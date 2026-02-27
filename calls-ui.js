@@ -1,8 +1,8 @@
 // calls-ui.js
 // ==================== RESILIENT UI CONTROLLER ====================
-// Version: 3.2.1
+// Version: 3.2.2
 // Purpose: Fault-tolerant, responsive UI layer for calls iframe
-// Dependencies: calls-core.js v3.2.1
+// Dependencies: calls-core.js v4.0.6
 // Security: XSS protected, input sanitized, CSP compliant
 // ===============================================================
 
@@ -101,27 +101,45 @@
 
     // ==================== WAIT FOR CORE READY ====================
     let coreReady = false;
+    let coreReadyCheckInterval = null;
     
     function waitForCoreReady(timeout = 10000) {
-        return new Promise((resolve, reject) => {
+        return new Promise((resolve) => {
             if (coreReady) {
                 resolve(true);
                 return;
             }
             
+            // Check if core is already available
             if (window.callsCore && window.callsCore.isReady && window.callsCore.isReady()) {
                 coreReady = true;
                 resolve(true);
                 return;
             }
             
+            // Check if core has a waitForReady method
+            if (window.callsCore && window.callsCore.waitForReady) {
+                window.callsCore.waitForReady(timeout).then(() => {
+                    coreReady = true;
+                    resolve(true);
+                }).catch(() => {
+                    logOnce('warn', 'Core ready timeout, proceeding with fallback');
+                    resolve(false);
+                });
+                return;
+            }
+            
+            // Fallback to event listening
             const timeoutId = setTimeout(() => {
                 window.removeEventListener('core.ready', readyHandler);
-                if (window.callsCore && window.callsCore.waitForReady) {
-                    window.callsCore.waitForReady(timeout).then(resolve).catch(() => {
-                        logOnce('warn', 'Core ready timeout, proceeding with fallback');
-                        resolve(false);
-                    });
+                if (coreReadyCheckInterval) {
+                    clearInterval(coreReadyCheckInterval);
+                    coreReadyCheckInterval = null;
+                }
+                // Check one more time before giving up
+                if (window.callsCore && window.callsCore.isReady && window.callsCore.isReady()) {
+                    coreReady = true;
+                    resolve(true);
                 } else {
                     logOnce('warn', 'Core ready timeout, proceeding with fallback');
                     resolve(false);
@@ -130,6 +148,10 @@
             
             const readyHandler = () => {
                 clearTimeout(timeoutId);
+                if (coreReadyCheckInterval) {
+                    clearInterval(coreReadyCheckInterval);
+                    coreReadyCheckInterval = null;
+                }
                 window.removeEventListener('core.ready', readyHandler);
                 coreReady = true;
                 resolve(true);
@@ -137,12 +159,17 @@
             
             window.addEventListener('core.ready', readyHandler);
             
-            if (window.callsCore && window.callsCore.isReady && window.callsCore.isReady()) {
-                clearTimeout(timeoutId);
-                window.removeEventListener('core.ready', readyHandler);
-                coreReady = true;
-                resolve(true);
-            }
+            // Also check periodically
+            coreReadyCheckInterval = setInterval(() => {
+                if (window.callsCore && window.callsCore.isReady && window.callsCore.isReady()) {
+                    clearTimeout(timeoutId);
+                    clearInterval(coreReadyCheckInterval);
+                    coreReadyCheckInterval = null;
+                    window.removeEventListener('core.ready', readyHandler);
+                    coreReady = true;
+                    resolve(true);
+                }
+            }, 500);
         });
     }
 
@@ -169,7 +196,7 @@
             SUSPENDED: 'SUSPENDED', DEGRADED: 'DEGRADED', DESTROYED: 'DESTROYED', 
             DEMO: 'DEMO', RECOVERING: 'RECOVERING'
         },
-        session = { isDemoMode: () => true, validateToken: () => false, getStatus: () => ({}) },
+        session = { isDemoMode: () => false, validateToken: () => false, getStatus: () => ({}) },
         auth = { check: () => false, refresh: () => Promise.resolve(false), logout: () => {} },
         currentUser = null,
         userDataLoaded = false,
@@ -5061,13 +5088,19 @@
         getUIState: () => ({ ...UIState })
     };
 
-    waitForCoreReady(10000).then(() => {
-        initializeUISystem().catch(error => {
-            if (DEBUG) {
-                logOnce('error', 'Auto-initialization failed', error);
-            }
+    // Wait for core but don't block
+    waitForCoreReady(10000).then((ready) => {
+        if (ready) {
+            initializeUISystem().catch(error => {
+                if (DEBUG) {
+                    logOnce('error', 'Auto-initialization failed', error);
+                }
+                RenderingPipeline.skeleton();
+            });
+        } else {
+            // Core not ready, still show UI with skeleton
             RenderingPipeline.skeleton();
-        });
+        }
     });
 
 })();

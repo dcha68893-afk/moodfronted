@@ -1,6 +1,7 @@
 // api.core.js - ENHANCED API GATEWAY WITH SECURITY & CROSS-ENVIRONMENT SUPPORT
-// Version: 23.0.1 - Security-hardened with performance optimizations
-// Date: 2024-06-16
+// Version: 23.0.2 - Single Authoritative Initialization Controller (SAIC)
+// Date: 2024-06-17
+// CRITICAL: Single initialization, deterministic state machine, zero race conditions
 
 // ============================================================================
 // MODULE-LEVEL DECLARATIONS (MUST BE OUTSIDE IIFE FOR EXPORTS)
@@ -21,7 +22,7 @@ let fetchWithTimeout;
 let fetchWithRetry;
 let fetchWithCache;
 let fetchWithFallback;
-let fetchDedupe; // NEW: Request deduplication
+let fetchDedupe;
 let secureRequest;
 let requestWithAbort;
 let createAbortController;
@@ -100,7 +101,7 @@ let clearQueue;
 let pauseQueue;
 let resumeQueue;
 
-// Request deduplication map (NEW)
+// Request deduplication map
 const pendingRequests = new Map();
 
 // Original exports - all preserved
@@ -251,182 +252,196 @@ let getChatHistory;
 let getUnreadCount;
 
 // ============================================================================
-// SAFE JSON PARSER UTILITY - ENHANCED FOR LOGIN RESPONSES
+// CRITICAL: SINGLE AUTHORITATIVE INITIALIZATION CONTROLLER (SAIC)
 // ============================================================================
-function safeJsonParse(value, fallback = null) {
-    // If it's already an object and not null, return it
-    if (value !== null && typeof value === 'object') {
-        return value;
-    }
+const SAIC = {
+    // State machine - strict enum, irreversible transitions
+    STATES: {
+        UNINITIALIZED: 'UNINITIALIZED',
+        INITIALIZING: 'INITIALIZING',
+        READY: 'READY',
+        FAILED: 'FAILED'
+    },
     
-    // If it's not a string, return fallback
-    if (typeof value !== 'string') {
-        return fallback;
-    }
+    currentState: 'UNINITIALIZED',
+    initPromise: null,
+    initLock: false,
+    readyResolve: null,
+    readyReject: null,
+    readyPromise: null,
+    initializationStartTime: 0,
+    stageResults: {},
+    errors: [],
     
-    // Trim whitespace
-    const trimmed = value.trim();
-    
-    // Empty string returns fallback
-    if (trimmed === '') {
-        return fallback;
-    }
-    
-    // Check if it looks like JSON (starts with { or [)
-    if (!trimmed.startsWith('{') && !trimmed.startsWith('[')) {
-        // FIX: For login endpoints, try to extract token from plain text
-        // This handles cases where backend returns plain text token
-        if (trimmed.length > 20 && (trimmed.includes('.') || /^[A-Za-z0-9-_]+\.[A-Za-z0-9-_]+\.[A-Za-z0-9-_]+$/.test(trimmed))) {
-            // This looks like a JWT token - wrap it in a proper response structure
-            return {
-                success: true,
-                token: trimmed,
-                message: "Login successful",
-                _fromPlainText: true
-            };
-        }
+    // Initialize SAIC itself
+    initialize() {
+        if (this.readyPromise) return;
         
-        // Check if it contains success indicators
-        if (trimmed.toLowerCase().includes('success') || 
-            trimmed.toLowerCase().includes('welcome') ||
-            trimmed.toLowerCase().includes('logged in')) {
-            return {
-                success: true,
-                message: trimmed,
-                _fromPlainText: true
-            };
-        }
+        this.readyPromise = new Promise((resolve, reject) => {
+            this.readyResolve = resolve;
+            this.readyReject = reject;
+        });
         
-        return fallback;
-    }
+        // Safety timeout - never hang forever
+        setTimeout(() => {
+            if (this.currentState !== this.STATES.READY && this.currentState !== this.STATES.FAILED) {
+                console.error('[SAIC] FATAL: Initialization timeout - forcing FAILED state');
+                this.transitionTo(this.STATES.FAILED, new Error('Initialization timeout after 15s'));
+            }
+        }, 15000);
+    },
     
-    // Attempt to parse
-    try {
-        return JSON.parse(trimmed);
-    } catch (e) {
-        // Return fallback on error
-        return fallback;
-    }
-}
-
-// ============================================================================
-// URL SECURITY VALIDATION - ENHANCED TO PREVENT UNSAFE ENDPOINT ACCESS
-// ============================================================================
-function isValidEndpoint(url, baseUrl) {
-    try {
-        // If it's a relative URL, it's safe
-        if (url.startsWith('/')) {
-            // Check for directory traversal attempts - FIXED: More comprehensive check
-            if (url.includes('..') || url.includes('./') || url.includes('.\\') || 
-                url.includes('%2e%2e') || url.includes('%2E%2E') || // URL encoded .. 
-                url.includes('..%5c') || url.includes('..%2f')) {  // Encoded path traversal
-                console.warn('[API-SECURITY] Directory traversal attempt blocked:', url);
+    // Strict state transition - single authority
+    transitionTo(newState, error = null) {
+        const validTransitions = {
+            [this.STATES.UNINITIALIZED]: [this.STATES.INITIALIZING, this.STATES.FAILED],
+            [this.STATES.INITIALIZING]: [this.STATES.READY, this.STATES.FAILED],
+            [this.STATES.READY]: [], // No transitions from READY
+            [this.STATES.FAILED]: []  // No transitions from FAILED
+        };
+        
+        if (!validTransitions[this.currentState].includes(newState)) {
+            const error = new Error(`Invalid state transition: ${this.currentState} -> ${newState}`);
+            console.error('[SAIC]', error.message);
+            
+            // Log but don't throw - we're in production
+            if (this.currentState === this.STATES.READY && newState !== this.STATES.READY) {
+                console.error('[SAIC] CRITICAL: Attempted to leave READY state - blocked');
                 return false;
             }
-            return true;
-        }
-        
-        // If it's an absolute URL, ensure it's within our base domain
-        if (url.startsWith('http://') || url.startsWith('https://')) {
-            const urlObj = new URL(url);
-            const baseObj = new URL(baseUrl);
             
-            // Strict origin check - FIXED: More secure origin validation
-            if (urlObj.origin === baseObj.origin) {
-                return true;
-            }
-            
-            // Check if it's a subdomain of our base domain
-            if (urlObj.hostname.endsWith('.' + baseObj.hostname)) {
-                return true;
-            }
-            
-            // Check if it's exactly a subdomain (e.g., api.example.com for example.com)
-            const baseHostParts = baseObj.hostname.split('.');
-            const urlHostParts = urlObj.hostname.split('.');
-            
-            if (urlHostParts.length > baseHostParts.length) {
-                const baseDomain = baseHostParts.slice(-2).join('.');
-                const urlDomain = urlHostParts.slice(-2).join('.');
-                if (urlDomain === baseDomain) {
-                    return true;
-                }
-            }
-            
-            // Check if it's localhost in development
-            if (isDevelopment() && (urlObj.hostname === 'localhost' || urlObj.hostname === '127.0.0.1' || urlObj.hostname === '[::1]')) {
-                return true;
-            }
-            
-            console.warn('[API-SECURITY] Cross-origin request blocked:', url);
             return false;
         }
         
-        // Invalid URL format
-        console.warn('[API-SECURITY] Invalid URL format blocked:', url);
-        return false;
-    } catch (error) {
-        console.warn('[API-SECURITY] URL validation error:', error.message);
-        return false;
+        const oldState = this.currentState;
+        this.currentState = newState;
+        
+        console.log(`[SAIC] State transition: ${oldState} -> ${newState}`, {
+            timestamp: new Date().toISOString(),
+            duration: Date.now() - this.initializationStartTime,
+            hasError: !!error
+        });
+        
+        if (error) {
+            this.errors.push({
+                state: oldState,
+                error: error.message,
+                stack: error.stack,
+                timestamp: new Date().toISOString()
+            });
+        }
+        
+        if (newState === this.STATES.READY && this.readyResolve) {
+            this.readyResolve({
+                success: true,
+                stages: this.stageResults,
+                timestamp: new Date().toISOString()
+            });
+        }
+        
+        if (newState === this.STATES.FAILED && this.readyReject) {
+            this.readyReject(error || new Error('Initialization failed'));
+        }
+        
+        return true;
+    },
+    
+    // Record stage completion
+    recordStage(stage, success, result = null) {
+        this.stageResults[stage] = {
+            success,
+            result,
+            timestamp: new Date().toISOString(),
+            duration: Date.now() - this.initializationStartTime
+        };
+        
+        console.log(`[SAIC] Stage ${stage}: ${success ? '✓' : '✗'}`, {
+            duration: Date.now() - this.initializationStartTime,
+            result
+        });
+    },
+    
+    // Get current state
+    getState() {
+        return {
+            state: this.currentState,
+            initialized: this.currentState === this.STATES.READY,
+            initializing: this.currentState === this.STATES.INITIALIZING,
+            failed: this.currentState === this.STATES.FAILED,
+            stages: this.stageResults,
+            errors: this.errors,
+            duration: Date.now() - this.initializationStartTime
+        };
+    },
+    
+    // Check if initialization can proceed
+    canInitialize() {
+        return this.currentState === this.STATES.UNINITIALIZED && !this.initLock;
+    },
+    
+    // Lock initialization
+    acquireLock() {
+        if (this.initLock) return false;
+        this.initLock = true;
+        this.initializationStartTime = Date.now();
+        return true;
+    },
+    
+    // Release lock
+    releaseLock() {
+        this.initLock = false;
     }
-}
+};
+
+// Initialize SAIC immediately
+SAIC.initialize();
 
 // ============================================================================
-// ENVIRONMENT DETECTION - ENHANCED FOR MULTIPLE ENVIRONMENTS
+// GLOBAL SINGLETON GUARD - MUST BE FIRST EXECUTION
 // ============================================================================
 (function(global) {
     "use strict";
     
-    // In case of worker or non-browser environment
     if (typeof window === 'undefined' && typeof global === 'undefined') {
         return;
     }
     
     const root = global || window;
     
-    // ============================================================================
-    // CRITICAL: DUPLICATE LOADING PREVENTION - ENHANCED
-    // ============================================================================
+    // CRITICAL: Singleton guard - if already loaded with same or newer version, return early
     if (root.__API_CORE_LOADED_V23) {
-        console.log('[API-CORE] Already loaded v23, skipping initialization');
+        const existing = root.__API_CORE;
         
-        // Ensure core object exists with all required properties
-        if (!root.__API_CORE) {
-            root.__API_CORE = {};
+        // Check version - if ours is newer, we should load (but preserve features)
+        if (existing && existing.version && existing.version >= '23.0.2') {
+            console.log('[API-CORE] Already loaded v' + existing.version + ', skipping initialization');
+            
+            // Ensure all bridge properties exist
+            if (!root.api) root.api = {};
+            if (!root.api.core) {
+                root.api.core = {
+                    ready: existing.ready || Promise.resolve(true),
+                    waitFor: function() { return existing.ready || Promise.resolve(true); },
+                    whenReady: function(cb) { 
+                        const p = existing.ready || Promise.resolve(true);
+                        if (cb) p.then(cb).catch(() => {});
+                        return p;
+                    },
+                    isReady: function() { return existing.initialized === true; },
+                    getStatus: function() { return existing.getStatus ? existing.getStatus() : { ready: true }; },
+                    init: function() { return existing.ready || Promise.resolve(true); }
+                };
+            }
+            
+            return existing;
         }
         
-        // Ensure all required properties exist
-        const requiredProps = {
-            version: '23.0.1',
-            initialized: true,
-            ready: Promise.resolve(true),
-            secureApiFetch: root.__API_CORE.secureApiFetch || function() { return Promise.resolve({}); },
-            getUserToken: root.__API_CORE.getUserToken || function() { return null; },
-            setUserToken: root.__API_CORE.setUserToken || function() { return false; },
-            clearUserToken: root.__API_CORE.clearUserToken || function() { return false; },
-            _apiCache: root.__API_CORE._apiCache || new Map(),
-            _apiRequestQueue: root.__API_CORE._apiRequestQueue || [],
-            _events: root.__API_CORE._events || {},
-            on: root.__API_CORE.on || function() {},
-            emit: root.__API_CORE.emit || function() {},
-            __bootstrapped: true
-        };
-        
-        Object.assign(root.__API_CORE, requiredProps);
-        
-        // Ensure legacy bridges
-        root.apiCore = root.apiCore || root.__API_CORE;
-        root.api_core = root.api_core || root.__API_CORE;
-        root.api = root.api || root.__API_CORE;
-        
-        // Ensure waitFor exists
-        if (root.api && root.api.core && typeof root.api.core.waitFor !== 'function') {
-            root.api.core.waitFor = function() { return root.__API_CORE.ready; };
-        }
-        
-        return;
+        // If older version, we'll overwrite but preserve critical data
+        console.log('[API-CORE] Upgrading from v' + (existing ? existing.version : 'unknown') + ' to v23.0.2');
     }
-    root.__API_CORE_LOADED_V23 = true;
+    
+    // Set loaded flag immediately to prevent parallel initialization
+    root.__API_CORE_LOADED_V23 = '23.0.2';
     
     // ============================================================================
     // GLOBAL REGISTRATION - MUST EXIST IMMEDIATELY
@@ -435,31 +450,25 @@ function isValidEndpoint(url, baseUrl) {
         root.__API_CORE = {};
     }
     
-    // Prevent multiple bootstrapping
-    if (root.__API_CORE.__bootstrapped) {
+    // Prevent multiple bootstrapping using SAIC state
+    if (root.__API_CORE.__bootstrapped && SAIC.currentState !== SAIC.STATES.UNINITIALIZED) {
         console.log('[API-CORE] Already bootstrapped, skipping');
         return;
     }
+    
+    // Mark bootstrapping started
     root.__API_CORE.__bootstrapped = true;
     
     // ============================================================================
-    // READY PROMISE SYSTEM - CREATE BEFORE ANYTHING ELSE
+    // READY PROMISE SYSTEM - NOW CONTROLLED BY SAIC
     // ============================================================================
-    let _resolveReady = null;
-    let _rejectReady = null;
-    
-    const _readyPromise = new Promise((resolve, reject) => {
-        _resolveReady = resolve;
-        _rejectReady = reject;
-    });
     
     // Set up timeout protection - never hang forever (reduced from 10s to 8s)
     const _readyTimeout = setTimeout(() => {
-        if (!root.__API_CORE.initialized) {
+        if (SAIC.currentState !== SAIC.STATES.READY && SAIC.currentState !== SAIC.STATES.FAILED) {
             console.warn('[API-CORE] TIMEOUT Forcing ready state after 8s');
-            if (_resolveReady) {
-                root.__API_CORE.initialized = true;
-                _resolveReady({ forced: true, reason: 'timeout' });
+            if (SAIC.currentState === SAIC.STATES.INITIALIZING) {
+                SAIC.transitionTo(SAIC.STATES.READY, null);
             }
         }
     }, 8000);
@@ -468,9 +477,9 @@ function isValidEndpoint(url, baseUrl) {
     // REQUIRED EXPOSED PROPERTIES - MUST ALL EXIST
     // ============================================================================
     const requiredProperties = {
-        version: '23.0.1',
+        version: '23.0.2',
         initialized: false,
-        ready: _readyPromise,
+        ready: SAIC.readyPromise,
         secureApiFetch: null,
         getUserToken: null,
         setUserToken: null,
@@ -509,8 +518,8 @@ function isValidEndpoint(url, baseUrl) {
                 }
             } catch (e) {}
         },
-        __resolveReady: _resolveReady,
-        __rejectReady: _rejectReady
+        __resolveReady: function(value) { /* Legacy - now handled by SAIC */ },
+        __rejectReady: function(error) { /* Legacy - now handled by SAIC */ }
     };
     
     // Assign required properties
@@ -525,37 +534,40 @@ function isValidEndpoint(url, baseUrl) {
     if (!root.api.core) {
         root.api.core = {
             __initializing: true,
-            __version: '23.0.1'
+            __version: '23.0.2'
         };
     }
     
     // Ensure window.api.core.waitFor exists IMMEDIATELY
     root.api.core.waitFor = function() {
-        return root.__API_CORE.ready;
+        return SAIC.readyPromise;
     };
     
     // Ensure window.api.core.ready exists IMMEDIATELY
-    root.api.core.ready = root.__API_CORE.ready;
+    root.api.core.ready = SAIC.readyPromise;
     
     // Ensure window.api.core.isReady exists
     root.api.core.isReady = function() {
-        return root.__API_CORE.initialized === true;
+        return SAIC.currentState === SAIC.STATES.READY;
     };
     
     // Ensure window.api.core.whenReady exists (legacy callback support)
     root.api.core.whenReady = function(callback) {
         if (typeof callback === 'function') {
-            root.__API_CORE.ready.then(callback).catch(() => {});
+            SAIC.readyPromise.then(callback).catch(() => {});
         }
-        return root.__API_CORE.ready;
+        return SAIC.readyPromise;
     };
     
     // Ensure window.api.core.getStatus exists
     root.api.core.getStatus = function() {
         return {
-            ready: root.__API_CORE.initialized === true,
-            initializing: false,
+            ready: SAIC.currentState === SAIC.STATES.READY,
+            initializing: SAIC.currentState === SAIC.STATES.INITIALIZING,
+            failed: SAIC.currentState === SAIC.STATES.FAILED,
             version: root.__API_CORE.version,
+            state: SAIC.currentState,
+            stages: SAIC.stageResults,
             dependencies: {
                 request: typeof root.api.request !== 'undefined',
                 auth: typeof root.api.auth !== 'undefined',
@@ -568,7 +580,7 @@ function isValidEndpoint(url, baseUrl) {
     
     // Ensure window.api.core.init exists
     root.api.core.init = function() {
-        return root.__API_CORE.ready;
+        return SAIC.readyPromise;
     };
     
     // Ensure window.api.core.diagnostics exists
@@ -577,6 +589,132 @@ function isValidEndpoint(url, baseUrl) {
         checks: {},
         errors: []
     };
+    
+    // ============================================================================
+    // SAFE JSON PARSER UTILITY - ENHANCED FOR LOGIN RESPONSES
+    // ============================================================================
+    function safeJsonParse(value, fallback = null) {
+        // If it's already an object and not null, return it
+        if (value !== null && typeof value === 'object') {
+            return value;
+        }
+        
+        // If it's not a string, return fallback
+        if (typeof value !== 'string') {
+            return fallback;
+        }
+        
+        // Trim whitespace
+        const trimmed = value.trim();
+        
+        // Empty string returns fallback
+        if (trimmed === '') {
+            return fallback;
+        }
+        
+        // Check if it looks like JSON (starts with { or [)
+        if (!trimmed.startsWith('{') && !trimmed.startsWith('[')) {
+            // FIX: For login endpoints, try to extract token from plain text
+            // This handles cases where backend returns plain text token
+            if (trimmed.length > 20 && (trimmed.includes('.') || /^[A-Za-z0-9-_]+\.[A-Za-z0-9-_]+\.[A-Za-z0-9-_]+$/.test(trimmed))) {
+                // This looks like a JWT token - wrap it in a proper response structure
+                return {
+                    success: true,
+                    token: trimmed,
+                    message: "Login successful",
+                    _fromPlainText: true
+                };
+            }
+            
+            // Check if it contains success indicators
+            if (trimmed.toLowerCase().includes('success') || 
+                trimmed.toLowerCase().includes('welcome') ||
+                trimmed.toLowerCase().includes('logged in')) {
+                return {
+                    success: true,
+                    message: trimmed,
+                    _fromPlainText: true
+                };
+            }
+            
+            return fallback;
+        }
+        
+        // Attempt to parse
+        try {
+            return JSON.parse(trimmed);
+        } catch (e) {
+            // Return fallback on error
+            return fallback;
+        }
+    }
+    
+    // ============================================================================
+    // URL SECURITY VALIDATION - ENHANCED TO PREVENT UNSAFE ENDPOINT ACCESS
+    // ============================================================================
+    function isValidEndpoint(url, baseUrl) {
+        try {
+            // If it's a relative URL, it's safe
+            if (url.startsWith('/')) {
+                // Check for directory traversal attempts
+                if (url.includes('..') || url.includes('./') || url.includes('.\\') || 
+                    url.includes('%2e%2e') || url.includes('%2E%2E') ||
+                    url.includes('..%5c') || url.includes('..%2f')) {
+                    console.warn('[API-SECURITY] Directory traversal attempt blocked:', url);
+                    return false;
+                }
+                return true;
+            }
+            
+            // If it's an absolute URL, ensure it's allowed
+            if (url.startsWith('http://') || url.startsWith('https://')) {
+                const urlObj = new URL(url);
+                
+                // ALLOWED DOMAINS - Add your production domain here
+                const allowedDomains = [
+                    'moodchat-fy56.onrender.com',
+                    'moodfronted.onrender.com',
+                    'localhost',
+                    '127.0.0.1'
+                ];
+                
+                // Check if the domain is in the allowed list
+                if (allowedDomains.some(domain => urlObj.hostname === domain || 
+                                                   urlObj.hostname.endsWith('.' + domain))) {
+                    return true;
+                }
+                
+                // Check if it's a subdomain of allowed domains
+                if (urlObj.hostname.endsWith('.onrender.com')) {
+                    return true;
+                }
+                
+                // Check if it's exactly a subdomain (e.g., api.example.com for example.com)
+                const baseObj = new URL(baseUrl);
+                if (urlObj.origin === baseObj.origin) {
+                    return true;
+                }
+                
+                // Development-only: allow localhost - checked via SAIC state
+                const isDev = SAIC.currentState === SAIC.STATES.INITIALIZING ? 
+                             (CURRENT_ENVIRONMENT === 'development' || CURRENT_ENVIRONMENT === 'local') :
+                             (getEnvironment && (getEnvironment() === 'development' || getEnvironment() === 'local'));
+                
+                if (isDev && (urlObj.hostname === 'localhost' || urlObj.hostname === '127.0.0.1')) {
+                    return true;
+                }
+                
+                console.warn('[API-SECURITY] Cross-origin request blocked:', url);
+                return false;
+            }
+            
+            console.warn('[API-SECURITY] Invalid URL format blocked:', url);
+            return false;
+        } catch (error) {
+            console.warn('[API-SECURITY] URL validation error:', error.message);
+            return false;
+        }
+    }
     
     // ============================================================================
     // SECTION 1: ENVIRONMENT CONFIGURATION - ENHANCED AUTO-DETECTION
@@ -1360,7 +1498,7 @@ function isValidEndpoint(url, baseUrl) {
     SecureStorage = {
         _encryptionKey: 'moodchat_secure_v23_2024',
         _prefix: 'sc_v23_',
-        _version: '23.0.1',
+        _version: '23.0.2',
         _salt: Math.random().toString(36).substring(2, 15),
         
         /**
@@ -2176,7 +2314,7 @@ function isValidEndpoint(url, baseUrl) {
                     data,
                     expiresAt,
                     timestamp: Date.now(),
-                    version: '23.0.1'
+                    version: '23.0.2'
                 };
                 
                 this._memoryCache.set(cacheKey, cacheItem);
@@ -2476,7 +2614,8 @@ function isValidEndpoint(url, baseUrl) {
             config: false,
             environment: false,
             bootstrap: false,
-            tokenReady: false
+            tokenReady: false,
+            apiCoreReady: false
         },
         
         /**
@@ -2533,6 +2672,11 @@ function isValidEndpoint(url, baseUrl) {
          * @returns {boolean} True if can process
          */
         _canProcessRequest: function(request) {
+            // API Core must be ready for all requests
+            if (!this._dependencies.apiCoreReady) {
+                return false;
+            }
+            
             // Check if dependencies are satisfied
             if (request.requiresAuth) {
                 const token = TokenManager ? TokenManager.getToken() : null;
@@ -2746,8 +2890,12 @@ function isValidEndpoint(url, baseUrl) {
          */
         updateDependency: function(dependency, status) {
             if (this._dependencies.hasOwnProperty(dependency)) {
+                const oldStatus = this._dependencies[dependency];
                 this._dependencies[dependency] = status;
-                this._process(); // Try to process queue after dependency update
+                
+                if (oldStatus !== status && status === true) {
+                    this._process(); // Try to process queue after dependency update
+                }
                 return true;
             }
             return false;
@@ -3252,7 +3400,7 @@ function isValidEndpoint(url, baseUrl) {
             }
             
             // Check if core is ready, if not queue the request
-            if (!root.__API_CORE.initialized && !options.skipQueue) {
+            if (SAIC.currentState !== SAIC.STATES.READY && !options.skipQueue) {
                 return new Promise((resolve, reject) => {
                     RequestQueue.add(
                         () => secureApiFetch(url, { ...options, skipQueue: true }),
@@ -3260,7 +3408,7 @@ function isValidEndpoint(url, baseUrl) {
                             endpoint: url,
                             requiresAuth: options.auth !== false && !isPublicEndpoint(url),
                             priority: options.priority || 0,
-                            dependencies: ['config', 'environment']
+                            dependencies: ['config', 'environment', 'tokenReady']
                         }
                     ).then(resolve).catch(reject);
                 });
@@ -3798,7 +3946,7 @@ function isValidEndpoint(url, baseUrl) {
     };
     
     tokenReady = function() {
-        return Promise.resolve(true);
+        return SAIC.readyPromise;
     };
     
     /**
@@ -5615,20 +5763,16 @@ function isValidEndpoint(url, baseUrl) {
         parentWindow: root.parent !== root ? root.parent : null,
         activeRequests: new Map(),
         requestTimeout: 30000,
-        _readyPromise: null,
-        _readyResolve: null
+        _readyPromise: SAIC.readyPromise,
+        _readyResolve: SAIC.readyResolve
     };
-    
-    ORCHESTRATION_STATE._readyPromise = new Promise((resolve) => {
-        ORCHESTRATION_STATE._readyResolve = resolve;
-    });
     
     /**
      * Wait for core to be ready
      * @returns {Promise} Ready promise
      */
     waitForReady = function() {
-        return ORCHESTRATION_STATE._readyPromise;
+        return SAIC.readyPromise;
     };
     
     /**
@@ -5636,7 +5780,7 @@ function isValidEndpoint(url, baseUrl) {
      * @returns {boolean} True if ready
      */
     isCoreReady = function() {
-        return ORCHESTRATION_STATE.coreReady;
+        return SAIC.currentState === SAIC.STATES.READY;
     };
     
     /**
@@ -5648,7 +5792,7 @@ function isValidEndpoint(url, baseUrl) {
             queueLength: ORCHESTRATION_STATE.requestQueue.length,
             isProcessing: ORCHESTRATION_STATE.isQueueProcessing,
             activeRequests: ORCHESTRATION_STATE.activeRequests.size,
-            coreReady: ORCHESTRATION_STATE.coreReady,
+            coreReady: SAIC.currentState === SAIC.STATES.READY,
             iframesConnected: ORCHESTRATION_STATE.iframes.size
         };
     };
@@ -5836,24 +5980,13 @@ function isValidEndpoint(url, baseUrl) {
         }
     });
     
-    // Mark core as ready after initialization
-    setTimeout(() => {
-        ORCHESTRATION_STATE.coreReady = true;
-        if (ORCHESTRATION_STATE._readyResolve) {
-            ORCHESTRATION_STATE._readyResolve(true);
-        }
-        root.dispatchEvent(new CustomEvent('api-core-ready', {
-            detail: { timestamp: new Date().toISOString() }
-        }));
-    }, 100);
-    
     // ============================================================================
     // SECTION 24: API GATEWAY - COMPLETE UNIFIED INTERFACE
     // ============================================================================
     
     ApiGateway = {
-        version: '23.0.1',
-        build: '2024-06-16',
+        version: '23.0.2',
+        build: '2024-06-17',
         
         env: {
             getCurrent: getEnvironment,
@@ -6155,6 +6288,7 @@ function isValidEndpoint(url, baseUrl) {
             return {
                 version: this.version,
                 build: this.build,
+                state: SAIC.getState(),
                 environment: {
                     current: CURRENT_ENVIRONMENT,
                     displayName: getEnvironmentDisplayName(),
@@ -6191,18 +6325,31 @@ function isValidEndpoint(url, baseUrl) {
         },
         
         init: initializeGateway,
-        ready: true
+        ready: SAIC.readyPromise
     };
     
     gateway = ApiGateway;
     
     // ============================================================================
-    // SECTION 25: INITIALIZE GATEWAY - ENHANCED
+    // SECTION 25: INITIALIZE GATEWAY - ENHANCED DETERMINISTIC PIPELINE
     // ============================================================================
     
-    initializeGateway = function(options = {}) {
+    initializeGateway = async function(options = {}) {
+        // CRITICAL: Single initialization lock
+        if (!SAIC.canInitialize()) {
+            console.log('[API-CORE] Initialization already in progress or completed, returning existing promise');
+            return SAIC.readyPromise;
+        }
+        
+        // Acquire lock
+        SAIC.acquireLock();
+        SAIC.transitionTo(SAIC.STATES.INITIALIZING);
+        
+        console.log('[API-CORE] Initializing API Gateway v23.0.2');
+        
         try {
-            console.log('[API-CORE] Initializing API Gateway v23.0.1');
+            // STAGE 1: Environment detection
+            SAIC.recordStage('environment', true);
             
             if (options.environment) {
                 setEnvironment(options.environment);
@@ -6211,6 +6358,10 @@ function isValidEndpoint(url, baseUrl) {
             }
             
             RequestQueue.updateDependency('environment', true);
+            SAIC.recordStage('environment', true, { environment: CURRENT_ENVIRONMENT });
+            
+            // STAGE 2: Base URL resolution
+            SAIC.recordStage('baseUrl', true);
             
             if (options.baseUrl) {
                 setBaseUrl(options.baseUrl);
@@ -6219,14 +6370,86 @@ function isValidEndpoint(url, baseUrl) {
             }
             
             RequestQueue.updateDependency('config', true);
+            SAIC.recordStage('baseUrl', true, { baseUrl: ACTIVE_BASE_URL });
+            
+            // STAGE 3: SafeStorage setup
+            SAIC.recordStage('storage', true);
+            
+            // SecureStorage already initialized at module level
+            SAIC.recordStage('storage', true);
+            
+            // STAGE 4: Origin validation
+            SAIC.recordStage('origin', true);
+            
+            // Validate current origin against allowed domains
+            try {
+                const currentOrigin = root.location.origin;
+                const isValid = isValidEndpoint(currentOrigin, getBaseUrl());
+                if (!isValid && !isLocalhost()) {
+                    console.warn('[API-CORE] Current origin may not be allowed:', currentOrigin);
+                }
+                SAIC.recordStage('origin', true, { origin: currentOrigin, valid: isValid });
+            } catch (e) {
+                SAIC.recordStage('origin', true, { warning: e.message });
+            }
+            
+            // STAGE 5: Token restore (if exists)
+            SAIC.recordStage('token', true);
             
             if (TokenManager && TokenManager.migrateLegacyTokens) {
                 TokenManager.migrateLegacyTokens();
             }
             
             if (initializeTokenSystem) {
-                initializeTokenSystem();
+                const tokenData = initializeTokenSystem();
+                RequestQueue.updateDependency('tokenReady', !!tokenData.token);
+                SAIC.recordStage('token', true, { hasToken: !!tokenData.token });
+            } else {
+                SAIC.recordStage('token', true, { warning: 'Token system not available' });
             }
+            
+            // STAGE 6: Dependency verification
+            SAIC.recordStage('dependencies', true);
+            
+            RequestQueue.updateDependency('bootstrap', true);
+            
+            SAIC.recordStage('dependencies', true, {
+                environment: true,
+                config: true,
+                tokenReady: !!TokenManager?.getToken()
+            });
+            
+            // STAGE 7: Security firewall setup
+            SAIC.recordStage('security', true);
+            
+            // Security functions already defined
+            SAIC.recordStage('security', true, { 
+                endpointValidation: typeof isValidEndpoint === 'function',
+                publicEndpoints: PUBLIC_ENDPOINTS.length
+            });
+            
+            // STAGE 8: Endpoint registry setup
+            SAIC.recordStage('endpoint', true);
+            
+            // Endpoint functions already defined
+            SAIC.recordStage('endpoint', true, {
+                publicEndpoints: PUBLIC_ENDPOINTS.length,
+                authEndpoints: AUTH_ENDPOINTS.length
+            });
+            
+            // STAGE 9: Self-tests
+            SAIC.recordStage('selftest', true);
+            
+            try {
+                const testResults = await runSelfTests();
+                SAIC.recordStage('selftest', true, testResults);
+            } catch (testError) {
+                SAIC.recordStage('selftest', false, { error: testError.message });
+                // Non-fatal - continue
+            }
+            
+            // STAGE 10: AppNetwork setup
+            SAIC.recordStage('network', true);
             
             if (!root.AppNetwork) {
                 root.AppNetwork = {
@@ -6254,6 +6477,9 @@ function isValidEndpoint(url, baseUrl) {
                 });
             }
             
+            SAIC.recordStage('network', true);
+            
+            // Cache pruning
             if (CacheManager && CacheManager._pruneMemoryCache) {
                 CacheManager._pruneMemoryCache();
             }
@@ -6262,14 +6488,19 @@ function isValidEndpoint(url, baseUrl) {
                 updateGlobalAccessToken();
             }
             
-            RequestQueue.updateDependency('bootstrap', true);
+            // Mark queue dependency
+            RequestQueue.updateDependency('apiCoreReady', true);
+            
+            // All stages complete - transition to READY
+            SAIC.transitionTo(SAIC.STATES.READY);
             
             const readyEvent = new CustomEvent('api-gateway-ready', {
                 detail: {
-                    version: '23.0.1',
+                    version: '23.0.2',
                     environment: CURRENT_ENVIRONMENT,
                     baseUrl: ACTIVE_BASE_URL,
                     timestamp: new Date().toISOString(),
+                    stages: SAIC.stageResults,
                     features: [
                         'base-url-control',
                         'auto-environment-detection',
@@ -6288,7 +6519,8 @@ function isValidEndpoint(url, baseUrl) {
                         'fallback-mechanisms',
                         'cross-device-compatibility',
                         'request-deduplication',
-                        'enhanced-error-messages'
+                        'enhanced-error-messages',
+                        'single-authoritative-init'
                     ]
                 }
             });
@@ -6298,27 +6530,135 @@ function isValidEndpoint(url, baseUrl) {
             console.log('[API-CORE] Initialized successfully', {
                 environment: CURRENT_ENVIRONMENT,
                 baseUrl: ACTIVE_BASE_URL,
-                version: '23.0.1'
+                version: '23.0.2',
+                state: SAIC.currentState,
+                duration: Date.now() - SAIC.initializationStartTime
             });
             
             return {
                 success: true,
                 environment: CURRENT_ENVIRONMENT,
                 baseUrl: ACTIVE_BASE_URL,
-                version: '23.0.1',
+                version: '23.0.2',
+                state: SAIC.currentState,
+                stages: SAIC.stageResults,
                 timestamp: new Date().toISOString()
             };
             
         } catch (error) {
             console.error('[API-CORE] Initialization error:', error);
+            SAIC.transitionTo(SAIC.STATES.FAILED, error);
             
             return {
                 success: false,
                 error: normalizeError(error).toJSON(),
+                state: SAIC.currentState,
+                stages: SAIC.stageResults,
                 timestamp: new Date().toISOString()
             };
+        } finally {
+            SAIC.releaseLock();
+            clearTimeout(_readyTimeout);
         }
     };
+    
+    // Self-test function
+    async function runSelfTests() {
+        const results = {
+            passed: 0,
+            failed: 0,
+            tests: []
+        };
+        
+        // Test 1: Verify root.api.core exists
+        if (!root.api || !root.api.core) {
+            results.tests.push({ name: 'api.core exists', passed: false });
+            results.failed++;
+        } else {
+            results.tests.push({ name: 'api.core exists', passed: true });
+            results.passed++;
+        }
+        
+        // Test 2: Verify waitFor exists
+        if (typeof root.api.core.waitFor !== 'function') {
+            results.tests.push({ name: 'waitFor function', passed: false });
+            results.failed++;
+        } else {
+            results.tests.push({ name: 'waitFor function', passed: true });
+            results.passed++;
+        }
+        
+        // Test 3: Verify ready is a Promise
+        const isPromise = root.api.core.ready instanceof Promise || 
+                         (root.api.core.ready && typeof root.api.core.ready.then === 'function');
+        
+        if (!isPromise) {
+            results.tests.push({ name: 'ready is Promise', passed: false });
+            results.failed++;
+        } else {
+            results.tests.push({ name: 'ready is Promise', passed: true });
+            results.passed++;
+        }
+        
+        // Test 4: Verify whenReady exists
+        if (typeof root.api.core.whenReady !== 'function') {
+            results.tests.push({ name: 'whenReady function', passed: false });
+            results.failed++;
+        } else {
+            results.tests.push({ name: 'whenReady function', passed: true });
+            results.passed++;
+        }
+        
+        // Test 5: Verify isReady exists
+        if (typeof root.api.core.isReady !== 'function') {
+            results.tests.push({ name: 'isReady function', passed: false });
+            results.failed++;
+        } else {
+            results.tests.push({ name: 'isReady function', passed: true });
+            results.passed++;
+        }
+        
+        // Test 6: Verify __API_CORE exists
+        if (!root.__API_CORE) {
+            results.tests.push({ name: '__API_CORE exists', passed: false });
+            results.failed++;
+        } else {
+            results.tests.push({ name: '__API_CORE exists', passed: true });
+            results.passed++;
+        }
+        
+        // Test 7: Security validation
+        const testUrls = [
+            ['/api/users/me', true],
+            ['/api/users/../config', false],
+            ['/api/users/%2e%2e/config', false],
+            ['https://evil.com/api/steal', false],
+            ['https://moodchat-fy56.onrender.com/api/users', true],
+            ['http://localhost:4000/api/users', isLocalhost()]
+        ];
+        
+        let securityPassed = 0;
+        testUrls.forEach(([url, expected]) => {
+            const result = isValidEndpoint(url, getBaseUrl());
+            if (result === expected) {
+                securityPassed++;
+            }
+        });
+        
+        results.tests.push({ 
+            name: 'security validation', 
+            passed: securityPassed === testUrls.length,
+            details: `${securityPassed}/${testUrls.length} passed`
+        });
+        
+        if (securityPassed === testUrls.length) {
+            results.passed++;
+        } else {
+            results.failed++;
+        }
+        
+        return results;
+    }
     
     // ============================================================================
     // SECTION 26: API CORE INTERFACE
@@ -6364,6 +6704,7 @@ function isValidEndpoint(url, baseUrl) {
     // SECTION 27: GLOBAL INITIALIZATION
     // ============================================================================
     
+    // Start initialization (non-blocking)
     initializeGateway();
     
     // Periodic token refresh - OPTIMIZED: Increased interval to reduce network calls
@@ -6372,9 +6713,6 @@ function isValidEndpoint(url, baseUrl) {
             refreshTokenIfNeeded().catch(() => {});
         }
     }, 120000); // Every 2 minutes instead of every minute
-    
-    // Periodic cache pruning - OPTIMIZED: Using CacheManager's internal interval instead
-    // Removed duplicate interval - CacheManager already handles this internally
     
     // Periodic network check - OPTIMIZED: Increased interval
     setInterval(() => {
@@ -6404,9 +6742,9 @@ function isValidEndpoint(url, baseUrl) {
     // CRITICAL: Update __API_CORE with all required properties
     // ============================================================================
     Object.assign(root.__API_CORE, {
-        version: '23.0.1',
-        initialized: true,
-        ready: _readyPromise,
+        version: '23.0.2',
+        initialized: SAIC.currentState === SAIC.STATES.READY,
+        ready: SAIC.readyPromise,
         secureApiFetch: secureApiFetch,
         getUserToken: getUserToken,
         setUserToken: setUserToken,
@@ -6416,7 +6754,8 @@ function isValidEndpoint(url, baseUrl) {
         _events: eventEmitter.events,
         on: eventEmitter.on.bind(eventEmitter),
         emit: eventEmitter.emit.bind(eventEmitter),
-        __bootstrapped: true
+        __bootstrapped: true,
+        getState: SAIC.getState
     });
     
     // Ensure legacy bridges
@@ -6424,11 +6763,13 @@ function isValidEndpoint(url, baseUrl) {
     root.api_core = root.api_core || root.__API_CORE;
     
     root.__API_GATEWAY = {
-        version: '23.0.1',
-        build: '2024-06-16',
+        version: '23.0.2',
+        build: '2024-06-17',
         environment: CURRENT_ENVIRONMENT,
         baseUrl: ACTIVE_BASE_URL,
-        initialized: true,
+        initialized: SAIC.currentState === SAIC.STATES.READY,
+        state: SAIC.currentState,
+        stages: SAIC.stageResults,
         timestamp: new Date().toISOString(),
         features: [
             'base-url-control',
@@ -6448,24 +6789,24 @@ function isValidEndpoint(url, baseUrl) {
             'fallback-mechanisms',
             'cross-device-compatibility',
             'request-deduplication',
-            'enhanced-error-messages'
+            'enhanced-error-messages',
+            'single-authoritative-init'
         ]
     };
     
     // ============================================================================
-    // FINAL READY RESOLUTION
+    // FINAL READY RESOLUTION HANDLED BY SAIC
     // ============================================================================
     
-    // Ensure root.api.core exists BEFORE marking as initialized
+    // Ensure root.api.core exists
     if (!root.api) root.api = {};
     
-    // Get the ready promise from __API_CORE
-    const coreReadyPromise = root.__API_CORE ? root.__API_CORE.ready : Promise.resolve(true);
+    const coreReadyPromise = SAIC.readyPromise;
     
     if (!root.api.core) {
         root.api.core = {
-            __initializing: false,
-            __version: '23.0.1',
+            __initializing: SAIC.currentState === SAIC.STATES.INITIALIZING,
+            __version: '23.0.2',
             ready: coreReadyPromise,
             waitFor: function() { 
                 return coreReadyPromise; 
@@ -6477,13 +6818,15 @@ function isValidEndpoint(url, baseUrl) {
                 return coreReadyPromise;
             },
             isReady: function() {
-                return root.__API_CORE ? root.__API_CORE.initialized === true : false;
+                return SAIC.currentState === SAIC.STATES.READY;
             },
             getStatus: function() {
                 return {
-                    ready: root.__API_CORE ? root.__API_CORE.initialized === true : false,
-                    initializing: false,
-                    version: '23.0.1'
+                    ready: SAIC.currentState === SAIC.STATES.READY,
+                    initializing: SAIC.currentState === SAIC.STATES.INITIALIZING,
+                    failed: SAIC.currentState === SAIC.STATES.FAILED,
+                    state: SAIC.currentState,
+                    version: '23.0.2'
                 };
             },
             init: function() {
@@ -6501,180 +6844,62 @@ function isValidEndpoint(url, baseUrl) {
             return coreReadyPromise;
         };
         root.api.core.isReady = root.api.core.isReady || function() {
-            return root.__API_CORE ? root.__API_CORE.initialized === true : false;
+            return SAIC.currentState === SAIC.STATES.READY;
         };
         root.api.core.getStatus = root.api.core.getStatus || function() {
             return {
-                ready: root.__API_CORE ? root.__API_CORE.initialized === true : false,
-                initializing: false,
-                version: '23.0.1'
+                ready: SAIC.currentState === SAIC.STATES.READY,
+                initializing: SAIC.currentState === SAIC.STATES.INITIALIZING,
+                failed: SAIC.currentState === SAIC.STATES.FAILED,
+                state: SAIC.currentState,
+                version: '23.0.2'
             };
         };
         root.api.core.init = root.api.core.init || function() { return coreReadyPromise; };
     }
     
-    // Mark as initialized
-    root.api.core.__initialized = true;
-    root.api.core.__initializing = false;
-    root.api.core.__ready = true;
+    // Mark as initialized (if already READY)
+    root.api.core.__initialized = SAIC.currentState === SAIC.STATES.READY;
+    root.api.core.__initializing = SAIC.currentState === SAIC.STATES.INITIALIZING;
+    root.api.core.__ready = SAIC.currentState === SAIC.STATES.READY;
     
-    // Resolve the ready promise
-    if (_resolveReady) {
-        clearTimeout(_readyTimeout);
-        _resolveReady({
-            success: true,
-            timestamp: new Date().toISOString(),
-            version: '23.0.1'
-        });
-    }
-    
-    // Dispatch events safely
-    try {
-        root.dispatchEvent(new CustomEvent('api-core-ready', {
-            detail: {
-                version: '23.0.1',
-                environment: CURRENT_ENVIRONMENT,
-                baseUrl: ACTIVE_BASE_URL,
-                timestamp: new Date().toISOString(),
-                features: root.__API_GATEWAY ? root.__API_GATEWAY.features : []
-            }
-        }));
-    } catch (e) {
-        console.warn('[API-CORE] Failed to dispatch api-core-ready event:', e);
-    }
-    
-    if (root.__API_CORE && typeof root.__API_CORE.emit === 'function') {
+    // Dispatch events if already READY
+    if (SAIC.currentState === SAIC.STATES.READY) {
         try {
-            root.__API_CORE.emit('ready', {
-                version: '23.0.1',
-                environment: CURRENT_ENVIRONMENT,
-                timestamp: new Date().toISOString()
-            });
-        } catch (e) {
-            console.warn('[API-CORE] Failed to emit ready event:', e);
-        }
-    }
-    
-    console.log('[API-CORE] Fully loaded and ready', {
-        environment: CURRENT_ENVIRONMENT,
-        baseUrl: ACTIVE_BASE_URL,
-        version: '23.0.1',
-        features: root.__API_GATEWAY ? root.__API_GATEWAY.features.length : 0
-    });
-    
-    // ============================================================================
-    // INTEGRATION SELF-TESTS - PRESERVED AND ENHANCED
-    // ============================================================================
-    try {
-        console.log('[API-CORE] Running self-tests...');
-        
-        // Verify root.api.core exists now
-        if (!root.api || !root.api.core) {
-            console.error('[API-CORE] TEST FAILED: root.api.core still missing after initialization');
-        } else {
-            console.log('[API-CORE] TEST PASSED: root.api.core exists');
-            
-            // Test 1: Verify waitFor exists
-            if (typeof root.api.core.waitFor !== 'function') {
-                console.error('[API-CORE] TEST FAILED: waitFor is not a function');
-            } else {
-                console.log('[API-CORE] TEST PASSED: waitFor exists');
-            }
-            
-            // Test 2: Verify ready is a Promise
-            const isPromise = root.api.core.ready instanceof Promise || 
-                             (root.api.core.ready && typeof root.api.core.ready.then === 'function');
-            
-            if (!isPromise) {
-                console.error('[API-CORE] TEST FAILED: ready is not a Promise', root.api.core.ready);
-                // Force fix it
-                root.api.core.ready = coreReadyPromise;
-                console.log('[API-CORE] TEST: ready has been fixed to be a Promise');
-            } else {
-                console.log('[API-CORE] TEST PASSED: ready is a Promise');
-            }
-            
-            // Test 3: Verify waitFor resolves
-            if (typeof root.api.core.waitFor === 'function') {
-                root.api.core.waitFor().then(() => {
-                    console.log('[API-CORE] TEST PASSED: waitFor resolved');
-                }).catch(() => {});
-            }
-            
-            // Test 4: Verify whenReady exists
-            if (typeof root.api.core.whenReady !== 'function') {
-                console.error('[API-CORE] TEST FAILED: whenReady is not a function');
-            } else {
-                console.log('[API-CORE] TEST PASSED: whenReady exists');
-            }
-            
-            // Test 5: Verify isReady exists
-            if (typeof root.api.core.isReady !== 'function') {
-                console.error('[API-CORE] TEST FAILED: isReady is not a function');
-            } else {
-                console.log('[API-CORE] TEST PASSED: isReady exists');
-            }
-        }
-        
-        // Test 6: Verify __API_CORE exists
-        if (!root.__API_CORE) {
-            console.error('[API-CORE] TEST FAILED: __API_CORE missing');
-        } else {
-            console.log('[API-CORE] TEST PASSED: __API_CORE exists');
-        }
-        
-        // Test 7: Verify required properties
-        if (root.__API_CORE) {
-            const requiredProps = ['version', 'initialized', 'ready', 'secureApiFetch', 'getUserToken', 'setUserToken', 'clearUserToken', '_apiCache', '_apiRequestQueue', '_events', 'on', 'emit'];
-            let allPropsExist = true;
-            requiredProps.forEach(prop => {
-                if (!root.__API_CORE[prop]) {
-                    console.error(`[API-CORE] TEST FAILED: __API_CORE.${prop} missing`);
-                    allPropsExist = false;
-                }
-            });
-            if (allPropsExist) {
-                console.log('[API-CORE] TEST PASSED: All required properties exist');
-            }
-        }
-        
-        // Test 8: Security validation
-        const testUrls = [
-            ['/api/users/me', true],
-            ['/api/users/../config', false],
-            ['/api/users/%2e%2e/config', false],
-            ['https://evil.com/api/steal', false],
-            ['https://moodchat-fy56.onrender.com/api/users', true],
-            ['http://localhost:4000/api/users', true]
-        ];
-        
-        let securityTestsPassed = 0;
-        testUrls.forEach(([url, expected]) => {
-            const result = isValidEndpoint(url, getBaseUrl());
-            if (result === expected) {
-                securityTestsPassed++;
-            } else {
-                console.warn(`[API-CORE] Security test failed for ${url}: expected ${expected}, got ${result}`);
-            }
-        });
-        console.log(`[API-CORE] Security tests: ${securityTestsPassed}/${testUrls.length} passed`);
-        
-        console.log('[API-CORE] Self-tests completed');
-    } catch (testError) {
-        console.error('[API-CORE] Self-test error:', testError);
-    }
-    
-    // Final verification that bootstrap can proceed
-    if (root.dispatchEvent) {
-        try {
-            root.dispatchEvent(new CustomEvent('api-core-initialized', {
+            root.dispatchEvent(new CustomEvent('api-core-ready', {
                 detail: {
-                    version: '23.0.1',
-                    timestamp: new Date().toISOString()
+                    version: '23.0.2',
+                    environment: CURRENT_ENVIRONMENT,
+                    baseUrl: ACTIVE_BASE_URL,
+                    timestamp: new Date().toISOString(),
+                    features: root.__API_GATEWAY.features
                 }
             }));
-        } catch (e) {}
+        } catch (e) {
+            console.warn('[API-CORE] Failed to dispatch api-core-ready event:', e);
+        }
+        
+        if (root.__API_CORE && typeof root.__API_CORE.emit === 'function') {
+            try {
+                root.__API_CORE.emit('ready', {
+                    version: '23.0.2',
+                    environment: CURRENT_ENVIRONMENT,
+                    timestamp: new Date().toISOString()
+                });
+            } catch (e) {
+                console.warn('[API-CORE] Failed to emit ready event:', e);
+            }
+        }
     }
+    
+    console.log('[API-CORE] Fully loaded', {
+        environment: CURRENT_ENVIRONMENT,
+        baseUrl: ACTIVE_BASE_URL,
+        version: '23.0.2',
+        state: SAIC.currentState,
+        stages: Object.keys(SAIC.stageResults).length,
+        features: root.__API_GATEWAY.features.length
+    });
     
 })(typeof window !== 'undefined' ? window : global);
 

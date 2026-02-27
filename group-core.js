@@ -1,7 +1,7 @@
 // =============================================
-// PRODUCTION-READY GROUPS SYSTEM WITH PARENT SESSION AUTHORITY
-// COMPLETE CORE ENGINE - HIGHLY SECURE, XSS PROTECTED
-// VERSION: 4.1.0 - DETERMINISTIC PARENT AUTHORITY CONTRACT
+// GROUPS MODULE - PARENT AUTHORITY COMPLIANT
+// DETERMINISTIC STATE MACHINE - VERSION 6.0.0
+// COMPLETE CORE ENGINE - FULL FUNCTIONALITY PRESERVED
 // =============================================
 
 // =============================================
@@ -17,10 +17,354 @@ function debugLog(...args) {
 }
 
 // =============================================
+// SECTION 1: GLOBAL STATE MACHINE (v5.0 COMPLIANT)
+// =============================================
+const IFRAME_STATES = {
+    STATE_BOOTING: 'STATE_BOOTING',
+    STATE_REGISTERING: 'STATE_REGISTERING',
+    STATE_WAITING_SESSION: 'STATE_WAITING_SESSION',
+    STATE_WAITING_PARENT_READY: 'STATE_WAITING_PARENT_READY',
+    STATE_ACTIVE: 'STATE_ACTIVE',
+    STATE_DEGRADED: 'STATE_DEGRADED',
+    STATE_RECOVERY: 'STATE_RECOVERY',
+    STATE_STANDALONE: 'STATE_STANDALONE',
+    STATE_OFFLINE: 'STATE_OFFLINE'
+};
+
+const IframeStateMachine = (function() {
+    'use strict';
+    
+    let currentState = IFRAME_STATES.STATE_BOOTING;
+    const stateListeners = new Set();
+    const stateHistory = [];
+    const MAX_HISTORY = 20;
+    
+    // Explicit transitions only
+    const validTransitions = {
+        [IFRAME_STATES.STATE_BOOTING]: [IFRAME_STATES.STATE_REGISTERING, IFRAME_STATES.STATE_DEGRADED],
+        [IFRAME_STATES.STATE_REGISTERING]: [IFRAME_STATES.STATE_WAITING_SESSION, IFRAME_STATES.STATE_WAITING_PARENT_READY, IFRAME_STATES.STATE_DEGRADED],
+        [IFRAME_STATES.STATE_WAITING_SESSION]: [IFRAME_STATES.STATE_WAITING_PARENT_READY, IFRAME_STATES.STATE_ACTIVE, IFRAME_STATES.STATE_DEGRADED, IFRAME_STATES.STATE_RECOVERY],
+        [IFRAME_STATES.STATE_WAITING_PARENT_READY]: [IFRAME_STATES.STATE_ACTIVE, IFRAME_STATES.STATE_DEGRADED, IFRAME_STATES.STATE_RECOVERY],
+        [IFRAME_STATES.STATE_ACTIVE]: [IFRAME_STATES.STATE_RECOVERY, IFRAME_STATES.STATE_DEGRADED, IFRAME_STATES.STATE_STANDALONE, IFRAME_STATES.STATE_OFFLINE],
+        [IFRAME_STATES.STATE_DEGRADED]: [IFRAME_STATES.STATE_ACTIVE, IFRAME_STATES.STATE_RECOVERY, IFRAME_STATES.STATE_STANDALONE, IFRAME_STATES.STATE_OFFLINE],
+        [IFRAME_STATES.STATE_RECOVERY]: [IFRAME_STATES.STATE_ACTIVE, IFRAME_STATES.STATE_DEGRADED, IFRAME_STATES.STATE_STANDALONE],
+        [IFRAME_STATES.STATE_STANDALONE]: [IFRAME_STATES.STATE_ACTIVE, IFRAME_STATES.STATE_RECOVERY, IFRAME_STATES.STATE_OFFLINE],
+        [IFRAME_STATES.STATE_OFFLINE]: [IFRAME_STATES.STATE_ACTIVE, IFRAME_STATES.STATE_RECOVERY, IFRAME_STATES.STATE_DEGRADED]
+    };
+    
+    const colors = {
+        [IFRAME_STATES.STATE_BOOTING]: '#666',
+        [IFRAME_STATES.STATE_REGISTERING]: '#33b5e5',
+        [IFRAME_STATES.STATE_WAITING_SESSION]: '#ffbb33',
+        [IFRAME_STATES.STATE_WAITING_PARENT_READY]: '#ff8800',
+        [IFRAME_STATES.STATE_ACTIVE]: '#00C851',
+        [IFRAME_STATES.STATE_DEGRADED]: '#ff8800',
+        [IFRAME_STATES.STATE_RECOVERY]: '#aa66cc',
+        [IFRAME_STATES.STATE_STANDALONE]: '#ff4444',
+        [IFRAME_STATES.STATE_OFFLINE]: '#ff4444'
+    };
+    
+    const symbols = {
+        [IFRAME_STATES.STATE_BOOTING]: '⚫',
+        [IFRAME_STATES.STATE_REGISTERING]: '🔵',
+        [IFRAME_STATES.STATE_WAITING_SESSION]: '⏳',
+        [IFRAME_STATES.STATE_WAITING_PARENT_READY]: '🛫',
+        [IFRAME_STATES.STATE_ACTIVE]: '🚀',
+        [IFRAME_STATES.STATE_DEGRADED]: '⚠️',
+        [IFRAME_STATES.STATE_RECOVERY]: '🔄',
+        [IFRAME_STATES.STATE_STANDALONE]: '🔴',
+        [IFRAME_STATES.STATE_OFFLINE]: '📴'
+    };
+    
+    const loggedStates = new Set();
+    
+    function isValidTransition(from, to) {
+        if (!validTransitions[from]) return false;
+        return validTransitions[from].includes(to);
+    }
+    
+    function transition(to, details = '') {
+        if (!isValidTransition(currentState, to)) {
+            debugLog(`Invalid state transition: ${currentState} → ${to}`);
+            return false;
+        }
+        
+        if (currentState === to) return false;
+        
+        const from = currentState;
+        currentState = to;
+        
+        stateHistory.push({ from, to, timestamp: Date.now(), details });
+        if (stateHistory.length > MAX_HISTORY) stateHistory.shift();
+        
+        const stateKey = `${to}`;
+        if (!loggedStates.has(stateKey)) {
+            loggedStates.add(stateKey);
+            STATUS_MACHINE.log('iframe-state', to, details);
+            console.log(
+                `%c${symbols[to] || '•'} ${to}${details ? ` ${details}` : ''}`,
+                `color: ${colors[to] || '#aaa'}; font-weight: bold;`
+            );
+        }
+        
+        stateListeners.forEach(listener => {
+            try { listener(to, from); } catch (e) {}
+        });
+        
+        return true;
+    }
+    
+    function getState() { return currentState; }
+    function isAtLeast(state) {
+        const order = Object.values(IFRAME_STATES);
+        const currentIdx = order.indexOf(currentState);
+        const targetIdx = order.indexOf(state);
+        return currentIdx >= targetIdx && currentIdx !== -1 && targetIdx !== -1;
+    }
+    function isActive() { return currentState === IFRAME_STATES.STATE_ACTIVE; }
+    function isDegraded() { return currentState === IFRAME_STATES.STATE_DEGRADED; }
+    function isRecovery() { return currentState === IFRAME_STATES.STATE_RECOVERY; }
+    function isStandalone() { return currentState === IFRAME_STATES.STATE_STANDALONE; }
+    function isOffline() { return currentState === IFRAME_STATES.STATE_OFFLINE; }
+    
+    function subscribe(listener) {
+        stateListeners.add(listener);
+        listener(currentState, null);
+        return () => stateListeners.delete(listener);
+    }
+    
+    function getHistory() { return [...stateHistory]; }
+    
+    return {
+        IFRAME_STATES,
+        transition,
+        getState,
+        isAtLeast,
+        isActive,
+        isDegraded,
+        isRecovery,
+        isStandalone,
+        isOffline,
+        subscribe,
+        getHistory
+    };
+})();
+
+window.__IFRAME_STATE_MACHINE = IframeStateMachine;
+
+// =============================================
+// FINITE STATE MACHINE - DETERMINISTIC LIFECYCLE
+// =============================================
+const MODULE_VERSION = '6.0.0';
+
+const LIFECYCLE_STATES = {
+    UNINITIALIZED: 'UNINITIALIZED',
+    BOOTSTRAPPING: 'BOOTSTRAPPING',
+    PRE_FLIGHT: 'PRE_FLIGHT',
+    DEPENDENCIES_CHECKED: 'DEPENDENCIES_CHECKED',
+    PARENT_DETECTED: 'PARENT_DETECTED',
+    HANDSHAKING: 'HANDSHAKING',
+    SESSION_PENDING: 'SESSION_PENDING',
+    SESSION_ACTIVE: 'SESSION_ACTIVE',
+    SERVICES_INITIALIZING: 'SERVICES_INITIALIZING',
+    ACTIVE: 'ACTIVE',
+    FAILED: 'FAILED',
+    DEGRADED_MODE: 'DEGRADED_MODE'
+};
+
+const LifecycleFSM = (function() {
+    'use strict';
+    
+    let currentState = LIFECYCLE_STATES.UNINITIALIZED;
+    const stateListeners = new Set();
+    const stateHistory = [];
+    const MAX_HISTORY = 20;
+    let initializationPromise = null;
+    let initializationLock = false;
+    let initializationResolve = null;
+    let initializationReject = null;
+    
+    // Strict linear transitions - no skipping states
+    const validTransitions = {
+        [LIFECYCLE_STATES.UNINITIALIZED]: [LIFECYCLE_STATES.BOOTSTRAPPING, LIFECYCLE_STATES.FAILED],
+        [LIFECYCLE_STATES.BOOTSTRAPPING]: [LIFECYCLE_STATES.PRE_FLIGHT, LIFECYCLE_STATES.FAILED],
+        [LIFECYCLE_STATES.PRE_FLIGHT]: [LIFECYCLE_STATES.DEPENDENCIES_CHECKED, LIFECYCLE_STATES.FAILED],
+        [LIFECYCLE_STATES.DEPENDENCIES_CHECKED]: [LIFECYCLE_STATES.PARENT_DETECTED, LIFECYCLE_STATES.FAILED],
+        [LIFECYCLE_STATES.PARENT_DETECTED]: [LIFECYCLE_STATES.HANDSHAKING, LIFECYCLE_STATES.FAILED],
+        [LIFECYCLE_STATES.HANDSHAKING]: [LIFECYCLE_STATES.SESSION_PENDING, LIFECYCLE_STATES.FAILED, LIFECYCLE_STATES.DEGRADED_MODE],
+        [LIFECYCLE_STATES.SESSION_PENDING]: [LIFECYCLE_STATES.SESSION_ACTIVE, LIFECYCLE_STATES.FAILED, LIFECYCLE_STATES.DEGRADED_MODE],
+        [LIFECYCLE_STATES.SESSION_ACTIVE]: [LIFECYCLE_STATES.SERVICES_INITIALIZING, LIFECYCLE_STATES.FAILED],
+        [LIFECYCLE_STATES.SERVICES_INITIALIZING]: [LIFECYCLE_STATES.ACTIVE, LIFECYCLE_STATES.FAILED],
+        [LIFECYCLE_STATES.ACTIVE]: [LIFECYCLE_STATES.FAILED],
+        [LIFECYCLE_STATES.FAILED]: [],
+        [LIFECYCLE_STATES.DEGRADED_MODE]: [LIFECYCLE_STATES.SERVICES_INITIALIZING, LIFECYCLE_STATES.ACTIVE, LIFECYCLE_STATES.FAILED]
+    };
+    
+    const symbols = {
+        [LIFECYCLE_STATES.UNINITIALIZED]: '⚫',
+        [LIFECYCLE_STATES.BOOTSTRAPPING]: '🔵',
+        [LIFECYCLE_STATES.PRE_FLIGHT]: '🛫',
+        [LIFECYCLE_STATES.DEPENDENCIES_CHECKED]: '✅',
+        [LIFECYCLE_STATES.PARENT_DETECTED]: '👪',
+        [LIFECYCLE_STATES.HANDSHAKING]: '🤝',
+        [LIFECYCLE_STATES.SESSION_PENDING]: '⏳',
+        [LIFECYCLE_STATES.SESSION_ACTIVE]: '🔐',
+        [LIFECYCLE_STATES.SERVICES_INITIALIZING]: '⚙️',
+        [LIFECYCLE_STATES.ACTIVE]: '🚀',
+        [LIFECYCLE_STATES.FAILED]: '💥',
+        [LIFECYCLE_STATES.DEGRADED_MODE]: '⚠️'
+    };
+    
+    const colors = {
+        [LIFECYCLE_STATES.UNINITIALIZED]: '#666',
+        [LIFECYCLE_STATES.BOOTSTRAPPING]: '#33b5e5',
+        [LIFECYCLE_STATES.PRE_FLIGHT]: '#ff8800',
+        [LIFECYCLE_STATES.DEPENDENCIES_CHECKED]: '#00C851',
+        [LIFECYCLE_STATES.PARENT_DETECTED]: '#0099CC',
+        [LIFECYCLE_STATES.HANDSHAKING]: '#aa66cc',
+        [LIFECYCLE_STATES.SESSION_PENDING]: '#ffbb33',
+        [LIFECYCLE_STATES.SESSION_ACTIVE]: '#00C851',
+        [LIFECYCLE_STATES.SERVICES_INITIALIZING]: '#33b5e5',
+        [LIFECYCLE_STATES.ACTIVE]: '#00C851',
+        [LIFECYCLE_STATES.FAILED]: '#ff4444',
+        [LIFECYCLE_STATES.DEGRADED_MODE]: '#ff8800'
+    };
+    
+    const loggedStates = new Set();
+    
+    function isValidTransition(from, to) {
+        if (!validTransitions[from]) {
+            console.warn(`[LifecycleFSM] No valid transitions defined for state: ${from}`);
+            return false;
+        }
+        return validTransitions[from].includes(to);
+    }
+    
+    function transition(to, details = '') {
+        if (!isValidTransition(currentState, to)) {
+            console.warn(`[LifecycleFSM] Invalid state transition: ${currentState} → ${to} - must follow linear path`);
+            return false;
+        }
+        
+        if (currentState === to) return false;
+        
+        const from = currentState;
+        currentState = to;
+        
+        const entry = {
+            from,
+            to,
+            timestamp: Date.now(),
+            details
+        };
+        
+        stateHistory.push(entry);
+        if (stateHistory.length > MAX_HISTORY) {
+            stateHistory.shift();
+        }
+        
+        const stateKey = `${to}`;
+        if (!loggedStates.has(stateKey)) {
+            loggedStates.add(stateKey);
+            const symbol = symbols[to] || '•';
+            STATUS_MACHINE.log('lifecycle', to, details);
+            console.log(
+                `%c${symbol} ${to}${details ? ` ${details}` : ''}`,
+                `color: ${colors[to] || '#aaa'}; font-weight: bold;`
+            );
+        }
+        
+        stateListeners.forEach(listener => {
+            try {
+                listener(to, from, entry);
+            } catch (e) {}
+        });
+        
+        return true;
+    }
+    
+    function getState() {
+        return currentState;
+    }
+    
+    function isAtLeast(state) {
+        const order = Object.values(LIFECYCLE_STATES);
+        const currentIdx = order.indexOf(currentState);
+        const targetIdx = order.indexOf(state);
+        return currentIdx >= targetIdx && currentIdx !== -1 && targetIdx !== -1;
+    }
+    
+    function isActive() {
+        return currentState === LIFECYCLE_STATES.ACTIVE;
+    }
+    
+    function isDegraded() {
+        return currentState === LIFECYCLE_STATES.DEGRADED_MODE;
+    }
+    
+    function isFailed() {
+        return currentState === LIFECYCLE_STATES.FAILED;
+    }
+    
+    function reset() {
+        currentState = LIFECYCLE_STATES.UNINITIALIZED;
+        loggedStates.clear();
+        initializationPromise = null;
+        initializationLock = false;
+        stateHistory.length = 0;
+    }
+    
+    function subscribe(listener) {
+        stateListeners.add(listener);
+        listener(currentState, null, { timestamp: Date.now() });
+        return () => stateListeners.delete(listener);
+    }
+    
+    function getHistory() {
+        return [...stateHistory];
+    }
+    
+    function getInitializationPromise() {
+        return initializationPromise;
+    }
+    
+    function setInitializationPromise(promise) {
+        initializationPromise = promise;
+    }
+    
+    function acquireLock() {
+        if (initializationLock) return false;
+        initializationLock = true;
+        return true;
+    }
+    
+    function releaseLock() {
+        initializationLock = false;
+    }
+    
+    return {
+        LIFECYCLE_STATES,
+        transition,
+        getState,
+        isAtLeast,
+        isActive,
+        isDegraded,
+        isFailed,
+        reset,
+        subscribe,
+        getHistory,
+        getInitializationPromise,
+        setInitializationPromise,
+        acquireLock,
+        releaseLock
+    };
+})();
+
+window.__LIFECYCLE_FSM = LifecycleFSM;
+
+// =============================================
 // STATUS MACHINE - One Message Only Per State Change
 // =============================================
-const MODULE_VERSION = '4.1.0';
-
 const STATUS_MACHINE = (function() {
     'use strict';
     
@@ -35,7 +379,13 @@ const STATUS_MACHINE = (function() {
         'FAILED': '❌',
         'READY': '🔵',
         'WARNING': '⚠️',
-        'DISCONNECTED': '🔴'
+        'DISCONNECTED': '🔴',
+        'iframe-state': '📱',
+        'registration': '📋',
+        'session': '🔐',
+        'heartbeat': '💓',
+        'queue': '📦',
+        'recovery': '🔄'
     };
     
     const colors = {
@@ -46,7 +396,13 @@ const STATUS_MACHINE = (function() {
         'FAILED': '#ff4444',
         'READY': '#0099CC',
         'WARNING': '#ffbb33',
-        'DISCONNECTED': '#ff4444'
+        'DISCONNECTED': '#ff4444',
+        'iframe-state': '#9c27b0',
+        'registration': '#2196F3',
+        'session': '#4CAF50',
+        'heartbeat': '#E91E63',
+        'queue': '#FF9800',
+        'recovery': '#9C27B0'
     };
     
     return {
@@ -61,14 +417,13 @@ const STATUS_MACHINE = (function() {
             lastState.set(context, status);
             shownStatuses.add(key);
             
-            const symbol = symbols[status] || '•';
+            const symbol = symbols[status] || symbols[context] || '•';
             const detailStr = details ? ` ${details}` : '';
             
-            // Only log critical statuses when DEBUG is false
-            if (DEBUG || status === 'INIT' || status === 'SUCCESS' || status === 'FAILED' || status === 'WARNING') {
+            if (DEBUG || status === 'INIT' || status === 'SUCCESS' || status === 'FAILED' || status === 'WARNING' || context === 'iframe-state') {
                 console.log(
                     `%c${symbol} ${status}${detailStr}`,
-                    `color: ${colors[status] || '#aaa'}; font-weight: bold;`
+                    `color: ${colors[status] || colors[context] || '#aaa'}; font-weight: bold;`
                 );
             }
         },
@@ -97,7 +452,6 @@ STATUS_MACHINE.log('group-core', 'INIT', 'Groups module loading');
 // =============================================
 // DETERMINISTIC PARENT AUTHORITY STATE MACHINE
 // =============================================
-
 const PARENT_AUTHORITY_STATES = {
     PREINIT: 'PREINIT',
     WAIT_PARENT: 'WAIT_PARENT',
@@ -122,6 +476,7 @@ const ParentAuthority = {
     _timeoutId: null,
     _sessionTimeoutId: null,
     _degradedMode: false,
+    _timers: new Set(),
     
     init() {
         if (this._initComplete) return this;
@@ -129,21 +484,44 @@ const ParentAuthority = {
         STATUS_MACHINE.log('authority', 'INIT', 'Parent authority layer');
         this._transition(PARENT_AUTHORITY_STATES.WAIT_PARENT);
         
-        // Set parent ready timeout
-        this._timeoutId = setTimeout(() => {
-            if (this._state === PARENT_AUTHORITY_STATES.WAIT_PARENT) {
-                debugLog('Parent ready timeout - entering degraded mode');
-                this._enterDegradedMode();
+        this._timeoutId = this._createTimer(() => {
+            if (this._state === PARENT_AUTHORITY_STATES.WAIT_PARENT && 
+                !LifecycleFSM.isAtLeast(LIFECYCLE_STATES.SESSION_PENDING)) {
+                debugLog('Parent ready timeout - checking lifecycle state');
+                if (LifecycleFSM.getState() === LIFECYCLE_STATES.HANDSHAKING) {
+                    this._enterDegradedMode();
+                }
             }
         }, 5000);
         
-        // Check if parent is already ready
         if (window.__PARENT_READY__ === true) {
             this.handleParentReady();
         }
         
         this._initComplete = true;
         return this;
+    },
+    
+    _createTimer(fn, delay) {
+        const timerId = setTimeout(() => {
+            this._timers.delete(timerId);
+            fn();
+        }, delay);
+        this._timers.add(timerId);
+        return timerId;
+    },
+    
+    _clearAllTimers() {
+        this._timers.forEach(id => clearTimeout(id));
+        this._timers.clear();
+        if (this._timeoutId) {
+            clearTimeout(this._timeoutId);
+            this._timeoutId = null;
+        }
+        if (this._sessionTimeoutId) {
+            clearTimeout(this._sessionTimeoutId);
+            this._sessionTimeoutId = null;
+        }
     },
     
     _transition(newState) {
@@ -154,10 +532,8 @@ const ParentAuthority = {
         
         debugLog(`ParentAuthority state: ${oldState} -> ${newState}`);
         
-        // Emit state change
         this._notifyListeners(newState, oldState);
         
-        // Handle state entry actions
         if (newState === PARENT_AUTHORITY_STATES.REGISTERING) {
             this._sendRegistration();
         } else if (newState === PARENT_AUTHORITY_STATES.READY) {
@@ -172,7 +548,6 @@ const ParentAuthority = {
         
         this._registrationSent = true;
         
-        // Send CHILD_READY exactly once
         const childReadyMsg = {
             type: 'CHILD_READY',
             module: 'groups',
@@ -183,7 +558,6 @@ const ParentAuthority = {
         
         TransportAgent.send('CHILD_READY', childReadyMsg, { requiresAck: false }).catch(() => {});
         
-        // Send REGISTER_MODULE
         const registerMsg = {
             type: 'REGISTER_MODULE',
             module: 'groups',
@@ -194,11 +568,13 @@ const ParentAuthority = {
         
         TransportAgent.send('REGISTER_MODULE', registerMsg, { requiresAck: false }).catch(() => {});
         
-        // Set session timeout
-        this._sessionTimeoutId = setTimeout(() => {
-            if (this._state === PARENT_AUTHORITY_STATES.WAIT_SESSION) {
-                debugLog('Session timeout - entering degraded mode');
-                this._enterDegradedMode();
+        this._sessionTimeoutId = this._createTimer(() => {
+            if (this._state === PARENT_AUTHORITY_STATES.WAIT_SESSION && 
+                !LifecycleFSM.isAtLeast(LIFECYCLE_STATES.SESSION_ACTIVE)) {
+                debugLog('Session timeout - checking lifecycle state');
+                if (LifecycleFSM.getState() === LIFECYCLE_STATES.SESSION_PENDING) {
+                    this._enterDegradedMode();
+                }
             }
         }, 5000);
     },
@@ -209,44 +585,32 @@ const ParentAuthority = {
             window.__MODULE_SESSION_ACTIVE__ = true;
         }
         
-        if (this._sessionTimeoutId) {
-            clearTimeout(this._sessionTimeoutId);
-            this._sessionTimeoutId = null;
-        }
-        
-        // Clear parent timeout if still pending
-        if (this._timeoutId) {
-            clearTimeout(this._timeoutId);
-            this._timeoutId = null;
-        }
+        this._clearAllTimers();
         
         STATUS_MACHINE.log('authority', 'SUCCESS', 'Parent contract ready');
     },
     
     _onDegraded() {
-        window.__MODULE_READY__ = true; // Still mark as ready for legacy fallback
+        window.__MODULE_READY__ = true;
         this._degradedMode = true;
         
         STATUS_MACHINE.log('authority', 'WARNING', 'Degraded mode - using legacy behavior');
         
-        // Clear all timeouts
-        if (this._timeoutId) {
-            clearTimeout(this._timeoutId);
-            this._timeoutId = null;
-        }
-        if (this._sessionTimeoutId) {
-            clearTimeout(this._sessionTimeoutId);
-            this._sessionTimeoutId = null;
-        }
+        this._clearAllTimers();
     },
     
     _enterDegradedMode() {
+        if (LifecycleFSM.isAtLeast(LIFECYCLE_STATES.SESSION_ACTIVE)) {
+            debugLog('Not entering degraded mode - session already active');
+            return;
+        }
         this._transition(PARENT_AUTHORITY_STATES.DEGRADED);
     },
     
     handleParentReady() {
         if (this._parentReady) return;
         if (this._degradedMode) return;
+        if (LifecycleFSM.isAtLeast(LIFECYCLE_STATES.SESSION_ACTIVE)) return;
         
         this._parentReady = true;
         
@@ -258,26 +622,23 @@ const ParentAuthority = {
     handleSessionActive(sessionData) {
         if (this._degradedMode) return;
         if (this._sessionReceived) return;
+        if (LifecycleFSM.isAtLeast(LIFECYCLE_STATES.SESSION_ACTIVE)) return;
         
         this._sessionReceived = true;
         this._authoritativeSession = sessionData;
         
-        // Clear session timeout
         if (this._sessionTimeoutId) {
             clearTimeout(this._sessionTimeoutId);
             this._sessionTimeoutId = null;
         }
         
-        // If we're in WAIT_SESSION, move to INITIALIZING
         if (this._state === PARENT_AUTHORITY_STATES.WAIT_SESSION) {
             this._transition(PARENT_AUTHORITY_STATES.INITIALIZING);
         } else if (this._state === PARENT_AUTHORITY_STATES.REGISTERING) {
-            // If we get session before transitioning, go to INITIALIZING directly
             this._transition(PARENT_AUTHORITY_STATES.INITIALIZING);
         }
         
-        // After INITIALIZING, go to READY
-        setTimeout(() => {
+        this._createTimer(() => {
             if (this._state === PARENT_AUTHORITY_STATES.INITIALIZING && !this._degradedMode) {
                 this._transition(PARENT_AUTHORITY_STATES.READY);
             }
@@ -288,49 +649,41 @@ const ParentAuthority = {
         if (this._degradedMode) return;
         if (!message || !message.type) return;
         
-        // Handle ACK messages
         if (message.type === 'ACK' && message.messageId) {
             TransportAgent.handleAck(message);
             return;
         }
         
-        // Handle PING
         if (message.type === 'PING') {
             TransportAgent.handlePing(message);
             return;
         }
         
-        // Handle PARENT_READY
         if (message.type === 'PARENT_READY') {
             this.handleParentReady();
             return;
         }
         
-        // Handle SESSION_ACTIVE (authoritative)
         if (message.type === 'SESSION_ACTIVE') {
             this.handleSessionActive(message.session || message.payload);
             return;
         }
         
-        // Handle SESSION_UPDATE
         if (message.type === 'SESSION_UPDATE') {
             this.handleSessionUpdate(message.session || message.payload);
             return;
         }
         
-        // Handle NAVIGATE
         if (message.type === 'NAVIGATE') {
             this.handleNavigate(message);
             return;
         }
         
-        // Handle PERMISSION_UPDATE
         if (message.type === 'PERMISSION_UPDATE') {
             this.handlePermissionUpdate(message);
             return;
         }
         
-        // Handle FORCE_LOGOUT
         if (message.type === 'FORCE_LOGOUT') {
             this.handleForceLogout();
             return;
@@ -340,7 +693,6 @@ const ParentAuthority = {
     handleSessionUpdate(updateData) {
         if (this._degradedMode) return;
         
-        // Update authoritative session
         if (this._authoritativeSession) {
             this._authoritativeSession = {
                 ...this._authoritativeSession,
@@ -351,7 +703,6 @@ const ParentAuthority = {
     
     handleNavigate(message) {
         if (this._degradedMode) return;
-        // Forward to existing navigation handler
         if (ParentConnectionManager && ParentConnectionManager.handleNavigate) {
             ParentConnectionManager.handleNavigate(message);
         }
@@ -359,7 +710,6 @@ const ParentAuthority = {
     
     handlePermissionUpdate(message) {
         if (this._degradedMode) return;
-        // Update permissions if needed
         if (message.permissions && SessionMirror) {
             const session = SessionMirror.getState();
             if (session) {
@@ -371,11 +721,9 @@ const ParentAuthority = {
     handleForceLogout() {
         if (this._degradedMode) return;
         
-        // Clear authoritative session
         this._authoritativeSession = null;
         this._sessionReceived = false;
         
-        // Forward to existing logout handler
         if (typeof handleLogout === 'function') {
             handleLogout();
         }
@@ -417,11 +765,1019 @@ const ParentAuthority = {
                 listener(newState, oldState);
             } catch (e) {}
         });
+    },
+    
+    destroy() {
+        this._clearAllTimers();
+        this._listeners.clear();
+        this._handledMessageIds.clear();
     }
 };
 
 // =============================================
-// MESSAGE DEDUPLICATION - Prevents duplicate logs
+// SECTION 2: INITIALIZATION TIMELINE (HARD LIMITS)
+// =============================================
+const InitTimeline = (function() {
+    'use strict';
+    
+    let registrationTimer = null;
+    let globalFailSafeTimer = null;
+    let registrationRetryCount = 0;
+    const MAX_REGISTRATION_RETRIES = 2;
+    const REGISTRATION_TIMEOUT_WARNING = 50;
+    const REGISTRATION_TIMEOUT_FAILURE = 150;
+    const GLOBAL_FAILSAFE_TIMEOUT = 200;
+    const REQUEST_SESSION_DELAY = 100;
+    const PARENT_READY_TIMEOUT = 150;
+    
+    let moduleRegistered = false;
+    let sessionReceived = false;
+    let parentReady = false;
+    
+    function startRegistrationTimeline() {
+        // T+0ms: STATE_BOOTING
+        IframeStateMachine.transition(IFRAME_STATES.STATE_BOOTING);
+        STATUS_MACHINE.log('init', 'STATE_BOOTING', 'Booting');
+        
+        // T+1ms: Send REGISTER_MODULE
+        setTimeout(() => {
+            if (IframeStateMachine.getState() === IFRAME_STATES.STATE_BOOTING) {
+                IframeStateMachine.transition(IFRAME_STATES.STATE_REGISTERING);
+                STATUS_MACHINE.log('init', 'SENDING', 'REGISTER_MODULE');
+                
+                const messageId = 'reg_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6);
+                
+                TransportAgent.send('REGISTER_MODULE', {
+                    module: 'groups',
+                    version: MODULE_VERSION,
+                    timestamp: Date.now(),
+                    frameId: SECURITY_CONFIG.FRAME_ID
+                }, { 
+                    requiresAck: true, 
+                    messageId: messageId,
+                    timeout: 50 // 50ms timeout for ACK
+                }).then((response) => {
+                    if (response && response.ack) {
+                        handleModuleRegistered(response.ack);
+                    }
+                }).catch((error) => {
+                    handleRegistrationFailure();
+                });
+                
+                // Start registration timer (50ms warning, 150ms failure)
+                startRegistrationTimer();
+                
+                // Start global failsafe timer (200ms)
+                startGlobalFailSafeTimer();
+            }
+        }, 1);
+    }
+    
+    function startRegistrationTimer() {
+        if (registrationTimer) clearTimeout(registrationTimer);
+        
+        // 50ms warning
+        registrationTimer = setTimeout(() => {
+            if (IframeStateMachine.getState() === IFRAME_STATES.STATE_REGISTERING && !moduleRegistered) {
+                STATUS_MACHINE.log('init', 'WAITING', 'No MODULE_REGISTERED yet (50ms)');
+                
+                if (registrationRetryCount < MAX_REGISTRATION_RETRIES) {
+                    registrationRetryCount++;
+                    // T+50ms: prepare retry
+                    prepareRegistrationRetry();
+                }
+            }
+        }, REGISTRATION_TIMEOUT_WARNING);
+    }
+    
+    function startGlobalFailSafeTimer() {
+        if (globalFailSafeTimer) clearTimeout(globalFailSafeTimer);
+        
+        globalFailSafeTimer = setTimeout(() => {
+            const currentState = IframeStateMachine.getState();
+            if (currentState === IFRAME_STATES.STATE_REGISTERING || 
+                currentState === IFRAME_STATES.STATE_WAITING_SESSION) {
+                
+                // Check if we have any response at all
+                if (!moduleRegistered && !sessionReceived && !parentReady) {
+                    STATUS_MACHINE.log('init', 'WARNING', 'No meaningful response (200ms) - entering degraded');
+                    IframeStateMachine.transition(IFRAME_STATES.STATE_DEGRADED, 'failsafe');
+                    
+                    // Still try to use cached session if available
+                    if (ParentConnectionManager && ParentConnectionManager.tryCachedSession()) {
+                        STATUS_MACHINE.log('init', 'SUCCESS', 'Using cached session in degraded mode');
+                    }
+                }
+            }
+        }, GLOBAL_FAILSAFE_TIMEOUT);
+    }
+    
+    function prepareRegistrationRetry() {
+        const backoffDelay = registrationRetryCount === 1 ? 500 : 1000;
+        
+        setTimeout(() => {
+            if (IframeStateMachine.getState() === IFRAME_STATES.STATE_REGISTERING && !moduleRegistered) {
+                STATUS_MACHINE.log('init', 'SENDING', `REGISTER_MODULE retry ${registrationRetryCount}`);
+                
+                TransportAgent.send('REGISTER_MODULE', {
+                    module: 'groups',
+                    version: MODULE_VERSION,
+                    timestamp: Date.now(),
+                    frameId: SECURITY_CONFIG.FRAME_ID,
+                    retry: registrationRetryCount
+                }, { 
+                    requiresAck: true,
+                    timeout: 50 
+                }).then((response) => {
+                    if (response && response.ack) {
+                        handleModuleRegistered(response.ack);
+                    }
+                }).catch(() => {
+                    if (registrationRetryCount >= MAX_REGISTRATION_RETRIES) {
+                        handleRegistrationFailure();
+                    }
+                });
+            }
+        }, backoffDelay);
+    }
+    
+    function handleModuleRegistered(message) {
+        if (moduleRegistered) return; // Already handled
+        
+        moduleRegistered = true;
+        STATUS_MACHINE.log('init', 'SUCCESS', 'MODULE_REGISTERED received');
+        
+        if (registrationTimer) {
+            clearTimeout(registrationTimer);
+            registrationTimer = null;
+        }
+        
+        if (IframeStateMachine.getState() === IFRAME_STATES.STATE_REGISTERING) {
+            IframeStateMachine.transition(IFRAME_STATES.STATE_WAITING_SESSION);
+            
+            // T+100ms: Send REQUEST_SESSION if no SESSION_ACTIVE
+            setTimeout(() => {
+                if (IframeStateMachine.getState() === IFRAME_STATES.STATE_WAITING_SESSION && 
+                    !sessionReceived && !SessionMirror.isAuthenticated()) {
+                    STATUS_MACHINE.log('init', 'SENDING', 'REQUEST_SESSION');
+                    
+                    TransportAgent.send('REQUEST_SESSION', {
+                        frameId: SECURITY_CONFIG.FRAME_ID,
+                        timestamp: Date.now(),
+                        requestId: 'session_' + Date.now()
+                    }, { 
+                        requiresAck: true,
+                        timeout: 50 
+                    }).catch(() => {
+                        // No response - will be handled by failsafe
+                    });
+                }
+            }, REQUEST_SESSION_DELAY);
+            
+            // T+150ms: If no PARENT_READY, continue waiting (don't queue yet)
+            setTimeout(() => {
+                if (IframeStateMachine.getState() === IFRAME_STATES.STATE_WAITING_SESSION &&
+                    !parentReady) {
+                    STATUS_MACHINE.log('init', 'WAITING', 'PARENT_READY not received (150ms)');
+                    // Continue waiting - parent might send later
+                }
+            }, PARENT_READY_TIMEOUT);
+        }
+    }
+    
+    function handleRegistrationFailure() {
+        if (moduleRegistered) return; // Already succeeded
+        
+        STATUS_MACHINE.log('init', 'FAILED', 'Registration failed after retries');
+        
+        // Try cached session before degrading
+        if (ParentConnectionManager && ParentConnectionManager.tryCachedSession()) {
+            STATUS_MACHINE.log('init', 'SUCCESS', 'Using cached session after registration failure');
+            moduleRegistered = true;
+            sessionReceived = true;
+            IframeStateMachine.transition(IFRAME_STATES.STATE_ACTIVE, 'cached');
+        } else {
+            IframeStateMachine.transition(IFRAME_STATES.STATE_DEGRADED, 'registration_failed');
+        }
+    }
+    
+    function handleSessionActive(sessionData) {
+        if (sessionReceived) return; // Already handled
+        
+        sessionReceived = true;
+        STATUS_MACHINE.log('init', 'SUCCESS', 'SESSION_ACTIVE received');
+        
+        if (IframeStateMachine.getState() === IFRAME_STATES.STATE_WAITING_SESSION) {
+            IframeStateMachine.transition(IFRAME_STATES.STATE_WAITING_PARENT_READY);
+            
+            // Validate session schema
+            if (validateSessionSchema(sessionData)) {
+                SessionMirror.updateFromParent(sessionData);
+            }
+        }
+    }
+    
+    function handleSessionNull() {
+        if (sessionReceived) return; // Already have session
+        
+        STATUS_MACHINE.log('init', 'INFO', 'SESSION_NULL received');
+        
+        if (IframeStateMachine.getState() === IFRAME_STATES.STATE_WAITING_SESSION) {
+            IframeStateMachine.transition(IFRAME_STATES.STATE_WAITING_PARENT_READY);
+            
+            // Disable protected actions but remain functional in guest mode
+            disableProtectedActions();
+        }
+    }
+    
+    function validateSessionSchema(sessionData) {
+        if (!sessionData || typeof sessionData !== 'object') return false;
+        
+        // SESSION_ACTIVE payload must include:
+        // authenticated: boolean,
+        // userId: string,
+        // token: string,
+        // user: { id, name, email, avatar },
+        // expiresAt: number
+        
+        const hasRequired = sessionData.hasOwnProperty('authenticated') &&
+                           sessionData.hasOwnProperty('userId') &&
+                           sessionData.hasOwnProperty('token') &&
+                           sessionData.hasOwnProperty('user') &&
+                           sessionData.hasOwnProperty('expiresAt');
+        
+        if (!hasRequired) return false;
+        
+        if (sessionData.user) {
+            const hasUserFields = sessionData.user.hasOwnProperty('id') &&
+                                 sessionData.user.hasOwnProperty('name') &&
+                                 sessionData.user.hasOwnProperty('email') &&
+                                 sessionData.user.hasOwnProperty('avatar');
+            if (!hasUserFields) return false;
+        }
+        
+        return true;
+    }
+    
+    function disableProtectedActions() {
+        // Disable protected UI features
+        const protectedElements = document.querySelectorAll('.protected-action, [data-protected]');
+        protectedElements.forEach(el => {
+            el.classList.add('disabled');
+            el.setAttribute('disabled', 'disabled');
+        });
+        
+        // Show login required where appropriate
+        const loginRequiredElements = document.querySelectorAll('.requires-auth');
+        loginRequiredElements.forEach(el => {
+            el.style.display = 'none';
+        });
+        
+        // Preserve drafts
+        const draftInputs = document.querySelectorAll('[data-draft]');
+        draftInputs.forEach(input => {
+            if (input.value) {
+                localStorage.setItem(`draft_${input.id}`, input.value);
+            }
+        });
+    }
+    
+    function handleParentReady() {
+        if (parentReady) return; // Already handled
+        
+        parentReady = true;
+        STATUS_MACHINE.log('init', 'SUCCESS', 'PARENT_READY received');
+        
+        if (IframeStateMachine.getState() === IFRAME_STATES.STATE_WAITING_PARENT_READY) {
+            IframeStateMachine.transition(IFRAME_STATES.STATE_ACTIVE);
+            
+            // Total handshake should be <150ms
+            const handshakeTime = Date.now() - window.__INIT_START_TIME__;
+            if (handshakeTime > 150) {
+                STATUS_MACHINE.log('init', 'WARNING', `Handshake took ${handshakeTime}ms (>150ms)`);
+            } else {
+                STATUS_MACHINE.log('init', 'SUCCESS', `Handshake complete in ${handshakeTime}ms`);
+            }
+            
+            // Start heartbeat system
+            HeartbeatSystem.start();
+            
+            // Flush message queue
+            MessageQueue.flush();
+        }
+    }
+    
+    function init() {
+        window.__INIT_START_TIME__ = Date.now();
+        startRegistrationTimeline();
+    }
+    
+    return {
+        init,
+        handleModuleRegistered,
+        handleSessionActive,
+        handleSessionNull,
+        handleParentReady,
+        isModuleRegistered: () => moduleRegistered,
+        isSessionReceived: () => sessionReceived,
+        isParentReady: () => parentReady
+    };
+})();
+
+// =============================================
+// SECTION 5: VERIFY_SESSION PROTOCOL
+// =============================================
+const SessionVerifier = (function() {
+    'use strict';
+    
+    const pendingVerifications = new Map();
+    let cachedSession = null;
+    let lastVerifyTime = 0;
+    const VERIFY_INTERVAL = 5 * 60 * 1000; // 5 minutes
+    const VERIFY_TIMEOUT = 50; // 50ms timeout
+    
+    async function verifySession(force = false, context = 'general') {
+        const now = Date.now();
+        
+        // Don't verify too frequently unless forced
+        if (!force && now - lastVerifyTime < VERIFY_INTERVAL) {
+            return cachedSession || SessionMirror.getState();
+        }
+        
+        // Only verify if we're in active state
+        if (!IframeStateMachine.isActive() && !force) {
+            return cachedSession || SessionMirror.getState();
+        }
+        
+        // Before initiating call or sensitive actions
+        if (force) {
+            STATUS_MACHINE.log('session', 'SENDING', `VERIFY_SESSION (${context})`);
+        }
+        
+        const requestId = 'verify_' + now + '_' + Math.random().toString(36).substr(2, 6);
+        
+        return new Promise((resolve) => {
+            let resolved = false;
+            
+            // Send verification request with short timeout
+            TransportAgent.send('VERIFY_SESSION', {
+                requestId,
+                timestamp: now,
+                frameId: SECURITY_CONFIG.FRAME_ID,
+                context: context
+            }, { 
+                requiresAck: true, 
+                timeout: VERIFY_TIMEOUT,
+                messageId: requestId
+            }).then((response) => {
+                if (resolved) return;
+                resolved = true;
+                
+                if (response && response.ack && response.ack.payload) {
+                    const result = response.ack.payload;
+                    
+                    if (result.valid !== false) {
+                        // Valid session
+                        cachedSession = SessionMirror.getState();
+                        lastVerifyTime = now;
+                        STATUS_MACHINE.log('session', 'SUCCESS', `Session verified (${context})`);
+                        resolve(cachedSession);
+                    } else {
+                        // Invalid session
+                        STATUS_MACHINE.log('session', 'WARNING', `Session invalid (${context})`);
+                        disableProtectedActions();
+                        resolve(null);
+                    }
+                } else {
+                    // No response - use cached session with warning
+                    STATUS_MACHINE.log('session', 'WARNING', `Using cached session (no response - ${context})`);
+                    resolve(cachedSession || SessionMirror.getState());
+                }
+            }).catch(() => {
+                if (resolved) return;
+                resolved = true;
+                
+                // First attempt failed - use cached session
+                STATUS_MACHINE.log('session', 'WARNING', `Using cached session (error - ${context})`);
+                resolve(cachedSession || SessionMirror.getState());
+            });
+            
+            // Safety timeout
+            setTimeout(() => {
+                if (!resolved) {
+                    resolved = true;
+                    STATUS_MACHINE.log('session', 'WARNING', `Using cached session (timeout - ${context})`);
+                    resolve(cachedSession || SessionMirror.getState());
+                }
+            }, VERIFY_TIMEOUT + 10);
+        });
+    }
+    
+    function disableProtectedActions() {
+        const protectedElements = document.querySelectorAll('.protected-action, [data-protected]');
+        protectedElements.forEach(el => {
+            el.classList.add('disabled');
+            el.setAttribute('disabled', 'disabled');
+        });
+        
+        // Show login required modal/notification
+        const loginRequired = document.querySelector('.login-required');
+        if (loginRequired) {
+            loginRequired.style.display = 'block';
+        }
+    }
+    
+    function handleFocus() {
+        // After tab regain focus
+        verifySession(true, 'focus').catch(() => {});
+    }
+    
+    function init() {
+        // Listen for focus events
+        window.addEventListener('focus', handleFocus);
+        
+        // Periodic verification only when active
+        setInterval(() => {
+            if (IframeStateMachine.isActive() && SessionMirror.isAuthenticated()) {
+                verifySession(false, 'periodic').catch(() => {});
+            }
+        }, VERIFY_INTERVAL);
+    }
+    
+    return {
+        verify: verifySession,
+        init
+    };
+})();
+
+// =============================================
+// SECTION 6: HEARTBEAT SYSTEM (3-TIER ESCALATION)
+// =============================================
+const HeartbeatSystem = (function() {
+    'use strict';
+    
+    let heartbeatInterval = null;
+    let missedHeartbeats = 0;
+    const MAX_MISSED_BEFORE_WARNING = 1;
+    const MAX_MISSED_BEFORE_REDUCE = 2;
+    const MAX_MISSED_BEFORE_STANDALONE = 3;
+    const HEARTBEAT_INTERVAL = 30000; // 30 seconds
+    const HEARTBEAT_TIMEOUT = 5000; // 5 seconds
+    
+    function start() {
+        if (heartbeatInterval) return;
+        
+        STATUS_MACHINE.log('heartbeat', 'INIT', 'Starting heartbeat system');
+        
+        heartbeatInterval = setInterval(() => {
+            sendHeartbeat();
+        }, HEARTBEAT_INTERVAL);
+    }
+    
+    function stop() {
+        if (heartbeatInterval) {
+            clearInterval(heartbeatInterval);
+            heartbeatInterval = null;
+        }
+        missedHeartbeats = 0;
+    }
+    
+    function sendHeartbeat() {
+        if (!IframeStateMachine.isActive()) return;
+        
+        const heartbeatId = 'hb_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6);
+        
+        TransportAgent.send('HEARTBEAT', {
+            id: heartbeatId,
+            timestamp: Date.now(),
+            frameId: SECURITY_CONFIG.FRAME_ID
+        }, { 
+            requiresAck: true, 
+            timeout: HEARTBEAT_TIMEOUT,
+            messageId: heartbeatId
+        }).then(() => {
+            // Heartbeat acknowledged
+            missedHeartbeats = 0;
+        }).catch(() => {
+            missedHeartbeats++;
+            
+            if (missedHeartbeats === MAX_MISSED_BEFORE_WARNING) {
+                // 1 missed: mark connection unstable
+                STATUS_MACHINE.log('heartbeat', 'WARNING', 'Connection unstable (1 missed)');
+            } else if (missedHeartbeats === MAX_MISSED_BEFORE_REDUCE) {
+                // 2 missed: reduce non-critical traffic
+                STATUS_MACHINE.log('heartbeat', 'WARNING', 'Reducing non-critical traffic (2 missed)');
+                MessageQueue.reduceTraffic(true);
+            } else if (missedHeartbeats >= MAX_MISSED_BEFORE_STANDALONE) {
+                // 3 missed: enter standalone mode
+                STATUS_MACHINE.log('heartbeat', 'FAILED', 'Entering standalone mode (3 missed)');
+                IframeStateMachine.transition(IFRAME_STATES.STATE_STANDALONE, 'heartbeat_failed');
+                
+                // Show connection warning
+                showConnectionWarning();
+                
+                // Queue outgoing messages
+                MessageQueue.queueAllOutgoing();
+            }
+        });
+    }
+    
+    function handleHeartbeatAck(message) {
+        if (message && message.inResponseTo && message.inResponseTo.startsWith('hb_')) {
+            missedHeartbeats = 0;
+            
+            // If we were in standalone and get a heartbeat ack, restore active
+            if (IframeStateMachine.isStandalone()) {
+                STATUS_MACHINE.log('heartbeat', 'SUCCESS', 'Heartbeat resumed - restoring active');
+                IframeStateMachine.transition(IFRAME_STATES.STATE_ACTIVE, 'heartbeat_resumed');
+                
+                // Flush queue
+                MessageQueue.flush();
+                
+                // Hide connection warning
+                hideConnectionWarning();
+            }
+        }
+    }
+    
+    function showConnectionWarning() {
+        const warningEl = document.getElementById('connection-warning');
+        if (!warningEl) {
+            const warning = document.createElement('div');
+            warning.id = 'connection-warning';
+            warning.className = 'connection-warning';
+            warning.innerHTML = '<i class="fas fa-exclamation-triangle"></i> Connection unstable - working in standalone mode';
+            warning.style.cssText = 'position: fixed; top: 0; left: 0; right: 0; background: #ff9800; color: white; padding: 8px; text-align: center; z-index: 10000;';
+            document.body.prepend(warning);
+        } else {
+            warningEl.style.display = 'block';
+        }
+    }
+    
+    function hideConnectionWarning() {
+        const warningEl = document.getElementById('connection-warning');
+        if (warningEl) {
+            warningEl.style.display = 'none';
+        }
+    }
+    
+    return {
+        start,
+        stop,
+        handleHeartbeatAck
+    };
+})();
+
+// =============================================
+// SECTION 7: BROADCAST HANDLING RULES
+// =============================================
+const BroadcastHandler = (function() {
+    'use strict';
+    
+    const processedMessageIds = new Map(); // messageId -> timestamp
+    const MESSAGE_ID_CACHE_TTL = 5000; // 5 seconds
+    
+    const SUPPORTED_BROADCAST_TYPES = [
+        'NEW_MESSAGE',
+        'FRIEND_UPDATE',
+        'GROUP_UPDATE',
+        'STATUS_UPDATE',
+        'SETTINGS_UPDATED',
+        'INCOMING_CALL',
+        'SESSION_REFRESHED',
+        'SESSION_INVALIDATED',
+        'SESSION_RECOVERY'
+    ];
+    
+    function handleBroadcast(message) {
+        // Validate type
+        if (!message || !message.type) return;
+        
+        // Ignore if irrelevant to module
+        if (!SUPPORTED_BROADCAST_TYPES.includes(message.type)) return;
+        
+        // Idempotency check - ignore duplicates via messageId cache
+        if (message.messageId) {
+            const lastProcessed = processedMessageIds.get(message.messageId);
+            const now = Date.now();
+            
+            if (lastProcessed && (now - lastProcessed) < MESSAGE_ID_CACHE_TTL) {
+                debugLog(`Ignoring duplicate broadcast: ${message.messageId}`);
+                return;
+            }
+            
+            processedMessageIds.set(message.messageId, now);
+            
+            // Clean old entries
+            for (const [id, timestamp] of processedMessageIds.entries()) {
+                if (now - timestamp > MESSAGE_ID_CACHE_TTL) {
+                    processedMessageIds.delete(id);
+                }
+            }
+        }
+        
+        // Never trigger full reload
+        // Update UI incrementally based on type
+        switch (message.type) {
+            case 'NEW_MESSAGE':
+                handleNewMessageBroadcast(message.payload);
+                break;
+            case 'FRIEND_UPDATE':
+                handleFriendUpdateBroadcast(message.payload);
+                break;
+            case 'GROUP_UPDATE':
+                handleGroupUpdateBroadcast(message.payload);
+                break;
+            case 'STATUS_UPDATE':
+                handleStatusUpdateBroadcast(message.payload);
+                break;
+            case 'SETTINGS_UPDATED':
+                handleSettingsUpdatedBroadcast(message.payload);
+                break;
+            case 'INCOMING_CALL':
+                handleIncomingCallBroadcast(message.payload);
+                break;
+            case 'SESSION_REFRESHED':
+                handleSessionRefreshedBroadcast(message.payload);
+                break;
+            case 'SESSION_INVALIDATED':
+                handleSessionInvalidatedBroadcast(message.payload);
+                break;
+            case 'SESSION_RECOVERY':
+                handleSessionRecoveryBroadcast(message.payload);
+                break;
+        }
+    }
+    
+    function handleNewMessageBroadcast(payload) {
+        if (!payload || !payload.groupId || !payload.message) return;
+        
+        // Add message without reload
+        addGroupMessage(payload.groupId, payload.message);
+        
+        // If currently viewing this group, add to chat
+        if (currentChatGroup && currentChatGroup.id === payload.groupId) {
+            addMessageToChat(payload.message, true);
+        }
+    }
+    
+    function handleFriendUpdateBroadcast(payload) {
+        if (!payload || !payload.friend) return;
+        
+        // Update friend list immediately
+        const index = friends.findIndex(f => f.id === payload.friend.id);
+        if (index !== -1) {
+            friends[index] = { ...friends[index], ...payload.friend };
+        } else {
+            friends.push(payload.friend);
+        }
+        
+        SafeStorage.setItem('friends', friends);
+    }
+    
+    function handleGroupUpdateBroadcast(payload) {
+        if (!payload || !payload.group) return;
+        
+        // Update members without reload
+        updateGroupInAllLists(payload.group);
+        saveGroupsToLocalStorage();
+        
+        // Update UI if on group details
+        if (selectedGroup && selectedGroup.id === payload.group.id) {
+            selectedGroup = payload.group;
+            loadGroupDetails(selectedGroup, selectedGroup.type || 'group');
+        }
+    }
+    
+    function handleStatusUpdateBroadcast(payload) {
+        if (!payload || !payload.userId || !payload.status) return;
+        
+        // Update status in UI
+        const statusElements = document.querySelectorAll(`[data-user-id="${payload.userId}"] .user-status`);
+        statusElements.forEach(el => {
+            el.textContent = payload.status;
+            el.className = `user-status status-${payload.status}`;
+        });
+    }
+    
+    function handleSettingsUpdatedBroadcast(payload) {
+        if (!payload || !payload.settings) return;
+        
+        // Apply settings live
+        if (payload.settings.theme) {
+            document.documentElement.setAttribute('data-theme', payload.settings.theme);
+        }
+    }
+    
+    function handleIncomingCallBroadcast(payload) {
+        if (!payload || !payload.groupId || !payload.caller) return;
+        
+        // Show incoming call notification
+        showIncomingCallNotification(payload);
+    }
+    
+    function handleSessionRefreshedBroadcast(payload) {
+        if (!payload || !payload.session) return;
+        
+        // Replace session atomically
+        SessionMirror.updateFromParent(payload.session);
+        
+        // Do NOT reinitialize UI
+        STATUS_MACHINE.log('session', 'SUCCESS', 'Session refreshed');
+    }
+    
+    function handleSessionInvalidatedBroadcast(payload) {
+        // Clear session
+        SessionMirror.clear();
+        
+        // Disable protected features
+        disableProtectedActions();
+        
+        // Preserve drafts
+        const drafts = {};
+        document.querySelectorAll('[data-draft]').forEach(el => {
+            if (el.value) {
+                drafts[el.id] = el.value;
+            }
+        });
+        SafeStorage.setItem('drafts', drafts);
+        
+        // Show login required
+        showLoginRequired();
+    }
+    
+    function handleSessionRecoveryBroadcast(payload) {
+        // Enter recovery state
+        IframeStateMachine.transition(IFRAME_STATES.STATE_RECOVERY, 'session_recovery');
+        
+        // Pause noncritical operations
+        MessageQueue.pauseNoncritical(true);
+        
+        // Queue outgoing messages
+        MessageQueue.queueAllOutgoing();
+        
+        STATUS_MACHINE.log('session', 'WAITING', 'Session recovery in progress');
+    }
+    
+    function showIncomingCallNotification(payload) {
+        const notification = document.createElement('div');
+        notification.className = 'call-notification';
+        notification.innerHTML = `
+            <div class="call-notification-content">
+                <div class="call-notification-title">Incoming Call</div>
+                <div class="call-notification-details">${payload.caller.name} is calling</div>
+                <div class="call-notification-actions">
+                    <button class="call-action accept" onclick="window.acceptCall('${payload.groupId}')">Accept</button>
+                    <button class="call-action decline" onclick="window.declineCall('${payload.groupId}')">Decline</button>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(notification);
+        
+        setTimeout(() => {
+            notification.remove();
+        }, 30000);
+    }
+    
+    function showLoginRequired() {
+        const modal = document.getElementById('loginRequiredModal');
+        if (modal) {
+            modal.classList.add('active');
+        } else {
+            const loginRequired = document.createElement('div');
+            loginRequired.className = 'login-required-modal';
+            loginRequired.innerHTML = `
+                <div class="login-required-content">
+                    <i class="fas fa-lock"></i>
+                    <h3>Session Expired</h3>
+                    <p>Please log in again to continue</p>
+                    <button class="action-btn primary" onclick="window.location.reload()">Reload</button>
+                </div>
+            `;
+            document.body.appendChild(loginRequired);
+        }
+    }
+    
+    function disableProtectedActions() {
+        const protectedElements = document.querySelectorAll('.protected-action, [data-protected]');
+        protectedElements.forEach(el => {
+            el.classList.add('disabled');
+            el.setAttribute('disabled', 'disabled');
+        });
+    }
+    
+    return {
+        handleBroadcast
+    };
+})();
+
+// =============================================
+// SECTION 8: OFFLINE MODE
+// =============================================
+const OfflineManager = (function() {
+    'use strict';
+    
+    let offlineBanner = null;
+    
+    function init() {
+        window.addEventListener('online', handleOnline);
+        window.addEventListener('offline', handleOffline);
+        
+        // Check initial state
+        if (!navigator.onLine) {
+            handleOffline();
+        }
+    }
+    
+    function handleOffline() {
+        STATUS_MACHINE.log('offline', 'DISCONNECTED', 'Device offline');
+        
+        IframeStateMachine.transition(IFRAME_STATES.STATE_OFFLINE, 'device_offline');
+        
+        // Queue outgoing messages
+        MessageQueue.queueAllOutgoing();
+        
+        // Disable network actions
+        disableNetworkActions();
+        
+        // Allow read-only access
+        enableReadOnlyMode();
+        
+        // Display offline banner
+        showOfflineBanner();
+    }
+    
+    function handleOnline() {
+        STATUS_MACHINE.log('offline', 'SUCCESS', 'Device online');
+        
+        if (IframeStateMachine.isOffline()) {
+            // Resend queued messages
+            MessageQueue.flush();
+            
+            // Send REQUEST_SESSION
+            TransportAgent.send('REQUEST_SESSION', {
+                frameId: SECURITY_CONFIG.FRAME_ID,
+                timestamp: Date.now(),
+                fromOffline: true
+            }, { requiresAck: true }).catch(() => {});
+            
+            // Resume heartbeat
+            HeartbeatSystem.start();
+            
+            // Restore active state
+            IframeStateMachine.transition(IFRAME_STATES.STATE_ACTIVE, 'online');
+            
+            // Hide offline banner
+            hideOfflineBanner();
+            
+            // Re-enable network actions
+            enableNetworkActions();
+        }
+    }
+    
+    function showOfflineBanner() {
+        if (!offlineBanner) {
+            offlineBanner = document.createElement('div');
+            offlineBanner.id = 'offline-banner';
+            offlineBanner.className = 'offline-banner';
+            offlineBanner.innerHTML = `
+                <i class="fas fa-wifi-slash"></i>
+                <span>You are offline - working in read-only mode</span>
+                <button onclick="window.retryConnection()" class="offline-retry">Retry</button>
+            `;
+            offlineBanner.style.cssText = 'position: fixed; bottom: 0; left: 0; right: 0; background: #f44336; color: white; padding: 10px; text-align: center; z-index: 10000; display: flex; justify-content: center; align-items: center; gap: 10px;';
+            document.body.appendChild(offlineBanner);
+        }
+        offlineBanner.style.display = 'flex';
+    }
+    
+    function hideOfflineBanner() {
+        if (offlineBanner) {
+            offlineBanner.style.display = 'none';
+        }
+    }
+    
+    function disableNetworkActions() {
+        document.querySelectorAll('[data-network-action]').forEach(el => {
+            el.classList.add('disabled');
+            el.setAttribute('disabled', 'disabled');
+        });
+    }
+    
+    function enableNetworkActions() {
+        document.querySelectorAll('[data-network-action]').forEach(el => {
+            el.classList.remove('disabled');
+            el.removeAttribute('disabled');
+        });
+    }
+    
+    function enableReadOnlyMode() {
+        document.body.classList.add('read-only-mode');
+    }
+    
+    function retryConnection() {
+        if (navigator.onLine) {
+            handleOnline();
+        } else {
+            STATUS_MACHINE.log('offline', 'WAITING', 'Still offline');
+        }
+    }
+    
+    window.retryConnection = retryConnection;
+    
+    return {
+        init,
+        retryConnection
+    };
+})();
+
+// =============================================
+// SECTION 9: MESSAGE QUEUE SYSTEM
+// =============================================
+const MessageQueue = (function() {
+    'use strict';
+    
+    const queue = [];
+    const MAX_QUEUE_SIZE = 100;
+    let paused = false;
+    let trafficReduced = false;
+    
+    function queueMessage(message) {
+        if (queue.length >= MAX_QUEUE_SIZE) {
+            // FIFO - remove oldest
+            queue.shift();
+        }
+        
+        queue.push({
+            ...message,
+            queuedAt: Date.now()
+        });
+        
+        STATUS_MACHINE.log('queue', 'WAITING', `Queued (${queue.length}/${MAX_QUEUE_SIZE})`);
+    }
+    
+    function sendImmediately(type, payload, options = {}) {
+        if (IframeStateMachine.isActive() && !paused) {
+            // Send immediately
+            return TransportAgent.send(type, payload, options);
+        } else {
+            // Queue
+            const messageId = options.messageId || 'msg_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6);
+            queueMessage({ type, payload, options, messageId });
+            return Promise.resolve({ queued: true, messageId });
+        }
+    }
+    
+    function flush() {
+        if (queue.length === 0) return;
+        
+        const messagesToSend = [...queue];
+        queue.length = 0;
+        
+        STATUS_MACHINE.log('queue', 'SENDING', `Flushing ${messagesToSend.length} messages`);
+        
+        messagesToSend.forEach((msg, index) => {
+            setTimeout(() => {
+                TransportAgent.send(msg.type, msg.payload, msg.options).catch(() => {
+                    // If send fails, re-queue
+                    queueMessage(msg);
+                });
+            }, index * 50); // Throttle to avoid overwhelming
+        });
+    }
+    
+    function queueAllOutgoing() {
+        // This will be called to indicate that all outgoing messages should be queued
+        // Implementation is in TransportAgent.send which checks state
+    }
+    
+    function pauseNoncritical(shouldPause) {
+        paused = shouldPause;
+        STATUS_MACHINE.log('queue', paused ? 'WAITING' : 'SUCCESS', `Noncritical traffic ${paused ? 'paused' : 'resumed'}`);
+    }
+    
+    function reduceTraffic(enabled) {
+        trafficReduced = enabled;
+        STATUS_MACHINE.log('queue', enabled ? 'WARNING' : 'SUCCESS', `Traffic ${enabled ? 'reduced' : 'normal'}`);
+    }
+    
+    function getQueueLength() {
+        return queue.length;
+    }
+    
+    return {
+        sendImmediately,
+        queueMessage,
+        flush,
+        queueAllOutgoing,
+        pauseNoncritical,
+        reduceTraffic,
+        getQueueLength
+    };
+})();
+
+// =============================================
+// MESSAGE DEDUPLICATOR - Prevents duplicate logs
 // =============================================
 const MessageDeduplicator = {
     _processedIds: new Set(),
@@ -474,103 +1830,44 @@ let isPageInitialized = false;
 let syncIntervalId = null;
 let backgroundSyncRunning = false;
 
-// Session readiness flags
 let __PARENT_READY__ = false;
 let __SESSION_READY__ = false;
 let __HANDSHAKE_COMPLETE__ = false;
 let __SESSION_REQUEST_PENDING__ = false;
 
-// Action queue for group operations
 const groupActionQueue = [];
 let isProcessingQueue = false;
 
-// Track handshake state
 let handshakeInProgress = false;
 let handshakeAttempts = 0;
 let handshakeCompleted = false;
 
-// Track handshake initialization globally
+// Set up message listener only, no automatic handshake
 if (typeof window !== 'undefined' && !window.__GROUP_HANDSHAKE_INITIALIZED__) {
     window.__GROUP_HANDSHAKE_INITIALIZED__ = true;
     
-    let handshakeAttempts = 0;
-    const maxAttempts = 2; // Reduced from 5 to prevent infinite loops
-    let handshakeInterval = null;
-    let handshakeSuccess = false;
-    
-    function initiateHandshake() {
-        if (handshakeAttempts >= maxAttempts || handshakeSuccess || handshakeCompleted) {
-            if (handshakeInterval) {
-                clearInterval(handshakeInterval);
-                handshakeInterval = null;
-            }
-            return;
-        }
-        
-        handshakeAttempts++;
-        
-        try {
-            window.parent.postMessage({
-                type: "CHILD_HANDSHAKE",
-                source: "group-core",
-                version: MODULE_VERSION,
-                attempt: handshakeAttempts,
-                timestamp: Date.now()
-            }, "*");
-            
-            window.__HANDSHAKE_STARTED__ = true;
-        } catch (e) {}
-    }
-    
-    handshakeInterval = setInterval(() => {
-        if (window.__PARENT_ACK_RECEIVED__ || handshakeCompleted) {
-            if (handshakeInterval) {
-                clearInterval(handshakeInterval);
-                handshakeInterval = null;
-                __PARENT_READY__ = true;
-            }
-        } else {
-            initiateHandshake();
-        }
-    }, 2000);
-    
+    // Set up message listener only, no automatic handshake
     window.addEventListener("message", (event) => {
         if (!event.data) return;
         
         if (event.data.type === "PARENT_ACK" || event.data.type === "HANDSHAKE_ACK" || event.data.type === "SESSION_VERIFIED") {
             window.__PARENT_ACK_RECEIVED__ = true;
-            handshakeSuccess = true;
             handshakeCompleted = true;
             __PARENT_READY__ = true;
             __HANDSHAKE_COMPLETE__ = true;
-            if (handshakeInterval) {
-                clearInterval(handshakeInterval);
-                handshakeInterval = null;
-            }
         }
     });
-    
-    initiateHandshake();
-    
-    setTimeout(() => {
-        if (!handshakeSuccess && handshakeInterval) {
-            clearInterval(handshakeInterval);
-            handshakeInterval = null;
-        }
-    }, 10000);
 }
 
 // =============================================
 // MODULE IDENTIFICATION
 // =============================================
-
 const MODULE_NAME = 'Groups';
 let _instanceId = null;
 
 // =============================================
 // SAFE FETCH WRAPPER
 // =============================================
-
 let fetchErrorShown = false;
 
 async function safeFetch(url, options = {}) {
@@ -640,7 +1937,6 @@ async function safeFetchGroupInvites() {
 // =============================================
 // SECURITY CONSTANTS
 // =============================================
-
 const SECURITY_CONFIG = {
     CSP_NONSE: 'group-core-' + Date.now() + '-' + Math.random().toString(36).substring(2, 15),
     MAX_STRING_LENGTH: 10000,
@@ -658,7 +1954,7 @@ const SECURITY_CONFIG = {
         /<\/script/i
     ],
     HANDSHAKE_TIMEOUT: 5000,
-    HANDSHAKE_MAX_RETRIES: 2, // Reduced from 3
+    HANDSHAKE_MAX_RETRIES: 2,
     SESSION_REFRESH_INTERVAL: 60000,
     MESSAGE_QUEUE_MAX_SIZE: 100,
     
@@ -683,7 +1979,6 @@ const SECURITY_CONFIG = {
 // =============================================
 // SAFE INPUT VALIDATION
 // =============================================
-
 function validateInput(input, maxLength = SECURITY_CONFIG.MAX_STRING_LENGTH) {
     if (input === null || input === undefined) return '';
     
@@ -729,41 +2024,371 @@ function safeGetElement(selector) {
 }
 
 // =============================================
-// STARTUP GOVERNOR - INTEGRATED WITH PARENT AUTHORITY
+// BROADCAST CHANNEL - Cross-tab synchronization
 // =============================================
+const BroadcastManager = (function() {
+    'use strict';
+    
+    let channel = null;
+    let initialized = false;
+    const listeners = new Set();
+    const messageQueue = [];
+    const CHANNEL_NAME = 'knecta_groups_sync';
+    
+    function init() {
+        if (initialized) return;
+        
+        try {
+            if (typeof BroadcastChannel !== 'undefined') {
+                channel = new BroadcastChannel(CHANNEL_NAME);
+                
+                channel.onmessage = (event) => {
+                    if (!event.data) return;
+                    
+                    const message = event.data;
+                    
+                    // Route through broadcast handler
+                    BroadcastHandler.handleBroadcast(message);
+                    
+                    listeners.forEach(listener => {
+                        try {
+                            listener(message);
+                        } catch (e) {}
+                    });
+                    
+                    while (messageQueue.length > 0) {
+                        const queued = messageQueue.shift();
+                        processMessage(queued);
+                    }
+                };
+                
+                initialized = true;
+                debugLog('BroadcastChannel initialized');
+            }
+        } catch (error) {
+            debugLog('BroadcastChannel not supported');
+        }
+    }
+    
+    function processMessage(message) {
+        if (!initialized || !channel) {
+            messageQueue.push(message);
+            return;
+        }
+        
+        try {
+            channel.postMessage(message);
+        } catch (error) {
+            debugLog('BroadcastChannel postMessage error:', error);
+        }
+    }
+    
+    function broadcast(type, data = {}) {
+        const message = {
+            type,
+            data,
+            source: SECURITY_CONFIG.FRAME_ID,
+            timestamp: Date.now(),
+            version: MODULE_VERSION
+        };
+        
+        processMessage(message);
+    }
+    
+    function subscribe(listener) {
+        listeners.add(listener);
+        return () => listeners.delete(listener);
+    }
+    
+    function destroy() {
+        if (channel) {
+            channel.close();
+            channel = null;
+        }
+        initialized = false;
+        listeners.clear();
+        messageQueue.length = 0;
+    }
+    
+    return {
+        init,
+        broadcast,
+        subscribe,
+        destroy,
+        isSupported: () => typeof BroadcastChannel !== 'undefined'
+    };
+})();
 
+// =============================================
+// SAFE STORAGE - Deterministic data persistence
+// =============================================
+const SafeStorage = (function() {
+    'use strict';
+    
+    const STORAGE_PREFIX = 'knecta_groups_';
+    const storage = new Map();
+    let useLocalStorage = true;
+    let initialized = false;
+    let encryptionKey = null;
+    const subscribers = new Map();
+    
+    try {
+        localStorage.setItem('test', 'test');
+        localStorage.removeItem('test');
+    } catch (e) {
+        useLocalStorage = false;
+    }
+    
+    function init() {
+        if (initialized) return;
+        
+        try {
+            if (useLocalStorage) {
+                for (let i = 0; i < localStorage.length; i++) {
+                    const key = localStorage.key(i);
+                    if (key && key.startsWith(STORAGE_PREFIX)) {
+                        try {
+                            const value = localStorage.getItem(key);
+                            const storageKey = key.substring(STORAGE_PREFIX.length);
+                            storage.set(storageKey, JSON.parse(value));
+                        } catch (e) {}
+                    }
+                }
+            }
+            
+            BroadcastManager.init();
+            BroadcastManager.subscribe(handleBroadcast);
+            
+            initialized = true;
+            debugLog('SafeStorage initialized');
+        } catch (error) {
+            debugLog('SafeStorage init error:', error);
+        }
+    }
+    
+    function handleBroadcast(message) {
+        if (message.type === 'storage_update' && message.data.key) {
+            const subscribers_list = subscribers.get(message.data.key);
+            if (subscribers_list) {
+                subscribers_list.forEach(callback => {
+                    try {
+                        callback(message.data.value, true);
+                    } catch (e) {}
+                });
+            }
+        }
+    }
+    
+    function getKey(key) {
+        return `${STORAGE_PREFIX}${key}`;
+    }
+    
+    function setItem(key, value, skipBroadcast = false) {
+        try {
+            const storageKey = key;
+            const serialized = JSON.stringify(value);
+            
+            storage.set(storageKey, value);
+            
+            if (useLocalStorage) {
+                localStorage.setItem(getKey(storageKey), serialized);
+            }
+            
+            if (!skipBroadcast) {
+                BroadcastManager.broadcast('storage_update', {
+                    key: storageKey,
+                    value
+                });
+            }
+            
+            const subs = subscribers.get(storageKey);
+            if (subs) {
+                subs.forEach(callback => {
+                    try {
+                        callback(value, false);
+                    } catch (e) {}
+                });
+            }
+            
+            return true;
+        } catch (error) {
+            debugLog('SafeStorage setItem error:', error);
+            return false;
+        }
+    }
+    
+    function getItem(key, defaultValue = null) {
+        try {
+            const storageKey = key;
+            
+            if (storage.has(storageKey)) {
+                return storage.get(storageKey);
+            }
+            
+            if (useLocalStorage) {
+                const serialized = localStorage.getItem(getKey(storageKey));
+                if (serialized) {
+                    const value = JSON.parse(serialized);
+                    storage.set(storageKey, value);
+                    return value;
+                }
+            }
+            
+            return defaultValue;
+        } catch (error) {
+            debugLog('SafeStorage getItem error:', error);
+            return defaultValue;
+        }
+    }
+    
+    function removeItem(key, skipBroadcast = false) {
+        try {
+            const storageKey = key;
+            
+            storage.delete(storageKey);
+            
+            if (useLocalStorage) {
+                localStorage.removeItem(getKey(storageKey));
+            }
+            
+            if (!skipBroadcast) {
+                BroadcastManager.broadcast('storage_remove', {
+                    key: storageKey
+                });
+            }
+            
+            return true;
+        } catch (error) {
+            debugLog('SafeStorage removeItem error:', error);
+            return false;
+        }
+    }
+    
+    function clear() {
+        try {
+            storage.clear();
+            
+            if (useLocalStorage) {
+                const keysToRemove = [];
+                for (let i = 0; i < localStorage.length; i++) {
+                    const key = localStorage.key(i);
+                    if (key && key.startsWith(STORAGE_PREFIX)) {
+                        keysToRemove.push(key);
+                    }
+                }
+                keysToRemove.forEach(key => localStorage.removeItem(key));
+            }
+            
+            BroadcastManager.broadcast('storage_clear', {});
+            
+            return true;
+        } catch (error) {
+            debugLog('SafeStorage clear error:', error);
+            return false;
+        }
+    }
+    
+    function subscribe(key, callback) {
+        if (!subscribers.has(key)) {
+            subscribers.set(key, new Set());
+        }
+        subscribers.get(key).add(callback);
+        
+        const currentValue = getItem(key);
+        if (currentValue !== null) {
+            try {
+                callback(currentValue, false);
+            } catch (e) {}
+        }
+        
+        return () => {
+            const subs = subscribers.get(key);
+            if (subs) {
+                subs.delete(callback);
+                if (subs.size === 0) {
+                    subscribers.delete(key);
+                }
+            }
+        };
+    }
+    
+    function getKeys() {
+        const keys = new Set();
+        
+        storage.forEach((_, key) => keys.add(key));
+        
+        if (useLocalStorage) {
+            for (let i = 0; i < localStorage.length; i++) {
+                const key = localStorage.key(i);
+                if (key && key.startsWith(STORAGE_PREFIX)) {
+                    keys.add(key.substring(STORAGE_PREFIX.length));
+                }
+            }
+        }
+        
+        return Array.from(keys);
+    }
+    
+    function destroy() {
+        storage.clear();
+        subscribers.clear();
+        initialized = false;
+    }
+    
+    return {
+        init,
+        setItem,
+        getItem,
+        removeItem,
+        clear,
+        subscribe,
+        getKeys,
+        destroy,
+        isAvailable: () => initialized
+    };
+})();
+
+// =============================================
+// STARTUP GOVERNOR - INTEGRATED WITH LIFECYCLE FSM
+// =============================================
 const StartupGovernor = {
-    _state: 'INIT',
-    _lock: false,
+    _state: LIFECYCLE_STATES.UNINITIALIZED,
     _initAttempts: 0,
-    _maxInitAttempts: 2, // Reduced from 3
+    _maxInitAttempts: 2,
     _initPromise: null,
     _initResolve: null,
+    _initReject: null,
     _stateListeners: new Set(),
     _stateHistory: [],
     _authoritySubscribed: false,
+    _timers: new Set(),
     
     init() {
-        if (this._lock) {
-            return this._initPromise || Promise.resolve({ success: false, reason: 'locked' });
+        if (!LifecycleFSM.acquireLock()) {
+            return LifecycleFSM.getInitializationPromise() || Promise.resolve({ success: false, reason: 'locked' });
         }
         
-        this._lock = true;
+        // Only transition from UNINITIALIZED to BOOTSTRAPPING
+        if (LifecycleFSM.getState() === LIFECYCLE_STATES.UNINITIALIZED) {
+            LifecycleFSM.transition(LIFECYCLE_STATES.BOOTSTRAPPING);
+        } else {
+            debugLog(`StartupGovernor: Already in state ${LifecycleFSM.getState()}, skipping bootstrap`);
+        }
+        
         this._initAttempts++;
         
-        // Subscribe to parent authority
         if (!this._authoritySubscribed) {
             this._authoritySubscribed = true;
             ParentAuthority.subscribe((newState) => {
-                if (newState === PARENT_AUTHORITY_STATES.READY) {
+                if (newState === PARENT_AUTHORITY_STATES.READY && 
+                    LifecycleFSM.getState() === LIFECYCLE_STATES.HANDSHAKING) {
                     this._handleAuthorityReady();
-                } else if (newState === PARENT_AUTHORITY_STATES.DEGRADED) {
+                } else if (newState === PARENT_AUTHORITY_STATES.DEGRADED && 
+                          !LifecycleFSM.isAtLeast(LIFECYCLE_STATES.SESSION_ACTIVE)) {
                     this._handleAuthorityDegraded();
                 }
             });
         }
-        
-        this._transition('WAIT_PARENT');
         
         this._initPromise = new Promise((resolve, reject) => {
             this._initResolve = resolve;
@@ -772,102 +2397,250 @@ const StartupGovernor = {
             this._runPipeline().then(resolve).catch(reject);
         });
         
+        LifecycleFSM.setInitializationPromise(this._initPromise);
+        
         return this._initPromise;
+    },
+    
+    _createTimer(fn, delay) {
+        const timerId = setTimeout(() => {
+            this._timers.delete(timerId);
+            fn();
+        }, delay);
+        this._timers.add(timerId);
+        return timerId;
+    },
+    
+    _clearAllTimers() {
+        this._timers.forEach(id => clearTimeout(id));
+        this._timers.clear();
     },
     
     async _runPipeline() {
         try {
-            // Check if parent authority is degraded
-            if (ParentAuthority.isDegraded()) {
-                return await this._runLegacyPipeline();
+            // PRE_FLIGHT - can only transition from BOOTSTRAPPING
+            if (LifecycleFSM.getState() === LIFECYCLE_STATES.BOOTSTRAPPING) {
+                LifecycleFSM.transition(LIFECYCLE_STATES.PRE_FLIGHT);
+            }
+            const preflightResult = await this._preflightStage();
+            
+            // DEPENDENCIES_CHECKED - can only transition from PRE_FLIGHT
+            if (LifecycleFSM.getState() === LIFECYCLE_STATES.PRE_FLIGHT) {
+                LifecycleFSM.transition(LIFECYCLE_STATES.DEPENDENCIES_CHECKED);
             }
             
-            // Wait for parent authority to reach registering state
-            await this._waitForAuthorityState([PARENT_AUTHORITY_STATES.REGISTERING, PARENT_AUTHORITY_STATES.WAIT_SESSION, PARENT_AUTHORITY_STATES.READY], 3000);
+            // PARENT_DETECTED - can only transition from DEPENDENCIES_CHECKED
+            if (LifecycleFSM.getState() === LIFECYCLE_STATES.DEPENDENCIES_CHECKED) {
+                LifecycleFSM.transition(LIFECYCLE_STATES.PARENT_DETECTED);
+            }
+            const parentResult = await this._parentDetectStage();
             
-            const parentAvailable = ParentConnectionManager && ParentConnectionManager.parentAvailable;
-            
-            this._transition('HANDSHAKING');
-            const handshakeResult = await this._performHandshake(parentAvailable);
-            
-            // If we have authoritative session, use it
-            if (ParentAuthority.isAuthoritativeSession()) {
-                const authSession = ParentAuthority.getAuthoritativeSession();
-                if (authSession) {
-                    await this._applyAuthoritativeSession(authSession);
-                    this._transition('ACTIVE');
-                    return {
-                        success: true,
-                        state: this._state,
-                        parentAvailable,
-                        handshake: handshakeResult,
-                        session: { success: true, fromCache: false, authoritative: true }
-                    };
+            // HANDSHAKING - can only transition from PARENT_DETECTED
+            if (parentResult.parentAvailable && !ParentAuthority.isDegraded()) {
+                if (LifecycleFSM.getState() === LIFECYCLE_STATES.PARENT_DETECTED) {
+                    LifecycleFSM.transition(LIFECYCLE_STATES.HANDSHAKING);
+                }
+                const handshakeResult = await this._handshakeStage(parentResult);
+                
+                // SESSION_PENDING - can only transition from HANDSHAKING
+                if (LifecycleFSM.getState() === LIFECYCLE_STATES.HANDSHAKING) {
+                    LifecycleFSM.transition(LIFECYCLE_STATES.SESSION_PENDING);
+                }
+                const sessionResult = await this._sessionStage(handshakeResult);
+                
+                if (sessionResult.success) {
+                    // SESSION_ACTIVE - can only transition from SESSION_PENDING
+                    if (LifecycleFSM.getState() === LIFECYCLE_STATES.SESSION_PENDING) {
+                        LifecycleFSM.transition(LIFECYCLE_STATES.SESSION_ACTIVE, sessionResult.authoritative ? 'authoritative' : 'synced');
+                    }
+                } else {
+                    if (ParentAuthority.isDegraded() || parentResult.parentAvailable === false) {
+                        if (LifecycleFSM.getState() === LIFECYCLE_STATES.SESSION_PENDING || 
+                            LifecycleFSM.getState() === LIFECYCLE_STATES.HANDSHAKING) {
+                            LifecycleFSM.transition(LIFECYCLE_STATES.DEGRADED_MODE, 'fallback');
+                        }
+                    } else {
+                        throw new Error('Session acquisition failed');
+                    }
+                }
+            } else {
+                if (LifecycleFSM.getState() === LIFECYCLE_STATES.PARENT_DETECTED) {
+                    LifecycleFSM.transition(LIFECYCLE_STATES.DEGRADED_MODE, 'parent_unavailable');
                 }
             }
             
-            this._transition('SYNCING');
-            const sessionResult = await this._syncSession(handshakeResult);
+            // SERVICES_INITIALIZING - can only transition from SESSION_ACTIVE or DEGRADED_MODE
+            if (LifecycleFSM.getState() === LIFECYCLE_STATES.SESSION_ACTIVE || 
+                LifecycleFSM.getState() === LIFECYCLE_STATES.DEGRADED_MODE) {
+                LifecycleFSM.transition(LIFECYCLE_STATES.SERVICES_INITIALIZING);
+            }
+            await this._servicesStage();
             
-            this._transition('ACTIVE');
+            // ACTIVE - can only transition from SERVICES_INITIALIZING
+            if (LifecycleFSM.getState() === LIFECYCLE_STATES.SERVICES_INITIALIZING) {
+                LifecycleFSM.transition(LIFECYCLE_STATES.ACTIVE);
+            }
+            
+            this._clearAllTimers();
+            LifecycleFSM.releaseLock();
             
             return {
                 success: true,
-                state: this._state,
-                parentAvailable,
-                handshake: handshakeResult,
-                session: sessionResult
+                state: LifecycleFSM.getState(),
+                degraded: LifecycleFSM.isDegraded()
             };
             
         } catch (error) {
-            if (this._initAttempts < this._maxInitAttempts) {
-                this._transition('RECOVERING');
-                this._lock = false;
+            if (this._initAttempts < this._maxInitAttempts && !LifecycleFSM.isAtLeast(LIFECYCLE_STATES.SESSION_ACTIVE)) {
+                this._clearAllTimers();
+                LifecycleFSM.releaseLock();
                 
-                await new Promise(r => setTimeout(r, 1000 * this._initAttempts));
+                const delay = 1000 * this._initAttempts;
+                await new Promise(r => setTimeout(r, delay));
+                
                 return this._runPipeline();
             }
             
-            // Check if we can fall back to legacy
-            if (ParentAuthority.isDegraded()) {
-                return await this._runLegacyPipeline();
+            if (LifecycleFSM.getState() !== LIFECYCLE_STATES.DEGRADED_MODE && 
+                !LifecycleFSM.isAtLeast(LIFECYCLE_STATES.SESSION_ACTIVE)) {
+                if (LifecycleFSM.getState() === LIFECYCLE_STATES.HANDSHAKING || 
+                    LifecycleFSM.getState() === LIFECYCLE_STATES.SESSION_PENDING) {
+                    LifecycleFSM.transition(LIFECYCLE_STATES.DEGRADED_MODE, 'error_fallback');
+                } else {
+                    LifecycleFSM.transition(LIFECYCLE_STATES.FAILED, error.message);
+                }
             }
             
-            this._transition('DEGRADED');
+            this._clearAllTimers();
+            LifecycleFSM.releaseLock();
             
             return {
                 success: false,
-                state: this._state,
+                state: LifecycleFSM.getState(),
                 error: error.message,
-                fallback: true
+                fallback: LifecycleFSM.isDegraded()
             };
         }
     },
     
-    async _runLegacyPipeline() {
-        debugLog('Running legacy pipeline (degraded mode)');
-        
-        const parentAvailable = ParentConnectionManager && ParentConnectionManager.parentAvailable;
-        
-        const handshakeResult = await this._performHandshake(parentAvailable);
-        const sessionResult = await this._syncSession(handshakeResult);
-        
-        this._transition('ACTIVE');
-        
-        return {
-            success: true,
-            state: this._state,
-            parentAvailable,
-            handshake: handshakeResult,
-            session: sessionResult,
-            degraded: true
-        };
+    async _preflightStage() {
+        try {
+            _instanceId = Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+            
+            SafeStorage.init();
+            IframeAuthority.init();
+            API_WRAPPER.init();
+            ParentAuthority.init();
+            
+            return { success: true };
+        } catch (error) {
+            throw new Error(`Preflight failed: ${error.message}`);
+        }
+    },
+    
+    async _parentDetectStage() {
+        try {
+            ParentConnectionManager.init();
+            
+            const parentAvailable = ParentConnectionManager.parentAvailable;
+            
+            return { success: true, parentAvailable };
+        } catch (error) {
+            return { success: false, parentAvailable: false };
+        }
+    },
+    
+    async _handshakeStage(parentResult) {
+        try {
+            if (!parentResult.parentAvailable) {
+                return { success: false, reason: 'parent_unavailable' };
+            }
+            
+            if (ParentAuthority.isAuthoritativeSession()) {
+                return { success: true, authoritative: true };
+            }
+            
+            try {
+                const result = await HandshakeClient.initiate({
+                    timeout: SECURITY_CONFIG.HANDSHAKE_TIMEOUT,
+                    maxRetries: SECURITY_CONFIG.HANDSHAKE_MAX_RETRIES
+                });
+                
+                return { success: true, result };
+            } catch (error) {
+                if (ParentConnectionManager && ParentConnectionManager.tryCachedSession()) {
+                    return { success: true, fromCache: true };
+                }
+                
+                return { success: false, error: error.message };
+            }
+        } catch (error) {
+            return { success: false, error: error.message };
+        }
+    },
+    
+    async _sessionStage(handshakeResult) {
+        try {
+            if (ParentAuthority.isAuthoritativeSession()) {
+                const authSession = ParentAuthority.getAuthoritativeSession();
+                if (authSession) {
+                    await this._applyAuthoritativeSession(authSession);
+                    return { success: true, authoritative: true };
+                }
+            }
+            
+            SessionMirror.init();
+            SessionClient.init();
+            
+            const sessionPromise = new Promise((resolve) => {
+                if (SessionMirror.isAuthenticated()) {
+                    resolve(SessionMirror.getState());
+                    return;
+                }
+                
+                const timeoutId = setTimeout(() => {
+                    unsubscribe();
+                    resolve(null);
+                }, 3000);
+                
+                const unsubscribe = SessionMirror.subscribe((state) => {
+                    if (state.authenticated) {
+                        clearTimeout(timeoutId);
+                        unsubscribe();
+                        resolve(state);
+                    }
+                });
+            });
+            
+            const session = await sessionPromise;
+            
+            if (session) {
+                currentUser = session.user;
+                userData = {
+                    displayName: session.user?.displayName || session.user?.name || 'User',
+                    username: session.user?.username || '',
+                    email: session.user?.email || '',
+                    photoURL: session.user?.photoURL || session.user?.avatar || ''
+                };
+                authReady = true;
+                __SESSION_READY__ = true;
+                
+                return { success: true, fromCache: session.fromCache || false };
+            }
+            
+            if (handshakeResult.fromCache) {
+                return { success: true, fromCache: true };
+            }
+            
+            return { success: false };
+        } catch (error) {
+            return { success: false, error: error.message };
+        }
     },
     
     async _applyAuthoritativeSession(sessionData) {
         if (!sessionData) return;
         
-        // Update session mirror with authoritative data
         if (SessionMirror) {
             SessionMirror.updateFromParent({
                 user: sessionData.user,
@@ -879,7 +2652,6 @@ const StartupGovernor = {
             });
         }
         
-        // Update local state
         if (sessionData.user) {
             currentUser = sessionData.user;
             userData = {
@@ -889,14 +2661,13 @@ const StartupGovernor = {
                 photoURL: sessionData.user.photoURL || sessionData.user.avatar || ''
             };
             
-            // Save to localStorage as cache only, not as authoritative
             try {
-                localStorage.setItem(LOCAL_STORAGE_KEYS.USER, JSON.stringify({
+                SafeStorage.setItem('user', {
                     uid: sessionData.user.id || sessionData.user._id || sessionData.user.uid,
                     displayName: sessionData.user.displayName || sessionData.user.name,
                     email: sessionData.user.email,
                     photoURL: sessionData.user.photoURL || sessionData.user.avatar
-                }));
+                });
             } catch (e) {}
         }
         
@@ -909,139 +2680,44 @@ const StartupGovernor = {
         __SESSION_READY__ = true;
     },
     
-    _waitForAuthorityState(states, timeout) {
-        return new Promise((resolve) => {
-            if (states.includes(ParentAuthority.getState().state)) {
-                resolve(true);
-                return;
-            }
-            
-            const timeoutId = setTimeout(() => {
-                unsubscribe();
-                resolve(false);
-            }, timeout);
-            
-            const unsubscribe = ParentAuthority.subscribe((newState) => {
-                if (states.includes(newState)) {
-                    clearTimeout(timeoutId);
-                    unsubscribe();
-                    resolve(true);
-                }
-            });
-        });
-    },
-    
-    _waitForParent(timeout) {
-        return new Promise((resolve) => {
-            const start = Date.now();
-            const checkInterval = setInterval(() => {
-                const parentAvailable = ParentConnectionManager && 
-                                        ParentConnectionManager.parentAvailable;
-                
-                if (parentAvailable) {
-                    clearInterval(checkInterval);
-                    clearTimeout(timer);
-                    resolve(true);
-                }
-                
-                if (Date.now() - start > timeout) {
-                    clearInterval(checkInterval);
-                    clearTimeout(timer);
-                    resolve(false);
-                }
-            }, 100);
-            
-            const timer = setTimeout(() => {
-                clearInterval(checkInterval);
-                resolve(false);
-            }, timeout);
-        });
-    },
-    
-    async _performHandshake(parentAvailable) {
-        if (!parentAvailable || ParentAuthority.isDegraded()) {
-            return { success: false, reason: 'parent_unavailable' };
+    async _servicesStage() {
+        loadCachedDataInstantly();
+        initializeTokenSystem();
+        
+        isPageInitialized = true;
+        
+        window.__MODULE_READY__ = true;
+        if (__SESSION_READY__) {
+            window.__MODULE_SESSION_ACTIVE__ = true;
         }
         
-        try {
-            const result = await HandshakeClient.initiate({
-                timeout: SECURITY_CONFIG.HANDSHAKE_TIMEOUT,
-                maxRetries: SECURITY_CONFIG.HANDSHAKE_MAX_RETRIES
-            });
-            
-            return { success: true, result };
-        } catch (error) {
-            if (ParentConnectionManager && ParentConnectionManager.tryCachedSession()) {
-                return { success: true, fromCache: true };
+        document.dispatchEvent(new CustomEvent('groupsCoreReady', {
+            detail: {
+                version: MODULE_VERSION,
+                timestamp: Date.now(),
+                sessionValid: hasValidSession(),
+                authenticated: SessionMirror.isAuthenticated(),
+                authoritative: ParentAuthority.isAuthoritativeSession(),
+                state: LifecycleFSM.getState()
             }
-            
-            return { success: false, error: error.message };
-        }
-    },
-    
-    async _syncSession(handshakeResult) {
-        return new Promise((resolve) => {
-            // If we have authoritative session, resolve immediately
-            if (ParentAuthority.isAuthoritativeSession()) {
-                resolve({ success: true, fromCache: false, authoritative: true });
-                return;
-            }
-            
-            if (SessionMirror && SessionMirror.isAuthenticated()) {
-                resolve({ success: true, fromCache: handshakeResult.fromCache });
-                return;
-            }
-            
-            const timeout = setTimeout(() => {
-                unsubscribe();
-                resolve({ success: false, reason: 'timeout' });
-            }, 5000);
-            
-            const unsubscribe = SessionMirror.subscribe((state) => {
-                if (state.authenticated) {
-                    clearTimeout(timeout);
-                    unsubscribe();
-                    resolve({ success: true, fromCache: state.fromCache });
-                }
-            });
-        });
+        }));
+        
+        processGroupActionQueue();
+        
+        return { success: true };
     },
     
     _handleAuthorityReady() {
-        if (this._state === 'WAIT_PARENT' || this._state === 'HANDSHAKING') {
+        if (LifecycleFSM.getState() === LIFECYCLE_STATES.HANDSHAKING) {
             // Continue with current flow
         }
     },
     
     _handleAuthorityDegraded() {
-        // Continue with existing flow but in degraded mode
-        if (this._state === 'WAIT_PARENT') {
-            this._transition('HANDSHAKING');
+        if (LifecycleFSM.getState() === LIFECYCLE_STATES.HANDSHAKING && 
+            !LifecycleFSM.isAtLeast(LIFECYCLE_STATES.SESSION_ACTIVE)) {
+            LifecycleFSM.transition(LIFECYCLE_STATES.DEGRADED_MODE, 'authority_degraded');
         }
-    },
-    
-    _transition(newState) {
-        const validStates = ['INIT', 'WAIT_PARENT', 'HANDSHAKING', 'SYNCING', 'ACTIVE', 'DEGRADED', 'RECOVERING'];
-        if (!validStates.includes(newState)) return;
-        
-        const oldState = this._state;
-        this._state = newState;
-        
-        this._stateHistory.push({
-            from: oldState,
-            to: newState,
-            timestamp: Date.now()
-        });
-        
-        if (this._stateHistory.length > 20) {
-            this._stateHistory.shift();
-        }
-        
-        this._stateListeners.forEach(listener => {
-            try {
-                listener(newState, oldState);
-            } catch (e) {}
-        });
     },
     
     onStateChange(listener) {
@@ -1051,32 +2727,32 @@ const StartupGovernor = {
     
     getState() {
         return {
-            state: this._state,
+            state: LifecycleFSM.getState(),
             attempts: this._initAttempts,
-            history: this._stateHistory.slice(-5)
+            history: LifecycleFSM.getHistory()
         };
     },
     
     isActive() {
-        return this._state === 'ACTIVE';
+        return LifecycleFSM.isActive();
     },
     
     isDegraded() {
-        return this._state === 'DEGRADED' || ParentAuthority.isDegraded();
+        return LifecycleFSM.isDegraded() || ParentAuthority.isDegraded();
     },
     
     reset() {
-        this._state = 'INIT';
-        this._lock = false;
+        this._clearAllTimers();
         this._initAttempts = 0;
         this._initPromise = null;
+        LifecycleFSM.reset();
+        LifecycleFSM.releaseLock();
     }
 };
 
 // =============================================
 // ORIGIN ADAPTER - DYNAMIC ORIGIN HANDLING
 // =============================================
-
 const OriginAdapter = {
     _trustCache: new Map(),
     _dynamicOrigins: new Set(),
@@ -1164,7 +2840,6 @@ const OriginAdapter = {
 // =============================================
 // CANONICAL MESSAGE FORMATTER
 // =============================================
-
 const CanonicalMessageFormatter = {
     createMessage(type, payload = {}, options = {}) {
         const messageId = options.messageId || this.generateMessageId();
@@ -1222,7 +2897,6 @@ const CanonicalMessageFormatter = {
 // =============================================
 // TRANSPORT AGENT - FIXED WITH DEDUPLICATION AND RETRY LIMITS
 // =============================================
-
 const TransportAgent = {
     _messageId: 0,
     _pendingAcks: new Map(),
@@ -1231,7 +2905,7 @@ const TransportAgent = {
     _heartbeatInterval: null,
     _lastHeartbeat: 0,
     _connectionState: 'disconnected',
-    _maxRetries: 2, // Reduced from 3
+    _maxRetries: 2,
     _baseBackoff: 500,
     _listeners: new Set(),
     _sentMessages: new Set(),
@@ -1246,6 +2920,7 @@ const TransportAgent = {
     },
     _heartbeatRetryCount: 0,
     _maxHeartbeatRetries: 2,
+    _timers: new Set(),
     
     init() {
         if (this._initialized) return this;
@@ -1256,6 +2931,20 @@ const TransportAgent = {
         return this;
     },
     
+    _createTimer(fn, delay) {
+        const timerId = setTimeout(() => {
+            this._timers.delete(timerId);
+            fn();
+        }, delay);
+        this._timers.add(timerId);
+        return timerId;
+    },
+    
+    _clearAllTimers() {
+        this._timers.forEach(id => clearTimeout(id));
+        this._timers.clear();
+    },
+    
     send(type, payload = {}, options = {}) {
         const messageId = options.messageId || this._generateMessageId();
         const requiresAck = options.requiresAck !== false;
@@ -1264,9 +2953,36 @@ const TransportAgent = {
         const maxRetries = options.maxRetries || this._maxRetries;
         const priority = options.priority || 'normal';
         
-        // Check if we already sent this message
+        // Don't send operational messages before PARENT_READY (v5.0 requirement)
+        const isOperational = ![
+            'REGISTER_MODULE', 'CHILD_READY', 'REQUEST_SESSION', 
+            'VERIFY_SESSION', 'PING', 'PONG', 'HEARTBEAT'
+        ].includes(type);
+        
+        if (isOperational && !InitTimeline.isParentReady() && !IframeStateMachine.isActive()) {
+            // Queue operational messages until parent is ready
+            MessageQueue.queueMessage({ type, payload, options, messageId });
+            return Promise.resolve({ 
+                success: false, 
+                queued: true, 
+                messageId,
+                reason: 'parent_not_ready'
+            });
+        }
+        
         if (this._sentMessages.has(messageId)) {
             return Promise.resolve({ success: true, cached: true, messageId });
+        }
+        
+        // Route through MessageQueue based on state
+        if (!IframeStateMachine.isActive() && !isOperational) {
+            MessageQueue.queueMessage({ type, payload, options, messageId });
+            return Promise.resolve({ 
+                success: false, 
+                queued: true, 
+                messageId,
+                reason: 'state_not_active'
+            });
         }
         
         const isInIframe = window !== window.parent;
@@ -1308,7 +3024,7 @@ const TransportAgent = {
                 options,
                 retryCount,
                 maxRetries,
-                timeout: setTimeout(() => {
+                timeout: this._createTimer(() => {
                     this._handleAckTimeout(messageId, retryCount, maxRetries, type, payload, options);
                 }, timeout),
                 timestamp: Date.now()
@@ -1323,7 +3039,6 @@ const TransportAgent = {
                 this._stats.sent++;
                 this._sentMessages.add(messageId);
                 
-                // Only log once per message type per session
                 const logKey = `${type}_sent`;
                 if (!MessageDeduplicator.isProcessed(logKey)) {
                     STATUS_MACHINE.log('transport', 'SENDING', type);
@@ -1373,18 +3088,17 @@ const TransportAgent = {
         this._pendingAcks.delete(messageId);
         this._stats.timedout++;
         
-        // Only log timeout once per retry attempt
         const logKey = `${type}_timeout_${retryCount}`;
         if (!MessageDeduplicator.isProcessed(logKey)) {
             STATUS_MACHINE.log('transport', 'WAITING', `${type} retry ${retryCount}/${maxRetries}`);
             MessageDeduplicator.markProcessed(logKey);
         }
         
-        if (retryCount < maxRetries) {
+        if (retryCount < maxRetries && !LifecycleFSM.isActive()) {
             const backoffDelay = this._baseBackoff * Math.pow(2, retryCount);
             this._stats.retried++;
             
-            setTimeout(() => {
+            this._createTimer(() => {
                 this.send(type, payload, {
                     ...options,
                     retryCount: retryCount + 1,
@@ -1393,7 +3107,6 @@ const TransportAgent = {
                 }).then(pending.resolve).catch(pending.reject);
             }, backoffDelay);
         } else {
-            // Don't log failure for every timeout, only once
             const failKey = `${type}_max_retries`;
             if (!MessageDeduplicator.isProcessed(failKey)) {
                 STATUS_MACHINE.log('transport', 'FAILED', `${type} max retries`);
@@ -1408,6 +3121,11 @@ const TransportAgent = {
     handleAck(message) {
         const messageId = message.inResponseTo || message.payload?.inResponseTo || message.messageId;
         if (!messageId) return;
+        
+        // Check if this is a heartbeat ack
+        if (message.inResponseTo && message.inResponseTo.startsWith('hb_')) {
+            HeartbeatSystem.handleHeartbeatAck(message);
+        }
         
         const pending = this._pendingAcks.get(messageId);
         if (pending) {
@@ -1429,7 +3147,7 @@ const TransportAgent = {
         }, { requiresAck: false }).catch(() => {});
         
         this._lastHeartbeat = Date.now();
-        this._heartbeatRetryCount = 0; // Reset on successful ping
+        this._heartbeatRetryCount = 0;
     },
     
     _generateMessageId() {
@@ -1462,7 +3180,6 @@ const TransportAgent = {
             const parentAvailable = isInIframe && hasPostMessage;
             
             if (parentAvailable && this._connectionState === 'connected') {
-                // Limit heartbeat retries
                 if (this._heartbeatRetryCount < this._maxHeartbeatRetries) {
                     this.send('PING', {
                         timestamp: Date.now(),
@@ -1474,10 +3191,9 @@ const TransportAgent = {
                     if (this._lastHeartbeat > 0 && 
                         Date.now() - this._lastHeartbeat > SECURITY_CONFIG.HEARTBEAT_TIMEOUT) {
                         this._connectionState = 'disconnected';
-                        if (this._heartbeatRetryCount < this._maxHeartbeatRetries) {
+                        if (this._heartbeatRetryCount < this._maxHeartbeatRetries && !LifecycleFSM.isActive()) {
                             this.reconnect();
                         } else {
-                            // Enter degraded mode silently
                             this._connectionState = 'degraded';
                         }
                     }
@@ -1541,16 +3257,28 @@ const TransportAgent = {
         if (validStates.includes(state)) {
             this._connectionState = state;
         }
+    },
+    
+    destroy() {
+        this._clearAllTimers();
+        if (this._heartbeatInterval) {
+            clearInterval(this._heartbeatInterval);
+            this._heartbeatInterval = null;
+        }
+        this._pendingAcks.clear();
+        this._offlineQueue = [];
+        this._sentMessages.clear();
+        this._listeners.clear();
+        this._initialized = false;
     }
 };
 
 // =============================================
 // RECOVERY MANAGER - WITH RETRY LIMITS
 // =============================================
-
 const RecoveryManager = {
     _failureCount: 0,
-    _maxFailures: 3, // Reduced from 5
+    _maxFailures: 3,
     _recoveryTimer: null,
     _lastRecovery: 0,
     _recoveryInProgress: false,
@@ -1558,6 +3286,7 @@ const RecoveryManager = {
     _initialized: false,
     _recoveryAttempts: 0,
     _maxRecoveryAttempts: 2,
+    _timers: new Set(),
     
     init() {
         if (this._initialized) return this;
@@ -1572,19 +3301,37 @@ const RecoveryManager = {
         return this;
     },
     
+    _createTimer(fn, delay) {
+        const timerId = setTimeout(() => {
+            this._timers.delete(timerId);
+            fn();
+        }, delay);
+        this._timers.add(timerId);
+        return timerId;
+    },
+    
+    _clearAllTimers() {
+        this._timers.forEach(id => clearTimeout(id));
+        this._timers.clear();
+    },
+    
     handleFailure(error, context = {}) {
+        if (LifecycleFSM.isActive()) {
+            this.reset();
+            return;
+        }
+        
         this._failureCount++;
         
         if (this._failureCount >= this._maxFailures) {
-            if (this._recoveryAttempts < this._maxRecoveryAttempts) {
+            if (this._recoveryAttempts < this._maxRecoveryAttempts && !LifecycleFSM.isActive()) {
                 this.initiateRecovery('full');
             } else {
-                // Enter degraded mode silently
                 this._failureCount = 0;
                 this._recoveryAttempts = 0;
             }
         } else if (this._failureCount > 2) {
-            if (this._recoveryAttempts < this._maxRecoveryAttempts) {
+            if (this._recoveryAttempts < this._maxRecoveryAttempts && !LifecycleFSM.isActive()) {
                 this.initiateRecovery('network');
             }
         }
@@ -1593,12 +3340,13 @@ const RecoveryManager = {
     initiateRecovery(strategy = 'network') {
         if (this._recoveryInProgress) return;
         if (this._recoveryAttempts >= this._maxRecoveryAttempts) return;
+        if (LifecycleFSM.isActive()) return;
         
         if (this._recoveryTimer) {
             clearTimeout(this._recoveryTimer);
         }
         
-        this._recoveryTimer = setTimeout(() => {
+        this._recoveryTimer = this._createTimer(() => {
             this._executeRecovery(strategy);
         }, 1000 * Math.min(this._failureCount, 3));
     },
@@ -1606,6 +3354,7 @@ const RecoveryManager = {
     async _executeRecovery(strategy) {
         if (this._recoveryInProgress) return;
         if (this._recoveryAttempts >= this._maxRecoveryAttempts) return;
+        if (LifecycleFSM.isActive()) return;
         
         this._recoveryInProgress = true;
         this._recoveryAttempts++;
@@ -1621,7 +3370,7 @@ const RecoveryManager = {
             } else {
                 this._failureCount++;
                 
-                if (this._failureCount < this._maxFailures && this._recoveryAttempts < this._maxRecoveryAttempts) {
+                if (this._failureCount < this._maxFailures && this._recoveryAttempts < this._maxRecoveryAttempts && !LifecycleFSM.isActive()) {
                     this.initiateRecovery('full');
                 }
             }
@@ -1633,6 +3382,10 @@ const RecoveryManager = {
     },
     
     async _recoverNetwork() {
+        if (LifecycleFSM.isActive()) {
+            return { success: true };
+        }
+        
         const isInIframe = window !== window.parent;
         const hasPostMessage = !!(window.parent && typeof window.parent.postMessage === 'function');
         const parentAvailable = isInIframe && hasPostMessage;
@@ -1651,6 +3404,10 @@ const RecoveryManager = {
     },
     
     async _recoverSession() {
+        if (LifecycleFSM.isActive()) {
+            return { success: true };
+        }
+        
         try {
             await TransportAgent.send('VERIFY_SESSION', {
                 frameId: SECURITY_CONFIG.FRAME_ID,
@@ -1665,10 +3422,14 @@ const RecoveryManager = {
     },
     
     async _recoverHandshake() {
+        if (LifecycleFSM.isActive()) {
+            return { success: true };
+        }
+        
         try {
             await HandshakeClient.initiate({
                 timeout: SECURITY_CONFIG.HANDSHAKE_TIMEOUT,
-                maxRetries: 1 // Reduced from 2
+                maxRetries: 1
             });
             
             return { success: true };
@@ -1678,6 +3439,10 @@ const RecoveryManager = {
     },
     
     async _recoverFull() {
+        if (LifecycleFSM.isActive()) {
+            return { success: true };
+        }
+        
         const network = await this._recoverNetwork();
         if (!network.success) {
             return network;
@@ -1696,10 +3461,7 @@ const RecoveryManager = {
     reset() {
         this._failureCount = 0;
         this._recoveryAttempts = 0;
-        if (this._recoveryTimer) {
-            clearTimeout(this._recoveryTimer);
-            this._recoveryTimer = null;
-        }
+        this._clearAllTimers();
         this._recoveryInProgress = false;
     }
 };
@@ -1709,7 +3471,6 @@ RecoveryManager.init();
 // =============================================
 // COMPATIBILITY BRIDGE
 // =============================================
-
 const CompatibilityBridge = {
     _enabled: false,
     _legacyMode: false,
@@ -1777,7 +3538,6 @@ const CompatibilityBridge = {
 // =============================================
 // IFrameAuthority
 // =============================================
-
 const IframeAuthority = {
     _initialized: false,
     _modules: new Set(),
@@ -1834,7 +3594,6 @@ const IframeAuthority = {
 // =============================================
 // SANDBOX DETECTOR
 // =============================================
-
 const SandboxDetector = {
     _isSandboxed: null,
     _restrictions: [],
@@ -1882,7 +3641,6 @@ const SandboxDetector = {
 // =============================================
 // FIXED HANDSHAKE CLIENT - Proper state tracking with retry limits
 // =============================================
-
 const HandshakeClient = {
     _handshakeInProgress: false,
     _handshakeAttempts: 0,
@@ -1895,10 +3653,25 @@ const HandshakeClient = {
     _handshakeAckReceived: false,
     _startTime: null,
     _handshakeComplete: false,
-    _maxHandshakeAttempts: 2, // Reduced from 3
+    _maxHandshakeAttempts: 2,
+    _timers: new Set(),
+    
+    _createTimer(fn, delay) {
+        const timerId = setTimeout(() => {
+            this._timers.delete(timerId);
+            fn();
+        }, delay);
+        this._timers.add(timerId);
+        return timerId;
+    },
+    
+    _clearAllTimers() {
+        this._timers.forEach(id => clearTimeout(id));
+        this._timers.clear();
+    },
     
     initiate: function(options = {}) {
-        if (this._handshakeComplete || handshakeCompleted) {
+        if (this._handshakeComplete || handshakeCompleted || LifecycleFSM.isAtLeast(LIFECYCLE_STATES.SESSION_ACTIVE)) {
             STATUS_MACHINE.log('handshake', 'SUCCESS', 'Already complete');
             return Promise.resolve({ success: true, fromCache: false });
         }
@@ -1907,7 +3680,6 @@ const HandshakeClient = {
             return this._handshakePromise || Promise.reject(new Error('Handshake already in progress'));
         }
         
-        // Check if we already have a valid session
         if (ParentConnectionManager && ParentConnectionManager.sessionMirror.authenticated) {
             this._handshakeComplete = true;
             handshakeCompleted = true;
@@ -1930,8 +3702,8 @@ const HandshakeClient = {
             this._handshakeResolve = resolve;
             this._handshakeReject = reject;
             
-            this._handshakeTimer = setTimeout(() => {
-                if (this._handshakeAttempts < maxRetries) {
+            this._handshakeTimer = this._createTimer(() => {
+                if (this._handshakeAttempts < maxRetries && !LifecycleFSM.isAtLeast(LIFECYCLE_STATES.SESSION_ACTIVE)) {
                     this._handshakeInProgress = false;
                     this._handshakeState = 'retry';
                     
@@ -1940,7 +3712,7 @@ const HandshakeClient = {
                         SECURITY_CONFIG.MAX_RETRY_DELAY
                     );
                     
-                    setTimeout(() => {
+                    this._createTimer(() => {
                         this.initiate(options).then(resolve).catch(reject);
                     }, delay);
                 } else {
@@ -1952,7 +3724,6 @@ const HandshakeClient = {
             }, timeout);
             
             if (window.parent) {
-                // Send CHILD_READY first
                 TransportAgent.send('CHILD_READY', {
                     childId: SECURITY_CONFIG.FRAME_ID,
                     version: MODULE_VERSION,
@@ -1960,7 +3731,6 @@ const HandshakeClient = {
                     module: 'groups'
                 }, { requiresAck: false }).catch(() => {});
                 
-                // Use VERIFY_SESSION
                 const requestId = 'verify_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6);
                 
                 TransportAgent.send('VERIFY_SESSION', {
@@ -1973,9 +3743,7 @@ const HandshakeClient = {
                     if (response && response.ack) {
                         this.handleHandshakeAck(response.ack);
                     }
-                }).catch((error) => {
-                    // Don't reject here, let timeout handle it
-                });
+                }).catch((error) => {});
             }
         });
         
@@ -1983,7 +3751,7 @@ const HandshakeClient = {
     },
     
     handleParentReady: function(message) {
-        if (this._handshakeComplete || handshakeCompleted) return;
+        if (this._handshakeComplete || handshakeCompleted || LifecycleFSM.isAtLeast(LIFECYCLE_STATES.SESSION_ACTIVE)) return;
         
         this._parentReadyReceived = true;
         
@@ -1991,7 +3759,7 @@ const HandshakeClient = {
             this._handshakeState = 'waiting_parent_ready';
         }
         
-        if (window.parent && !this._handshakeComplete && !handshakeCompleted) {
+        if (window.parent && !this._handshakeComplete && !handshakeCompleted && !LifecycleFSM.isAtLeast(LIFECYCLE_STATES.SESSION_ACTIVE)) {
             const requestId = 'verify_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6);
             
             TransportAgent.send('VERIFY_SESSION', {
@@ -2007,7 +3775,7 @@ const HandshakeClient = {
     },
     
     handleHandshakeAck: function(message) {
-        if (this._handshakeComplete || handshakeCompleted) return;
+        if (this._handshakeComplete || handshakeCompleted || LifecycleFSM.isAtLeast(LIFECYCLE_STATES.SESSION_ACTIVE)) return;
         
         this._handshakeAckReceived = true;
         this._handshakeComplete = true;
@@ -2068,18 +3836,13 @@ const HandshakeClient = {
         handshakeCompleted = false;
         this._startTime = null;
         __HANDSHAKE_COMPLETE__ = false;
-        
-        if (this._handshakeTimer) {
-            clearTimeout(this._handshakeTimer);
-            this._handshakeTimer = null;
-        }
+        this._clearAllTimers();
     }
 };
 
 // =============================================
 // PARENT MESSAGE TYPES
 // =============================================
-
 const PARENT_MESSAGE_TYPES = {
     CHILD_READY: 'CHILD_READY',
     REQUEST_SESSION: 'REQUEST_SESSION',
@@ -2107,13 +3870,11 @@ const PARENT_MESSAGE_TYPES = {
     NAVIGATE: 'NAVIGATE',
     SESSION_VERIFIED: 'SESSION_VERIFIED',
     
-    // Contract messages
     SESSION_ACTIVE: 'SESSION_ACTIVE',
     PERMISSION_UPDATE: 'PERMISSION_UPDATE',
     FORCE_LOGOUT: 'FORCE_LOGOUT',
     REGISTER_MODULE: 'REGISTER_MODULE',
     
-    // Group-specific message types
     GROUP_CREATED: 'GROUP_CREATED',
     GROUP_UPDATED: 'GROUP_UPDATED',
     GROUP_DELETED: 'GROUP_DELETED',
@@ -2123,7 +3884,16 @@ const PARENT_MESSAGE_TYPES = {
     GROUP_MESSAGE: 'GROUP_MESSAGE',
     UNREAD_COUNT_UPDATED: 'UNREAD_COUNT_UPDATED',
     GROUP_TYPING: 'GROUP_TYPING',
-    GROUP_CALL: 'GROUP_CALL'
+    GROUP_CALL: 'GROUP_CALL',
+    
+    // v5.0 protocol messages
+    MODULE_REGISTERED: 'MODULE_REGISTERED',
+    SESSION_NULL: 'SESSION_NULL',
+    SESSION_REFRESHED: 'SESSION_REFRESHED',
+    SESSION_INVALIDATED: 'SESSION_INVALIDATED',
+    SESSION_RECOVERY: 'SESSION_RECOVERY',
+    HEARTBEAT: 'HEARTBEAT',
+    HEARTBEAT_ACK: 'HEARTBEAT_ACK'
 };
 
 export const SESSION_SCHEMA = {
@@ -2140,7 +3910,6 @@ export const SESSION_SCHEMA = {
 // =============================================
 // ENHANCED PARENT CONNECTION MANAGER
 // =============================================
-
 export const ParentConnectionManager = {
     isConnected: false,
     handshakeComplete: false,
@@ -2175,7 +3944,7 @@ export const ParentConnectionManager = {
     sessionSyncState: 'none',
     pendingMessages: new Map(),
     messageRetryCounts: new Map(),
-    maxRetries: 2, // Reduced from 3
+    maxRetries: 2,
     backoffBase: 500,
     
     ackCallbacks: new Map(),
@@ -2183,6 +3952,21 @@ export const ParentConnectionManager = {
     
     _initialized: false,
     _sessionRequestPending: false,
+    _timers: new Set(),
+    
+    _createTimer(fn, delay) {
+        const timerId = setTimeout(() => {
+            this._timers.delete(timerId);
+            fn();
+        }, delay);
+        this._timers.add(timerId);
+        return timerId;
+    },
+    
+    _clearAllTimers() {
+        this._timers.forEach(id => clearTimeout(id));
+        this._timers.clear();
+    },
     
     init() {
         if (this._initialized) return this;
@@ -2254,7 +4038,9 @@ export const ParentConnectionManager = {
             
             this.parentAvailable = true;
             
-            // First, let ParentAuthority handle contract messages
+            // Route through broadcast handler for supported broadcast types
+            BroadcastHandler.handleBroadcast(message);
+            
             ParentAuthority.handleMessage(message);
             
             if (message.type === PARENT_MESSAGE_TYPES.ACK) {
@@ -2269,14 +4055,15 @@ export const ParentConnectionManager = {
             
             if (message.type === PARENT_MESSAGE_TYPES.PARENT_READY) {
                 this.handleParentReady(message);
+                InitTimeline.handleParentReady();
                 return;
             }
             
-            // Handle SESSION_ACTIVE (authoritative)
             if (message.type === 'SESSION_ACTIVE') {
                 const sessionData = message.session || message.payload;
                 if (sessionData) {
                     this.handleSessionData(sessionData);
+                    InitTimeline.handleSessionActive(sessionData);
                     
                     TransportAgent.send('SESSION_ACK', {
                         received: true,
@@ -2292,9 +4079,18 @@ export const ParentConnectionManager = {
                 return;
             }
             
-            // Handle SESSION_VERIFIED
+            if (message.type === PARENT_MESSAGE_TYPES.MODULE_REGISTERED) {
+                InitTimeline.handleModuleRegistered(message);
+                return;
+            }
+            
+            if (message.type === PARENT_MESSAGE_TYPES.SESSION_NULL) {
+                InitTimeline.handleSessionNull(message);
+                return;
+            }
+            
             if (message.type === 'SESSION_VERIFIED') {
-                if (!handshakeCompleted && !this.handshakeComplete) {
+                if (!handshakeCompleted && !this.handshakeComplete && !LifecycleFSM.isAtLeast(LIFECYCLE_STATES.SESSION_ACTIVE)) {
                     HandshakeClient.handleHandshakeAck(message);
                     handshakeCompleted = true;
                     this.handshakeComplete = true;
@@ -2309,7 +4105,7 @@ export const ParentConnectionManager = {
             
             if (message.type === PARENT_MESSAGE_TYPES.HANDSHAKE_ACK || 
                 message.type === PARENT_MESSAGE_TYPES.HANDSHAKE_RESPONSE) {
-                if (!handshakeCompleted && !this.handshakeComplete) {
+                if (!handshakeCompleted && !this.handshakeComplete && !LifecycleFSM.isAtLeast(LIFECYCLE_STATES.SESSION_ACTIVE)) {
                     HandshakeClient.handleHandshakeAck(message);
                     handshakeCompleted = true;
                     this.handshakeComplete = true;
@@ -2379,7 +4175,6 @@ export const ParentConnectionManager = {
                 return;
             }
             
-            // Handle PERMISSION_UPDATE
             if (message.type === 'PERMISSION_UPDATE') {
                 if (message.permissions && this.sessionMirror) {
                     this.sessionMirror.permissions = message.permissions;
@@ -2387,7 +4182,6 @@ export const ParentConnectionManager = {
                 return;
             }
             
-            // Handle group-specific messages from parent
             if (message.type === PARENT_MESSAGE_TYPES.GROUP_CREATED) {
                 const groupData = message.payload?.group;
                 if (groupData && typeof handleGroupCreatedFromParent === 'function') {
@@ -2494,7 +4288,7 @@ export const ParentConnectionManager = {
     },
     
     handleHandshakeResponse(message) {
-        if (this.handshakeResolve && !handshakeCompleted && !this.handshakeComplete) {
+        if (this.handshakeResolve && !handshakeCompleted && !this.handshakeComplete && !LifecycleFSM.isAtLeast(LIFECYCLE_STATES.SESSION_ACTIVE)) {
             this.handshakeResolve(message);
             this.handshakeResolve = null;
             this.handshakeReject = null;
@@ -2524,11 +4318,11 @@ export const ParentConnectionManager = {
     },
     
     handleParentReady(message) {
-        if (handshakeCompleted || this.handshakeComplete) return;
+        if (handshakeCompleted || this.handshakeComplete || LifecycleFSM.isAtLeast(LIFECYCLE_STATES.SESSION_ACTIVE)) return;
         
         HandshakeClient.handleParentReady(message);
         
-        if (!this.handshakeComplete && !handshakeCompleted) {
+        if (!this.handshakeComplete && !handshakeCompleted && !LifecycleFSM.isAtLeast(LIFECYCLE_STATES.SESSION_ACTIVE)) {
             this.initiateHandshake();
         }
     },
@@ -2652,14 +4446,12 @@ export const ParentConnectionManager = {
         
         this.sessionData = sessionData;
         
-        // Save to localStorage as cache only
         try {
             if (sessionData.user) {
-                localStorage.setItem(LOCAL_STORAGE_KEYS.USER, JSON.stringify(sessionData.user));
+                SafeStorage.setItem('user', sessionData.user);
             }
             if (sessionData.token) {
-                localStorage.setItem('USER_TOKEN', sessionData.token);
-                localStorage.setItem('knecta_access_token', sessionData.token);
+                SafeStorage.setItem('token', sessionData.token);
             }
         } catch (e) {}
     },
@@ -2681,14 +4473,13 @@ export const ParentConnectionManager = {
         __SESSION_READY__ = false;
         
         try {
-            localStorage.removeItem(LOCAL_STORAGE_KEYS.USER);
-            localStorage.removeItem('USER_TOKEN');
-            localStorage.removeItem('knecta_access_token');
+            SafeStorage.removeItem('user');
+            SafeStorage.removeItem('token');
         } catch (e) {}
     },
     
     initiateHandshake() {
-        if (this.handshakeInProgress || handshakeCompleted || this.handshakeComplete) {
+        if (this.handshakeInProgress || handshakeCompleted || this.handshakeComplete || LifecycleFSM.isAtLeast(LIFECYCLE_STATES.SESSION_ACTIVE)) {
             return this.handshakePromise;
         }
         
@@ -2704,8 +4495,8 @@ export const ParentConnectionManager = {
             this.handshakeResolve = resolve;
             this.handshakeReject = reject;
             
-            this.handshakeTimer = setTimeout(() => {
-                if (this.handshakeInProgress) {
+            this.handshakeTimer = this._createTimer(() => {
+                if (this.handshakeInProgress && !LifecycleFSM.isAtLeast(LIFECYCLE_STATES.SESSION_ACTIVE)) {
                     if (this.handshakeAttempts < SECURITY_CONFIG.HANDSHAKE_MAX_RETRIES) {
                         this.handshakeInProgress = false;
                         
@@ -2714,7 +4505,7 @@ export const ParentConnectionManager = {
                             SECURITY_CONFIG.MAX_RETRY_DELAY
                         );
                         
-                        setTimeout(() => {
+                        this._createTimer(() => {
                             this.initiateHandshake().then(resolve).catch(reject);
                         }, delay);
                     } else {
@@ -2733,7 +4524,6 @@ export const ParentConnectionManager = {
                 module: 'groups'
             }, { requiresAck: false }).catch(() => {});
             
-            // Use VERIFY_SESSION
             const requestId = 'verify_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6);
             
             this.sendMessage('VERIFY_SESSION', {
@@ -2753,18 +4543,20 @@ export const ParentConnectionManager = {
     },
     
     tryCachedSession() {
-        // If parent authority is active, don't restore from cache
         if (ParentAuthority.isAuthoritativeSession()) {
             return false;
         }
         
+        if (LifecycleFSM.isAtLeast(LIFECYCLE_STATES.SESSION_ACTIVE)) {
+            return false;
+        }
+        
         try {
-            const cachedUser = localStorage.getItem(LOCAL_STORAGE_KEYS.USER);
-            const cachedToken = localStorage.getItem('USER_TOKEN') || 
-                               localStorage.getItem('knecta_access_token');
+            const cachedUser = SafeStorage.getItem('user');
+            const cachedToken = SafeStorage.getItem('token');
             
             if (cachedUser && cachedToken) {
-                const user = JSON.parse(cachedUser);
+                const user = cachedUser;
                 this.sessionMirror = {
                     user,
                     token: cachedToken,
@@ -2801,9 +4593,12 @@ export const ParentConnectionManager = {
         this.handshakeAttempts = 0;
         this.connectionState = 'connecting';
         
+        if (LifecycleFSM.isAtLeast(LIFECYCLE_STATES.SESSION_ACTIVE)) {
+            return;
+        }
+        
         this.initiateHandshake().catch(() => {
-            // Don't try cached session if parent authority is active
-            if (!ParentAuthority.isAuthoritativeSession()) {
+            if (!ParentAuthority.isAuthoritativeSession() && !LifecycleFSM.isAtLeast(LIFECYCLE_STATES.SESSION_ACTIVE)) {
                 this.tryCachedSession();
             }
         });
@@ -2867,7 +4662,7 @@ export const ParentConnectionManager = {
     },
     
     requestSession() {
-        if (__SESSION_REQUEST_PENDING__ || handshakeCompleted || this.handshakeComplete) {
+        if (__SESSION_REQUEST_PENDING__ || handshakeCompleted || this.handshakeComplete || LifecycleFSM.isAtLeast(LIFECYCLE_STATES.SESSION_ACTIVE)) {
             return;
         }
         
@@ -2884,15 +4679,23 @@ export const ParentConnectionManager = {
         }, { requiresAck: true, timeout: 5000 }).catch(() => {
             __SESSION_REQUEST_PENDING__ = false;
         });
+    },
+    
+    destroy() {
+        this._clearAllTimers();
+        this.messageHandlers.clear();
+        this.pendingAcks.clear();
+        this.messageQueue = [];
+        this.pendingMessages.clear();
+        this.messageRetryCounts.clear();
+        this.ackCallbacks.clear();
+        this._initialized = false;
     }
 };
-
-// Global handshake tracker
 
 // =============================================
 // SESSION MIRROR LAYER
 // =============================================
-
 export const SessionMirror = {
     user: null,
     token: null,
@@ -2902,8 +4705,11 @@ export const SessionMirror = {
     fromCache: false,
     
     subscribers: new Set(),
+    _initialized: false,
     
     init() {
+        if (this._initialized) return this;
+        
         document.addEventListener('sessionReady', (e) => {
             this.updateFromParent(e.detail);
         });
@@ -2919,8 +4725,7 @@ export const SessionMirror = {
         
         if (!this.authenticated) {
             setTimeout(() => {
-                if (!__SESSION_REQUEST_PENDING__ && !__SESSION_READY__ && !handshakeCompleted) {
-                    // Don't request if parent authority is active
+                if (!__SESSION_REQUEST_PENDING__ && !__SESSION_READY__ && !handshakeCompleted && !LifecycleFSM.isAtLeast(LIFECYCLE_STATES.SESSION_ACTIVE)) {
                     if (!ParentAuthority.isAuthoritativeSession()) {
                         ParentConnectionManager.requestSession();
                     }
@@ -2928,6 +4733,7 @@ export const SessionMirror = {
             }, 100);
         }
         
+        this._initialized = true;
         return this;
     },
     
@@ -2992,18 +4798,37 @@ export const SessionMirror = {
     
     isAuthenticated() {
         return this.authenticated;
+    },
+    
+    destroy() {
+        this.subscribers.clear();
+        this._initialized = false;
     }
 };
 
 // =============================================
 // SESSION CLIENT
 // =============================================
-
 const SessionClient = {
     syncRequested: false,
     syncTimer: null,
     refreshTimer: null,
     expiryTimer: null,
+    _timers: new Set(),
+    
+    _createTimer(fn, delay) {
+        const timerId = setTimeout(() => {
+            this._timers.delete(timerId);
+            fn();
+        }, delay);
+        this._timers.add(timerId);
+        return timerId;
+    },
+    
+    _clearAllTimers() {
+        this._timers.forEach(id => clearTimeout(id));
+        this._timers.clear();
+    },
     
     init() {
         this.setupExpiryCheck();
@@ -3013,6 +4838,7 @@ const SessionClient = {
     requestSync() {
         if (this.syncRequested) return;
         if (__SESSION_REQUEST_PENDING__) return;
+        if (LifecycleFSM.isAtLeast(LIFECYCLE_STATES.SESSION_ACTIVE)) return;
         
         this.syncRequested = true;
         __SESSION_REQUEST_PENDING__ = true;
@@ -3030,11 +4856,11 @@ const SessionClient = {
             __SESSION_REQUEST_PENDING__ = false;
         });
         
-        this.syncTimer = setTimeout(() => {
+        this.syncTimer = this._createTimer(() => {
             this.syncRequested = false;
             __SESSION_REQUEST_PENDING__ = false;
             
-            if (!ParentConnectionManager.sessionMirror.authenticated && !ParentAuthority.isAuthoritativeSession()) {
+            if (!ParentConnectionManager.sessionMirror.authenticated && !ParentAuthority.isAuthoritativeSession() && !LifecycleFSM.isAtLeast(LIFECYCLE_STATES.SESSION_ACTIVE)) {
                 ParentConnectionManager.tryCachedSession();
             }
         }, 5000);
@@ -3078,16 +4904,17 @@ const SessionClient = {
     },
     
     destroy() {
-        if (this.syncTimer) clearTimeout(this.syncTimer);
-        if (this.refreshTimer) clearTimeout(this.refreshTimer);
-        if (this.expiryTimer) clearInterval(this.expiryTimer);
+        this._clearAllTimers();
+        if (this.expiryTimer) {
+            clearInterval(this.expiryTimer);
+            this.expiryTimer = null;
+        }
     }
 };
 
 // =============================================
 // ACTION QUEUE MANAGEMENT
 // =============================================
-
 function queueGroupAction(action) {
     groupActionQueue.push(action);
     
@@ -3163,7 +4990,6 @@ function processGroupActionQueue() {
 // =============================================
 // GLOBAL VARIABLES
 // =============================================
-
 export let currentUser = null;
 export let userData = null;
 export let groups = [];
@@ -3181,7 +5007,6 @@ export let offlineOverlayDismissed = false;
 export let friends = [];
 export let selectedFriends = [];
 
-// Group messages and unread counts
 export let groupMessages = {};
 export let groupUnreadCounts = {};
 export let groupTypingUsers = {};
@@ -3190,7 +5015,6 @@ export let currentChatGroup = null;
 // =============================================
 // UNIQUE FEATURES VARIABLES
 // =============================================
-
 export const groupPurposes = Object.freeze({
     'study': { name: 'Study', icon: '📚', color: '#4CAF50' },
     'prayer': { name: 'Prayer', icon: '🙏', color: '#9C27B0' },
@@ -3328,7 +5152,6 @@ export const groupRoles = Object.freeze({
 // =============================================
 // CHAT & CALL VARIABLES
 // =============================================
-
 export let chatMessagesList = [];
 export let isTyping = false;
 export let callInProgress = false;
@@ -3340,7 +5163,6 @@ export let peerConnections = {};
 // =============================================
 // UNIQUE FEATURES STATE
 // =============================================
-
 export let currentParticipationMode = 'normal';
 export let isSilentMode = false;
 export let isAnonymousMode = false;
@@ -3352,7 +5174,6 @@ export let energySuggestions = [];
 // =============================================
 // LOCAL STORAGE KEYS
 // =============================================
-
 export const LOCAL_STORAGE_KEYS = Object.freeze({
     USER: 'knecta_current_user',
     GROUPS: 'knecta_groups',
@@ -3385,10 +5206,9 @@ export const LOCAL_STORAGE_KEYS = Object.freeze({
 // =============================================
 // SAFETY GUARDS
 // =============================================
-
 const loggedErrors = new Set();
 const loggedWarnings = new Set();
-const maxRetries = 2; // Reduced from 3
+const maxRetries = 2;
 const retryCounters = new Map();
 
 function shouldRetry(operationId) {
@@ -3430,7 +5250,6 @@ function guardGroupOperation(operation, fallback = null) {
 // =============================================
 // TOKEN MANAGEMENT
 // =============================================
-
 export function initializeTokenSystem() {
     try {
         tokenReadyPromise = new Promise((resolve, reject) => {
@@ -3440,7 +5259,6 @@ export function initializeTokenSystem() {
         
         setTimeout(async () => {
             try {
-                // Check for authoritative session first
                 if (ParentAuthority.isAuthoritativeSession()) {
                     const authSession = ParentAuthority.getAuthoritativeSession();
                     if (authSession && authSession.token) {
@@ -3463,7 +5281,7 @@ export function initializeTokenSystem() {
                     return;
                 }
                 
-                const cachedToken = getUnifiedToken();
+                const cachedToken = SafeStorage.getItem('token');
                 if (cachedToken) {
                     authReady = true;
                     authCheckComplete = true;
@@ -3500,7 +5318,6 @@ export function initializeTokenSystem() {
 
 export async function waitForTokenReady() {
     try {
-        // Check for authoritative session first
         if (ParentAuthority.isAuthoritativeSession()) {
             const authSession = ParentAuthority.getAuthoritativeSession();
             if (authSession && authSession.token) {
@@ -3519,7 +5336,7 @@ export async function waitForTokenReady() {
             return parentToken;
         }
         
-        const token = getUnifiedToken();
+        const token = SafeStorage.getItem('token');
         if (token) {
             authReady = true;
             authCheckComplete = true;
@@ -3538,7 +5355,6 @@ export async function waitForTokenReady() {
 
 export function getUnifiedToken() {
     try {
-        // Check for authoritative session first
         if (ParentAuthority.isAuthoritativeSession()) {
             const authSession = ParentAuthority.getAuthoritativeSession();
             if (authSession && authSession.token) {
@@ -3556,7 +5372,7 @@ export function getUnifiedToken() {
             return String(mirrorToken).substring(0, SECURITY_CONFIG.MAX_STRING_LENGTH);
         }
         
-        const unifiedToken = localStorage.getItem(LOCAL_STORAGE_KEYS.USER_TOKEN);
+        const unifiedToken = SafeStorage.getItem('token');
         if (unifiedToken) {
             return String(unifiedToken).substring(0, SECURITY_CONFIG.MAX_STRING_LENGTH);
         }
@@ -3590,7 +5406,8 @@ export function saveUnifiedToken(token) {
         
         const safeToken = String(token).substring(0, SECURITY_CONFIG.MAX_STRING_LENGTH);
         
-        localStorage.setItem(LOCAL_STORAGE_KEYS.USER_TOKEN, safeToken);
+        SafeStorage.setItem('token', safeToken);
+        
         localStorage.setItem('knecta_access_token', safeToken);
         localStorage.setItem('moodchat_token', safeToken);
         
@@ -3599,7 +5416,6 @@ export function saveUnifiedToken(token) {
 
 export function getCurrentUserLocal() {
     try {
-        // Check for authoritative session first
         if (ParentAuthority.isAuthoritativeSession()) {
             const authSession = ParentAuthority.getAuthoritativeSession();
             if (authSession && authSession.user) {
@@ -3617,9 +5433,14 @@ export function getCurrentUserLocal() {
             return mirrorUser;
         }
         
-        const cachedUser = localStorage.getItem(LOCAL_STORAGE_KEYS.USER);
+        const cachedUser = SafeStorage.getItem('user');
         if (cachedUser) {
-            return JSON.parse(cachedUser);
+            return cachedUser;
+        }
+        
+        const legacyUser = localStorage.getItem(LOCAL_STORAGE_KEYS.USER);
+        if (legacyUser) {
+            return JSON.parse(legacyUser);
         }
         
         return null;
@@ -3635,7 +5456,6 @@ export function getCurrentUser() {
 // =============================================
 // QUEUE API CALL SYSTEM
 // =============================================
-
 export function queueApiCall(apiCallFunction) {
     return new Promise(async (resolve, reject) => {
         try {
@@ -3707,7 +5527,6 @@ export async function processTokenQueue() {
 // =============================================
 // SECURE API WRAPPER
 // =============================================
-
 const API_WRAPPER = {
     _ready: false,
     _readyPromise: null,
@@ -3722,7 +5541,7 @@ const API_WRAPPER = {
     },
     _cache: new Map(),
     _cacheTTL: 5 * 60 * 1000,
-    _maxRetries: 1, // Reduced from 2
+    _maxRetries: 1,
     _retryDelay: 1000,
     _initialized: false,
     _handshakeComplete: false,
@@ -4023,11 +5842,11 @@ const API_WRAPPER = {
                     data: currentUser
                 };
             }
-            const cachedUser = localStorage.getItem(LOCAL_STORAGE_KEYS.USER);
+            const cachedUser = SafeStorage.getItem('user');
             if (cachedUser) {
                 return {
                     success: true,
-                    data: JSON.parse(cachedUser)
+                    data: cachedUser
                 };
             }
             return {
@@ -4078,7 +5897,6 @@ API_WRAPPER.init();
 // =============================================
 // SECURE API CALL FUNCTION
 // =============================================
-
 export async function secureApiCall(endpoint, options = {}) {
     try {
         if (!options.skipReadyCheck) {
@@ -4108,9 +5926,8 @@ export async function safeApiCall(endpoint, options = {}) {
 }
 
 // =============================================
-// INITIALIZATION PIPELINE - INTEGRATED WITH PARENT AUTHORITY
+// INITIALIZATION PIPELINE - INTEGRATED WITH LIFECYCLE FSM
 // =============================================
-
 let _initState = {
     preflight: false,
     parentConnect: false,
@@ -4123,10 +5940,9 @@ async function preflightStage() {
     try {
         _instanceId = Date.now() + '_' + Math.random().toString(36).substr(2, 9);
         
+        SafeStorage.init();
         IframeAuthority.init();
         API_WRAPPER.init();
-        
-        // Initialize parent authority
         ParentAuthority.init();
         
         _initState.preflight = true;
@@ -4161,7 +5977,6 @@ async function handshakeStage(parentAvailable) {
             _initState.handshake = true;
             return { success: true };
         } catch (error) {
-            // Try cached session only if not in authoritative mode
             if (!ParentAuthority.isAuthoritativeSession() && ParentConnectionManager.tryCachedSession()) {
                 _initState.handshake = true;
                 return { success: true, fromCache: true };
@@ -4181,7 +5996,6 @@ async function sessionStage(handshakeSuccess, fromCache) {
         SessionMirror.init();
         SessionClient.init();
         
-        // Check for authoritative session
         if (ParentAuthority.isAuthoritativeSession()) {
             const authSession = ParentAuthority.getAuthoritativeSession();
             if (authSession) {
@@ -4247,7 +6061,6 @@ async function readyStage() {
         isPageInitialized = true;
         _initState.ready = true;
         
-        // Set module ready flag
         window.__MODULE_READY__ = true;
         if (__SESSION_READY__) {
             window.__MODULE_SESSION_ACTIVE__ = true;
@@ -4259,7 +6072,8 @@ async function readyStage() {
                 timestamp: Date.now(),
                 sessionValid: hasValidSession(),
                 authenticated: SessionMirror.isAuthenticated(),
-                authoritative: ParentAuthority.isAuthoritativeSession()
+                authoritative: ParentAuthority.isAuthoritativeSession(),
+                state: LifecycleFSM.getState()
             }
         }));
         
@@ -4317,7 +6131,6 @@ export async function initializeGroupsCore() {
 // =============================================
 // CORE PAGE MANAGEMENT
 // =============================================
-
 const pageCore = {
     isReady: false,
     isInitialized: false,
@@ -4334,7 +6147,7 @@ const pageCore = {
     },
     
     errors: new Set(),
-    maxRetries: 2, // Reduced from 3
+    maxRetries: 2,
     retryCounts: new Map()
 };
 
@@ -4378,7 +6191,6 @@ async function setupParentListener() {
                 
                 const msg = event.data;
                 
-                // Let ParentAuthority handle it first
                 ParentAuthority.handleMessage(msg);
                 
                 if (!pageCore.isReady) {
@@ -4420,7 +6232,6 @@ async function setupParentListener() {
 
 pageCore.loadSession = async function() {
     try {
-        // Check for authoritative session first
         if (ParentAuthority.isAuthoritativeSession()) {
             const authSession = ParentAuthority.getAuthoritativeSession();
             if (authSession) {
@@ -4445,9 +6256,9 @@ pageCore.loadSession = async function() {
                 pageCore.data.session = initMessage.payload || initMessage.session;
                 __SESSION_READY__ = true;
             } else {
-                const saved = localStorage.getItem('knecta_groups_session');
+                const saved = SafeStorage.getItem('session');
                 if (saved) {
-                    pageCore.data.session = JSON.parse(saved);
+                    pageCore.data.session = saved;
                     __SESSION_READY__ = true;
                 }
             }
@@ -4474,25 +6285,21 @@ pageCore.loadData = async function() {
         
         if (friendsResult.status === 'fulfilled' && friendsResult.value.success) {
             pageCore.data.friendsList = Array.isArray(friendsResult.value.data) ? friendsResult.value.data : [];
-            localStorage.setItem(LOCAL_STORAGE_KEYS.FRIENDS, JSON.stringify(pageCore.data.friendsList));
+            SafeStorage.setItem('friends', pageCore.data.friendsList);
         } else {
-            const cached = localStorage.getItem(LOCAL_STORAGE_KEYS.FRIENDS);
+            const cached = SafeStorage.getItem('friends');
             if (cached) {
-                try {
-                    pageCore.data.friendsList = JSON.parse(cached);
-                } catch (e) {}
+                pageCore.data.friendsList = cached;
             }
         }
         
         if (groupsResult.status === 'fulfilled' && groupsResult.value.success) {
             pageCore.data.groupsList = Array.isArray(groupsResult.value.data) ? groupsResult.value.data : [];
-            localStorage.setItem(LOCAL_STORAGE_KEYS.GROUPS, JSON.stringify(pageCore.data.groupsList));
+            SafeStorage.setItem('groups', pageCore.data.groupsList);
         } else {
-            const cached = localStorage.getItem(LOCAL_STORAGE_KEYS.GROUPS);
+            const cached = SafeStorage.getItem('groups');
             if (cached) {
-                try {
-                    pageCore.data.groupsList = JSON.parse(cached);
-                } catch (e) {}
+                pageCore.data.groupsList = cached;
             }
         }
         
@@ -4503,27 +6310,21 @@ pageCore.loadData = async function() {
         if (settingsResult.status === 'fulfilled' && settingsResult.value.success) {
             pageCore.data.settings = settingsResult.value.data || {};
         } else {
-            const cached = localStorage.getItem('knecta_settings');
+            const cached = SafeStorage.getItem('settings');
             if (cached) {
-                try {
-                    pageCore.data.settings = JSON.parse(cached);
-                } catch (e) {}
+                pageCore.data.settings = cached;
             }
         }
         
     } catch (error) {
-        const cachedFriends = localStorage.getItem(LOCAL_STORAGE_KEYS.FRIENDS);
+        const cachedFriends = SafeStorage.getItem('friends');
         if (cachedFriends) {
-            try {
-                pageCore.data.friendsList = JSON.parse(cachedFriends);
-            } catch (e) {}
+            pageCore.data.friendsList = cachedFriends;
         }
         
-        const cachedGroups = localStorage.getItem(LOCAL_STORAGE_KEYS.GROUPS);
+        const cachedGroups = SafeStorage.getItem('groups');
         if (cachedGroups) {
-            try {
-                pageCore.data.groupsList = JSON.parse(cachedGroups);
-            } catch (e) {}
+            pageCore.data.groupsList = cachedGroups;
         }
     }
 };
@@ -4604,14 +6405,14 @@ async function handleRefreshDataRequest(payload) {
                         const friendsResult = await secureApiCall('/friends', { skipCache: true });
                         if (friendsResult.success) {
                             pageCore.data.friendsList = Array.isArray(friendsResult.data) ? friendsResult.data : [];
-                            localStorage.setItem(LOCAL_STORAGE_KEYS.FRIENDS, JSON.stringify(pageCore.data.friendsList));
+                            SafeStorage.setItem('friends', pageCore.data.friendsList);
                         }
                         break;
                     case 'groups':
                         const groupsResult = await secureApiCall('/groups', { skipCache: true });
                         if (groupsResult.success) {
                             pageCore.data.groupsList = Array.isArray(groupsResult.data) ? groupsResult.data : [];
-                            localStorage.setItem(LOCAL_STORAGE_KEYS.GROUPS, JSON.stringify(pageCore.data.groupsList));
+                            SafeStorage.setItem('groups', pageCore.data.groupsList);
                         }
                         break;
                     case 'notifications':
@@ -4715,10 +6516,12 @@ export function updateCoreData(type, payload) {
             case 'friendsList':
                 if (!Array.isArray(payload)) throw new Error('friendsList must be array');
                 pageCore.data.friendsList = payload;
+                SafeStorage.setItem('friends', payload);
                 break;
             case 'groupsList':
                 if (!Array.isArray(payload)) throw new Error('groupsList must be array');
                 pageCore.data.groupsList = payload;
+                SafeStorage.setItem('groups', payload);
                 break;
             case 'notifications':
                 if (!Array.isArray(payload)) throw new Error('notifications must be array');
@@ -4727,6 +6530,7 @@ export function updateCoreData(type, payload) {
             case 'settings':
                 if (typeof payload !== 'object') throw new Error('settings must be object');
                 pageCore.data.settings = payload;
+                SafeStorage.setItem('settings', payload);
                 break;
             default:
                 throw new Error(`Unknown data type: ${safeType}`);
@@ -4740,7 +6544,6 @@ export function updateCoreData(type, payload) {
 // =============================================
 // PARENT COORDINATION FUNCTIONS
 // =============================================
-
 export function initializeParentConnection() {
     return ParentConnectionManager.init();
 }
@@ -4796,14 +6599,14 @@ export function updateLocalStateFromSession(sessionData) {
             photoURL: sessionData.user.photoURL || sessionData.user.avatar || ''
         };
         
-        localStorage.setItem(LOCAL_STORAGE_KEYS.USER, JSON.stringify({
+        SafeStorage.setItem('user', {
             uid: sessionData.user.id || sessionData.user._id || sessionData.user.uid,
             displayName: sessionData.user.displayName || sessionData.user.name,
             email: sessionData.user.email,
             photoURL: sessionData.user.photoURL || sessionData.user.avatar
-        }));
+        });
         
-        localStorage.setItem(LOCAL_STORAGE_KEYS.USER_PROFILE, JSON.stringify(userData));
+        SafeStorage.setItem('userProfile', userData);
         
         if (sessionData.token) {
             saveUnifiedToken(sessionData.token);
@@ -4837,11 +6640,9 @@ export function clearLocalSessionState() {
     __SESSION_READY__ = false;
     
     try {
-        localStorage.removeItem(LOCAL_STORAGE_KEYS.USER_TOKEN);
-        localStorage.removeItem('knecta_access_token');
-        localStorage.removeItem('moodchat_token');
-        localStorage.removeItem(LOCAL_STORAGE_KEYS.USER);
-        localStorage.removeItem(LOCAL_STORAGE_KEYS.USER_PROFILE);
+        SafeStorage.removeItem('token');
+        SafeStorage.removeItem('user');
+        SafeStorage.removeItem('userProfile');
     } catch (error) {}
     
     ParentConnectionManager.clearSession();
@@ -4849,8 +6650,11 @@ export function clearLocalSessionState() {
 }
 
 export function handleParentUnavailable() {
-    // Don't restore from cache if parent authority is active
     if (ParentAuthority.isAuthoritativeSession()) {
+        return;
+    }
+    
+    if (LifecycleFSM.isAtLeast(LIFECYCLE_STATES.SESSION_ACTIVE)) {
         return;
     }
     
@@ -4920,7 +6724,6 @@ export function stopBackgroundProcesses() {
 // =============================================
 // GROUP MESSAGE FUNCTIONS
 // =============================================
-
 export function getGroupMessages(groupId) {
     return groupMessages[groupId] || [];
 }
@@ -4928,7 +6731,7 @@ export function getGroupMessages(groupId) {
 export function saveGroupMessages(groupId, messages) {
     groupMessages[groupId] = messages;
     try {
-        localStorage.setItem(LOCAL_STORAGE_KEYS.GROUP_MESSAGES + groupId, JSON.stringify(messages));
+        SafeStorage.setItem(`group_messages_${groupId}`, messages);
     } catch (e) {}
 }
 
@@ -4945,13 +6748,11 @@ export function addGroupMessage(groupId, message) {
     groupMessages[groupId] = messages;
     
     try {
-        localStorage.setItem(LOCAL_STORAGE_KEYS.GROUP_MESSAGES + groupId, JSON.stringify(messages));
+        SafeStorage.setItem(`group_messages_${groupId}`, messages);
     } catch (e) {}
     
-    // Update unread count
     incrementGroupUnreadCount(groupId);
     
-    // Notify parent
     sendMessageToParent(PARENT_MESSAGE_TYPES.GROUP_MESSAGE, {
         groupId,
         message,
@@ -4966,7 +6767,6 @@ export function getGroupUnreadCount(groupId) {
 export function incrementGroupUnreadCount(groupId) {
     if (!groupId) return;
     
-    // Don't increment if this is the currently open chat
     if (currentChatGroup && currentChatGroup.id === groupId) {
         return;
     }
@@ -4975,10 +6775,9 @@ export function incrementGroupUnreadCount(groupId) {
     groupUnreadCounts[groupId] = count;
     
     try {
-        localStorage.setItem(LOCAL_STORAGE_KEYS.GROUP_UNREAD + groupId, count.toString());
+        SafeStorage.setItem(`group_unread_${groupId}`, count);
     } catch (e) {}
     
-    // Notify parent
     sendMessageToParent(PARENT_MESSAGE_TYPES.UNREAD_COUNT_UPDATED, {
         groupId,
         count,
@@ -4992,10 +6791,9 @@ export function resetGroupUnreadCount(groupId) {
     groupUnreadCounts[groupId] = 0;
     
     try {
-        localStorage.setItem(LOCAL_STORAGE_KEYS.GROUP_UNREAD + groupId, '0');
+        SafeStorage.setItem(`group_unread_${groupId}`, 0);
     } catch (e) {}
     
-    // Notify parent
     sendMessageToParent(PARENT_MESSAGE_TYPES.UNREAD_COUNT_UPDATED, {
         groupId,
         count: 0,
@@ -5036,7 +6834,6 @@ export function handleGroupTyping(groupId, userId, isTyping) {
         delete groupTypingUsers[groupId][userId];
     }
     
-    // Notify parent
     sendMessageToParent(PARENT_MESSAGE_TYPES.GROUP_TYPING, {
         groupId,
         userId,
@@ -5048,19 +6845,11 @@ export function handleGroupTyping(groupId, userId, isTyping) {
 // =============================================
 // MAIN INITIALIZATION
 // =============================================
-
 async function safeGroupPageInit() {
     let tries = 0;
-    const MAX_TRIES = 3; // Reduced from 5
+    const MAX_TRIES = 3;
 
-    TransportAgent.send('CHILD_READY', {
-        childId: SECURITY_CONFIG.FRAME_ID,
-        version: MODULE_VERSION,
-        timestamp: Date.now(),
-        module: 'groups'
-    }, { requiresAck: false }).catch(() => {});
-
-    while (!ParentConnectionManager.isReady() && tries < MAX_TRIES && !handshakeCompleted) {
+    while (!ParentConnectionManager.isReady() && tries < MAX_TRIES && !handshakeCompleted && !LifecycleFSM.isAtLeast(LIFECYCLE_STATES.SESSION_ACTIVE)) {
         await new Promise(r => setTimeout(r, 500));
         tries++;
     }
@@ -5096,8 +6885,7 @@ async function originalGroupPageInit() {
             startBackgroundProcesses();
             __SESSION_READY__ = true;
         } else {
-            if (!__SESSION_REQUEST_PENDING__ && !handshakeCompleted) {
-                // Don't request if parent authority is active
+            if (!__SESSION_REQUEST_PENDING__ && !handshakeCompleted && !LifecycleFSM.isAtLeast(LIFECYCLE_STATES.SESSION_ACTIVE)) {
                 if (!ParentAuthority.isAuthoritativeSession()) {
                     ParentConnectionManager.requestSession();
                 }
@@ -5135,14 +6923,14 @@ export async function loadUserDataInBackground() {
                 photoURL: currentUser.photoURL || currentUser.avatar || null
             };
             
-            localStorage.setItem(LOCAL_STORAGE_KEYS.USER, JSON.stringify({
+            SafeStorage.setItem('user', {
                 uid: currentUser.id || currentUser._id || currentUser.uid,
                 displayName: currentUser.displayName || currentUser.name,
                 email: currentUser.email,
                 photoURL: currentUser.photoURL || currentUser.avatar
-            }));
+            });
             
-            localStorage.setItem(LOCAL_STORAGE_KEYS.USER_PROFILE, JSON.stringify(userData));
+            SafeStorage.setItem('userProfile', userData);
             
             updateUserUI();
             __SESSION_READY__ = true;
@@ -5221,38 +7009,36 @@ export function setupResponsiveBehavior() {
 // =============================================
 // CORE GROUP FUNCTIONS
 // =============================================
-
 export function loadCachedDataInstantly() {
     try {
-        const groupsData = localStorage.getItem(LOCAL_STORAGE_KEYS.GROUPS);
+        const groupsData = SafeStorage.getItem('groups');
         if (groupsData) {
-            groups = JSON.parse(groupsData);
+            groups = groupsData;
             isLoadedFromLocalStorage = true;
             updateGroupCounts();
         }
         
-        const myGroupsData = localStorage.getItem(LOCAL_STORAGE_KEYS.MY_GROUPS);
-        if (myGroupsData) myGroups = JSON.parse(myGroupsData);
+        const myGroupsData = SafeStorage.getItem('myGroups');
+        if (myGroupsData) myGroups = myGroupsData;
         
-        const joinedData = localStorage.getItem(LOCAL_STORAGE_KEYS.JOINED_GROUPS);
-        if (joinedData) joinedGroups = JSON.parse(joinedData);
+        const joinedData = SafeStorage.getItem('joinedGroups');
+        if (joinedData) joinedGroups = joinedData;
         
-        const invitesData = localStorage.getItem(LOCAL_STORAGE_KEYS.GROUP_INVITES);
-        if (invitesData) groupInvites = JSON.parse(invitesData);
+        const invitesData = SafeStorage.getItem('groupInvites');
+        if (invitesData) groupInvites = invitesData;
         
-        const adminData = localStorage.getItem(LOCAL_STORAGE_KEYS.ADMIN_GROUPS);
-        if (adminData) adminGroups = JSON.parse(adminData);
+        const adminData = SafeStorage.getItem('adminGroups');
+        if (adminData) adminGroups = adminData;
         
-        const cachedFriends = localStorage.getItem(LOCAL_STORAGE_KEYS.FRIENDS);
-        if (cachedFriends) friends = JSON.parse(cachedFriends);
+        const cachedFriends = SafeStorage.getItem('friends');
+        if (cachedFriends) friends = cachedFriends;
         
-        const cachedUser = localStorage.getItem(LOCAL_STORAGE_KEYS.USER);
+        const cachedUser = SafeStorage.getItem('user');
         if (cachedUser) {
-            currentUser = JSON.parse(cachedUser);
-            userData = JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.USER_PROFILE) || '{}');
+            currentUser = cachedUser;
+            userData = SafeStorage.getItem('userProfile') || {};
         }
         
-        // Load group messages
         const allGroupIds = new Set();
         groups.forEach(g => allGroupIds.add(g.id));
         myGroups.forEach(g => allGroupIds.add(g.id));
@@ -5261,14 +7047,14 @@ export function loadCachedDataInstantly() {
         
         allGroupIds.forEach(groupId => {
             try {
-                const messagesData = localStorage.getItem(LOCAL_STORAGE_KEYS.GROUP_MESSAGES + groupId);
+                const messagesData = SafeStorage.getItem(`group_messages_${groupId}`);
                 if (messagesData) {
-                    groupMessages[groupId] = JSON.parse(messagesData);
+                    groupMessages[groupId] = messagesData;
                 }
                 
-                const unreadData = localStorage.getItem(LOCAL_STORAGE_KEYS.GROUP_UNREAD + groupId);
-                if (unreadData) {
-                    groupUnreadCounts[groupId] = parseInt(unreadData, 10);
+                const unreadData = SafeStorage.getItem(`group_unread_${groupId}`);
+                if (unreadData !== null) {
+                    groupUnreadCounts[groupId] = unreadData;
                 }
             } catch (e) {}
         });
@@ -5280,9 +7066,9 @@ export function loadCachedDataInstantly() {
 
 export function loadUniqueFeaturesData() {
     try {
-        const cachedPurposes = localStorage.getItem(LOCAL_STORAGE_KEYS.GROUP_PURPOSES);
+        const cachedPurposes = SafeStorage.getItem('groupPurposes');
         if (cachedPurposes) {
-            const purposes = JSON.parse(cachedPurposes);
+            const purposes = cachedPurposes;
             groups.forEach(group => {
                 if (purposes[group.id]) {
                     group.purpose = purposes[group.id];
@@ -5290,9 +7076,9 @@ export function loadUniqueFeaturesData() {
             });
         }
         
-        const cachedMoods = localStorage.getItem(LOCAL_STORAGE_KEYS.GROUP_MOODS);
+        const cachedMoods = SafeStorage.getItem('groupMoods');
         if (cachedMoods) {
-            const moods = JSON.parse(cachedMoods);
+            const moods = cachedMoods;
             groups.forEach(group => {
                 if (moods[group.id]) {
                     group.mood = moods[group.id];
@@ -5300,9 +7086,9 @@ export function loadUniqueFeaturesData() {
             });
         }
         
-        const cachedRules = localStorage.getItem(LOCAL_STORAGE_KEYS.GROUP_POSTING_RULES);
+        const cachedRules = SafeStorage.getItem('groupPostingRules');
         if (cachedRules) {
-            const rules = JSON.parse(cachedRules);
+            const rules = cachedRules;
             groups.forEach(group => {
                 if (rules[group.id]) {
                     group.postingRule = rules[group.id];
@@ -5310,9 +7096,9 @@ export function loadUniqueFeaturesData() {
             });
         }
         
-        const cachedModes = localStorage.getItem(LOCAL_STORAGE_KEYS.USER_PARTICIPATION_MODES);
+        const cachedModes = SafeStorage.getItem('participationMode');
         if (cachedModes) {
-            currentParticipationMode = JSON.parse(cachedModes);
+            currentParticipationMode = cachedModes;
         }
     } catch (error) {}
 }
@@ -5466,7 +7252,6 @@ export function addGroupItem(groupData, container, type) {
         const ruleInfo = postingRules[postingRule];
         const pulse = calculateGroupPulse(safeGroupData);
         
-        // Get unread count
         const unreadCount = groupUnreadCounts[safeGroupData.id] || 0;
         
         groupItem.innerHTML = `
@@ -5577,9 +7362,8 @@ export function handleGroupAction(action, groupData, type, button) {
 // =============================================
 // BACKGROUND SYNC FUNCTIONS
 // =============================================
-
 let _backgroundSyncRetryCount = 0;
-const MAX_BACKGROUND_RETRY = 2; // Reduced from 3
+const MAX_BACKGROUND_RETRY = 2;
 
 export function startBackgroundSync() {
     try {
@@ -5629,7 +7413,7 @@ export async function backgroundSyncWithServer() {
         await syncGroupInvitesFromServer();
         await syncUniqueFeaturesData();
         
-        localStorage.setItem(LOCAL_STORAGE_KEYS.LAST_SYNC, Date.now().toString());
+        SafeStorage.setItem('lastSync', Date.now().toString());
         _backgroundSyncRetryCount = 0;
     } catch (error) {}
 }
@@ -5637,7 +7421,6 @@ export async function backgroundSyncWithServer() {
 // =============================================
 // GROUP MEMBER MANAGEMENT FUNCTIONS
 // =============================================
-
 export function getUserRoleInGroup(groupData, userId) {
     if (!groupData || !userId) return null;
     
@@ -5671,13 +7454,10 @@ export function canUserAddMembers(groupData, userId) {
 export function canUserRemoveMembers(groupData, userId, targetUserId) {
     if (!groupData || !userId || !targetUserId) return false;
     
-    // Cannot remove creator
     if (groupData.createdBy === targetUserId) return false;
     
-    // Creator can remove anyone
     if (groupData.createdBy === userId) return true;
     
-    // Admins can remove members and moderators
     const userRole = getUserRoleInGroup(groupData, userId);
     const targetRole = getUserRoleInGroup(groupData, targetUserId);
     
@@ -5695,10 +7475,8 @@ export function canUserRemoveMembers(groupData, userId, targetUserId) {
 export function canUserChangeRole(groupData, userId, targetUserId) {
     if (!groupData || !userId || !targetUserId) return false;
     
-    // Cannot change creator's role
     if (groupData.createdBy === targetUserId) return false;
     
-    // Only creator can change admin roles
     if (groupData.createdBy === userId) return true;
     
     return false;
@@ -5739,13 +7517,10 @@ export function addMemberToGroup(groupId, userId, role = 'member') {
     group.members.push(newMember);
     group.memberCount = group.members.length;
     
-    // Update all group arrays
     updateGroupInAllLists(group);
     
-    // Save to storage
     saveGroupsToLocalStorage();
     
-    // Notify parent
     sendMessageToParent(PARENT_MESSAGE_TYPES.MEMBER_ADDED, {
         groupId: group.id,
         member: newMember,
@@ -5780,13 +7555,10 @@ export function removeMemberFromGroup(groupId, userId) {
     group.members.splice(memberIndex, 1);
     group.memberCount = group.members.length;
     
-    // Update all group arrays
     updateGroupInAllLists(group);
     
-    // Save to storage
     saveGroupsToLocalStorage();
     
-    // Notify parent
     sendMessageToParent(PARENT_MESSAGE_TYPES.MEMBER_REMOVED, {
         groupId: group.id,
         userId,
@@ -5821,13 +7593,10 @@ export function changeMemberRole(groupId, userId, newRole) {
     const oldRole = member.role;
     member.role = newRole;
     
-    // Update all group arrays
     updateGroupInAllLists(group);
     
-    // Save to storage
     saveGroupsToLocalStorage();
     
-    // Notify parent
     sendMessageToParent(PARENT_MESSAGE_TYPES.MEMBER_ROLE_CHANGED, {
         groupId: group.id,
         userId,
@@ -5850,27 +7619,22 @@ export function deleteGroup(groupId) {
         return { success: false, reason: 'permission_denied' };
     }
     
-    // Remove from all lists
     groups = groups.filter(g => g.id !== groupId);
     myGroups = myGroups.filter(g => g.id !== groupId);
     adminGroups = adminGroups.filter(g => g.id !== groupId);
     joinedGroups = joinedGroups.filter(g => g.id !== groupId);
     groupInvites = groupInvites.filter(invite => invite.groupId !== groupId && invite.id !== groupId);
     
-    // Remove messages
     delete groupMessages[groupId];
     delete groupUnreadCounts[groupId];
     
-    // Remove from storage
     try {
-        localStorage.removeItem(LOCAL_STORAGE_KEYS.GROUP_MESSAGES + groupId);
-        localStorage.removeItem(LOCAL_STORAGE_KEYS.GROUP_UNREAD + groupId);
+        SafeStorage.removeItem(`group_messages_${groupId}`);
+        SafeStorage.removeItem(`group_unread_${groupId}`);
     } catch (e) {}
     
-    // Save to storage
     saveGroupsToLocalStorage();
     
-    // If this is the currently open chat, close it
     if (currentChatGroup && currentChatGroup.id === groupId) {
         if (typeof closeGroupChatMobile === 'function') {
             closeGroupChatMobile();
@@ -5878,7 +7642,6 @@ export function deleteGroup(groupId) {
         currentChatGroup = null;
     }
     
-    // Notify parent
     sendMessageToParent(PARENT_MESSAGE_TYPES.GROUP_DELETED, {
         groupId,
         timestamp: Date.now()
@@ -5888,36 +7651,30 @@ export function deleteGroup(groupId) {
 }
 
 export function updateGroupInAllLists(updatedGroup) {
-    // Update in groups
     const groupIndex = groups.findIndex(g => g.id === updatedGroup.id);
     if (groupIndex !== -1) {
         groups[groupIndex] = updatedGroup;
     }
     
-    // Update in myGroups
     const myIndex = myGroups.findIndex(g => g.id === updatedGroup.id);
     if (myIndex !== -1) {
         myGroups[myIndex] = updatedGroup;
     }
     
-    // Update in adminGroups
     const adminIndex = adminGroups.findIndex(g => g.id === updatedGroup.id);
     if (adminIndex !== -1) {
         adminGroups[adminIndex] = updatedGroup;
     }
     
-    // Update in joinedGroups
     const joinedIndex = joinedGroups.findIndex(g => g.id === updatedGroup.id);
     if (joinedIndex !== -1) {
         joinedGroups[joinedIndex] = updatedGroup;
     }
     
-    // Update currentChatGroup if it's this group
     if (currentChatGroup && currentChatGroup.id === updatedGroup.id) {
         currentChatGroup = updatedGroup;
     }
     
-    // Update selectedGroup if it's this group
     if (selectedGroup && selectedGroup.id === updatedGroup.id) {
         selectedGroup = updatedGroup;
     }
@@ -5926,7 +7683,6 @@ export function updateGroupInAllLists(updatedGroup) {
 // =============================================
 // ONLINE OPERATIONS (API)
 // =============================================
-
 export const addMemberOnline = async function(groupId, userId, role = 'member') {
     if (!isGroupOperationReady()) {
         queueGroupAction({ type: 'addMember', groupId, userId, role });
@@ -5943,7 +7699,6 @@ export const addMemberOnline = async function(groupId, userId, role = 'member') 
             throw new Error(response?.message || 'Failed to add member');
         }
         
-        // Update local state
         const group = groups.find(g => g.id === groupId) || 
                       myGroups.find(g => g.id === groupId) || 
                       adminGroups.find(g => g.id === groupId);
@@ -5983,7 +7738,6 @@ export const removeMemberOnline = async function(groupId, userId) {
             throw new Error(response?.message || 'Failed to remove member');
         }
         
-        // Update local state
         const group = groups.find(g => g.id === groupId) || 
                       myGroups.find(g => g.id === groupId) || 
                       adminGroups.find(g => g.id === groupId);
@@ -6016,7 +7770,6 @@ export const changeMemberRoleOnline = async function(groupId, userId, role) {
             throw new Error(response?.message || 'Failed to change role');
         }
         
-        // Update local state
         const group = groups.find(g => g.id === groupId) || 
                       myGroups.find(g => g.id === groupId) || 
                       adminGroups.find(g => g.id === groupId);
@@ -6050,7 +7803,6 @@ export const deleteGroupOnline = async function(groupId) {
             throw new Error(response?.message || 'Failed to delete group');
         }
         
-        // Update local state
         deleteGroup(groupId);
         
     } catch (error) {
@@ -6061,7 +7813,6 @@ export const deleteGroupOnline = async function(groupId) {
 // =============================================
 // CHAT AND GROUP MANAGEMENT FUNCTIONS
 // =============================================
-
 export const openGroupChat = async function(groupData) {
     if (!isGroupOperationReady()) {
         queueGroupAction(() => openGroupChat(groupData));
@@ -6077,7 +7828,6 @@ export const openGroupChat = async function(groupData) {
         
         currentChatGroup = groupData;
         
-        // Reset unread count for this group
         resetGroupUnreadCount(groupData.id);
         
         const chatTitle = safeGetElement('#chatTitle');
@@ -6339,8 +8089,8 @@ export function loadUniqueFeaturesPanels(groupId) {
 
 export async function loadGroupNotes(groupId) {
     try {
-        const cacheKey = LOCAL_STORAGE_KEYS.GROUP_NOTES + groupId;
-        const cachedNotes = localStorage.getItem(cacheKey);
+        const cacheKey = `group_notes_${groupId}`;
+        const cachedNotes = SafeStorage.getItem(cacheKey);
         
         const groupNotesContent = safeGetElement('#groupNotesContent');
         if (groupNotesContent) {
@@ -6356,7 +8106,7 @@ export async function loadGroupNotes(groupId) {
             if (response && response.success && response.data && groupNotesContent) {
                 const notes = response.data.notes || '';
                 groupNotesContent.innerHTML = notes || '<p style="margin: 0; color: var(--text-secondary);">No notes yet. Add important information here.</p>';
-                localStorage.setItem(cacheKey, notes);
+                SafeStorage.setItem(cacheKey, notes);
             }
         } catch (error) {}
         
@@ -6372,13 +8122,13 @@ export async function loadGroupNotes(groupId) {
 
 export async function loadGroupEvents(groupId) {
     try {
-        const cacheKey = LOCAL_STORAGE_KEYS.GROUP_EVENTS + groupId;
-        const cachedEvents = localStorage.getItem(cacheKey);
+        const cacheKey = `group_events_${groupId}`;
+        const cachedEvents = SafeStorage.getItem(cacheKey);
         
         let events = [];
         if (cachedEvents) {
             try {
-                events = JSON.parse(cachedEvents);
+                events = cachedEvents;
             } catch (e) {}
         }
         
@@ -6386,11 +8136,11 @@ export async function loadGroupEvents(groupId) {
             const response = await secureApiCall(`/groups/${groupId}/events`, { silent: true });
             if (response && response.success && response.data) {
                 events = response.data;
-                localStorage.setItem(cacheKey, JSON.stringify(events));
+                SafeStorage.setItem(cacheKey, events);
             } else {
                 if (events.length === 0 && currentUser) {
                     events = generateUniqueEventsForUser(groupId, currentUser.uid || currentUser.id);
-                    localStorage.setItem(cacheKey, JSON.stringify(events));
+                    SafeStorage.setItem(cacheKey, events);
                 }
             }
         } catch (error) {}
@@ -6496,24 +8246,24 @@ export function hashCode(str) {
 
 export async function loadTransparencyLog(groupId) {
     try {
-        const cacheKey = LOCAL_STORAGE_KEYS.GROUP_TRANSPARENCY + groupId;
-        const cachedLog = localStorage.getItem(cacheKey);
+        const cacheKey = `group_transparency_${groupId}`;
+        const cachedLog = SafeStorage.getItem(cacheKey);
         
         let log = [];
         if (cachedLog) {
             try {
-                log = JSON.parse(cachedLog);
+                log = cachedLog;
             } catch (e) {}
         } else {
             log = generateInitialTransparencyLog(groupId);
-            localStorage.setItem(cacheKey, JSON.stringify(log));
+            SafeStorage.setItem(cacheKey, log);
         }
         
         try {
             const response = await secureApiCall(`/groups/${groupId}/transparency`, { silent: true });
             if (response && response.success && response.data) {
                 log = response.data;
-                localStorage.setItem(cacheKey, JSON.stringify(log));
+                SafeStorage.setItem(cacheKey, log);
             }
         } catch (error) {}
         
@@ -6723,12 +8473,12 @@ export async function loadGroupChatMessages(groupId) {
         const chatMessages = safeGetElement('#chatMessages');
         if (!chatMessages) return;
         
-        const cachedMessagesKey = LOCAL_STORAGE_KEYS.GROUP_MESSAGES + groupId;
-        const cachedMessages = localStorage.getItem(cachedMessagesKey);
+        const cachedMessagesKey = `group_messages_${groupId}`;
+        const cachedMessages = SafeStorage.getItem(cachedMessagesKey);
         
         if (cachedMessages) {
             try {
-                const messages = JSON.parse(cachedMessages);
+                const messages = cachedMessages;
                 messages.forEach(message => {
                     addMessageToChat(message, false);
                 });
@@ -6835,8 +8585,8 @@ export function addSystemMessage(content) {
 
 export function saveMessageToCache(groupId, message) {
     try {
-        const cacheKey = LOCAL_STORAGE_KEYS.GROUP_MESSAGES + groupId;
-        const cachedMessages = JSON.parse(localStorage.getItem(cacheKey) || '[]');
+        const cacheKey = `group_messages_${groupId}`;
+        const cachedMessages = SafeStorage.getItem(cacheKey) || [];
         
         if (!cachedMessages.some(m => m.id === message.id)) {
             cachedMessages.push(message);
@@ -6845,7 +8595,7 @@ export function saveMessageToCache(groupId, message) {
                 cachedMessages.splice(0, cachedMessages.length - 100);
             }
             
-            localStorage.setItem(cacheKey, JSON.stringify(cachedMessages));
+            SafeStorage.setItem(cacheKey, cachedMessages);
         }
     } catch (error) {}
 }
@@ -6926,7 +8676,6 @@ export const sendGroupMessage = async function() {
                 };
                 saveMessageToCache(currentChatGroup.id, finalMessage);
                 
-                // Add to group messages
                 addGroupMessage(currentChatGroup.id, finalMessage);
                 
                 if (isAnonymousMode) {
@@ -6936,7 +8685,6 @@ export const sendGroupMessage = async function() {
                 throw new Error(response?.message || 'Failed to send message');
             }
         } catch (error) {
-            // Add to offline queue
             queueGroupAction({
                 type: 'sendMessage',
                 groupId: currentChatGroup.id,
@@ -6966,7 +8714,7 @@ export function toggleSilentMode() {
             if (chatInput) chatInput.placeholder = 'Silent mode: Read only';
         }
         
-        localStorage.setItem(LOCAL_STORAGE_KEYS.USER_PARTICIPATION_MODES, JSON.stringify(currentParticipationMode));
+        SafeStorage.setItem('participationMode', currentParticipationMode);
         updateParticipationModeButtons();
     } catch (error) {}
 }
@@ -7015,7 +8763,6 @@ export function setupTypingListener(groupId) {
         const chatInput = safeGetElement('#chatInput');
         if (!chatInput) return;
         
-        // Remove existing listeners to avoid duplicates
         const newChatInput = chatInput.cloneNode(true);
         chatInput.parentNode.replaceChild(newChatInput, chatInput);
         
@@ -7286,11 +9033,11 @@ export async function logTransparencyAction(groupId, action, targetId = null) {
             timestamp: new Date()
         };
         
-        const cacheKey = LOCAL_STORAGE_KEYS.GROUP_TRANSPARENCY + groupId;
-        const cachedLog = JSON.parse(localStorage.getItem(cacheKey) || '[]');
+        const cacheKey = `group_transparency_${groupId}`;
+        const cachedLog = SafeStorage.getItem(cacheKey) || [];
         cachedLog.unshift(logEntry);
         if (cachedLog.length > 50) cachedLog.pop();
-        localStorage.setItem(cacheKey, JSON.stringify(cachedLog));
+        SafeStorage.setItem(cacheKey, cachedLog);
         
         await secureApiCall(`/groups/${groupId}/transparency`, {
             method: 'POST',
@@ -7454,7 +9201,6 @@ export const saveGroupSettings = async function(groupData) {
         if (response && response.success) {
             Object.assign(groupData, settings);
             
-            // Update in all lists
             updateGroupInAllLists(groupData);
             
             logTransparencyAction(groupData.id, 'Updated group settings');
@@ -7467,7 +9213,6 @@ export const saveGroupSettings = async function(groupData) {
             const adminManagementModal = safeGetElement('#adminManagementModal');
             if (adminManagementModal) adminManagementModal.classList.remove('active');
             
-            // Save to storage
             saveGroupsToLocalStorage();
         } else {
             throw new Error(response?.message || 'Failed to save settings');
@@ -7677,7 +9422,6 @@ export const createGroupOnline = async function(groupData) {
         
         const newGroup = response.data;
         
-        // Add creator info
         newGroup.createdBy = currentUser?.uid || currentUser?.id;
         newGroup.createdAt = Date.now();
         newGroup.members = members.map(userId => ({
@@ -7714,7 +9458,6 @@ export const createGroupOnline = async function(groupData) {
         selectedFriends = [];
         showGroupDetails(newGroup, 'my_group');
         
-        // Notify parent
         sendMessageToParent(PARENT_MESSAGE_TYPES.GROUP_CREATED, {
             group: newGroup,
             timestamp: Date.now()
@@ -7761,7 +9504,6 @@ export const joinGroupOnline = async function(groupId) {
         const groupInviteModal = safeGetElement('#groupInviteModal');
         if (groupInviteModal) groupInviteModal.classList.remove('active');
         
-        // Notify parent
         sendMessageToParent(PARENT_MESSAGE_TYPES.MEMBER_ADDED, {
             groupId,
             member: {
@@ -7808,7 +9550,6 @@ export const leaveGroupOnline = async function(groupId) {
             selectedGroup = null;
         }
         
-        // If this is the currently open chat, close it
         if (currentChatGroup && currentChatGroup.id === groupId) {
             if (typeof closeGroupChatMobile === 'function') {
                 closeGroupChatMobile();
@@ -7816,7 +9557,6 @@ export const leaveGroupOnline = async function(groupId) {
             currentChatGroup = null;
         }
         
-        // Notify parent
         sendMessageToParent(PARENT_MESSAGE_TYPES.MEMBER_REMOVED, {
             groupId,
             userId: currentUser?.uid || currentUser?.id,
@@ -8221,7 +9961,6 @@ export async function loadGroupDetails(groupData, type) {
 // =============================================
 // DATA SYNC FUNCTIONS
 // =============================================
-
 export async function syncGroupsFromServer() {
     if (!authReady && !SessionMirror.isAuthenticated()) return;
     
@@ -8270,11 +10009,11 @@ export async function syncGroupsFromServer() {
             joinedGroups = serverJoinedGroups;
             adminGroups = serverAdminGroups;
             
-            localStorage.setItem(LOCAL_STORAGE_KEYS.GROUPS, JSON.stringify(groups));
-            localStorage.setItem(LOCAL_STORAGE_KEYS.MY_GROUPS, JSON.stringify(myGroups));
-            localStorage.setItem(LOCAL_STORAGE_KEYS.JOINED_GROUPS, JSON.stringify(joinedGroups));
-            localStorage.setItem(LOCAL_STORAGE_KEYS.ADMIN_GROUPS, JSON.stringify(adminGroups));
-            localStorage.setItem(LOCAL_STORAGE_KEYS.LAST_CACHE_TIME, Date.now().toString());
+            SafeStorage.setItem('groups', groups);
+            SafeStorage.setItem('myGroups', myGroups);
+            SafeStorage.setItem('joinedGroups', joinedGroups);
+            SafeStorage.setItem('adminGroups', adminGroups);
+            SafeStorage.setItem('lastCacheTime', Date.now().toString());
             
             const allGroupsSection = safeGetElement('#allGroupsSection');
             if (allGroupsSection && allGroupsSection.classList.contains('active')) {
@@ -8306,7 +10045,7 @@ export async function syncGroupInvitesFromServer() {
         
         if (JSON.stringify(serverInvites) !== JSON.stringify(groupInvites)) {
             groupInvites = serverInvites;
-            localStorage.setItem(LOCAL_STORAGE_KEYS.GROUP_INVITES, JSON.stringify(groupInvites));
+            SafeStorage.setItem('groupInvites', groupInvites);
             
             const invitesCountEl = safeGetElement('#invitesCount');
             const invitesSectionCountEl = safeGetElement('#invitesSectionCount');
@@ -8322,7 +10061,7 @@ export async function syncUniqueFeaturesData() {
     try {
         const purposesResponse = await secureApiCall('/groups/purposes', { silent: true });
         if (purposesResponse && purposesResponse.success && purposesResponse.data) {
-            localStorage.setItem(LOCAL_STORAGE_KEYS.GROUP_PURPOSES, JSON.stringify(purposesResponse.data));
+            SafeStorage.setItem('groupPurposes', purposesResponse.data);
             
             purposesResponse.data.forEach(purpose => {
                 const group = groups.find(g => g.id === purpose.groupId);
@@ -8334,7 +10073,7 @@ export async function syncUniqueFeaturesData() {
         
         const moodsResponse = await secureApiCall('/groups/moods', { silent: true });
         if (moodsResponse && moodsResponse.success && moodsResponse.data) {
-            localStorage.setItem(LOCAL_STORAGE_KEYS.GROUP_MOODS, JSON.stringify(moodsResponse.data));
+            SafeStorage.setItem('groupMoods', moodsResponse.data);
             
             moodsResponse.data.forEach(mood => {
                 const group = groups.find(g => g.id === mood.groupId);
@@ -8407,13 +10146,13 @@ export function searchGroups(searchTerm) {
 
 export function saveGroupsToLocalStorage() {
     try {
-        localStorage.setItem(LOCAL_STORAGE_KEYS.GROUPS, JSON.stringify(groups));
-        localStorage.setItem(LOCAL_STORAGE_KEYS.MY_GROUPS, JSON.stringify(myGroups));
-        localStorage.setItem(LOCAL_STORAGE_KEYS.JOINED_GROUPS, JSON.stringify(joinedGroups));
-        localStorage.setItem(LOCAL_STORAGE_KEYS.GROUP_INVITES, JSON.stringify(groupInvites));
-        localStorage.setItem(LOCAL_STORAGE_KEYS.ADMIN_GROUPS, JSON.stringify(adminGroups));
-        localStorage.setItem(LOCAL_STORAGE_KEYS.PENDING_ACTIONS, JSON.stringify(pendingGroupActions));
-        localStorage.setItem(LOCAL_STORAGE_KEYS.LAST_CACHE_TIME, Date.now().toString());
+        SafeStorage.setItem('groups', groups);
+        SafeStorage.setItem('myGroups', myGroups);
+        SafeStorage.setItem('joinedGroups', joinedGroups);
+        SafeStorage.setItem('groupInvites', groupInvites);
+        SafeStorage.setItem('adminGroups', adminGroups);
+        SafeStorage.setItem('pendingActions', pendingGroupActions);
+        SafeStorage.setItem('lastCacheTime', Date.now().toString());
     } catch (error) {}
 }
 
@@ -8472,7 +10211,7 @@ export function showNotification(message, type = 'success') {
 
 export function processPendingOfflineActions() {
     try {
-        const pendingActions = JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.PENDING_ACTIONS) || '[]');
+        const pendingActions = SafeStorage.getItem('pendingActions') || [];
         if (pendingActions.length > 0) {}
     } catch (error) {}
 }
@@ -8498,7 +10237,6 @@ export function updateCreateGroupPostingRulesUI() {
 // =============================================
 // PARENT MESSAGE HANDLERS
 // =============================================
-
 export function handleGroupCreatedFromParent(groupData) {
     if (!groupData) return;
     
@@ -8539,8 +10277,8 @@ export function handleGroupDeletedFromParent(groupId) {
     delete groupUnreadCounts[groupId];
     
     try {
-        localStorage.removeItem(LOCAL_STORAGE_KEYS.GROUP_MESSAGES + groupId);
-        localStorage.removeItem(LOCAL_STORAGE_KEYS.GROUP_UNREAD + groupId);
+        SafeStorage.removeItem(`group_messages_${groupId}`);
+        SafeStorage.removeItem(`group_unread_${groupId}`);
     } catch (e) {}
     
     if (currentChatGroup && currentChatGroup.id === groupId) {
@@ -8592,7 +10330,6 @@ export function handleMemberRemovedFromParent(groupId, userId) {
         updateGroupCounts();
     }
     
-    // If the removed user is the current user, handle leaving
     if (userId === (currentUser?.uid || currentUser?.id)) {
         groups = groups.filter(g => g.id !== groupId);
         myGroups = myGroups.filter(g => g.id !== groupId);
@@ -8647,7 +10384,7 @@ export function handleUnreadCountUpdatedFromParent(groupId, count) {
     groupUnreadCounts[groupId] = count;
     
     try {
-        localStorage.setItem(LOCAL_STORAGE_KEYS.GROUP_UNREAD + groupId, count.toString());
+        SafeStorage.setItem(`group_unread_${groupId}`, count);
     } catch (e) {}
 }
 
@@ -8668,7 +10405,6 @@ export function handleGroupTypingFromParent(groupId, userId, isTyping) {
 // =============================================
 // MISSING FUNCTION EXPORTS
 // =============================================
-
 export function showGroupOptions(groupData) {
     try {} catch (error) {}
 }
@@ -8899,12 +10635,19 @@ export function showGroupInviteDetails() {
 // =============================================
 // INITIALIZATION
 // =============================================
-
 if (typeof document !== 'undefined') {
     document.addEventListener('DOMContentLoaded', () => {
         try {
+            SafeStorage.init();
             IframeAuthority.init();
             ParentConnectionManager.init();
+            
+            // Start initialization timeline (v5.0) - this is the ONLY source of handshake
+            InitTimeline.init();
+            
+            // Initialize other systems
+            SessionVerifier.init();
+            OfflineManager.init();
             
             initializeGroupsCore();
             initPageCore();
@@ -8918,7 +10661,6 @@ if (typeof document !== 'undefined') {
 // =============================================
 // WINDOW EXPOSURES
 // =============================================
-
 if (typeof window !== 'undefined') {
     const secureExpose = (name, fn) => {
         Object.defineProperty(window, name, {
@@ -8960,41 +10702,55 @@ if (typeof window !== 'undefined') {
     secureExpose('clearAPICache', () => API_WRAPPER.clearCache());
     secureExpose('getIframeDebug', () => false);
     secureExpose('getIframeState', () => ({
+        lifecycle: LifecycleFSM.getState(),
+        iframeState: IframeStateMachine.getState(),
         startup: StartupGovernor.getState(),
         session: SessionMirror.getState(),
         connection: ParentConnectionManager.getStatus(),
         transport: TransportAgent.getStats(),
         api: API_WRAPPER.getStats(),
         handshake: HandshakeClient.getState(),
-        parentAuthority: ParentAuthority.getState()
+        parentAuthority: ParentAuthority.getState(),
+        queueLength: MessageQueue.getQueueLength(),
+        initTimeline: {
+            moduleRegistered: InitTimeline.isModuleRegistered ? InitTimeline.isModuleRegistered() : false,
+            sessionReceived: InitTimeline.isSessionReceived ? InitTimeline.isSessionReceived() : false,
+            parentReady: InitTimeline.isParentReady ? InitTimeline.isParentReady() : false
+        }
     }));
+    
+    // Expose retryConnection for offline mode
+    secureExpose('retryConnection', () => OfflineManager.retryConnection());
 }
 
 // =============================================
 // COMPREHENSIVE EXPORTS - ALL REQUIRED EXPORTS
 // =============================================
-
-
 export {
-     // Flags and state
-        isPageInitialized,
-        authReady,
-        authCheckComplete,
-        backgroundSyncRunning,
-        syncIntervalId,
-        apiInitialized,
-        tokenReadyPromise,
-        tokenReadyResolve,
-        tokenReadyReject,
-        tokenQueue,
-        isProcessingTokenQueue,
-    
-        // Parent connection
-        PARENT_MESSAGE_TYPES,
-        HandshakeClient,
-        
-        // Parent authority
-        ParentAuthority,
+    LifecycleFSM,
+    LIFECYCLE_STATES,
+    IframeStateMachine,
+    IFRAME_STATES,
+    isPageInitialized,
+    authReady,
+    authCheckComplete,
+    backgroundSyncRunning,
+    syncIntervalId,
+    apiInitialized,
+    tokenReadyPromise,
+    tokenReadyResolve,
+    tokenReadyReject,
+    tokenQueue,
+    isProcessingTokenQueue,
+    PARENT_MESSAGE_TYPES,
+    HandshakeClient,
+    ParentAuthority,
+    InitTimeline,
+    SessionVerifier,
+    HeartbeatSystem,
+    BroadcastHandler,
+    OfflineManager,
+    MessageQueue
 };
 
 // =============================================

@@ -1,15 +1,43 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 <head>
+<script>
+// Suppress iframe sandbox warnings (usually from extensions)
+(function() {
+    const originalError = console.error;
+    const originalWarn = console.warn;
+    
+    console.error = function(msg) {
+        if (msg && msg.includes && (
+            msg.includes('iframe which has both') ||
+            msg.includes('sandbox')
+        )) {
+            return;
+        }
+        originalError.apply(console, arguments);
+    };
+    
+    console.warn = function(msg) {
+        if (msg && msg.includes && (
+            msg.includes('iframe which has both') ||
+            msg.includes('sandbox')
+        )) {
+            return;
+        }
+        originalWarn.apply(console, arguments);
+    };
+})();
+</script>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=yes">
     <title>Call - Secure Voice & Video Calls</title>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="manifest" href="/manifest.json">
-    
+    <link rel="stylesheet" href="/css/vendor/font-awesome.min.css">
+<link rel="stylesheet" href="/css/vendor/pickr-nano.min.css">
+<link rel="stylesheet" href="/css/vendor/viewer.min.css">
+<link rel="stylesheet" href="/css/vendor/spectrum.min.css">
+<link rel="stylesheet" href="/css/vendor/video-js.min.css">
     <!-- External libraries (non-module) -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/4.3.0/marked.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.4.7/peerjs.min.js"></script>
     <link rel="stylesheet" href="calls.css">
     
     <!-- Preconnect to API endpoints for better performance -->
@@ -2269,6 +2297,7 @@
             z-index: 2;
         }
     </style>
+    <link rel="stylesheet" href="/css/suppress-webgl.css">
 </head>
 <body>
     <!-- Debug Toggle (only visible in debug mode) -->
@@ -2975,10 +3004,23 @@
     <!-- Notification Area -->
     <div class="notification-area" id="notificationArea"></div>
     
-    <!-- External vendor libraries (loaded as regular scripts) -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/4.3.0/marked.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.4.7/peerjs.min.js"></script>
+    <!-- Scripts loaded in correct order -->
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
     
+    <!-- All vendor libraries (regular scripts, not modules) -->
+    <script src="/js/vendor/qrcode.min.js"></script>
+    <script src="/js/vendor/RecordRTC.min.js"></script>
+    <script src="/js/vendor/viewer.min.js"></script>
+    <script src="/js/vendor/wavesurfer.min.js"></script>
+    <script src="/js/vendor/jsQR.min.js"></script>
+    <script src="/js/vendor/peerjs.min.js"></script>
+    <script src="/js/vendor/spectrum.min.js"></script>
+    <script src="/js/vendor/video.min.js"></script>
+    <script type="module" src="/js/vendor/emoji-picker.js"></script>
+    <script src="/js/vendor/chart.min.js"></script>
+    <script src="/js/vendor/pickr.min.js"></script>
+    <script src="/js/vendor/marked.min.js"></script>
+
     <!-- Application modules (ES6 modules) - loaded in correct order -->
     <script type="module" src="calls-core.js"></script>
     <script type="module" src="calls-ui.js"></script>
@@ -3004,6 +3046,30 @@
                     if (el) el.style.display = 'none';
                 });
             });
+
+            // Initialize UI system when core is ready
+            async function initializeApp() {
+                try {
+                    // Wait for core to be ready (up to 10 seconds)
+                    if (window.callsCore && window.callsCore.waitForReady) {
+                        await window.callsCore.waitForReady(10000);
+                    }
+                    
+                    // Initialize UI system
+                    if (window.callsUI && window.callsUI.initializeUISystem) {
+                        await window.callsUI.initializeUISystem();
+                    }
+                } catch (error) {
+                    // Silent fail - UI will still work in fallback mode
+                }
+            }
+
+            // Start initialization after DOM is loaded
+            if (document.readyState === 'loading') {
+                document.addEventListener('DOMContentLoaded', initializeApp);
+            } else {
+                initializeApp();
+            }
         })();
     </script>
     
@@ -3056,29 +3122,19 @@
                     try {
                         // Get core status
                         const core = window.callsCore;
-                        const ui = window.callsUI;
                         
-                        // Use new modules if available
-                        const env = core?.IframeEnvironment?.detect?.() || 
-                                   core?.EnvironmentDetector?.detect?.() || 'Unknown';
-                        
+                        const env = core?.IframeEnvironment?.detect?.() || 'Unknown';
                         document.getElementById('debugEnv').textContent = env;
                         
-                        const state = core?.StartupGovernor?.getState?.() || 
-                                     core?.currentState || 'Unknown';
+                        const state = core?.StateGovernor?.getState?.() || 'Unknown';
                         document.getElementById('debugState').textContent = state;
                         
-                        const handshake = core?.IframeHandshakeAuthority?.getStatus?.() || 
-                                         core?.HandshakeClient?.getStatus?.() || {};
+                        const handshake = core?.IframeHandshakeAuthority?.getStatus?.() || {};
                         document.getElementById('debugHandshake').textContent = 
-                            handshake.handshakeDone ? 'Complete' : 
-                            handshake.state === 'in_progress' ? 'In Progress' : 
-                            handshake.state === 'timeout' ? 'Timeout' : 'Pending';
+                            handshake.handshakeComplete ? 'Complete' : 'Pending';
                         
-                        const sessionValid = core?.IframeSessionClient?.isValid?.() ? 'Valid' : 
-                                            core?.SessionClient?.isValid?.() ? 'Valid' : 'None';
-                        const sessionTime = core?.IframeSessionClient?.getTimeRemaining?.() || 
-                                           core?.SessionClient?.getTimeRemaining?.() || 0;
+                        const sessionValid = core?.IframeSessionClient?.isValid?.() ? 'Valid' : 'None';
+                        const sessionTime = core?.IframeSessionClient?.getTimeRemaining?.() || 0;
                         document.getElementById('debugSession').textContent = sessionTime > 0 ? 
                             `${sessionValid} (${Math.round(sessionTime/1000)}s)` : sessionValid;
                         
@@ -3093,8 +3149,7 @@
                             recovery.recoveryInProgress ? 'In Progress' : 
                             recovery.recoveryAttempts > 0 ? `${recovery.recoveryAttempts} attempts` : 'None';
                         
-                        const transport = core?.IframeTransport?.getStatus?.() || 
-                                         core?.TransportAgent?.getStatus?.() || {};
+                        const transport = core?.IframeTransport?.getStatus?.() || {};
                         document.getElementById('debugTransport').textContent = 
                             `${transport.queueSize || 0} pending, ${transport.offlineQueueSize || 0} offline`;
                         
@@ -3143,24 +3198,16 @@
                 
                 // Expose diagnostics globally (debug only)
                 window.callsDebug = {
-                    getCoreStatus: () => window.callsCore?.iframeCore?.diag ? window.callsCore.iframeCore.diag() : 'Not ready',
-                    getUIStatus: () => window.callsUI?.getDiagnostics ? window.callsUI.getDiagnostics() : 'Not ready',
-                    getHandshakeStatus: () => window.callsUI?.getHandshakeStatus ? window.callsUI.getHandshakeStatus() : 'Not ready',
+                    getCoreStatus: () => window.callsCore,
+                    getHandshakeStatus: () => window.callsCore?.IframeHandshakeAuthority?.getStatus?.(),
                     getSession: () => window.__CHILD_SESSION__,
-                    getCore: () => window.callsCore?.CallApp?.checkApiStatus ? window.callsCore.CallApp.checkApiStatus() : 'Not ready',
-                    getRecoveryStatus: () => window.callsCore?.CallApp?.getRecoveryStatus ? window.callsCore.CallApp.getRecoveryStatus() : 'Not ready',
-                    getCompatibilityStatus: () => window.callsCore?.CallApp?.getCompatibilityStatus ? window.callsCore.CallApp.getCompatibilityStatus() : 'Not ready',
-                    getEnvironment: () => window.callsCore?.IframeEnvironment?.getFullReport ? 
-                        window.callsCore.IframeEnvironment.getFullReport() : 
-                        (window.callsCore?.EnvironmentDetector?.getFullReport ? window.callsCore.EnvironmentDetector.getFullReport() : 'Not ready'),
-                    getTransportStatus: () => window.callsCore?.IframeTransport?.getStatus ? 
-                        window.callsCore.IframeTransport.getStatus() : 
-                        (window.callsCore?.TransportAgent?.getStatus ? window.callsCore.TransportAgent.getStatus() : 'Not ready'),
-                    forceRecovery: () => window.callsCore?.RecoveryManager?.recover ? window.callsCore.RecoveryManager.recover() : 'Not available',
+                    getRecoveryStatus: () => window.callsCore?.RecoveryManager?.getStatus?.(),
+                    getEnvironment: () => window.callsCore?.IframeEnvironment?.getFullReport?.(),
+                    getTransportStatus: () => window.callsCore?.IframeTransport?.getStatus?.(),
+                    forceRecovery: () => window.callsCore?.RecoveryManager?.recover?.(),
                     resetSession: () => {
                         window.__CHILD_SESSION__ = { token: null, userId: null, expires: null };
                         window.callsCore?.IframeSessionClient?.clear?.();
-                        window.callsCore?.SessionClient?.clearSession?.();
                     }
                 };
             }

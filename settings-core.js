@@ -1,32 +1,61 @@
 // =============================================
-// SETTINGS CORE - ULTRA-HARDENED v6.4.0 (PARENT AUTHORITY)
-// COMPLETE INTEGRATION WITH PARENT ORCHESTRATION SYSTEM
-// ENVIRONMENT-AWARE | STARTUP GOVERNOR | HANDSHAKE CLIENT
-// SESSION BRIDGE | ORIGIN ADAPTER | RELIABILITY ENGINE
-// SECURITY HARDENING | MULTI-MODULE COORDINATION
-// API GATEWAY INTEGRATION | SILENT BACKGROUND OPERATIONS
-// PARENT AUTHORITY CONTRACT ENFORCEMENT | DETERMINISTIC BOOT
+// SETTINGS CORE - PARENT AUTHORITY v7.0.0
+// DETERMINISTIC STATE MACHINE UNDER PARENT CONTROL
+// NO DEMO_MODE | NO INDEPENDENT SESSION | NO RECOVERY LOOPS
+// COMPLETE INTEGRATION WITH PARENT ORCHESTRATION
 // =============================================
 
 // =============================================
 // MODULE IDENTITY & VERSION
 // =============================================
 const MODULE_NAME = 'settings-core';
-const MODULE_VERSION = '6.4.0-parent-authority';
-const PROTOCOL_VERSION = '2.1';
-const PROTOCOL_CANONICAL = 'KYN-2.0';
+const MODULE_VERSION = '7.0.0-parent-authority';
+const PROTOCOL_VERSION = '3.0';
+const PROTOCOL_CANONICAL = 'KYN-3.0';
+const FRAME_ID = 'settings';
 let moduleId = `settings-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
 
 // =============================================
-// GLOBAL DEBUG FLAG - REDUCED NOISE BY DEFAULT
+// GLOBAL DEBUG FLAG - MINIMAL NOISE
 // =============================================
-const DEBUG = false; // Set to false to reduce console noise
-window.__IFRAME_DEBUG__ = DEBUG;
+const DEBUG = false;
+window.__SETTINGS_DEBUG__ = DEBUG;
 let DEBUG_ENABLED = DEBUG;
 let CONSOLE_NOISE_SUPPRESSED = true;
 
+// =============================================
+// SETTINGS STATE MACHINE - STRICT PARENT AUTHORITY
+// =============================================
+const SETTINGS_STATES = {
+    INIT: 'INIT',
+    REGISTERING: 'REGISTERING',
+    REGISTERED: 'REGISTERED',
+    SESSION_RECEIVED: 'SESSION_RECEIVED',
+    ACTIVE: 'ACTIVE',
+    READY: 'READY',
+    DEGRADED: 'DEGRADED'
+};
+
+let currentState = SETTINGS_STATES.INIT;
+let stateHistory = [];
+let stateTransitionLock = false;
+let initializationPromise = null;
+let initializationLock = false;
+let readyEmitted = false;
+
+// Exposed flags for parent inspection
+window.__SETTINGS_STATE__ = currentState;
+window.__SETTINGS_SESSION_ACTIVE__ = false;
+window.__SETTINGS_READY__ = false;
+
 // Log throttling to prevent spam
 const logThrottle = new Map();
+const THROTTLE_TIMES = {
+    'REGISTRATION': 30000,
+    'HEARTBEAT': 10000,
+    'default': 5000
+};
+
 const PROCESSED_MESSAGE_TTL = 5000;
 const processedMessages = new Map();
 let lastPingTime = 0;
@@ -76,38 +105,126 @@ const EMITTED_STATES = {
     READY: 'READY'
 };
 
-// Exposed flags for parent inspection
-window.__MODULE_READY__ = false;
-window.__MODULE_SESSION_ACTIVE__ = false;
-window.__MODULE_STATE__ = parentAuthorityState;
+// Timer tracking for cleanup
+const activeTimers = new Set();
+const activeIntervals = new Set();
 
-// Retry limiting
-const MAX_RETRIES = 2;
-let handshakeRetryCount = 0;
-let pingRetryCount = 0;
-let sessionSyncRetryCount = 0;
-let verifySessionRetryCount = 0;
-let mirrorSyncRetryCount = 0;
-let recoveryAttemptCount = 0;
+function safeSetTimeout(fn, delay) {
+    const timer = setTimeout(() => {
+        activeTimers.delete(timer);
+        fn();
+    }, delay);
+    activeTimers.add(timer);
+    return timer;
+}
 
-// Single initialization lock
-let initializationLock = false;
-let readyEmitted = false;
+function safeSetInterval(fn, interval) {
+    const timer = setInterval(fn, interval);
+    activeIntervals.add(timer);
+    return timer;
+}
 
-function throttledLog(level, message, data = null, throttleMs = 5000) {
-    if (!DEBUG && level !== 'error' && level !== 'init' && level !== 'success' && level !== 'receive') {
-        return; // Skip non-critical logs when DEBUG is false
+function clearAllTimers() {
+    activeTimers.forEach(timer => clearTimeout(timer));
+    activeTimers.clear();
+    activeIntervals.forEach(interval => clearInterval(interval));
+    activeIntervals.clear();
+}
+
+// =============================================
+// STATE TRANSITION - STRICT FSM
+// =============================================
+function transitionTo(newState, reason = '') {
+    if (stateTransitionLock && newState !== SETTINGS_STATES.DEGRADED) {
+        return false;
+    }
+
+    const oldState = currentState;
+    
+    // Define valid transitions - strict ordering
+    const validTransitions = {
+        [SETTINGS_STATES.INIT]: [SETTINGS_STATES.REGISTERING, SETTINGS_STATES.DEGRADED],
+        [SETTINGS_STATES.REGISTERING]: [SETTINGS_STATES.REGISTERED, SETTINGS_STATES.DEGRADED],
+        [SETTINGS_STATES.REGISTERED]: [SETTINGS_STATES.SESSION_RECEIVED, SETTINGS_STATES.DEGRADED],
+        [SETTINGS_STATES.SESSION_RECEIVED]: [SETTINGS_STATES.ACTIVE, SETTINGS_STATES.DEGRADED],
+        [SETTINGS_STATES.ACTIVE]: [SETTINGS_STATES.READY, SETTINGS_STATES.DEGRADED],
+        [SETTINGS_STATES.READY]: [SETTINGS_STATES.DEGRADED],
+        [SETTINGS_STATES.DEGRADED]: [SETTINGS_STATES.SESSION_RECEIVED]
+    };
+
+    if (!validTransitions[oldState] || !validTransitions[oldState].includes(newState)) {
+        return false;
+    }
+
+    if (oldState === newState) {
+        return false;
+    }
+
+    stateTransitionLock = true;
+    currentState = newState;
+    
+    if (newState === SETTINGS_STATES.READY) {
+        console.log(`[${MODULE_NAME}] ✅ State: ${oldState} → ${newState}`);
+    } else if (newState === SETTINGS_STATES.DEGRADED) {
+        console.warn(`[${MODULE_NAME}] ⚠️ State: ${oldState} → ${newState}`);
+    } else if (DEBUG) {
+        console.debug(`[${MODULE_NAME}] 🔄 State: ${oldState} → ${newState}`);
+    }
+
+    stateHistory.push({
+        from: oldState,
+        to: newState,
+        reason,
+        timestamp: Date.now()
+    });
+
+    if (stateHistory.length > 20) {
+        stateHistory.shift();
+    }
+
+    window.__SETTINGS_STATE__ = currentState;
+    window.__SETTINGS_SESSION_ACTIVE__ = (newState === SETTINGS_STATES.ACTIVE || newState === SETTINGS_STATES.READY);
+    window.__SETTINGS_READY__ = (newState === SETTINGS_STATES.READY);
+
+    stateTransitionLock = false;
+    return true;
+}
+
+function stopAllRetryLoops() {
+    clearAllTimers();
+    
+    if (sessionRequestTimeout) {
+        clearTimeout(sessionRequestTimeout);
+        sessionRequestTimeout = null;
+    }
+    if (parentAuthorityTimeout) {
+        clearTimeout(parentAuthorityTimeout);
+        parentAuthorityTimeout = null;
+    }
+}
+
+function throttledLog(level, message, data = null) {
+    if (!DEBUG && level !== 'error' && level !== 'success' && level !== 'init' && level !== 'receive') {
+        return;
     }
     
-    const key = `${level}:${message}`;
-    const lastLog = logThrottle.get(key);
+    let throttleMs = THROTTLE_TIMES.default;
+    for (const [key, time] of Object.entries(THROTTLE_TIMES)) {
+        if (message.includes(key)) {
+            throttleMs = time;
+            break;
+        }
+    }
+    
+    const logKey = `${level}:${message}`;
+    const lastLog = logThrottle.get(logKey);
     const now = Date.now();
     
     if (lastLog && now - lastLog < throttleMs) {
         return;
     }
     
-    logThrottle.set(key, now);
+    logThrottle.set(logKey, now);
     
     if (logThrottle.size > 50) {
         const oldest = Date.now() - 60000;
@@ -118,8 +235,6 @@ function throttledLog(level, message, data = null, throttleMs = 5000) {
         }
     }
     
-    const timeStr = new Date().toISOString().slice(11, 19);
-    
     switch(level) {
         case 'error': 
             console.error(`[${MODULE_NAME}] ❌ ${message}`, data || '');
@@ -127,26 +242,20 @@ function throttledLog(level, message, data = null, throttleMs = 5000) {
         case 'warn': 
             console.warn(`[${MODULE_NAME}] ⚠️ ${message}`, data || '');
             break;
-        case 'info': 
-            if (DEBUG) console.info(`[${MODULE_NAME}] ℹ️ ${message}`, data || '');
-            break;
-        case 'debug': 
-            if (DEBUG) console.debug(`[${MODULE_NAME}] 🔍 ${message}`, data || '');
-            break;
-        case 'send': 
-            if (DEBUG) console.log(`[${MODULE_NAME}] 📤 ${message}`, data || '');
-            break;
-        case 'receive': 
-            console.log(`[${MODULE_NAME}] 📥 ${message}`, data || '');
-            break;
         case 'success': 
             console.log(`[${MODULE_NAME}] ✅ ${message}`, data || '');
             break;
         case 'init': 
             console.log(`[${MODULE_NAME}] 🚀 ${message}`, data || '');
             break;
+        case 'receive':
+            console.log(`[${MODULE_NAME}] 📥 ${message}`, data || '');
+            break;
+        case 'send':
+            if (DEBUG) console.log(`[${MODULE_NAME}] 📤 ${message}`, data || '');
+            break;
         default:
-            if (DEBUG) console.log(`[${MODULE_NAME}] 🔵 ${message}`, data || '');
+            if (DEBUG) console.debug(`[${MODULE_NAME}] 🔍 ${message}`, data || '');
     }
 }
 
@@ -156,10 +265,9 @@ function successLog(...args) { throttledLog('success', args[0], args.slice(1)); 
 function sendLog(...args) { throttledLog('send', args[0], args.slice(1)); }
 function receiveLog(...args) { throttledLog('receive', args[0], args.slice(1)); }
 function initLog(...args) { throttledLog('init', args[0], args.slice(1)); }
-function infoLog(...args) { throttledLog('info', args[0], args.slice(1)); }
 
 // =============================================
-// MESSAGE DEDUPLICATION
+// MESSAGE DEDUPLICATION & VALIDATION
 // =============================================
 function isMessageDuplicate(messageId, type) {
     if (!messageId) return false;
@@ -186,6 +294,15 @@ function isMessageDuplicate(messageId, type) {
     return false;
 }
 
+function validateMessage(message) {
+    if (!message || typeof message !== 'object') return false;
+    if (message.target && message.target !== FRAME_ID && message.target !== 'all') return false;
+    if (message.module && message.module !== MODULE_NAME) return false;
+    if (message.frameId && message.frameId !== FRAME_ID) return false;
+    if (message.requestId && isMessageDuplicate(message.requestId, message.type)) return false;
+    return true;
+}
+
 function canSendPing() {
     const now = Date.now();
     if (now - lastPingTime < PING_RATE_LIMIT) {
@@ -203,14 +320,18 @@ function clearSessionTimeouts() {
 }
 
 // =============================================
-// UNIQUE MESSAGE ID GENERATOR
+// UNIQUE ID GENERATOR
 // =============================================
 function generateUniqueId() {
     return `msg_${Date.now()}_${Math.random().toString(36).substring(2, 10)}_${Math.random().toString(36).substring(2, 5)}`;
 }
 
+function generateRequestId() {
+    return `req_${Date.now()}_${Math.random().toString(36).substring(2, 10)}`;
+}
+
 // =============================================
-// API CORE GATEWAY - SECURE CENTRALIZED API ACCESS
+// API CORE GATEWAY - ROUTES THROUGH PARENT
 // =============================================
 export const ApiCore = {
     _ready: false,
@@ -218,7 +339,7 @@ export const ApiCore = {
     _readyResolvers: [],
     _baseUrl: null,
     _timeout: 15000,
-    _retryCount: 2,
+    _retryCount: 0,
     _retryDelay: 1000,
     _circuitBreaker: {
         failures: 0,
@@ -237,7 +358,7 @@ export const ApiCore = {
             this._readyResolvers.push(resolve);
         });
         
-        setTimeout(() => {
+        safeSetTimeout(() => {
             if (!this._ready) {
                 this._ready = true;
                 this._readyResolvers.forEach(r => r());
@@ -256,7 +377,7 @@ export const ApiCore = {
     },
     
     isReady() {
-        return this._ready;
+        return this._ready && (currentState === SETTINGS_STATES.READY || currentState === SETTINGS_STATES.ACTIVE);
     },
     
     whenReady() {
@@ -268,6 +389,10 @@ export const ApiCore = {
     },
     
     _shouldAllowRequest() {
+        if (currentState !== SETTINGS_STATES.READY && currentState !== SETTINGS_STATES.ACTIVE) {
+            return false;
+        }
+        
         if (!this._circuitBreaker.isOpen) return true;
         
         if (Date.now() - this._circuitBreaker.lastFailure > this._circuitBreaker.timeout) {
@@ -349,77 +474,54 @@ export const ApiCore = {
         }
         
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), options.timeout || this._timeout);
+        const timeoutId = safeSetTimeout(() => controller.abort(), options.timeout || this._timeout);
         
         this._pendingRequests.set(requestId, { controller, endpoint });
         
         try {
-            const headers = {
-                'Content-Type': 'application/json',
-                'X-Request-ID': requestId,
-                ...options.headers
-            };
-            
-            const token = getSecureToken();
-            if (token) {
-                headers['Authorization'] = `Bearer ${token}`;
-            }
-            
-            let url = endpoint;
-            if (!url.startsWith('http')) {
-                url = this._baseUrl ? `${this._baseUrl}${url}` : url;
-            }
-            
-            const response = await fetch(url, {
-                method,
-                headers,
-                body: options.body ? JSON.stringify(options.body) : undefined,
-                signal: controller.signal,
-                credentials: 'include',
-                mode: 'cors'
-            });
+            // Route through parent
+            const response = await sendToParent({
+                type: 'API_REQUEST',
+                endpoint: endpoint,
+                method: method,
+                data: options.body,
+                headers: options.headers,
+                requestId: requestId,
+                timestamp: Date.now()
+            }, 0, true);
             
             clearTimeout(timeoutId);
+            activeTimers.delete(timeoutId);
             this._pendingRequests.delete(requestId);
             
-            let data;
-            const contentType = response.headers.get('content-type');
-            if (contentType && contentType.includes('application/json')) {
-                data = await response.json();
-            } else {
-                data = await response.text();
-            }
-            
-            if (!response.ok) {
-                this._recordFailure();
-                
-                const errorMessage = data?.message || data?.error || `HTTP ${response.status}`;
-                
-                return {
-                    success: false,
-                    status: response.status,
-                    message: errorMessage,
-                    data: data || null
+            if (response && response.payload) {
+                const result = {
+                    success: true,
+                    status: response.status || 200,
+                    data: response.payload,
+                    headers: response.headers
                 };
+                
+                if (useCache && method === 'GET') {
+                    this._setCache(cacheKey, response.payload);
+                }
+                
+                this._recordSuccess();
+                return result;
             }
             
-            this._recordSuccess();
+            this._recordFailure();
             
-            const result = {
-                success: true,
-                status: response.status,
-                data: data,
-                headers: Object.fromEntries(response.headers)
+            return {
+                success: false,
+                status: response?.status || 'error',
+                message: response?.message || 'Request failed',
+                data: null
             };
-            
-            if (useCache && method === 'GET') {
-                this._setCache(cacheKey, data);
-            }
-            
-            return result;
             
         } catch (error) {
             clearTimeout(timeoutId);
+            activeTimers.delete(timeoutId);
             this._pendingRequests.delete(requestId);
             
             this._recordFailure();
@@ -470,7 +572,6 @@ export const ApiCore = {
 // =============================================
 export async function secureApiCall(endpoint, options = {}) {
     try {
-        // Route through parent
         const response = await sendToParent({
             type: 'API_REQUEST',
             endpoint: endpoint,
@@ -524,7 +625,7 @@ export function safeObject(obj, defaultValue = {}) {
 }
 
 // =============================================
-// IFRAME ENVIRONMENT DETECTOR 
+// IFRAME ENVIRONMENT DETECTOR
 // =============================================
 export const ENV_TYPES = {
     LOCAL_DEV: 'local_dev',
@@ -547,7 +648,7 @@ export const IframeEnvironment = {
         isSandboxed: false,
         isIframe: false,
         parentOrigin: null,
-        backendReachable: true // Assume reachable via parent
+        backendReachable: true
     },
     _detected: false,
     _backendUrl: 'https://moodchat-fy56.onrender.com',
@@ -611,7 +712,6 @@ export const IframeEnvironment = {
                 if (DEBUG) debugLog('Environment detected: UNKNOWN');
             }
             
-            // Don't check backend directly - assume reachable via parent
             this._features.backendReachable = true;
             this._detected = true;
             this._detectionComplete = true;
@@ -667,8 +767,6 @@ export const IframeEnvironment = {
     },
     
     getAdjustedRetries(baseRetries) {
-        if (this.isVPN()) return baseRetries + 2;
-        if (this.isLocal()) return baseRetries + 1;
         return baseRetries;
     },
     
@@ -680,7 +778,7 @@ export const IframeEnvironment = {
 IframeEnvironment.detect();
 
 // =============================================
-// SAFE STORAGE LAYER 
+// SAFE STORAGE LAYER
 // =============================================
 export const SafeStorage = {
     _memoryCache: new Map(),
@@ -690,25 +788,35 @@ export const SafeStorage = {
     _quotaExceeded: false,
     _quotaWarningIssued: false,
     _fallbackMode: false,
+    _initialized: false,
+    _initPromise: null,
     
     init() {
-        initLog('SafeStorage initializing');
-        this._checkAvailability();
-        this._generateKey();
+        if (this._initialized) return this;
+        if (this._initPromise) return this._initPromise;
         
-        try {
-            const cached = sessionStorage.getItem(`${this._prefix}memory_fallback`);
-            if (cached) {
-                const data = JSON.parse(cached);
-                Object.entries(data).forEach(([key, value]) => {
-                    this._memoryCache.set(key, value);
-                });
-                if (DEBUG) debugLog('Loaded memory fallback cache');
-            }
-        } catch (e) {}
+        this._initPromise = new Promise((resolve) => {
+            initLog('SafeStorage initializing');
+            this._checkAvailability();
+            this._generateKey();
+            
+            try {
+                const cached = sessionStorage.getItem(`${this._prefix}memory_fallback`);
+                if (cached) {
+                    const data = JSON.parse(cached);
+                    Object.entries(data).forEach(([key, value]) => {
+                        this._memoryCache.set(key, value);
+                    });
+                    if (DEBUG) debugLog('Loaded memory fallback cache');
+                }
+            } catch (e) {}
+            
+            this._initialized = true;
+            successLog('SafeStorage initialized - Type:', this.getStorageType());
+            resolve(this);
+        });
         
-        successLog('SafeStorage initialized - Type:', this.getStorageType());
-        return this;
+        return this._initPromise;
     },
     
     _checkAvailability() {
@@ -926,10 +1034,12 @@ export const SafeStorage = {
         if (this._storageAvailable === 'session') return 'sessionStorage';
         return 'memory';
     }
-}.init();
+};
+
+SafeStorage.init();
 
 // =============================================
-// COMPATIBILITY BRIDGE 
+// COMPATIBILITY BRIDGE
 // =============================================
 export const CompatibilityBridge = {
     _enabled: false,
@@ -1061,179 +1171,7 @@ export const CompatibilityBridge = {
 };
 
 // =============================================
-// STARTUP GOVERNOR 
-// =============================================
-export const StartupGovernor = {
-    _state: 'INIT',
-    _lock: false,
-    _attempts: 0,
-    _maxAttempts: 5,
-    _backoffMs: 1000,
-    _initialized: false,
-    _startTime: Date.now(),
-    _stateHistory: [],
-    _transitionListeners: new Set(),
-    _recoveryTimer: null,
-    _degradedTimer: null,
-    _silent: true, // Set to true to reduce noise
-    
-    states: {
-        INIT: 'INIT',
-        WAIT_PARENT: 'WAIT_PARENT',
-        HANDSHAKING: 'HANDSHAKING',
-        SYNCING: 'SYNCING',
-        ACTIVE: 'ACTIVE',
-        DEGRADED: 'DEGRADED',
-        RECOVERING: 'RECOVERING',
-        FAILED: 'FAILED'
-    },
-    
-    getState() { 
-        return this._state; 
-    },
-    
-    transition(newState, reason = '') {
-        if (this._lock && newState !== this._state && newState !== 'FAILED') {
-            return false;
-        }
-        
-        const oldState = this._state;
-        this._state = newState;
-        
-        if (!this._silent) {
-            debugLog(`State: ${oldState} → ${newState} (${reason})`);
-        }
-        
-        this._stateHistory.push({
-            from: oldState,
-            to: newState,
-            reason,
-            timestamp: Date.now()
-        });
-        
-        if (this._stateHistory.length > 20) {
-            this._stateHistory.shift();
-        }
-        
-        this._transitionListeners.forEach(listener => {
-            try {
-                listener(oldState, newState, reason);
-            } catch (e) {}
-        });
-        
-        if (newState === this.states.DEGRADED) {
-            this._scheduleRecovery();
-        }
-        
-        return true;
-    },
-    
-    onTransition(listener) {
-        this._transitionListeners.add(listener);
-        return () => this._transitionListeners.delete(listener);
-    },
-    
-    async execute(operation, options = {}) {
-        const {
-            timeout = 10000,
-            retryCount = 3,
-            backoff = true,
-            name = 'operation'
-        } = options;
-        
-        if (this._lock && this._state !== this.states.FAILED) {
-            return { success: false, error: 'locked' };
-        }
-        
-        this._lock = true;
-        this._attempts++;
-        
-        try {
-            for (let attempt = 1; attempt <= retryCount; attempt++) {
-                try {
-                    const result = await Promise.race([
-                        operation(),
-                        new Promise((_, reject) => 
-                            setTimeout(() => reject(new Error(`${name} timeout`)), timeout)
-                        )
-                    ]);
-                    
-                    this._lock = false;
-                    return { success: true, result };
-                    
-                } catch (error) {
-                    if (attempt === retryCount) {
-                        this._lock = false;
-                        return { success: false, error: error.message };
-                    }
-                    
-                    if (backoff) {
-                        const delay = this._backoffMs * Math.pow(1.5, attempt - 1);
-                        await new Promise(resolve => setTimeout(resolve, delay));
-                    }
-                }
-            }
-        } finally {
-            this._lock = false;
-        }
-    },
-    
-    _scheduleRecovery() {
-        if (this._recoveryTimer) clearTimeout(this._recoveryTimer);
-        
-        this._recoveryTimer = setTimeout(() => {
-            if (this._state === this.states.DEGRADED) {
-                this.transition(this.states.RECOVERING, 'auto_recovery');
-                
-                setTimeout(() => {
-                    if (this._state === this.states.RECOVERING) {
-                        this.transition(this.states.ACTIVE, 'recovery_success');
-                        if (!this._silent) successLog('Recovery successful');
-                    }
-                }, 5000);
-            }
-        }, 10000);
-    },
-    
-    canProceed() {
-        return this._state !== this.states.FAILED && 
-               this._state !== this.states.RECOVERING;
-    },
-    
-    isStable() {
-        return this._state === this.states.ACTIVE;
-    },
-    
-    isDegraded() {
-        return this._state === this.states.DEGRADED;
-    },
-    
-    getDiagnostics() {
-        return {
-            state: this._state,
-            attempts: this._attempts,
-            uptime: Date.now() - this._startTime,
-            history: this._stateHistory.slice(-5),
-            locked: this._lock
-        };
-    },
-    
-    reset() {
-        this._state = 'INIT';
-        this._lock = false;
-        this._attempts = 0;
-        this._stateHistory = [];
-        if (this._recoveryTimer) clearTimeout(this._recoveryTimer);
-        if (this._degradedTimer) clearTimeout(this._degradedTimer);
-    },
-    
-    setSilent(silent) {
-        this._silent = silent;
-    }
-};
-
-// =============================================
-// ORIGIN ADAPTER 
+// ORIGIN ADAPTER
 // =============================================
 export const OriginAdapter = {
     _trustedOrigins: new Set(),
@@ -1391,25 +1329,179 @@ export const OriginAdapter = {
 OriginAdapter.init();
 
 // =============================================
-// RETRY DEBOUNCER
+// STARTUP GOVERNOR - ENHANCED WITH LIFECYCLE AWARENESS
+// =============================================
+export const StartupGovernor = {
+    _state: 'INIT',
+    _lock: false,
+    _attempts: 0,
+    _maxAttempts: 1,
+    _backoffMs: 1000,
+    _initialized: false,
+    _startTime: Date.now(),
+    _stateHistory: [],
+    _transitionListeners: new Set(),
+    _recoveryTimer: null,
+    _degradedTimer: null,
+    _silent: true,
+    _lifecycleAware: true,
+    
+    states: {
+        INIT: 'INIT',
+        WAIT_PARENT: 'WAIT_PARENT',
+        HANDSHAKING: 'HANDSHAKING',
+        SYNCING: 'SYNCING',
+        ACTIVE: 'ACTIVE',
+        DEGRADED: 'DEGRADED',
+        RECOVERING: 'RECOVERING',
+        FAILED: 'FAILED'
+    },
+    
+    getState() { 
+        return this._state; 
+    },
+    
+    transition(newState, reason = '') {
+        if (currentState === SETTINGS_STATES.READY || currentState === SETTINGS_STATES.DEGRADED) {
+            return false;
+        }
+        
+        if (this._lock && newState !== this._state && newState !== 'FAILED') {
+            return false;
+        }
+        
+        const oldState = this._state;
+        this._state = newState;
+        
+        if (!this._silent) {
+            debugLog(`Governor: ${oldState} → ${newState} (${reason})`);
+        }
+        
+        this._stateHistory.push({
+            from: oldState,
+            to: newState,
+            reason,
+            timestamp: Date.now()
+        });
+        
+        if (this._stateHistory.length > 20) {
+            this._stateHistory.shift();
+        }
+        
+        this._transitionListeners.forEach(listener => {
+            try {
+                listener(oldState, newState, reason);
+            } catch (e) {}
+        });
+        
+        return true;
+    },
+    
+    onTransition(listener) {
+        this._transitionListeners.add(listener);
+        return () => this._transitionListeners.delete(listener);
+    },
+    
+    async execute(operation, options = {}) {
+        const {
+            timeout = 10000,
+            retryCount = 0,
+            backoff = false,
+            name = 'operation'
+        } = options;
+        
+        if (this._lock && this._state !== this.states.FAILED) {
+            return { success: false, error: 'locked' };
+        }
+        
+        this._lock = true;
+        this._attempts++;
+        
+        try {
+            for (let attempt = 1; attempt <= retryCount; attempt++) {
+                try {
+                    const result = await Promise.race([
+                        operation(),
+                        new Promise((_, reject) => 
+                            safeSetTimeout(() => reject(new Error(`${name} timeout`)), timeout)
+                        )
+                    ]);
+                    
+                    this._lock = false;
+                    return { success: true, result };
+                    
+                } catch (error) {
+                    if (attempt === retryCount) {
+                        this._lock = false;
+                        return { success: false, error: error.message };
+                    }
+                    
+                    if (backoff) {
+                        const delay = this._backoffMs * Math.pow(1.5, attempt - 1);
+                        await new Promise(resolve => safeSetTimeout(resolve, delay));
+                    }
+                }
+            }
+        } finally {
+            this._lock = false;
+        }
+    },
+    
+    canProceed() {
+        return this._state !== this.states.FAILED && 
+               this._state !== this.states.RECOVERING;
+    },
+    
+    isStable() {
+        return this._state === this.states.ACTIVE;
+    },
+    
+    isDegraded() {
+        return this._state === this.states.DEGRADED;
+    },
+    
+    getDiagnostics() {
+        return {
+            state: this._state,
+            attempts: this._attempts,
+            uptime: Date.now() - this._startTime,
+            history: this._stateHistory.slice(-5),
+            locked: this._lock
+        };
+    },
+    
+    reset() {
+        this._state = 'INIT';
+        this._lock = false;
+        this._attempts = 0;
+        this._stateHistory = [];
+        if (this._recoveryTimer) {
+            clearTimeout(this._recoveryTimer);
+            activeTimers.delete(this._recoveryTimer);
+        }
+        if (this._degradedTimer) {
+            clearTimeout(this._degradedTimer);
+            activeTimers.delete(this._degradedTimer);
+        }
+    },
+    
+    setSilent(silent) {
+        this._silent = silent;
+    }
+};
+
+// =============================================
+// RETRY DEBOUNCER - DISABLED UNDER PARENT AUTHORITY
 // =============================================
 const retryDebouncers = new Map();
 
 function debounceRetry(type, callback, delay = 1000) {
-    if (retryDebouncers.has(type)) {
-        clearTimeout(retryDebouncers.get(type));
-    }
-    
-    const timerId = setTimeout(() => {
-        retryDebouncers.delete(type);
-        callback();
-    }, delay);
-    
-    retryDebouncers.set(type, timerId);
+    // DISABLED - parent handles retries
+    return;
 }
 
 // =============================================
-// IFRAME TRANSPORT 
+// IFRAME TRANSPORT - STRICT PARENT COMMUNICATION
 // =============================================
 export const IframeTransport = {
     _messageId: 0,
@@ -1418,19 +1510,44 @@ export const IframeTransport = {
     _retryQueue: new Map(),
     _offlineBuffer: [],
     _sequence: 0,
-    _frameId: 'settings',
+    _frameId: FRAME_ID,
     _protocolVersion: PROTOCOL_VERSION,
-    _maxRetries: MAX_RETRIES, // Use limited retries
+    _maxRetries: 0,
     _baseTimeout: 5000,
     _circuitBreakers: new Map(),
     _enabled: true,
-    _silent: true, // Reduce noise
+    _silent: true,
+    _parentWindow: null,
+    _parentOrigin: '*',
+    _handshakeTimer: null,
+    _handshakeComplete: false,
     
     init() {
         initLog('IframeTransport initializing');
+        this._detectParent();
         this._setupMessageListener();
-        this._startRetryProcessor();
         successLog('IframeTransport initialized');
+    },
+    
+    _detectParent() {
+        try {
+            if (window.parent && window.parent !== window) {
+                this._parentWindow = window.parent;
+                
+                try {
+                    if (window.location.ancestorOrigins && window.location.ancestorOrigins.length > 0) {
+                        this._parentOrigin = window.location.ancestorOrigins[0];
+                    } else {
+                        this._parentOrigin = document.referrer ? new URL(document.referrer).origin : '*';
+                    }
+                } catch (e) {
+                    this._parentOrigin = '*';
+                }
+                
+                OriginAdapter.setParentOrigin(this._parentOrigin);
+                parentOrigin = this._parentOrigin;
+            }
+        } catch (error) {}
     },
     
     _setupMessageListener() {
@@ -1451,12 +1568,12 @@ export const IframeTransport = {
             
             if (!message || typeof message !== 'object') return;
             
-            // DEDUPLICATION
-            if (isMessageDuplicate(message.messageId || message.requestId, message.type)) {
+            if (!validateMessage(message)) return;
+            
+            if (isMessageDuplicate(message.requestId || message.messageId, message.type)) {
                 return;
             }
             
-            // Handle required parent contract messages
             if (message.type === REQUIRED_PARENT_MESSAGES.SESSION_ACTIVE) {
                 handleAuthoritativeSession(message);
             } else if (message.type === REQUIRED_PARENT_MESSAGES.SESSION_UPDATE) {
@@ -1477,6 +1594,7 @@ export const IframeTransport = {
                 const pending = this._pendingAcks.get(message.inResponseTo);
                 if (pending) {
                     clearTimeout(pending.timer);
+                    activeTimers.delete(pending.timer);
                     pending.resolve(message);
                     this._pendingAcks.delete(message.inResponseTo);
                     
@@ -1491,9 +1609,50 @@ export const IframeTransport = {
                 const pending = this._pendingAcks.get(message.pingId);
                 if (pending) {
                     clearTimeout(pending.timer);
+                    activeTimers.delete(pending.timer);
                     pending.resolve(message);
                     this._pendingAcks.delete(message.pingId);
                 }
+                return;
+            }
+            
+            if (message.type === 'MODULE_REGISTERED') {
+                handleModuleRegistered(message);
+                return;
+            }
+            
+            if (message.type === 'SESSION_ACTIVE') {
+                handleSessionActive(message);
+                return;
+            }
+            
+            if (message.type === 'SESSION_NULL') {
+                handleSessionNull();
+                return;
+            }
+            
+            if (message.type === 'SESSION_REFRESHED') {
+                handleSessionRefreshed(message);
+                return;
+            }
+            
+            if (message.type === 'SESSION_INVALIDATED') {
+                handleSessionInvalidated();
+                return;
+            }
+            
+            if (message.type === 'PARENT_READY') {
+                handleParentReady(message);
+                return;
+            }
+            
+            if (message.type === 'SETTINGS_UPDATED') {
+                handleSettingsUpdatedBroadcast(message);
+                return;
+            }
+            
+            if (message.type === 'SESSION_VERIFIED') {
+                if (DEBUG) debugLog('Session verified by parent');
                 return;
             }
             
@@ -1511,6 +1670,7 @@ export const IframeTransport = {
         const pending = this._pendingAcks.get(message.inResponseTo || message.messageId);
         if (pending) {
             clearTimeout(pending.timer);
+            activeTimers.delete(pending.timer);
             pending.resolve(message);
             this._pendingAcks.delete(message.inResponseTo || message.messageId);
             
@@ -1565,26 +1725,14 @@ export const IframeTransport = {
         return this._circuitBreakers.get(type);
     },
     
-    _startRetryProcessor() {
-        setInterval(() => {
-            if (!this._enabled) return;
-            
-            const now = Date.now();
-            this._retryQueue.forEach((item, id) => {
-                if (item.nextRetry <= now) {
-                    this._retryQueue.delete(id);
-                    this.send(item.type, item.payload, {
-                        ...item.options,
-                        retryCount: item.retryCount + 1
-                    }).catch(() => {});
-                }
-            });
-        }, 1000);
-    },
-    
     send(type, payload = {}, options = {}) {
         return new Promise((resolve, reject) => {
             try {
+                if (currentState === SETTINGS_STATES.DEGRADED && type !== 'HEARTBEAT' && type !== 'PING') {
+                    resolve({ success: false, reason: 'degraded_state' });
+                    return;
+                }
+                
                 if (type === 'PING' && !canSendPing()) {
                     resolve({ success: false, reason: 'rate_limited' });
                     return;
@@ -1595,56 +1743,42 @@ export const IframeTransport = {
                     retryCount = 0,
                     maxRetries = this._maxRetries,
                     expectAck = true,
-                    priority = 'normal',
-                    targetOrigin = '*'
+                    targetOrigin = '*',
+                    requestId = generateRequestId()
                 } = options;
                 
                 const breaker = this._getCircuitBreaker(type);
                 if (breaker && !breaker.allow()) {
-                    if (retryCount < maxRetries) {
-                        const backoff = Math.min(1000 * Math.pow(2, retryCount), 30000);
-                        this._retryQueue.set(`${type}_${Date.now()}_${Math.random()}`, {
-                            type,
-                            payload,
-                            options: { ...options, retryCount: retryCount + 1 },
-                            nextRetry: Date.now() + backoff,
-                            retryCount
-                        });
-                        return;
-                    } else {
-                        reject(new Error(`Circuit breaker open for ${type}`));
-                        return;
-                    }
+                    reject(new Error(`Circuit breaker open for ${type}`));
+                    return;
                 }
                 
-                const messageId = options.messageId || generateUniqueId();
                 const timestamp = Date.now();
                 
                 const message = {
                     protocol: PROTOCOL_CANONICAL,
-                    messageId,
-                    type,
-                    source: this._frameId,
-                    target: 'parent',
-                    timestamp,
+                    type: type,
+                    module: MODULE_NAME,
+                    frameId: this._frameId,
+                    requestId: requestId,
+                    timestamp: timestamp,
                     payload: payload || {},
                     sequence: this._sequence++,
                     version: MODULE_VERSION,
-                    expectAck,
-                    retryCount,
+                    expectAck: expectAck,
+                    retryCount: retryCount,
                     environment: IframeEnvironment.getEnvironment()
                 };
-                
-                const token = SessionClient?.getToken() || getSecureToken();
-                if (token) {
-                    message.token = token;
-                }
                 
                 const finalMessage = CompatibilityBridge.isEnabled() ? 
                     CompatibilityBridge.translateOutgoing(message) : message;
                 
-                const parentWin = state.parentWindow || window.parent;
-                const origin = state.parentOrigin || targetOrigin;
+                if (!this._parentWindow || this._parentWindow === window) {
+                    this._detectParent();
+                }
+                
+                const parentWin = this._parentWindow || window.parent;
+                const origin = this._parentOrigin || targetOrigin;
                 
                 if (!parentWin || parentWin === window) {
                     if (retryCount < maxRetries) {
@@ -1655,7 +1789,7 @@ export const IframeTransport = {
                             timestamp: Date.now()
                         });
                         
-                        setTimeout(() => {
+                        safeSetTimeout(() => {
                             this.send(type, payload, options).then(resolve).catch(reject);
                         }, 1000 * (retryCount + 1));
                         return;
@@ -1665,7 +1799,7 @@ export const IframeTransport = {
                     }
                 }
                 
-                if (DEBUG || !this._silent) sendLog(`${type} - MessageId: ${messageId}`);
+                if (!this._silent) sendLog(`${type} - RequestId: ${requestId}`);
                 try {
                     parentWin.postMessage(finalMessage, origin);
                 } catch (e) {
@@ -1673,28 +1807,18 @@ export const IframeTransport = {
                 }
                 
                 if (expectAck) {
-                    const timer = setTimeout(() => {
-                        if (this._pendingAcks.has(messageId)) {
-                            this._pendingAcks.delete(messageId);
+                    const timer = safeSetTimeout(() => {
+                        if (this._pendingAcks.has(requestId)) {
+                            this._pendingAcks.delete(requestId);
                             
                             if (breaker) breaker.recordFailure();
                             
-                            if (retryCount < maxRetries) {
-                                const backoff = Math.min(1000 * Math.pow(2, retryCount), 30000);
-                                setTimeout(() => {
-                                    this.send(type, payload, { 
-                                        ...options, 
-                                        retryCount: retryCount + 1 
-                                    }).then(resolve).catch(reject);
-                                }, backoff);
-                            } else {
-                                reject(new Error(`ACK timeout for ${messageId}`));
-                            }
+                            reject(new Error(`ACK timeout for ${requestId}`));
                         }
                     }, timeout);
                     
-                    this._pendingAcks.set(messageId, {
-                        messageId,
+                    this._pendingAcks.set(requestId, {
+                        requestId,
                         timer,
                         resolve,
                         reject,
@@ -1702,7 +1826,7 @@ export const IframeTransport = {
                         timestamp
                     });
                 } else {
-                    resolve({ messageId, acknowledged: false });
+                    resolve({ requestId, acknowledged: false });
                 }
                 
             } catch (error) {
@@ -1762,10 +1886,6 @@ export const IframeTransport = {
     },
     
     ping() {
-        pingRetryCount++;
-        if (pingRetryCount > MAX_RETRIES) {
-            return Promise.resolve({ success: false, error: 'max_retries_exceeded' });
-        }
         return this.send('PING', {}, { expectAck: true, timeout: 3000 }).catch(() => {
             return { success: false, error: 'ping_failed' };
         });
@@ -1778,6 +1898,28 @@ export const IframeTransport = {
     
     disable() {
         this._enabled = false;
+    },
+    
+    startHandshakeTimer(timeout = 150) {
+        if (this._handshakeTimer) {
+            clearTimeout(this._handshakeTimer);
+            activeTimers.delete(this._handshakeTimer);
+        }
+        
+        this._handshakeTimer = safeSetTimeout(() => {
+            if (!this._handshakeComplete) {
+                transitionTo(SETTINGS_STATES.DEGRADED, 'handshake_timeout');
+            }
+        }, timeout);
+        activeTimers.add(this._handshakeTimer);
+    },
+    
+    completeHandshake() {
+        this._handshakeComplete = true;
+        if (this._handshakeTimer) {
+            clearTimeout(this._handshakeTimer);
+            activeTimers.delete(this._handshakeTimer);
+        }
     },
     
     getDiagnostics() {
@@ -1803,13 +1945,13 @@ export const IframeTransport = {
 IframeTransport.init();
 
 // =============================================
-// HANDSHAKE AUTHORITY 
+// HANDSHAKE AUTHORITY - SINGLE ATTEMPT ONLY
 // =============================================
 export const IframeHandshakeAuthority = {
     _handshakeId: null,
     _handshakeComplete: false,
     _handshakeAttempts: 0,
-    _maxAttempts: MAX_RETRIES, // Limited retries
+    _maxAttempts: 1,
     _backoffMs: 500,
     _parentReady: false,
     _handshakeAcked: false,
@@ -1822,14 +1964,13 @@ export const IframeHandshakeAuthority = {
     
     async startHandshake(options = {}) {
         const {
-            timeout = 10000,
-            retryCount = MAX_RETRIES,
-            backoffMs = 500,
+            timeout = 5000,
             force = false
         } = options;
         
-        const adjustedRetries = IframeEnvironment.getAdjustedRetries(retryCount);
-        const adjustedTimeout = IframeEnvironment.getAdjustedTimeout(timeout);
+        if (currentState === SETTINGS_STATES.READY || currentState === SETTINGS_STATES.DEGRADED) {
+            return { success: false, error: 'lifecycle_terminal' };
+        }
         
         if (this._handshakeComplete && !force) {
             return { success: true, cached: true };
@@ -1843,51 +1984,20 @@ export const IframeHandshakeAuthority = {
         this._handshakeId = `hs_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
         this._handshakeAttempts = 0;
         
-        if (!this._silent) debugLog(`Starting handshake (attempt 1/${adjustedRetries})`);
-        
         return new Promise((resolve) => {
-            const attemptHandshake = async () => {
+            const performHandshake = async () => {
+                if (currentState === SETTINGS_STATES.READY || currentState === SETTINGS_STATES.DEGRADED) {
+                    this._inProgress = false;
+                    resolve({ success: false, error: 'lifecycle_terminal' });
+                    return;
+                }
+                
                 this._handshakeAttempts++;
                 
                 try {
-                    if (!this._parentReady && !force) {
-                        const parentTimeout = setTimeout(() => {
-                            this._inProgress = false;
-                            resolve({ success: false, error: 'parent_timeout' });
-                        }, 5000);
-                        
-                        const waitForParent = () => {
-                            clearTimeout(parentTimeout);
-                            performHandshake();
-                        };
-                        
-                        this.once('parent_ready', waitForParent);
-                        return;
-                    }
-                    
-                    performHandshake();
-                    
-                } catch (error) {
-                    if (this._handshakeAttempts < adjustedRetries) {
-                        const baseDelay = backoffMs * Math.pow(1.5, this._handshakeAttempts - 1);
-                        const jitter = Math.random() * 200;
-                        const delay = Math.min(baseDelay + jitter, 10000);
-                        
-                        debounceRetry('handshake', () => {
-                            this._retryTimer = setTimeout(attemptHandshake, delay);
-                        }, delay);
-                    } else {
-                        this._inProgress = false;
-                        resolve({ success: false, error: error.message });
-                    }
-                }
-            };
-            
-            const performHandshake = async () => {
-                try {
                     const handshakePayload = {
                         type: 'HANDSHAKE',
-                        childId: 'settings',
+                        childId: FRAME_ID,
                         handshakeId: this._handshakeId,
                         timestamp: Date.now(),
                         protocolVersion: PROTOCOL_VERSION,
@@ -1895,16 +2005,10 @@ export const IframeHandshakeAuthority = {
                         environment: IframeEnvironment.getEnvironment(),
                         capabilities: {
                             sessionMirror: true,
-                            tokenManagement: true,
                             heartbeat: true,
                             ping: true,
                             sessionAck: true,
-                            originBind: true,
-                            recovery: true,
-                            governor: true,
-                            handshakeAuthority: true,
-                            transport: true,
-                            sessionClient: true
+                            originBind: true
                         }
                     };
                     
@@ -1912,7 +2016,7 @@ export const IframeHandshakeAuthority = {
                     const response = await IframeTransport.send(
                         'HANDSHAKE', 
                         handshakePayload, 
-                        { expectAck: true, timeout: adjustedTimeout }
+                        { expectAck: true, timeout: timeout }
                     );
                     
                     if (response && response.acknowledged) {
@@ -1921,7 +2025,7 @@ export const IframeHandshakeAuthority = {
                         this._completedState = response;
                         this._inProgress = false;
                         
-                        StartupGovernor.transition(StartupGovernor.states.SYNCING, 'handshake_complete');
+                        transitionTo(SETTINGS_STATES.SESSION_RECEIVED, 'handshake_complete');
                         successLog('Handshake complete');
                         
                         this.emit('handshake_success', response);
@@ -1931,24 +2035,14 @@ export const IframeHandshakeAuthority = {
                     }
                     
                 } catch (error) {
-                    if (this._handshakeAttempts < adjustedRetries) {
-                        const baseDelay = backoffMs * Math.pow(2, this._handshakeAttempts - 1);
-                        const jitter = Math.random() * 200;
-                        const delay = Math.min(baseDelay + jitter, 10000);
-                        
-                        debounceRetry('handshake', () => {
-                            this._retryTimer = setTimeout(attemptHandshake, delay);
-                        }, delay);
-                    } else {
-                        this._inProgress = false;
-                        StartupGovernor.transition(StartupGovernor.states.DEGRADED, 'handshake_failed');
-                        if (!this._silent) errorLog('Handshake failed:', error);
-                        resolve({ success: false, error: error.message });
-                    }
+                    this._inProgress = false;
+                    transitionTo(SETTINGS_STATES.DEGRADED, 'handshake_failed');
+                    if (!this._silent) errorLog('Handshake failed:', error);
+                    resolve({ success: false, error: error.message });
                 }
             };
             
-            setTimeout(attemptHandshake, 100);
+            safeSetTimeout(performHandshake, 100);
         });
     },
     
@@ -1985,8 +2079,14 @@ export const IframeHandshakeAuthority = {
         this._handshakeAcked = false;
         this._inProgress = false;
         this._completedState = null;
-        if (this._timeoutId) clearTimeout(this._timeoutId);
-        if (this._retryTimer) clearTimeout(this._retryTimer);
+        if (this._timeoutId) {
+            clearTimeout(this._timeoutId);
+            activeTimers.delete(this._timeoutId);
+        }
+        if (this._retryTimer) {
+            clearTimeout(this._retryTimer);
+            activeTimers.delete(this._retryTimer);
+        }
     },
     
     isComplete() {
@@ -2017,7 +2117,6 @@ export const IframeHandshakeAuthority = {
 // PARENT AUTHORITY FUNCTIONS
 // =============================================
 
-// Wait for parent ready signal
 function waitForParentAuthority(timeout = PARENT_AUTHORITY_TIMEOUT) {
     return new Promise((resolve) => {
         if (parentReadyDetected || window.__PARENT_READY__ === true) {
@@ -2030,6 +2129,7 @@ function waitForParentAuthority(timeout = PARENT_AUTHORITY_TIMEOUT) {
             if (window.__PARENT_READY__ === true) {
                 parentReadyDetected = true;
                 clearTimeout(parentAuthorityTimeout);
+                activeTimers.delete(parentAuthorityTimeout);
                 window.removeEventListener('message', parentMessageHandler);
                 resolve(true);
             }
@@ -2039,6 +2139,7 @@ function waitForParentAuthority(timeout = PARENT_AUTHORITY_TIMEOUT) {
             if (event.data && event.data.type === 'PARENT_READY') {
                 parentReadyDetected = true;
                 clearTimeout(parentAuthorityTimeout);
+                activeTimers.delete(parentAuthorityTimeout);
                 window.removeEventListener('message', parentMessageHandler);
                 resolve(true);
             }
@@ -2046,44 +2147,34 @@ function waitForParentAuthority(timeout = PARENT_AUTHORITY_TIMEOUT) {
         
         window.addEventListener('message', parentMessageHandler);
         
-        parentAuthorityTimeout = setTimeout(() => {
+        parentAuthorityTimeout = safeSetTimeout(() => {
             window.removeEventListener('message', parentMessageHandler);
-            // Fallback to legacy mode if parent not detected
             resolve(false);
         }, timeout);
+        activeTimers.add(parentAuthorityTimeout);
     });
 }
 
-// Send module registration exactly once
 function sendModuleRegistration() {
     if (moduleRegistered) return;
     
     parentAuthorityState = EMITTED_STATES.REGISTERING;
     window.__MODULE_STATE__ = parentAuthorityState;
     
-    // Send CHILD_READY exactly once
-    IframeTransport.send('CHILD_READY', {
-        module: MODULE_NAME,
-        frameId: 'settings',
-        timestamp: Date.now()
-    }, { expectAck: true, maxRetries: 1 }).catch(() => {});
-    
-    // Send REGISTER_MODULE exactly once
     IframeTransport.send('REGISTER_MODULE', {
         module: MODULE_NAME,
+        frameId: FRAME_ID,
         version: MODULE_VERSION,
-        capabilities: ['session', 'settings', 'storage']
-    }, { expectAck: true, maxRetries: 1 }).then(() => {
+        capabilities: ['settings', 'storage'],
+        timestamp: Date.now()
+    }, { expectAck: true, maxRetries: 0 }).then(() => {
         moduleRegistered = true;
         parentAuthorityState = EMITTED_STATES.REGISTERED;
         window.__MODULE_STATE__ = parentAuthorityState;
         if (DEBUG) successLog('Module registered with parent');
-    }).catch(() => {
-        // Silent fallback
-    });
+    }).catch(() => {});
 }
 
-// Handle authoritative session from parent
 function handleAuthoritativeSession(message) {
     if (!message.session) return;
     
@@ -2091,43 +2182,33 @@ function handleAuthoritativeSession(message) {
     parentSessionReceived = true;
     parentContractEnforced = true;
     
-    // Disable local session restore - authoritative source is parent
     parentAuthorityState = EMITTED_STATES.SESSION_ACTIVE;
     window.__MODULE_STATE__ = parentAuthorityState;
-    window.__MODULE_SESSION_ACTIVE__ = true;
+    window.__SETTINGS_SESSION_ACTIVE__ = true;
     
-    // Update session with parent data (do NOT override with localStorage)
-    SessionClient.updateSession(
+    updateSession(
         message.session.user,
-        message.session.token,
-        message.session.expiry
+        message.session.expiry || message.session.expiresAt,
+        message.session.version || 1
     );
     
     successLog('Authoritative session received from parent');
-    
-    // Proceed to initialization
-    if (parentAuthorityState === EMITTED_STATES.SESSION_ACTIVE) {
-        proceedToInitialization();
-    }
 }
 
-// Handle session update from parent
 function handleAuthoritativeSessionUpdate(message) {
     if (!message.session) return;
     
     parentAuthoritativeSession = message.session;
     
-    // Update session but keep parent as authoritative
-    SessionClient.updateSession(
+    updateSession(
         message.session.user,
-        message.session.token,
-        message.session.expiry
+        message.session.expiry || message.session.expiresAt,
+        message.session.version || (session.version + 1)
     );
     
     if (DEBUG) debugLog('Session updated from parent');
 }
 
-// Handle parent navigation request
 function handleParentNavigation(message) {
     const event = new CustomEvent('parentNavigation', {
         detail: {
@@ -2138,7 +2219,6 @@ function handleParentNavigation(message) {
     window.dispatchEvent(event);
 }
 
-// Handle permission update from parent
 function handlePermissionUpdate(message) {
     const event = new CustomEvent('permissionUpdate', {
         detail: {
@@ -2148,929 +2228,230 @@ function handlePermissionUpdate(message) {
     window.dispatchEvent(event);
 }
 
-// Handle force logout from parent
 function handleParentForceLogout() {
     resetUIForLogout();
     const event = new CustomEvent('parentForceLogout');
     window.dispatchEvent(event);
 }
 
-// Proceed to initialization after parent authority
 function proceedToInitialization() {
     if (parentAuthorityState === EMITTED_STATES.INITIALIZING) return;
     
     parentAuthorityState = EMITTED_STATES.INITIALIZING;
     window.__MODULE_STATE__ = parentAuthorityState;
     
-    // Continue with normal initialization
     completeInitialization();
 }
 
-// Complete initialization process
 function completeInitialization() {
     if (readyEmitted) return;
     
     parentAuthorityState = EMITTED_STATES.READY;
     window.__MODULE_STATE__ = parentAuthorityState;
-    window.__MODULE_READY__ = true;
+    window.__SETTINGS_READY__ = true;
     readyEmitted = true;
     
+    transitionTo(SETTINGS_STATES.READY, 'parent_authority_ready');
     successLog('Module READY - Parent authority established');
 }
 
-// Deterministic boot sequence
 async function executeParentAuthorityBoot() {
-    if (initializationLock) return;
+    if (initializationLock) return false;
     initializationLock = true;
     
     try {
-        // 1. PREINIT
         parentAuthorityState = PARENT_AUTHORITY_STATES.PREINIT;
         window.__MODULE_STATE__ = parentAuthorityState;
         
-        // 2. WAIT_PARENT - wait for parent ready signal
         parentAuthorityState = PARENT_AUTHORITY_STATES.WAIT_PARENT;
         window.__MODULE_STATE__ = parentAuthorityState;
         
         const parentAvailable = await waitForParentAuthority();
         
         if (!parentAvailable) {
-            // No parent authority detected - fallback to legacy mode
-            if (DEBUG) debugLog('Parent authority not detected - falling back to legacy mode');
             initializationLock = false;
-            return false; // Allow legacy initialization to proceed
+            return false;
         }
         
-        // 3. REGISTERING - send registration exactly once
         parentAuthorityState = PARENT_AUTHORITY_STATES.REGISTERING;
         window.__MODULE_STATE__ = parentAuthorityState;
         sendModuleRegistration();
         
-        // 4. WAIT_SESSION - wait for authoritative session
         parentAuthorityState = PARENT_AUTHORITY_STATES.WAIT_SESSION;
         window.__MODULE_STATE__ = parentAuthorityState;
         
-        // Wait for session with timeout
         const sessionReceived = await new Promise((resolve) => {
-            const sessionTimeout = setTimeout(() => {
-                resolve(false); // Timeout - fallback to local session
+            const sessionTimeout = safeSetTimeout(() => {
+                resolve(false);
             }, PARENT_AUTHORITY_TIMEOUT);
+            activeTimers.add(sessionTimeout);
             
             const checkSession = () => {
                 if (parentAuthoritativeSession || parentSessionReceived) {
                     clearTimeout(sessionTimeout);
+                    activeTimers.delete(sessionTimeout);
                     resolve(true);
                 }
             };
             
-            // Check every 100ms
-            const interval = setInterval(checkSession, 100);
+            const interval = safeSetInterval(checkSession, 100);
+            activeIntervals.add(interval);
             
-            // Also listen for session active message
             const sessionHandler = (message) => {
                 if (message.type === 'SESSION_ACTIVE' && message.session) {
                     clearTimeout(sessionTimeout);
+                    activeTimers.delete(sessionTimeout);
                     clearInterval(interval);
+                    activeIntervals.delete(interval);
                     resolve(true);
                 }
             };
             
             window.addEventListener('message', sessionHandler);
             
-            // Cleanup function
-            setTimeout(() => {
+            safeSetTimeout(() => {
                 clearInterval(interval);
+                activeIntervals.delete(interval);
                 window.removeEventListener('message', sessionHandler);
             }, PARENT_AUTHORITY_TIMEOUT + 100);
         });
         
         if (sessionReceived) {
-            // Parent provided authoritative session
             parentAuthorityState = EMITTED_STATES.SESSION_ACTIVE;
             window.__MODULE_STATE__ = parentAuthorityState;
-            window.__MODULE_SESSION_ACTIVE__ = true;
-        } else {
-            // No session from parent - fallback to local session logic (unchanged)
-            if (DEBUG) debugLog('No authoritative session from parent - using local session');
+            window.__SETTINGS_SESSION_ACTIVE__ = true;
+            transitionTo(SETTINGS_STATES.SESSION_RECEIVED, 'parent_session');
         }
         
-        // 5. INITIALIZING
         parentAuthorityState = EMITTED_STATES.INITIALIZING;
         window.__MODULE_STATE__ = parentAuthorityState;
         
-        // 6. READY
         parentAuthorityState = EMITTED_STATES.READY;
         window.__MODULE_STATE__ = parentAuthorityState;
-        window.__MODULE_READY__ = true;
+        window.__SETTINGS_READY__ = true;
         readyEmitted = true;
         
+        transitionTo(SETTINGS_STATES.READY, 'parent_authority_boot');
         successLog('Parent authority boot sequence complete');
         return true;
         
     } catch (error) {
         errorLog('Parent authority boot error:', error);
         initializationLock = false;
-        return false; // Fallback to legacy
+        return false;
     }
 }
 
 // =============================================
-// SESSION CLIENT 
+// SESSION STORAGE - MEMORY ONLY, NO TOKEN MANAGEMENT
 // =============================================
-export const SessionClient = {
-    _session: null,
-    _sessionToken: null,
-    _sessionExpiry: null,
-    _sessionVersion: 0,
-    _lastSync: 0,
-    _syncInterval: null,
-    _refreshTimer: null,
-    _listeners: new Set(),
-    _pendingAck: false,
-    _sessionLock: false,
-    _refreshAttempts: 0,
-    _maxRefreshAttempts: MAX_RETRIES, // Limited retries
-    _offlineMode: false,
-    _syncInProgress: false,
-    _silent: true,
-    
-    init() {
-        initLog('SessionClient initializing');
-        
-        // Only load cached session if parent hasn't provided authoritative session
-        if (!parentAuthoritativeSession && !parentSessionReceived) {
-            try {
-                const cached = SafeStorage.getJSON('session_client', null, true);
-                if (cached && cached.session && cached.expiry > Date.now()) {
-                    this._session = cached.session;
-                    this._sessionToken = cached.token;
-                    this._sessionExpiry = cached.expiry;
-                    this._sessionVersion = cached.version || 0;
-                    if (DEBUG) debugLog('Loaded cached session');
-                }
-            } catch (e) {}
-        } else {
-            // Parent is authoritative - disable local restore
-            if (DEBUG) debugLog('Parent authoritative - skipping local session restore');
-        }
-        
-        this._startSync();
-        this._scheduleRefresh();
-        successLog('SessionClient initialized');
-    },
-    
-    _startSync() {
-        if (this._syncInterval) clearInterval(this._syncInterval);
-        
-        const interval = IframeEnvironment.isVPN() ? 60000 : 30000;
-        
-        this._syncInterval = setInterval(() => {
-            // Only sync if parent hasn't provided authoritative session or we're in degraded mode
-            if (!parentAuthoritativeSession && !parentContractEnforced && 
-                (StartupGovernor.isStable() || StartupGovernor.isDegraded())) {
-                this.sync();
-            }
-        }, interval);
-    },
-    
-    async sync() {
-        // Limit retries
-        sessionSyncRetryCount++;
-        if (sessionSyncRetryCount > MAX_RETRIES) {
-            if (DEBUG) debugLog('Session sync retry limit reached - entering degraded mode');
-            return false;
-        }
-        
-        if (this._sessionLock || this._syncInProgress) return false;
-        
-        this._syncInProgress = true;
-        this._sessionLock = true;
-        
-        try {
-            sendLog('SESSION_SYNC request');
-            const response = await IframeTransport.send('SESSION_SYNC', {
-                childId: 'settings',
-                version: this._sessionVersion,
-                timestamp: Date.now()
-            }, { expectAck: true, timeout: 5000, maxRetries: MAX_RETRIES });
-            
-            if (response && response.payload?.session) {
-                this.updateSession(
-                    response.payload.session.user,
-                    response.payload.session.token,
-                    response.payload.session.expiry
-                );
-                this._lastSync = Date.now();
-                
-                await IframeTransport.send('SESSION_ACK', {
-                    childId: 'settings',
-                    version: this._sessionVersion,
-                    timestamp: Date.now()
-                }, { expectAck: false, maxRetries: 1 });
-                
-                sessionSyncRetryCount = 0;
-                return true;
-            }
-            
-            return false;
-            
-        } catch (error) {
-            this._offlineMode = true;
-            return false;
-        } finally {
-            this._sessionLock = false;
-            this._syncInProgress = false;
-        }
-    },
-    
-    updateSession(session, token, expiry) {
-        // If parent is authoritative, do not override with local updates unless it's from parent
-        if (parentContractEnforced && !parentAuthoritativeSession && !parentSessionReceived) {
-            if (DEBUG) debugLog('Parent authoritative - ignoring local session update');
-            return false;
-        }
-        
-        if (this._sessionLock) return false;
-        
-        this._sessionLock = true;
-        
-        try {
-            const previousVersion = this._sessionVersion;
-            
-            if (session) {
-                this._session = typeof session === 'object' ? { ...session } : session;
-                currentUser = this._session;
-                coreData.user = this._session;
-                state.session = this._session;
-                if (!parentAuthoritativeSession && !parentSessionReceived) {
-                    parentSessionData = { user: this._session, token, expiry };
-                    parentSessionReceived = true;
-                }
-                sessionValidated = true;
-                if (DEBUG) debugLog('Session updated:', this._session?.name);
-            }
-            
-            if (token) {
-                this._sessionToken = token;
-                tokenAvailable = true;
-                tokenReady = true;
-                authReady = true;
-                originBoundToken = token;
-            }
-            
-            if (expiry) {
-                this._sessionExpiry = expiry;
-            }
-            
-            this._sessionVersion++;
-            this._lastSync = Date.now();
-            this._offlineMode = false;
-            
-            // Only cache if parent is not authoritative
-            if (!parentContractEnforced) {
-                SafeStorage.setJSON('session_client', {
-                    session: this._session ? { id: this._session.id, name: this._session.name } : null,
-                    token: this._sessionToken,
-                    expiry: this._sessionExpiry,
-                    version: this._sessionVersion,
-                    lastSync: this._lastSync
-                }, true);
-            }
-            
-            this.emit('session_updated', {
-                session: this._session,
-                token: this._sessionToken,
-                expiry: this._sessionExpiry,
-                version: this._sessionVersion,
-                previousVersion
-            });
-            
-            this._scheduleRefresh();
-            
-            return true;
-            
-        } finally {
-            this._sessionLock = false;
-        }
-    },
-    
-    _scheduleRefresh() {
-        if (this._refreshTimer) clearTimeout(this._refreshTimer);
-        
-        if (!this._sessionExpiry) return;
-        
-        const timeToExpiry = this._sessionExpiry - Date.now();
-        const refreshTime = Math.max(0, timeToExpiry - 300000);
-        
-        if (refreshTime <= 0) {
-            this.refresh();
-        } else {
-            this._refreshTimer = setTimeout(() => this.refresh(), refreshTime);
-        }
-    },
-    
-    async refresh() {
-        // Limit refresh attempts
-        this._refreshAttempts++;
-        if (this._refreshAttempts >= this._maxRefreshAttempts) {
-            if (DEBUG) debugLog('Refresh retry limit reached');
-            return false;
-        }
-        
-        try {
-            sendLog('SESSION_REQUEST refresh');
-            const response = await IframeTransport.send('SESSION_REQUEST', {
-                childId: 'settings',
-                refresh: true,
-                timestamp: Date.now()
-            }, { expectAck: true, timeout: 8000, maxRetries: MAX_RETRIES });
-            
-            if (response && response.payload?.session) {
-                this.updateSession(
-                    response.payload.session.user,
-                    response.payload.session.token,
-                    response.payload.session.expiry
-                );
-                this._refreshAttempts = 0;
-                return true;
-            }
-            
-            return false;
-            
-        } catch (error) {
-            const backoff = Math.min(60000 * Math.pow(2, this._refreshAttempts), 300000);
-            setTimeout(() => this.refresh(), backoff);
-            return false;
-        }
-    },
-    
-    on(event, listener) {
-        this._listeners.add({ event, listener });
-    },
-    
-    emit(event, data) {
-        this._listeners.forEach(item => {
-            if (item.event === event) {
-                try {
-                    item.listener(data);
-                } catch (e) {}
-            }
-        });
-    },
-    
-    getSession() {
-        // Return authoritative session if available
-        if (parentAuthoritativeSession) {
-            return parentAuthoritativeSession.user || parentAuthoritativeSession;
-        }
-        return this._session ? { ...this._session } : null;
-    },
-    
-    getToken() {
-        // Return token from authoritative session if available
-        if (parentAuthoritativeSession && parentAuthoritativeSession.token) {
-            return parentAuthoritativeSession.token;
-        }
-        return this._sessionToken;
-    },
-    
-    isValid() {
-        // Check authoritative session first
-        if (parentAuthoritativeSession) {
-            const expiry = parentAuthoritativeSession.expiry || parentAuthoritativeSession.expiresAt;
-            return !!parentAuthoritativeSession.user && 
-                   !!parentAuthoritativeSession.token && 
-                   (!expiry || expiry > Date.now());
-        }
-        
-        return !!this._session && 
-               !!this._sessionToken && 
-               (!this._sessionExpiry || this._sessionExpiry > Date.now());
-    },
-    
-    isExpired() {
-        if (parentAuthoritativeSession) {
-            const expiry = parentAuthoritativeSession.expiry || parentAuthoritativeSession.expiresAt;
-            return !!expiry && expiry <= Date.now();
-        }
-        
-        return !!this._sessionExpiry && this._sessionExpiry <= Date.now();
-    },
-    
-    isOffline() {
-        return this._offlineMode;
-    },
-    
-    clear() {
-        this._session = null;
-        this._sessionToken = null;
-        this._sessionExpiry = null;
-        this._sessionVersion = 0;
-        this._lastSync = 0;
-        this._offlineMode = false;
-        
-        SafeStorage.remove('session_client');
-        
-        this.emit('session_cleared');
-        if (DEBUG) debugLog('Session cleared');
-    },
-    
-    getDiagnostics() {
-        return {
-            hasSession: !!this._session,
-            hasToken: !!this._sessionToken,
-            expiry: this._sessionExpiry,
-            version: this._sessionVersion,
-            lastSync: this._lastSync,
-            refreshAttempts: this._refreshAttempts,
-            isValid: this.isValid(),
-            isExpired: this.isExpired(),
-            offlineMode: this._offlineMode,
-            parentAuthoritative: !!parentAuthoritativeSession
-        };
-    },
-    
-    setSilent(silent) {
-        this._silent = silent;
-    }
+let session = {
+    user: null,
+    expiresAt: 0,
+    version: 0
 };
 
+function updateSession(user, expiry, version) {
+    if (user) {
+        session.user = typeof user === 'object' ? { ...user } : user;
+        currentUser = session.user;
+        coreData.user = session.user;
+    }
+    
+    if (expiry) {
+        session.expiresAt = expiry;
+    }
+    
+    if (version !== undefined) {
+        session.version = version;
+    }
+    
+    window.__SETTINGS_SESSION_ACTIVE__ = !!session.user;
+}
+
+function clearSession() {
+    session = {
+        user: null,
+        expiresAt: 0,
+        version: 0
+    };
+    currentUser = null;
+    coreData.user = null;
+    window.__SETTINGS_SESSION_ACTIVE__ = false;
+}
+
+function isSessionValid() {
+    return !!session.user && session.expiresAt > Date.now();
+}
+
 // =============================================
-// RELIABILITY ENGINE 
+// HEARTBEAT MANAGER - PARENT CONTROLLED
 // =============================================
-export const ReliabilityEngine = {
-    _ackQueue: new Map(),
-    _retryQueue: new Map(),
-    _pingInterval: null,
-    _pingFailures: 0,
-    _maxPingFailures: 3,
-    _pingTimeout: 5000,
-    _lastPing: 0,
-    _lastPong: 0,
-    _offlineBuffer: [],
-    _visibilityThrottle: false,
-    _latencyHistory: [],
-    _backoffState: new Map(),
-    _circuitBreakers: new Map(),
-    _heartbeatTimer: null,
-    _recoveryTimer: null,
+export const HeartbeatManager = {
+    _interval: null,
+    _missedCount: 0,
+    _maxMissed: 3,
+    _running: false,
+    _lastAck: 0,
     _listeners: new Set(),
-    _enabled: true,
-    _quality: 'unknown',
-    _silent: true,
     
-    init() {
-        initLog('ReliabilityEngine initializing');
-        this._startPing();
-        this._setupVisibility();
-        this._setupHeartbeat();
+    start() {
+        if (this._running) return;
+        if (currentState !== SETTINGS_STATES.ACTIVE && currentState !== SETTINGS_STATES.READY) return;
         
-        if (navigator.connection) {
-            navigator.connection.addEventListener('change', () => {
-                this._onNetworkChange();
-            });
+        this._running = true;
+        this._missedCount = 0;
+        this._lastAck = Date.now();
+        
+        this._interval = safeSetInterval(() => {
+            this._sendHeartbeat();
+        }, 30000);
+        
+        activeIntervals.add(this._interval);
+        if (DEBUG) debugLog('Heartbeat started');
+    },
+    
+    stop() {
+        if (this._interval) {
+            clearInterval(this._interval);
+            activeIntervals.delete(this._interval);
+            this._interval = null;
         }
-        
-        window.addEventListener('online', () => {
-            this._onOnline();
-        });
-        
-        window.addEventListener('offline', () => {
-            this._onOffline();
-        });
-        
-        successLog('ReliabilityEngine initialized');
+        this._running = false;
+        this._missedCount = 0;
+        if (DEBUG) debugLog('Heartbeat stopped');
     },
     
-    _startPing() {
-        if (this._pingInterval) clearInterval(this._pingInterval);
-        
-        const interval = IframeEnvironment.isVPN() ? 30000 : 15000;
-        
-        this._pingInterval = setInterval(() => {
-            if (this._enabled && (!document.hidden || !this._visibilityThrottle)) {
-                this._sendPing();
-            }
-        }, interval);
-    },
-    
-    async _sendPing() {
-        // Limit ping retries
-        pingRetryCount++;
-        if (pingRetryCount > MAX_RETRIES) {
-            if (DEBUG) debugLog('Ping retry limit reached - reducing frequency');
+    _sendHeartbeat() {
+        if (currentState === SETTINGS_STATES.DEGRADED) {
+            this.stop();
             return;
         }
         
-        const pingId = `ping_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-        this._lastPing = Date.now();
-        
-        try {
-            const pong = await IframeTransport.send('PING', { pingId }, { 
-                expectAck: true, 
-                timeout: this._pingTimeout,
-                retryCount: 0,
-                maxRetries: 1
-            });
-            
-            if (pong) {
-                this._lastPong = Date.now();
-                this._pingFailures = 0;
-                pingRetryCount = 0;
-                
-                const latency = this._lastPong - this._lastPing;
-                this._latencyHistory.push(latency);
-                if (this._latencyHistory.length > 10) this._latencyHistory.shift();
-                
-                this._updateConnectionQuality(latency);
-            }
-            
-        } catch (error) {
-            this._pingFailures++;
-            
-            if (this._pingFailures >= this._maxPingFailures) {
-                this._enterDegradedMode('ping_failure');
-            }
-        }
-    },
-    
-    _updateConnectionQuality(latency) {
-        if (latency < 100) {
-            this._quality = 'good';
-        } else if (latency < 300) {
-            this._quality = 'fair';
-        } else if (latency < 1000) {
-            this._quality = 'poor';
-        } else {
-            this._quality = 'degraded';
-        }
-        
-        state.connectionQuality = this._quality;
-        
-        if (this._quality === 'degraded') {
-            this._enterDegradedMode('high_latency');
-        }
-    },
-    
-    _enterDegradedMode(reason) {
-        if (StartupGovernor.isStable()) {
-            StartupGovernor.transition(StartupGovernor.states.DEGRADED, reason);
-            
-            clearInterval(this._pingInterval);
-            this._pingInterval = setInterval(() => this._sendPing(), 30000);
-            this._pingTimeout = 10000;
-            
-            this.emit('degraded', { reason });
-        }
-    },
-    
-    _setupVisibility() {
-        document.addEventListener('visibilitychange', () => {
-            if (document.hidden) {
-                this._visibilityThrottle = true;
-                this._flushUrgentQueue();
-            } else {
-                this._visibilityThrottle = false;
-                SessionClient.sync();
-                this.flushOffline();
-            }
-        });
-    },
-    
-    _setupHeartbeat() {
-        if (this._heartbeatTimer) clearInterval(this._heartbeatTimer);
-        
-        const interval = IframeEnvironment.isVPN() ? 60000 : 30000;
-        
-        this._heartbeatTimer = setInterval(() => {
-            if (this._enabled && StartupGovernor.isStable()) {
-                IframeTransport.send('HEARTBEAT', {
-                    childId: 'settings',
-                    state: StartupGovernor.getState(),
-                    sessionValid: SessionClient.isValid(),
-                    quality: this._quality,
-                    timestamp: Date.now()
-                }, { expectAck: false, maxRetries: 1 }).catch(() => {});
-            }
-        }, interval);
-    },
-    
-    _onNetworkChange() {
-        if (navigator.connection) {
-            const rtt = navigator.connection.rtt || 0;
-            
-            if (rtt > 500) {
-                this._enterDegradedMode('slow_network');
-            } else if (this._quality === 'degraded' && rtt < 200) {
-                this._attemptRecovery();
-            }
-        }
-    },
-    
-    _onOnline() {
-        this._pingFailures = 0;
-        this.flushOffline();
-        SessionClient.sync();
-        this.emit('online');
-    },
-    
-    _onOffline() {
-        this.emit('offline');
-    },
-    
-    _flushUrgentQueue() {
-        // No operation needed
-    },
-    
-    async _attemptRecovery() {
-        // Limit recovery attempts
-        recoveryAttemptCount++;
-        if (recoveryAttemptCount > MAX_RETRIES) {
-            if (DEBUG) debugLog('Recovery attempt limit reached');
-            return;
-        }
-        
-        if (this._recoveryTimer) clearTimeout(this._recoveryTimer);
-        
-        this._recoveryTimer = setTimeout(async () => {
-            StartupGovernor.transition(StartupGovernor.states.RECOVERING, 'network_recovery');
-            
-            try {
-                await IframeHandshakeAuthority.startHandshake({ force: true });
-                await SessionClient.sync();
-                StartupGovernor.transition(StartupGovernor.states.ACTIVE, 'recovery_success');
-                this.emit('recovered');
-                recoveryAttemptCount = 0;
-            } catch (error) {
-                StartupGovernor.transition(StartupGovernor.states.DEGRADED, 'recovery_failed');
-                this._recoveryTimer = setTimeout(() => this._attemptRecovery(), 60000);
-            }
-        }, 5000);
-    },
-    
-    bufferOffline(message) {
-        if (!message) return;
-        
-        this._offlineBuffer.push({
-            message,
+        IframeTransport.send('HEARTBEAT', {
+            state: currentState,
             timestamp: Date.now()
-        });
-        
-        if (this._offlineBuffer.length > 50) {
-            this._offlineBuffer.shift();
-        }
-    },
-    
-    flushOffline() {
-        if (this._offlineBuffer.length === 0) return;
-        
-        const buffer = [...this._offlineBuffer];
-        this._offlineBuffer = [];
-        
-        buffer.forEach(item => {
-            IframeTransport.send(item.message.type, item.message.payload, { expectAck: false, maxRetries: 1 })
-                .catch(() => {
-                    this.bufferOffline(item.message);
-                });
-        });
-    },
-    
-    getCircuitBreaker(name, options = {}) {
-        if (!this._circuitBreakers.has(name)) {
-            this._circuitBreakers.set(name, {
-                name,
-                failures: 0,
-                lastFailure: null,
-                isOpen: false,
-                openTime: null,
-                threshold: options.threshold || 5,
-                timeout: options.timeout || 30000,
-                halfOpenSuccesses: 0,
-                halfOpenThreshold: options.halfOpenThreshold || 2,
-                
-                recordFailure() {
-                    this.failures++;
-                    this.lastFailure = Date.now();
-                    
-                    if (this.failures >= this.threshold && !this.isOpen) {
-                        this.isOpen = true;
-                        this.openTime = Date.now();
-                        this.halfOpenSuccesses = 0;
-                    }
-                },
-                
-                recordSuccess() {
-                    if (this.isOpen) {
-                        this.halfOpenSuccesses++;
-                        if (this.halfOpenSuccesses >= this.halfOpenThreshold) {
-                            this.isOpen = false;
-                            this.failures = 0;
-                            this.openTime = null;
-                            this.halfOpenSuccesses = 0;
-                        }
-                    } else {
-                        this.failures = Math.max(0, this.failures - 1);
-                    }
-                },
-                
-                allow() {
-                    if (this.isOpen && this.openTime) {
-                        if (Date.now() - this.openTime > this.timeout) {
-                            this.isOpen = false;
-                            this.halfOpenSuccesses = 0;
-                            return true;
-                        }
-                        return false;
-                    }
-                    return true;
-                }
-            });
-        }
-        
-        return this._circuitBreakers.get(name);
-    },
-    
-    on(event, listener) {
-        this._listeners.add({ event, listener });
-    },
-    
-    emit(event, data) {
-        this._listeners.forEach(item => {
-            if (item.event === event) {
-                try {
-                    item.listener(data);
-                } catch (e) {}
-            }
-        });
-    },
-    
-    enable() {
-        this._enabled = true;
-    },
-    
-    disable() {
-        this._enabled = false;
-    },
-    
-    getQuality() {
-        return this._quality;
-    },
-    
-    getDiagnostics() {
-        const avgLatency = this._latencyHistory.length > 0 ?
-            this._latencyHistory.reduce((a, b) => a + b, 0) / this._latencyHistory.length : 0;
-        
-        return {
-            pingFailures: this._pingFailures,
-            lastPing: this._lastPing,
-            lastPong: this._lastPong,
-            avgLatency,
-            ackQueueSize: this._ackQueue.size,
-            retryQueueSize: this._retryQueue.size,
-            offlineBufferSize: this._offlineBuffer.length,
-            connectionQuality: this._quality,
-            visibilityThrottle: this._visibilityThrottle,
-            enabled: this._enabled,
-            circuitBreakers: Array.from(this._circuitBreakers.keys()).map(name => {
-                const cb = this._circuitBreakers.get(name);
-                return {
-                    name,
-                    isOpen: cb.isOpen,
-                    failures: cb.failures
-                };
-            })
-        };
-    },
-    
-    setSilent(silent) {
-        this._silent = silent;
-    }
-};
-
-ReliabilityEngine.init();
-
-// =============================================
-// RECOVERY MANAGER 
-// =============================================
-export const RecoveryManager = {
-    _attempts: 0,
-    _maxAttempts: MAX_RETRIES, // Limited retries
-    _backoffMs: 1000,
-    _recoveryInProgress: false,
-    _recoveryTimer: null,
-    _listeners: new Set(),
-    _recoveryStrategies: new Map(),
-    _silent: true,
-    
-    init() {
-        initLog('RecoveryManager initializing');
-        this._registerDefaultStrategies();
-        successLog('RecoveryManager initialized');
-    },
-    
-    _registerDefaultStrategies() {
-        this.registerStrategy('handshake', async () => {
-            verifySessionRetryCount++;
-            if (verifySessionRetryCount > MAX_RETRIES) {
-                return false;
-            }
-            const result = await IframeHandshakeAuthority.startHandshake({ force: true });
-            if (result.success) verifySessionRetryCount = 0;
-            return result.success;
-        });
-        
-        this.registerStrategy('session', async () => {
-            sessionSyncRetryCount++;
-            if (sessionSyncRetryCount > MAX_RETRIES) {
-                return false;
-            }
-            const result = await SessionClient.sync();
-            if (result) sessionSyncRetryCount = 0;
-            return result;
-        });
-        
-        this.registerStrategy('ping', async () => {
-            pingRetryCount++;
-            if (pingRetryCount > MAX_RETRIES) {
-                return false;
-            }
-            try {
-                await IframeTransport.ping();
-                pingRetryCount = 0;
-                return true;
-            } catch (e) {
-                return false;
-            }
-        });
-        
-        this.registerStrategy('reload', async () => {
-            window.location.reload();
-            return true;
-        });
-    },
-    
-    registerStrategy(name, strategy) {
-        this._recoveryStrategies.set(name, strategy);
-    },
-    
-    async attemptRecovery(options = {}) {
-        const {
-            strategies = ['handshake', 'session', 'ping'],
-            maxAttempts = this._maxAttempts,
-            reason = 'unknown'
-        } = options;
-        
-        if (this._recoveryInProgress) return false;
-        if (this._attempts >= maxAttempts) {
-            this.emit('failed', { reason, attempts: this._attempts });
-            return false;
-        }
-        
-        this._recoveryInProgress = true;
-        this._attempts++;
-        
-        if (!this._silent) debugLog(`Recovery attempt ${this._attempts}/${maxAttempts} - Reason: ${reason}`);
-        this.emit('attempt', { attempt: this._attempts, reason });
-        
-        try {
-            for (const strategy of strategies) {
-                if (!this._recoveryStrategies.has(strategy)) continue;
-                
-                const strategyFn = this._recoveryStrategies.get(strategy);
-                const success = await strategyFn();
-                
-                if (success) {
-                    this._recoveryInProgress = false;
-                    this._attempts = 0;
-                    this.emit('success', { strategy, attempts: this._attempts });
-                    ReliabilityEngine.flushOffline();
-                    if (!this._silent) successLog('Recovery successful via', strategy);
-                    return true;
-                }
-                
-                await new Promise(resolve => setTimeout(resolve, 500));
-            }
+        }, { expectAck: true, timeout: 5000 }).then(() => {
+            this._missedCount = 0;
+            this._lastAck = Date.now();
+            this.emit('heartbeat', { success: true });
+        }).catch(() => {
+            this._missedCount++;
+            this.emit('heartbeat', { success: false, missed: this._missedCount });
             
-            this._recoveryInProgress = false;
-            this.emit('failed', { reason, attempts: this._attempts });
-            
-            const backoff = Math.min(this._backoffMs * Math.pow(2, this._attempts), 30000);
-            this._recoveryTimer = setTimeout(() => {
-                this.attemptRecovery(options);
-            }, backoff);
-            
-            return false;
-            
-        } catch (error) {
-            this._recoveryInProgress = false;
-            return false;
-        }
+            if (this._missedCount >= this._maxMissed) {
+                if (DEBUG) console.warn(`[${MODULE_NAME}] Missed ${this._missedCount} heartbeats`);
+            }
+        });
     },
     
-    reset() {
-        this._attempts = 0;
-        this._recoveryInProgress = false;
-        if (this._recoveryTimer) clearTimeout(this._recoveryTimer);
+    handleAck() {
+        this._missedCount = 0;
+        this._lastAck = Date.now();
+    },
+    
+    isHealthy() {
+        return this._missedCount < this._maxMissed;
     },
     
     on(event, listener) {
@@ -3089,368 +2470,21 @@ export const RecoveryManager = {
     
     getDiagnostics() {
         return {
-            attempts: this._attempts,
-            maxAttempts: this._maxAttempts,
-            recoveryInProgress: this._recoveryInProgress,
-            strategies: Array.from(this._recoveryStrategies.keys())
+            running: this._running,
+            missedCount: this._missedCount,
+            maxMissed: this._maxMissed,
+            lastAck: this._lastAck,
+            healthy: this.isHealthy()
         };
     },
     
     setSilent(silent) {
-        this._silent = silent;
-    }
-};
-
-RecoveryManager.init();
-
-// =============================================
-// DIAGNOSTICS AGENT 
-// =============================================
-export const DiagnosticsAgent = {
-    _enabled: true,
-    _logBuffer: [],
-    _maxBuffer: 500,
-    _startTime: Date.now(),
-    _metrics: {
-        messagesSent: 0,
-        messagesReceived: 0,
-        handshakes: 0,
-        handshakeFailures: 0,
-        sessionUpdates: 0,
-        sessionFailures: 0,
-        pings: 0,
-        pongs: 0,
-        acks: 0,
-        errors: 0,
-        recoveries: 0
-    },
-    _stateSnapshots: [],
-    _logToConsole: DEBUG,
-    
-    enable(debug = false) {
-        this._enabled = true;
-        
-        if (debug) {
-            this._logToConsole = true;
-            this._maxBuffer = 500;
-            window.__IFRAME_DEBUG__ = true;
-            DEBUG_ENABLED = true;
-        }
-        
-        window.__getDiagnostics = () => this.getFullReport();
-        window.__resetDiagnostics = () => this.reset();
-    },
-    
-    disable() {
-        this._enabled = false;
-        this._logToConsole = false;
-    },
-    
-    log(level, message, data = null) {
-        if (!this._enabled) return;
-        if (!DEBUG && level !== 'error' && level !== 'init' && level !== 'success') return;
-        
-        const entry = {
-            level,
-            message,
-            data: data ? (typeof data === 'object' ? JSON.stringify(data).substring(0, 200) : String(data)) : null,
-            timestamp: Date.now(),
-            timeStr: new Date().toISOString().slice(11, 23),
-            state: StartupGovernor.getState(),
-            environment: IframeEnvironment.getEnvironment()
-        };
-        
-        this._logBuffer.push(entry);
-        
-        if (this._logBuffer.length > this._maxBuffer) {
-            this._logBuffer.shift();
-        }
-    },
-    
-    track(event, details = {}) {
-        if (!this._enabled) return;
-        
-        if (this._metrics.hasOwnProperty(event)) {
-            this._metrics[event]++;
-        }
-        
-        this._stateSnapshots.push({
-            event,
-            details,
-            timestamp: Date.now(),
-            state: StartupGovernor.getState(),
-            handshakeStatus: IframeHandshakeAuthority.getStatus(),
-            sessionValid: SessionClient.isValid(),
-            environment: IframeEnvironment.getEnvironment()
-        });
-        
-        if (this._stateSnapshots.length > 50) {
-            this._stateSnapshots.shift();
-        }
-    },
-    
-    error(error, context = '') {
-        this._metrics.errors++;
-        errorLog(context, error);
-    },
-    
-    getMetrics() {
-        return {
-            ...this._metrics,
-            uptime: Date.now() - this._startTime,
-            environment: IframeEnvironment.getEnvironment(),
-            sandboxed: IframeEnvironment._features.isSandboxed,
-            compatibility: CompatibilityBridge.isEnabled()
-        };
-    },
-    
-    getFullReport() {
-        return {
-            timestamp: Date.now(),
-            environment: {
-                type: IframeEnvironment.getEnvironment(),
-                features: { ...IframeEnvironment._features },
-                sandboxed: IframeEnvironment._features.isSandboxed,
-                compatibility: CompatibilityBridge.isEnabled(),
-                compatibilityReason: CompatibilityBridge.getReason()
-            },
-            startup: StartupGovernor.getDiagnostics(),
-            handshake: IframeHandshakeAuthority.getStatus(),
-            session: SessionClient.getDiagnostics(),
-            reliability: ReliabilityEngine.getDiagnostics(),
-            origin: OriginAdapter.getDiagnostics(),
-            transport: IframeTransport.getDiagnostics(),
-            recovery: RecoveryManager.getDiagnostics(),
-            metrics: this.getMetrics(),
-            logs: this._logBuffer.slice(-20),
-            stateSnapshots: this._stateSnapshots.slice(-10),
-            parentAuthority: {
-                state: parentAuthorityState,
-                parentReadyDetected,
-                moduleRegistered,
-                parentAuthoritative: !!parentAuthoritativeSession,
-                parentContractEnforced
-            }
-        };
-    },
-    
-    reset() {
-        this._logBuffer = [];
-        this._metrics = {
-            messagesSent: 0,
-            messagesReceived: 0,
-            handshakes: 0,
-            handshakeFailures: 0,
-            sessionUpdates: 0,
-            sessionFailures: 0,
-            pings: 0,
-            pongs: 0,
-            acks: 0,
-            errors: 0,
-            recoveries: 0
-        };
-        this._stateSnapshots = [];
-        this._startTime = Date.now();
-        this.log('INFO', 'Diagnostics reset');
+        // No-op for compatibility
     }
 };
 
 // =============================================
-// MULTI-MODULE COORDINATOR - FIXED
-// =============================================
-export const MODULE_DISCOVERY = 'MODULE_DISCOVERY';
-export const MODULE_PRESENCE = 'MODULE_PRESENCE';
-export const ORIGIN_BIND = 'ORIGIN_BIND';
-
-export const MultiModuleCoordinator = {
-    _modules: new Map(),
-    _moduleId: `settings_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
-    _moduleType: 'settings',
-    _busListeners: new Map(),
-    _sharedSession: null,
-    _masterModule: false,
-    _handshakeCoordinator: null,
-    _silent: true,
-    
-    init() {
-        initLog('MultiModuleCoordinator initializing');
-        if (!window.__MODULE_COORDINATOR__) {
-            window.__MODULE_COORDINATOR__ = this;
-            this._masterModule = true;
-        }
-        
-        this.registerModule(this._moduleType, this._moduleId);
-        
-        window.addEventListener('message', (event) => {
-            if (event.data && event.data._moduleBus) {
-                this._handleModuleMessage(event.data);
-            }
-        });
-        
-        setTimeout(() => this._discoverModules(), 1000);
-        successLog('MultiModuleCoordinator initialized');
-    },
-    
-    registerModule(type, id) {
-        this._modules.set(id, {
-            type,
-            id,
-            lastSeen: Date.now(),
-            ready: false,
-            handshakeComplete: false,
-            sessionValid: false
-        });
-        
-        this._broadcast({
-            _moduleBus: true,
-            type: MODULE_PRESENCE,
-            moduleType: type,
-            moduleId: id,
-            timestamp: Date.now()
-        });
-    },
-    
-    _discoverModules() {
-        this._broadcast({
-            _moduleBus: true,
-            type: MODULE_DISCOVERY,
-            sourceId: this._moduleId,
-            timestamp: Date.now()
-        });
-    },
-    
-    _handleModuleMessage(data) {
-        const { type, sourceId, moduleType, target } = data;
-        
-        if (target && target !== this._moduleId && target !== 'all') return;
-        
-        switch (type) {
-            case MODULE_PRESENCE:
-                this._modules.set(sourceId, {
-                    type: moduleType,
-                    id: sourceId,
-                    lastSeen: Date.now(),
-                    ready: true,
-                    handshakeComplete: data.handshakeComplete || false,
-                    sessionValid: data.sessionValid || false
-                });
-                break;
-                
-            case MODULE_DISCOVERY:
-                this._broadcast({
-                    _moduleBus: true,
-                    type: MODULE_PRESENCE,
-                    moduleType: this._moduleType,
-                    moduleId: this._moduleId,
-                    handshakeComplete: IframeHandshakeAuthority.isComplete(),
-                    sessionValid: SessionClient.isValid(),
-                    timestamp: Date.now(),
-                    target: sourceId
-                });
-                break;
-                
-            case 'SESSION_UPDATE':
-                if (data.session && !this._sharedSession) {
-                    this._sharedSession = data.session;
-                    // Only update if parent hasn't provided authoritative session
-                    if (!parentAuthoritativeSession) {
-                        SessionClient.updateSession(
-                            data.session.user,
-                            data.session.token,
-                            data.session.expiry
-                        );
-                    }
-                }
-                break;
-                
-            case 'HANDSHAKE_COMPLETE':
-                if (!IframeHandshakeAuthority.isComplete()) {
-                    IframeHandshakeAuthority._handshakeComplete = true;
-                }
-                break;
-                
-            default:
-                const listeners = this._busListeners.get(type) || [];
-                listeners.forEach(listener => {
-                    try {
-                        listener(data);
-                    } catch (e) {}
-                });
-        }
-    },
-    
-    _broadcast(message) {
-        message.sourceId = this._moduleId;
-        message.timestamp = Date.now();
-        
-        IframeTransport.send('MODULE_BROADCAST', {
-            payload: message,
-            timestamp: Date.now()
-        }, { expectAck: false, maxRetries: 1 }).catch(() => {});
-    },
-    
-    on(event, listener) {
-        if (!this._busListeners.has(event)) {
-            this._busListeners.set(event, []);
-        }
-        this._busListeners.get(event).push(listener);
-    },
-    
-    emit(event, data) {
-        this._broadcast({
-            _moduleBus: true,
-            type: event,
-            ...data
-        });
-    },
-    
-    getModules() {
-        const now = Date.now();
-        this._modules.forEach((module, id) => {
-            if (now - module.lastSeen > 60000) {
-                this._modules.delete(id);
-            }
-        });
-        
-        return Array.from(this._modules.values());
-    },
-    
-    hasModule(type) {
-        return Array.from(this._modules.values()).some(m => m.type === type);
-    },
-    
-    getSharedSession() {
-        // Return authoritative session if available
-        if (parentAuthoritativeSession) {
-            return parentAuthoritativeSession;
-        }
-        return this._sharedSession;
-    },
-    
-    setSharedSession(session) {
-        this._sharedSession = session;
-        this.emit('SESSION_UPDATE', { session });
-    },
-    
-    getDiagnostics() {
-        return {
-            moduleId: this._moduleId,
-            moduleType: this._moduleType,
-            masterModule: this._masterModule,
-            modulesCount: this._modules.size,
-            modules: Array.from(this._modules.values())
-        };
-    },
-    
-    setSilent(silent) {
-        this._silent = silent;
-    }
-};
-
-MultiModuleCoordinator.init();
-
-// =============================================
-// NAVIGATION GUARD 
+// NAVIGATION GUARD
 // =============================================
 export const NavigationGuard = {
     _enabled: true,
@@ -3568,10 +2602,8 @@ export const NavigationGuard = {
     }
 };
 
-NavigationGuard.init();
-
 // =============================================
-// UI FAILSAFE 
+// UI FAILSAFE
 // =============================================
 export const UIFailsafe = {
     _enabled: true,
@@ -3683,9 +2715,10 @@ export const UIFailsafe = {
         
         this.emit('fallback', true);
         
-        this._recoveryTimer = setTimeout(() => {
+        this._recoveryTimer = safeSetTimeout(() => {
             this.exitFallbackMode();
         }, 30000);
+        activeTimers.add(this._recoveryTimer);
     },
     
     exitFallbackMode() {
@@ -3706,7 +2739,10 @@ export const UIFailsafe = {
         const msg = document.querySelector('.failsafe-message');
         if (msg) msg.remove();
         
-        if (this._recoveryTimer) clearTimeout(this._recoveryTimer);
+        if (this._recoveryTimer) {
+            clearTimeout(this._recoveryTimer);
+            activeTimers.delete(this._recoveryTimer);
+        }
         
         this.emit('fallback', false);
     },
@@ -3751,10 +2787,538 @@ export const UIFailsafe = {
     }
 };
 
-UIFailsafe.init();
+// =============================================
+// MULTI-MODULE COORDINATOR - SIMPLIFIED
+// =============================================
+export const MODULE_DISCOVERY = 'MODULE_DISCOVERY';
+export const MODULE_PRESENCE = 'MODULE_PRESENCE';
+export const ORIGIN_BIND = 'ORIGIN_BIND';
+
+export const MultiModuleCoordinator = {
+    _modules: new Map(),
+    _moduleId: `settings_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+    _moduleType: 'settings',
+    _busListeners: new Map(),
+    _sharedSession: null,
+    _masterModule: false,
+    _handshakeCoordinator: null,
+    _silent: true,
+    _broadcastChannel: null,
+    
+    init() {
+        initLog('MultiModuleCoordinator initializing');
+        if (!window.__MODULE_COORDINATOR__) {
+            window.__MODULE_COORDINATOR__ = this;
+            this._masterModule = true;
+        }
+        
+        this.registerModule(this._moduleType, this._moduleId);
+        
+        window.addEventListener('message', (event) => {
+            if (event.data && event.data._moduleBus) {
+                this._handleModuleMessage(event.data);
+            }
+        });
+        
+        try {
+            this._broadcastChannel = new BroadcastChannel('knecta_settings');
+            this._broadcastChannel.onmessage = (event) => {
+                if (event.data && event.data.type) {
+                    this._handleBroadcastMessage(event.data);
+                }
+            };
+        } catch (e) {
+            if (DEBUG) debugLog('BroadcastChannel not supported');
+        }
+        
+        successLog('MultiModuleCoordinator initialized');
+    },
+    
+    _handleBroadcastMessage(data) {
+        if (data.type === 'SETTINGS_UPDATED' && data.source !== this._moduleId) {
+            if (currentState === SETTINGS_STATES.READY) {
+                loadFromLocalStorage().then(() => {
+                    const event = new CustomEvent('settingsUpdated', {
+                        detail: { source: 'broadcast', timestamp: Date.now() }
+                    });
+                    window.dispatchEvent(event);
+                });
+            }
+        }
+        
+        if (data.type === 'LANGUAGE_CHANGED' && data.source !== this._moduleId) {
+            const event = new CustomEvent('languageChanged', {
+                detail: { language: data.language, source: 'broadcast' }
+            });
+            window.dispatchEvent(event);
+        }
+    },
+    
+    registerModule(type, id) {
+        this._modules.set(id, {
+            type,
+            id,
+            lastSeen: Date.now(),
+            ready: currentState === SETTINGS_STATES.READY,
+            handshakeComplete: IframeHandshakeAuthority.isComplete(),
+            sessionValid: isSessionValid()
+        });
+        
+        this._broadcast({
+            _moduleBus: true,
+            type: MODULE_PRESENCE,
+            moduleType: type,
+            moduleId: id,
+            timestamp: Date.now()
+        });
+    },
+    
+    _handleModuleMessage(data) {
+        const { type, sourceId, moduleType, target } = data;
+        
+        if (target && target !== this._moduleId && target !== 'all') return;
+        
+        switch (type) {
+            case MODULE_PRESENCE:
+                this._modules.set(sourceId, {
+                    type: moduleType,
+                    id: sourceId,
+                    lastSeen: Date.now(),
+                    ready: data.ready || false,
+                    handshakeComplete: data.handshakeComplete || false,
+                    sessionValid: data.sessionValid || false
+                });
+                break;
+                
+            case MODULE_DISCOVERY:
+                this._broadcast({
+                    _moduleBus: true,
+                    type: MODULE_PRESENCE,
+                    moduleType: this._moduleType,
+                    moduleId: this._moduleId,
+                    ready: currentState === SETTINGS_STATES.READY,
+                    handshakeComplete: IframeHandshakeAuthority.isComplete(),
+                    sessionValid: isSessionValid(),
+                    timestamp: Date.now(),
+                    target: sourceId
+                });
+                break;
+                
+            default:
+                const listeners = this._busListeners.get(type) || [];
+                listeners.forEach(listener => {
+                    try {
+                        listener(data);
+                    } catch (e) {}
+                });
+        }
+    },
+    
+    _broadcast(message) {
+        message.sourceId = this._moduleId;
+        message.timestamp = Date.now();
+        
+        IframeTransport.send('MODULE_BROADCAST', {
+            payload: message,
+            timestamp: Date.now()
+        }, { expectAck: false, maxRetries: 0 }).catch(() => {});
+        
+        if (this._broadcastChannel) {
+            try {
+                this._broadcastChannel.postMessage({
+                    type: message.type,
+                    source: this._moduleId,
+                    ...message
+                });
+            } catch (e) {}
+        }
+    },
+    
+    on(event, listener) {
+        if (!this._busListeners.has(event)) {
+            this._busListeners.set(event, []);
+        }
+        this._busListeners.get(event).push(listener);
+    },
+    
+    emit(event, data) {
+        this._broadcast({
+            _moduleBus: true,
+            type: event,
+            ...data
+        });
+    },
+    
+    getModules() {
+        const now = Date.now();
+        this._modules.forEach((module, id) => {
+            if (now - module.lastSeen > 60000) {
+                this._modules.delete(id);
+            }
+        });
+        
+        return Array.from(this._modules.values());
+    },
+    
+    hasModule(type) {
+        return Array.from(this._modules.values()).some(m => m.type === type);
+    },
+    
+    getSharedSession() {
+        return session.user ? { user: session.user } : null;
+    },
+    
+    setSharedSession(sessionData) {
+        // Do nothing - parent is authoritative
+    },
+    
+    getDiagnostics() {
+        return {
+            moduleId: this._moduleId,
+            moduleType: this._moduleType,
+            masterModule: this._masterModule,
+            modulesCount: this._modules.size,
+            modules: Array.from(this._modules.values())
+        };
+    },
+    
+    setSilent(silent) {
+        this._silent = silent;
+    }
+};
 
 // =============================================
-// EXPORTED STATE VARIABLES - COMPLETE 
+// RECOVERY MANAGER - DISABLED
+// =============================================
+export const RecoveryManager = {
+    _attempts: 0,
+    _maxAttempts: 0,
+    _backoffMs: 1000,
+    _recoveryInProgress: false,
+    _recoveryTimer: null,
+    _listeners: new Set(),
+    _recoveryStrategies: new Map(),
+    _silent: true,
+    
+    init() {
+        initLog('RecoveryManager initializing (disabled)');
+        successLog('RecoveryManager initialized (disabled)');
+    },
+    
+    _registerDefaultStrategies() {},
+    
+    registerStrategy(name, strategy) {},
+    
+    async attemptRecovery(options = {}) {
+        return false;
+    },
+    
+    reset() {},
+    
+    on(event, listener) {},
+    
+    emit(event, data) {},
+    
+    getDiagnostics() {
+        return {
+            attempts: 0,
+            maxAttempts: 0,
+            recoveryInProgress: false,
+            strategies: []
+        };
+    },
+    
+    setSilent(silent) {
+        this._silent = silent;
+    }
+};
+
+// =============================================
+// RELIABILITY ENGINE - SIMPLIFIED
+// =============================================
+export const ReliabilityEngine = {
+    _quality: 'unknown',
+    _enabled: true,
+    _silent: true,
+    
+    init() {
+        initLog('ReliabilityEngine initializing');
+        successLog('ReliabilityEngine initialized');
+    },
+    
+    getQuality() {
+        return this._quality;
+    },
+    
+    enable() {
+        this._enabled = true;
+    },
+    
+    disable() {
+        this._enabled = false;
+    },
+    
+    getDiagnostics() {
+        return {
+            quality: this._quality,
+            enabled: this._enabled
+        };
+    },
+    
+    setSilent(silent) {
+        this._silent = silent;
+    }
+};
+
+// =============================================
+// SESSION CLIENT - SIMPLIFIED
+// =============================================
+export const SessionClient = {
+    _session: null,
+    _sessionToken: null,
+    _sessionExpiry: null,
+    _sessionVersion: 0,
+    _lastSync: 0,
+    _syncInterval: null,
+    _refreshTimer: null,
+    _listeners: new Set(),
+    _pendingAck: false,
+    _sessionLock: false,
+    _refreshAttempts: 0,
+    _maxRefreshAttempts: 0,
+    _offlineMode: false,
+    _syncInProgress: false,
+    _silent: true,
+    
+    init() {
+        initLog('SessionClient initializing');
+        successLog('SessionClient initialized');
+    },
+    
+    _startSync() {},
+    
+    async sync() {
+        return false;
+    },
+    
+    updateSession(session, token, expiry) {
+        return false;
+    },
+    
+    _scheduleRefresh() {},
+    
+    async refresh() {
+        return false;
+    },
+    
+    on(event, listener) {},
+    
+    emit(event, data) {},
+    
+    getSession() {
+        return session.user ? { ...session.user } : null;
+    },
+    
+    getToken() {
+        return null;
+    },
+    
+    isValid() {
+        return isSessionValid();
+    },
+    
+    isExpired() {
+        return !isSessionValid();
+    },
+    
+    isOffline() {
+        return false;
+    },
+    
+    clear() {},
+    
+    getDiagnostics() {
+        return {
+            hasSession: !!session.user,
+            hasToken: false,
+            expiry: session.expiresAt,
+            version: session.version,
+            lastSync: 0,
+            refreshAttempts: 0,
+            isValid: isSessionValid(),
+            isExpired: !isSessionValid(),
+            offlineMode: false,
+            parentAuthoritative: !!parentAuthoritativeSession
+        };
+    },
+    
+    setSilent(silent) {
+        this._silent = silent;
+    }
+};
+
+// =============================================
+// DIAGNOSTICS AGENT
+// =============================================
+export const DiagnosticsAgent = {
+    _enabled: true,
+    _logBuffer: [],
+    _maxBuffer: 500,
+    _startTime: Date.now(),
+    _metrics: {
+        messagesSent: 0,
+        messagesReceived: 0,
+        handshakes: 0,
+        handshakeFailures: 0,
+        sessionUpdates: 0,
+        sessionFailures: 0,
+        pings: 0,
+        pongs: 0,
+        acks: 0,
+        errors: 0,
+        recoveries: 0
+    },
+    _stateSnapshots: [],
+    _logToConsole: DEBUG,
+    
+    enable(debug = false) {
+        this._enabled = true;
+        
+        if (debug) {
+            this._logToConsole = true;
+            this._maxBuffer = 500;
+            window.__IFRAME_DEBUG__ = true;
+            DEBUG_ENABLED = true;
+        }
+        
+        window.__getDiagnostics = () => this.getFullReport();
+        window.__resetDiagnostics = () => this.reset();
+    },
+    
+    disable() {
+        this._enabled = false;
+        this._logToConsole = false;
+    },
+    
+    log(level, message, data = null) {
+        if (!this._enabled) return;
+        if (!DEBUG && level !== 'error' && level !== 'init' && level !== 'success') return;
+        
+        const entry = {
+            level,
+            message,
+            data: data ? (typeof data === 'object' ? JSON.stringify(data).substring(0, 200) : String(data)) : null,
+            timestamp: Date.now(),
+            timeStr: new Date().toISOString().slice(11, 23),
+            state: currentState,
+            environment: IframeEnvironment.getEnvironment()
+        };
+        
+        this._logBuffer.push(entry);
+        
+        if (this._logBuffer.length > this._maxBuffer) {
+            this._logBuffer.shift();
+        }
+    },
+    
+    track(event, details = {}) {
+        if (!this._enabled) return;
+        
+        if (this._metrics.hasOwnProperty(event)) {
+            this._metrics[event]++;
+        }
+        
+        this._stateSnapshots.push({
+            event,
+            details,
+            timestamp: Date.now(),
+            state: currentState,
+            handshakeStatus: IframeHandshakeAuthority.getStatus(),
+            sessionValid: isSessionValid(),
+            environment: IframeEnvironment.getEnvironment()
+        });
+        
+        if (this._stateSnapshots.length > 50) {
+            this._stateSnapshots.shift();
+        }
+    },
+    
+    error(error, context = '') {
+        this._metrics.errors++;
+        errorLog(context, error);
+    },
+    
+    getMetrics() {
+        return {
+            ...this._metrics,
+            uptime: Date.now() - this._startTime,
+            environment: IframeEnvironment.getEnvironment(),
+            sandboxed: IframeEnvironment._features.isSandboxed,
+            compatibility: CompatibilityBridge.isEnabled()
+        };
+    },
+    
+    getFullReport() {
+        return {
+            timestamp: Date.now(),
+            state: {
+                current: currentState,
+                history: stateHistory.slice(-5)
+            },
+            environment: {
+                type: IframeEnvironment.getEnvironment(),
+                features: { ...IframeEnvironment._features },
+                sandboxed: IframeEnvironment._features.isSandboxed,
+                compatibility: CompatibilityBridge.isEnabled(),
+                compatibilityReason: CompatibilityBridge.getReason()
+            },
+            startup: StartupGovernor.getDiagnostics(),
+            handshake: IframeHandshakeAuthority.getStatus(),
+            session: {
+                valid: isSessionValid(),
+                user: session.user ? { id: session.user.id, name: session.user.name } : null,
+                expiresAt: session.expiresAt,
+                version: session.version
+            },
+            heartbeat: HeartbeatManager.getDiagnostics(),
+            origin: OriginAdapter.getDiagnostics(),
+            transport: IframeTransport.getDiagnostics(),
+            metrics: this.getMetrics(),
+            logs: this._logBuffer.slice(-20),
+            stateSnapshots: this._stateSnapshots.slice(-10),
+            parentAuthority: {
+                state: parentAuthorityState,
+                parentReadyDetected,
+                moduleRegistered,
+                parentAuthoritative: !!parentAuthoritativeSession,
+                parentContractEnforced
+            }
+        };
+    },
+    
+    reset() {
+        this._logBuffer = [];
+        this._metrics = {
+            messagesSent: 0,
+            messagesReceived: 0,
+            handshakes: 0,
+            handshakeFailures: 0,
+            sessionUpdates: 0,
+            sessionFailures: 0,
+            pings: 0,
+            pongs: 0,
+            acks: 0,
+            errors: 0,
+            recoveries: 0
+        };
+        this._stateSnapshots = [];
+        this._startTime = Date.now();
+        this.log('INFO', 'Diagnostics reset');
+    }
+};
+
+// =============================================
+// EXPORTED STATE VARIABLES
 // =============================================
 export let isReady = false;
 export let coreError = null;
@@ -3792,14 +3356,14 @@ export let lastPongTime = 0;
 export let pingInterval = null;
 export let recoveryAgentActive = false;
 export let recoveryAttempts = 0;
-export let maxRecoveryAttempts = MAX_RETRIES;
+export let maxRecoveryAttempts = 0;
 export let originBoundToken = null;
 export let tokenBindingNonce = null;
 
-export let MAX_API_RETRIES = MAX_RETRIES;
+export let MAX_API_RETRIES = 0;
 export let AUTH_CHECK_INTERVAL = 30000;
 export let TOKEN_CHECK_INTERVAL = 1000;
-export let MAX_HANDSHAKE_ATTEMPTS = MAX_RETRIES;
+export let MAX_HANDSHAKE_ATTEMPTS = 1;
 export let HANDSHAKE_RETRY_INTERVAL = 1000;
 export let SESSION_SYNC_TIMEOUT = 5000;
 export let HEARTBEAT_INTERVAL = 30000;
@@ -3813,7 +3377,7 @@ export let VISIBILITY_THROTTLE_DELAY = 5000;
 export let TOKEN_BINDING_NONCE_LENGTH = 16;
 
 // =============================================
-// PARENT MESSAGE TYPES - COMPLETE 
+// PARENT MESSAGE TYPES
 // =============================================
 export const PARENT_MESSAGE_TYPES = {
     READY: 'READY',
@@ -3857,7 +3421,6 @@ export const PARENT_MESSAGE_TYPES = {
     VISIBILITY_RESUME: 'VISIBILITY_RESUME',
     THEME_CHANGED: 'THEME_CHANGED',
     
-    // Settings-specific message types
     SETTINGS_UPDATED: 'SETTINGS_UPDATED',
     SETTINGS_PROFILE_UPDATED: 'SETTINGS_PROFILE_UPDATED',
     SETTINGS_PRIVACY_UPDATED: 'SETTINGS_PRIVACY_UPDATED',
@@ -3878,7 +3441,7 @@ export const PARENT_MESSAGE_TYPES = {
 };
 
 // =============================================
-// CORE DATA STORAGE 
+// CORE DATA STORAGE
 // =============================================
 export const coreData = {
     friendsList: [],
@@ -3890,7 +3453,7 @@ export const coreData = {
 };
 
 // =============================================
-// MESSAGE QUEUE 
+// MESSAGE QUEUE
 // =============================================
 export const messageQueue = [];
 export let parentReady = false;
@@ -4129,7 +3692,7 @@ export const SETTINGS_MENU = [
 ];
 
 // =============================================
-// PRIVATE STATE MANAGEMENT 
+// PRIVATE STATE MANAGEMENT
 // =============================================
 const state = {
     initialized: false,
@@ -4185,7 +3748,7 @@ const state = {
     processedMessageIds: new Set(),
     messageIdCleanupTimer: null,
     reconnectAttempts: 0,
-    maxReconnectAttempts: 5,
+    maxReconnectAttempts: 0,
     reconnectDelay: 1000,
     sessionWatchdog: null,
     readyCallbacks: [],
@@ -4215,7 +3778,7 @@ const state = {
 };
 
 // =============================================
-// TRUSTED ORIGINS 
+// TRUSTED ORIGINS
 // =============================================
 const TRUSTED_ORIGINS = new Set([
     window.location.origin,
@@ -4251,7 +3814,7 @@ const originPatterns = [
 ];
 
 // =============================================
-// LOGGING SYSTEM - ENHANCED
+// LOGGING SYSTEM
 // =============================================
 const Log = {
     _warnings: new Set(),
@@ -4382,12 +3945,12 @@ const Log = {
 };
 
 // =============================================
-// SECURE STORAGE ABSTRACTION LAYER 
+// SECURE STORAGE ABSTRACTION LAYER
 // =============================================
 const SecureStorage = SafeStorage;
 
 // =============================================
-// SESSION MIRROR LAYER 
+// SESSION MIRROR LAYER - DISABLED UNDER PARENT AUTHORITY
 // =============================================
 const SessionMirror = {
     _mirror: {
@@ -4409,224 +3972,71 @@ const SessionMirror = {
     _syncInterval: null,
     
     init() {
-        // Only load cached if parent hasn't provided authoritative session
-        if (!parentAuthoritativeSession && !parentSessionReceived) {
-            const cached = SafeStorage.getJSON('session_mirror', null, true);
-            if (cached) {
-                this._mirror = { ...this._mirror, ...cached };
-                if (this._mirror.boundOrigin && this._mirror.boundOrigin !== window.location.origin) {
-                    this.clear();
-                }
-            }
-        }
-        this._startAutoSync();
         return this;
     },
     
-    _startAutoSync() {
-        if (this._syncInterval) clearInterval(this._syncInterval);
-        this._syncInterval = setInterval(() => this.sync(), 30000);
-        state.intervals.add(this._syncInterval);
-    },
-    
     update(sessionData) {
-        if (!sessionData) return false;
-        
-        // If parent is authoritative, do not override with local updates
-        if (parentContractEnforced && !parentAuthoritativeSession && !parentSessionReceived) {
-            return false;
-        }
-        
-        const previousVersion = this._mirror.version;
-        
-        if (sessionData.user) this._mirror.user = { ...sessionData.user };
-        if (sessionData.token) this._mirror.token = sessionData.token;
-        if (sessionData.permissions) this._mirror.permissions = { ...sessionData.permissions };
-        if (sessionData.expiresAt) this._mirror.expiresAt = sessionData.expiresAt;
-        if (sessionData.capabilities) this._mirror.capabilities = [...sessionData.capabilities];
-        if (sessionData.boundOrigin) this._mirror.boundOrigin = sessionData.boundOrigin;
-        if (sessionData.bindingNonce) this._mirror.bindingNonce = sessionData.bindingNonce;
-        
-        this._mirror.lastSync = Date.now();
-        this._mirror.lastValidated = Date.now();
-        this._mirror.version = (this._mirror.version || 0) + 1;
-        this._mirror.source = 'parent';
-        
-        if (this._mirror.user) {
-            currentUser = this._mirror.user;
-            coreData.user = this._mirror.user;
-            state.session = this._mirror.user;
-            state.sessionMirror = { ...this._mirror };
-            if (!parentAuthoritativeSession && !parentSessionReceived) {
-                parentSessionData = this._mirror;
-                parentSessionReceived = true;
-            }
-            sessionValidated = true;
-            
-            if (this._mirror.token) {
-                tokenAvailable = true;
-                tokenReady = true;
-                authReady = true;
-                
-                if (!this._mirror.boundOrigin) {
-                    this._bindToOrigin();
-                }
-            }
-        }
-        
-        // Only cache if parent is not authoritative
-        if (!parentContractEnforced) {
-            SafeStorage.setJSON('session_mirror', {
-                user: this._mirror.user ? { id: this._mirror.user.id, name: this._mirror.user.name } : null,
-                version: this._mirror.version,
-                expiresAt: this._mirror.expiresAt,
-                boundOrigin: this._mirror.boundOrigin,
-                capabilities: this._mirror.capabilities
-            }, true);
-        }
-        
-        this._notifySubscribers();
-        DiagnosticsAgent.track('session_update', { version: this._mirror.version });
-        return true;
-    },
-    
-    _bindToOrigin() {
-        if (!this._mirror.token) return false;
-        
-        tokenBindingNonce = this._generateNonce(TOKEN_BINDING_NONCE_LENGTH);
-        this._mirror.bindingNonce = tokenBindingNonce;
-        this._mirror.boundOrigin = window.location.origin;
-        
-        IframeTransport.send(ORIGIN_BIND, {
-            nonce: tokenBindingNonce,
-            origin: window.location.origin,
-            timestamp: Date.now()
-        }).catch(() => {});
-        
-        return true;
-    },
-    
-    _generateNonce(length) {
-        const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-        let result = '';
-        for (let i = 0; i < length; i++) {
-            result += chars.charAt(Math.floor(Math.random() * chars.length));
-        }
-        return result;
+        return false;
     },
     
     sync() {
-        // Limit sync retries
-        mirrorSyncRetryCount++;
-        if (mirrorSyncRetryCount > MAX_RETRIES) {
-            return false;
-        }
-        
-        if (this._syncInProgress) return false;
-        this._lastSyncAttempt = Date.now();
-        this._syncInProgress = true;
-        IframeTransport.send('MIRROR_SYNC', {
-            childId: 'settings',
-            version: this._mirror.version,
-            timestamp: Date.now(),
-            source: MODULE_NAME
-        }, { expectAck: true, timeout: 3000, maxRetries: 1 }).then(response => {
-            if (response?.payload?.session) {
-                this.update(response.payload.session);
-                mirrorSyncRetryCount = 0;
-            }
-        }).catch(() => {}).finally(() => {
-            this._syncInProgress = false;
-        });
-        return true;
+        return false;
     },
     
     subscribe(callback) {
-        this._subscribers.add(callback);
-        callback(this.getMirror());
-        return () => this._subscribers.delete(callback);
+        return () => {};
     },
     
-    _notifySubscribers() {
-        const mirror = this.getMirror();
-        this._subscribers.forEach(cb => {
-            try { cb(mirror); } catch (e) {}
-        });
-    },
+    _notifySubscribers() {},
     
     getMirror() {
         return {
-            user: this._mirror.user ? { ...this._mirror.user } : null,
-            token: this._mirror.token,
-            permissions: this._mirror.permissions ? { ...this._mirror.permissions } : null,
-            expiresAt: this._mirror.expiresAt,
-            lastSync: this._mirror.lastSync,
-            version: this._mirror.version,
-            isValid: this.isValid(),
-            isExpired: this.isExpired(),
-            boundOrigin: this._mirror.boundOrigin,
-            bindingNonce: this._mirror.bindingNonce,
-            capabilities: [...(this._mirror.capabilities || [])],
-            lastValidated: this._mirror.lastValidated
-        };
-    },
-    
-    getUser() {
-        return this._mirror.user ? { ...this._mirror.user } : null;
-    },
-    
-    getToken() {
-        return this._mirror.token;
-    },
-    
-    validateToken() {
-        if (!this._mirror.token) return false;
-        if (this._mirror.boundOrigin && this._mirror.boundOrigin !== window.location.origin) {
-            return false;
-        }
-        return !this.isExpired();
-    },
-    
-    isValid() {
-        return !!this._mirror.user && !!this._mirror.token && !this.isExpired() && this.validateToken();
-    },
-    
-    isExpired() {
-        if (!this._mirror.expiresAt) return false;
-        return Date.now() >= this._mirror.expiresAt;
-    },
-    
-    clear() {
-        this._mirror = {
-            user: null,
+            user: session.user ? { ...session.user } : null,
             token: null,
             permissions: null,
-            expiresAt: 0,
+            expiresAt: session.expiresAt,
             lastSync: 0,
-            version: 0,
-            source: null,
+            version: session.version,
+            isValid: isSessionValid(),
+            isExpired: !isSessionValid(),
             boundOrigin: null,
             bindingNonce: null,
             capabilities: [],
             lastValidated: 0
         };
-        SafeStorage.remove('session_mirror');
-        originBoundToken = null;
-        tokenBindingNonce = null;
-        this._notifySubscribers();
+    },
+    
+    getUser() {
+        return session.user ? { ...session.user } : null;
+    },
+    
+    getToken() {
+        return null;
+    },
+    
+    validateToken() {
+        return false;
+    },
+    
+    isValid() {
+        return isSessionValid();
+    },
+    
+    isExpired() {
+        return !isSessionValid();
+    },
+    
+    clear() {
+        // Do nothing
     },
     
     shutdown() {
-        if (this._syncInterval) {
-            clearInterval(this._syncInterval);
-            this._syncInterval = null;
-        }
-        this._subscribers.clear();
+        // Do nothing
     }
 };
 
 // =============================================
-// CANONICAL MESSAGE FORMATTER 
+// CANONICAL MESSAGE FORMATTER
 // =============================================
 function formatCanonicalMessage(type, payload = {}, options = {}) {
     const messageId = options.messageId || generateMessageId();
@@ -4641,7 +4051,7 @@ function formatCanonicalMessage(type, payload = {}, options = {}) {
         type,
         source: 'iframe',
         target: 'parent',
-        frameId: 'settings',
+        frameId: FRAME_ID,
         timestamp,
         payload: payload || {},
         expectAck,
@@ -4650,24 +4060,11 @@ function formatCanonicalMessage(type, payload = {}, options = {}) {
         module: MODULE_NAME,
         version: MODULE_VERSION,
         environment: IframeEnvironment.getEnvironment(),
-        handshakeState: StartupGovernor.getState()
+        state: currentState
     };
-    
-    if (tokenAvailable && getSecureToken()) {
-        canonicalMessage.token = getSecureToken();
-        
-        try {
-            const hmacPayload = `${messageId}:${type}:${timestamp}:${canonicalMessage.token}`;
-            canonicalMessage.signature = btoa(hmacPayload);
-        } catch (e) {}
-    }
     
     if (options.legacy) {
         canonicalMessage.legacy = true;
-    }
-    
-    if (originBoundToken && tokenBindingNonce) {
-        canonicalMessage.bindingNonce = tokenBindingNonce;
     }
     
     if (CompatibilityBridge.isEnabled()) {
@@ -4679,14 +4076,14 @@ function formatCanonicalMessage(type, payload = {}, options = {}) {
 }
 
 // =============================================
-// MESSAGE ID GENERATOR 
+// MESSAGE ID GENERATOR
 // =============================================
 function generateMessageId() {
     return generateUniqueId();
 }
 
 // =============================================
-// SECURITY FUNCTIONS 
+// SECURITY FUNCTIONS
 // =============================================
 function isValidOrigin(origin) {
     return OriginAdapter.isTrusted(origin);
@@ -4737,7 +4134,7 @@ function isFromParent(event) {
 }
 
 // =============================================
-// PARENT DETECTION 
+// PARENT DETECTION
 // =============================================
 function detectParent() {
     try {
@@ -4768,27 +4165,33 @@ function waitForParent(timeout = 5000) {
             return;
         }
         const startTime = Date.now();
-        const checkInterval = setInterval(() => {
+        const checkInterval = safeSetInterval(() => {
             if (detectParent()) {
                 clearInterval(checkInterval);
+                activeIntervals.delete(checkInterval);
                 clearTimeout(timeoutId);
+                activeTimers.delete(timeoutId);
                 resolve(true);
             } else if (Date.now() - startTime > timeout) {
                 clearInterval(checkInterval);
+                activeIntervals.delete(checkInterval);
                 resolve(false);
             }
         }, 100);
-        const timeoutId = setTimeout(() => {
+        activeIntervals.add(checkInterval);
+        const timeoutId = safeSetTimeout(() => {
             clearInterval(checkInterval);
+            activeIntervals.delete(checkInterval);
             resolve(false);
         }, timeout);
+        activeTimers.add(timeoutId);
         state.timeouts.add(checkInterval);
         state.timeouts.add(timeoutId);
     });
 }
 
 // =============================================
-// ENHANCED SEND TO PARENT 
+// SEND TO PARENT - WRAPPER
 // =============================================
 export function sendToParent(payload, retryCount = 0, expectAck = false) {
     const messageId = generateUniqueId();
@@ -4799,1372 +4202,562 @@ export function sendToParent(payload, retryCount = 0, expectAck = false) {
             expectAck, 
             retryCount,
             timeout: payload.timeout || 5000,
-            maxRetries: MAX_RETRIES,
+            maxRetries: 0,
             messageId
         }
     );
 }
 
 // =============================================
-// RECEIVE FROM PARENT 
+// RECEIVE FROM PARENT
 // =============================================
 export function receiveFromParent(messageType, handler) {
     return IframeTransport.on(messageType, handler);
 }
 
 // =============================================
-// ENHANCED STARTUP SEQUENCE 
+// REGISTER WITH PARENT - STEP 1
 // =============================================
-export async function executeStartupSequence() {
-    StartupGovernor.transition(StartupGovernor.states.WAIT_PARENT, 'starting');
+function registerWithParent() {
+    transitionTo(SETTINGS_STATES.REGISTERING, 'starting_registration');
     
-    state.handshakeState = 'child_ready';
-    state.childReadySent = true;
+    IframeTransport.startHandshakeTimer(150);
     
-    sendLog('CHILD_READY');
-    await IframeTransport.send('CHILD_READY', {
-        childId: 'settings',
-        frameId: 'settings',
-        timestamp: Date.now(),
-        protocol: PROTOCOL_CANONICAL,
-        environment: IframeEnvironment.getEnvironment(),
-        capabilities: {
-            supportsCanonical: true,
-            supportsPing: true,
-            supportsSessionAck: true,
-            supportsOriginBind: true,
-            supportsGovernor: true,
-            supportsSessionClient: true
-        }
-    }, { expectAck: true, timeout: 5000, maxRetries: 1 }).catch(() => {});
+    const requestId = generateRequestId();
     
-    state.handshakeState = 'waiting_parent_ready';
-    
-    const parentReadyTimeout = setTimeout(() => {
-        if (!state.parentReadyReceived) {
-            state.handshakeState = 'handshake_sent';
-            IframeHandshakeAuthority.startHandshake();
-        }
-    }, 3000);
-    
-    state.timeouts.add(parentReadyTimeout);
-}
-
-// =============================================
-// REQUEST SESSION - FIXED WITH TIMEOUT HANDLING
-// =============================================
-export function requestSession(timeout = 5000) {
-    clearSessionTimeouts();
-    
-    return new Promise((resolve) => {
-        try {
-            // If parent has provided authoritative session, use it
-            if (parentAuthoritativeSession) {
-                const session = parentAuthoritativeSession.user || parentAuthoritativeSession;
-                const token = parentAuthoritativeSession.token;
-                
-                state.sessionSynced = true;
-                state.authMode = 'authenticated';
-                parentSessionReceived = true;
-                sessionValidated = true;
-                
-                sendSessionAck({ user: session, token });
-                successLog('Authoritative session from parent');
-                
-                resolve({
-                    session,
-                    token,
-                    mode: 'authenticated',
-                    fromParent: true
-                });
-                return;
-            }
-            
-            if (SessionClient.isValid()) {
-                const session = SessionClient.getSession();
-                const token = SessionClient.getToken();
-                
-                state.sessionSynced = true;
-                state.authMode = 'authenticated';
-                parentSessionReceived = true;
-                sessionValidated = true;
-                
-                sendSessionAck({ user: session, token });
-                successLog('Session already valid');
-                
-                resolve({
-                    session,
-                    token,
-                    mode: 'authenticated',
-                    fromClient: true
-                });
-                return;
-            }
-            
-            const breaker = ReliabilityEngine.getCircuitBreaker('session-request');
-            if (breaker && breaker.isOpen && !breaker.allow()) {
-                enableGuestMode();
-                resolve({ session: null, mode: 'guest', expiry: null });
-                return;
-            }
-            
-            const messageId = `session_req_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
-            
-            const handler = (message) => {
-                if (message.inResponseTo === messageId || 
-                    (message.type === 'SESSION_RESPONSE' && message.messageId === messageId)) {
-                    cleanup();
-                    
-                    const payload = message.payload || message;
-                    
-                    if (payload.session || payload.user) {
-                        const sessionData = {
-                            user: payload.user || payload.session?.user,
-                            token: payload.token || payload.session?.token,
-                            expiresAt: payload.expiry || payload.session?.expiry,
-                            permissions: payload.permissions
-                        };
-                        
-                        SessionClient.updateSession(
-                            sessionData.user,
-                            sessionData.token,
-                            sessionData.expiresAt
-                        );
-                        
-                        sendSessionAck(sessionData);
-                        
-                        successLog('Session received');
-                        resolve({
-                            session: sessionData.user,
-                            token: sessionData.token,
-                            mode: 'authenticated',
-                            expiry: sessionData.expiresAt
-                        });
-                        
-                        if (breaker) breaker.recordSuccess();
-                    } else {
-                        enableGuestMode();
-                        resolve({ session: null, mode: 'guest', expiry: null });
-                    }
-                }
-            };
-            
-            sessionRequestTimeout = setTimeout(() => {
-                cleanup();
-                if (breaker) breaker.recordFailure();
-                if (state.parentVerified) {
-                    enableGuestMode();
-                    resolve({ session: null, mode: 'guest', expiry: null });
-                } else {
-                    enableDemoMode();
-                    resolve({ session: null, mode: 'demo', expiry: null });
-                }
-            }, timeout);
-            
-            const cleanup = () => {
-                clearTimeout(sessionRequestTimeout);
-                IframeTransport.off('SESSION_RESPONSE', handler);
-            };
-            
-            IframeTransport.on('SESSION_RESPONSE', handler);
-            
-            sendLog('SESSION_REQUEST');
-            IframeTransport.send('SESSION_REQUEST', {
-                childId: 'settings',
-                mirrorVersion: SessionMirror.getMirror().version,
-                timestamp: Date.now()
-            }, { 
-                expectAck: true, 
-                timeout: timeout - 500,
-                messageId,
-                maxRetries: 1
-            }).catch(() => {
-                cleanup();
-                enableDemoMode();
-                resolve({ session: null, mode: 'demo', expiry: null });
-            });
-            
-        } catch (error) {
-            enableDemoMode();
-            resolve({ session: null, mode: 'demo', expiry: null });
-        }
+    sendToParent({
+        type: 'REGISTER_MODULE',
+        module: MODULE_NAME,
+        frameId: FRAME_ID,
+        requestId: requestId,
+        timestamp: Date.now()
+    }, 0, true).then(() => {
+        if (DEBUG) debugLog('Registration sent');
+    }).catch(() => {
+        transitionTo(SETTINGS_STATES.DEGRADED, 'registration_failed');
     });
 }
 
 // =============================================
-// ENABLE DEMO MODE 
+// HANDLE MODULE REGISTERED - STEP 2
 // =============================================
-function enableDemoMode() {
-    if (state.authMode === 'demo') return;
-    state.authMode = 'demo';
-    state.parentVerified = false;
-    const demoUser = {
-        id: 'demo-user',
-        name: 'Demo User',
-        displayName: 'Demo User',
-        username: 'demo_user',
-        email: 'demo@example.com',
-        demo: true
-    };
-    state.session = demoUser;
-    currentUser = demoUser;
-    coreData.user = demoUser;
+function handleModuleRegistered(message) {
+    if (currentState !== SETTINGS_STATES.REGISTERING) return;
+    
+    transitionTo(SETTINGS_STATES.REGISTERED, 'module_registered');
+}
+
+// =============================================
+// HANDLE SESSION ACTIVE - STEP 3A
+// =============================================
+function handleSessionActive(message) {
+    if (!message.session) return;
+    
+    updateSession(
+        message.session.user,
+        message.session.expiry || message.session.expiresAt,
+        message.session.version || 1
+    );
+    
+    parentSessionData = { user: message.session.user, token: null, expiry: message.session.expiry };
+    parentSessionReceived = true;
+    sessionValidated = true;
+    
+    transitionTo(SETTINGS_STATES.SESSION_RECEIVED, 'session_active');
+    
+    IframeTransport.completeHandshake();
+}
+
+// =============================================
+// HANDLE SESSION NULL - STEP 3B
+// =============================================
+function handleSessionNull() {
+    clearSession();
     parentSessionReceived = false;
     sessionValidated = false;
-    authReady = false;
-    tokenReady = false;
-    tokenAvailable = false;
     
-    SessionClient.updateSession(demoUser, 'demo-token', Date.now() + 86400000);
-    if (DEBUG) debugLog('Demo mode enabled');
+    transitionTo(SETTINGS_STATES.SESSION_RECEIVED, 'session_null');
     
-    if (!userSettings) {
-        userSettings = JSON.parse(JSON.stringify(DEFAULT_SETTINGS));
-        coreData.settings = userSettings;
+    IframeTransport.completeHandshake();
+    
+    disableSettingsControls();
+}
+
+// =============================================
+// HANDLE PARENT READY - STEP 4
+// =============================================
+function handleParentReady(message) {
+    parentReady = true;
+    parentReadyReceived = true;
+    parentCommunicationReady = true;
+    
+    if (currentState !== SETTINGS_STATES.SESSION_RECEIVED) return;
+    
+    if (isSessionValid()) {
+        transitionTo(SETTINGS_STATES.ACTIVE, 'parent_ready_with_session');
+        
+        HeartbeatManager.start();
+        
+        loadSettingsFromAPI();
+    } else {
+        disableSettingsControls();
     }
 }
 
 // =============================================
-// ENABLE GUEST MODE 
+// HANDLE SESSION REFRESHED
 // =============================================
-function enableGuestMode() {
-    if (state.authMode === 'guest') return;
-    state.authMode = 'guest';
-    state.session = null;
-    state.sessionExpiry = null;
-    state.sessionSynced = false;
-    authReady = false;
-    tokenReady = false;
-    tokenAvailable = false;
-    SessionClient.clear();
-    notifyParentAuthState(false);
-    if (DEBUG) debugLog('Guest mode enabled');
+function handleSessionRefreshed(message) {
+    if (!message.session) return;
+    
+    updateSession(
+        message.session.user,
+        message.session.expiry || message.session.expiresAt,
+        message.session.version || (session.version + 1)
+    );
+    
+    parentSessionData = { user: message.session.user, token: null, expiry: message.session.expiry };
+    parentSessionReceived = true;
+    sessionValidated = true;
+    
+    if (currentState === SETTINGS_STATES.DEGRADED) {
+        transitionTo(SETTINGS_STATES.SESSION_RECEIVED, 'session_refreshed');
+        
+        if (parentReady) {
+            transitionTo(SETTINGS_STATES.ACTIVE, 'session_refreshed_with_parent_ready');
+            HeartbeatManager.start();
+            loadSettingsFromAPI();
+        }
+    }
 }
 
 // =============================================
-// INITIALIZE CORE 
+// HANDLE SESSION INVALIDATED
 // =============================================
-export async function initializeCore(options = {}) {
-    // Single initialization lock - prevent parallel bootstrap paths
-    if (initializationLock) {
-        return { success: false, message: 'Initialization already in progress' };
+function handleSessionInvalidated() {
+    clearSession();
+    parentSessionReceived = false;
+    sessionValidated = false;
+    
+    disableSettingsControls();
+    HeartbeatManager.stop();
+    
+    if (currentState === SETTINGS_STATES.READY || currentState === SETTINGS_STATES.ACTIVE) {
+        transitionTo(SETTINGS_STATES.DEGRADED, 'session_invalidated');
     }
-    
-    if (state.initialized) {
-        return { success: true, mode: state.authMode, alreadyInitialized: true };
-    }
-    
-    initializationLock = true;
-    
-    // First, run parent authority boot sequence
-    const parentAuthoritySuccess = await executeParentAuthorityBoot();
-    
-    // If parent authority succeeded, we're already in READY state
-    if (parentAuthoritySuccess && parentAuthorityState === EMITTED_STATES.READY) {
-        initializationLock = false;
-        return { success: true, mode: state.authMode || 'parent_authority', parentAuthority: true };
-    }
-    
-    // Otherwise, proceed with legacy initialization (backward compatible)
-    
-    initializationInProgress = true;
-    coreError = null;
-    
-    initLog('Core initialization started (legacy mode)');
-    
-    const {
-        handshakeTimeout = 5000,
-        sessionTimeout = 5000,
-        autoStart = true,
-        demoMode = true,
-        debug = DEBUG,
-        forceParentCheck = true
-    } = options;
-    
-    if (debug) {
-        Log.enableDebug();
-        DiagnosticsAgent.enable(true);
-        CONSOLE_NOISE_SUPPRESSED = false;
-    }
+}
+
+// =============================================
+// LOAD SETTINGS FROM API
+// =============================================
+async function loadSettingsFromAPI() {
+    if (currentState !== SETTINGS_STATES.ACTIVE) return;
     
     try {
-        StartupGovernor.transition(StartupGovernor.states.INIT, 'core_start');
-        
-        IframeEnvironment.detect();
-        CompatibilityBridge.detect();
-        
-        if (!userSettings) {
-            userSettings = JSON.parse(JSON.stringify(DEFAULT_SETTINGS));
-            coreData.settings = userSettings;
+        const verified = await verifySessionWithParent();
+        if (!verified) {
+            transitionTo(SETTINGS_STATES.DEGRADED, 'session_verification_failed');
+            return;
         }
         
-        await executeStage('preflight', async () => {
-            initTrustedOrigins();
-            SessionMirror.init();
-            setupMessageCleanup();
-            setupVisibilityTracking();
-            return true;
-        }, { timeout: 1000, fallback: true });
+        const response = await ApiCore.request('/api/settings', { method: 'GET' });
         
-        const dependencyResult = await executeStage('dependencyCheck', async () => {
-            apiInitialized = true;
-            return apiInitialized;
-        }, { timeout: 1000, fallback: true });
-        
-        const parentResult = await executeStage('parentDetect', async () => {
-            if (forceParentCheck) {
-                return await waitForParent(2000);
-            }
-            return detectParent();
-        }, { timeout: 2000, fallback: false });
-        
-        await executeStage('setupMessaging', async () => {
-            setupMessaging();
-            return true;
-        }, { timeout: 1000, fallback: true });
-        
-        const handshake = await executeStage('handshake', async () => {
-            if (parentResult) {
-                return await IframeHandshakeAuthority.startHandshake({
-                    timeout: handshakeTimeout,
-                    retryCount: MAX_RETRIES
+        if (response.success && response.data) {
+            const settingsData = response.data.settings || response.data;
+            
+            if (settingsData) {
+                userSettings = settingsData;
+                coreData.settings = settingsData;
+                
+                Object.keys(DEFAULT_SETTINGS).forEach(section => {
+                    if (!userSettings[section]) {
+                        userSettings[section] = JSON.parse(JSON.stringify(DEFAULT_SETTINGS[section]));
+                    }
                 });
+                
+                SafeStorage.setJSON('user_settings', userSettings);
+                
+                if (userSettings.appearance) {
+                    applyTheme(userSettings.appearance.theme || 'auto');
+                }
+                
+                if (userSettings.notifications) {
+                    applyNotificationPreferences(userSettings.notifications);
+                }
+                
+                if (userSettings.privacy) {
+                    applyPrivacySettings(userSettings.privacy);
+                }
+                
+                transitionTo(SETTINGS_STATES.READY, 'settings_loaded');
+                isReady = true;
+                
+                sendToParent({
+                    type: 'SETTINGS_READY',
+                    timestamp: Date.now()
+                }, 0, false);
+                
+                dispatchSettingsLoadedEvent();
             }
-            return { success: false, mode: 'demo' };
-        }, { timeout: handshakeTimeout + 1000, fallback: { success: false, mode: 'demo' } });
-        
-        const session = await executeStage('sessionSync', async () => {
-            if (handshake.success) {
-                return await requestSession(sessionTimeout);
-            }
-            return { session: null, mode: 'demo', expiry: null };
-        }, { timeout: sessionTimeout + 1000, fallback: { session: null, mode: 'demo', expiry: null } });
-        
-        if (session.session) {
-            state.session = session.session;
-            currentUser = session.session;
-            coreData.user = session.session;
-            state.authMode = session.mode;
-            state.sessionSynced = true;
-            
-            if (!state.sessionAcked) {
-                sendSessionAck(session);
-            }
-            
-            StartupGovernor.transition(StartupGovernor.states.ACTIVE, 'session_received');
         } else {
-            state.authMode = session.mode;
-            StartupGovernor.transition(StartupGovernor.states.DEGRADED, 'no_session');
-        }
-        
-        await executeStage('permissions', async () => {
-            state.permissionsGranted = await checkPermissions();
-            return state.permissionsGranted;
-        }, { timeout: 2000, fallback: false });
-        
-        await executeStage('dependenciesLoad', async () => {
-            state.dependenciesLoaded = await loadDependencies();
-            return state.dependenciesLoaded;
-        }, { timeout: 2000, fallback: true });
-        
-        await executeStage('loadData', async () => {
-            await loadFromLocalStorage();
-            await loadAllData();
-            return true;
-        }, { timeout: 5000, fallback: true });
-        
-        await executeStage('validateData', async () => {
-            validateAllData();
-            return true;
-        }, { timeout: 1000, fallback: true });
-        
-        await executeStage('syncState', async () => {
-            syncWithGlobalState();
-            return true;
-        }, { timeout: 1000, fallback: true });
-        
-        state.initialized = true;
-        isReady = true;
-        initializationInProgress = false;
-        state.health.status = 'ready';
-        
-        // Set exposed flags
-        window.__MODULE_READY__ = true;
-        if (SessionClient.isValid()) {
-            window.__MODULE_SESSION_ACTIVE__ = true;
-        }
-        
-        startPassiveAuthMonitoring();
-        startSessionWatchdog();
-        
-        sendLog('CORE_READY');
-        IframeTransport.send('READY', {
-            mode: state.authMode,
-            version: MODULE_VERSION,
-            protocolVersion: PROTOCOL_VERSION,
-            canonical: true,
-            timestamp: Date.now(),
-            childId: 'settings',
-            source: MODULE_NAME,
-            environment: IframeEnvironment.getEnvironment()
-        }, { expectAck: false, maxRetries: 1 }).catch(() => {});
-        
-        notifyParentReady();
-        processMessageQueue();
-        dispatchDataReadyEvent();
-        executeReadyCallbacks();
-        
-        DiagnosticsAgent.track('core_initialized', { mode: state.authMode });
-        successLog('Core initialization complete');
-        
-        initializationLock = false;
-        
-        return {
-            success: true,
-            mode: state.authMode,
-            handshake: handshake.success,
-            session: !!state.session,
-            permissions: state.permissionsGranted,
-            parentDetected: parentResult,
-            environment: IframeEnvironment.getEnvironment()
-        };
-        
-    } catch (error) {
-        coreError = error;
-        initializationInProgress = false;
-        state.health.status = 'error';
-        StartupGovernor.transition(StartupGovernor.states.FAILED, error.message);
-        errorLog('Core initialization failed:', error);
-        
-        if (demoMode) {
-            enableDemoMode();
-            state.initialized = true;
-            isReady = true;
-            state.health.status = 'demo';
-            window.__MODULE_READY__ = true;
-            syncWithGlobalState();
-            executeReadyCallbacks();
-            initializationLock = false;
-            return {
-                success: true,
-                mode: 'demo',
-                fallback: true,
-                error: error.message
-            };
-        }
-        
-        initializationLock = false;
-        
-        return {
-            success: false,
-            mode: 'none',
-            error: error.message
-        };
-    }
-}
-
-// =============================================
-// EXECUTE STAGE 
-// =============================================
-async function executeStage(stageName, fn, options = {}) {
-    const { timeout = 5000, fallback = null } = options;
-    try {
-        const timeoutPromise = new Promise((_, reject) => {
-            const timer = setTimeout(() => reject(new Error(`${stageName} timeout after ${timeout}ms`)), timeout);
-            state.timeouts.add(timer);
-        });
-        const result = await Promise.race([fn(), timeoutPromise]);
-        if (DEBUG) debugLog(`Stage ${stageName} completed`);
-        return result;
-    } catch (error) {
-        if (DEBUG) debugLog(`Stage ${stageName} failed:`, error);
-        if (fallback !== null) {
-            return typeof fallback === 'function' ? fallback() : fallback;
-        }
-        throw error;
-    }
-}
-
-// =============================================
-// SHUTDOWN CORE 
-// =============================================
-export function shutdownCore() {
-    try {
-        if (state.pingInterval) {
-            clearInterval(state.pingInterval);
-            state.pingInterval = null;
-        }
-        if (state.pongTimeout) {
-            clearTimeout(state.pongTimeout);
-            state.pongTimeout = null;
-        }
-        
-        if (state.visibilityHandler) {
-            document.removeEventListener('visibilitychange', state.visibilityHandler);
-        }
-        
-        IframeTransport.send('SHUTDOWN', {
-            reason: 'normal_shutdown',
-            timestamp: Date.now(),
-            childId: 'settings',
-            source: MODULE_NAME
-        }, { expectAck: false, maxRetries: 1 }).catch(() => {});
-        
-        state.intervals.forEach(interval => clearInterval(interval));
-        state.intervals.clear();
-        state.timeouts.forEach(timeout => clearTimeout(timeout));
-        state.timeouts.clear();
-        
-        if (state.tokenCheckInterval) {
-            clearInterval(state.tokenCheckInterval);
-            state.tokenCheckInterval = null;
-        }
-        if (state.authCheckInterval) {
-            clearInterval(state.authCheckInterval);
-            state.authCheckInterval = null;
-        }
-        if (state.handshakeInterval) {
-            clearInterval(state.handshakeInterval);
-            state.handshakeInterval = null;
-        }
-        if (state.heartbeatInterval) {
-            clearInterval(state.heartbeatInterval);
-            state.heartbeatInterval = null;
-        }
-        if (state.sessionWatchdog) {
-            clearInterval(state.sessionWatchdog);
-            state.sessionWatchdog = null;
-        }
-        if (state.messageIdCleanupTimer) {
-            clearInterval(state.messageIdCleanupTimer);
-            state.messageIdCleanupTimer = null;
-        }
-        
-        state.listeners.forEach(listener => {
-            if (listener.element) {
-                listener.element.removeEventListener(listener.type, listener.handler, listener.options);
+            const cached = SafeStorage.getJSON('user_settings', null);
+            if (cached) {
+                userSettings = cached;
+                coreData.settings = cached;
+                
+                if (userSettings.appearance) {
+                    applyTheme(userSettings.appearance.theme || 'auto');
+                }
+                
+                transitionTo(SETTINGS_STATES.READY, 'cached_settings_loaded');
+                isReady = true;
             } else {
-                window.removeEventListener(listener.type, listener.handler, listener.options);
-            }
-        });
-        state.listeners.clear();
-        
-        state.messageHandlers.clear();
-        state.pendingMessages.forEach((pending, id) => {
-            if (pending.timeout) clearTimeout(pending.timeout);
-            if (pending.reject) pending.reject(new Error('Core shutting down'));
-        });
-        state.pendingMessages.clear();
-        state.pendingAcks.forEach((ack, id) => {
-            if (ack.timeout) clearTimeout(ack.timeout);
-            if (ack.reject) ack.reject(new Error('Core shutting down'));
-        });
-        state.pendingAcks.clear();
-        state.processedMessageIds.clear();
-        
-        SessionMirror.shutdown();
-        SessionClient.clear();
-        
-        state.initialized = false;
-        state.parentVerified = false;
-        state.handshakeCompleted = false;
-        state.sessionSynced = false;
-        state.health.status = 'shutdown';
-        
-        isReady = false;
-        initializationInProgress = false;
-        parentReady = false;
-        parentCommunicationReady = false;
-        parentSessionReceived = false;
-        sessionValidated = false;
-        authReady = false;
-        tokenReady = false;
-        tokenAvailable = false;
-        backgroundTasksStarted = false;
-        
-        window.__MODULE_READY__ = false;
-        window.__MODULE_SESSION_ACTIVE__ = false;
-        
-        if (DEBUG) debugLog('Core shutdown complete');
-        return true;
-        
-    } catch (error) {
-        return false;
-    }
-}
-
-// =============================================
-// BACKGROUND SERVICES 
-// =============================================
-function startSessionWatchdog() {
-    if (state.sessionWatchdog) clearInterval(state.sessionWatchdog);
-    state.sessionWatchdog = setInterval(() => {
-        if (state.authMode === 'authenticated' && SessionClient.isExpired()) {
-            requestSession(5000).catch(() => {});
-        }
-    }, 60000);
-    state.intervals.add(state.sessionWatchdog);
-}
-
-function setupMessageCleanup() {
-    if (state.messageIdCleanupTimer) clearInterval(state.messageIdCleanupTimer);
-    state.messageIdCleanupTimer = setInterval(() => {
-        if (state.processedMessageIds.size > 100) {
-            const ids = Array.from(state.processedMessageIds);
-            state.processedMessageIds = new Set(ids.slice(-50));
-        }
-    }, 60000);
-    state.timeouts.add(state.messageIdCleanupTimer);
-}
-
-// =============================================
-// UI EXPORTS 
-// =============================================
-export function verifyParentPresence() {
-    return detectParent();
-}
-
-export function setupSecureMessagingChannel() {
-    setupMessaging();
-    return true;
-}
-
-export function resetUIForLogout() {
-    try {
-        currentUser = null;
-        coreData.user = null;
-        state.session = null;
-        state.sessionSynced = false;
-        parentSessionData = null;
-        parentSessionReceived = false;
-        sessionValidated = false;
-        tokenReady = false;
-        tokenAvailable = false;
-        authReady = false;
-        backgroundTasksStarted = false;
-        unsavedChanges = false;
-        SessionMirror.clear();
-        SessionClient.clear();
-        
-        state.handshakeState = 'pending';
-        state.parentReadyReceived = false;
-        state.childReadySent = false;
-        state.handshakeAcked = false;
-        state.sessionAcked = false;
-        originBoundToken = null;
-        tokenBindingNonce = null;
-        
-        StartupGovernor.reset();
-        IframeHandshakeAuthority.reset();
-        OriginAdapter.reset();
-        
-        // Reset parent authority state
-        parentAuthoritativeSession = null;
-        parentSessionReceived = false;
-        parentContractEnforced = false;
-        parentAuthorityState = PARENT_AUTHORITY_STATES.PREINIT;
-        window.__MODULE_STATE__ = parentAuthorityState;
-        window.__MODULE_SESSION_ACTIVE__ = false;
-        
-        if (DEBUG) debugLog('UI reset for logout');
-        return true;
-    } catch (error) {
-        return false;
-    }
-}
-
-export function showReconnectionState() {
-    try {
-        const event = new CustomEvent('coreReconnecting', {
-            detail: {
-                timestamp: Date.now(),
-                attempts: state.health.recoveryAttempts,
-                mode: state.authMode,
-                handshakeState: state.handshakeState,
-                connectionQuality: state.connectionQuality,
-                environment: IframeEnvironment.getEnvironment()
-            }
-        });
-        window.dispatchEvent(event);
-        return true;
-    } catch (error) {
-        return false;
-    }
-}
-
-export function getCoreDiagnostics() {
-    return DiagnosticsAgent.getFullReport();
-}
-
-export function checkAuthenticationState() {
-    try {
-        if (SessionClient.isValid()) return true;
-        if (parentSessionReceived || state.authMode === 'authenticated' || tokenReady) return true;
-        if (state.authMode === 'demo') return true;
-        if (parentAuthoritativeSession) return true;
-        return false;
-    } catch (error) {
-        return false;
-    }
-}
-
-export async function bootstrapIframe() {
-    try {
-        IframeEnvironment.detect();
-        CompatibilityBridge.detect();
-        OriginAdapter.init();
-        detectParent();
-        setupMessaging();
-        await loadFromLocalStorage();
-        SessionMirror.init();
-        SessionClient.init();
-        ReliabilityEngine.init();
-        MultiModuleCoordinator.init();
-        NavigationGuard.init();
-        UIFailsafe.init();
-        RecoveryManager.init();
-        
-        executeStartupSequence();
-        
-        return true;
-    } catch (error) {
-        return false;
-    }
-}
-
-export async function waitForSession(timeout = 10000) {
-    return new Promise((resolve) => {
-        if (SessionClient.isValid() || parentAuthoritativeSession) {
-            resolve(true);
-            return;
-        }
-        const startTime = Date.now();
-        const checkInterval = setInterval(() => {
-            try {
-                if (SessionClient.isValid() || (parentSessionReceived && sessionValidated) || parentAuthoritativeSession) {
-                    clearInterval(checkInterval);
-                    clearTimeout(timeoutId);
-                    resolve(true);
-                } else if (Date.now() - startTime > timeout) {
-                    clearInterval(checkInterval);
-                    resolve(false);
+                userSettings = JSON.parse(JSON.stringify(DEFAULT_SETTINGS));
+                coreData.settings = JSON.parse(JSON.stringify(DEFAULT_SETTINGS));
+                
+                if (userSettings.appearance) {
+                    applyTheme(userSettings.appearance.theme || 'auto');
                 }
-            } catch (error) {
-                clearInterval(checkInterval);
-                resolve(false);
+                
+                transitionTo(SETTINGS_STATES.READY, 'default_settings_loaded');
+                isReady = true;
             }
-        }, 100);
-        const timeoutId = setTimeout(() => {
-            clearInterval(checkInterval);
-            resolve(false);
-        }, timeout);
-        state.timeouts.add(checkInterval);
-        state.timeouts.add(timeoutId);
-    });
-}
-
-export function initializeBasicUI() {
-    try {
-        if (!userSettings) {
-            userSettings = JSON.parse(JSON.stringify(DEFAULT_SETTINGS));
-            coreData.settings = userSettings;
         }
-        const event = new CustomEvent('basicUIReady', {
-            detail: {
-                timestamp: Date.now(),
-                mode: state.authMode,
-                handshakeState: state.handshakeState,
-                environment: IframeEnvironment.getEnvironment()
-            }
-        });
-        window.dispatchEvent(event);
-        return true;
     } catch (error) {
-        return false;
-    }
-}
-
-export function setupBasicEventListeners() {
-    try {
-        const backToAppBtn = document.getElementById('backToAppBtn');
-        if (backToAppBtn) {
-            const handler = () => {
-                if (unsavedChanges) {
-                    const event = new CustomEvent('confirmNavigation', {
-                        detail: {
-                            message: 'You have unsaved changes. Are you sure you want to leave?',
-                            callback: () => {
-                                IframeTransport.send('CHILD_CLOSING', {
-                                    childId: 'settings',
-                                    timestamp: Date.now(),
-                                    source: MODULE_NAME,
-                                    unsavedChanges: true
-                                }, { expectAck: false, maxRetries: 1 }).catch(() => {});
-                            }
-                        }
-                    });
-                    window.dispatchEvent(event);
-                } else {
-                    IframeTransport.send('CHILD_CLOSING', {
-                        childId: 'settings',
-                        timestamp: Date.now(),
-                        source: MODULE_NAME
-                    }, { expectAck: false, maxRetries: 1 }).catch(() => {});
-                }
-            };
-            backToAppBtn.addEventListener('click', handler);
-            state.listeners.add({ type: 'click', handler, options: false, element: backToAppBtn });
-        }
-        
-        window.addEventListener('beforeunload', (e) => {
-            if (unsavedChanges) {
-                e.preventDefault();
-                e.returnValue = 'You have unsaved changes. Are you sure you want to leave?';
-            }
-        });
-        return true;
-    } catch (error) {
-        return false;
-    }
-}
-
-export function startTokenMonitoring() {
-    try {
-        if (state.tokenCheckInterval) {
-            clearInterval(state.tokenCheckInterval);
-            state.tokenCheckInterval = null;
-        }
-        state.tokenCheckInterval = setInterval(() => {
-            try {
-                checkTokenAvailability();
-            } catch (error) {}
-        }, TOKEN_CHECK_INTERVAL);
-        state.intervals.add(state.tokenCheckInterval);
-        setTimeout(() => checkTokenAvailability(), 500);
-    } catch (error) {}
-}
-
-export function checkTokenAvailability() {
-    try {
-        if (SessionClient.isValid() || parentAuthoritativeSession) {
-            if (!tokenAvailable) {
-                tokenAvailable = true;
-                tokenReady = true;
-                authReady = true;
-                if (!backgroundTasksStarted) {
-                    startBackgroundTasks();
-                }
-                notifyTokenReady();
-            }
-            return;
-        }
-        if (parentSessionData && parentSessionData.token) {
-            if (!tokenAvailable) {
-                tokenAvailable = true;
-                tokenReady = true;
-                authReady = true;
-                if (!backgroundTasksStarted) {
-                    startBackgroundTasks();
-                }
-                notifyTokenReady();
-            }
-            return;
-        }
-        const token = getSecureToken();
-        if (token && token !== '' && token !== 'null' && token !== 'undefined') {
-            if (!tokenAvailable) {
-                tokenAvailable = true;
-                tokenReady = true;
-                authReady = true;
-                if (!backgroundTasksStarted) {
-                    startBackgroundTasks();
-                }
-                notifyTokenReady();
-            }
-        } else {
-            if (tokenAvailable) {
-                tokenAvailable = false;
-                tokenReady = false;
-                authReady = false;
-                notifyTokenLost();
-            }
-        }
-    } catch (error) {}
-}
-
-export function notifyTokenReady() {
-    try {
-        authReady = true;
-        if (!backgroundTasksStarted) {
-            startBackgroundTasks();
-        }
-        notifyParentAuthState(true);
-        const event = new CustomEvent('tokenReady', {
-            detail: {
-                timestamp: Date.now(),
-                mode: state.authMode
-            }
-        });
-        window.dispatchEvent(event);
-        if (DEBUG) debugLog('Token ready');
-    } catch (error) {}
-}
-
-export function notifyTokenLost() {
-    try {
-        authReady = false;
-        backgroundTasksStarted = false;
-        notifyParentAuthState(false);
-        const event = new CustomEvent('tokenLost', {
-            detail: {
-                timestamp: Date.now()
-            }
-        });
-        window.dispatchEvent(event);
-        if (DEBUG) debugLog('Token lost');
-    } catch (error) {}
-}
-
-export function getSecureToken() {
-    try {
-        // Check authoritative session first
-        if (parentAuthoritativeSession && parentAuthoritativeSession.token) {
-            originBoundToken = parentAuthoritativeSession.token;
-            return parentAuthoritativeSession.token;
-        }
-        
-        if (originBoundToken && originBoundToken !== '' && originBoundToken !== 'null' && originBoundToken !== 'undefined') {
-            return originBoundToken;
-        }
-        
-        const clientToken = SessionClient.getToken();
-        if (clientToken && clientToken !== '' && clientToken !== 'null' && clientToken !== 'undefined') {
-            originBoundToken = clientToken;
-            return clientToken;
-        }
-        
-        const mirrorToken = SessionMirror.getToken();
-        if (mirrorToken && mirrorToken !== '' && mirrorToken !== 'null' && mirrorToken !== 'undefined') {
-            originBoundToken = mirrorToken;
-            return mirrorToken;
-        }
-        if (parentSessionData && parentSessionData.token) {
-            originBoundToken = parentSessionData.token;
-            return parentSessionData.token;
-        }
-        const legacyTokens = [
-            SafeStorage.get('token', null),
-            SafeStorage.get('USER_TOKEN', null),
-            SafeStorage.get('accessToken', null)
-        ];
-        for (const legacyToken of legacyTokens) {
-            if (legacyToken && legacyToken !== 'null' && legacyToken !== 'undefined') {
-                originBoundToken = legacyToken;
-                return legacyToken;
-            }
-        }
-        return null;
-    } catch (error) {
-        return null;
+        transitionTo(SETTINGS_STATES.DEGRADED, 'settings_load_failed');
     }
 }
 
 // =============================================
-// SECURE FETCH WRAPPER - ROUTES THROUGH PARENT
+// VERIFY SESSION WITH PARENT
 // =============================================
-export async function secureFetchWrapper(endpoint, method = 'GET', data = null, options = {}) {
+async function verifySessionWithParent() {
+    if (!isSessionValid()) return false;
+    
+    const requestId = generateRequestId();
+    
     try {
-        if (state.authMode === 'demo') {
-            return simulateResponse(endpoint, method);
-        }
-        
-        // Route through parent instead of direct API call
         const response = await sendToParent({
-            type: 'API_REQUEST',
-            endpoint: endpoint,
-            method: method,
-            data: data,
-            options: options,
+            type: 'VERIFY_SESSION',
+            sessionVersion: session.version,
+            requestId: requestId,
             timestamp: Date.now()
         }, 0, true);
         
-        if (response && response.payload) {
-            return response.payload;
+        if (response && response.payload && response.payload.verified) {
+            return true;
         }
         
-        return { success: false, data: null };
-        
+        return false;
     } catch (error) {
-        if (state.authMode === 'demo') {
-            return simulateResponse(endpoint, method, true);
+        return false;
+    }
+}
+
+// =============================================
+// DISABLE SETTINGS CONTROLS
+// =============================================
+function disableSettingsControls() {
+    const event = new CustomEvent('settingsControlsDisabled', {
+        detail: {
+            timestamp: Date.now(),
+            reason: 'no_session'
+        }
+    });
+    window.dispatchEvent(event);
+}
+
+// =============================================
+// APPLY THEME
+// =============================================
+function applyTheme(theme) {
+    if (!theme) return;
+    
+    try {
+        const root = document.documentElement;
+        
+        if (theme === 'auto') {
+            const isDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+            root.setAttribute('data-theme', isDark ? 'dark' : 'light');
+        } else {
+            root.setAttribute('data-theme', theme);
         }
         
-        return {
-            success: false,
-            status: 'error',
-            message: 'Request failed',
-            data: null
-        };
-    }
-}
-
-function simulateResponse(endpoint, method, useFallback = false) {
-    const normalized = endpoint.toLowerCase();
-    
-    if (normalized.includes('/settings') || normalized.includes('/api/settings')) {
-        return { 
-            success: true, 
-            data: { settings: userSettings || DEFAULT_SETTINGS },
-            settings: userSettings || DEFAULT_SETTINGS
-        };
-    }
-    if (normalized.includes('/friends') || normalized.includes('/api/friends')) {
-        return { 
-            success: true, 
-            data: { friendsList: coreData.friendsList || [] },
-            friendsList: coreData.friendsList || [] 
-        };
-    }
-    if (normalized.includes('/groups') || normalized.includes('/api/groups')) {
-        return { 
-            success: true, 
-            data: { groupsList: coreData.groupsList || [] },
-            groupsList: coreData.groupsList || [] 
-        };
-    }
-    if (normalized.includes('/notifications') || normalized.includes('/api/notifications')) {
-        return { 
-            success: true, 
-            data: { notifications: coreData.notifications || [] },
-            notifications: coreData.notifications || [] 
-        };
-    }
-    if (normalized.includes('/chats/history') || normalized.includes('/api/chats/history')) {
-        return { 
-            success: true, 
-            data: { chatHistory: coreData.chatHistory || [] },
-            chatHistory: coreData.chatHistory || [] 
-        };
-    }
-    if (normalized.includes('/users/blocked') || normalized.includes('/api/users/blocked')) {
-        return { 
-            success: true, 
-            data: { blockedUsers: blockedUsers || [] },
-            blockedUsers: blockedUsers || [] 
-        };
-    }
-    if (normalized.includes('/auth/sessions') || normalized.includes('/api/auth/sessions')) {
-        return { 
-            success: true, 
-            data: { sessions: activeSessions || [] },
-            sessions: activeSessions || [] 
-        };
-    }
-    if (normalized.includes('/contacts') || normalized.includes('/api/contacts')) {
-        return { 
-            success: true, 
-            data: { contacts: userContacts || [] },
-            contacts: userContacts || [] 
-        };
-    }
-    if (normalized.includes('/group') || normalized.includes('/api/group')) {
-        return { 
-            success: true, 
-            data: { groups: userGroups || [] },
-            groups: userGroups || [] 
-        };
-    }
-    
-    return { 
-        success: true, 
-        data: null,
-        message: 'Mock response' 
-    };
-}
-
-export async function waitForToken(timeout = 10000) {
-    return new Promise((resolve) => {
-        if (tokenReady || SessionClient.isValid() || parentAuthoritativeSession) {
-            resolve(true);
-            return;
-        }
-        const startTime = Date.now();
-        const checkInterval = setInterval(() => {
-            try {
-                if (tokenReady || SessionClient.isValid() || parentAuthoritativeSession) {
-                    clearInterval(checkInterval);
-                    clearTimeout(timeoutId);
-                    resolve(true);
-                } else if (Date.now() - startTime > timeout) {
-                    clearInterval(checkInterval);
-                    resolve(false);
-                }
-            } catch (error) {
-                clearInterval(checkInterval);
-                resolve(false);
-            }
-        }, 100);
-        const timeoutId = setTimeout(() => {
-            clearInterval(checkInterval);
-            resolve(false);
-        }, timeout);
-        state.timeouts.add(checkInterval);
-        state.timeouts.add(timeoutId);
-    });
-}
-
-export function startPassiveAuthMonitoring() {
-    try {
-        if (state.authCheckInterval) {
-            clearInterval(state.authCheckInterval);
-            state.authCheckInterval = null;
-        }
-        state.authCheckInterval = setInterval(() => {
-            try {
-                checkTokenAvailability();
-            } catch (error) {}
-        }, AUTH_CHECK_INTERVAL);
-        state.intervals.add(state.authCheckInterval);
-        setTimeout(() => checkTokenAvailability(), 1000);
+        const event = new CustomEvent('themeApplied', {
+            detail: { theme, timestamp: Date.now() }
+        });
+        window.dispatchEvent(event);
     } catch (error) {}
 }
 
-export function startBackgroundTasks() {
+// =============================================
+// APPLY NOTIFICATION PREFERENCES
+// =============================================
+function applyNotificationPreferences(notifications) {
+    if (!notifications) return;
+    
     try {
-        if (backgroundTasksStarted) return;
-        if (!tokenReady && !parentSessionReceived && state.authMode === 'guest' && !parentAuthoritativeSession) return;
-        
-        backgroundTasksStarted = true;
-        
-        Promise.allSettled([
-            safeLoadUserData(),
-            safeLoadSettings(),
-            safeLoadBlockedUsers(),
-            safeLoadActiveSessions(),
-            safeLoadUserContacts(),
-            safeLoadUserGroups()
-        ]).then((results) => {}).catch(() => {});
-    } catch (error) {
-        backgroundTasksStarted = false;
-    }
+        const event = new CustomEvent('notificationPreferencesApplied', {
+            detail: { preferences: notifications, timestamp: Date.now() }
+        });
+        window.dispatchEvent(event);
+    } catch (error) {}
 }
 
-export async function safeLoadUserData() {
-    if (!tokenReady && !parentSessionReceived && state.authMode === 'guest' && !parentAuthoritativeSession) {
-        return null;
-    }
+// =============================================
+// APPLY PRIVACY SETTINGS
+// =============================================
+function applyPrivacySettings(privacy) {
+    if (!privacy) return;
+    
     try {
-        // Check authoritative session first
-        if (parentAuthoritativeSession) {
-            const user = parentAuthoritativeSession.user || parentAuthoritativeSession;
-            if (user) {
-                currentUser = user;
-                coreData.user = user;
-                state.session = user;
-                SafeStorage.setJSON('current_user', currentUser);
-                return currentUser;
-            }
-        }
-        
-        const clientUser = SessionClient.getSession();
-        if (clientUser) {
-            currentUser = clientUser;
-            coreData.user = clientUser;
-            state.session = clientUser;
-            SafeStorage.setJSON('current_user', currentUser);
-            return currentUser;
-        }
-        const mirrorUser = SessionMirror.getUser();
-        if (mirrorUser) {
-            currentUser = mirrorUser;
-            coreData.user = mirrorUser;
-            state.session = mirrorUser;
-            SafeStorage.setJSON('current_user', currentUser);
-            return currentUser;
-        }
-        if (parentSessionData && parentSessionData.user) {
-            currentUser = parentSessionData.user;
-            coreData.user = parentSessionData.user;
-            state.session = parentSessionData.user;
-            SessionClient.updateSession(parentSessionData.user);
-            SafeStorage.setJSON('current_user', currentUser);
-            return currentUser;
-        }
-        return null;
-    } catch (error) {
-        return null;
-    }
+        const event = new CustomEvent('privacySettingsApplied', {
+            detail: { settings: privacy, timestamp: Date.now() }
+        });
+        window.dispatchEvent(event);
+    } catch (error) {}
 }
 
-export async function safeLoadSettings() {
-    if (!tokenReady && !parentSessionReceived && state.authMode === 'guest' && !parentAuthoritativeSession) {
-        return null;
-    }
+// =============================================
+// DISPATCH SETTINGS LOADED EVENT
+// =============================================
+function dispatchSettingsLoadedEvent() {
     try {
-        const response = await secureFetchWrapper('/api/settings', 'GET');
-        const settingsData = response?.data || response?.settings || null;
-        
-        if (settingsData) {
-            userSettings = settingsData;
-            coreData.settings = settingsData;
-            Object.keys(DEFAULT_SETTINGS).forEach(section => {
-                if (!userSettings[section]) {
-                    userSettings[section] = JSON.parse(JSON.stringify(DEFAULT_SETTINGS[section]));
-                }
-            });
-            SafeStorage.setJSON('user_settings', userSettings);
-            calculateStorageUsage();
-            return userSettings;
-        }
-        return null;
-    } catch (error) {
-        return null;
-    }
-}
-
-export async function safeLoadBlockedUsers() {
-    if (!tokenReady && !parentSessionReceived && state.authMode === 'guest' && !parentAuthoritativeSession) return null;
-    try {
-        const response = await secureFetchWrapper('/api/users/blocked', 'GET');
-        const blockedData = response?.data?.blockedUsers || response?.blockedUsers || [];
-        if (blockedData) {
-            blockedUsers = blockedData;
-            return blockedUsers;
-        }
-        return null;
-    } catch (error) {
-        return null;
-    }
-}
-
-export async function safeLoadActiveSessions() {
-    if (!tokenReady && !parentSessionReceived && state.authMode === 'guest' && !parentAuthoritativeSession) return null;
-    try {
-        const response = await secureFetchWrapper('/api/auth/sessions', 'GET');
-        const sessionsData = response?.data?.sessions || response?.sessions || [];
-        if (sessionsData) {
-            activeSessions = sessionsData;
-            return activeSessions;
-        }
-        return null;
-    } catch (error) {
-        return null;
-    }
-}
-
-export async function safeLoadUserContacts() {
-    if (!tokenReady && !parentSessionReceived && state.authMode === 'guest' && !parentAuthoritativeSession) return null;
-    try {
-        const response = await secureFetchWrapper('/api/contacts', 'GET');
-        const contactsData = response?.data?.contacts || response?.contacts || [];
-        if (contactsData) {
-            userContacts = contactsData;
-            return userContacts;
-        }
-        return null;
-    } catch (error) {
-        return null;
-    }
-}
-
-export async function safeLoadUserGroups() {
-    if (!tokenReady && !parentSessionReceived && state.authMode === 'guest' && !parentAuthoritativeSession) return null;
-    try {
-        const response = await secureFetchWrapper('/api/group', 'GET');
-        const groupsData = response?.data?.groups || response?.groups || [];
-        if (groupsData) {
-            userGroups = groupsData;
-            coreData.groupsList = groupsData;
-            return userGroups;
-        }
-        return null;
-    } catch (error) {
-        return null;
-    }
-}
-
-export async function makeSafeRequest(endpoint, method = 'GET', data = null, options = {}) {
-    if (!tokenReady && !parentSessionReceived && state.authMode === 'guest' && !parentAuthoritativeSession) {
-        throw new Error('Authentication not available');
-    }
-    return await secureFetchWrapper(endpoint, method, data, options);
-}
-
-export async function saveSettings() {
-    try {
-        SafeStorage.setJSON('user_settings', userSettings);
-        coreData.settings = userSettings;
-        
-        if (tokenReady || parentSessionReceived || state.authMode === 'authenticated' || parentAuthoritativeSession) {
-            await secureFetchWrapper('/api/settings', 'POST', { settings: userSettings });
-            
-            // Notify parent about settings update
-            await sendToParent({
-                type: PARENT_MESSAGE_TYPES.SETTINGS_UPDATED,
-                section: currentSection,
+        const event = new CustomEvent('settingsLoaded', {
+            detail: {
                 settings: userSettings,
                 timestamp: Date.now()
-            }, 0, false);
-        }
-        
-        unsavedChanges = false;
-        const event = new CustomEvent('settingsSaved', {
-            detail: {
-                timestamp: Date.now(),
-                settings: userSettings,
-                section: currentSection
             }
         });
         window.dispatchEvent(event);
-        return true;
-    } catch (error) {
+    } catch (error) {}
+}
+
+// =============================================
+// HANDLE SETTINGS UPDATED BROADCAST
+// =============================================
+function handleSettingsUpdatedBroadcast(message) {
+    if (!validateMessage(message)) return;
+    
+    if (message.source === FRAME_ID) return;
+    
+    if (message.payload && message.payload.settings) {
+        userSettings = message.payload.settings;
+        coreData.settings = message.payload.settings;
+        
+        if (message.payload.settings.appearance) {
+            applyTheme(message.payload.settings.appearance.theme || 'auto');
+        }
+        
         SafeStorage.setJSON('user_settings', userSettings);
-        coreData.settings = userSettings;
+        
+        const event = new CustomEvent('settingsUpdated', {
+            detail: {
+                source: 'broadcast',
+                settings: message.payload.settings,
+                timestamp: Date.now()
+            }
+        });
+        window.dispatchEvent(event);
+    }
+}
+
+// =============================================
+// UPDATE SETTING - WITH VERIFICATION
+// =============================================
+export async function updateSetting(section, key, value) {
+    if (currentState !== SETTINGS_STATES.READY) {
+        throw new Error('Settings not ready');
+    }
+    
+    if (!isSessionValid()) {
+        throw new Error('No valid session');
+    }
+    
+    const verified = await verifySessionWithParent();
+    if (!verified) {
+        transitionTo(SETTINGS_STATES.DEGRADED, 'session_verification_failed');
+        throw new Error('Session verification failed');
+    }
+    
+    const oldValue = userSettings[section]?.[key];
+    if (!userSettings[section]) {
+        userSettings[section] = {};
+    }
+    userSettings[section][key] = value;
+    unsavedChanges = true;
+    
+    const optimisticEvent = new CustomEvent('settingUpdatedOptimistic', {
+        detail: { section, key, value, timestamp: Date.now() }
+    });
+    window.dispatchEvent(optimisticEvent);
+    
+    try {
+        const response = await ApiCore.request('/api/settings', {
+            method: 'POST',
+            body: { settings: userSettings }
+        });
+        
+        if (response.success) {
+            unsavedChanges = false;
+            
+            SafeStorage.setJSON('user_settings', userSettings);
+            coreData.settings = userSettings;
+            
+            if (section === 'appearance' && key === 'theme') {
+                applyTheme(value);
+            }
+            
+            await sendToParent({
+                type: PARENT_MESSAGE_TYPES.SETTINGS_UPDATED,
+                section: section,
+                key: key,
+                value: value,
+                settings: userSettings,
+                timestamp: Date.now()
+            }, 0, true);
+            
+            const successEvent = new CustomEvent('settingUpdated', {
+                detail: { section, key, value, timestamp: Date.now() }
+            });
+            window.dispatchEvent(successEvent);
+            
+            return true;
+        } else {
+            if (userSettings[section]) {
+                userSettings[section][key] = oldValue;
+            }
+            unsavedChanges = false;
+            
+            const rollbackEvent = new CustomEvent('settingUpdateFailed', {
+                detail: { section, key, timestamp: Date.now() }
+            });
+            window.dispatchEvent(rollbackEvent);
+            
+            throw new Error('API update failed');
+        }
+    } catch (error) {
+        if (userSettings[section]) {
+            userSettings[section][key] = oldValue;
+        }
+        unsavedChanges = false;
         throw error;
     }
 }
 
-export function notifyParentAuthState(hasAuth) {
+// =============================================
+// SAVE ALL SETTINGS
+// =============================================
+export async function saveSettings() {
+    if (currentState !== SETTINGS_STATES.READY) {
+        throw new Error('Settings not ready');
+    }
+    
+    if (!isSessionValid()) {
+        throw new Error('No valid session');
+    }
+    
+    const verified = await verifySessionWithParent();
+    if (!verified) {
+        transitionTo(SETTINGS_STATES.DEGRADED, 'session_verification_failed');
+        throw new Error('Session verification failed');
+    }
+    
     try {
-        IframeTransport.send('IFRAME_AUTH_STATE', {
-            hasAuth: hasAuth,
-            iframeId: 'settings',
-            tokenReady: tokenReady,
-            timestamp: Date.now(),
-            source: MODULE_NAME,
-            mirrorVersion: SessionMirror.getMirror().version,
-            handshakeState: state.handshakeState,
-            environment: IframeEnvironment.getEnvironment()
-        }, { expectAck: false, maxRetries: 1 }).catch(() => {});
-    } catch (error) {}
+        SafeStorage.setJSON('user_settings', userSettings);
+        coreData.settings = userSettings;
+        
+        const response = await ApiCore.request('/api/settings', {
+            method: 'POST',
+            body: { settings: userSettings }
+        });
+        
+        if (response.success) {
+            unsavedChanges = false;
+            
+            if (userSettings.appearance) {
+                applyTheme(userSettings.appearance.theme || 'auto');
+            }
+            
+            await sendToParent({
+                type: PARENT_MESSAGE_TYPES.SETTINGS_UPDATED,
+                settings: userSettings,
+                timestamp: Date.now()
+            }, 0, true);
+            
+            const event = new CustomEvent('settingsSaved', {
+                detail: { timestamp: Date.now() }
+            });
+            window.dispatchEvent(event);
+            
+            return true;
+        }
+        
+        throw new Error('API update failed');
+    } catch (error) {
+        throw error;
+    }
 }
 
-export function notifyParentAuthError() {
-    if (authErrorNotified) return;
+// =============================================
+// HANDLE LOGOUT
+// =============================================
+export async function handleLogout() {
+    if (currentState !== SETTINGS_STATES.READY) {
+        return false;
+    }
+    
+    if (!isSessionValid()) {
+        return false;
+    }
+    
     try {
-        IframeTransport.send('IFRAME_AUTH_ERROR', {
-            iframeId: 'settings',
-            message: 'Authentication required',
-            tokenExpired: true,
-            timestamp: Date.now(),
-            source: MODULE_NAME
-        }, { expectAck: false, maxRetries: 1 }).catch(() => {});
-        authErrorNotified = true;
-    } catch (error) {}
+        await verifySessionWithParent();
+        
+        const response = await ApiCore.request('/api/auth/logout', {
+            method: 'POST'
+        });
+        
+        if (response.success) {
+            await sendToParent({
+                type: PARENT_MESSAGE_TYPES.SESSION_INVALIDATED,
+                timestamp: Date.now()
+            }, 0, true);
+            
+            clearSession();
+            parentSessionReceived = false;
+            sessionValidated = false;
+            
+            HeartbeatManager.stop();
+            disableSettingsControls();
+            
+            transitionTo(SETTINGS_STATES.DEGRADED, 'user_logout');
+            
+            const event = new CustomEvent('userLoggedOut', {
+                detail: { timestamp: Date.now() }
+            });
+            window.dispatchEvent(event);
+            
+            return true;
+        }
+        
+        return false;
+    } catch (error) {
+        return false;
+    }
 }
 
+// =============================================
+// LOAD FROM LOCAL STORAGE (CACHE ONLY)
+// =============================================
 export async function loadFromLocalStorage() {
     try {
         const cachedUser = SafeStorage.getJSON('current_user', null);
         if (cachedUser) {
             currentUser = cachedUser;
             coreData.user = cachedUser;
-            state.session = cachedUser;
-        } else {
-            currentUser = { displayName: 'User', id: 'local-user' };
-            coreData.user = { displayName: 'User', id: 'local-user' };
-            state.session = { displayName: 'User', id: 'local-user' };
         }
+        
         const savedSettings = SafeStorage.getJSON('user_settings', null);
         if (savedSettings) {
             userSettings = savedSettings;
@@ -6173,11 +4766,13 @@ export async function loadFromLocalStorage() {
             userSettings = JSON.parse(JSON.stringify(DEFAULT_SETTINGS));
             coreData.settings = JSON.parse(JSON.stringify(DEFAULT_SETTINGS));
         }
+        
         Object.keys(DEFAULT_SETTINGS).forEach(section => {
             if (!userSettings[section]) {
                 userSettings[section] = JSON.parse(JSON.stringify(DEFAULT_SETTINGS[section]));
             }
         });
+        
         calculateStorageUsage();
         return true;
     } catch (error) {
@@ -6185,11 +4780,13 @@ export async function loadFromLocalStorage() {
         coreData.settings = JSON.parse(JSON.stringify(DEFAULT_SETTINGS));
         currentUser = { displayName: 'User', id: 'local-user' };
         coreData.user = { displayName: 'User', id: 'local-user' };
-        state.session = { displayName: 'User', id: 'local-user' };
         return false;
     }
 }
 
+// =============================================
+// UPDATE USER UI
+// =============================================
 export function updateUserUI() {
     try {
         const event = new CustomEvent('userUIUpdate', {
@@ -6205,14 +4802,16 @@ export function updateUserUI() {
     }
 }
 
+// =============================================
+// INITIALIZE UI
+// =============================================
 export function initializeUI() {
     try {
         const event = new CustomEvent('coreUIInitialized', {
             detail: {
                 timestamp: Date.now(),
-                mode: state.authMode,
+                mode: isSessionValid() ? 'authenticated' : 'no_session',
                 user: currentUser,
-                handshakeState: state.handshakeState,
                 environment: IframeEnvironment.getEnvironment()
             }
         });
@@ -6223,6 +4822,9 @@ export function initializeUI() {
     }
 }
 
+// =============================================
+// CALCULATE STORAGE USAGE
+// =============================================
 export function calculateStorageUsage() {
     try {
         if (!userSettings || !userSettings.storage) return 0;
@@ -6239,6 +4841,9 @@ export function calculateStorageUsage() {
     }
 }
 
+// =============================================
+// FORMAT STORAGE SIZE
+// =============================================
 export function formatStorageSize(bytes) {
     if (bytes === 0 || !bytes) return '0 Bytes';
     const k = 1024;
@@ -6247,6 +4852,9 @@ export function formatStorageSize(bytes) {
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
 }
 
+// =============================================
+// GET MOOD TEXT
+// =============================================
 export function getMoodText(mood) {
     const moodTexts = {
         neutral: 'Neutral',
@@ -6262,6 +4870,9 @@ export function getMoodText(mood) {
     return moodTexts[mood] || 'Neutral';
 }
 
+// =============================================
+// GET MOOD COLOR
+// =============================================
 export function getMoodColor(mood) {
     const colors = {
         neutral: '#A9A9A9',
@@ -6277,104 +4888,341 @@ export function getMoodColor(mood) {
     return colors[mood] || '#A9A9A9';
 }
 
+// =============================================
+// LOAD SECTION
+// =============================================
+export async function loadSection(sectionId) {
+    currentSection = sectionId;
+    
+    const event = new CustomEvent('settingsSectionChanged', {
+        detail: {
+            section: sectionId,
+            timestamp: Date.now(),
+            authenticated: isSessionValid()
+        }
+    });
+    window.dispatchEvent(event);
+    
+    if (currentState === SETTINGS_STATES.READY && isSessionValid()) {
+        try {
+            switch(sectionId) {
+                case 'profile':
+                    await loadUserData();
+                    break;
+                case 'security':
+                    await loadActiveSessions();
+                    break;
+                case 'privacy':
+                    await loadBlockedUsers();
+                    break;
+                case 'friends':
+                    await loadUserContacts();
+                    break;
+                case 'groups':
+                    await loadUserGroups();
+                    break;
+                default:
+                    break;
+            }
+        } catch (error) {
+            if (DEBUG) debugLog(`Error loading section ${sectionId}:`, error);
+        }
+    }
+    
+    return true;
+}
+
+// =============================================
+// LOAD USER DATA
+// =============================================
+async function loadUserData() {
+    if (currentState !== SETTINGS_STATES.READY || !isSessionValid()) return;
+    
+    try {
+        const response = await ApiCore.request('/api/user/profile', { method: 'GET' });
+        if (response.success && response.data) {
+            const user = response.data.user || response.data;
+            if (user) {
+                currentUser = user;
+                coreData.user = user;
+                SafeStorage.setJSON('current_user', currentUser);
+                updateUserUI();
+            }
+        }
+    } catch (error) {}
+}
+
+// =============================================
+// LOAD ACTIVE SESSIONS
+// =============================================
+async function loadActiveSessions() {
+    if (currentState !== SETTINGS_STATES.READY || !isSessionValid()) return;
+    
+    try {
+        const response = await ApiCore.request('/api/auth/sessions', { method: 'GET' });
+        if (response.success && response.data) {
+            activeSessions = response.data.sessions || response.data || [];
+            
+            const event = new CustomEvent('activeSessionsLoaded', {
+                detail: { sessions: activeSessions, timestamp: Date.now() }
+            });
+            window.dispatchEvent(event);
+        }
+    } catch (error) {}
+}
+
+// =============================================
+// LOAD BLOCKED USERS
+// =============================================
+async function loadBlockedUsers() {
+    if (currentState !== SETTINGS_STATES.READY || !isSessionValid()) return;
+    
+    try {
+        const response = await ApiCore.request('/api/users/blocked', { method: 'GET' });
+        if (response.success && response.data) {
+            blockedUsers = response.data.blockedUsers || response.data || [];
+            
+            const event = new CustomEvent('blockedUsersLoaded', {
+                detail: { users: blockedUsers, timestamp: Date.now() }
+            });
+            window.dispatchEvent(event);
+        }
+    } catch (error) {}
+}
+
+// =============================================
+// LOAD USER CONTACTS
+// =============================================
+async function loadUserContacts() {
+    if (currentState !== SETTINGS_STATES.READY || !isSessionValid()) return;
+    
+    try {
+        const response = await ApiCore.request('/api/contacts', { method: 'GET' });
+        if (response.success && response.data) {
+            userContacts = response.data.contacts || response.data || [];
+            
+            const event = new CustomEvent('userContactsLoaded', {
+                detail: { contacts: userContacts, timestamp: Date.now() }
+            });
+            window.dispatchEvent(event);
+        }
+    } catch (error) {}
+}
+
+// =============================================
+// LOAD USER GROUPS
+// =============================================
+async function loadUserGroups() {
+    if (currentState !== SETTINGS_STATES.READY || !isSessionValid()) return;
+    
+    try {
+        const response = await ApiCore.request('/api/group', { method: 'GET' });
+        if (response.success && response.data) {
+            userGroups = response.data.groups || response.data || [];
+            coreData.groupsList = userGroups;
+            
+            const event = new CustomEvent('userGroupsLoaded', {
+                detail: { groups: userGroups, timestamp: Date.now() }
+            });
+            window.dispatchEvent(event);
+        }
+    } catch (error) {}
+}
+
+// =============================================
+// TERMINATE SESSION
+// =============================================
 export async function terminateSession(sessionId) {
+    if (currentState !== SETTINGS_STATES.READY || !isSessionValid()) {
+        throw new Error('Not ready');
+    }
+    
     try {
-        await makeSafeRequest('/api/auth/terminate-session', 'POST', { sessionId });
-        await safeLoadActiveSessions();
+        const response = await ApiCore.request('/api/auth/terminate-session', {
+            method: 'POST',
+            body: { sessionId }
+        });
         
-        await sendToParent({
-            type: PARENT_MESSAGE_TYPES.SESSION_TERMINATED,
-            sessionId,
-            timestamp: Date.now()
-        }, 0, false);
+        if (response.success) {
+            await loadActiveSessions();
+            
+            await sendToParent({
+                type: PARENT_MESSAGE_TYPES.SESSION_TERMINATED,
+                sessionId,
+                timestamp: Date.now()
+            }, 0, false);
+            
+            const event = new CustomEvent('sessionTerminated', {
+                detail: { sessionId, timestamp: Date.now() }
+            });
+            window.dispatchEvent(event);
+            
+            return true;
+        }
         
-        return true;
+        return false;
     } catch (error) {
         throw error;
     }
 }
 
+// =============================================
+// TERMINATE ALL SESSIONS
+// =============================================
 export async function terminateAllSessions() {
+    if (currentState !== SETTINGS_STATES.READY || !isSessionValid()) {
+        throw new Error('Not ready');
+    }
+    
     try {
-        await makeSafeRequest('/api/auth/terminate-all-sessions', 'POST');
-        await safeLoadActiveSessions();
+        const response = await ApiCore.request('/api/auth/terminate-all-sessions', {
+            method: 'POST'
+        });
         
-        await sendToParent({
-            type: PARENT_MESSAGE_TYPES.ALL_SESSIONS_TERMINATED,
-            timestamp: Date.now()
-        }, 0, false);
+        if (response.success) {
+            await loadActiveSessions();
+            
+            await sendToParent({
+                type: PARENT_MESSAGE_TYPES.ALL_SESSIONS_TERMINATED,
+                timestamp: Date.now()
+            }, 0, false);
+            
+            const event = new CustomEvent('allSessionsTerminated', {
+                detail: { timestamp: Date.now() }
+            });
+            window.dispatchEvent(event);
+            
+            return true;
+        }
         
-        return true;
+        return false;
     } catch (error) {
         throw error;
     }
 }
 
+// =============================================
+// UNBLOCK USER
+// =============================================
 export async function unblockUser(userId) {
+    if (currentState !== SETTINGS_STATES.READY || !isSessionValid()) {
+        throw new Error('Not ready');
+    }
+    
     try {
-        await makeSafeRequest('/api/users/unblock', 'POST', { userId });
-        await safeLoadBlockedUsers();
+        const response = await ApiCore.request('/api/users/unblock', {
+            method: 'POST',
+            body: { userId }
+        });
         
-        await sendToParent({
-            type: PARENT_MESSAGE_TYPES.USER_UNBLOCKED,
-            userId,
-            timestamp: Date.now()
-        }, 0, false);
+        if (response.success) {
+            await loadBlockedUsers();
+            
+            await sendToParent({
+                type: PARENT_MESSAGE_TYPES.USER_UNBLOCKED,
+                userId,
+                timestamp: Date.now()
+            }, 0, false);
+            
+            const event = new CustomEvent('userUnblocked', {
+                detail: { userId, timestamp: Date.now() }
+            });
+            window.dispatchEvent(event);
+            
+            return true;
+        }
         
-        return true;
+        return false;
     } catch (error) {
         throw error;
     }
 }
 
+// =============================================
+// CLEAR CHAT CACHE
+// =============================================
 export async function clearChatCache() {
+    if (currentState !== SETTINGS_STATES.READY || !isSessionValid()) {
+        throw new Error('Not ready');
+    }
+    
     try {
-        await makeSafeRequest('/api/storage/clear-chat-cache', 'POST');
-        if (userSettings.storage) {
+        const response = await ApiCore.request('/api/storage/clear-chat-cache', {
+            method: 'POST'
+        });
+        
+        if (response.success && userSettings.storage) {
             userSettings.storage.storageBreakdown.chats = 0;
             userSettings.storage.totalStorageUsed = 
                 (userSettings.storage.storageBreakdown.media || 0) + 
                 (userSettings.storage.storageBreakdown.other || 0);
+            calculateStorageUsage();
+            unsavedChanges = true;
+            
+            await sendToParent({
+                type: PARENT_MESSAGE_TYPES.CACHE_CLEARED,
+                cacheType: 'chat',
+                timestamp: Date.now()
+            }, 0, false);
+            
+            const event = new CustomEvent('chatCacheCleared', {
+                detail: { timestamp: Date.now() }
+            });
+            window.dispatchEvent(event);
+            
+            return true;
         }
-        unsavedChanges = true;
-        calculateStorageUsage();
         
-        await sendToParent({
-            type: PARENT_MESSAGE_TYPES.CACHE_CLEARED,
-            cacheType: 'chat',
-            timestamp: Date.now()
-        }, 0, false);
-        
-        return true;
+        return false;
     } catch (error) {
         throw error;
     }
 }
 
+// =============================================
+// CLEAR MEDIA CACHE
+// =============================================
 export async function clearMediaCache() {
+    if (currentState !== SETTINGS_STATES.READY || !isSessionValid()) {
+        throw new Error('Not ready');
+    }
+    
     try {
-        await makeSafeRequest('/api/storage/clear-media-cache', 'POST');
-        if (userSettings.storage) {
+        const response = await ApiCore.request('/api/storage/clear-media-cache', {
+            method: 'POST'
+        });
+        
+        if (response.success && userSettings.storage) {
             userSettings.storage.storageBreakdown.media = 0;
             userSettings.storage.totalStorageUsed = 
                 (userSettings.storage.storageBreakdown.chats || 0) + 
                 (userSettings.storage.storageBreakdown.other || 0);
+            calculateStorageUsage();
+            unsavedChanges = true;
+            
+            await sendToParent({
+                type: PARENT_MESSAGE_TYPES.CACHE_CLEARED,
+                cacheType: 'media',
+                timestamp: Date.now()
+            }, 0, false);
+            
+            const event = new CustomEvent('mediaCacheCleared', {
+                detail: { timestamp: Date.now() }
+            });
+            window.dispatchEvent(event);
+            
+            return true;
         }
-        unsavedChanges = true;
-        calculateStorageUsage();
         
-        await sendToParent({
-            type: PARENT_MESSAGE_TYPES.CACHE_CLEARED,
-            cacheType: 'media',
-            timestamp: Date.now()
-        }, 0, false);
-        
-        return true;
+        return false;
     } catch (error) {
         throw error;
     }
 }
 
+// =============================================
+// SHOW ACTIVE SESSIONS
+// =============================================
 export function showActiveSessions() {
     try {
         const event = new CustomEvent('showSessions', {
@@ -6390,6 +5238,9 @@ export function showActiveSessions() {
     }
 }
 
+// =============================================
+// SHOW BLOCKED USERS
+// =============================================
 export function showBlockedUsers() {
     try {
         const event = new CustomEvent('showBlockedUsers', {
@@ -6406,7 +5257,641 @@ export function showBlockedUsers() {
 }
 
 // =============================================
-// INTERNAL FUNCTIONS 
+// NOTIFY PARENT AUTH STATE
+// =============================================
+export function notifyParentAuthState(hasAuth) {
+    try {
+        sendToParent({
+            type: 'IFRAME_AUTH_STATE',
+            hasAuth: hasAuth,
+            iframeId: FRAME_ID,
+            timestamp: Date.now()
+        }, 0, false);
+    } catch (error) {}
+}
+
+// =============================================
+// NOTIFY PARENT AUTH ERROR
+// =============================================
+export function notifyParentAuthError() {
+    if (authErrorNotified) return;
+    try {
+        sendToParent({
+            type: 'IFRAME_AUTH_ERROR',
+            iframeId: FRAME_ID,
+            message: 'Authentication required',
+            tokenExpired: true,
+            timestamp: Date.now()
+        }, 0, false);
+        authErrorNotified = true;
+    } catch (error) {}
+}
+
+// =============================================
+// GET SECURE TOKEN - ALWAYS FROM PARENT
+// =============================================
+export function getSecureToken() {
+    return null;
+}
+
+// =============================================
+// SECURE FETCH WRAPPER - ROUTES THROUGH PARENT
+// =============================================
+export async function secureFetchWrapper(endpoint, method = 'GET', data = null, options = {}) {
+    try {
+        const response = await sendToParent({
+            type: 'API_REQUEST',
+            endpoint: endpoint,
+            method: method,
+            data: data,
+            options: options,
+            timestamp: Date.now()
+        }, 0, true);
+        
+        if (response && response.payload) {
+            return response.payload;
+        }
+        
+        return { success: false, data: null };
+        
+    } catch (error) {
+        return {
+            success: false,
+            status: 'error',
+            message: 'Request failed',
+            data: null
+        };
+    }
+}
+
+// =============================================
+// WAIT FOR TOKEN - ALWAYS FALSE
+// =============================================
+export async function waitForToken(timeout = 10000) {
+    return false;
+}
+
+// =============================================
+// START PASSIVE AUTH MONITORING - DISABLED
+// =============================================
+export function startPassiveAuthMonitoring() {}
+
+// =============================================
+// START BACKGROUND TASKS
+// =============================================
+export function startBackgroundTasks() {
+    try {
+        if (backgroundTasksStarted) return;
+        if (!isSessionValid() && currentState !== SETTINGS_STATES.READY) return;
+        
+        backgroundTasksStarted = true;
+        
+        Promise.allSettled([
+            loadUserData(),
+            loadActiveSessions(),
+            loadBlockedUsers(),
+            loadUserContacts(),
+            loadUserGroups()
+        ]).then(() => {}).catch(() => {});
+    } catch (error) {
+        backgroundTasksStarted = false;
+    }
+}
+
+// =============================================
+// SAFE LOAD USER DATA
+// =============================================
+export async function safeLoadUserData() {
+    if (!isSessionValid() && currentState !== SETTINGS_STATES.READY) {
+        return null;
+    }
+    
+    try {
+        if (session.user) {
+            currentUser = session.user;
+            coreData.user = session.user;
+            SafeStorage.setJSON('current_user', currentUser);
+            return currentUser;
+        }
+        return null;
+    } catch (error) {
+        return null;
+    }
+}
+
+// =============================================
+// SAFE LOAD SETTINGS
+// =============================================
+export async function safeLoadSettings() {
+    if (!isSessionValid() && currentState !== SETTINGS_STATES.READY) {
+        return null;
+    }
+    
+    try {
+        const response = await secureFetchWrapper('/api/settings', 'GET');
+        const settingsData = response?.data || response?.settings || null;
+        
+        if (settingsData) {
+            userSettings = settingsData;
+            coreData.settings = settingsData;
+            
+            Object.keys(DEFAULT_SETTINGS).forEach(section => {
+                if (!userSettings[section]) {
+                    userSettings[section] = JSON.parse(JSON.stringify(DEFAULT_SETTINGS[section]));
+                }
+            });
+            
+            SafeStorage.setJSON('user_settings', userSettings);
+            calculateStorageUsage();
+            return userSettings;
+        }
+        return null;
+    } catch (error) {
+        return null;
+    }
+}
+
+// =============================================
+// SAFE LOAD BLOCKED USERS
+// =============================================
+export async function safeLoadBlockedUsers() {
+    if (!isSessionValid() && currentState !== SETTINGS_STATES.READY) return null;
+    
+    try {
+        const response = await secureFetchWrapper('/api/users/blocked', 'GET');
+        const blockedData = response?.data?.blockedUsers || response?.blockedUsers || [];
+        if (blockedData) {
+            blockedUsers = blockedData;
+            return blockedUsers;
+        }
+        return null;
+    } catch (error) {
+        return null;
+    }
+}
+
+// =============================================
+// SAFE LOAD ACTIVE SESSIONS
+// =============================================
+export async function safeLoadActiveSessions() {
+    if (!isSessionValid() && currentState !== SETTINGS_STATES.READY) return null;
+    
+    try {
+        const response = await secureFetchWrapper('/api/auth/sessions', 'GET');
+        const sessionsData = response?.data?.sessions || response?.sessions || [];
+        if (sessionsData) {
+            activeSessions = sessionsData;
+            return activeSessions;
+        }
+        return null;
+    } catch (error) {
+        return null;
+    }
+}
+
+// =============================================
+// SAFE LOAD USER CONTACTS
+// =============================================
+export async function safeLoadUserContacts() {
+    if (!isSessionValid() && currentState !== SETTINGS_STATES.READY) return null;
+    
+    try {
+        const response = await secureFetchWrapper('/api/contacts', 'GET');
+        const contactsData = response?.data?.contacts || response?.contacts || [];
+        if (contactsData) {
+            userContacts = contactsData;
+            return userContacts;
+        }
+        return null;
+    } catch (error) {
+        return null;
+    }
+}
+
+// =============================================
+// SAFE LOAD USER GROUPS
+// =============================================
+export async function safeLoadUserGroups() {
+    if (!isSessionValid() && currentState !== SETTINGS_STATES.READY) return null;
+    
+    try {
+        const response = await secureFetchWrapper('/api/group', 'GET');
+        const groupsData = response?.data?.groups || response?.groups || [];
+        if (groupsData) {
+            userGroups = groupsData;
+            coreData.groupsList = groupsData;
+            return userGroups;
+        }
+        return null;
+    } catch (error) {
+        return null;
+    }
+}
+
+// =============================================
+// MAKE SAFE REQUEST
+// =============================================
+export async function makeSafeRequest(endpoint, method = 'GET', data = null, options = {}) {
+    if (!isSessionValid() && currentState !== SETTINGS_STATES.READY) {
+        throw new Error('Authentication not available');
+    }
+    return await secureFetchWrapper(endpoint, method, data, options);
+}
+
+// =============================================
+// INITIALIZE CORE - MAIN ENTRY POINT
+// =============================================
+export async function initializeCore(options = {}) {
+    if (initializationPromise) {
+        return initializationPromise;
+    }
+    
+    if (currentState !== SETTINGS_STATES.INIT) {
+        return { success: true, state: currentState };
+    }
+    
+    initializationPromise = (async () => {
+        initializationInProgress = true;
+        coreError = null;
+        
+        const {
+            debug = DEBUG
+        } = options;
+        
+        if (debug) {
+            Log.enableDebug();
+        }
+        
+        try {
+            await loadFromLocalStorage();
+            
+            setupMessageHandlers();
+            
+            registerWithParent();
+            
+            return new Promise((resolve) => {
+                const checkInterval = safeSetInterval(() => {
+                    if (currentState === SETTINGS_STATES.READY) {
+                        clearInterval(checkInterval);
+                        activeIntervals.delete(checkInterval);
+                        initializationInProgress = false;
+                        initializationPromise = null;
+                        resolve({ 
+                            success: true, 
+                            state: currentState, 
+                            authenticated: isSessionValid() 
+                        });
+                    } else if (currentState === SETTINGS_STATES.DEGRADED) {
+                        clearInterval(checkInterval);
+                        activeIntervals.delete(checkInterval);
+                        initializationInProgress = false;
+                        initializationPromise = null;
+                        resolve({ 
+                            success: true, 
+                            state: currentState, 
+                            authenticated: false 
+                        });
+                    }
+                }, 50);
+                activeIntervals.add(checkInterval);
+                
+                safeSetTimeout(() => {
+                    clearInterval(checkInterval);
+                    activeIntervals.delete(checkInterval);
+                    initializationInProgress = false;
+                    initializationPromise = null;
+                    if (currentState === SETTINGS_STATES.INIT || currentState === SETTINGS_STATES.REGISTERING) {
+                        transitionTo(SETTINGS_STATES.DEGRADED, 'initialization_timeout');
+                    }
+                    resolve({ success: true, state: currentState, authenticated: false });
+                }, 5000);
+            });
+            
+        } catch (error) {
+            coreError = error;
+            initializationInProgress = false;
+            initializationPromise = null;
+            transitionTo(SETTINGS_STATES.DEGRADED, error.message);
+            
+            return {
+                success: false,
+                state: currentState,
+                error: error.message
+            };
+        }
+    })();
+    
+    return initializationPromise;
+}
+
+// =============================================
+// SETUP MESSAGE HANDLERS
+// =============================================
+function setupMessageHandlers() {
+    IframeTransport.on('MODULE_REGISTERED', (message) => {
+        handleModuleRegistered(message);
+    });
+    
+    IframeTransport.on('SESSION_ACTIVE', (message) => {
+        handleSessionActive(message);
+    });
+    
+    IframeTransport.on('SESSION_NULL', () => {
+        handleSessionNull();
+    });
+    
+    IframeTransport.on('SESSION_REFRESHED', (message) => {
+        handleSessionRefreshed(message);
+    });
+    
+    IframeTransport.on('SESSION_INVALIDATED', () => {
+        handleSessionInvalidated();
+    });
+    
+    IframeTransport.on('PARENT_READY', (message) => {
+        handleParentReady(message);
+    });
+    
+    IframeTransport.on('SETTINGS_UPDATED', (message) => {
+        handleSettingsUpdatedBroadcast(message);
+    });
+    
+    IframeTransport.on('SESSION_VERIFIED', (message) => {
+        if (DEBUG) debugLog('Session verified by parent');
+    });
+    
+    IframeTransport.on('ACK', (message) => {
+        if (message.inResponseTo && message.inResponseTo.includes('HEARTBEAT')) {
+            HeartbeatManager.handleAck();
+        }
+    });
+}
+
+// =============================================
+// SHUTDOWN CORE
+// =============================================
+export function shutdownCore() {
+    try {
+        HeartbeatManager.stop();
+        clearAllTimers();
+        
+        sendToParent({
+            type: 'SHUTDOWN',
+            reason: 'normal_shutdown',
+            timestamp: Date.now()
+        }, 0, false).catch(() => {});
+        
+        currentState = SETTINGS_STATES.INIT;
+        isReady = false;
+        initializationInProgress = false;
+        parentReady = false;
+        parentReadyReceived = false;
+        parentCommunicationReady = false;
+        parentSessionReceived = false;
+        sessionValidated = false;
+        authReady = false;
+        tokenReady = false;
+        tokenAvailable = false;
+        backgroundTasksStarted = false;
+        clearSession();
+        
+        window.__SETTINGS_STATE__ = currentState;
+        window.__SETTINGS_SESSION_ACTIVE__ = false;
+        window.__SETTINGS_READY__ = false;
+        
+        stateHistory = [];
+        
+        if (DEBUG) debugLog('Core shutdown complete');
+        return true;
+        
+    } catch (error) {
+        return false;
+    }
+}
+
+// =============================================
+// VERIFY PARENT PRESENCE
+// =============================================
+export function verifyParentPresence() {
+    return OriginAdapter.isParentVerified();
+}
+
+// =============================================
+// SETUP SECURE MESSAGING CHANNEL
+// =============================================
+export function setupSecureMessagingChannel() {
+    return true;
+}
+
+// =============================================
+// RESET UI FOR LOGOUT
+// =============================================
+export function resetUIForLogout() {
+    try {
+        clearSession();
+        parentSessionReceived = false;
+        sessionValidated = false;
+        parentReady = false;
+        parentReadyReceived = false;
+        parentCommunicationReady = false;
+        
+        if (currentState === SETTINGS_STATES.READY || currentState === SETTINGS_STATES.ACTIVE) {
+            transitionTo(SETTINGS_STATES.DEGRADED, 'ui_logout');
+        }
+        
+        HeartbeatManager.stop();
+        
+        const event = new CustomEvent('uiResetForLogout', {
+            detail: { timestamp: Date.now() }
+        });
+        window.dispatchEvent(event);
+        
+        return true;
+    } catch (error) {
+        return false;
+    }
+}
+
+// =============================================
+// SHOW RECONNECTION STATE
+// =============================================
+export function showReconnectionState() {
+    try {
+        const event = new CustomEvent('coreReconnecting', {
+            detail: {
+                timestamp: Date.now(),
+                state: currentState,
+                connectionQuality: state.connectionQuality,
+                environment: IframeEnvironment.getEnvironment()
+            }
+        });
+        window.dispatchEvent(event);
+        return true;
+    } catch (error) {
+        return false;
+    }
+}
+
+// =============================================
+// GET CORE DIAGNOSTICS
+// =============================================
+export function getCoreDiagnostics() {
+    return DiagnosticsAgent.getFullReport();
+}
+
+// =============================================
+// CHECK AUTHENTICATION STATE
+// =============================================
+export function checkAuthenticationState() {
+    return isSessionValid();
+}
+
+// =============================================
+// BOOTSTRAP IFRAME
+// =============================================
+export async function bootstrapIframe() {
+    try {
+        IframeEnvironment.detect();
+        CompatibilityBridge.detect();
+        OriginAdapter.init();
+        await loadFromLocalStorage();
+        
+        return true;
+    } catch (error) {
+        return false;
+    }
+}
+
+// =============================================
+// WAIT FOR SESSION
+// =============================================
+export async function waitForSession(timeout = 10000) {
+    return new Promise((resolve) => {
+        if (isSessionValid()) {
+            resolve(true);
+            return;
+        }
+        const startTime = Date.now();
+        const checkInterval = safeSetInterval(() => {
+            try {
+                if (isSessionValid()) {
+                    clearInterval(checkInterval);
+                    activeIntervals.delete(checkInterval);
+                    clearTimeout(timeoutId);
+                    activeTimers.delete(timeoutId);
+                    resolve(true);
+                } else if (Date.now() - startTime > timeout) {
+                    clearInterval(checkInterval);
+                    activeIntervals.delete(checkInterval);
+                    resolve(false);
+                }
+            } catch (error) {
+                clearInterval(checkInterval);
+                activeIntervals.delete(checkInterval);
+                resolve(false);
+            }
+        }, 100);
+        activeIntervals.add(checkInterval);
+        const timeoutId = safeSetTimeout(() => {
+            clearInterval(checkInterval);
+            activeIntervals.delete(checkInterval);
+            resolve(false);
+        }, timeout);
+        activeTimers.add(timeoutId);
+    });
+}
+
+// =============================================
+// INITIALIZE BASIC UI
+// =============================================
+export function initializeBasicUI() {
+    try {
+        if (!userSettings) {
+            userSettings = JSON.parse(JSON.stringify(DEFAULT_SETTINGS));
+            coreData.settings = userSettings;
+        }
+        const event = new CustomEvent('basicUIReady', {
+            detail: {
+                timestamp: Date.now(),
+                state: currentState,
+                environment: IframeEnvironment.getEnvironment()
+            }
+        });
+        window.dispatchEvent(event);
+        return true;
+    } catch (error) {
+        return false;
+    }
+}
+
+// =============================================
+// SETUP BASIC EVENT LISTENERS
+// =============================================
+export function setupBasicEventListeners() {
+    try {
+        const backToAppBtn = document.getElementById('backToAppBtn');
+        if (backToAppBtn) {
+            const handler = () => {
+                if (unsavedChanges) {
+                    const event = new CustomEvent('confirmNavigation', {
+                        detail: {
+                            message: 'You have unsaved changes. Are you sure you want to leave?',
+                            callback: () => {
+                                sendToParent({
+                                    type: 'CHILD_CLOSING',
+                                    childId: FRAME_ID,
+                                    timestamp: Date.now(),
+                                    unsavedChanges: true
+                                }, 0, false).catch(() => {});
+                            }
+                        }
+                    });
+                    window.dispatchEvent(event);
+                } else {
+                    sendToParent({
+                        type: 'CHILD_CLOSING',
+                        childId: FRAME_ID,
+                        timestamp: Date.now()
+                    }, 0, false).catch(() => {});
+                }
+            };
+            backToAppBtn.addEventListener('click', handler);
+        }
+        
+        window.addEventListener('beforeunload', (e) => {
+            if (unsavedChanges) {
+                e.preventDefault();
+                e.returnValue = 'You have unsaved changes. Are you sure you want to leave?';
+            }
+        });
+        return true;
+    } catch (error) {
+        return false;
+    }
+}
+
+// =============================================
+// START TOKEN MONITORING - DISABLED
+// =============================================
+export function startTokenMonitoring() {}
+
+// =============================================
+// CHECK TOKEN AVAILABILITY - DISABLED
+// =============================================
+export function checkTokenAvailability() {}
+
+// =============================================
+// NOTIFY TOKEN READY - DISABLED
+// =============================================
+export function notifyTokenReady() {}
+
+// =============================================
+// NOTIFY TOKEN LOST - DISABLED
+// =============================================
+export function notifyTokenLost() {}
+
+// =============================================
+// INTERNAL FUNCTIONS
 // =============================================
 function initTrustedOrigins() {
     try {
@@ -6437,15 +5922,10 @@ function initTrustedOrigins() {
 function setupMessaging() {
     window.removeEventListener('message', handleIncomingMessage);
     window.addEventListener('message', handleIncomingMessage, false);
-    state.listeners.add({
-        type: 'message',
-        handler: handleIncomingMessage,
-        options: false
-    });
 }
 
 async function checkPermissions() {
-    return state.authMode === 'authenticated' && !!state.session;
+    return isSessionValid();
 }
 
 async function loadDependencies() {
@@ -6464,8 +5944,7 @@ async function loadAllData() {
 
 async function loadData(dataType, endpoint) {
     try {
-        const token = getSecureToken();
-        if (!token && endpoint !== '/api/settings' && state.authMode !== 'demo') {
+        if (!isSessionValid() && endpoint !== '/api/settings') {
             return;
         }
         const response = await secureFetchWrapper(endpoint, 'GET');
@@ -6536,7 +6015,6 @@ function dispatchDataReadyEvent() {
             detail: {
                 data: coreData,
                 timestamp: Date.now(),
-                handshakeState: state.handshakeState,
                 environment: IframeEnvironment.getEnvironment()
             }
         });
@@ -6560,20 +6038,16 @@ function dispatchDataUpdatedEvent(dataType) {
 function notifyParentReady() {
     try {
         if (window.parent !== window) {
-            IframeTransport.send('CORE_READY', {
+            sendToParent({
+                type: 'CORE_READY',
                 payload: {
-                    iframeId: 'settings',
+                    iframeId: FRAME_ID,
                     status: 'success',
                     dataTypes: Object.keys(coreData).filter(key => coreData[key] !== null),
                     timestamp: Date.now(),
-                    mode: state.authMode,
-                    mirrorVersion: SessionMirror.getMirror().version,
-                    handshakeState: state.handshakeState,
-                    protocol: PROTOCOL_CANONICAL,
-                    environment: IframeEnvironment.getEnvironment()
-                },
-                source: MODULE_NAME
-            }, { expectAck: false, maxRetries: 1 }).catch(() => {});
+                    state: currentState
+                }
+            }, 0, false).catch(() => {});
         }
     } catch (error) {}
 }
@@ -6581,14 +6055,14 @@ function notifyParentReady() {
 function notifyParentError(error) {
     try {
         if (window.parent !== window) {
-            IframeTransport.send('ERROR', {
+            sendToParent({
+                type: 'ERROR',
                 payload: {
-                    iframeId: 'settings',
+                    iframeId: FRAME_ID,
                     message: error.message,
                     timestamp: Date.now()
-                },
-                source: MODULE_NAME
-            }, { expectAck: false, maxRetries: 1 }).catch(() => {});
+                }
+            }, 0, false).catch(() => {});
         }
     } catch (error) {}
 }
@@ -6661,7 +6135,7 @@ export function onReady(callback) {
 }
 
 // =============================================
-// MESSAGE HANDLER - WITH DEDUPLICATION
+// MESSAGE HANDLER - LEGACY SUPPORT
 // =============================================
 function handleIncomingMessage(event) {
     try {
@@ -6673,8 +6147,7 @@ function handleIncomingMessage(event) {
             return;
         }
         
-        if (!isFromParent(event)) {
-            if (event.source === window) return;
+        if (event.source !== IframeTransport._parentWindow && event.source !== window.parent) {
             return;
         }
         
@@ -6683,26 +6156,8 @@ function handleIncomingMessage(event) {
             return;
         }
         
-        // DEDUPLICATION
-        if (isMessageDuplicate(message.messageId || message.requestId, message.type)) {
+        if (isMessageDuplicate(message.requestId || message.messageId, message.type)) {
             return;
-        }
-        
-        // Handle required parent contract messages
-        if (message.type === REQUIRED_PARENT_MESSAGES.SESSION_ACTIVE) {
-            handleAuthoritativeSession(message);
-        } else if (message.type === REQUIRED_PARENT_MESSAGES.SESSION_UPDATE) {
-            handleAuthoritativeSessionUpdate(message);
-        } else if (message.type === REQUIRED_PARENT_MESSAGES.ACK) {
-            IframeTransport.handleAck(message);
-        } else if (message.type === REQUIRED_PARENT_MESSAGES.PING) {
-            IframeTransport.send('PONG', { inResponseTo: message.messageId }, { expectAck: false }).catch(() => {});
-        } else if (message.type === REQUIRED_PARENT_MESSAGES.NAVIGATE) {
-            handleParentNavigation(message);
-        } else if (message.type === REQUIRED_PARENT_MESSAGES.PERMISSION_UPDATE) {
-            handlePermissionUpdate(message);
-        } else if (message.type === REQUIRED_PARENT_MESSAGES.FORCE_LOGOUT) {
-            handleParentForceLogout();
         }
         
         if (CompatibilityBridge.isEnabled()) {
@@ -6711,22 +6166,15 @@ function handleIncomingMessage(event) {
         
         receiveLog(message.type);
         Log.trackReceive();
-        DiagnosticsAgent.track('message_received', { type: message.type });
-        
-        if (message.source === MODULE_NAME) {
-            return;
-        }
         
         if (message.type === 'ACK' && message.inResponseTo) {
             const pending = state.pendingAcks.get(message.inResponseTo);
             if (pending) {
                 clearTimeout(pending.timeout);
+                activeTimers.delete(pending.timeout);
                 state.health.acksReceived++;
                 pending.resolve({ acknowledged: true, ...message });
                 state.pendingAcks.delete(message.inResponseTo);
-                
-                const breaker = ReliabilityEngine.getCircuitBreaker('sendToParent');
-                if (breaker) breaker.recordSuccess();
             }
             return;
         }
@@ -6737,51 +6185,25 @@ function handleIncomingMessage(event) {
             state.connectionQuality = 'good';
             if (state.pongTimeout) {
                 clearTimeout(state.pongTimeout);
+                activeTimers.delete(state.pongTimeout);
                 state.pongTimeout = null;
             }
             return;
         }
         
-        if (message.type === 'PING') {
-            IframeTransport.send('PONG', {
-                inResponseTo: message.messageId,
-                timestamp: Date.now()
-            }, { expectAck: false, maxRetries: 1 }).catch(() => {});
+        if (message.requestId && state.processedMessageIds.has(message.requestId)) {
             return;
         }
         
-        if (message.type === 'MIRROR_UPDATE' && message.session) {
-            SessionMirror.update(message.session);
-            return;
-        }
-        
-        if (message.type === 'PARENT_READY') {
-            state.parentReadyReceived = true;
-            parentReady = true;
-            parentReadyDetected = true;
-            IframeHandshakeAuthority.onParentReady();
-            
-            if (state.handshakeState === 'waiting_parent_ready') {
-                state.handshakeState = 'handshake_sent';
-                IframeHandshakeAuthority.startHandshake();
-            }
-            return;
-        }
-        
-        if (message.messageId && state.processedMessageIds.has(message.messageId)) {
-            return;
-        }
-        
-        if (message.messageId) {
-            state.processedMessageIds.add(message.messageId);
+        if (message.requestId) {
+            state.processedMessageIds.add(message.requestId);
             if (state.processedMessageIds.size > 100) {
                 const ids = Array.from(state.processedMessageIds);
                 state.processedMessageIds = new Set(ids.slice(-50));
             }
         }
         
-        if (!isReady && message.type !== 'INIT' && 
-            message.type !== 'SESSION_RESPONSE') {
+        if (!isReady && message.type !== 'INIT' && message.type !== 'SESSION_RESPONSE') {
             messageQueue.push({ message, event });
             return;
         }
@@ -6806,7 +6228,7 @@ function handleIncomingMessage(event) {
                 handleSessionUpdate(message);
                 break;
             case 'LOGOUT':
-                handleLogout();
+                handleLogoutMessage();
                 break;
             case 'PARENT_READY_ACK':
                 parentReady = true;
@@ -6814,21 +6236,12 @@ function handleIncomingMessage(event) {
                 break;
             case 'AUTH_READY':
                 authReady = true;
-                checkTokenAvailability();
                 break;
             case 'AUTH_LOST':
                 authReady = false;
                 tokenReady = false;
                 tokenAvailable = false;
                 backgroundTasksStarted = false;
-                break;
-            case 'TOKEN_READY':
-                handleTokenReady();
-                break;
-            case 'TOKEN_RESPONSE':
-                if (message.token) {
-                    SessionClient.updateSession(null, message.token);
-                }
                 break;
             case 'USER_UPDATED':
                 handleUserUpdated(message);
@@ -6840,59 +6253,14 @@ function handleIncomingMessage(event) {
                 handleUpdateData(message);
                 break;
             case 'HEARTBEAT':
-                IframeTransport.send('HEARTBEAT', {
+                sendToParent({
+                    type: 'HEARTBEAT',
                     status: state.health.status,
-                    timestamp: Date.now(),
-                    childId: 'settings',
-                    source: MODULE_NAME
-                }, { expectAck: false, maxRetries: 1 }).catch(() => {});
+                    timestamp: Date.now()
+                }, 0, false).catch(() => {});
                 break;
             case 'SHUTDOWN':
                 shutdownCore();
-                break;
-            case 'SESSION_INIT':
-                if (message.session) {
-                    SessionClient.updateSession(
-                        message.session.user,
-                        message.session.token,
-                        message.session.expiry
-                    );
-                }
-                IframeTransport.send('SESSION_CONFIRMED', {
-                    childId: 'settings',
-                    timestamp: Date.now(),
-                    source: MODULE_NAME
-                }, { expectAck: false, maxRetries: 1 }).catch(() => {});
-                break;
-            case 'HANDSHAKE_RESPONSE':
-                if (message.session) {
-                    SessionClient.updateSession(
-                        message.session.user,
-                        message.session.token,
-                        message.session.expiry
-                    );
-                }
-                break;
-            case 'RECOVERY_RESPONSE':
-                state.health.recoveryAttempts++;
-                if (message.session) {
-                    SessionClient.updateSession(
-                        message.session.user,
-                        message.session.token,
-                        message.session.expiry
-                    );
-                }
-                break;
-            case 'RECOVERY_REQUEST':
-                handleRecoveryRequest(message);
-                break;
-            case 'ORIGIN_BIND_ACK':
-                if (message.success) {}
-                break;
-            case 'SESSION_SYNC':
-                if (message.version && message.version !== SessionClient._sessionVersion) {
-                    SessionClient.sync();
-                }
                 break;
             default:
                 break;
@@ -6900,29 +6268,12 @@ function handleIncomingMessage(event) {
     } catch (error) {}
 }
 
-function handleRecoveryRequest(message) {
-    state.handshakeCompleted = false;
-    state.sessionSynced = false;
-    state.parentVerified = false;
-    
-    setTimeout(() => {
-        IframeHandshakeAuthority.startHandshake({ force: true }).catch(() => {});
-    }, 100);
-    
-    IframeTransport.send('RECOVERY_RESPONSE', {
-        childId: 'settings',
-        accepted: true,
-        timestamp: Date.now()
-    }, { expectAck: false, maxRetries: 1 }).catch(() => {});
-}
-
 function handleInitMessage(message) {
     try {
         if (message.payload) {
             if (message.payload.session) {
-                SessionClient.updateSession(
+                updateSession(
                     message.payload.session.user,
-                    message.payload.session.token,
                     message.payload.session.expiry
                 );
             }
@@ -6931,72 +6282,48 @@ function handleInitMessage(message) {
                 userSettings = message.payload.settings;
             }
         }
-        IframeTransport.send('INIT_ACK', {
-            childId: 'settings',
-            timestamp: Date.now(),
-            source: MODULE_NAME,
-            mirrorVersion: SessionMirror.getMirror().version
-        }, { expectAck: false, maxRetries: 1 }).catch(() => {});
+        sendToParent({
+            type: 'INIT_ACK',
+            timestamp: Date.now()
+        }, 0, false).catch(() => {});
     } catch (error) {}
 }
 
 function handleSessionResponse(message) {
     try {
-        if (!message.token && !message.user && !message.session) {
+        if (!message.user && !message.session) {
             return;
         }
         const sessionData = {
             user: message.user || message.session?.user,
-            token: message.token || message.session?.token,
-            expiresAt: message.expiry || message.session?.expiry
+            expiry: message.expiry || message.session?.expiry
         };
-        SessionClient.updateSession(
+        updateSession(
             sessionData.user,
-            sessionData.token,
-            sessionData.expiresAt
+            sessionData.expiry
         );
-        
-        sendSessionAck(sessionData);
-        
-        IframeTransport.send('SESSION_CONFIRMED', {
-            childId: 'settings',
-            timestamp: Date.now(),
-            received: true,
-            validated: true,
-            source: MODULE_NAME,
-            mirrorVersion: SessionMirror.getMirror().version
-        }, { expectAck: false, maxRetries: 1 }).catch(() => {});
     } catch (error) {}
 }
 
 function handleSessionUpdate(message) {
     try {
         if (message.session) {
-            SessionClient.updateSession(
+            updateSession(
                 message.session.user,
-                message.session.token,
                 message.session.expiry
             );
-            
-            IframeTransport.send('SESSION_UPDATE_ACK', {
-                childId: 'settings',
-                timestamp: Date.now()
-            }, { expectAck: false, maxRetries: 1 }).catch(() => {});
         }
     } catch (error) {}
 }
 
-function handleLogout() {
+function handleLogoutMessage() {
     try {
         parentSessionData = null;
         parentSessionReceived = false;
         sessionValidated = false;
-        SessionMirror.clear();
-        SessionClient.clear();
+        clearSession();
         currentUser = null;
         coreData.user = null;
-        state.session = null;
-        state.sessionSynced = false;
         tokenReady = false;
         tokenAvailable = false;
         authReady = false;
@@ -7004,38 +6331,21 @@ function handleLogout() {
         isReady = false;
         
         state.handshakeState = 'pending';
-        state.parentReadyReceived = false;
-        state.childReadySent = false;
-        state.handshakeAcked = false;
-        state.sessionAcked = false;
+        parentReadyReceived = false;
         
-        // Reset parent authority state
-        parentAuthoritativeSession = null;
-        parentSessionReceived = false;
-        parentContractEnforced = false;
-        parentAuthorityState = PARENT_AUTHORITY_STATES.PREINIT;
-        window.__MODULE_STATE__ = parentAuthorityState;
-        window.__MODULE_SESSION_ACTIVE__ = false;
+        HeartbeatManager.stop();
         
-        StartupGovernor.reset();
-        IframeHandshakeAuthority.reset();
-        
-        IframeTransport.send('LOGOUT_CONFIRMED', {
-            childId: 'settings',
-            timestamp: Date.now(),
-            source: MODULE_NAME
-        }, { expectAck: false, maxRetries: 1 }).catch(() => {});
+        sendToParent({
+            type: 'LOGOUT_CONFIRMED',
+            timestamp: Date.now()
+        }, 0, false).catch(() => {});
     } catch (error) {}
-}
-
-function handleTokenReady() {
-    checkTokenAvailability();
 }
 
 function handleUserUpdated(data) {
     try {
         if (data.user) {
-            SessionClient.updateSession(data.user, null, null);
+            updateSession(data.user, null);
         }
     } catch (error) {}
 }
@@ -7046,30 +6356,27 @@ async function handleRefreshData(message) {
         if (dataType && coreData.hasOwnProperty(dataType)) {
             await loadData(dataType, getEndpointForDataType(dataType));
             syncWithGlobalState();
-            IframeTransport.send('DATA_REFRESHED', {
-                childId: 'settings',
+            sendToParent({
+                type: 'DATA_REFRESHED',
                 dataType: dataType,
-                timestamp: Date.now(),
-                source: MODULE_NAME
-            }, { expectAck: false, maxRetries: 1 }).catch(() => {});
+                timestamp: Date.now()
+            }, 0, false).catch(() => {});
             dispatchDataUpdatedEvent(dataType);
         } else {
             await loadAllData();
             syncWithGlobalState();
-            IframeTransport.send('ALL_DATA_REFRESHED', {
-                childId: 'settings',
-                timestamp: Date.now(),
-                source: MODULE_NAME
-            }, { expectAck: false, maxRetries: 1 }).catch(() => {});
+            sendToParent({
+                type: 'ALL_DATA_REFRESHED',
+                timestamp: Date.now()
+            }, 0, false).catch(() => {});
             dispatchDataUpdatedEvent('all');
         }
     } catch (error) {
-        IframeTransport.send('REFRESH_ERROR', {
-            childId: 'settings',
+        sendToParent({
+            type: 'REFRESH_ERROR',
             error: error.message,
-            timestamp: Date.now(),
-            source: MODULE_NAME
-        }, { expectAck: false, maxRetries: 1 }).catch(() => {});
+            timestamp: Date.now()
+        }, 0, false).catch(() => {});
     }
 }
 
@@ -7078,28 +6385,17 @@ function handleUpdateData(message) {
         const { dataType, payload } = message;
         if (dataType && coreData.hasOwnProperty(dataType)) {
             updateData(dataType, payload);
-            IframeTransport.send('DATA_UPDATED', {
-                childId: 'settings',
+            sendToParent({
+                type: 'DATA_UPDATED',
                 dataType: dataType,
-                timestamp: Date.now(),
-                source: MODULE_NAME
-            }, { expectAck: false, maxRetries: 1 }).catch(() => {});
+                timestamp: Date.now()
+            }, 0, false).catch(() => {});
         }
     } catch (error) {}
 }
 
-function sendSessionAck(sessionData) {
-    state.sessionAcked = true;
-    
-    IframeTransport.send('SESSION_ACK', {
-        childId: 'settings',
-        sessionVersion: sessionData?.version || 0,
-        timestamp: Date.now()
-    }, { expectAck: false, maxRetries: 1 }).catch(() => {});
-}
-
 // =============================================
-// FEATURE REGISTRATION 
+// FEATURE REGISTRATION
 // =============================================
 export function registerFeature(name, implementation) {
     try {
@@ -7132,7 +6428,7 @@ export function getFeature(name) {
 }
 
 // =============================================
-// DATA VALIDATION SCHEMAS 
+// DATA VALIDATION SCHEMAS
 // =============================================
 const validationSchemas = {
     friendsList: { requiredFields: ['id', 'name'], optionalFields: ['avatar', 'lastSeen', 'status'] },
@@ -7174,7 +6470,7 @@ function validateDataStructure(data, dataType) {
 }
 
 // =============================================
-// BUILD SETTINGS MENU - COMPATIBILITY STUB 
+// BUILD SETTINGS MENU
 // =============================================
 export function buildSettingsMenu(container = null, config = {}) {
     try {
@@ -7184,8 +6480,7 @@ export function buildSettingsMenu(container = null, config = {}) {
                 config,
                 menu: SETTINGS_MENU,
                 timestamp: Date.now(),
-                mode: state.authMode,
-                authenticated: SessionClient.isValid() || !!parentAuthoritativeSession
+                authenticated: isSessionValid()
             }
         });
         window.dispatchEvent(event);
@@ -7196,7 +6491,7 @@ export function buildSettingsMenu(container = null, config = {}) {
 }
 
 // =============================================
-// SET VISIBILITY TRACKING 
+// SET VISIBILITY TRACKING
 // =============================================
 function setupVisibilityTracking() {
     document.addEventListener('visibilitychange', () => {
@@ -7205,80 +6500,53 @@ function setupVisibilityTracking() {
         pageVisibility = document.visibilityState;
         
         if (wasVisible === false && state.pageVisible === true) {
-            if (isReady) {
-                SessionClient.sync().catch(() => {});
+            if (isReady && isSessionValid()) {
                 if (currentSection) {
                     loadSection(currentSection).catch(() => {});
                 }
             }
             
-            IframeTransport.send('VISIBILITY_RESUME', {
-                childId: 'settings',
+            sendToParent({
+                type: 'VISIBILITY_RESUME',
                 timestamp: Date.now()
-            }, { expectAck: false, maxRetries: 1 }).catch(() => {});
+            }, 0, false).catch(() => {});
         }
     });
 }
 
 // =============================================
-// LOAD SECTION FUNCTION - ADDED FOR UI INTEGRATION
+// GET HEALTH METRICS
 // =============================================
-export async function loadSection(sectionId) {
-    if (!isReady) {
-        await new Promise(resolve => {
-            const checkReady = setInterval(() => {
-                if (isReady) {
-                    clearInterval(checkReady);
-                    resolve();
-                }
-            }, 100);
-        });
-    }
-    
-    currentSection = sectionId;
-    
-    const event = new CustomEvent('settingsSectionChanged', {
-        detail: {
-            section: sectionId,
-            timestamp: Date.now(),
-            authenticated: checkAuthenticationState()
-        }
-    });
-    window.dispatchEvent(event);
-    
-    return true;
+export function getHealthMetrics() {
+    return {
+        uptime: Date.now() - (stateHistory[0]?.timestamp || Date.now()),
+        state: currentState,
+        sessionValid: isSessionValid(),
+        heartbeatHealthy: HeartbeatManager.isHealthy(),
+        parentVerified: OriginAdapter.isParentVerified(),
+        ready: isReady,
+        environment: IframeEnvironment.getEnvironment()
+    };
 }
 
 // =============================================
-// AUTO-START WITH RETRY 
+// GET PARENT ORIGIN
 // =============================================
-document.addEventListener('DOMContentLoaded', function() {
-    try {
-        initLog('DOMContentLoaded - starting core initialization');
-        setTimeout(() => {
-            initializeCore({ 
-                demoMode: true,
-                forceParentCheck: true,
-                handshakeTimeout: 3000,
-                debug: DEBUG
-            }).then(result => {
-                if (result.success) {
-                    successLog('Core initialized in mode:', result.mode);
-                } else {
-                    errorLog('Core initialization failed:', result);
-                }
-            }).catch(error => {
-                errorLog('Core initialization error:', error);
-            });
-        }, 100);
-    } catch (error) {}
-});
+export function getParentOrigin() {
+    return OriginAdapter.getParentOrigin() || '*';
+}
 
 // =============================================
-// EXPORT ALIASES FOR BACKWARD COMPATIBILITY 
+// IS PARENT AVAILABLE
+// =============================================
+export function isParentAvailable() {
+    return OriginAdapter.isParentVerified() && !!IframeTransport._parentWindow;
+}
+
+// =============================================
+// EXPORT ALIASES
 // =============================================
 export {
-    requestSession as requestSessionFromParent,
     sendToParent as sendMessageToParent,
     receiveFromParent as onParentMessage
 };
@@ -7299,99 +6567,43 @@ export const safeApiCall = async (endpoint, options = {}) => {
 };
 
 export const sendMessageWithAck = async (type, payload, timeout = 5000) => {
-    return IframeTransport.send(type, payload, { expectAck: true, timeout, maxRetries: MAX_RETRIES });
+    return IframeTransport.send(type, payload, { expectAck: true, timeout, maxRetries: 0 });
 };
 
 export const broadcastToAllIframes = (type, payload) => {
-    const iframes = ['messagesIframe', 'statusIframe', 'groupIframe', 'friendsIframe', 'callsIframe', 'settingsIframe', 'toolsIframe'];
-    iframes.forEach(frameId => {
-        IframeTransport.send(type, {
-            target: frameId,
-            ...payload
-        }, { expectAck: false, maxRetries: 1 }).catch(() => {});
-    });
+    return Promise.resolve({ success: false });
 };
 
-export const getParentOrigin = () => state.parentOrigin || '*';
-
-export const isParentAvailable = () => state.parentVerified && !!state.parentWindow;
-
-export const getHealthMetrics = () => ({
-    uptime: Date.now() - Log._metrics.startTime,
-    messagesSent: Log._metrics.messagesSent,
-    messagesReceived: Log._metrics.messagesReceived,
-    errors: Log._metrics.errors,
-    warnings: Log._metrics.warnings,
-    handshakeAttempts: Log._metrics.handshakeAttempts,
-    recoveryAttempts: Log._metrics.recoveryAttempts,
-    handshakeState: state.handshakeState,
-    connectionQuality: state.connectionQuality,
-    pageVisible: state.pageVisible,
-    parentVerified: state.parentVerified,
-    authMode: state.authMode,
-    sessionValid: SessionClient.isValid(),
-    environment: IframeEnvironment.getEnvironment(),
-    governorState: StartupGovernor.getState(),
-    parentAuthority: {
-        state: parentAuthorityState,
-        parentReadyDetected,
-        moduleRegistered,
-        parentAuthoritative: !!parentAuthoritativeSession,
-        parentContractEnforced
-    }
-});
-
 // =============================================
-// ERROR BOUNDARY 
+// ERROR BOUNDARY
 // =============================================
 window.addEventListener('error', (event) => {
     state.health.failures++;
-    DiagnosticsAgent.error(event.error, 'global_error');
-    errorLog('Global error:', event.error);
     
     if (event.target && event.target.tagName === 'SCRIPT') {
         event.preventDefault();
         return false;
     }
     
-    if (state.health.failures > 10 && isReady) {
-        state.health.recoveryAttempts++;
-        RecoveryManager.attemptRecovery({ reason: 'global_error' });
-    }
     return true;
 });
 
 window.addEventListener('unhandledrejection', (event) => {
     state.health.failures++;
-    DiagnosticsAgent.error(event.reason, 'unhandled_rejection');
     errorLog('Unhandled rejection:', event.reason);
-    
-    if (state.health.failures > 5 && isReady) {
-        state.health.recoveryAttempts++;
-        setTimeout(() => {
-            RecoveryManager.attemptRecovery({ reason: 'unhandled_rejection' });
-        }, 1000);
-    }
 });
 
 // =============================================
-// RECOVERY MECHANISM 
+// RECOVERY MECHANISM - DISABLED
 // =============================================
-function attemptRecovery() {
-    RecoveryManager.attemptRecovery({ reason: state.health.lastError });
-}
+function attemptRecovery() {}
 
-export function triggerRecovery() {
-    RecoveryManager.attemptRecovery({ reason: 'manual_trigger' });
-}
+export function triggerRecovery() {}
 
-export const forceRecovery = () => {
-    RecoveryManager.reset();
-    RecoveryManager.attemptRecovery({ reason: 'manual_force' });
-};
+export const forceRecovery = () => {};
 
 // =============================================
-// SET ALL COMPONENTS TO SILENT MODE 
+// SET ALL COMPONENTS TO SILENT MODE
 // =============================================
 export function setSilentMode(silent = !DEBUG) {
     CONSOLE_NOISE_SUPPRESSED = silent;
@@ -7399,39 +6611,14 @@ export function setSilentMode(silent = !DEBUG) {
     StartupGovernor.setSilent(silent);
     IframeTransport.setSilent(silent);
     IframeHandshakeAuthority.setSilent(silent);
-    SessionClient.setSilent(silent);
-    ReliabilityEngine.setSilent(silent);
-    RecoveryManager.setSilent(silent);
+    HeartbeatManager.setSilent?.(silent);
     NavigationGuard.setSilent(silent);
     UIFailsafe.setSilent(silent);
     MultiModuleCoordinator.setSilent(silent);
+    RecoveryManager.setSilent(silent);
+    ReliabilityEngine.setSilent(silent);
+    SessionClient.setSilent(silent);
 }
-
-setSilentMode(!DEBUG);
-
-// =============================================
-// EXPOSE DEBUG INTERFACE 
-// =============================================
-window.__IFRAME_DEBUG__ = DEBUG;
-window.__getDiagnostics = () => DiagnosticsAgent.getFullReport();
-window.__forceRecovery = forceRecovery;
-window.__resetCore = () => {
-    shutdownCore();
-    setTimeout(() => initializeCore(), 1000);
-};
-window.__getEnvironment = () => IframeEnvironment.getInfo();
-window.__getTransportStatus = () => IframeTransport.getDiagnostics();
-window.__getSessionStatus = () => SessionClient.getDiagnostics();
-window.__getReliabilityStatus = () => ReliabilityEngine.getDiagnostics();
-window.__getUIFailsafe = () => UIFailsafe.getDiagnostics();
-window.__getApiCore = () => ApiCore.getDiagnostics();
-window.__getParentAuthority = () => ({
-    state: parentAuthorityState,
-    parentReadyDetected,
-    moduleRegistered,
-    parentAuthoritative: !!parentAuthoritativeSession,
-    parentContractEnforced
-});
 
 // =============================================
 // ENABLE DEBUG IF URL PARAM
@@ -7446,5 +6633,72 @@ if (window.location.search.includes('debug=true')) {
 }
 
 // =============================================
-// END OF FILE - COMPLETE ENHANCED IMPLEMENTATION 
+// EXPOSE DEBUG INTERFACE
+// =============================================
+window.__IFRAME_DEBUG__ = DEBUG;
+window.__getDiagnostics = () => DiagnosticsAgent.getFullReport();
+window.__forceRecovery = forceRecovery;
+window.__resetCore = () => {
+    shutdownCore();
+    safeSetTimeout(() => initializeCore(), 1000);
+};
+window.__getEnvironment = () => IframeEnvironment.getInfo();
+window.__getTransportStatus = () => IframeTransport.getDiagnostics();
+window.__getSessionStatus = () => ({
+    valid: isSessionValid(),
+    user: session.user,
+    expiresAt: session.expiresAt,
+    version: session.version
+});
+window.__getReliabilityStatus = () => HeartbeatManager.getDiagnostics();
+window.__getUIFailsafe = () => UIFailsafe.getDiagnostics();
+window.__getApiCore = () => ApiCore.getDiagnostics();
+window.__getParentAuthority = () => ({
+    state: parentAuthorityState,
+    parentReadyDetected,
+    moduleRegistered,
+    parentAuthoritative: !!parentAuthoritativeSession,
+    parentContractEnforced
+});
+window.__getLifecycleState = () => currentState;
+window.__getLifecycleHistory = () => stateHistory;
+
+// =============================================
+// AUTO-START
+// =============================================
+let domContentLoadedFired = false;
+
+document.addEventListener('DOMContentLoaded', function() {
+    if (domContentLoadedFired) return;
+    domContentLoadedFired = true;
+    
+    try {
+        initLog('DOMContentLoaded - starting core initialization');
+        safeSetTimeout(() => {
+            initializeCore({ 
+                debug: DEBUG
+            }).then(result => {
+                if (result.success) {
+                    if (result.state === SETTINGS_STATES.READY) {
+                        successLog('Core initialized');
+                    } else if (result.state === SETTINGS_STATES.DEGRADED) {
+                        if (DEBUG) debugLog('Core initialized in degraded mode');
+                    }
+                } else {
+                    errorLog('Core initialization failed:', result);
+                }
+            }).catch(error => {
+                errorLog('Core initialization error:', error);
+            });
+        }, 100);
+    } catch (error) {}
+});
+
+// =============================================
+// CALL SETSILENTMODE AFTER ALL COMPONENTS ARE INITIALIZED
+// =============================================
+setSilentMode(!DEBUG);
+
+// =============================================
+// END OF FILE - PARENT AUTHORITY IMPLEMENTATION
 // =============================================

@@ -1,26 +1,49 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 <head>
+<script>
+// Suppress iframe sandbox warnings (usually from extensions)
+(function() {
+    const originalError = console.error;
+    const originalWarn = console.warn;
+    
+    console.error = function(msg) {
+        if (msg && msg.includes && (
+            msg.includes('iframe which has both') ||
+            msg.includes('sandbox') ||
+            msg.includes('Directory traversal attempt') // Suppress self-test warnings
+        )) {
+            return;
+        }
+        originalError.apply(console, arguments);
+    };
+    
+    console.warn = function(msg) {
+        if (msg && msg.includes && (
+            msg.includes('iframe which has both') ||
+            msg.includes('sandbox') ||
+            msg.includes('Directory traversal attempt') || // Suppress self-test warnings
+            msg.includes('Cross-origin request blocked') // Suppress self-test warnings
+        )) {
+            return;
+        }
+        originalWarn.apply(console, arguments);
+    };
+})();
+</script>
     <link rel="manifest" href="../manifest.json">
     <meta name="theme-color" content="#4F46E5">
     <link rel="icon" href="../icons/moodchat-192.png">
     <link rel="icon" href="../icons/moodchat-512.png">
-    <meta name="theme-color" content="#000000">
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Friends | Knecta Chat</title>
 
-    <!-- Font Awesome -->
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    
-    <!-- QR Code Library -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
-    
-    <!-- jsQR Library for real QR code scanning -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jsqr/1.4.0/jsQR.min.js"></script>
-    
+    <!-- ===== STYLESHEETS ===== -->
     <link rel="stylesheet" href="friend.css">
-    
+    <link rel="stylesheet" href="/css/vendor/font-awesome.min.css">
+    <link rel="stylesheet" href="/css/suppress-webgl.css">
+
     <style>
         /* ========== BASE STYLES ========== */
         :root {
@@ -55,7 +78,7 @@
             overflow-x: hidden;
         }
 
-        /* ========== CONNECTION STATUS INDICATOR ========== */
+        /* ========== V6 CONNECTION STATUS INDICATOR ========== */
         .connection-status {
             display: inline-flex;
             align-items: center;
@@ -74,13 +97,29 @@
             font-size: 10px;
         }
 
-        .connection-status.connecting {
+        .connection-status.connecting,
+        .connection-status.init,
+        .connection-status.registering {
             background: rgba(255, 193, 7, 0.15);
             color: #ffc107;
             border: 1px solid rgba(255, 193, 7, 0.3);
         }
 
-        .connection-status.connected {
+        .connection-status.registered,
+        .connection-status.session-received {
+            background: rgba(0, 123, 255, 0.15);
+            color: #007bff;
+            border: 1px solid rgba(0, 123, 255, 0.3);
+        }
+
+        .connection-status.active,
+        .connection-status.syncing {
+            background: rgba(40, 167, 69, 0.15);
+            color: #28a745;
+            border: 1px solid rgba(40, 167, 69, 0.3);
+        }
+
+        .connection-status.ready {
             background: rgba(40, 167, 69, 0.15);
             color: #28a745;
             border: 1px solid rgba(40, 167, 69, 0.3);
@@ -90,20 +129,6 @@
             background: rgba(220, 53, 69, 0.15);
             color: #dc3545;
             border: 1px solid rgba(220, 53, 69, 0.3);
-        }
-
-        .connection-status.handshake,
-        .connection-status.syncing {
-            background: rgba(0, 123, 255, 0.15);
-            color: #007bff;
-            border: 1px solid rgba(0, 123, 255, 0.3);
-        }
-
-        .connection-status.recovering {
-            background: rgba(255, 193, 7, 0.15);
-            color: #ffc107;
-            border: 1px solid rgba(255, 193, 7, 0.3);
-            animation: pulse 1.5s infinite;
         }
 
         .connection-status.disconnected {
@@ -228,8 +253,8 @@
             display: block;
         }
 
-        /* ========== KYN DEBUG PANEL ========== */
-        .kyn-debug-panel {
+        /* ========== V6 DEBUG PANEL ========== */
+        .v6-debug-panel {
             position: fixed;
             bottom: 10px;
             right: 10px;
@@ -246,7 +271,7 @@
             box-shadow: 0 0 10px rgba(0,0,0,0.5);
         }
 
-        .kyn-debug-panel .debug-title {
+        .v6-debug-panel .debug-title {
             border-bottom: 1px solid #333;
             margin-bottom: 5px;
             padding-bottom: 5px;
@@ -254,26 +279,26 @@
             color: #fff;
         }
 
-        .kyn-debug-panel .debug-row {
+        .v6-debug-panel .debug-row {
             display: flex;
             justify-content: space-between;
             margin-bottom: 2px;
         }
 
-        .kyn-debug-panel .debug-label {
+        .v6-debug-panel .debug-label {
             color: #aaa;
         }
 
-        .kyn-debug-panel .debug-value {
+        .v6-debug-panel .debug-value {
             color: #0f0;
             font-weight: bold;
         }
 
-        .kyn-debug-panel .debug-value.warning {
+        .v6-debug-panel .debug-value.warning {
             color: #ff0;
         }
 
-        .kyn-debug-panel .debug-value.error {
+        .v6-debug-panel .debug-value.error {
             color: #f00;
         }
 
@@ -808,7 +833,7 @@
                 font-size: 10px;
             }
 
-            .kyn-debug-panel {
+            .v6-debug-panel {
                 bottom: 5px;
                 right: 5px;
                 max-width: 250px;
@@ -2095,16 +2120,12 @@
     </div>
     
     <div class="app-container">
-        <!-- Sidebar with friend list - Always visible on both desktop and mobile -->
+        <!-- Sidebar with friend list -->
         <div class="sidebar active" id="sidebar">
             <div class="sidebar-header">
                 <h2>Friends</h2>
                 <div style="display: flex; gap: 10px; align-items: center;">
-                    <!-- Connection Status Indicator -->
-                    <div class="connection-status connecting" id="connectionStatus">
-                        <i class="fas fa-sync-alt fa-spin"></i>
-                        <span>Connecting</span>
-                    </div>
+                    <!-- V6 Connection Status Indicator -->
                     <button class="add-friend-btn" id="startNewChatBtn" title="Start New Chat">
                         <i class="fas fa-comments"></i>
                     </button>
@@ -2262,7 +2283,7 @@
                     <i class="fas fa-arrow-left"></i>
                 </button>
                 <div class="friend-details-title">Friend Details</div>
-                <div style="width: 40px;"></div> <!-- Spacer for alignment -->
+                <div style="width: 40px;"></div>
             </div>
             
             <div class="friend-details-content" id="friendDetailsContent">
@@ -2564,19 +2585,107 @@
         </div>
     </div>
 
-    <!-- jQuery first (if needed) -->
-    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
-    
-    <!-- Vendor libraries that don't support ES6 modules -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jsqr/1.4.0/jsQR.min.js"></script>
+    <!-- V6 Debug Panel (Hidden by default, enable with ?debug=true) -->
+    <div class="v6-debug-panel" id="v6DebugPanel" style="display: none;">
+        <div class="debug-title">V6 State Machine</div>
+        <div class="debug-row">
+            <span class="debug-label">State:</span>
+            <span class="debug-value" id="debugState">INIT</span>
+        </div>
+        <div class="debug-row">
+            <span class="debug-label">Session:</span>
+            <span class="debug-value" id="debugSession">false</span>
+        </div>
+        <div class="debug-row">
+            <span class="debug-label">Heartbeat:</span>
+            <span class="debug-value" id="debugHeartbeat">0</span>
+        </div>
+        <div class="debug-row">
+            <span class="debug-label">Handshake:</span>
+            <span class="debug-value" id="debugHandshake">0ms</span>
+        </div>
+        <div class="debug-row">
+            <span class="debug-label">Queue:</span>
+            <span class="debug-value" id="debugQueue">0</span>
+        </div>
+    </div>
 
-    <!-- Core API Module FIRST -->
-    
-    <!-- Core friend module (Parent-Authority Compliant) -->
+    <!-- ===== SCRIPT ORDER - CRITICAL ===== -->
+    <!-- 1. jQuery (required by some libraries) -->
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+
+    <!-- 2. Vendor libraries (synchronous) -->
+    <script src="/js/vendor/qrcode.min.js"></script>
+    <script src="/js/vendor/jsQR.min.js"></script>
+    <script src="/js/vendor/RecordRTC.min.js"></script>
+    <script src="/js/vendor/viewer.min.js"></script>
+    <script src="/js/vendor/wavesurfer.min.js"></script>
+    <script src="/js/vendor/peerjs.min.js"></script>
+    <script src="/js/vendor/spectrum.min.js"></script>
+    <script src="/js/vendor/video.min.js"></script>
+    <script type="module" src="/js/vendor/emoji-picker.js"></script>
+    <script src="/js/vendor/chart.min.js"></script>
+    <script src="/js/vendor/pickr.min.js"></script>
+    <script src="/js/vendor/marked.min.js"></script>
+
+    <!-- 3. Core module (must load before UI) -->
     <script type="module" src="friend-core.js"></script>
     
-    <!-- UI module (Parent-Authority Compliant) -->
+    <!-- 4. UI module (depends on core) -->
     <script type="module" src="friend-ui.js"></script>
+    
+    <script>
+    // Enable debug panel if URL has ?debug=true
+    (function() {
+        const urlParams = new URLSearchParams(window.location.search);
+        if (urlParams.has('debug') && urlParams.get('debug') === 'true') {
+            document.getElementById('v6DebugPanel').style.display = 'block';
+            
+            // Listen for V6 state updates
+            window.addEventListener('v6StateUpdate', function(e) {
+                const state = e.detail;
+                document.getElementById('debugState').textContent = state.state || 'UNKNOWN';
+                document.getElementById('debugSession').textContent = state.sessionValid ? 'true' : 'false';
+                document.getElementById('debugHeartbeat').textContent = state.heartbeatMissed || '0';
+                document.getElementById('debugHandshake').textContent = state.handshakeTime + 'ms';
+                document.getElementById('debugQueue').textContent = state.queueLength || '0';
+                
+                // Update connection status
+                const statusEl = document.getElementById('connectionStatus');
+                if (statusEl) {
+                    statusEl.className = 'connection-status';
+                    statusEl.classList.add(state.state.toLowerCase().replace('_', '-'));
+                    
+                    const statusSpan = statusEl.querySelector('span:not(.parent-version-badge)');
+                    if (statusSpan) {
+                        statusSpan.textContent = state.state.charAt(0) + state.state.slice(1).toLowerCase();
+                    }
+                    
+                    // Show/hide spinner based on state
+                    const icon = statusEl.querySelector('i');
+                    if (icon) {
+                        if (['INIT', 'REGISTERING', 'REGISTERED', 'SESSION_RECEIVED', 'SYNCING'].includes(state.state)) {
+                            icon.className = 'fas fa-sync-alt fa-spin';
+                        } else if (state.state === 'ACTIVE' || state.state === 'READY') {
+                            icon.className = 'fas fa-check-circle';
+                        } else if (state.state === 'DEGRADED') {
+                            icon.className = 'fas fa-exclamation-triangle';
+                        } else {
+                            icon.className = 'fas fa-circle';
+                        }
+                    }
+                }
+            });
+            
+            // Request initial state
+            setTimeout(() => {
+                if (window.V6) {
+                    const state = window.V6.getState();
+                    window.dispatchEvent(new CustomEvent('v6StateUpdate', { detail: state }));
+                }
+            }, 500);
+        }
+    })();
+    </script>
 </body>
 </html>

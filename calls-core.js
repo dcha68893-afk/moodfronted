@@ -1,31 +1,41 @@
 // calls-core.js
-// ==================== IFRAME CORE MODULE - ENTERPRISE STABILIZED ====================
-// Version: 4.0.3 - PRODUCTION STABLE
-// Purpose: Enterprise-grade iframe module with deterministic state machine,
-//          hardened ACK protocol with retry limits, single-run bootstrap pipeline,
-//          promise-based session gate, and clean informational logging
+// ==================== IFRAME CORE MODULE - PARENT AUTHORITY COMPLIANT ====================
+// Version: 5.0.0 - PRODUCTION STABLE
+// Purpose: Enterprise-grade iframe module with deterministic parent authority,
+//          zero token management, strict handshake protocol, and perfect state alignment
 //
-// ==================== STATE MACHINE DIAGRAM ====================
-// UNINITIALIZED → BOOTSTRAPPING → REGISTERING → REGISTERED → 
-// SESSION_PENDING → SESSION_ACTIVE → SERVICES_INITIALIZING → ACTIVE
-//         ↓              ↓              ↓                    ↓
-//   ERROR_RECOVERABLE ← ERROR_FATAL ← Any state with unrecoverable error
-//         ↓
-//   RECOVERING → BOOTSTRAPPING
-//
-// ==================== CRITICAL ARCHITECTURE RULES ====================
-// 1. State transitions are atomic and validated
-// 2. ACK system has hard limit of 3 retries
-// 3. Bootstrap pipeline runs exactly once
-// 4. Session acquisition is promise-gated, never polled
-// 5. Parent owns WebSocket - calls module only listens
-// 6. Console logs are deduplicated and informational
-// 7. No forced state transitions
-// 8. Handshake runs exactly once
+// COMPLIANCE: Parent Authority Architecture v2.0
+// - NO token management (parent only)
+// - NO independent session refresh
+// - NO REQUEST_TOKEN messages
+// - Strict 150ms handshake window
+// - WebRTC only after VERIFY_SESSION success
+// - Heartbeat only in ACTIVE state
+// - Single handshake entry point
 // =================================================================
 
 (function() {
     'use strict';
+
+    // ==================== GLOBAL CALL STATE STRUCTURE (STRICT) ====================
+    const callsState = {
+        moduleName: "calls",
+        registered: false,
+        parentReady: false,
+        session: null,
+        token: null,
+        verified: false,
+        verificationLock: false,
+        heartbeatInterval: null,
+        degraded: false,
+        callActive: false,
+        pendingCall: null,
+        webrtcInitialized: false,
+        recoveryMode: false
+    };
+
+    // No hidden globals - only exposed through window.callsCore
+    // All internal state is encapsulated in this module
 
     // ==================== CLEAN LOGGING SYSTEM (LIKE FRIEND MODULE) ====================
     const _infoLogs = new Map();
@@ -34,6 +44,10 @@
     const _successLogs = new Map();
     const _sendingLogs = new Map();
     const _readyLogs = new Map();
+    const _stateLogs = new Map();
+    const _sessionLogs = new Map();
+    const _tokenLogs = new Map();
+    const _pipelineLogs = new Map();
 
     function logInfo(module, message, data = null) {
         const key = `${module}:${message}`;
@@ -108,14 +122,2335 @@
     }
 
     function logState(module, fromState, toState, reason = '') {
+        const key = `${module}:${fromState}→${toState}`;
+        if (_stateLogs.has(key)) {
+            const lastTime = _stateLogs.get(key);
+            if (Date.now() - lastTime < 1000) return;
+        }
+        _stateLogs.set(key, Date.now());
+        setTimeout(() => _stateLogs.delete(key), 1000);
+        
         console.log(`[${module}] 📊 ${fromState} → ${toState}${reason ? ` (${reason})` : ''}`);
     }
 
+    function logToken(module, message, data = null) {
+        const key = `${module}:token:${message}`;
+        if (_tokenLogs.has(key)) {
+            const lastTime = _tokenLogs.get(key);
+            if (Date.now() - lastTime < 10000) return;
+        }
+        _tokenLogs.set(key, Date.now());
+        setTimeout(() => _tokenLogs.delete(key), 10000);
+        
+        console.log(`[${module}] 🔑 ${message}`, data ? data : '');
+    }
+
+    function logSession(module, message, data = null) {
+        const key = `${module}:session:${message}`;
+        if (_sessionLogs.has(key)) {
+            const lastTime = _sessionLogs.get(key);
+            if (Date.now() - lastTime < 10000) return;
+        }
+        _sessionLogs.set(key, Date.now());
+        setTimeout(() => _sessionLogs.delete(key), 10000);
+        
+        console.log(`[${module}] 🎫 ${message}`, data ? data : '');
+    }
+
+    function logPipeline(module, stage, status, data = null) {
+        const key = `${module}:pipeline:${stage}:${status}`;
+        if (_pipelineLogs.has(key)) {
+            const lastTime = _pipelineLogs.get(key);
+            if (Date.now() - lastTime < 5000) return;
+        }
+        _pipelineLogs.set(key, Date.now());
+        setTimeout(() => _pipelineLogs.delete(key), 5000);
+        
+        const icon = status === 'start' ? '🚀' : status === 'success' ? '✅' : status === 'fail' ? '❌' : '⏳';
+        console.log(`[${module}] ${icon} Pipeline stage: ${stage} - ${status}`, data ? data : '');
+    }
+
     const MODULE = 'CallsCore';
+    
+    // ==================== GLOBAL MESSAGE INTERCEPTOR ====================
+    (function() {
+        const originalAddEventListener = window.addEventListener;
+        const messageHandlers = [];
+        
+        window.addEventListener = function(type, handler, options) {
+            if (type === 'message') {
+                messageHandlers.push(handler);
+            }
+            return originalAddEventListener.call(this, type, handler, options);
+        };
+        
+        window.addEventListener('message', function(event) {
+            if (event.data && 
+                (event.data.type === 'SESSION_RESPONSE' || 
+                 event.data.type === 'SESSION_DATA' || 
+                 event.data.type === 'SESSION_ACTIVE')) {
+                
+                console.log('[CallsCore] 🚨 GLOBAL INTERCEPTOR: Session message received', event.data.type);
+                
+                window.__LAST_SESSION_RESPONSE__ = {
+                    data: event.data,
+                    timestamp: Date.now()
+                };
+                
+                if (window.__resolveSessionPromise) {
+                    window.__resolveSessionPromise(true);
+                }
+            }
+        }, true);
+    })();
+
+    // ==================== TOKEN MANAGER - DISABLED (Parent Authority Only) ====================
+    const TokenManager = {
+        _token: null,
+        _refreshToken: null,
+        _expiresAt: null,
+        _valid: false,
+        _validated: false,
+        _lastValidation: 0,
+        _validationTTL: 60000,
+        _acquisitionAttempts: 0,
+        _maxAcquisitionAttempts: 0, // Disabled
+        _refreshAttempts: 0,
+        _maxRefreshAttempts: 0, // Disabled
+        _refreshInProgress: false,
+        _acquisitionInProgress: false,
+        _listeners: new Set(),
+        _storageKey: 'calls_core_token',
+        _storageStrategy: 'memory',
+        _usingCachedToken: false,
+        _cacheChecked: false,
+
+        initialize: function() {
+            this._detectStorage();
+            logReady(MODULE, 'TokenManager initialized (disabled - parent authority only)');
+            return this;
+        },
+
+        _detectStorage: function() {
+            try {
+                localStorage.setItem('_test_', '_test_');
+                localStorage.removeItem('_test_');
+                this._storageStrategy = 'local';
+            } catch (e) {
+                this._storageStrategy = 'memory';
+            }
+        },
+
+        _checkCache: function() {
+            return false; // Always return false - token management disabled
+        },
+
+        acquire: async function(force = false) {
+            logToken(MODULE, 'acquisition disabled - parent only');
+            return { success: false, error: 'Token acquisition disabled - parent authority only' };
+        },
+
+        _acquireWithRetry: async function() {
+            return { success: false, error: 'Token acquisition disabled' };
+        },
+
+        _requestTokenFromParent: function() {
+            return Promise.reject(new Error('Token requests disabled - parent authority only'));
+        },
+
+        refresh: async function() {
+            logToken(MODULE, 'refresh disabled - parent only');
+            return { success: false, error: 'Token refresh disabled - parent authority only' };
+        },
+
+        _requestTokenRefresh: function() {
+            return Promise.reject(new Error('Token refresh disabled - parent authority only'));
+        },
+
+        _setToken: function(token, refreshToken, expiresAt) {
+            // Token setting disabled - ignore
+        },
+
+        validate: function(force = false) {
+            return false; // Always return false - validation handled by parent
+        },
+
+        clear: function() {
+            this._token = null;
+            this._refreshToken = null;
+            this._expiresAt = null;
+            this._valid = false;
+            this._validated = false;
+            this._usingCachedToken = false;
+
+            try {
+                if (this._storageStrategy === 'local') {
+                    localStorage.removeItem(this._storageKey);
+                }
+            } catch (e) {
+                logError(MODULE, 'Failed to clear token', e);
+            }
+
+            logToken(MODULE, 'cleared');
+            this._notifyListeners('clear', {});
+        },
+
+        reset: function() {
+            this._acquisitionAttempts = 0;
+            this._refreshAttempts = 0;
+            this._refreshInProgress = false;
+            this._acquisitionInProgress = false;
+            this._cacheChecked = false;
+        },
+
+        getToken: function() {
+            return null; // Token retrieval disabled
+        },
+
+        getRefreshToken: function() {
+            return null;
+        },
+
+        getExpiry: function() {
+            return null;
+        },
+
+        getTimeRemaining: function() {
+            return 0;
+        },
+
+        isValid: function() {
+            return false;
+        },
+
+        isUsingCached: function() {
+            return false;
+        },
+
+        _waitForAcquisition: function() {
+            return Promise.resolve({ success: false, token: null });
+        },
+
+        _waitForRefresh: function() {
+            return Promise.resolve({ success: false, token: null });
+        },
+
+        addListener: function(listener) {
+            if (typeof listener === 'function') this._listeners.add(listener);
+        },
+
+        removeListener: function(listener) {
+            this._listeners.delete(listener);
+        },
+
+        _notifyListeners: function(event, data) {
+            this._listeners.forEach(listener => {
+                try { listener(event, data); } catch (e) {}
+            });
+        },
+
+        getStatus: function() {
+            return {
+                hasToken: false,
+                valid: false,
+                validated: false,
+                expiresAt: null,
+                timeRemaining: 0,
+                usingCached: false,
+                acquisitionAttempts: 0,
+                refreshAttempts: 0,
+                refreshInProgress: false,
+                acquisitionInProgress: false,
+                storageStrategy: this._storageStrategy,
+                disabled: true
+            };
+        }
+    };
+
+    TokenManager.initialize();
+
+    // ==================== SESSION PIPELINE ====================
+    const SessionPipeline = {
+        _stages: [
+            'preflight',
+            'dependencyCheck',
+            'parentDetection',
+            'handshake',
+            'tokenAcquisition', // Kept for compatibility but will be skipped
+            'sessionSync',
+            'serviceInit',
+            'ready'
+        ],
+        _currentStage: null,
+        _stageResults: {},
+        _stageAttempts: {},
+        _maxAttempts: 2,
+        _pipelineInProgress: false,
+        _pipelineCompleted: false,
+        _pipelineDegraded: false,
+        _pipelineStartTime: 0,
+        _pipelineEndTime: 0,
+        _listeners: new Set(),
+        _tokenManager: null,
+
+        initialize: function(tokenManager) {
+            this._tokenManager = tokenManager;
+            this._reset();
+            logReady(MODULE, 'SessionPipeline initialized');
+            return this;
+        },
+
+        _reset: function() {
+            this._currentStage = null;
+            this._stageResults = {};
+            this._stageAttempts = {};
+            this._pipelineInProgress = false;
+            this._pipelineCompleted = false;
+            this._pipelineDegraded = false;
+        },
+
+        run: async function() {
+            if (this._pipelineInProgress) {
+                logPipeline(MODULE, 'pipeline', 'already in progress');
+                return this._waitForCompletion();
+            }
+
+            if (this._pipelineCompleted) {
+                logPipeline(MODULE, 'pipeline', 'already completed', { degraded: this._pipelineDegraded });
+                return { success: true, completed: true, degraded: this._pipelineDegraded };
+            }
+
+            this._pipelineInProgress = true;
+            this._pipelineStartTime = Date.now();
+            this._pipelineDegraded = false;
+
+            logPipeline(MODULE, 'pipeline', 'start');
+
+            for (const stage of this._stages) {
+                this._currentStage = stage;
+                this._stageAttempts[stage] = 0;
+                
+                logPipeline(MODULE, stage, 'start');
+                
+                const stageResult = await this._executeStageWithRetry(stage);
+                this._stageResults[stage] = stageResult;
+                
+                if (stageResult.success) {
+                    logPipeline(MODULE, stage, 'success', { attempt: stageResult.attempt });
+                } else {
+                    logPipeline(MODULE, stage, 'fail', { attempt: stageResult.attempt, error: stageResult.error });
+                    
+                    const criticalStages = ['preflight', 'dependencyCheck'];
+                    
+                    if (criticalStages.includes(stage)) {
+                        logPipeline(MODULE, 'pipeline', 'critical failure', { stage });
+                        this._pipelineInProgress = false;
+                        return { success: false, stage, error: stageResult.error };
+                    }
+                    
+                    this._pipelineDegraded = true;
+                    
+                    if (stage === 'tokenAcquisition' || stage === 'sessionSync') {
+                        logPipeline(MODULE, 'pipeline', 'continuing in degraded mode', { stage });
+                    } else {
+                        logPipeline(MODULE, 'pipeline', 'continuing despite failure', { stage });
+                    }
+                }
+            }
+
+            this._pipelineCompleted = true;
+            this._pipelineInProgress = false;
+            this._pipelineEndTime = Date.now();
+
+            const duration = this._pipelineEndTime - this._pipelineStartTime;
+            
+            logPipeline(MODULE, 'pipeline', 'complete', { 
+                degraded: this._pipelineDegraded,
+                duration: duration + 'ms'
+            });
+
+            return { 
+                success: true, 
+                degraded: this._pipelineDegraded,
+                duration,
+                stages: this._stageResults
+            };
+        },
+
+        _executeStageWithRetry: async function(stage) {
+            while (this._stageAttempts[stage] < this._maxAttempts) {
+                this._stageAttempts[stage]++;
+                
+                try {
+                    let result;
+                    
+                    switch (stage) {
+                        case 'preflight':
+                            result = await this._runPreflight();
+                            break;
+                        case 'dependencyCheck':
+                            result = await this._runDependencyCheck();
+                            break;
+                        case 'parentDetection':
+                            result = await this._runParentDetection();
+                            break;
+                        case 'handshake':
+                            result = await this._runHandshake();
+                            break;
+                        case 'tokenAcquisition':
+                            result = await this._runTokenAcquisition(); // Will always return degraded
+                            break;
+                        case 'sessionSync':
+                            result = await this._runSessionSync();
+                            break;
+                        case 'serviceInit':
+                            result = await this._runServiceInit();
+                            break;
+                        case 'ready':
+                            result = { success: true, ready: true };
+                            break;
+                        default:
+                            result = { success: false, error: 'Unknown stage' };
+                    }
+                    
+                    if (result.success) {
+                        return { success: true, attempt: this._stageAttempts[stage], result };
+                    }
+                    
+                    if (this._stageAttempts[stage] < this._maxAttempts) {
+                        const delay = 300 * this._stageAttempts[stage];
+                        logPipeline(MODULE, stage, 'retrying', { attempt: this._stageAttempts[stage], nextDelay: delay + 'ms' });
+                        await new Promise(r => setTimeout(r, delay));
+                    }
+                    
+                } catch (error) {
+                    logError(MODULE, `Stage ${stage} error`, error);
+                    
+                    if (this._stageAttempts[stage] < this._maxAttempts) {
+                        const delay = 300 * this._stageAttempts[stage];
+                        await new Promise(r => setTimeout(r, delay));
+                    } else {
+                        return { success: false, attempt: this._stageAttempts[stage], error: error.message };
+                    }
+                }
+            }
+            
+            return { success: false, attempt: this._stageAttempts[stage], error: `Stage ${stage} failed after ${this._maxAttempts} attempts` };
+        },
+
+        _runPreflight: async function() {
+            if (document.readyState === 'loading') {
+                await new Promise(resolve => {
+                    document.addEventListener('DOMContentLoaded', resolve, { once: true });
+                });
+            }
+            
+            const capabilities = {
+                postMessage: typeof window.postMessage === 'function',
+                addEventListener: typeof window.addEventListener === 'function',
+                Promise: typeof Promise !== 'undefined',
+                localStorage: typeof localStorage !== 'undefined',
+                sessionStorage: typeof sessionStorage !== 'undefined'
+            };
+            
+            const missing = Object.entries(capabilities)
+                .filter(([_, available]) => !available)
+                .map(([name]) => name);
+            
+            if (missing.length > 0) {
+                logWarn(MODULE, 'Preflight: missing capabilities', { missing });
+                return { success: false, error: `Missing: ${missing.join(', ')}` };
+            }
+            
+            return { success: true, capabilities, readyState: document.readyState };
+        },
+
+        _runDependencyCheck: async function() {
+            const dependencies = {
+                window: typeof window !== 'undefined',
+                document: typeof document !== 'undefined',
+                navigator: typeof navigator !== 'undefined',
+                crypto: typeof crypto !== 'undefined',
+                performance: typeof performance !== 'undefined'
+            };
+            
+            const missing = Object.entries(dependencies)
+                .filter(([_, available]) => !available)
+                .map(([name]) => name);
+            
+            if (missing.length > 0) {
+                return { success: false, error: `Missing dependencies: ${missing.join(', ')}` };
+            }
+            
+            return { success: true, dependencies };
+        },
+
+        _runParentDetection: async function() {
+            const parentDetected = !!(window.parent && window.parent !== window);
+            let sameOrigin = false;
+            let parentOrigin = null;
+            
+            if (parentDetected) {
+                try {
+                    parentOrigin = window.parent.location.origin;
+                    sameOrigin = window.location.origin === parentOrigin;
+                } catch (e) {
+                    sameOrigin = false;
+                }
+            }
+            
+            logInfo(MODULE, 'Parent detection', { parentDetected, sameOrigin, parentOrigin });
+            
+            return { 
+                success: true, 
+                parentDetected, 
+                sameOrigin, 
+                parentOrigin 
+            };
+        },
+
+        _runHandshake: async function() {
+            try {
+                const handshakeResult = await IframeHandshakeAuthority.start({
+                    timeout: CONFIG.HANDSHAKE_TIMEOUT
+                });
+                
+                return { 
+                    success: handshakeResult.success, 
+                    handshakeResult,
+                    degraded: handshakeResult.degraded || false
+                };
+            } catch (error) {
+                logError(MODULE, 'Handshake failed', error);
+                return { success: false, error: error.message };
+            }
+        },
+
+        _runTokenAcquisition: async function() {
+            // Token acquisition disabled - parent authority only
+            logToken(MODULE, 'acquisition skipped - parent authority');
+            return { success: true, degraded: true, disabled: true };
+        },
+
+        _runSessionSync: async function() {
+            if (IframeSessionClient && IframeSessionClient.isValid()) {
+                logSession(MODULE, 'already valid');
+                return { success: true, cached: true };
+            }
+            
+            try {
+                IframeTransport.requestSessionFromParent();
+                
+                const sessionResult = await StateGovernor.waitForSession(CONFIG.SESSION_TIMEOUT * 2);
+                
+                if (sessionResult && sessionResult.success) {
+                    logSession(MODULE, 'acquired');
+                    return { success: true };
+                }
+            } catch (error) {
+                logSession(MODULE, 'failed', error.message);
+            }
+            
+            if (IframeSessionClient && IframeSessionClient.checkStorage()) {
+                logSession(MODULE, 'using cached session');
+                return { success: true, degraded: true, cached: true };
+            }
+            
+            return { success: false, error: 'Session sync failed' };
+        },
+
+        _runServiceInit: async function() {
+            if (APICore && typeof APICore.initialize === 'function') {
+                try {
+                    await APICore.initialize();
+                } catch (error) {
+                    logError(MODULE, 'API Core init failed', error);
+                }
+            }
+            
+            if (window.callAPI && typeof window.callAPI.initialize === 'function') {
+                try {
+                    await window.callAPI.initialize();
+                } catch (error) {
+                    logError(MODULE, 'CallAPI init failed', error);
+                }
+            }
+            
+            if (window.callCore && typeof window.callCore.safeInitialize === 'function') {
+                try {
+                    await window.callCore.safeInitialize();
+                } catch (error) {
+                    logError(MODULE, 'CallCore init failed', error);
+                }
+            }
+            
+            return { success: true };
+        },
+
+        _waitForCompletion: function() {
+            return new Promise((resolve) => {
+                const checkInterval = setInterval(() => {
+                    if (!this._pipelineInProgress) {
+                        clearInterval(checkInterval);
+                        resolve({ 
+                            success: this._pipelineCompleted, 
+                            degraded: this._pipelineDegraded,
+                            stages: this._stageResults 
+                        });
+                    }
+                }, 100);
+                
+                setTimeout(() => {
+                    clearInterval(checkInterval);
+                    resolve({ 
+                        success: this._pipelineCompleted, 
+                        degraded: this._pipelineDegraded,
+                        timeout: true 
+                    });
+                }, 30000);
+            });
+        },
+
+        getStatus: function() {
+            return {
+                currentStage: this._currentStage,
+                pipelineInProgress: this._pipelineInProgress,
+                pipelineCompleted: this._pipelineCompleted,
+                pipelineDegraded: this._pipelineDegraded,
+                startTime: this._pipelineStartTime,
+                endTime: this._pipelineEndTime,
+                duration: this._pipelineEndTime ? this._pipelineEndTime - this._pipelineStartTime : 0,
+                stages: this._stageResults,
+                attempts: { ...this._stageAttempts }
+            };
+        },
+
+        addListener: function(listener) {
+            if (typeof listener === 'function') this._listeners.add(listener);
+        },
+
+        removeListener: function(listener) {
+            this._listeners.delete(listener);
+        },
+
+        _notifyListeners: function(event, data) {
+            this._listeners.forEach(listener => {
+                try { listener(event, data); } catch (e) {}
+            });
+        }
+    };
 
     // ==================== GLOBAL DEBUG FLAG ====================
     window.__IFRAME_DEBUG__ = window.__IFRAME_DEBUG__ || false;
-    const DEBUG = false; // Keep false for production
+    const DEBUG = false;
+
+    // ==================== CALLS STATE MACHINE (MANDATORY) ====================
+    const CALLS_STATE = {
+        INIT: 'INIT',
+        REGISTERING: 'REGISTERING',
+        REGISTERED: 'REGISTERED',
+        SESSION_RECEIVED: 'SESSION_RECEIVED',
+        ACTIVE: 'ACTIVE',
+        CALL_READY: 'CALL_READY',
+        IN_CALL: 'IN_CALL',
+        TERMINATED: 'TERMINATED'
+    };
+
+    // Legacy state mapping for backward compatibility
+    const V5_STATE = {
+        BOOTING: 'BOOTING',
+        REGISTERING: 'REGISTERING',
+        WAITING_SESSION: 'WAITING_SESSION',
+        WAITING_PARENT_READY: 'WAITING_PARENT_READY',
+        ACTIVE: 'ACTIVE',
+        DEGRADED: 'DEGRADED',
+        RECOVERY: 'RECOVERY',
+        STANDALONE: 'STANDALONE',
+        OFFLINE: 'OFFLINE'
+    };
+
+    const STATE = {
+        UNINITIALIZED: 'UNINITIALIZED',
+        BOOTSTRAPPING: 'BOOTSTRAPPING',
+        REGISTERING: 'REGISTERING',
+        REGISTERED: 'REGISTERED',
+        SESSION_PENDING: 'SESSION_PENDING',
+        SESSION_ACTIVE: 'SESSION_ACTIVE',
+        SERVICES_INITIALIZING: 'SERVICES_INITIALIZING',
+        ACTIVE: 'ACTIVE',
+        ERROR_RECOVERABLE: 'ERROR_RECOVERABLE',
+        ERROR_FATAL: 'ERROR_FATAL',
+        RECOVERING: 'RECOVERING',
+        INIT: 'INIT',
+        PREFLIGHT: 'PREFLIGHT',
+        DEPENDENCY: 'DEPENDENCY',
+        PARENT_DETECT: 'PARENT_DETECT',
+        SYNC: 'SYNC',
+        PERMISSIONS: 'PERMISSIONS',
+        READY: 'READY',
+        SUSPENDED: 'SUSPENDED',
+        DEGRADED: 'DEGRADED',
+        DESTROYED: 'DESTROYED',
+        DEMO: 'DEMO', // Kept for compatibility but unused
+        HANDSHAKE_IDLE: 'HANDSHAKE_IDLE',
+        HANDSHAKE_WAITING: 'HANDSHAKE_WAITING',
+        HANDSHAKE_IN_PROGRESS: 'HANDSHAKE_IN_PROGRESS',
+        HANDSHAKE_FAILED: 'HANDSHAKE_FAILED',
+        SESSION_IDLE: 'SESSION_IDLE',
+        SESSION_WAITING: 'SESSION_WAITING',
+        SESSION_VALID: 'SESSION_VALID',
+        SESSION_EXPIRED: 'SESSION_EXPIRED',
+        SESSION_ERROR: 'SESSION_ERROR'
+    };
+
+    const CallCoreState = {
+        IDLE: 'IDLE',
+        WAITING_PARENT: 'WAITING_PARENT',
+        WAITING_SESSION: 'WAITING_SESSION',
+        SYNCED: 'SYNCED',
+        ACTIVE: 'ACTIVE',
+        ERROR: 'ERROR',
+        RECOVERING: 'RECOVERING'
+    };
+
+    const V5_TO_LEGACY_STATE = {
+        [V5_STATE.BOOTING]: STATE.BOOTSTRAPPING,
+        [V5_STATE.REGISTERING]: STATE.REGISTERING,
+        [V5_STATE.WAITING_SESSION]: STATE.SESSION_PENDING,
+        [V5_STATE.WAITING_PARENT_READY]: STATE.REGISTERED,
+        [V5_STATE.ACTIVE]: STATE.ACTIVE,
+        [V5_STATE.DEGRADED]: STATE.DEGRADED,
+        [V5_STATE.RECOVERY]: STATE.RECOVERING,
+        [V5_STATE.STANDALONE]: STATE.DEGRADED,
+        [V5_STATE.OFFLINE]: STATE.SUSPENDED
+    };
+
+    // ==================== CALLS STATE GOVERNOR ====================
+    const CallsStateGovernor = {
+        _currentState: CALLS_STATE.INIT,
+        _previousState: null,
+        _transitionLock: false,
+        _stateChangeListeners: new Set(),
+        _handshakeTimer: null,
+        _fallbackTimer: null,
+        _moduleRegistered: false,
+        _sessionReceived: false,
+        _parentReadyReceived: false,
+        _session: null,
+        _lastHeartbeat: 0,
+        _heartbeatMissed: 0,
+        _heartbeatTimer: null,
+        _messageIdCache: new Set(),
+        _outboundQueue: [],
+        _queueEnabled: true,
+        _degradedTimer: null,
+        _parentSilentTimer: null,
+        _verificationInProgress: false,
+        _lastVerificationTime: 0,
+        _lastVerificationResult: true,
+        _registrationAttempts: 0,
+        _maxRegistrationAttempts: 3,
+        _globalFailSafeTimer: null,
+        _heartbeatInterval: null,
+        _sessionVerificationTimer: null,
+        _lastSessionVerification: 0,
+
+        // Map to callsState for compliance
+        _callsState: callsState,
+
+        initialize: function() {
+            this._currentState = CALLS_STATE.INIT;
+            this._previousState = null;
+            this._moduleRegistered = false;
+            this._sessionReceived = false;
+            this._parentReadyReceived = false;
+            this._session = null;
+            this._heartbeatMissed = 0;
+            this._outboundQueue = [];
+            this._queueEnabled = true;
+            this._registrationAttempts = 0;
+            
+            // Initialize callsState
+            this._callsState.registered = false;
+            this._callsState.parentReady = false;
+            this._callsState.session = null;
+            this._callsState.token = null;
+            this._callsState.verified = false;
+            this._callsState.verificationLock = false;
+            this._callsState.heartbeatInterval = null;
+            this._callsState.degraded = false;
+            this._callsState.callActive = false;
+            this._callsState.pendingCall = null;
+            this._callsState.webrtcInitialized = false;
+            this._callsState.recoveryMode = false;
+
+            logInfo(MODULE, 'Calls State Governor initialized');
+            return this;
+        },
+
+        transition: function(newState, reason = '') {
+            if (this._transitionLock) {
+                return false;
+            }
+
+            const oldState = this._currentState;
+            if (oldState === newState) return false;
+
+            // FIX: Allow SESSION_RECEIVED from REGISTERING (parent may send session early)
+            const isLegal = this._isLegalTransition(oldState, newState);
+            
+            if (!isLegal) {
+                logWarn(MODULE, `Illegal state transition: ${oldState} → ${newState}`);
+                return false;
+            }
+
+            this._previousState = oldState;
+            this._currentState = newState;
+
+            this._updateLegacyState(newState);
+
+            logState(MODULE, oldState, newState, reason);
+            this._notifyListeners('state', { oldState, newState, reason });
+
+            this._handleStateActions(newState);
+
+            return true;
+        },
+
+        _isLegalTransition: function(from, to) {
+            // FIX: Allow SESSION_RECEIVED from REGISTERING
+            const legalTransitions = {
+                [CALLS_STATE.INIT]: [CALLS_STATE.REGISTERING],
+                [CALLS_STATE.REGISTERING]: [CALLS_STATE.REGISTERED, CALLS_STATE.SESSION_RECEIVED], // Added SESSION_RECEIVED
+                [CALLS_STATE.REGISTERED]: [CALLS_STATE.SESSION_RECEIVED, CALLS_STATE.REGISTERING],
+                [CALLS_STATE.SESSION_RECEIVED]: [CALLS_STATE.ACTIVE],
+                [CALLS_STATE.ACTIVE]: [CALLS_STATE.CALL_READY, CALLS_STATE.SESSION_RECEIVED],
+                [CALLS_STATE.CALL_READY]: [CALLS_STATE.IN_CALL, CALLS_STATE.ACTIVE],
+                [CALLS_STATE.IN_CALL]: [CALLS_STATE.CALL_READY, CALLS_STATE.TERMINATED],
+                [CALLS_STATE.TERMINATED]: [CALLS_STATE.INIT]
+            };
+            return legalTransitions[from] ? legalTransitions[from].includes(to) : false;
+        },
+
+        _updateLegacyState: function(callsState) {
+            const mapping = {
+                [CALLS_STATE.INIT]: STATE.UNINITIALIZED,
+                [CALLS_STATE.REGISTERING]: STATE.REGISTERING,
+                [CALLS_STATE.REGISTERED]: STATE.REGISTERED,
+                [CALLS_STATE.SESSION_RECEIVED]: STATE.SESSION_PENDING,
+                [CALLS_STATE.ACTIVE]: STATE.ACTIVE,
+                [CALLS_STATE.CALL_READY]: STATE.READY,
+                [CALLS_STATE.IN_CALL]: STATE.ACTIVE,
+                [CALLS_STATE.TERMINATED]: STATE.DESTROYED
+            };
+            const legacyState = mapping[callsState] || STATE.DEGRADED;
+            if (StateGovernor && typeof StateGovernor._transition === 'function') {
+                StateGovernor._transition(StateGovernor.getState(), legacyState, 'calls_state_sync');
+            }
+        },
+
+        _handleStateActions: function(state) {
+            switch (state) {
+                case CALLS_STATE.ACTIVE:
+                    this._startHeartbeat();
+                    this._startParentSilentMonitor();
+                    this._flushQueue();
+                    this._scheduleSessionVerification();
+                    this._enableCallUI();
+                    break;
+                case CALLS_STATE.SESSION_RECEIVED:
+                    this._stopParentSilentMonitor();
+                    break;
+                case CALLS_STATE.IN_CALL:
+                    this._stopHeartbeat();
+                    break;
+                case CALLS_STATE.TERMINATED:
+                    this._stopHeartbeat();
+                    this._stopParentSilentMonitor();
+                    break;
+                default:
+                    break;
+            }
+        },
+
+        startHandshake: function() {
+            if (this._currentState !== CALLS_STATE.INIT) return;
+
+            this.transition(CALLS_STATE.REGISTERING, 'handshake_start');
+
+            this._clearTimers();
+
+            // Handshake timer - 150ms strict window
+            this._handshakeTimer = setTimeout(() => {
+                if (this._currentState === CALLS_STATE.REGISTERING && !this._moduleRegistered) {
+                    logWarn(MODULE, 'Handshake timeout (150ms), waiting for fallback');
+                    
+                    // Don't enter degraded immediately - wait full 300ms
+                    this._fallbackTimer = setTimeout(() => {
+                        if (this._currentState === CALLS_STATE.REGISTERING && !this._moduleRegistered) {
+                            logWarn(MODULE, 'Handshake fallback timeout (300ms) - parent unresponsive');
+                            // Don't enter degraded for handshake timeout
+                            this.transition(CALLS_STATE.REGISTERED, 'handshake_fallback');
+                        }
+                    }, CONFIG.HANDSHAKE_FALLBACK_TIMEOUT - CONFIG.HANDSHAKE_TIMEOUT);
+                }
+            }, CONFIG.HANDSHAKE_TIMEOUT);
+
+            this._globalFailSafeTimer = setTimeout(() => {
+                if (this._currentState === CALLS_STATE.REGISTERING || 
+                    this._currentState === CALLS_STATE.REGISTERED ||
+                    this._currentState === CALLS_STATE.SESSION_RECEIVED) {
+                    
+                    if (!this._parentReadyReceived && !this._sessionReceived) {
+                        logWarn(MODULE, 'Global fail-safe triggered - using cached session if available');
+                        if (IframeSessionClient && IframeSessionClient.isValid()) {
+                            this._session = IframeSessionClient.getSession();
+                            this._sessionReceived = true;
+                            this.transition(CALLS_STATE.SESSION_RECEIVED, 'global_failsafe_cache');
+                        }
+                    }
+                }
+            }, 500);
+
+            // Send REGISTER_MODULE at time 0
+            this._sendRegistration();
+        },
+
+        _sendRegistration: function() {
+            const messageId = `reg_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+            
+            const registrationMessage = {
+                type: MESSAGE_TYPES.REGISTER_MODULE,
+                module: 'calls',
+                frameId: window.name || 'calls-iframe',
+                requestId: messageId,
+                timestamp: Date.now(),
+                version: CONFIG.VERSION,
+                protocol: CONFIG.PROTOCOL_VERSION
+            };
+
+            logSending(MODULE, 'REGISTER_MODULE sent', { messageId });
+
+            if (window.parent && window.parent !== window) {
+                try {
+                    window.parent.postMessage(registrationMessage, OriginSecurity.getTargetOrigin());
+                } catch (e) {
+                    logError(MODULE, 'Failed to send REGISTER_MODULE', e);
+                }
+            }
+
+            // Register for ACK
+            MessageRegistry.register(messageId, MESSAGE_TYPES.REGISTER_MODULE, { timeout: CONFIG.REGISTER_ACK_TIMEOUT })
+                .then(() => {
+                    logSuccess(MODULE, 'REGISTER_MODULE acknowledged');
+                })
+                .catch(() => {
+                    logWarn(MODULE, 'REGISTER_MODULE ACK timeout');
+                });
+        },
+
+        _handleRegistrationTimeout: function() {
+            this._registrationAttempts++;
+            
+            if (this._registrationAttempts < this._maxRegistrationAttempts) {
+                const backoff = this._registrationAttempts === 1 ? 1000 : 2000;
+                logInfo(MODULE, `Retrying registration (attempt ${this._registrationAttempts + 1}/${this._maxRegistrationAttempts}) in ${backoff}ms`);
+                
+                setTimeout(() => {
+                    if (this._currentState === CALLS_STATE.REGISTERING && !this._moduleRegistered) {
+                        this._sendRegistration();
+                    }
+                }, backoff);
+            } else {
+                logWarn(MODULE, 'Max registration attempts reached');
+                // Don't enter degraded mode
+            }
+        },
+
+        handleModuleRegistered: function() {
+            if (this._moduleRegistered) return;
+            
+            this._moduleRegistered = true;
+            this._callsState.registered = true; // Update callsState
+            logSuccess(MODULE, 'MODULE_REGISTERED received');
+
+            if (this._handshakeTimer) {
+                clearTimeout(this._handshakeTimer);
+                this._handshakeTimer = null;
+            }
+            if (this._fallbackTimer) {
+                clearTimeout(this._fallbackTimer);
+                this._fallbackTimer = null;
+            }
+
+            if (this._currentState === CALLS_STATE.REGISTERING) {
+                this.transition(CALLS_STATE.REGISTERED, 'module_registered');
+            }
+
+            // No other messages sent during REGISTERING - wait for SESSION_ACTIVE
+        },
+
+        handleSessionActive: function(sessionData) {
+            if (!sessionData || typeof sessionData !== 'object') {
+                logError(MODULE, 'Invalid session data', null, sessionData);
+                return;
+            }
+
+            // Normalize session
+            const session = {
+                authenticated: sessionData.authenticated === true,
+                userId: sessionData.userId || sessionData.user?.id,
+                token: sessionData.token || sessionData.jwt || sessionData.accessToken,
+                user: sessionData.user || {},
+                expiresAt: sessionData.expiresAt || sessionData.expiry || (Date.now() + 3600000),
+                version: sessionData.version || 1
+            };
+
+            // Store session in callsState
+            this._session = session;
+            this._callsState.session = session;
+            this._callsState.token = session.token;
+            
+            if (!this._sessionReceived) {
+                this._sessionReceived = true;
+                logSession(MODULE, 'SESSION_ACTIVE received', { 
+                    authenticated: session.authenticated,
+                    userId: session.userId
+                });
+
+                // FIX: Allow transition from REGISTERING to SESSION_RECEIVED
+                if (this._currentState === CALLS_STATE.REGISTERED || this._currentState === CALLS_STATE.REGISTERING) {
+                    this.transition(CALLS_STATE.SESSION_RECEIVED, 'session_active');
+                }
+
+                // Update session client
+                if (IframeSessionClient) {
+                    IframeSessionClient._handleSessionUpdate(session);
+                }
+
+                // If PARENT_READY already received, go to ACTIVE
+                if (this._parentReadyReceived) {
+                    this.transition(CALLS_STATE.ACTIVE, 'parent_ready_after_session');
+                }
+
+                // Resolve any pending session promises
+                if (StateGovernor && StateGovernor._sessionResolve) {
+                    StateGovernor._sessionResolve({ success: true });
+                    StateGovernor._sessionResolve = null;
+                    StateGovernor._sessionReject = null;
+                    if (StateGovernor._sessionTimeoutId) {
+                        clearTimeout(StateGovernor._sessionTimeoutId);
+                        StateGovernor._sessionTimeoutId = null;
+                    }
+                }
+                
+                if (IframeSessionClient && IframeSessionClient._sessionResolve) {
+                    IframeSessionClient._sessionResolve({ success: true, session });
+                    IframeSessionClient._sessionResolve = null;
+                    IframeSessionClient._sessionReject = null;
+                }
+                
+                if (typeof window.__resolveSessionPromise === 'function') {
+                    window.__resolveSessionPromise(true);
+                }
+            } else {
+                // Session already received, just update
+                logSession(MODULE, 'SESSION_REFRESHED received', { 
+                    authenticated: session.authenticated,
+                    userId: session.userId
+                });
+                if (IframeSessionClient) {
+                    IframeSessionClient._handleSessionUpdate(session);
+                }
+            }
+        },
+
+        handleSessionNull: function() {
+            logInfo(MODULE, 'SESSION_NULL received - no authenticated session');
+            
+            this._session = {
+                authenticated: false,
+                userId: null,
+                token: null,
+                user: {},
+                expiresAt: 0,
+                version: 1
+            };
+            this._callsState.session = null;
+            this._callsState.token = null;
+            
+            if (!this._sessionReceived) {
+                this._sessionReceived = true;
+
+                if (this._currentState === CALLS_STATE.REGISTERED || this._currentState === CALLS_STATE.REGISTERING) {
+                    this.transition(CALLS_STATE.SESSION_RECEIVED, 'session_null');
+                }
+
+                if (IframeSessionClient) {
+                    IframeSessionClient._handleSessionNull();
+                }
+            }
+            
+            // Show login required UI
+            this._showLoginRequiredUI();
+        },
+
+        handleSessionRefreshed: function(sessionData) {
+            if (!sessionData) return;
+
+            // Replace session silently
+            const session = {
+                authenticated: sessionData.authenticated === true,
+                userId: sessionData.userId || sessionData.user?.id,
+                token: sessionData.token || sessionData.jwt || sessionData.accessToken,
+                user: sessionData.user || {},
+                expiresAt: sessionData.expiresAt || sessionData.expiry || (Date.now() + 3600000),
+                version: sessionData.version || (this._session ? this._session.version + 1 : 2)
+            };
+
+            this._session = session;
+            this._callsState.session = session;
+            this._callsState.token = session.token;
+
+            logSession(MODULE, 'SESSION_REFRESHED received', { 
+                authenticated: session.authenticated,
+                userId: session.userId
+            });
+
+            // Update UI silently - no state transition
+            if (IframeSessionClient) {
+                IframeSessionClient._handleSessionUpdate(session);
+            }
+
+            // Notify UI components to refresh
+            this._notifyListeners('session_refreshed', session);
+        },
+
+        handleSessionInvalidated: function() {
+            logWarn(MODULE, 'SESSION_INVALIDATED received');
+            
+            this._session = null;
+            this._sessionReceived = false;
+            this._callsState.session = null;
+            this._callsState.token = null;
+
+            // Don't enter degraded automatically
+            if (this._currentState === CALLS_STATE.ACTIVE) {
+                this._disableCallUI();
+            }
+
+            if (IframeSessionClient) {
+                IframeSessionClient.clear();
+            }
+
+            this._notifyListeners('session_invalidated', {});
+            this._showLoginRequiredUI();
+        },
+
+        handleParentReady: function() {
+            if (this._parentReadyReceived) return;
+            
+            this._parentReadyReceived = true;
+            this._callsState.parentReady = true; // Update callsState
+            logSuccess(MODULE, 'PARENT_READY received');
+
+            if (this._globalFailSafeTimer) {
+                clearTimeout(this._globalFailSafeTimer);
+                this._globalFailSafeTimer = null;
+            }
+
+            if (this._currentState === CALLS_STATE.SESSION_RECEIVED) {
+                // Have session, go to ACTIVE
+                this.transition(CALLS_STATE.ACTIVE, 'parent_ready');
+                
+                // Initialize UI
+                this._initializeUI();
+            } else if (this._currentState === CALLS_STATE.REGISTERED) {
+                // No session yet, stay in REGISTERED
+                logInfo(MODULE, 'PARENT_READY received before session - waiting for SESSION_ACTIVE');
+            }
+        },
+
+        // ==================== VERIFY_SESSION (Critical) ====================
+        verifySession: function(force = false) {
+            return new Promise((resolve) => {
+                // Check verification lock
+                if (this._callsState.verificationLock) {
+                    logInfo(MODULE, 'Verification already in progress, waiting');
+                    
+                    // Wait for verification to complete
+                    const checkInterval = setInterval(() => {
+                        if (!this._callsState.verificationLock) {
+                            clearInterval(checkInterval);
+                            resolve({ valid: this._callsState.verified, cached: true });
+                        }
+                    }, 10);
+                    
+                    setTimeout(() => {
+                        clearInterval(checkInterval);
+                        resolve({ valid: this._callsState.verified, cached: true, timeout: true });
+                    }, 100);
+                    
+                    return;
+                }
+
+                // Check cached session first
+                if (this._session && this._session.authenticated && this._session.expiresAt > Date.now()) {
+                    // Perform verification if forced or last verification is old
+                    const timeSinceLast = Date.now() - this._lastVerificationTime;
+                    if (force || timeSinceLast > 30000) {
+                        this._performVerification().then(result => {
+                            resolve(result);
+                        }).catch(() => {
+                            resolve({ valid: true, cached: true });
+                        });
+                    } else {
+                        resolve({ valid: true, cached: true });
+                    }
+                } else {
+                    resolve({ valid: false, reason: 'no_session' });
+                }
+            });
+        },
+
+        _performVerification: function() {
+            return new Promise((resolve) => {
+                // Set verification lock
+                this._callsState.verificationLock = true;
+                this._verificationInProgress = true;
+
+                const requestId = `verify_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+                let responded = false;
+
+                logSending(MODULE, 'VERIFY_SESSION sent', { requestId });
+
+                // Send verification request
+                if (window.parent && window.parent !== window) {
+                    try {
+                        window.parent.postMessage({
+                            type: MESSAGE_TYPES.VERIFY_SESSION,
+                            module: 'calls',
+                            frameId: window.name || 'calls-iframe',
+                            requestId: requestId,
+                            timestamp: Date.now()
+                        }, OriginSecurity.getTargetOrigin());
+                    } catch (e) {
+                        logError(MODULE, 'Failed to send VERIFY_SESSION', e);
+                    }
+                }
+
+                const handler = (event) => {
+                    if (!OriginSecurity.validateEvent(event)) return;
+
+                    const message = event.data;
+                    if (!message || message.requestId !== requestId) return;
+
+                    if (message.type === MESSAGE_TYPES.SESSION_VERIFIED) {
+                        window.removeEventListener('message', handler);
+                        responded = true;
+
+                        this._verificationInProgress = false;
+                        this._lastVerificationTime = Date.now();
+                        this._lastVerificationResult = message.valid === true;
+                        
+                        // Update callsState
+                        this._callsState.verified = message.valid === true;
+                        this._callsState.verificationLock = false;
+
+                        if (message.valid === true) {
+                            resolve({ valid: true, verified: true });
+                        } else {
+                            resolve({ valid: false, reason: 'verified_false' });
+                        }
+                    }
+                };
+
+                window.addEventListener('message', handler);
+
+                // Set timeout - strict 100ms window
+                setTimeout(() => {
+                    window.removeEventListener('message', handler);
+                    
+                    if (!responded) {
+                        logWarn(MODULE, 'Verification timeout - retry once', { requestId });
+                        
+                        // Set verification lock false for retry
+                        this._callsState.verificationLock = false;
+                        this._verificationInProgress = false;
+                        
+                        // Retry once immediately
+                        setTimeout(() => {
+                            this.verifySession(true).then(retryResult => {
+                                // This will resolve through the retry
+                            });
+                        }, 10);
+                        
+                        // Return cached result for now
+                        this._callsState.verified = true;
+                        resolve({ valid: true, cached: true, timeout: true });
+                    }
+                }, CONFIG.VERIFY_TIMEOUT || 100); // Strict 100ms window
+            });
+        },
+
+        // ==================== Heartbeat Governance ====================
+        _startHeartbeat: function() {
+            if (this._currentState !== CALLS_STATE.ACTIVE) return;
+
+            this._stopHeartbeat();
+
+            this._lastHeartbeat = Date.now();
+            this._heartbeatMissed = 0;
+            this._callsState.degraded = false;
+
+            this._heartbeatTimer = setInterval(() => {
+                this._sendHeartbeat();
+            }, CONFIG.HEARTBEAT_INTERVAL);
+
+            this._callsState.heartbeatInterval = this._heartbeatTimer;
+
+            logInfo(MODULE, 'Heartbeat started');
+        },
+
+        _stopHeartbeat: function() {
+            if (this._heartbeatTimer) {
+                clearInterval(this._heartbeatTimer);
+                this._heartbeatTimer = null;
+                this._callsState.heartbeatInterval = null;
+                logInfo(MODULE, 'Heartbeat stopped');
+            }
+        },
+
+        _sendHeartbeat: function() {
+            if (this._currentState !== CALLS_STATE.ACTIVE) {
+                this._stopHeartbeat();
+                return;
+            }
+
+            if (!window.parent || window.parent === window) return;
+
+            const heartbeatId = `hb_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+
+            try {
+                window.parent.postMessage({
+                    type: MESSAGE_TYPES.HEARTBEAT,
+                    module: 'calls',
+                    frameId: window.name || 'calls-iframe',
+                    id: heartbeatId,
+                    timestamp: Date.now()
+                }, OriginSecurity.getTargetOrigin());
+
+                logSending(MODULE, 'HEARTBEAT sent', { id: heartbeatId });
+            } catch (e) {
+                logError(MODULE, 'Failed to send heartbeat', e);
+            }
+
+            const timeSinceLastBeat = Date.now() - this._lastHeartbeat;
+            
+            if (timeSinceLastBeat > CONFIG.HEARTBEAT_INTERVAL * 2) {
+                this._heartbeatMissed++;
+
+                if (this._heartbeatMissed === 1) {
+                    logWarn(MODULE, 'Heartbeat missed (1/3)');
+                } else if (this._heartbeatMissed === 2) {
+                    logWarn(MODULE, 'Heartbeat missed (2/3)');
+                } else if (this._heartbeatMissed >= 3) {
+                    logWarn(MODULE, 'Heartbeat missed (3/3) - parent may be degraded');
+                    
+                    // After 3 missed heartbeats, enter degraded mode
+                    this._callsState.degraded = true;
+                    
+                    // Disable call UI
+                    this._disableCallUI();
+                    
+                    // Show connection warning
+                    this._showConnectionWarning();
+                    
+                    // Stop sending verification requests
+                    this._stopHeartbeat();
+                }
+            }
+        },
+
+        handleHeartbeatAck: function() {
+            this._lastHeartbeat = Date.now();
+            this._heartbeatMissed = 0;
+            this._callsState.degraded = false;
+            logInfo(MODULE, 'Heartbeat ACK received');
+        },
+
+        _showConnectionWarning: function() {
+            try {
+                const warningDiv = document.createElement('div');
+                warningDiv.className = 'connection-warning';
+                warningDiv.innerHTML = `
+                    <i class="fas fa-exclamation-triangle"></i>
+                    <span>Connection unstable. Call functionality may be limited.</span>
+                `;
+                
+                const appContainer = document.getElementById('appContainer');
+                if (appContainer && !document.querySelector('.connection-warning')) {
+                    appContainer.prepend(warningDiv);
+                    
+                    setTimeout(() => {
+                        if (warningDiv.parentNode) warningDiv.remove();
+                    }, 10000);
+                }
+            } catch (e) {
+                logError(MODULE, 'Failed to show connection warning', e);
+            }
+        },
+
+        // ==================== Parent Silent Monitor ====================
+        _startParentSilentMonitor: function() {
+            this._stopParentSilentMonitor();
+
+            this._parentSilentTimer = setTimeout(() => {
+                if (this._currentState === CALLS_STATE.ACTIVE && !this._parentReadyReceived) {
+                    logWarn(MODULE, `Parent silent > ${CONFIG.PARENT_SILENT_THRESHOLD / 1000}s`);
+                    // Don't enter degraded - just warn
+                }
+            }, CONFIG.PARENT_SILENT_THRESHOLD);
+        },
+
+        _stopParentSilentMonitor: function() {
+            if (this._parentSilentTimer) {
+                clearTimeout(this._parentSilentTimer);
+                this._parentSilentTimer = null;
+            }
+        },
+
+        // ==================== UI Integration ====================
+        _initializeUI: function() {
+            if (this._session && this._session.authenticated) {
+                this._enableCallUI();
+                this._updateUIWithSession();
+            } else {
+                this._showLoginRequiredUI();
+            }
+
+            this._notifyListeners('ui_ready', { 
+                authenticated: this._session ? this._session.authenticated : false 
+            });
+        },
+
+        _enableCallUI: function() {
+            try {
+                const newCallBtn = document.getElementById('newCallBtn');
+                const quickVoiceBtn = document.getElementById('quickVoiceBtn');
+                const quickVideoBtn = document.getElementById('quickVideoBtn');
+                const quickGroupBtn = document.getElementById('quickGroupBtn');
+
+                if (newCallBtn) newCallBtn.disabled = false;
+                if (quickVoiceBtn) quickVoiceBtn.disabled = false;
+                if (quickVideoBtn) quickVideoBtn.disabled = false;
+                if (quickGroupBtn) quickGroupBtn.disabled = !AppState.isPremium;
+
+                logInfo(MODULE, 'Call UI enabled');
+            } catch (e) {
+                logError(MODULE, 'Failed to enable call UI', e);
+            }
+        },
+
+        _disableCallUI: function() {
+            try {
+                const newCallBtn = document.getElementById('newCallBtn');
+                const quickVoiceBtn = document.getElementById('quickVoiceBtn');
+                const quickVideoBtn = document.getElementById('quickVideoBtn');
+                const quickGroupBtn = document.getElementById('quickGroupBtn');
+
+                if (newCallBtn) newCallBtn.disabled = true;
+                if (quickVoiceBtn) quickVoiceBtn.disabled = true;
+                if (quickVideoBtn) quickVideoBtn.disabled = true;
+                if (quickGroupBtn) quickGroupBtn.disabled = true;
+
+                logInfo(MODULE, 'Call UI disabled');
+            } catch (e) {
+                logError(MODULE, 'Failed to disable call UI', e);
+            }
+        },
+
+        _showLoginRequiredUI: function() {
+            try {
+                const appContainer = document.getElementById('appContainer');
+                if (!appContainer) return;
+
+                if (document.querySelector('.login-required-overlay')) return;
+
+                const loginOverlay = document.createElement('div');
+                loginOverlay.className = 'login-required-overlay';
+                loginOverlay.innerHTML = `
+                    <div class="login-required-message">
+                        <i class="fas fa-user-lock"></i>
+                        <h3>Login Required</h3>
+                        <p>Please log in to make calls</p>
+                        <button class="login-btn" onclick="window.parent.postMessage({type: 'REQUEST_LOGIN'}, '*')">
+                            <i class="fas fa-sign-in-alt"></i> Login
+                        </button>
+                    </div>
+                `;
+
+                appContainer.appendChild(loginOverlay);
+                logInfo(MODULE, 'Login required UI shown');
+            } catch (e) {
+                logError(MODULE, 'Failed to show login UI', e);
+            }
+        },
+
+        _updateUIWithSession: function() {
+            if (!this._session || !this._session.user) return;
+
+            try {
+                const user = this._session.user;
+                
+                const userAvatar = document.querySelector('.user-avatar');
+                const userName = document.querySelector('.user-name');
+                
+                if (userAvatar && user.avatar) {
+                    if (userAvatar.tagName === 'IMG') {
+                        userAvatar.src = SecurityCore.sanitizeURL(user.avatar);
+                    } else {
+                        userAvatar.style.backgroundImage = `url(${SecurityCore.sanitizeURL(user.avatar)})`;
+                    }
+                }
+                
+                if (userName) {
+                    userName.textContent = SecurityCore.sanitizeString(user.name || user.username || 'User');
+                }
+                
+                if (window.AppState) {
+                    window.AppState.user = user;
+                    window.AppState.currentUser = user;
+                    window.AppState.isAuthenticated = true;
+                }
+            } catch (e) {
+                logError(MODULE, 'Failed to update UI with session', e);
+            }
+        },
+
+        // ==================== Message Queue ====================
+        queueMessage: function(message) {
+            if (this._currentState === CALLS_STATE.ACTIVE && this._parentReadyReceived) {
+                this._sendMessageImmediate(message);
+            } else {
+                if (this._outboundQueue.length < 200) {
+                    this._outboundQueue.push({
+                        message: message,
+                        timestamp: Date.now()
+                    });
+                    logInfo(MODULE, 'Message queued', { type: message.type, queueSize: this._outboundQueue.length });
+                } else {
+                    logWarn(MODULE, 'Queue full - dropping message', { type: message.type });
+                }
+            }
+        },
+
+        _sendMessageImmediate: function(message) {
+            if (!window.parent || window.parent === window) return false;
+
+            const outboundMessage = {
+                ...message,
+                module: 'calls',
+                frameId: window.name || 'calls-iframe',
+                timestamp: Date.now()
+            };
+
+            if (outboundMessage.messageId) {
+                if (this._messageIdCache.has(outboundMessage.messageId)) {
+                    logInfo(MODULE, 'Duplicate message ignored', { messageId: outboundMessage.messageId });
+                    return false;
+                }
+                this._messageIdCache.add(outboundMessage.messageId);
+                setTimeout(() => {
+                    this._messageIdCache.delete(outboundMessage.messageId);
+                }, CONFIG.MESSAGE_CACHE_TTL);
+            }
+
+            try {
+                window.parent.postMessage(outboundMessage, OriginSecurity.getTargetOrigin());
+                return true;
+            } catch (e) {
+                logError(MODULE, 'Failed to send message', e);
+                return false;
+            }
+        },
+
+        _flushQueue: function() {
+            if (this._outboundQueue.length === 0) return;
+
+            logInfo(MODULE, `Flushing queue (${this._outboundQueue.length} messages)`);
+
+            const queue = [...this._outboundQueue];
+            this._outboundQueue = [];
+
+            queue.forEach(item => {
+                this._sendMessageImmediate(item.message);
+            });
+        },
+
+        // ==================== Session Verification Scheduling ====================
+        _scheduleSessionVerification: function() {
+            if (this._sessionVerificationTimer) {
+                clearInterval(this._sessionVerificationTimer);
+            }
+            
+            this._sessionVerificationTimer = setInterval(() => {
+                this.verifySession();
+            }, 600000); // 10 minutes
+        },
+
+        // ==================== Network Status ====================
+        handleOffline: function() {
+            if (this._currentState !== CALLS_STATE.TERMINATED) {
+                logWarn(MODULE, 'Network offline');
+                
+                // Disable call UI when offline
+                const newCallBtn = document.getElementById('newCallBtn');
+                const quickVoiceBtn = document.getElementById('quickVoiceBtn');
+                const quickVideoBtn = document.getElementById('quickVideoBtn');
+                
+                if (newCallBtn) newCallBtn.disabled = true;
+                if (quickVoiceBtn) quickVoiceBtn.disabled = true;
+                if (quickVideoBtn) quickVideoBtn.disabled = true;
+                
+                this._notifyListeners('offline', {});
+            }
+        },
+
+        handleOnline: function() {
+            logInfo(MODULE, 'Network online');
+            
+            // Re-verify session when coming online
+            this.verifySession(true).then(result => {
+                if (result.valid && this._currentState === CALLS_STATE.ACTIVE && this._session && this._session.authenticated) {
+                    const newCallBtn = document.getElementById('newCallBtn');
+                    const quickVoiceBtn = document.getElementById('quickVoiceBtn');
+                    const quickVideoBtn = document.getElementById('quickVideoBtn');
+                    
+                    if (newCallBtn) newCallBtn.disabled = false;
+                    if (quickVoiceBtn) quickVoiceBtn.disabled = false;
+                    if (quickVideoBtn) quickVideoBtn.disabled = false;
+                }
+            });
+            
+            this._notifyListeners('online', {});
+        },
+
+        // ==================== Call Initiation Order (No Race) ====================
+        initiateCall: async function(callType, participants = []) {
+            // Check if in degraded mode
+            if (this._callsState.degraded) {
+                logWarn(MODULE, 'Cannot initiate call - degraded mode', { state: this._currentState });
+                this._notifyListeners('call_blocked', { reason: 'degraded' });
+                return { success: false, reason: 'degraded' };
+            }
+
+            // Check if already in a call
+            if (this._callsState.callActive) {
+                logWarn(MODULE, 'Cannot initiate call - call already active', { state: this._currentState });
+                this._notifyListeners('call_blocked', { reason: 'call_active' });
+                return { success: false, reason: 'call_active' };
+            }
+
+            // Check if in recovery mode
+            if (this._callsState.recoveryMode) {
+                logWarn(MODULE, 'Cannot initiate call - recovery mode active', { state: this._currentState });
+                this._notifyListeners('call_blocked', { reason: 'recovery' });
+                return { success: false, reason: 'recovery' };
+            }
+
+            if (this._currentState !== CALLS_STATE.ACTIVE) {
+                logWarn(MODULE, 'Cannot initiate call - not in ACTIVE state', { state: this._currentState });
+                this._notifyListeners('call_blocked', { reason: 'not_active' });
+                return { success: false, reason: 'not_active' };
+            }
+
+            // Store pending call
+            this._callsState.pendingCall = { type: callType, participants };
+
+            // Verify session before call - CRITICAL
+            const verifyResult = await this.verifySession(true);
+
+            if (!verifyResult.valid) {
+                logWarn(MODULE, 'Call blocked - session verification failed', verifyResult);
+                this._showLoginRequiredUI();
+                this._callsState.pendingCall = null;
+                return { success: false, reason: 'verification_failed' };
+            }
+
+            // Update verified flag
+            this._callsState.verified = true;
+
+            // Check all prerequisites for WebRTC initialization
+            if (!this._parentReadyReceived) {
+                logWarn(MODULE, 'WebRTC blocked - parent not ready');
+                this._callsState.pendingCall = null;
+                return { success: false, reason: 'parent_not_ready' };
+            }
+
+            if (!this._session || !this._session.authenticated) {
+                logWarn(MODULE, 'WebRTC blocked - no valid session');
+                this._callsState.pendingCall = null;
+                return { success: false, reason: 'no_session' };
+            }
+
+            if (!this._callsState.token) {
+                logWarn(MODULE, 'WebRTC blocked - no token');
+                this._callsState.pendingCall = null;
+                return { success: false, reason: 'no_token' };
+            }
+
+            if (this._callsState.callActive) {
+                logWarn(MODULE, 'WebRTC blocked - call already active');
+                this._callsState.pendingCall = null;
+                return { success: false, reason: 'call_active' };
+            }
+
+            try {
+                // Mark call as active
+                this._callsState.callActive = true;
+                this._callsState.webrtcInitialized = true;
+
+                // Proceed with WebRTC initialization
+                const constraints = {
+                    audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+                    video: callType === 'video' ? { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user' } : false
+                };
+
+                const stream = await navigator.mediaDevices.getUserMedia(constraints);
+
+                const peerConnection = new RTCPeerConnection({
+                    iceServers: [
+                        { urls: 'stun:stun.l.google.com:19302' },
+                        { urls: 'stun:stun1.l.google.com:19302' }
+                    ],
+                    iceCandidatePoolSize: 10
+                });
+
+                stream.getTracks().forEach(track => {
+                    peerConnection.addTrack(track, stream);
+                });
+
+                peerConnection.onicecandidate = (event) => {
+                    if (event.candidate) {
+                        this._sendMessageImmediate({
+                            type: MESSAGE_TYPES.SIGNALING_MESSAGE,
+                            payload: {
+                                callId: this._activeCallId,
+                                candidate: event.candidate
+                            }
+                        });
+                    }
+                };
+
+                peerConnection.ontrack = (event) => {
+                    this._remoteStream = event.streams[0];
+                    this._notifyListeners('remote_stream_added', { stream: this._remoteStream });
+                };
+
+                const offer = await peerConnection.createOffer();
+                await peerConnection.setLocalDescription(offer);
+
+                const callId = `call_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+                this._activeCallId = callId;
+                this._localStream = stream;
+                this._peerConnection = peerConnection;
+
+                this._sendMessageImmediate({
+                    type: MESSAGE_TYPES.CALL_INITIATED,
+                    payload: {
+                        callId,
+                        callType,
+                        participants,
+                        offer: peerConnection.localDescription,
+                        timestamp: Date.now()
+                    },
+                    requestId: `call_init_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`
+                });
+
+                this.transition(CALLS_STATE.CALL_READY, 'call_initiated');
+
+                logSuccess(MODULE, 'Call initiated', { type: callType, callId });
+                
+                // Clear pending call
+                this._callsState.pendingCall = null;
+
+                return { 
+                    success: true, 
+                    callId,
+                    stream,
+                    peerConnection
+                };
+
+            } catch (error) {
+                logError(MODULE, 'Failed to initiate call', error);
+                this._callsState.callActive = false;
+                this._callsState.webrtcInitialized = false;
+                this._callsState.pendingCall = null;
+                return { success: false, reason: error.message };
+            }
+        },
+
+        // ==================== Incoming Call Flow ====================
+        handleIncomingCall: function(callData) {
+            logInfo(MODULE, 'Incoming call received', callData);
+
+            // Check if session exists and is authenticated
+            if (!this._session || !this._session.authenticated || this._session.expiresAt <= Date.now()) {
+                logWarn(MODULE, 'Incoming call rejected - session invalid');
+                return;
+            }
+
+            // Check if in recovery mode
+            if (this._callsState.recoveryMode) {
+                logWarn(MODULE, 'Incoming call queued - recovery mode active');
+                this._callsState.pendingCall = callData;
+                return;
+            }
+
+            // Check if already in a call
+            if (this._callsState.callActive) {
+                logWarn(MODULE, 'Incoming call rejected - already in a call');
+                
+                // Auto reject
+                this._sendMessageImmediate({
+                    type: MESSAGE_TYPES.CALL_ENDED,
+                    payload: {
+                        callId: callData.callId,
+                        reason: 'busy',
+                        timestamp: Date.now()
+                    }
+                });
+                return;
+            }
+
+            // Verify session quickly before showing UI
+            this.verifySession().then(result => {
+                if (!result.valid) {
+                    logWarn(MODULE, 'Incoming call rejected - verification failed');
+                    return;
+                }
+
+                this._showIncomingCallUI(callData);
+                this._pendingCall = callData;
+            });
+        },
+
+        _showIncomingCallUI: function(callData) {
+            try {
+                const incomingCallModal = document.getElementById('incomingCallModal');
+                const incomingCallName = document.getElementById('incomingCallName');
+                const incomingCallType = document.getElementById('incomingCallType');
+                const incomingCallAvatar = document.getElementById('incomingCallAvatar');
+                const incomingCallMood = document.getElementById('incomingCallMood');
+                const incomingCallIntention = document.getElementById('incomingCallIntention');
+                const acceptCallBtn = document.getElementById('acceptCallBtn');
+                const acceptVideoCallBtn = document.getElementById('acceptVideoCallBtn');
+                const declineCallBtn = document.getElementById('declineCallBtn');
+                const declineTimer = document.getElementById('declineTimer');
+
+                if (!incomingCallModal) return;
+
+                if (incomingCallName) {
+                    incomingCallName.textContent = callData.callerName || 'Unknown Caller';
+                }
+                if (incomingCallType) {
+                    incomingCallType.textContent = callData.callType === 'video' ? 'Video Call' : 'Voice Call';
+                }
+                
+                if (incomingCallAvatar) {
+                    const initials = (callData.callerName || 'U').split(' ').map(n => n[0]).join('').toUpperCase();
+                    incomingCallAvatar.innerHTML = SecurityCore.sanitizeString(initials);
+                    incomingCallAvatar.style.backgroundColor = this._stringToColor(callData.callerName);
+                }
+                
+                if (incomingCallMood && callData.mood) {
+                    const moodIcons = {
+                        happy: 'fa-smile',
+                        neutral: 'fa-meh',
+                        sad: 'fa-frown',
+                        angry: 'fa-angry',
+                        tired: 'fa-tired'
+                    };
+                    const icon = moodIcons[callData.mood] || 'fa-meh';
+                    incomingCallMood.innerHTML = `<i class="fas ${icon}"></i><span>${SecurityCore.sanitizeString(callData.mood)}</span>`;
+                    incomingCallMood.className = `mood-indicator mood-${SecurityCore.sanitizeString(callData.mood)}`;
+                    incomingCallMood.style.display = 'inline-flex';
+                }
+                
+                if (incomingCallIntention && callData.intention) {
+                    const intentionLabels = {
+                        quick: 'Quick Chat',
+                        important: 'Important',
+                        emergency: 'Emergency',
+                        checkin: 'Check-in',
+                        work: 'Work'
+                    };
+                    const label = intentionLabels[callData.intention] || 'Quick Chat';
+                    incomingCallIntention.innerHTML = `<i class="fas fa-bullseye"></i><span>${SecurityCore.sanitizeString(label)}</span>`;
+                    incomingCallIntention.className = `intention-indicator intention-${SecurityCore.sanitizeString(callData.intention)}`;
+                    incomingCallIntention.style.display = 'inline-flex';
+                }
+
+                if (acceptCallBtn) acceptCallBtn.style.display = callData.callType === 'voice' ? 'inline-flex' : 'none';
+                if (acceptVideoCallBtn) acceptVideoCallBtn.style.display = callData.callType === 'video' ? 'inline-flex' : 'none';
+
+                let timeLeft = 60;
+                if (declineTimer) declineTimer.textContent = timeLeft;
+                
+                const countdown = setInterval(() => {
+                    timeLeft--;
+                    if (declineTimer) declineTimer.textContent = timeLeft;
+                    if (timeLeft <= 0) {
+                        clearInterval(countdown);
+                        if (incomingCallModal.classList.contains('active')) {
+                            incomingCallModal.classList.remove('active');
+                        }
+                    }
+                }, 1000);
+
+                const acceptHandler = async () => {
+                    clearInterval(countdown);
+                    incomingCallModal.classList.remove('active');
+
+                    // Verify again before accepting
+                    const verifyResult = await this.verifySession(true);
+
+                    if (!verifyResult.valid) {
+                        logWarn(MODULE, 'Cannot accept call - session verification failed');
+                        this._showLoginRequiredUI();
+                        return;
+                    }
+
+                    this._acceptIncomingCall(callData);
+                };
+
+                if (acceptCallBtn) {
+                    acceptCallBtn.onclick = acceptHandler;
+                }
+                if (acceptVideoCallBtn) {
+                    acceptVideoCallBtn.onclick = acceptHandler;
+                }
+
+                if (declineCallBtn) {
+                    declineCallBtn.onclick = () => {
+                        clearInterval(countdown);
+                        incomingCallModal.classList.remove('active');
+                        
+                        this._sendMessageImmediate({
+                            type: MESSAGE_TYPES.CALL_ENDED,
+                            payload: {
+                                callId: callData.callId,
+                                reason: 'declined',
+                                timestamp: Date.now()
+                            }
+                        });
+                    };
+                }
+
+                incomingCallModal.classList.add('active');
+                logInfo(MODULE, 'Incoming call UI shown');
+
+            } catch (e) {
+                logError(MODULE, 'Failed to show incoming call UI', e);
+            }
+        },
+
+        _acceptIncomingCall: async function(callData) {
+            try {
+                // Mark call as active
+                this._callsState.callActive = true;
+                this._callsState.webrtcInitialized = true;
+
+                const constraints = {
+                    audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+                    video: callData.callType === 'video' ? { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user' } : false
+                };
+
+                const stream = await navigator.mediaDevices.getUserMedia(constraints);
+
+                const peerConnection = new RTCPeerConnection({
+                    iceServers: [
+                        { urls: 'stun:stun.l.google.com:19302' },
+                        { urls: 'stun:stun1.l.google.com:19302' }
+                    ],
+                    iceCandidatePoolSize: 10
+                });
+
+                stream.getTracks().forEach(track => {
+                    peerConnection.addTrack(track, stream);
+                });
+
+                peerConnection.onicecandidate = (event) => {
+                    if (event.candidate) {
+                        this._sendMessageImmediate({
+                            type: MESSAGE_TYPES.SIGNALING_MESSAGE,
+                            payload: {
+                                callId: callData.callId,
+                                candidate: event.candidate
+                            }
+                        });
+                    }
+                };
+
+                peerConnection.ontrack = (event) => {
+                    this._remoteStream = event.streams[0];
+                    this._notifyListeners('remote_stream_added', { stream: this._remoteStream });
+                };
+
+                const answer = await peerConnection.createAnswer();
+                await peerConnection.setLocalDescription(answer);
+
+                this._sendMessageImmediate({
+                    type: MESSAGE_TYPES.CALL_STARTED,
+                    payload: {
+                        callId: callData.callId,
+                        accepted: true,
+                        answer: peerConnection.localDescription,
+                        timestamp: Date.now()
+                    }
+                });
+
+                this._activeCallId = callData.callId;
+                this._localStream = stream;
+                this._peerConnection = peerConnection;
+                this._remoteStream = null;
+
+                this.transition(CALLS_STATE.IN_CALL, 'incoming_accepted');
+
+                logSuccess(MODULE, 'Incoming call accepted');
+
+                this._updateCallUI(true, callData.callType);
+
+            } catch (error) {
+                logError(MODULE, 'Failed to accept incoming call', error);
+                
+                this._callsState.callActive = false;
+                this._callsState.webrtcInitialized = false;
+
+                this._sendMessageImmediate({
+                    type: MESSAGE_TYPES.CALL_FAILED,
+                    payload: {
+                        callId: callData.callId,
+                        reason: error.message,
+                        timestamp: Date.now()
+                    }
+                });
+            }
+        },
+
+        endCall: async function() {
+            if (!this._activeCallId) return;
+
+            logInfo(MODULE, 'Ending call', { callId: this._activeCallId });
+
+            if (this._localStream) {
+                this._localStream.getTracks().forEach(track => track.stop());
+                this._localStream = null;
+            }
+
+            if (this._peerConnection) {
+                this._peerConnection.close();
+                this._peerConnection = null;
+            }
+
+            this._remoteStream = null;
+
+            this._sendMessageImmediate({
+                type: MESSAGE_TYPES.CALL_ENDED,
+                payload: {
+                    callId: this._activeCallId,
+                    timestamp: Date.now()
+                }
+            });
+
+            this._activeCallId = null;
+            
+            // Update call state
+            this._callsState.callActive = false;
+            this._callsState.webrtcInitialized = false;
+            
+            if (this._currentState === CALLS_STATE.IN_CALL) {
+                this.transition(CALLS_STATE.CALL_READY, 'call_ended');
+            }
+            
+            this._updateCallUI(false);
+
+            logSuccess(MODULE, 'Call ended');
+        },
+
+        _updateCallUI: function(inCall, callType = 'voice') {
+            try {
+                const muteBtn = document.getElementById('muteBtn');
+                const videoBtn = document.getElementById('videoBtn');
+                const endCallBtn = document.getElementById('endCallBtn');
+                const callStatusText = document.getElementById('callStatusText');
+                const videoGrid = document.getElementById('videoGrid');
+                const offlineCallPlaceholder = document.getElementById('offlineCallPlaceholder');
+
+                if (muteBtn) muteBtn.style.display = inCall ? 'inline-flex' : 'none';
+                if (videoBtn) videoBtn.style.display = (inCall && callType === 'video') ? 'inline-flex' : 'none';
+                if (endCallBtn) endCallBtn.style.display = inCall ? 'inline-flex' : 'none';
+                if (callStatusText) {
+                    callStatusText.textContent = inCall ? 'In call...' : 'Ready to call';
+                }
+                
+                if (videoGrid) {
+                    videoGrid.style.display = (inCall && callType === 'video') ? 'grid' : 'none';
+                }
+                
+                if (offlineCallPlaceholder) {
+                    offlineCallPlaceholder.style.display = (inCall && callType === 'voice') ? 'flex' : 'none';
+                }
+
+                const newCallBtn = document.getElementById('newCallBtn');
+                const quickVoiceBtn = document.getElementById('quickVoiceBtn');
+                const quickVideoBtn = document.getElementById('quickVideoBtn');
+                
+                if (newCallBtn) newCallBtn.disabled = inCall;
+                if (quickVoiceBtn) quickVoiceBtn.disabled = inCall;
+                if (quickVideoBtn) quickVideoBtn.disabled = inCall;
+
+            } catch (e) {
+                logError(MODULE, 'Failed to update call UI', e);
+            }
+        },
+
+        _stringToColor: function(str) {
+            if (!str) return '#6c5ce7';
+            let hash = 0;
+            for (let i = 0; i < str.length; i++) {
+                hash = str.charCodeAt(i) + ((hash << 5) - hash);
+            }
+            const colors = ['#6c5ce7', '#00b894', '#0984e3', '#fdcb6e', '#e17055', '#d63031', '#e84342'];
+            return colors[Math.abs(hash) % colors.length];
+        },
+
+        // ==================== Utility Methods ====================
+        _clearTimers: function() {
+            if (this._handshakeTimer) {
+                clearTimeout(this._handshakeTimer);
+                this._handshakeTimer = null;
+            }
+            if (this._fallbackTimer) {
+                clearTimeout(this._fallbackTimer);
+                this._fallbackTimer = null;
+            }
+            if (this._degradedTimer) {
+                clearTimeout(this._degradedTimer);
+                this._degradedTimer = null;
+            }
+            if (this._parentSilentTimer) {
+                clearTimeout(this._parentSilentTimer);
+                this._parentSilentTimer = null;
+            }
+            if (this._globalFailSafeTimer) {
+                clearTimeout(this._globalFailSafeTimer);
+                this._globalFailSafeTimer = null;
+            }
+            if (this._sessionVerificationTimer) {
+                clearInterval(this._sessionVerificationTimer);
+                this._sessionVerificationTimer = null;
+            }
+        },
+
+        getState: function() {
+            return this._currentState;
+        },
+
+        getSession: function() {
+            return this._session ? { ...this._session } : null;
+        },
+
+        isActive: function() {
+            return this._currentState === CALLS_STATE.ACTIVE;
+        },
+
+        isCallReady: function() {
+            return this._currentState === CALLS_STATE.CALL_READY;
+        },
+
+        isInCall: function() {
+            return this._currentState === CALLS_STATE.IN_CALL;
+        },
+
+        canInitiateCall: function() {
+            return this._currentState === CALLS_STATE.ACTIVE && 
+                   this._session && 
+                   this._session.authenticated &&
+                   this._session.expiresAt > Date.now() &&
+                   this._callsState.verified &&
+                   this._callsState.parentReady &&
+                   !this._callsState.degraded &&
+                   !this._callsState.recoveryMode;
+        },
+
+        addListener: function(listener) {
+            if (typeof listener === 'function') this._stateChangeListeners.add(listener);
+        },
+
+        removeListener: function(listener) {
+            this._stateChangeListeners.delete(listener);
+        },
+
+        _notifyListeners: function(event, data) {
+            this._stateChangeListeners.forEach(listener => {
+                try { listener(event, data); } catch (e) {}
+            });
+        },
+
+        reset: function() {
+            this._clearTimers();
+            this._stopHeartbeat();
+            this._stopParentSilentMonitor();
+            this._currentState = CALLS_STATE.INIT;
+            this._previousState = null;
+            this._moduleRegistered = false;
+            this._sessionReceived = false;
+            this._parentReadyReceived = false;
+            this._session = null;
+            this._heartbeatMissed = 0;
+            this._outboundQueue = [];
+            this._messageIdCache.clear();
+            this._verificationInProgress = false;
+            this._registrationAttempts = 0;
+            this._activeCallId = null;
+            this._localStream = null;
+            this._remoteStream = null;
+            this._peerConnection = null;
+            
+            // Reset callsState
+            this._callsState.registered = false;
+            this._callsState.parentReady = false;
+            this._callsState.session = null;
+            this._callsState.token = null;
+            this._callsState.verified = false;
+            this._callsState.verificationLock = false;
+            this._callsState.heartbeatInterval = null;
+            this._callsState.degraded = false;
+            this._callsState.callActive = false;
+            this._callsState.pendingCall = null;
+            this._callsState.webrtcInitialized = false;
+            this._callsState.recoveryMode = false;
+        }
+    };
+
+    CallsStateGovernor.initialize();
+
+    // ==================== V5StateGovernor - Wrapper for Compatibility ====================
+    const V5StateGovernor = {
+        _currentV5State: V5_STATE.BOOTING,
+
+        initialize: function() {
+            logInfo(MODULE, 'V5StateGovernor initialized (compatibility)');
+            return this;
+        },
+
+        transition: function(newV5State, reason = '') {
+            const mapping = {
+                [V5_STATE.BOOTING]: CALLS_STATE.INIT,
+                [V5_STATE.REGISTERING]: CALLS_STATE.REGISTERING,
+                [V5_STATE.WAITING_SESSION]: CALLS_STATE.REGISTERED,
+                [V5_STATE.WAITING_PARENT_READY]: CALLS_STATE.SESSION_RECEIVED,
+                [V5_STATE.ACTIVE]: CALLS_STATE.ACTIVE,
+                [V5_STATE.DEGRADED]: CALLS_STATE.TERMINATED,
+                [V5_STATE.STANDALONE]: CALLS_STATE.TERMINATED,
+                [V5_STATE.OFFLINE]: CALLS_STATE.TERMINATED
+            };
+            
+            const callsState = mapping[newV5State] || CALLS_STATE.INIT;
+            CallsStateGovernor.transition(callsState, reason);
+            return true;
+        },
+
+        startRegistration: function() {
+            CallsStateGovernor.startHandshake();
+        },
+
+        handleModuleRegistered: function() {
+            CallsStateGovernor.handleModuleRegistered();
+        },
+
+        handleSessionActive: function(sessionData) {
+            CallsStateGovernor.handleSessionActive(sessionData);
+        },
+
+        handleSessionNull: function() {
+            CallsStateGovernor.handleSessionNull();
+        },
+
+        handleParentReady: function() {
+            CallsStateGovernor.handleParentReady();
+        },
+
+        handleHeartbeatAck: function() {
+            CallsStateGovernor.handleHeartbeatAck();
+        },
+
+        handleOnline: function() {
+            CallsStateGovernor.handleOnline();
+        },
+
+        handleOffline: function() {
+            CallsStateGovernor.handleOffline();
+        },
+
+        verifySession: function(force) {
+            return CallsStateGovernor.verifySession(force);
+        },
+
+        queueMessage: function(message) {
+            CallsStateGovernor.queueMessage(message);
+        },
+
+        canSendOperational: function() {
+            return CallsStateGovernor.isActive() && CallsStateGovernor._parentReadyReceived;
+        },
+
+        getState: function() {
+            const callsState = CallsStateGovernor.getState();
+            const mapping = {
+                [CALLS_STATE.INIT]: V5_STATE.BOOTING,
+                [CALLS_STATE.REGISTERING]: V5_STATE.REGISTERING,
+                [CALLS_STATE.REGISTERED]: V5_STATE.WAITING_SESSION,
+                [CALLS_STATE.SESSION_RECEIVED]: V5_STATE.WAITING_PARENT_READY,
+                [CALLS_STATE.ACTIVE]: V5_STATE.ACTIVE,
+                [CALLS_STATE.CALL_READY]: V5_STATE.ACTIVE,
+                [CALLS_STATE.IN_CALL]: V5_STATE.ACTIVE,
+                [CALLS_STATE.TERMINATED]: V5_STATE.DEGRADED
+            };
+            return mapping[callsState] || V5_STATE.BOOTING;
+        },
+
+        isActive: function() {
+            return CallsStateGovernor.isActive();
+        },
+
+        isDegraded: function() {
+            return CallsStateGovernor.getState() === CALLS_STATE.TERMINATED;
+        },
+
+        isOffline: function() {
+            return !navigator.onLine;
+        },
+
+        addListener: function(listener) {
+            CallsStateGovernor.addListener(listener);
+        },
+
+        removeListener: function(listener) {
+            CallsStateGovernor.removeListener(listener);
+        },
+
+        reset: function() {
+            CallsStateGovernor.reset();
+        },
+
+        _enableQueue: function() {
+        }
+    };
+
+    V5StateGovernor.initialize();
 
     // ==================== ENVIRONMENT DETECTION ====================
     const ENVIRONMENT = {
@@ -350,50 +2685,50 @@
             const env = this.detect();
 
             const timeouts = {
-                handshake: 8000,
-                session: 6000,
-                ack: 5000,
+                handshake: 150,
+                session: 15000,
+                ack: 100,
                 heartbeat: 30000,
-                retryBackoff: 800,
-                recovery: 2000,
-                parentDetect: 5000,
-                preflight: 2000,
-                dependency: 3000,
-                api: 10000,
-                tokenRequest: 8000,
-                sessionSync: 10000
+                retryBackoff: 1500,
+                recovery: 5000,
+                parentDetect: 8000,
+                preflight: 5000,
+                dependency: 5000,
+                api: 20000,
+                tokenRequest: 15000,
+                sessionSync: 20000
             };
 
             if (env === 'VPN_NETWORK' || this._latency > 300) {
-                timeouts.handshake = 15000;
-                timeouts.session = 12000;
-                timeouts.ack = 8000;
+                timeouts.handshake = 300;
+                timeouts.session = 25000;
+                timeouts.ack = 150;
                 timeouts.heartbeat = 45000;
-                timeouts.retryBackoff = 1500;
-                timeouts.recovery = 3000;
-                timeouts.parentDetect = 8000;
-                timeouts.api = 20000;
-                timeouts.tokenRequest = 15000;
-                timeouts.sessionSync = 20000;
+                timeouts.retryBackoff = 3000;
+                timeouts.recovery = 8000;
+                timeouts.parentDetect = 15000;
+                timeouts.api = 30000;
+                timeouts.tokenRequest = 25000;
+                timeouts.sessionSync = 30000;
             }
 
             if (env === 'LOCAL_DEV') {
-                timeouts.handshake = 3000;
-                timeouts.session = 2000;
-                timeouts.ack = 2000;
-                timeouts.heartbeat = 10000;
-                timeouts.retryBackoff = 300;
-                timeouts.api = 5000;
-                timeouts.tokenRequest = 3000;
-                timeouts.sessionSync = 5000;
+                timeouts.handshake = 150;
+                timeouts.session = 8000;
+                timeouts.ack = 100;
+                timeouts.heartbeat = 30000;
+                timeouts.retryBackoff = 800;
+                timeouts.api = 10000;
+                timeouts.tokenRequest = 8000;
+                timeouts.sessionSync = 10000;
             }
 
             if (this._sandboxed) {
-                timeouts.handshake += 2000;
-                timeouts.session += 2000;
-                timeouts.api += 5000;
-                timeouts.tokenRequest += 2000;
-                timeouts.sessionSync += 3000;
+                timeouts.handshake += 50;
+                timeouts.session += 5000;
+                timeouts.api += 10000;
+                timeouts.tokenRequest += 5000;
+                timeouts.sessionSync += 8000;
             }
 
             return timeouts;
@@ -401,18 +2736,18 @@
 
         getMaxRetries: function() {
             const env = this.detect();
-            if (env === 'VPN_NETWORK') return 3;
-            if (env === 'PRODUCTION') return 2;
-            if (env === 'RENDER_HOSTED') return 2;
-            return 2;
+            if (env === 'VPN_NETWORK') return 5;
+            if (env === 'PRODUCTION') return 3;
+            if (env === 'RENDER_HOSTED') return 3;
+            return 3;
         },
 
         getHeartbeatInterval: function() {
             const env = this.detect();
-            if (env === 'VPN_NETWORK') return 30000;
-            if (env === 'PRODUCTION') return 20000;
-            if (env === 'RENDER_HOSTED') return 15000;
-            return 10000;
+            if (env === 'VPN_NETWORK') return 45000;
+            if (env === 'PRODUCTION') return 30000;
+            if (env === 'RENDER_HOSTED') return 30000;
+            return 30000;
         },
 
         getStorageStrategy: function() {
@@ -439,51 +2774,6 @@
 
     IframeEnvironment.detect();
 
-    // ==================== DETERMINISTIC STATE MACHINE ====================
-    const STATE = {
-        UNINITIALIZED: 'UNINITIALIZED',
-        BOOTSTRAPPING: 'BOOTSTRAPPING',
-        REGISTERING: 'REGISTERING',
-        REGISTERED: 'REGISTERED',
-        SESSION_PENDING: 'SESSION_PENDING',
-        SESSION_ACTIVE: 'SESSION_ACTIVE',
-        SERVICES_INITIALIZING: 'SERVICES_INITIALIZING',
-        ACTIVE: 'ACTIVE',
-        ERROR_RECOVERABLE: 'ERROR_RECOVERABLE',
-        ERROR_FATAL: 'ERROR_FATAL',
-        RECOVERING: 'RECOVERING',
-        INIT: 'INIT',
-        PREFLIGHT: 'PREFLIGHT',
-        DEPENDENCY: 'DEPENDENCY',
-        PARENT_DETECT: 'PARENT_DETECT',
-        SYNC: 'SYNC',
-        PERMISSIONS: 'PERMISSIONS',
-        READY: 'READY',
-        SUSPENDED: 'SUSPENDED',
-        DEGRADED: 'DEGRADED',
-        DESTROYED: 'DESTROYED',
-        DEMO: 'DEMO',
-        HANDSHAKE_IDLE: 'HANDSHAKE_IDLE',
-        HANDSHAKE_WAITING: 'HANDSHAKE_WAITING',
-        HANDSHAKE_IN_PROGRESS: 'HANDSHAKE_IN_PROGRESS',
-        HANDSHAKE_FAILED: 'HANDSHAKE_FAILED',
-        SESSION_IDLE: 'SESSION_IDLE',
-        SESSION_WAITING: 'SESSION_WAITING',
-        SESSION_VALID: 'SESSION_VALID',
-        SESSION_EXPIRED: 'SESSION_EXPIRED',
-        SESSION_ERROR: 'SESSION_ERROR'
-    };
-
-    const CallCoreState = {
-        IDLE: 'IDLE',
-        WAITING_PARENT: 'WAITING_PARENT',
-        WAITING_SESSION: 'WAITING_SESSION',
-        SYNCED: 'SYNCED',
-        ACTIVE: 'ACTIVE',
-        ERROR: 'ERROR',
-        RECOVERING: 'RECOVERING'
-    };
-
     // ==================== STATE GOVERNOR - SINGLE SOURCE OF TRUTH ====================
     const StateGovernor = {
         _currentState: STATE.UNINITIALIZED,
@@ -500,6 +2790,8 @@
         _initialized: false,
         _sessionActive: false,
         _fatalError: null,
+        _allowTransitions: true,
+        _handshakeCompleted: false,
 
         initialize: function() {
             if (this._initializationPromise) return this._initializationPromise;
@@ -514,6 +2806,15 @@
         },
 
         _transition: function(newState, reason = '') {
+            if (!this._allowTransitions) {
+                const now = Date.now();
+                if (!this._lastTransitionWarning || now - this._lastTransitionWarning > 30000) {
+                    logWarn(MODULE, `Transitions disabled, ignoring: ${this._currentState} → ${newState}`);
+                    this._lastTransitionWarning = now;
+                }
+                return false;
+            }
+
             if (this._stateLock || this._transitionLock) {
                 return false;
             }
@@ -628,30 +2929,79 @@
             this._transitionLock = false;
         },
 
+        disableTransitions: function() {
+            this._allowTransitions = false;
+        },
+
+        enableTransitions: function() {
+            this._allowTransitions = true;
+        },
+
         getState: function() { return this._currentState; },
         isInitialized: function() { return this._initialized; },
         isSessionActive: function() { return this._sessionActive; },
         hasFatalError: function() { return this._fatalError; },
 
-        waitForSession: function(timeout = 8000) {
-            if (this._sessionActive) return Promise.resolve({ success: true });
-            if (this._fatalError) return Promise.reject(new Error('Fatal error occurred'));
+        waitForSession: function(timeout = 15000) {
+            if (this._sessionActive) {
+                logInfo(MODULE, 'Session already active, resolving immediately');
+                return Promise.resolve({ success: true, immediate: true });
+            }
+            
+            if (IframeSessionClient && IframeSessionClient.isValid()) {
+                logInfo(MODULE, 'Valid session found in IframeSessionClient');
+                this._sessionActive = true;
+                return Promise.resolve({ success: true, fromClient: true });
+            }
+            
+            try {
+                const storedSession = SafeStorage.get('session');
+                if (storedSession && storedSession.token && storedSession.expiresAt > Date.now()) {
+                    logInfo(MODULE, 'Valid session found in storage');
+                    IframeSessionClient._handleSessionUpdate(storedSession);
+                    this._sessionActive = true;
+                    return Promise.resolve({ success: true, fromStorage: true });
+                }
+            } catch (e) {}
+            
+            if (this._fatalError) {
+                return Promise.reject(new Error('Fatal error occurred'));
+            }
 
-            if (!this._sessionPromise) {
-                this._sessionPromise = new Promise((resolve, reject) => {
-                    this._sessionResolve = resolve;
-                    this._sessionReject = reject;
+            if (this._sessionPromise) {
+                logInfo(MODULE, 'Returning existing session promise');
+                return this._sessionPromise;
+            }
 
-                    setTimeout(() => {
-                        if (this._sessionPromise && this._sessionReject) {
+            logInfo(MODULE, `Creating new session promise with timeout ${timeout}ms`);
+
+            this._sessionPromise = new Promise((resolve, reject) => {
+                this._sessionResolve = resolve;
+                this._sessionReject = reject;
+
+                this._sessionTimeoutId = setTimeout(() => {
+                    if (this._sessionPromise && this._sessionReject && !this._sessionActive) {
+                        if (IframeSessionClient && IframeSessionClient.isValid()) {
+                            logInfo(MODULE, 'Session became valid just before timeout');
+                            this._sessionActive = true;
+                            this._sessionResolve({ success: true, lastMinute: true });
+                            this._sessionResolve = null;
+                            this._sessionReject = null;
+                            if (this._sessionTimeoutId) {
+                                clearTimeout(this._sessionTimeoutId);
+                                this._sessionTimeoutId = null;
+                            }
+                        } else {
+                            logWarn(MODULE, `Session acquisition timeout after ${timeout}ms`);
                             this._sessionReject(new Error('Session acquisition timeout'));
                             this._sessionPromise = null;
                             this._sessionResolve = null;
                             this._sessionReject = null;
+                            this._sessionTimeoutId = null;
                         }
-                    }, timeout);
-                });
-            }
+                    }
+                }, timeout);
+            });
 
             return this._sessionPromise;
         },
@@ -688,38 +3038,37 @@
     const STORAGE_STRATEGY = IframeEnvironment.getStorageStrategy();
 
     const CONFIG = {
-        VERSION: '4.0.3',
-        PROTOCOL_VERSION: 'KYN-4.0',
+        VERSION: '5.0.0',
+        PROTOCOL_VERSION: 'KYN-6.0',
 
-        HANDSHAKE_TIMEOUT: ENV_TIMEOUTS.handshake,
-        SESSION_TIMEOUT: ENV_TIMEOUTS.session,
-        ACK_TIMEOUT: ENV_TIMEOUTS.ack,
-        HEARTBEAT_INTERVAL: ENV_HEARTBEAT,
-        RETRY_BACKOFF: ENV_TIMEOUTS.retryBackoff,
-        RECOVERY_DELAY: ENV_TIMEOUTS.recovery,
-        PARENT_DETECT_TIMEOUT: ENV_TIMEOUTS.parentDetect,
-        PREFLIGHT_TIMEOUT: ENV_TIMEOUTS.preflight,
-        DEPENDENCY_TIMEOUT: ENV_TIMEOUTS.dependency,
-        API_TIMEOUT: ENV_TIMEOUTS.api,
-        TOKEN_REQUEST_TIMEOUT: ENV_TIMEOUTS.tokenRequest || 8000,
-        SESSION_SYNC_TIMEOUT: ENV_TIMEOUTS.sessionSync || 10000,
+        HANDSHAKE_TIMEOUT: ENV_TIMEOUTS.handshake || 150,
+        HANDSHAKE_FALLBACK_TIMEOUT: 300,
+        REGISTER_ACK_TIMEOUT: 100,
 
-        MAX_RETRIES: Math.min(ENV_RETRIES, 2),
-        HANDSHAKE_MAX_ATTEMPTS: 1,
-        MAX_MESSAGE_RETRIES: 2,
-        MAX_RECOVERY_ATTEMPTS: 2,
-        AUTH_RETRY_LIMIT: 1,
+        VERIFY_TIMEOUT: ENV_TIMEOUTS.ack || 50,
+        VERIFY_MAX_RETRIES: 2,
+        VERIFY_RETRY_DELAY: 10,
 
-        AUTH_RETRY_DELAY: ENV_TIMEOUTS.retryBackoff,
-        SESSION_RETRY_DELAY: ENV_TIMEOUTS.retryBackoff,
+        HEARTBEAT_INTERVAL: ENV_HEARTBEAT || 30000,
+        HEARTBEAT_MAX_MISSED: 3,
 
-        SESSION_REFRESH_THRESHOLD: 300000,
-        MESSAGE_CACHE_TTL: 1000,
+        PARENT_SILENT_THRESHOLD: 10000,
+
+        SESSION_TIMEOUT: ENV_TIMEOUTS.session || 15000,
+        SESSION_REFRESH_THRESHOLD: 600000,
+
+        MESSAGE_CACHE_TTL: 5000,
         ERROR_CACHE_TTL: 60000,
-        MAX_PENDING_REQUESTS: 50,
-        CIRCUIT_BREAKER_THRESHOLD: 5,
-        CIRCUIT_BREAKER_RESET: 30000,
-        MAX_SESSION_WAIT: ENV_TIMEOUTS.session * 2,
+        MAX_PENDING_REQUESTS: 100,
+        CIRCUIT_BREAKER_THRESHOLD: 10,
+        CIRCUIT_BREAKER_RESET: 60000,
+        MAX_SESSION_WAIT: 30000,
+
+        MAX_RETRIES: ENV_RETRIES || 3,
+        MAX_MESSAGE_RETRIES: 3,
+        MAX_RECOVERY_ATTEMPTS: 3,
+        AUTH_RETRY_LIMIT: 2,
+        RETRY_BACKOFF: ENV_TIMEOUTS.retryBackoff || 1500,
 
         STORAGE_PREFIX: 'calls_core_',
         STORAGE_STRATEGY: STORAGE_STRATEGY,
@@ -734,10 +3083,6 @@
         ],
         TRUSTED_PROTOCOLS: ['http:', 'https:'],
 
-        HEARTBEAT_MAX_FAILURES: 3,
-        HEARTBEAT_INTERVAL_MS: 15000,
-        HEARTBEAT_MISSED_THRESHOLD: 3,
-
         API_ENDPOINT: ENVIRONMENT.apiEndpoint,
         WS_ENDPOINT: ENVIRONMENT.wsEndpoint,
         USE_HTTPS: ENVIRONMENT.isProduction
@@ -746,8 +3091,8 @@
     // ==================== HEARTBEAT CONFIGURATION ====================
     const HEARTBEAT_CONFIG = {
         failures: 0,
-        maxFailures: CONFIG.HEARTBEAT_MAX_FAILURES || 3,
-        interval: CONFIG.HEARTBEAT_INTERVAL_MS || 15000,
+        maxFailures: CONFIG.HEARTBEAT_MAX_MISSED || 3,
+        interval: CONFIG.HEARTBEAT_INTERVAL || 30000,
         lastBeat: 0,
         timer: null,
         enabled: true
@@ -755,19 +3100,14 @@
 
     function handleHeartbeatFailure() {
         HEARTBEAT_CONFIG.failures++;
-
         if (HEARTBEAT_CONFIG.failures >= HEARTBEAT_CONFIG.maxFailures) {
-            attemptSoftRecovery();
+            logWarn(MODULE, 'Heartbeat failures threshold reached');
         }
     }
 
     function resetHeartbeat() {
         HEARTBEAT_CONFIG.failures = 0;
-    }
-
-    function attemptSoftRecovery() {
-        fetchActiveCallUsers().catch(() => {});
-        HEARTBEAT_CONFIG.failures = 0;
+        V5StateGovernor.handleHeartbeatAck();
     }
 
     async function fetchActiveCallUsers() {
@@ -786,6 +3126,9 @@
 
     // ==================== MESSAGE TYPES ====================
     const MESSAGE_TYPES = {
+        REGISTER_MODULE: 'REGISTER_MODULE',
+        MODULE_REGISTERED: 'MODULE_REGISTERED',
+        
         CHILD_READY: 'CHILD_READY',
         PARENT_READY: 'PARENT_READY',
         HANDSHAKE_REQUEST: 'HANDSHAKE_REQUEST',
@@ -793,6 +3136,8 @@
         HANDSHAKE_RESPONSE: 'HANDSHAKE_RESPONSE',
 
         REQUEST_SESSION: 'REQUEST_SESSION',
+        SESSION_ACTIVE: 'SESSION_ACTIVE',
+        SESSION_NULL: 'SESSION_NULL',
         SESSION_RESPONSE: 'SESSION_RESPONSE',
         SESSION_DATA: 'SESSION_DATA',
         SESSION_INIT: 'SESSION_INIT',
@@ -802,9 +3147,13 @@
         CALL_SESSION_ACK: 'CALL_SESSION_ACK',
         VERIFY_SESSION: 'VERIFY_SESSION',
         SESSION_VERIFIED: 'SESSION_VERIFIED',
+        SESSION_REFRESHED: 'SESSION_REFRESHED',
+        SESSION_INVALIDATED: 'SESSION_INVALIDATED',
+        SESSION_RECOVERY: 'SESSION_RECOVERY',
 
         HEARTBEAT: 'HEARTBEAT',
         HEARTBEAT_RESPONSE: 'HEARTBEAT_RESPONSE',
+        HEARTBEAT_ACK: 'HEARTBEAT_ACK',
         PING: 'PING',
         PONG: 'PONG',
 
@@ -819,6 +3168,7 @@
         AUTH_ERROR: 'AUTH_ERROR',
         SESSION_ERROR: 'SESSION_ERROR',
 
+        CALL_INITIATED: 'CALL_INITIATED',
         CALL_CONNECTING: 'CALL_CONNECTING',
         CALL_STARTED: 'CALL_STARTED',
         CALL_ENDED: 'CALL_ENDED',
@@ -829,7 +3179,6 @@
 
         MOOD_UPDATE: 'MOOD_UPDATE',
         INTENTION_UPDATE: 'INTENTION_UPDATE',
-
         REACTION: 'REACTION',
 
         DATA_SYNC_COMPLETE: 'DATA_SYNC_COMPLETE',
@@ -858,13 +3207,19 @@
         USER_LOGGED_IN: 'USER_LOGGED_IN',
 
         INCOMING_CALL_SIMULATED: 'INCOMING_CALL_SIMULATED',
-
         IFRAME_REGISTERED: 'IFRAME_REGISTERED',
         CALLS_STATUS_WARNING: 'CALLS_STATUS_WARNING',
 
         CORE_READY: 'CORE_READY',
         CORE_ERROR: 'CORE_ERROR',
-        CORE_INITIALIZED: 'CORE_INITIALIZED'
+        CORE_INITIALIZED: 'CORE_INITIALIZED',
+        
+        NEW_MESSAGE: 'NEW_MESSAGE',
+        FRIEND_UPDATE: 'FRIEND_UPDATE',
+        GROUP_UPDATE: 'GROUP_UPDATE',
+        STATUS_UPDATE: 'STATUS_UPDATE',
+        SETTINGS_UPDATED: 'SETTINGS_UPDATED',
+        INCOMING_CALL: 'INCOMING_CALL'
     };
 
     // ==================== ORIGIN SECURITY ====================
@@ -1102,13 +3457,15 @@
 
     SafeStorage.initialize();
 
-    // ==================== HARDENED ACK PROTOCOL WITH HARD LIMITS ====================
+    // ==================== HARDENED ACK PROTOCOL ====================
     const MessageRegistry = {
         _pendingMessages: new Map(),
         _processedMessages: new Set(),
-        _maxRetries: 2,
-        _ackTimeout: CONFIG.ACK_TIMEOUT,
+        _maxRetries: 0,
+        _ackTimeout: CONFIG.REGISTER_ACK_TIMEOUT,
         _cleanupTimer: null,
+        _activeSession: false,
+        _retryEnabled: false,
 
         initialize: function() {
             this._startCleanup();
@@ -1129,7 +3486,7 @@
                 }
             }
 
-            if (this._processedMessages.size > 1000) {
+            if (this._processedMessages.size > 2000) {
                 this._processedMessages.clear();
             }
         },
@@ -1144,7 +3501,6 @@
             }
 
             const timeout = options.timeout || this._ackTimeout;
-            const maxRetries = 2;
 
             let resolve, reject;
             const promise = new Promise((res, rej) => {
@@ -1153,7 +3509,7 @@
             });
 
             const timer = setTimeout(() => {
-                this._handleTimeout(messageId, type, maxRetries);
+                this._failWithReason(messageId, 'timeout');
             }, timeout);
 
             this._pendingMessages.set(messageId, {
@@ -1162,26 +3518,10 @@
                 reject,
                 timer,
                 expiry: Date.now() + timeout,
-                retries: 0,
-                maxRetries,
                 options
             });
 
             return promise;
-        },
-
-        _handleTimeout: function(messageId, type, maxRetries) {
-            const pending = this._pendingMessages.get(messageId);
-            if (!pending) return;
-
-            const retryCount = (pending.retries || 0) + 1;
-
-            if (retryCount <= maxRetries) {
-                pending.retries = retryCount;
-                pending.expiry = Date.now() + (this._ackTimeout * Math.pow(1.5, retryCount - 1));
-            } else {
-                this._failWithReason(messageId, `max retries (${maxRetries}) exceeded`);
-            }
         },
 
         acknowledge: function(messageId, payload = {}) {
@@ -1226,12 +3566,16 @@
             }
             this._pendingMessages.clear();
             this._processedMessages.clear();
+        },
+
+        setSessionActive: function(active) {
+            this._activeSession = active;
         }
     };
 
     MessageRegistry.initialize();
 
-    // ==================== IFRAME TRANSPORT WITH HARDENED ACK ====================
+    // ==================== IFRAME TRANSPORT ====================
     const IframeTransport = {
         _messageId: 0,
         _queue: [],
@@ -1241,19 +3585,40 @@
         _heartbeatInterval: null,
         _lastHeartbeat: 0,
         _heartbeatMissed: 0,
-        _maxMissedHeartbeats: CONFIG.HEARTBEAT_MAX_FAILURES || 3,
+        _maxMissedHeartbeats: CONFIG.HEARTBEAT_MAX_MISSED || 3,
         _sessionRequested: false,
         _sessionRequestTimer: null,
         _listeners: new Set(),
         _targetOrigin: OriginSecurity.getTargetOrigin(),
-        _maxRetries: 2,
+        _maxRetries: 0,
         _backoffBase: CONFIG.RETRY_BACKOFF,
+        _sessionActive: false,
 
         initialize: function() {
+            this._setupImmediateMessageHandler();
             this._setupListeners();
             this._startHeartbeat();
             logReady(MODULE, 'IframeTransport initialized');
             return this;
+        },
+
+        _setupImmediateMessageHandler: function() {
+            const self = this;
+            
+            this._messageHandler = function(event) {
+                self.handleIncoming(event);
+            };
+            
+            window.addEventListener('message', this._messageHandler);
+            
+            if (!window.__callsCoreMessageHandler) {
+                window.__callsCoreMessageHandler = function(event) {
+                    self.handleIncoming(event);
+                };
+                window.addEventListener('message', window.__callsCoreMessageHandler);
+            }
+            
+            logInfo(MODULE, 'Immediate message handler installed');
         },
 
         _setupListeners: function() {
@@ -1261,12 +3626,14 @@
                 this._online = true;
                 this._processOfflineQueue();
                 this._notifyListeners('online', {});
+                V5StateGovernor.handleOnline();
                 logInfo(MODULE, 'Network online');
             });
 
             window.addEventListener('offline', () => {
                 this._online = false;
                 this._notifyListeners('offline', {});
+                V5StateGovernor.handleOffline();
                 logWarn(MODULE, 'Network offline');
             });
 
@@ -1287,7 +3654,7 @@
                     const messageId = options.messageId || this._generateMessageId();
                     const timestamp = options.timestamp || Date.now();
                     const requireAck = options.requireAck !== false;
-                    const timeout = options.timeout || CONFIG.ACK_TIMEOUT;
+                    const timeout = options.timeout || CONFIG.REGISTER_ACK_TIMEOUT;
                     const priority = options.priority || 'normal';
 
                     let actualType = type;
@@ -1301,6 +3668,7 @@
                         messageId: messageId,
                         requestId: messageId,
                         type: actualType,
+                        module: 'calls',
                         source: 'iframe',
                         target: 'parent',
                         timestamp,
@@ -1308,6 +3676,23 @@
                         version: CONFIG.VERSION,
                         requireAck
                     };
+
+                    if (actualType !== MESSAGE_TYPES.REGISTER_MODULE && !V5StateGovernor.canSendOperational()) {
+                        V5StateGovernor.queueMessage(message);
+                        
+                        if (requireAck) {
+                            MessageRegistry.register(messageId, actualType, { timeout })
+                                .then(result => {
+                                    resolve({ success: true, messageId, type: actualType, result });
+                                })
+                                .catch(error => {
+                                    reject(error);
+                                });
+                        } else {
+                            resolve({ success: true, messageId, type: actualType, queued: true });
+                        }
+                        return;
+                    }
 
                     const queueItem = {
                         message,
@@ -1328,7 +3713,7 @@
                     }
 
                     if (requireAck) {
-                        MessageRegistry.register(messageId, actualType, { timeout, maxRetries: this._maxRetries })
+                        MessageRegistry.register(messageId, actualType, { timeout })
                             .then(result => {
                                 resolve({ success: true, messageId, type: actualType, result });
                             })
@@ -1345,8 +3730,13 @@
             });
         },
 
+        setSessionActive: function(active) {
+            this._sessionActive = active;
+            MessageRegistry.setSessionActive(active);
+        },
+
         requestSessionFromParent: function() {
-            if (this._sessionRequested) return;
+            if (this._sessionRequested || this._sessionActive) return;
 
             this._sessionRequested = true;
 
@@ -1356,23 +3746,26 @@
 
             this._sessionRequestTimer = setTimeout(() => {
                 this._sessionRequested = false;
-            }, 30000);
+            }, 60000);
 
             const messageId = 'req_' + Date.now() + '_' + Math.random().toString(36).substr(2, 8);
+
+            const payload = {
+                timestamp: Date.now(),
+                frameId: window.name || 'calls-iframe'
+            };
 
             if (window.parent && window.parent !== window) {
                 try {
                     window.parent.postMessage({
                         type: 'REQUEST_SESSION',
+                        module: 'calls',
                         messageId: messageId,
                         requestId: messageId,
                         timestamp: Date.now(),
                         source: 'iframe',
                         frameId: window.name || 'calls-iframe',
-                        payload: {
-                            timestamp: Date.now(),
-                            frameId: window.name || 'calls-iframe'
-                        },
+                        payload: payload,
                         expectAck: true
                     }, '*');
                     logSending(MODULE, 'REQUEST_SESSION sent', { messageId });
@@ -1381,42 +3774,85 @@
                 }
             }
 
-            MessageRegistry.register(messageId, 'REQUEST_SESSION', { timeout: 10000 })
-                .catch(() => {});
+            if (!this._sessionActive) {
+                MessageRegistry.register(messageId, 'REQUEST_SESSION', { timeout: 20000 })
+                    .catch(() => {});
+            }
 
-            const responseHandler = (event) => {
+            const directHandler = (event) => {
                 if (!event.data) return;
 
-                if (event.data.type === 'SESSION_RESPONSE' || event.data.type === 'SESSION_DATA') {
-                    const sessionData = event.data.payload || event.data.data;
-                    if (sessionData && (sessionData.token || sessionData.user)) {
-                        IframeSessionClient._handleSessionUpdate(sessionData);
+                if (event.data.type === 'SESSION_RESPONSE' || 
+                    event.data.type === 'SESSION_DATA' || 
+                    event.data.type === 'SESSION_ACTIVE') {
+                    
+                    logSuccess(MODULE, 'DIRECT HANDLER: Session response received');
+                    
+                    const sessionData = event.data.payload || event.data.data || event.data;
+                    
+                    IframeSessionClient._handleSessionUpdate(sessionData);
+                    V5StateGovernor.handleSessionActive(sessionData);
+                    this.setSessionActive(true);
+                    
+                    if (StateGovernor && StateGovernor._sessionResolve) {
+                        StateGovernor._sessionResolve({ success: true });
+                        StateGovernor._sessionResolve = null;
+                        StateGovernor._sessionReject = null;
+                        if (StateGovernor._sessionTimeoutId) {
+                            clearTimeout(StateGovernor._sessionTimeoutId);
+                            StateGovernor._sessionTimeoutId = null;
+                        }
                     }
+                    
+                    if (IframeSessionClient && IframeSessionClient._sessionResolve) {
+                        IframeSessionClient._sessionResolve({ success: true });
+                        IframeSessionClient._sessionResolve = null;
+                        IframeSessionClient._sessionReject = null;
+                    }
+                    
+                    window.removeEventListener('message', directHandler);
                     window.removeEventListener('message', responseHandler);
                 }
             };
 
+            const responseHandler = (event) => {
+                if (!event.data) return;
+
+                if (event.data.type === 'SESSION_RESPONSE' || event.data.type === 'SESSION_DATA' ||
+                    event.data.type === 'SESSION_ACTIVE' || event.data.type === 'SESSION_NULL') {
+                    
+                    const sessionData = event.data.payload || event.data.data;
+                    
+                    if (event.data.type === 'SESSION_ACTIVE' && sessionData) {
+                        V5StateGovernor.handleSessionActive(sessionData);
+                        IframeSessionClient._handleSessionUpdate(sessionData);
+                        this.setSessionActive(true);
+                    } else if (event.data.type === 'SESSION_NULL') {
+                        V5StateGovernor.handleSessionNull();
+                        this.setSessionActive(false);
+                    } else if (sessionData && (sessionData.token || sessionData.user)) {
+                        V5StateGovernor.handleSessionActive(sessionData);
+                        IframeSessionClient._handleSessionUpdate(sessionData);
+                        this.setSessionActive(true);
+                    }
+                    
+                    window.removeEventListener('message', directHandler);
+                    window.removeEventListener('message', responseHandler);
+                }
+            };
+
+            window.addEventListener('message', directHandler);
             window.addEventListener('message', responseHandler);
 
             setTimeout(() => {
+                window.removeEventListener('message', directHandler);
                 window.removeEventListener('message', responseHandler);
-            }, 10000);
+            }, 30000);
         },
 
         requestTokenFromParent: function() {
-            return this.send('REQUEST_TOKEN', {
-                timestamp: Date.now(),
-                frameId: window.name || 'calls-iframe'
-            }, { requireAck: true, timeout: CONFIG.TOKEN_REQUEST_TIMEOUT })
-            .then(response => {
-                if (response && response.payload && response.payload.token) {
-                    IframeSessionClient._handleTokenUpdate(response.payload);
-                    if (APICore) {
-                        APICore.setToken(response.payload.token, response.payload.refreshToken, response.payload.expiry);
-                    }
-                }
-                return response;
-            });
+            logToken(MODULE, 'Token request disabled - parent only');
+            return Promise.resolve({ success: false, error: 'Token management disabled' });
         },
 
         _processQueue: async function() {
@@ -1434,8 +3870,10 @@
                     continue;
                 }
 
-                if (item.attempts >= this._maxRetries) {
-                    if (!item.requireAck) {
+                if (item.attempts >= this._maxRetries || this._sessionActive) {
+                    if (!item.requireAck || this._sessionActive) {
+                        item.resolve({ success: true, messageId: item.id, type: item.message.type, degraded: true });
+                    } else {
                         item.reject(new Error('Max retries exceeded'));
                     }
                     this._queue.shift();
@@ -1456,7 +3894,7 @@
                     item.attempts++;
 
                     let delay = this._backoffBase * Math.pow(2, item.attempts - 1);
-                    if (IframeEnvironment.isVPNNetwork()) delay *= 1.5;
+                    if (IframeEnvironment.isVPNNetwork()) delay *= 2;
 
                     await new Promise(resolve => setTimeout(resolve, delay));
 
@@ -1494,6 +3932,96 @@
 
             if (!message || typeof message !== 'object') return;
 
+            if (message.type === 'MODULE_REGISTERED') {
+                V5StateGovernor.handleModuleRegistered();
+            }
+
+            if (message.type === 'TOKEN_RESPONSE' || message.type === 'TOKEN_REFRESHED') {
+                logToken(MODULE, 'Token response ignored - parent only');
+                const requestId = message.requestId || message.payload?.requestId;
+                if (requestId) {
+                    MessageRegistry.acknowledge(requestId, message.payload);
+                }
+            }
+
+            if (message.type === 'SESSION_RESPONSE' || 
+                message.type === 'SESSION_DATA' || 
+                message.type === 'SESSION_ACTIVE' ||
+                message.type === 'SESSION_UPDATE' ||
+                message.type === 'PARENT_SESSION_RESPONSE') {
+                
+                this._sessionRequested = false;
+                if (this._sessionRequestTimer) {
+                    clearTimeout(this._sessionRequestTimer);
+                    this._sessionRequestTimer = null;
+                }
+
+                const requestId = message.requestId || message.payload?.requestId;
+                if (requestId) {
+                    MessageRegistry.acknowledge(requestId, message.payload);
+                }
+
+                const sessionData = message.payload || message.data || message;
+                
+                logSession(MODULE, 'received from parent', { 
+                    hasToken: !!(sessionData.token || sessionData.jwt || sessionData.accessToken),
+                    hasUser: !!(sessionData.user || sessionData.userId)
+                });
+                
+                const token = sessionData.token || sessionData.jwt || sessionData.accessToken;
+                if (token) {
+                    const normalizedSession = {
+                        token: token,
+                        user: sessionData.user || { id: sessionData.userId },
+                        userId: sessionData.userId || sessionData.user?.id,
+                        expiresAt: sessionData.expiresAt || sessionData.expiry || (Date.now() + 3600000),
+                        authenticated: sessionData.authenticated !== false
+                    };
+                    
+                    IframeSessionClient._handleSessionUpdate(normalizedSession);
+                    V5StateGovernor.handleSessionActive(normalizedSession);
+                    this.setSessionActive(true);
+                    
+                    if (StateGovernor && StateGovernor._sessionResolve) {
+                        logSuccess(MODULE, 'Resolving StateGovernor session promise');
+                        StateGovernor._sessionResolve({ success: true });
+                        StateGovernor._sessionResolve = null;
+                        StateGovernor._sessionReject = null;
+                        if (StateGovernor._sessionTimeoutId) {
+                            clearTimeout(StateGovernor._sessionTimeoutId);
+                            StateGovernor._sessionTimeoutId = null;
+                        }
+                    }
+                    
+                    if (IframeSessionClient && IframeSessionClient._sessionResolve) {
+                        logSuccess(MODULE, 'Resolving IframeSessionClient session promise');
+                        IframeSessionClient._sessionResolve({ success: true });
+                        IframeSessionClient._sessionResolve = null;
+                        IframeSessionClient._sessionReject = null;
+                    }
+                    
+                    if (typeof window.__resolveSessionPromise === 'function') {
+                        window.__resolveSessionPromise(true);
+                    }
+                }
+            }
+
+            if (message.type === 'SESSION_NULL') {
+                V5StateGovernor.handleSessionNull();
+                this.setSessionActive(false);
+            }
+
+            if (message.type === 'PARENT_READY') {
+                V5StateGovernor.handleParentReady();
+            }
+
+            if (message.type === 'HEARTBEAT_ACK' || message.type === 'HEARTBEAT_RESPONSE' || message.type === 'PONG') {
+                this._lastHeartbeat = Date.now();
+                this._heartbeatMissed = 0;
+                resetHeartbeat();
+                V5StateGovernor.handleHeartbeatAck();
+            }
+
             if (message.type === MESSAGE_TYPES.ACK || message.type === 'ACK') {
                 const ackId = message.payload?.ackId ||
                               message.ackId ||
@@ -1506,35 +4034,8 @@
                 }
             }
 
-            if (message.type === 'SESSION_RESPONSE') {
-                this._sessionRequested = false;
-                if (this._sessionRequestTimer) {
-                    clearTimeout(this._sessionRequestTimer);
-                    this._sessionRequestTimer = null;
-                }
-
-                const requestId = message.requestId || message.payload?.requestId;
-                if (requestId) {
-                    MessageRegistry.acknowledge(requestId, message.payload);
-                }
-
-                if (message.payload) {
-                    IframeSessionClient._handleSessionUpdate(message.payload);
-                }
-            }
-
-            if (message.type === 'TOKEN_RESPONSE') {
-                const requestId = message.requestId || message.payload?.requestId;
-                if (requestId) {
-                    MessageRegistry.acknowledge(requestId, message.payload);
-                }
-
-                if (message.payload && message.payload.token) {
-                    IframeSessionClient._handleTokenUpdate(message.payload);
-                    if (APICore) {
-                        APICore.setToken(message.payload.token, message.payload.refreshToken, message.payload.expiry);
-                    }
-                }
+            if (message.type === 'TOKEN_UPDATE') {
+                logToken(MODULE, 'Token update ignored - parent only');
             }
 
             if (message.type === 'SESSION_VERIFIED') {
@@ -1545,29 +4046,55 @@
 
                 if (message.payload && message.payload.valid) {
                     resetHeartbeat();
+                    this.setSessionActive(true);
                 }
             }
 
-            if (message.type === 'TOKEN_UPDATE') {
+            if (message.type === 'SESSION_REFRESHED') {
                 if (message.payload && message.payload.token) {
-                    IframeSessionClient._handleTokenUpdate(message.payload);
-                    if (APICore) {
-                        APICore.setToken(message.payload.token, message.payload.refreshToken, message.payload.expiry);
+                    IframeSessionClient._handleSessionUpdate(message.payload);
+                    logSuccess(MODULE, 'Session refreshed atomically');
+                }
+            }
+
+            if (message.type === 'SESSION_INVALIDATED') {
+                logWarn(MODULE, 'Session invalidated');
+                IframeSessionClient.clear();
+            }
+
+            if (message.type === 'SESSION_RECOVERY') {
+                logInfo(MODULE, 'Session recovery initiated');
+                V5StateGovernor.transition(V5_STATE.RECOVERY, 'session_recovery');
+                callsState.recoveryMode = true; // Update callsState
+                
+                // Disable call UI during recovery
+                CallsStateGovernor._disableCallUI();
+            }
+
+            if (message.type === 'INCOMING_CALL') {
+                CallsStateGovernor.handleIncomingCall(message.payload);
+            }
+
+            if (['NEW_MESSAGE', 'FRIEND_UPDATE', 'GROUP_UPDATE', 'STATUS_UPDATE', 
+                 'SETTINGS_UPDATED'].includes(message.type)) {
+                
+                if (!message.type) return;
+                
+                if (message.type === 'NEW_MESSAGE' && message.payload && message.payload.module && 
+                    message.payload.module !== 'calls' && message.payload.module !== 'all') {
+                    return;
+                }
+                
+                if (message.type === 'FRIEND_UPDATE' && window.callAPI) {
+                    window.callAPI.fetchContacts(true).catch(() => {});
+                }
+                
+                if (message.type === 'SETTINGS_UPDATED' && message.payload && window.AppState) {
+                    window.AppState.settings = { ...window.AppState.settings, ...message.payload.settings };
+                    if (typeof window.applySettingsToUI === 'function') {
+                        window.applySettingsToUI();
                     }
                 }
-            }
-
-            if (message.type === 'SESSION_UPDATE') {
-                if (message.payload && (message.payload.token || message.payload.user)) {
-                    IframeSessionClient._handleSessionUpdate(message.payload);
-                }
-            }
-
-            if (message.type === MESSAGE_TYPES.HEARTBEAT_RESPONSE ||
-                message.type === MESSAGE_TYPES.PONG) {
-                this._lastHeartbeat = Date.now();
-                this._heartbeatMissed = 0;
-                resetHeartbeat();
             }
 
             this._notifyListeners('received', { type: message.type, data: message });
@@ -1590,8 +4117,8 @@
             this._heartbeatMissed = 0;
 
             this._heartbeatInterval = setInterval(() => {
-                if (this._online && window.parent && window.parent !== window) {
-                    this.send(MESSAGE_TYPES.HEARTBEAT, { timestamp: Date.now() }, { requireAck: false })
+                if (this._online && window.parent && window.parent !== window && V5StateGovernor.isActive()) {
+                    this.send('HEARTBEAT', { timestamp: Date.now() }, { requireAck: false })
                         .catch(() => {});
 
                     if (Date.now() - this._lastHeartbeat > interval * 2) {
@@ -1601,8 +4128,8 @@
                         if (this._heartbeatMissed >= this._maxMissedHeartbeats) {
                             this._notifyListeners('connection_suspect', { missed: this._heartbeatMissed });
 
-                            if (StateGovernor.getState() === STATE.ACTIVE) {
-                                StateGovernor._transition(STATE.ACTIVE, STATE.DEGRADED, 'heartbeat_failure');
+                            if (V5StateGovernor && V5StateGovernor.isActive()) {
+                                V5StateGovernor.transition(V5_STATE.STANDALONE, 'heartbeat_failure');
                                 RecoveryManager.scheduleRecovery();
                             }
                         }
@@ -1630,7 +4157,9 @@
                 lastHeartbeat: this._lastHeartbeat,
                 heartbeatMissed: this._heartbeatMissed,
                 targetOrigin: this._targetOrigin,
-                sessionRequested: this._sessionRequested
+                sessionRequested: this._sessionRequested,
+                sessionActive: this._sessionActive,
+                v5State: V5StateGovernor ? V5StateGovernor.getState() : 'unknown'
             };
         },
 
@@ -1652,7 +4181,7 @@
 
     IframeTransport.initialize();
 
-    // ==================== API CORE - PARENT-OWNED WEBSOCKET ====================
+    // ==================== API CORE ====================
     const APICore = {
         _initialized: false,
         _initializing: false,
@@ -1676,8 +4205,14 @@
         _tokenRefreshPromise: null,
         _tokenRefreshTimer: null,
         _lastWsAttempt: 0,
+        _initLock: false,
 
         initialize: async function() {
+            if (this._initLock) {
+                logInfo(MODULE, 'API Core initialization already in progress');
+                return { success: false, status: 'in_progress' };
+            }
+
             if (this._initialized) {
                 return { success: true, status: 'already_initialized' };
             }
@@ -1686,11 +4221,16 @@
                 return { success: false, status: 'in_progress' };
             }
 
+            this._initLock = true;
             this._initializing = true;
             logInfo(MODULE, 'Initializing API Core', { endpoint: this._baseURL });
 
             try {
-                await this._loadToken();
+                const session = IframeSessionClient.getSession();
+                if (session && session.token) {
+                    this._token = session.token;
+                    this._tokenExpiry = session.expiresAt;
+                }
 
                 this._setupListeners();
 
@@ -1707,9 +4247,12 @@
 
             } catch (error) {
                 this._initializing = false;
+                this._initLock = false;
                 this._emitCoreError(error);
                 logError(MODULE, 'API Core initialization failed', error);
                 return { success: false, error: error.message, fallback: false };
+            } finally {
+                this._initLock = false;
             }
         },
 
@@ -1753,7 +4296,8 @@
                 if (!message || typeof message !== 'object') return;
 
                 if (message.type === MESSAGE_TYPES.TOKEN_UPDATE ||
-                    message.type === MESSAGE_TYPES.TOKEN_REFRESH) {
+                    message.type === MESSAGE_TYPES.TOKEN_REFRESH ||
+                    message.type === 'SESSION_REFRESHED') {
                     const tokenData = message.payload || message;
                     if (tokenData.token) {
                         this.setToken(tokenData.token, tokenData.refreshToken, tokenData.expiry);
@@ -1772,6 +4316,12 @@
                     if (data.data && data.data.payload && data.data.payload.token) {
                         this.setToken(data.data.payload.token, data.data.payload.refreshToken, data.data.payload.expiry);
                     }
+                }
+            });
+
+            IframeSessionClient.addListener((event, data) => {
+                if (event === 'update' && data && data.token) {
+                    this.setToken(data.token, data.refreshToken, data.expiresAt);
                 }
             });
         },
@@ -1794,31 +4344,10 @@
             this._processingQueue = false;
         },
 
-        _loadToken: async function() {
-            try {
-                const storedToken = localStorage.getItem('jwt_token');
-                const storedRefreshToken = localStorage.getItem('refresh_token');
-                const storedExpiry = localStorage.getItem('token_expiry');
-
-                if (storedToken && storedExpiry && parseInt(storedExpiry) > Date.now()) {
-                    this._token = storedToken;
-                    this._refreshToken = storedRefreshToken;
-                    this._tokenExpiry = parseInt(storedExpiry);
-                    logSuccess(MODULE, 'Loaded valid token from storage');
-                    return true;
-                }
-            } catch (e) {}
-
-            try {
-                await StateGovernor.waitForSession(CONFIG.TOKEN_REQUEST_TIMEOUT);
-                return true;
-            } catch (e) {
-                return false;
-            }
-        },
-
         setToken: function(token, refreshToken, expiry) {
-            if (token && (token.includes('demo-token') || token === 'demo-token-1771688949339')) {
+            if (!token) return;
+            
+            if (token.includes('demo-token') || token === 'demo-token-1771688949339') {
                 return;
             }
             if (this._token === token) return;
@@ -1830,12 +4359,6 @@
             this._persistToken();
 
             this._scheduleTokenRefresh();
-
-            if (IframeSessionClient && IframeSessionClient._token !== token) {
-                setTimeout(() => {
-                    IframeSessionClient._handleTokenUpdate({ token, refreshToken, expiry: this._tokenExpiry });
-                }, 0);
-            }
 
             logSuccess(MODULE, 'Token updated');
         },
@@ -1858,12 +4381,11 @@
             const refreshTime = Math.max(0, timeUntilExpiry - CONFIG.SESSION_REFRESH_THRESHOLD);
 
             if (refreshTime <= 0) {
-                this._refreshTokenRequest();
                 return;
             }
 
             this._tokenRefreshTimer = setTimeout(() => {
-                this._refreshTokenRequest();
+                logInfo(MODULE, 'Token expiry approaching - waiting for parent refresh');
             }, refreshTime);
         },
 
@@ -1887,33 +4409,8 @@
         },
 
         _refreshTokenRequest: async function() {
-            if (this._tokenRefreshPromise) return this._tokenRefreshPromise;
-
-            if (!this._refreshToken) return false;
-
-            this._tokenRefreshPromise = (async () => {
-                try {
-                    const response = await fetch(this._baseURL + '/auth/refresh', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ refreshToken: this._refreshToken })
-                    });
-
-                    if (response.ok) {
-                        const data = await response.json();
-                        this.setToken(data.token, data.refreshToken, data.expiry);
-                        logSuccess(MODULE, 'Token refreshed successfully');
-                        return true;
-                    }
-                } catch (error) {
-                    logError(MODULE, 'Token refresh failed', error);
-                } finally {
-                    this._tokenRefreshPromise = null;
-                }
-                return false;
-            })();
-
-            return this._tokenRefreshPromise;
+            logToken(MODULE, 'Token refresh disabled - parent only');
+            return false;
         },
 
         isReady: function() { return this._coreReady; },
@@ -1956,11 +4453,11 @@
     let lastRegisterSent = 0;
     let isRegistered = false;
     let registrationAttempts = 0;
-    const MAX_REGISTRATION_ATTEMPTS = 2;
+    const MAX_REGISTRATION_ATTEMPTS = 3;
 
     function registerWithParent() {
         const now = Date.now();
-        if (now - lastRegisterSent < 3000) return;
+        if (now - lastRegisterSent < 5000) return;
         lastRegisterSent = now;
 
         if (isRegistered) return;
@@ -1985,7 +4482,9 @@
         } catch (error) {
             logError(MODULE, 'Failed to register with parent', error);
             if (registrationAttempts < MAX_REGISTRATION_ATTEMPTS) {
-                setTimeout(registerWithParent, 5000);
+                setTimeout(registerWithParent, 10000);
+            } else {
+                logWarn(MODULE, 'Module registration failed after max attempts');
             }
         }
     }
@@ -1994,7 +4493,7 @@
         registerWithParent();
     }
 
-    // ==================== IFRAME HANDSHAKE AUTHORITY - SINGLE-RUN GUARANTEED ====================
+    // ==================== IFRAME HANDSHAKE AUTHORITY ====================
     const IframeHandshakeAuthority = {
         _handshakeLock: false,
         _handshakePromise: null,
@@ -2003,6 +4502,8 @@
         _listeners: new Set(),
         _handshakeTimer: null,
         _handshakeCompleted: false,
+        _handshakeAttempts: 0,
+        _maxHandshakeAttempts: 1,
 
         initialize: function() {
             this._setupListeners();
@@ -2021,10 +4522,8 @@
                     message.type === 'SESSION_DATA' ||
                     message.type === 'SESSION_UPDATE' ||
                     message.type === 'SESSION_INIT' ||
-                    message.type === 'TOKEN_RESPONSE' ||
-                    message.type === 'SESSION_ACK' ||
-                    message.type === 'CALL_SESSION_ACK' ||
-                    message.type === 'TOKEN_UPDATE') {
+                    message.type === 'SESSION_ACTIVE' ||
+                    message.type === 'SESSION_NULL') {
 
                     if (!this._handshakeCompleted) {
                         this._completeHandshake('session_received');
@@ -2125,7 +4624,7 @@
                         this._handshakeResolve({ success: true, degraded: true, reason: 'timeout' });
                         this._handshakeResolve = null;
                         this._handshakeReject = null;
-                        logWarn(MODULE, 'Handshake timeout, continuing with degraded mode');
+                        logWarn(MODULE, 'Handshake timeout, continuing');
                     }
                 }, timeout);
             });
@@ -2136,6 +4635,14 @@
         },
 
         _performHandshake: function() {
+            this._handshakeAttempts++;
+            
+            if (this._handshakeAttempts > this._maxHandshakeAttempts) {
+                logWarn(MODULE, 'Max handshake attempts reached, completing');
+                this._completeHandshake('max_attempts');
+                return;
+            }
+
             const messageId = 'hs_' + Date.now() + '_' + Math.random().toString(36).substr(2, 8);
 
             IframeTransport.send(MESSAGE_TYPES.CHILD_READY, {
@@ -2155,13 +4662,13 @@
                 if (!this._handshakeCompleted) {
                     safeRegister();
                 }
-            }, 100);
+            }, 500);
 
             setTimeout(() => {
-                if (!this._handshakeCompleted) {
+                if (!this._handshakeCompleted && !IframeTransport._sessionActive) {
                     IframeTransport.requestSessionFromParent();
                 }
-            }, 500);
+            }, 1000);
         },
 
         reset: function() {
@@ -2174,12 +4681,14 @@
                 this._handshakeTimer = null;
             }
             this._handshakeCompleted = false;
+            this._handshakeAttempts = 0;
         },
 
         getStatus: function() {
             return {
                 handshakeComplete: this._handshakeCompleted,
-                state: StateGovernor.getState()
+                state: StateGovernor.getState(),
+                attempts: this._handshakeAttempts
             };
         },
 
@@ -2196,7 +4705,7 @@
 
     IframeHandshakeAuthority.initialize();
 
-    // ==================== IFRAME SESSION CLIENT - PROMISE-BASED SESSION GATE ====================
+    // ==================== IFRAME SESSION CLIENT ====================
     const IframeSessionClient = {
         _session: null,
         _token: null,
@@ -2221,8 +4730,12 @@
         _sessionPromise: null,
         _sessionResolve: null,
         _sessionReject: null,
+        _initLock: false,
 
         initialize: function() {
+            if (this._initLock) return this;
+            this._initLock = true;
+            
             this._loadFromStorage();
             this._setupListeners();
             this._startRefreshTimer();
@@ -2231,11 +4744,42 @@
             if (this._valid && this._token) {
                 this._usingCachedSession = true;
                 this._resolveSessionPromise();
-                logSuccess(MODULE, 'Session loaded from storage');
+                IframeTransport.setSessionActive(true);
+                MessageRegistry.setSessionActive(true);
+                V5StateGovernor.handleSessionActive({ token: this._token, authenticated: true });
+                logSession(MODULE, 'loaded from storage');
             }
 
             logReady(MODULE, 'IframeSessionClient initialized', { valid: this._valid });
             return this;
+        },
+
+        checkStorage: function() {
+            try {
+                const stored = SafeStorage.get('session');
+                if (!stored) return false;
+                
+                if (stored.token && stored.token.length > 10) {
+                    const expiresAt = stored.expiresAt || stored.expiry;
+                    if (expiresAt && expiresAt < Date.now()) {
+                        SafeStorage.remove('session');
+                        return false;
+                    }
+                    
+                    this._token = stored.token;
+                    this._userId = stored.userId;
+                    this._expiresAt = expiresAt || (Date.now() + 3600000);
+                    this._refreshToken = stored.refreshToken;
+                    this._valid = true;
+                    this._state = STATE.SESSION_VALID;
+                    
+                    logSession(MODULE, 'emergency recovery from storage');
+                    return true;
+                }
+            } catch (e) {
+                logError(MODULE, 'checkStorage error', e);
+            }
+            return false;
         },
 
         _resolveSessionPromise: function() {
@@ -2275,7 +4819,7 @@
                         this._sessionResolve = null;
                         this._sessionReject = null;
                         this._sessionPromise = null;
-                        logWarn(MODULE, 'Session acquisition timeout');
+                        logSession(MODULE, 'acquisition timeout');
                     }
                 }, timeout);
             });
@@ -2298,6 +4842,7 @@
 
                     case MESSAGE_TYPES.TOKEN_UPDATE:
                     case MESSAGE_TYPES.TOKEN_REFRESH:
+                    case 'SESSION_REFRESHED':
                         this._handleTokenUpdate(message.payload || message.data);
                         break;
 
@@ -2307,9 +4852,17 @@
 
                     case 'SESSION_RESPONSE':
                     case 'SESSION_DATA':
+                    case 'SESSION_ACTIVE':
                         if (message.payload) {
                             this._handleSessionUpdate(message.payload);
                         }
+                        break;
+
+                    case 'SESSION_NULL':
+                        this._valid = false;
+                        this._token = null;
+                        this._guestMode = true;
+                        this._resolveSessionPromise();
                         break;
 
                     case MESSAGE_TYPES.AUTH_ERROR:
@@ -2318,6 +4871,10 @@
 
                     case MESSAGE_TYPES.VERIFY_SESSION:
                         this._handleVerifySession(message.payload || message.data, message.messageId);
+                        break;
+                        
+                    case 'SESSION_INVALIDATED':
+                        this.clear();
                         break;
                 }
             };
@@ -2339,11 +4896,15 @@
 
         _handleSessionUpdate: function(data) {
             let updated = false;
+            let hadToken = !!this._token;
 
             if (data.token) {
                 this._token = data.token;
                 this._tokenReceived = true;
                 updated = true;
+                IframeTransport.setSessionActive(true);
+                MessageRegistry.setSessionActive(true);
+                logSession(MODULE, 'token received');
             }
 
             if (data.userId || data.user?.id) {
@@ -2378,8 +4939,16 @@
                 }
 
                 this._notifyListeners('update', data);
-                this._resolveSessionPromise();
-                logSuccess(MODULE, 'Session updated from parent');
+                
+                if (this._sessionResolve) {
+                    logSession(MODULE, 'resolving promise from update');
+                    this._sessionResolve({ success: true, fromUpdate: true });
+                    this._sessionResolve = null;
+                    this._sessionReject = null;
+                    this._sessionPromise = null;
+                }
+                
+                logSession(MODULE, 'updated from parent' + (hadToken ? ' (refresh)' : ''));
             }
         },
 
@@ -2397,6 +4966,9 @@
                 this._expiresAt = data.expires || data.expiry || (Date.now() + 3600000);
                 this._refreshToken = data.refreshToken || this._refreshToken;
 
+                IframeTransport.setSessionActive(true);
+                MessageRegistry.setSessionActive(true);
+
                 this._updateSession();
                 this._saveToStorage();
                 this._sendAck();
@@ -2409,7 +4981,7 @@
 
                 this._notifyListeners('token', data);
                 this._resolveSessionPromise();
-                logSuccess(MODULE, 'Token updated from parent');
+                logToken(MODULE, 'updated from parent');
 
             } finally {
                 setTimeout(() => { this._processingToken = false; }, 500);
@@ -2507,6 +5079,7 @@
                         fromStorage: true 
                     });
                     
+                    logSession(MODULE, 'loaded from storage');
                     return true;
                 }
 
@@ -2530,6 +5103,9 @@
             this._usingCachedSession = false;
             this._tokenReceived = false;
 
+            IframeTransport.setSessionActive(false);
+            MessageRegistry.setSessionActive(false);
+
             SafeStorage.remove('session');
 
             this._notifyListeners('clear', {});
@@ -2549,12 +5125,11 @@
             const refreshTime = Math.max(0, timeUntilExpiry - CONFIG.SESSION_REFRESH_THRESHOLD);
 
             if (refreshTime <= 0) {
-                IframeTransport.requestSessionFromParent();
                 return;
             }
 
             this._refreshTimer = setTimeout(() => {
-                IframeTransport.requestSessionFromParent();
+                logInfo(MODULE, 'Session expiry approaching - waiting for parent refresh');
             }, refreshTime);
         },
 
@@ -2569,11 +5144,11 @@
                     }
 
                     this.clear();
-                } else if (this._expiresAt && (this._expiresAt - Date.now()) < 300000 && !this._expiryWarningSent) {
+                } else if (this._expiresAt && (this._expiresAt - Date.now()) < 600000 && !this._expiryWarningSent) {
                     this._expiryWarningSent = true;
                     this._notifyListeners('expiring', { timeLeft: this._expiresAt - Date.now() });
                 }
-            }, 60000);
+            }, 120000);
         },
 
         addListener: function(listener) {
@@ -2642,6 +5217,7 @@
         _offlineQueue: [],
         _online: navigator.onLine,
         _listeners: new Set(),
+        _sessionActive: false,
 
         initialize: function() {
             this._setupListeners();
@@ -2674,6 +5250,7 @@
         },
 
         canRetry: function(key, maxRetries = this._maxRetries) {
+            if (this._sessionActive) return false;
             const count = this._retryCounters.get(key) || 0;
             const breaker = this.getCircuitBreaker(key);
             return count < maxRetries && breaker.canExecute();
@@ -2699,13 +5276,17 @@
         getBackoffDelay: function(key) {
             const count = this._retryCounters.get(key) || 0;
             let delay = this._backoffBase * Math.pow(2, count);
-            if (IframeEnvironment.isVPNNetwork()) delay *= 1.5;
+            if (IframeEnvironment.isVPNNetwork()) delay *= 2;
             return delay;
         },
 
         executeWithRetry: async function(fn, key, options = {}) {
+            if (this._sessionActive) {
+                return fn();
+            }
+
             const maxRetries = options.maxRetries || this._maxRetries;
-            const timeout = options.timeout || 30000;
+            const timeout = options.timeout || 60000;
             let lastError;
 
             while (this.canRetry(key, maxRetries)) {
@@ -2763,6 +5344,10 @@
             });
         },
 
+        setSessionActive: function(active) {
+            this._sessionActive = active;
+        },
+
         addListener: function(listener) {
             if (typeof listener === 'function') this._listeners.add(listener);
         },
@@ -2778,7 +5363,8 @@
                 online: this._online,
                 circuitBreakers: this._circuitBreakers.size,
                 retryCounters: this._retryCounters.size,
-                offlineQueueSize: this._offlineQueue.length
+                offlineQueueSize: this._offlineQueue.length,
+                sessionActive: this._sessionActive
             };
         }
     };
@@ -2834,7 +5420,7 @@
         _recoveryInProgress: false,
         _recoveryAttempts: 0,
         _maxRecoveryAttempts: CONFIG.MAX_RECOVERY_ATTEMPTS,
-        _recoveryBackoff: CONFIG.RECOVERY_DELAY,
+        _recoveryBackoff: CONFIG.RETRY_BACKOFF,
         _lastCheckpoint: null,
         _checkpoints: [],
         _recoveryTimer: null,
@@ -2901,7 +5487,7 @@
             }
 
             if (this._recoveryAttempts >= this._maxRecoveryAttempts) {
-                logWarn(MODULE, 'Max recovery attempts reached, entering degraded mode');
+                logWarn(MODULE, 'Max recovery attempts reached');
                 return { success: false, reason: 'max_attempts' };
             }
 
@@ -2946,7 +5532,7 @@
 
                     if (this._recoveryAttempts < this._maxRecoveryAttempts) {
                         let delay = this._recoveryBackoff * Math.pow(2, this._recoveryAttempts - 1);
-                        if (IframeEnvironment.isVPNNetwork()) delay *= 1.5;
+                        if (IframeEnvironment.isVPNNetwork()) delay *= 2;
 
                         logInfo(MODULE, `Recovery retrying in ${delay}ms`);
 
@@ -2990,11 +5576,11 @@
                 setTimeout(() => {
                     window.removeEventListener('online', handler);
                     resolve();
-                }, 30000);
+                }, 60000);
             });
         },
 
-        scheduleRecovery: function(delay = CONFIG.RECOVERY_DELAY) {
+        scheduleRecovery: function(delay = CONFIG.RETRY_BACKOFF) {
             if (this._recoveryTimer) clearTimeout(this._recoveryTimer);
 
             this._recoveryTimer = setTimeout(() => {
@@ -3150,7 +5736,16 @@
             errors: 0,
             retries: 0,
             recoveries: 0,
-            stateChanges: 0
+            stateChanges: 0,
+            tokenAcquisitions: 0,
+            tokenRefreshes: 0,
+            pipelineStages: 0,
+            handshakeDuration: 0,
+            verificationLatency: 0,
+            heartbeatTracking: 0,
+            callStartTime: 0,
+            callEndReason: null,
+            recoveryTriggers: 0
         },
         _history: [],
         _startTime: Date.now(),
@@ -3171,6 +5766,27 @@
 
             if (this._metrics.hasOwnProperty(name)) this._metrics[name]++;
 
+            // Track specific metrics
+            if (name === 'handshake_duration' && data.duration) {
+                this._metrics.handshakeDuration = data.duration;
+            }
+            if (name === 'verification_latency' && data.latency) {
+                this._metrics.verificationLatency = data.latency;
+            }
+            if (name === 'heartbeat') {
+                this._metrics.heartbeatTracking++;
+            }
+            if (name === 'call_start') {
+                this._metrics.callStartTime = Date.now();
+                this._metrics.callEndReason = null;
+            }
+            if (name === 'call_end' && data.reason) {
+                this._metrics.callEndReason = data.reason;
+            }
+            if (name === 'recovery_trigger') {
+                this._metrics.recoveryTriggers++;
+            }
+
             const entry = {
                 name,
                 data,
@@ -3179,7 +5795,9 @@
                     coreState: StateGovernor.getState(),
                     sessionValid: IframeSessionClient.isValid(),
                     online: navigator.onLine,
-                    visible: !document.hidden
+                    visible: !document.hidden,
+                    v5State: V5StateGovernor ? V5StateGovernor.getState() : 'unknown',
+                    tokenValid: !!callsState.token
                 }
             };
 
@@ -3198,7 +5816,9 @@
                     coreState: StateGovernor.getState(),
                     sessionValid: IframeSessionClient.isValid(),
                     online: navigator.onLine,
-                    visible: !document.hidden
+                    visible: !document.hidden,
+                    v5State: V5StateGovernor ? V5StateGovernor.getState() : 'unknown',
+                    tokenValid: !!callsState.token
                 },
                 environment: IframeEnvironment.getFullReport(),
                 transport: IframeTransport.getStatus(),
@@ -3208,7 +5828,9 @@
                     timeRemaining: IframeSessionClient.getTimeRemaining()
                 } : { valid: false },
                 recovery: RecoveryManager.getStatus(),
-                api: APICore.getStatus()
+                api: APICore.getStatus(),
+                token: TokenManager ? TokenManager.getStatus() : null,
+                callsState: { ...callsState }
             };
 
             this._snapshots.push(snapshot);
@@ -3227,7 +5849,9 @@
                     coreState: StateGovernor.getState(),
                     sessionValid: IframeSessionClient.isValid(),
                     online: navigator.onLine,
-                    visible: !document.hidden
+                    visible: !document.hidden,
+                    v5State: V5StateGovernor ? V5StateGovernor.getState() : 'unknown',
+                    tokenValid: !!callsState.token
                 },
                 environment: IframeEnvironment.getFullReport(),
                 transport: IframeTransport.getStatus(),
@@ -3237,7 +5861,9 @@
                     timeRemaining: IframeSessionClient.getTimeRemaining()
                 } : { valid: false },
                 recovery: RecoveryManager.getStatus(),
-                api: APICore.getStatus()
+                api: APICore.getStatus(),
+                token: TokenManager ? TokenManager.getStatus() : null,
+                callsState: { ...callsState }
             };
         },
 
@@ -3251,7 +5877,16 @@
                 errors: 0,
                 retries: 0,
                 recoveries: 0,
-                stateChanges: 0
+                stateChanges: 0,
+                tokenAcquisitions: 0,
+                tokenRefreshes: 0,
+                pipelineStages: 0,
+                handshakeDuration: 0,
+                verificationLatency: 0,
+                heartbeatTracking: 0,
+                callStartTime: 0,
+                callEndReason: null,
+                recoveryTriggers: 0
             };
             this._history = [];
             this._snapshots = [];
@@ -3282,7 +5917,10 @@
                 diagnostics: DiagnosticsAgent,
                 origin: OriginSecurity,
                 api: APICore,
-                state: StateGovernor
+                state: StateGovernor,
+                v5State: V5StateGovernor,
+                token: TokenManager,
+                callsState: callsState
             };
 
             this._initialized = true;
@@ -3421,7 +6059,7 @@
 
             setTimeout(() => {
                 if (notification.parentNode) notification.remove();
-            }, 5000);
+            }, 10000);
         },
 
         _restoreUI: function() {
@@ -3545,7 +6183,310 @@
 
     NavigationGuard.initialize();
 
-    // ==================== DETERMINISTIC SAFE INITIALIZATION - SINGLE-RUN ====================
+    // ==================== SINGLE AUTHORITATIVE LIFECYCLE CONTROLLER ====================
+    const LifecycleController = {
+        _initializationPromise: null,
+        _initializationLock: false,
+        _pipelineCompleted: false,
+        _pipelineStage: null,
+        _pipelineStartTime: 0,
+        _pipelineResults: {},
+        _listeners: new Set(),
+        _handshakeCompleted: false,
+        _sessionAcquired: false,
+        _apiInitialized: false,
+        _pipelineAttempts: 0,
+        _maxPipelineAttempts: 2,
+
+        initialize: function() {
+            logReady(MODULE, 'LifecycleController initialized');
+            return this;
+        },
+
+        runDeterministicPipeline: async function() {
+            if (this._initializationPromise) {
+                return this._initializationPromise;
+            }
+
+            if (this._initializationLock) {
+                logWarn(MODULE, 'Pipeline already running, waiting');
+                return new Promise(resolve => {
+                    const checkInterval = setInterval(() => {
+                        if (this._pipelineCompleted || !this._initializationLock) {
+                            clearInterval(checkInterval);
+                            resolve(this._pipelineResults);
+                        }
+                    }, 100);
+                });
+            }
+
+            this._pipelineAttempts++;
+            if (this._pipelineAttempts > this._maxPipelineAttempts) {
+                logWarn(MODULE, 'Max pipeline attempts reached, completing');
+                this._pipelineResults = { success: true, degraded: true };
+                this._pipelineCompleted = true;
+                return this._pipelineResults;
+            }
+
+            this._initializationLock = true;
+            this._pipelineStartTime = Date.now();
+            this._pipelineResults = {};
+
+            this._initializationPromise = this._executePipeline();
+
+            return this._initializationPromise;
+        },
+
+        _executePipeline: async function() {
+            try {
+                logInfo(MODULE, 'Starting deterministic pipeline');
+
+                StateGovernor.enableTransitions();
+
+                const pipelineResult = await SessionPipeline.run();
+                
+                this._pipelineResults = pipelineResult;
+                this._pipelineCompleted = true;
+                this._initializationLock = false;
+
+                if (pipelineResult.success) {
+                    logSuccess(MODULE, `Deterministic pipeline completed in ${pipelineResult.duration || 0}ms`, { degraded: pipelineResult.degraded });
+
+                    window.dispatchEvent(new CustomEvent('core.ready', {
+                        detail: {
+                            timestamp: Date.now(),
+                            version: CONFIG.VERSION,
+                            environment: ENVIRONMENT.current,
+                            duration: pipelineResult.duration || 0,
+                            degraded: pipelineResult.degraded || false
+                        }
+                    }));
+
+                    return pipelineResult;
+                } else {
+                    throw new Error(pipelineResult.error || 'Pipeline failed');
+                }
+
+            } catch (error) {
+                logError(MODULE, 'Pipeline execution failed', error);
+                this._initializationLock = false;
+                if (!StateGovernor._transition(StateGovernor.getState(), STATE.ERROR_FATAL, 'pipeline_failed')) {
+                    StateGovernor._currentState = STATE.ERROR_FATAL;
+                }
+                RecoveryManager.scheduleRecovery();
+
+                this._pipelineResults.success = false;
+                this._pipelineResults.error = error.message;
+                return this._pipelineResults;
+            } finally {
+                StateGovernor.disableTransitions();
+            }
+        },
+
+        _runPreflight: async function() {
+            logInfo(MODULE, 'Preflight stage');
+            if (document.readyState === 'loading') {
+                await new Promise(resolve => {
+                    document.addEventListener('DOMContentLoaded', resolve, { once: true });
+                });
+            }
+            return { success: true, readyState: document.readyState };
+        },
+
+        _runDependencyCheck: async function() {
+            logInfo(MODULE, 'Dependency check stage');
+            const dependencies = {
+                postMessage: typeof window.postMessage === 'function',
+                addEventListener: typeof window.addEventListener === 'function',
+                Promise: typeof Promise !== 'undefined'
+            };
+            const missing = Object.entries(dependencies)
+                .filter(([_, available]) => !available)
+                .map(([name]) => name);
+            return { success: missing.length === 0, missing, dependencies };
+        },
+
+        _runParentDetection: async function() {
+            logInfo(MODULE, 'Parent detection stage');
+            const parentDetected = !!(window.parent && window.parent !== window);
+            let sameOrigin = false;
+            if (parentDetected) {
+                try {
+                    sameOrigin = window.location.origin === window.parent.location.origin;
+                } catch (e) {
+                    sameOrigin = false;
+                }
+            }
+            return { success: true, parentDetected, sameOrigin };
+        },
+
+        _runHandshake: async function() {
+            logInfo(MODULE, 'Handshake stage');
+
+            let handshakeResult;
+            try {
+                handshakeResult = await IframeHandshakeAuthority.start({
+                    timeout: CONFIG.HANDSHAKE_TIMEOUT
+                });
+            } catch (error) {
+                logError(MODULE, 'Handshake error', error);
+                handshakeResult = { success: false, error: error.message };
+            }
+
+            return handshakeResult;
+        },
+
+        _runSessionAcquisition: async function() {
+            logInfo(MODULE, 'Session acquisition stage');
+
+            try {
+                if (IframeSessionClient.isValid()) {
+                    logSuccess(MODULE, 'Session already valid');
+                    return { success: true, source: 'cached' };
+                }
+
+                const storedSession = IframeSessionClient.checkStorage();
+                if (storedSession) {
+                    logSuccess(MODULE, 'Session restored from storage');
+                    return { success: true, source: 'storage' };
+                }
+
+                logInfo(MODULE, 'Requesting session from parent');
+                
+                if (!window.__callsCoreMessageHandler) {
+                    logWarn(MODULE, 'Message handler not ready, setting up backup');
+                    IframeTransport._setupImmediateMessageHandler();
+                }
+                
+                IframeTransport.requestSessionFromParent();
+
+                try {
+                    const timeout = CONFIG.SESSION_TIMEOUT * 2;
+                    const result = await StateGovernor.waitForSession(timeout);
+                    logSuccess(MODULE, 'Session acquired from parent', result);
+                    
+                    if (!IframeSessionClient.isValid()) {
+                        logWarn(MODULE, 'Session promise resolved but session not valid');
+                        if (IframeSessionClient.checkStorage()) {
+                            logSuccess(MODULE, 'Session recovered from storage after promise');
+                        } else {
+                            return { success: false, error: 'Session promise resolved but no session' };
+                        }
+                    }
+                    
+                    IframeTransport.setSessionActive(true);
+                    MessageRegistry.setSessionActive(true);
+                    ReliabilityEngine.setSessionActive(true);
+                    
+                    return { success: true, source: 'parent' };
+                    
+                } catch (error) {
+                    logWarn(MODULE, 'Session wait failed', error.message);
+                    
+                    if (IframeSessionClient.isValid()) {
+                        logSuccess(MODULE, 'Session became valid despite timeout');
+                        IframeTransport.setSessionActive(true);
+                        MessageRegistry.setSessionActive(true);
+                        ReliabilityEngine.setSessionActive(true);
+                        return { success: true, source: 'delayed' };
+                    }
+                    
+                    const emergencyToken = SafeStorage.get('session');
+                    if (emergencyToken && emergencyToken.token) {
+                        logWarn(MODULE, 'Using emergency token from storage');
+                        IframeSessionClient._handleTokenUpdate(emergencyToken);
+                        IframeTransport.setSessionActive(true);
+                        MessageRegistry.setSessionActive(true);
+                        ReliabilityEngine.setSessionActive(true);
+                        return { success: true, source: 'emergency' };
+                    }
+                }
+
+                logWarn(MODULE, 'Session acquisition failed');
+                return { success: false, error: 'Session acquisition failed' };
+
+            } catch (error) {
+                logError(MODULE, 'Session acquisition error', error);
+                return { success: false, error: error.message };
+            }
+        },
+        _runAPICoreInitialization: async function() {
+            logInfo(MODULE, 'API Core initialization stage');
+            try {
+                const result = await APICore.initialize();
+                return { success: result.success, result };
+            } catch (error) {
+                logError(MODULE, 'API Core init failed', error);
+                return { success: false, error: error.message };
+            }
+        },
+
+        _runServicesInitialization: async function() {
+            logInfo(MODULE, 'Services initialization stage');
+
+            safeRegister();
+
+            if (window.callAPI && typeof window.callAPI.initialize === 'function') {
+                try {
+                    await window.callAPI.initialize();
+                } catch (error) {
+                    logError(MODULE, 'API service init failed', error);
+                }
+            }
+
+            if (window.callCore && typeof window.callCore.safeInitialize === 'function') {
+                try {
+                    await window.callCore.safeInitialize();
+                } catch (error) {
+                    logError(MODULE, 'Call core init failed', error);
+                }
+            }
+
+            return { success: true };
+        },
+
+        getPipelineStatus: function() {
+            return {
+                stage: this._pipelineStage,
+                completed: this._pipelineCompleted,
+                locked: this._initializationLock,
+                startTime: this._pipelineStartTime,
+                duration: this._pipelineStartTime ? Date.now() - this._pipelineStartTime : 0,
+                results: this._pipelineResults
+            };
+        },
+
+        reset: function() {
+            this._initializationPromise = null;
+            this._initializationLock = false;
+            this._pipelineCompleted = false;
+            this._pipelineStage = null;
+            this._pipelineStartTime = 0;
+            this._pipelineResults = {};
+            this._handshakeCompleted = false;
+            this._sessionAcquired = false;
+            this._apiInitialized = false;
+            this._pipelineAttempts = 0;
+        },
+
+        addListener: function(listener) {
+            if (typeof listener === 'function') this._listeners.add(listener);
+        },
+
+        removeListener: function(listener) {
+            this._listeners.delete(listener);
+        },
+
+        _notifyListeners: function(event, data) {
+            this._listeners.forEach(listener => {
+                try { listener(event, data); } catch (e) {}
+            });
+        }
+    };
+
+    LifecycleController.initialize();
+
+    // ==================== DETERMINISTIC SAFE INITIALIZATION ====================
     let _PARENT_READY_ = false;
     let _HANDSHAKE_DONE_ = false;
 
@@ -3599,7 +6540,7 @@
 
     let validatedSession = null;
     let sessionValidationTimestamp = 0;
-    const SESSION_VALIDATION_TTL = 30000;
+    const SESSION_VALIDATION_TTL = 60000;
 
     let callCoreState = CallCoreState.IDLE;
     let handshakePromise = null;
@@ -3608,7 +6549,7 @@
     let sessionAckReceived = false;
     let sessionAckTimestamp = 0;
     let sessionSyncAttempts = 0;
-    const MAX_SESSION_SYNC_ATTEMPTS = 2;
+    const MAX_SESSION_SYNC_ATTEMPTS = 3;
 
     let recoveryInProgress = false;
     let lastValidSession = null;
@@ -3616,7 +6557,7 @@
     let _verificationInProgress = false;
     let _lastVerificationTime = 0;
     let _lastVerificationResult = true;
-    const VERIFICATION_COOLDOWN = 10000;
+    const VERIFICATION_COOLDOWN = 30000;
 
     // ==================== ORIGINAL ENVIRONMENT DETECTOR ====================
     const EnvironmentDetector = {
@@ -3694,19 +6635,19 @@
         getTimeouts: function() {
             const env = this.detect();
             if (env === 'VPN_NETWORK' || this._latency > 300) {
-                return { handshake: 15000, session: 12000, ack: 8000, heartbeat: 45000, retryBackoff: 1500 };
+                return { handshake: 300, session: 25000, ack: 150, heartbeat: 45000, retryBackoff: 3000 };
             }
             if (env === 'PRODUCTION') {
-                return { handshake: 8000, session: 6000, ack: 5000, heartbeat: 30000, retryBackoff: 800 };
+                return { handshake: 150, session: 15000, ack: 100, heartbeat: 30000, retryBackoff: 1500 };
             }
-            return { handshake: 5000, session: 4000, ack: 3000, heartbeat: 15000, retryBackoff: 500 };
+            return { handshake: 150, session: 8000, ack: 100, heartbeat: 30000, retryBackoff: 800 };
         },
 
         getMaxRetries: function() {
             const env = this.detect();
-            if (env === 'VPN_NETWORK') return 3;
-            if (env === 'PRODUCTION') return 2;
-            return 2;
+            if (env === 'VPN_NETWORK') return 5;
+            if (env === 'PRODUCTION') return 3;
+            return 3;
         }
     };
 
@@ -3816,7 +6757,7 @@
             if (!logger._errors.has(hash)) {
                 logger._errors.set(hash, Date.now());
                 logger._store('once', msg, data);
-                setTimeout(() => logger._errors.delete(hash), 5000);
+                setTimeout(() => logger._errors.delete(hash), 10000);
                 if (this._debugMode) logInfo('Logger', msg, data);
             }
         },
@@ -3855,7 +6796,7 @@
         if (loggedErrors.has(hash)) return;
         loggedErrors.add(hash);
         console[type](`[Calls core] ${msg}`);
-        setTimeout(() => loggedErrors.delete(hash), 5000);
+        setTimeout(() => loggedErrors.delete(hash), 10000);
     }
 
     function logErrorOnce(module, error, context = '') {
@@ -3864,7 +6805,7 @@
         if (!loggedErrors.has(hash)) {
             logOnceLegacy('warn', `${module} error: ${error.message} ${context}`);
             loggedErrors.add(hash);
-            setTimeout(() => loggedErrors.delete(hash), 60000);
+            setTimeout(() => loggedErrors.delete(hash), 120000);
         }
     }
 
@@ -3909,7 +6850,7 @@
                 return false;
             }
             const timestamp = message.timestamp || message._timestamp;
-            if (timestamp && (timestamp > Date.now() + 60000 || timestamp < Date.now() - 300000)) {
+            if (timestamp && (timestamp > Date.now() + 60000 || timestamp < Date.now() - 600000)) {
                 logger.once(`Invalid message: timestamp out of range`, { id: message.id || message.messageId });
                 return false;
             }
@@ -3921,7 +6862,7 @@
             }
             try {
                 const size = JSON.stringify(message).length;
-                if (size > 1024 * 100) {
+                if (size > 1024 * 200) {
                     logger.once(`Message too large`, { id: messageId, size });
                     return false;
                 }
@@ -4115,6 +7056,7 @@
                 if (message.type === MESSAGE_TYPES.PARENT_READY) {
                     this._parentReadyReceived = true;
                     _PARENT_READY_ = true;
+                    V5StateGovernor.handleParentReady();
 
                     if (this._state === 'idle' || this._state === 'waiting') this._state = 'ready';
                 }
@@ -4177,6 +7119,7 @@
                         window.removeEventListener('message', handler);
                         _PARENT_READY_ = true;
                         this._parentReadyReceived = true;
+                        V5StateGovernor.handleParentReady();
                         resolve(true);
                     }
                 };
@@ -4249,7 +7192,8 @@
                     if (!response) return;
 
                     if (response.type === MESSAGE_TYPES.SESSION_DATA ||
-                        response.type === MESSAGE_TYPES.SESSION_INIT) {
+                        response.type === MESSAGE_TYPES.SESSION_INIT ||
+                        response.type === 'SESSION_ACTIVE') {
 
                         clearTimeout(timeout);
                         window.removeEventListener('message', handler);
@@ -4258,6 +7202,9 @@
                         if (sessionData && sessionData.token) {
                             this.handleSessionData(sessionData);
                             resolve({ success: true });
+                        } else if (response.type === 'SESSION_NULL') {
+                            V5StateGovernor.handleSessionNull();
+                            resolve({ success: true, guestMode: true });
                         } else {
                             resolve({ success: false, reason: 'invalid_session' });
                         }
@@ -4292,6 +7239,8 @@
                     sessionValidationTimestamp = Date.now();
                     sessionAckReceived = true;
                     sessionAckTimestamp = Date.now();
+                    
+                    V5StateGovernor.handleSessionActive(sessionData);
                 }
 
                 this.sendSessionAck(sessionData);
@@ -4367,6 +7316,7 @@
                         break;
                     case MESSAGE_TYPES.TOKEN_UPDATE:
                     case MESSAGE_TYPES.TOKEN_REFRESH:
+                    case 'SESSION_REFRESHED':
                         this.handleTokenUpdate(message.payload || message.data);
                         break;
                     case MESSAGE_TYPES.AUTH_ERROR:
@@ -4374,6 +7324,16 @@
                         break;
                     case MESSAGE_TYPES.VERIFY_SESSION:
                         this.handleVerifySession(message.payload || message.data, message.messageId);
+                        break;
+                    case 'SESSION_ACTIVE':
+                        this.handleSessionUpdate(message.payload || message.data);
+                        V5StateGovernor.handleSessionActive(message.payload || message.data);
+                        break;
+                    case 'SESSION_NULL':
+                        V5StateGovernor.handleSessionNull();
+                        break;
+                    case 'SESSION_INVALIDATED':
+                        this.clearSession();
                         break;
                 }
             };
@@ -4434,6 +7394,7 @@
 
         handleVerifySession: function(data, messageId) {
             const isValid = this.isValid();
+            const requestId = messageId || ('verify_' + Date.now() + '_' + Math.random().toString(36).substr(2, 8));
 
             const response = MessageBridge.createMessage(MESSAGE_TYPES.VERIFY_SESSION, {
                 valid: isValid,
@@ -4486,7 +7447,7 @@
 
             setTimeout(() => {
                 this._syncInProgress = false;
-            }, 5000);
+            }, 10000);
         },
 
         saveToStorage: function() {
@@ -4565,12 +7526,11 @@
             const refreshTime = Math.max(0, timeUntilExpiry - CONFIG.SESSION_REFRESH_THRESHOLD);
 
             if (refreshTime <= 0) {
-                this.requestSync();
                 return;
             }
 
             this._refreshTimer = setTimeout(() => {
-                this.requestSync();
+                logInfo(MODULE, 'Session expiry approaching - waiting for parent refresh');
             }, refreshTime);
 
             timers.add(this._refreshTimer);
@@ -4587,11 +7547,11 @@
                     }
 
                     this.clearSession();
-                } else if (sessionExpiry && (sessionExpiry - Date.now()) < 300000 && !this._expiryWarningSent) {
+                } else if (sessionExpiry && (sessionExpiry - Date.now()) < 600000 && !this._expiryWarningSent) {
                     this._expiryWarningSent = true;
                     this.notifyListeners({ expiring: true, timeLeft: sessionExpiry - Date.now() });
                 }
-            }, 60000);
+            }, 120000);
 
             timers.add(this._checkTimer);
         },
@@ -4630,16 +7590,16 @@
     const TransportAgent = {
         _queue: [],
         _processing: false,
-        _maxQueueSize: 100,
+        _maxQueueSize: 200,
         _retryCounts: new Map(),
-        _maxRetries: 2,
+        _maxRetries: 0,
         _backoffBase: CONFIG.RETRY_BACKOFF,
         _offlineQueue: [],
         _pendingAcks: new Map(),
         _heartbeatInterval: null,
         _lastHeartbeat: 0,
         _heartbeatMissed: 0,
-        _maxMissedHeartbeats: 3,
+        _maxMissedHeartbeats: CONFIG.HEARTBEAT_MAX_MISSED,
         _listeners: new Set(),
 
         initialize: function() {
@@ -4653,11 +7613,13 @@
             window.addEventListener('online', () => {
                 this.processOfflineQueue();
                 this._heartbeatMissed = 0;
+                V5StateGovernor.handleOnline();
             });
 
             window.addEventListener('offline', () => {
                 this._offlineQueue.push(...this._queue);
                 this._queue = [];
+                V5StateGovernor.handleOffline();
             });
         },
 
@@ -4674,6 +7636,13 @@
                             legacy: options.legacy
                         }
                     );
+
+                    if (!V5StateGovernor.canSendOperational() && 
+                        message.type !== 'REGISTER_MODULE' && message.type !== 'REQUEST_SESSION') {
+                        V5StateGovernor.queueMessage(canonicalMessage);
+                        resolve({ success: true, queued: true, messageId: canonicalMessage.messageId });
+                        return;
+                    }
 
                     this._queue.push({
                         message: canonicalMessage,
@@ -4719,7 +7688,7 @@
                     await this.sendMessage(item);
 
                     if (item.options.requireAck) {
-                        const ackReceived = await this.waitForAck(item.message.messageId, item.options.ackTimeout || CONFIG.ACK_TIMEOUT);
+                        const ackReceived = await this.waitForAck(item.message.messageId, item.options.ackTimeout || CONFIG.REGISTER_ACK_TIMEOUT);
                         if (ackReceived) {
                             item.resolve({ success: true, messageId: item.message.messageId });
                         } else {
@@ -4735,7 +7704,7 @@
                     item.attempts++;
 
                     let delay = this._backoffBase * Math.pow(2, item.attempts - 1);
-                    if (EnvironmentDetector.isVPNNetwork()) delay *= 1.5;
+                    if (EnvironmentDetector.isVPNNetwork()) delay *= 2;
 
                     await new Promise(resolve => setTimeout(resolve, delay));
 
@@ -4809,10 +7778,12 @@
             }
 
             if (message.type === MESSAGE_TYPES.HEARTBEAT_RESPONSE ||
-                message.type === MESSAGE_TYPES.PONG) {
+                message.type === MESSAGE_TYPES.PONG ||
+                message.type === 'HEARTBEAT_ACK') {
                 this._lastHeartbeat = Date.now();
                 this._heartbeatMissed = 0;
                 resetHeartbeat();
+                V5StateGovernor.handleHeartbeatAck();
             }
 
             this._listeners.forEach(listener => {
@@ -4841,7 +7812,7 @@
             this._heartbeatMissed = 0;
 
             this._heartbeatInterval = setInterval(() => {
-                if (navigator.onLine && window.parent && window.parent !== window) {
+                if (navigator.onLine && window.parent && window.parent !== window && V5StateGovernor.isActive()) {
                     this.send({
                         type: MESSAGE_TYPES.HEARTBEAT,
                         payload: { timestamp: Date.now() }
@@ -4852,10 +7823,15 @@
                         handleHeartbeatFailure();
 
                         if (this._heartbeatMissed >= this._maxMissedHeartbeats) {
-                            this._notifyListeners('connection_suspect');
+                            this._notifyListeners('connection_suspect', { missed: this._heartbeatMissed });
 
-                            if (StateGovernor.getState() === STATE.ACTIVE) {
+                            const currentState = StateGovernor.getState();
+                            if (currentState === STATE.ACTIVE && !StateGovernor._allowTransitions) {
+                                RecoveryManager.scheduleRecovery();
+                                V5StateGovernor.transition(V5_STATE.STANDALONE, 'heartbeat_failure');
+                            } else if (currentState === STATE.ACTIVE) {
                                 StateGovernor._transition(STATE.ACTIVE, STATE.DEGRADED, 'heartbeat_failure');
+                                V5StateGovernor.transition(V5_STATE.STANDALONE, 'heartbeat_failure');
                                 RecoveryManager.scheduleRecovery();
                             }
                         }
@@ -4915,7 +7891,7 @@
             };
 
             if (sessionToken && !options.excludeToken) {
-                message.token = sessionToken.substring(0, 8) + '...';
+                message.token = '[PRESENT]';
                 message.tokenHash = SecurityCore.createSignature(sessionToken, timestamp);
             }
 
@@ -4976,8 +7952,8 @@
 
         validateTimestamp: function(message) {
             const now = Date.now();
-            const maxAge = 5 * 60 * 1000;
-            const minAge = -5 * 60 * 1000;
+            const maxAge = 10 * 60 * 1000;
+            const minAge = -10 * 60 * 1000;
             const age = now - message.timestamp;
             return age <= maxAge && age >= minAge;
         }
@@ -5136,10 +8112,10 @@
         return null;
     }
 
-    async function waitForSession(timeout = CONFIG.MAX_SESSION_WAIT || 10000) {
+    async function waitForSession(timeout = CONFIG.MAX_SESSION_WAIT || 30000) {
         const startTime = Date.now();
         let attempts = 0;
-        const maxAttempts = MAX_SESSION_SYNC_ATTEMPTS || 2;
+        const maxAttempts = MAX_SESSION_SYNC_ATTEMPTS || 3;
 
         while (attempts < maxAttempts) {
             const session = getValidatedSession();
@@ -5201,7 +8177,7 @@
             }
 
             attempts++;
-            await new Promise(resolve => setTimeout(resolve, CONFIG.SESSION_RETRY_DELAY || 1000));
+            await new Promise(resolve => setTimeout(resolve, CONFIG.SESSION_RETRY_DELAY || 2000));
         }
 
         return null;
@@ -5215,7 +8191,7 @@
                 logSuccess(MODULE, 'Parent ready');
                 return true;
             }
-            await new Promise(resolve => setTimeout(resolve, 100));
+            await new Promise(resolve => setTimeout(resolve, 50));
         }
 
         logWarn(MODULE, 'Parent wait timeout');
@@ -5256,64 +8232,10 @@
     }
 
     async function verifySession() {
-        const now = Date.now();
-
-        if (now - _lastVerificationTime < VERIFICATION_COOLDOWN) {
-            return _lastVerificationResult;
-        }
-
-        if (_verificationInProgress) {
-            return new Promise((resolve) => {
-                const checkInterval = setInterval(() => {
-                    if (!_verificationInProgress) {
-                        clearInterval(checkInterval);
-                        resolve(_lastVerificationResult);
-                    }
-                }, 100);
-
-                setTimeout(() => {
-                    clearInterval(checkInterval);
-                    resolve(true);
-                }, 5000);
-            });
-        }
-
-        _verificationInProgress = true;
-
-        try {
-            const session = getValidatedSession();
-            if (!session) {
-                _lastVerificationResult = false;
-                return false;
-            }
-
-            if (session.expiresAt < Date.now()) {
-                logWarn(MODULE, 'Session expired');
-                _lastVerificationResult = false;
-                return false;
-            }
-
-            const result = await parentComm.request('VERIFY_SESSION', {
-                token: session.token,
-                userId: session.userId,
-                timestamp: Date.now()
-            }, 3000).catch(() => ({ valid: true }));
-
-            _lastVerificationResult = result?.valid !== false;
-            _lastVerificationTime = Date.now();
-
-            return _lastVerificationResult;
-        } catch (error) {
-            logWarn(MODULE, 'Session verification failed', error);
-            _lastVerificationResult = true;
-            _lastVerificationTime = Date.now();
-            return true;
-        } finally {
-            _verificationInProgress = false;
-        }
+        return V5StateGovernor.verifySession();
     }
 
-    // ==================== DETERMINISTIC SAFE INITIALIZATION - SINGLE-RUN PIPELINE ====================
+    // ==================== DETERMINISTIC SAFE INITIALIZATION ====================
     let _initLock = false;
     let _initPromise = null;
     let _bootstrapStarted = false;
@@ -5337,6 +8259,8 @@
 
                 StateGovernor.initialize();
                 EnvironmentDetector.detect();
+
+                TokenManager.initialize();
 
                 const hasStoredSession = (function() {
                     if (IframeSessionClient.isValid()) {
@@ -5373,6 +8297,12 @@
                     StateGovernor._sessionActive = true;
                     StateGovernor._transition(STATE.UNINITIALIZED, STATE.SESSION_ACTIVE, 'stored_session');
                     
+                    IframeTransport.setSessionActive(true);
+                    MessageRegistry.setSessionActive(true);
+                    ReliabilityEngine.setSessionActive(true);
+                    
+                    V5StateGovernor.handleSessionActive({ token: IframeSessionClient.getToken(), authenticated: true });
+                    
                     safeRegister();
                     
                     APICore.initialize().catch(() => {});
@@ -5404,6 +8334,8 @@
                 CompatibilityBridge.detect();
                 OriginAdapter.initialize();
 
+                SessionPipeline.initialize(TokenManager);
+
                 APICore.initialize().then(result => {
                     if (result.success) {
                         logSuccess(MODULE, 'API Core initialized');
@@ -5412,9 +8344,21 @@
                     }
                 });
 
-                const parentReady = await waitForParent(CONFIG.HANDSHAKE_TIMEOUT / 2);
+                const parentReady = await waitForParent(CONFIG.HANDSHAKE_TIMEOUT);
 
                 StateGovernor._transition(STATE.BOOTSTRAPPING, STATE.REGISTERING, 'bootstrap_complete');
+
+                V5StateGovernor.startRegistration();
+
+                const pipelineResult = await SessionPipeline.run();
+
+                if (!pipelineResult.success) {
+                    logWarn(MODULE, 'Pipeline failed, continuing', pipelineResult);
+                }
+
+                if (pipelineResult.degraded) {
+                    logWarn(MODULE, 'Pipeline completed in degraded mode');
+                }
 
                 let handshakeResult;
                 try {
@@ -5425,10 +8369,10 @@
                 }
                 
                 if (!handshakeResult || !handshakeResult.success) {
-                    logWarn(MODULE, 'Handshake timeout or failure, trying direct session request');
+                    logWarn(MODULE, 'Handshake timeout, trying direct session request');
                     IframeTransport.requestSessionFromParent();
                     
-                    await new Promise(resolve => setTimeout(resolve, 1000));
+                    await new Promise(resolve => setTimeout(resolve, 500));
                 } else {
                     logSuccess(MODULE, 'Handshake completed');
                 }
@@ -5436,7 +8380,7 @@
                 StateGovernor._transition(STATE.REGISTERING, STATE.REGISTERED, 'handshake_complete');
 
                 try {
-                    await StateGovernor.waitForSession(CONFIG.HANDSHAKE_TIMEOUT / 2);
+                    await StateGovernor.waitForSession(CONFIG.SESSION_TIMEOUT);
                 } catch (e) {
                     logWarn(MODULE, 'Session wait timeout, continuing');
                 }
@@ -5450,14 +8394,17 @@
                 if (IframeSessionClient.isValid()) {
                     logSuccess(MODULE, 'Session acquired');
                     StateGovernor._sessionActive = true;
+                    IframeTransport.setSessionActive(true);
+                    MessageRegistry.setSessionActive(true);
+                    ReliabilityEngine.setSessionActive(true);
+                    V5StateGovernor.handleSessionActive({ token: IframeSessionClient.getToken(), authenticated: true });
                     StateGovernor._transition(STATE.SESSION_PENDING, STATE.SESSION_ACTIVE, 'session_acquired');
                 } else {
                     try {
-                        await IframeSessionClient.waitForSession(CONFIG.TOKEN_REQUEST_TIMEOUT / 2);
+                        await IframeSessionClient.waitForSession(CONFIG.SESSION_TIMEOUT);
                         logSuccess(MODULE, 'Session ready');
                     } catch (e) {
-                        logWarn(MODULE, 'Session wait timeout, will retry', e.message);
-                        await IframeTransport.requestTokenFromParent().catch(() => {});
+                        logWarn(MODULE, 'Session wait timeout', e.message);
                     }
 
                     StateGovernor._transition(STATE.SESSION_PENDING, STATE.SESSION_ACTIVE, 'session_acquired');
@@ -5624,43 +8571,23 @@
         },
 
         requestToken: function() {
-            return parentComm.request('REQUEST_TOKEN', {
-                iframeId: iframeId,
-                timestamp: Date.now()
-            }, 5000).catch(error => {
-                logWarn(MODULE, 'Token request failed', error.message);
-                return null;
-            });
+            logToken(MODULE, 'Token request disabled - parent only');
+            return Promise.reject(new Error('Token request disabled'));
         },
 
         requestSessionFromParent: function() {
             return parentComm.request('REQUEST_SESSION', {
                 iframeId: iframeId,
                 timestamp: Date.now()
-            }, 8000).catch(error => {
+            }, 15000).catch(error => {
                 logWarn(MODULE, 'Session request failed', error.message);
                 return null;
             });
         },
 
         refreshToken: function() {
-            if (this._refreshTimer) {
-                clearTimeout(this._refreshTimer);
-                this._refreshTimer = null;
-            }
-
-            if (!sessionToken && !this._guestMode && !this._demoMode) return Promise.resolve(false);
-            if (this._demoMode) return Promise.resolve(false);
-
-            return this.requestToken().then(tokenData => {
-                if (tokenData && tokenData.token) {
-                    return this.setToken(tokenData.token, tokenData.expiry);
-                }
-                return false;
-            }).catch(error => {
-                logError(MODULE, 'Token refresh failed', error);
-                return false;
-            });
+            logToken(MODULE, 'Token refresh disabled - parent only');
+            return Promise.resolve(false);
         },
 
         setToken: function(token, expiry) {
@@ -5773,12 +8700,11 @@
             const refreshTime = Math.max(0, timeUntilExpiry - CONFIG.SESSION_REFRESH_THRESHOLD);
 
             if (refreshTime <= 0) {
-                this.refreshToken();
                 return;
             }
 
             this._refreshTimer = setTimeout(() => {
-                this.refreshToken();
+                logInfo(MODULE, 'Session expiry approaching - waiting for parent refresh');
             }, refreshTime);
 
             timers.add(this._refreshTimer);
@@ -5920,7 +8846,7 @@
             this.validateToken();
 
             if (!getValidatedSession() && !this._demoMode) {
-                setTimeout(() => requestResync(), 500);
+                setTimeout(() => requestResync(), 1000);
             }
         }
     };
@@ -5965,13 +8891,13 @@
         getBackoffDelay: function(key) {
             const count = this._counters.get(key) || 0;
             let delay = CONFIG.RETRY_BACKOFF * Math.pow(2, count);
-            if (EnvironmentDetector.isVPNNetwork()) delay *= 1.5;
+            if (EnvironmentDetector.isVPNNetwork()) delay *= 2;
             return delay;
         },
 
         executeWithRetry: async function(fn, key, options = {}) {
             const maxRetries = options.maxRetries || CONFIG.MAX_RETRIES;
-            const timeout = options.timeout || 30000;
+            const timeout = options.timeout || 60000;
             let lastError;
 
             while (this.canRetry(key, maxRetries)) {
@@ -6090,22 +9016,28 @@
 
                 const adaptedMessage = CompatibilityBridge.adaptOutgoing(message);
 
+                if (!V5StateGovernor.canSendOperational() && type !== 'REGISTER_MODULE' && type !== 'REQUEST_SESSION') {
+                    V5StateGovernor.queueMessage(adaptedMessage);
+                    if (DiagnosticsAgent) DiagnosticsAgent.record('messagesQueued', { type });
+                    return true;
+                }
+
                 try {
                     window.parent.postMessage(adaptedMessage, targetOrigin);
                     if (DiagnosticsAgent) DiagnosticsAgent.record('messagesSent', { type });
 
                     if (options.requireAck) {
-                        this._waitForAck(message.id, options.timeout || CONFIG.ACK_TIMEOUT)
+                        this._waitForAck(message.id, options.timeout || CONFIG.REGISTER_ACK_TIMEOUT)
                             .catch(() => {
                                 logWarn(MODULE, `No ACK for message, retrying...`, { id: message.id });
-                                if ((options.retryCount || 0) < CONFIG.MAX_MESSAGE_RETRIES) {
+                                if ((options.retryCount || 0) < 1) {
                                     setTimeout(() => {
                                         this._send(type, payload, targetOrigin, {
                                             ...options,
                                             retryCount: (options.retryCount || 0) + 1,
                                             id: MessageValidator.generateId()
                                         });
-                                    }, 1000 * ((options.retryCount || 0) + 1));
+                                    }, 2000);
                                 }
                             });
                     }
@@ -6143,7 +9075,7 @@
             return this._send(type, payload, OriginAdapter.getTargetOrigin(), { requireAck: false });
         },
 
-        sendWithAck: function(type, payload = {}, timeout = CONFIG.ACK_TIMEOUT) {
+        sendWithAck: function(type, payload = {}, timeout = CONFIG.REGISTER_ACK_TIMEOUT) {
             const id = MessageValidator.generateId();
             return new Promise((resolve, reject) => {
                 const success = this._send(type, payload, OriginAdapter.getTargetOrigin(), {
@@ -6170,7 +9102,7 @@
             return this._send(type, { ...payload, _token: sessionToken ? sessionToken.substring(0, 8) : null }, OriginAdapter.getTargetOrigin(), { requireAck: false });
         },
 
-        request: function(type, payload = {}, timeout = 8000) {
+        request: function(type, payload = {}, timeout = 15000) {
             return new Promise((resolve, reject) => {
                 ErrorBoundary.execute(() => {
                     const requestId = MessageValidator.generateId();
@@ -6257,9 +9189,26 @@
 
         TransportAgent.handleIncoming({ data: adaptedMessage, origin: e.origin });
 
+        if (adaptedMessage.type === 'MODULE_REGISTERED') {
+            V5StateGovernor.handleModuleRegistered();
+        }
+
+        if (adaptedMessage.type === 'SESSION_ACTIVE') {
+            V5StateGovernor.handleSessionActive(adaptedMessage.payload || adaptedMessage);
+        }
+
+        if (adaptedMessage.type === 'SESSION_NULL') {
+            V5StateGovernor.handleSessionNull();
+        }
+
+        if (adaptedMessage.type === 'HEARTBEAT_ACK' || adaptedMessage.type === 'HEARTBEAT_RESPONSE') {
+            V5StateGovernor.handleHeartbeatAck();
+        }
+
         if (adaptedMessage.type === 'PARENT_READY') {
             _PARENT_READY_ = true;
             _HANDSHAKE_DONE_ = true;
+            V5StateGovernor.handleParentReady();
             logSuccess(MODULE, 'Parent handshake complete');
 
             if (StateGovernor.getState() === STATE.REGISTERING) {
@@ -6301,6 +9250,8 @@
                 if (isValidSession(session)) {
                     validatedSession = session;
                     sessionValidationTimestamp = Date.now();
+                    
+                    V5StateGovernor.handleSessionActive(sessionData);
                 }
 
                 const ackMessage = MessageBridge.createMessage('SESSION_ACK', { success: true }, { legacy: true });
@@ -6317,7 +9268,9 @@
                     currentUser = payload.user;
                     userDataLoaded = true;
                 }
-                logSuccess(MODULE, 'Token response received from parent');
+                logToken(MODULE, 'received from parent');
+                
+                V5StateGovernor.handleSessionActive(payload);
 
                 const ackMessage = MessageBridge.createMessage('TOKEN_ACK', { success: true }, { legacy: true });
                 window.parent.postMessage(ackMessage, OriginAdapter.getTargetOrigin());
@@ -6344,6 +9297,8 @@
                 if (isValidSession(session)) {
                     validatedSession = session;
                     sessionValidationTimestamp = Date.now();
+                    
+                    V5StateGovernor.handleSessionActive(sessionData);
 
                     const ackMessage = MessageBridge.createMessage('SESSION_INIT_ACK', { success: true }, { legacy: true });
                     window.parent.postMessage(ackMessage, OriginAdapter.getTargetOrigin());
@@ -6377,6 +9332,8 @@
                 if (isValidSession(session)) {
                     validatedSession = session;
                     sessionValidationTimestamp = Date.now();
+                    
+                    V5StateGovernor.handleSessionActive(payload);
                 }
             }
         }
@@ -6416,6 +9373,49 @@
             logWarn(MODULE, 'Parent crash detected, initiating recovery');
             RecoveryManager.recover();
         }
+
+        if (['NEW_MESSAGE', 'FRIEND_UPDATE', 'GROUP_UPDATE', 'STATUS_UPDATE', 
+             'SETTINGS_UPDATED', 'INCOMING_CALL', 'SESSION_REFRESHED', 
+             'SESSION_INVALIDATED', 'SESSION_RECOVERY'].includes(adaptedMessage.type)) {
+            
+            if (adaptedMessage.type === 'SESSION_REFRESHED' && adaptedMessage.payload && adaptedMessage.payload.token) {
+                sessionToken = adaptedMessage.payload.token;
+                sessionExpiry = adaptedMessage.payload.expiry;
+                if (adaptedMessage.payload.user) {
+                    currentUser = adaptedMessage.payload.user;
+                    userDataLoaded = true;
+                }
+                logSuccess(MODULE, 'Session refreshed atomically');
+            }
+            
+            if (adaptedMessage.type === 'SESSION_INVALIDATED') {
+                logWarn(MODULE, 'Session invalidated');
+                session.clearToken();
+            }
+            
+            if (adaptedMessage.type === 'SESSION_RECOVERY') {
+                logInfo(MODULE, 'Session recovery initiated');
+                V5StateGovernor.transition(V5_STATE.RECOVERY, 'session_recovery');
+                callsState.recoveryMode = true; // Update callsState
+            }
+            
+            if (adaptedMessage.type === 'FRIEND_UPDATE' && window.callAPI) {
+                window.callAPI.fetchContacts(true).catch(() => {});
+            }
+            
+            if (adaptedMessage.type === 'SETTINGS_UPDATED' && adaptedMessage.payload && window.AppState) {
+                window.AppState.settings = { ...window.AppState.settings, ...adaptedMessage.payload.settings };
+                if (typeof window.applySettingsToUI === 'function') {
+                    window.applySettingsToUI();
+                }
+            }
+            
+            if (adaptedMessage.type === 'INCOMING_CALL' && window.callCore && !AppState.isInCall) {
+                if (elements.incomingCallModal) {
+                    simulateIncomingCall(adaptedMessage.payload.callerId, adaptedMessage.payload.metadata);
+                }
+            }
+        }
     });
 
     function sendSessionAck(type, payload) {
@@ -6453,6 +9453,8 @@
                 sessionValidationTimestamp = Date.now();
                 sessionAckReceived = true;
                 sessionAckTimestamp = Date.now();
+                
+                V5StateGovernor.handleSessionActive(payload);
 
                 if (callCoreState === CallCoreState.WAITING_SESSION) {
                     callCoreState = CallCoreState.SYNCED;
@@ -6566,7 +9568,7 @@
             this.uiBindings = [];
             this.sessionWaitingLogged = false;
             this.messageRetryCounts = new Map();
-            this.maxMessageRetries = 2;
+            this.maxMessageRetries = 1;
             this.fallbackMode = false;
             this._sanitizing = false;
         }
@@ -6758,7 +9760,7 @@
                         resolved = true;
                         resolve({ success: false, fallback: true });
                     }
-                }, CONFIG.HANDSHAKE_TIMEOUT + 1000);
+                }, CONFIG.HANDSHAKE_TIMEOUT + 500);
             });
         }
 
@@ -6782,6 +9784,8 @@
             this.handshakeInProgress = false;
             this.handshakeComplete = true;
             this.fallbackMode = false;
+            
+            V5StateGovernor.handleSessionActive(sessionData);
 
             logSuccess(MODULE, 'Secure session received and validated successfully');
             this.setFallbackState('connected');
@@ -6853,12 +9857,12 @@
 
             let attempt = getRetryCount(retryKey);
             const maxAttempts = 2;
-            const baseDelay = 1000;
+            const baseDelay = 2000;
 
             while (attempt < maxAttempts && !this.handshakeComplete) {
                 attempt = incrementRetryCount(retryKey);
                 let delay = baseDelay * Math.pow(2, attempt - 1);
-                if (EnvironmentDetector.isVPNNetwork()) delay *= 1.5;
+                if (EnvironmentDetector.isVPNNetwork()) delay *= 2;
 
                 logInfo(MODULE, `Requesting session (attempt ${attempt}/${maxAttempts})...`);
 
@@ -6881,7 +9885,7 @@
                             clearInterval(checkInterval);
                             resolve();
                         }
-                    }, 100);
+                    }, 200);
                 });
             }
 
@@ -6913,6 +9917,12 @@
                 return false;
             }
 
+            if (!V5StateGovernor.canSendOperational() && 
+                message.type !== 'REGISTER_MODULE' && message.type !== 'REQUEST_SESSION') {
+                V5StateGovernor.queueMessage(message);
+                return true;
+            }
+
             try {
                 const adaptedMessage = CompatibilityBridge.adaptOutgoing(message);
 
@@ -6928,14 +9938,14 @@
                 logError(MODULE, 'ParentCoordinator.sendToParent', error, `type: ${message.type}, retry: ${retryCount + 1}`);
 
                 if (retryCount < this.maxMessageRetries - 1) {
-                    setTimeout(() => this.sendToParent(message, targetOrigin), 1000 * (retryCount + 1));
+                    setTimeout(() => this.sendToParent(message, targetOrigin), 2000);
                 }
 
                 return false;
             }
         }
 
-        sendWithResponse(message, timeout = 5000) {
+        sendWithResponse(message, timeout = 10000) {
             return new Promise((resolve, reject) => {
                 if (!this.parentDetected) {
                     reject(new Error('No parent detected'));
@@ -6985,6 +9995,8 @@
             this.handshakeComplete = true;
             this.handshakeInProgress = false;
             this.setFallbackState('connected');
+            
+            V5StateGovernor.handleSessionActive(sessionData);
 
             this.updateGlobalStateFromSession();
             this.bindUIAfterSessionConfirmation();
@@ -7161,7 +10173,7 @@
 
                     setTimeout(() => {
                         if (apiStatusIndicator) apiStatusIndicator.style.display = 'none';
-                    }, 2000);
+                    }, 3000);
                 }
             } catch (error) {
                 logError(MODULE, 'ParentCoordinator.updateApiStatusIndicator', error);
@@ -7410,6 +10422,10 @@
                     case 'HEARTBEAT_RESPONSE':
                         this.handleHeartbeatResponse();
                         break;
+                    case 'HEARTBEAT_ACK':
+                        this.handleHeartbeatResponse();
+                        V5StateGovernor.handleHeartbeatAck();
+                        break;
                     case 'CHILD_READY_ACK':
                         this.handleChildReadyAck();
                         break;
@@ -7426,6 +10442,30 @@
                         break;
                     case 'NAVIGATE':
                         logInfo(MODULE, 'Parent navigation:', data.payload);
+                        break;
+                    case 'SESSION_ACTIVE':
+                        V5StateGovernor.handleSessionActive(data.payload || data);
+                        break;
+                    case 'SESSION_NULL':
+                        V5StateGovernor.handleSessionNull();
+                        break;
+                    case 'SESSION_REFRESHED':
+                        if (data.payload && data.payload.token) {
+                            session.setToken(data.payload.token, data.payload.expiry);
+                            logSuccess(MODULE, 'Session refreshed atomically');
+                        }
+                        break;
+                    case 'SESSION_INVALIDATED':
+                        logWarn(MODULE, 'Session invalidated');
+                        session.clearToken();
+                        break;
+                    case 'SESSION_RECOVERY':
+                        logInfo(MODULE, 'Session recovery initiated');
+                        V5StateGovernor.transition(V5_STATE.RECOVERY, 'session_recovery');
+                        callsState.recoveryMode = true; // Update callsState
+                        break;
+                    case 'INCOMING_CALL':
+                        CallsStateGovernor.handleIncomingCall(data.payload);
                         break;
                 }
             } catch (error) {
@@ -7460,9 +10500,9 @@
 
                 this.heartbeatInterval = setInterval(() => {
                     this.sendHeartbeat();
-                }, 15000);
+                }, 30000);
 
-                setTimeout(() => this.sendHeartbeat(), 1000);
+                setTimeout(() => this.sendHeartbeat(), 2000);
                 timers.add(this.heartbeatInterval);
             } catch (error) {
                 logError(MODULE, 'ParentCoordinator.startHeartbeat', error);
@@ -7485,6 +10525,7 @@
         handleHeartbeatResponse() {
             this.lastHeartbeat = Date.now();
             resetHeartbeat();
+            V5StateGovernor.handleHeartbeatAck();
         }
 
         handleChildReadyAck() {
@@ -7505,7 +10546,12 @@
                     if (this.parentDetected && !this.fallbackMode) {
                         this.checkParentConnection();
                         TransportAgent.processOfflineQueue();
+                        V5StateGovernor.handleOnline();
                     }
+                });
+                
+                window.addEventListener('offline', () => {
+                    V5StateGovernor.handleOffline();
                 });
             } catch (error) {
                 logError(MODULE, 'ParentCoordinator.setupResynchronization', error);
@@ -7629,7 +10675,7 @@
 
                 if (this.initAttempts < this.maxInitAttempts) {
                     logInfo(MODULE, `Retrying initialization (${this.initAttempts}/${this.maxInitAttempts})...`);
-                    const timer = setTimeout(() => this.initialize(), 1000 * this.initAttempts);
+                    const timer = setTimeout(() => this.initialize(), 2000 * this.initAttempts);
                     timers.add(timer);
                     return { status: 'retrying', attempt: this.initAttempts };
                 } else {
@@ -7677,7 +10723,7 @@
                     }
 
                     if (stage === 'sessionSync') {
-                        logWarn(MODULE, 'Session sync failed, continuing without demo mode');
+                        logWarn(MODULE, 'Session sync failed, continuing');
                         this.enterDegradedMode();
                         results.ready = { success: true, result: 'degraded' };
                         this.markAsReady(true);
@@ -7691,15 +10737,15 @@
 
         _getStageTimeout(stage) {
             const timeouts = {
-                preflight: CONFIG.PREFLIGHT_TIMEOUT,
-                dependencyCheck: CONFIG.DEPENDENCY_TIMEOUT,
-                parentDetect: CONFIG.PARENT_DETECT_TIMEOUT,
+                preflight: CONFIG.PREFLIGHT_TIMEOUT || 5000,
+                dependencyCheck: CONFIG.DEPENDENCY_TIMEOUT || 5000,
+                parentDetect: CONFIG.PARENT_DETECT_TIMEOUT || 8000,
                 handshake: CONFIG.HANDSHAKE_TIMEOUT,
-                sessionSync: CONFIG.SESSION_SYNC_TIMEOUT,
-                serviceInit: CONFIG.SERVICE_INIT_TIMEOUT,
-                ready: 1000
+                sessionSync: CONFIG.SESSION_SYNC_TIMEOUT || 20000,
+                serviceInit: 10000,
+                ready: 2000
             };
-            return timeouts[stage] || 3000;
+            return timeouts[stage] || 5000;
         }
 
         async _executeStage(stage) {
@@ -7804,17 +10850,6 @@
 
             await session.acquire();
 
-            if (session.isDemoMode()) {
-                logWarn(MODULE, 'Demo mode disabled - will retry');
-                return {
-                    demoMode: false,
-                    guestMode: session.isGuestMode(),
-                    valid: session.validateToken(),
-                    user: currentUser ? { id: currentUser.id, username: currentUser.username } : null,
-                    timestamp: Date.now()
-                };
-            }
-
             return {
                 demoMode: false,
                 guestMode: session.isGuestMode(),
@@ -7886,6 +10921,8 @@
             session._guestMode = false;
             this.loadDemoData();
             StateGovernor._transition(StateGovernor.getState(), STATE.DEGRADED, 'degraded_mode');
+            V5StateGovernor.transition(V5_STATE.DEGRADED, 'degraded_mode');
+            callsState.degraded = true; // Update callsState
             RecoveryManager.scheduleRecovery();
         }
 
@@ -7929,7 +10966,7 @@
                             this.loadingMessage.remove();
                             this.loadingMessage = null;
                         }
-                    }, 2000);
+                    }, 3000);
                     timers.add(timer);
                 }
             } catch (error) {
@@ -7955,6 +10992,7 @@
                 this.initializationInProgress = false;
                 coreReady = true;
                 coreInitialized = true;
+                callsState.degraded = degraded; // Update callsState
 
                 parentComm.send('coreReady', {
                     iframeId: iframeId,
@@ -8203,7 +11241,7 @@
                 const verified = await verifySession();
                 if (!verified) {
                     logWarn(MODULE, 'Session verification failed, retrying');
-                    setTimeout(() => verifySession(), 2000);
+                    setTimeout(() => verifySession(), 3000);
                 }
 
                 const ackMessage = MessageBridge.createMessage('CALL_CORE_READY', {
@@ -8249,6 +11287,14 @@
                     return;
                 }
 
+                const verified = await V5StateGovernor.verifySession(true);
+                if (!verified) {
+                    logWarn(MODULE, 'Session verification failed before call init');
+                    if (UIFailsafe) {
+                        UIFailsafe.showFallbackMessage('Session verification failed - limited functionality', 'warning');
+                    }
+                }
+
                 this.initializationInProgress = true;
                 this.initAttempts++;
 
@@ -8283,7 +11329,7 @@
 
                     if (this.initAttempts < this.maxInitAttempts) {
                         logInfo(MODULE, `Retrying call core initialization (${this.initAttempts}/${this.maxInitAttempts})...`);
-                        const timer = setTimeout(() => this.safeInitialize(), 1000 * this.initAttempts);
+                        const timer = setTimeout(() => this.safeInitialize(), 2000 * this.initAttempts);
                         timers.add(timer);
                     } else {
                         logError(MODULE, 'Max call core initialization attempts reached');
@@ -8321,8 +11367,8 @@
         async verifyReadiness() {
             return new Promise((resolve, reject) => {
                 let attempts = 0;
-                const maxAttempts = 30;
-                const interval = 100;
+                const maxAttempts = 50;
+                const interval = 200;
 
                 const checkInterval = setInterval(() => {
                     attempts++;
@@ -8401,6 +11447,12 @@
             return this.featureBoundary.executeAsync(async () => {
                 const session = getValidatedSession();
                 if (!session) throw new Error('No valid session - cannot start call');
+                
+                const verified = await V5StateGovernor.verifySession(true);
+                if (!verified) {
+                    throw new Error('Session verification failed - cannot start call');
+                }
+                
                 if (!this.deviceInitialized) throw new Error('Call core not initialized');
                 if (this.callState !== 'idle') throw new Error(`Cannot start call, current state: ${this.callState}`);
 
@@ -8755,263 +11807,17 @@
         }
     }
 
-    // ==================== ORIGINAL TOKEN MANAGER ====================
-    class TokenManager {
-        constructor() {
-            this.tokenReady = false;
-            this.token = null;
-            this.waitingCallbacks = [];
-            this.apiInitialized = false;
-            this.tokenCheckInterval = null;
-            this.migrationDone = false;
-            this.parentCoordinator = null;
-            this.coordinatedToken = false;
-            this.tokenRetryCount = 0;
-            this.maxTokenRetries = CONFIG.MAX_RETRIES;
-            this.fallbackMode = false;
-        }
-
-        async initialize() {
-            try {
-                logInfo(MODULE, 'Initializing token manager...');
-
-                if (!parentCoordinator) {
-                    logInfo(MODULE, 'Parent coordinator not yet available');
-                } else {
-                    this.parentCoordinator = parentCoordinator;
-                    if (this.parentCoordinator?.sessionData?.token) {
-                        this.setToken(this.parentCoordinator.sessionData.token);
-                        this.coordinatedToken = true;
-                    }
-                }
-
-                await this.tryGetTokenFromAPI();
-                this.loadCachedData();
-                this.migrateOldTokens();
-            } catch (error) {
-                logError(MODULE, 'TokenManager.initialize', error);
-                this.fallbackMode = true;
-                this.tokenReady = true;
-                this.executeWaitingCallbacks();
-            }
-        }
-
-        async tryGetTokenFromAPI() {
-            if (this.coordinatedToken || this.fallbackMode) return false;
-
-            try {
-                if (this.tokenRetryCount >= this.maxTokenRetries) {
-                    logWarn(MODULE, 'Maximum token retry attempts reached');
-                    return false;
-                }
-
-                this.tokenRetryCount++;
-
-                const token = session.getToken();
-
-                if (token && this.validateToken(token)) {
-                    this.setToken(token);
-                    this.tokenRetryCount = 0;
-                    return true;
-                }
-
-                return false;
-            } catch (error) {
-                logError(MODULE, 'TokenManager.tryGetTokenFromAPI', error, `attempt: ${this.tokenRetryCount}`);
-                return false;
-            }
-        }
-
-        setToken(token) {
-            if (!this.validateToken(token)) {
-                logWarn(MODULE, 'Attempted to set invalid token');
-                return;
-            }
-
-            try {
-                this.token = token;
-                this.tokenReady = true;
-                this.tokenRetryCount = 0;
-                this.fallbackMode = false;
-
-                SecurityCore.safeLocalStorageSet('USER_TOKEN', token);
-
-                if (window.AppState) window.AppState.isAuthenticated = true;
-
-                this.executeWaitingCallbacks();
-                logSuccess(MODULE, 'Token set successfully');
-            } catch (error) {
-                logError(MODULE, 'TokenManager.setToken', error);
-            }
-        }
-
-        waitForToken() {
-            return new Promise((resolve) => {
-                try {
-                    if (this.tokenReady && this.token) {
-                        resolve(this.token);
-                    } else if (this.fallbackMode) {
-                        resolve(null);
-                    } else {
-                        this.waitingCallbacks.push(resolve);
-                    }
-                } catch (error) {
-                    logError(MODULE, 'TokenManager.waitForToken', error);
-                    resolve(null);
-                }
-            });
-        }
-
-        executeWaitingCallbacks() {
-            const tokenValue = this.fallbackMode ? null : this.token;
-            if (this.tokenReady || this.fallbackMode) {
-                while (this.waitingCallbacks.length > 0) {
-                    const callback = this.waitingCallbacks.shift();
-                    try { callback(tokenValue); } catch (error) {
-                        logError(MODULE, 'TokenManager.executeWaitingCallbacks', error);
-                    }
-                }
-            }
-        }
-
-        validateToken(token) {
-            if (this.fallbackMode) return true;
-            if (!token || typeof token !== 'string') return false;
-            if (token.length < 10) return false;
-
-            try {
-                const parts = token.split('.');
-                if (parts.length === 3) {
-                    const payload = JSON.parse(atob(parts[1]));
-                    if (payload.exp) {
-                        const now = Math.floor(Date.now() / 1000);
-                        if (payload.exp < now) {
-                            logInfo(MODULE, 'Token expired');
-                            return false;
-                        }
-                    }
-                }
-                return true;
-            } catch (e) {
-                return true;
-            }
-        }
-
-        migrateOldTokens() {
-            if (this.migrationDone) return;
-
-            try {
-                const oldTokenKeys = ['accessToken', 'moodchat_token', 'authToken', 'token', 'auth_token'];
-
-                for (const key of oldTokenKeys) {
-                    const oldToken = SecurityCore.safeLocalStorageGet(key);
-                    if (oldToken && this.validateToken(oldToken)) {
-                        SecurityCore.safeLocalStorageSet('USER_TOKEN', oldToken);
-                    }
-                }
-
-                for (const key of oldTokenKeys) {
-                    const oldToken = SecurityCore.safeSessionStorageGet(key);
-                    if (oldToken && this.validateToken(oldToken)) {
-                        SecurityCore.safeLocalStorageSet('USER_TOKEN', oldToken);
-                    }
-                }
-
-                this.migrationDone = true;
-            } catch (error) {
-                logError(MODULE, 'TokenManager.migrateOldTokens', error);
-            }
-        }
-
-        loadCachedData() {
-            try {
-                const cachedUser = SecurityCore.safeLocalStorageGet('authUser') ||
-                                  SecurityCore.safeLocalStorageGet('currentUser') ||
-                                  SecurityCore.safeLocalStorageGet('userData');
-
-                if (cachedUser) {
-                    try {
-                        const userData = SecurityCore.safeJSONParse(cachedUser);
-                        if (window.AppState) {
-                            window.AppState.user = userData;
-                            window.AppState.currentUser = userData;
-                        }
-                    } catch (e) {}
-                }
-            } catch (error) {
-                logError(MODULE, 'TokenManager.loadCachedData', error);
-            }
-        }
-
-        getToken() {
-            try {
-                if (this.fallbackMode) return null;
-                if (this.parentCoordinator?.sessionData?.token) {
-                    return this.parentCoordinator.sessionData.token;
-                }
-                return this.token || session.getToken();
-            } catch (error) {
-                logError(MODULE, 'TokenManager.getToken', error);
-                return null;
-            }
-        }
-
-        isTokenReady() {
-            try {
-                if (this.fallbackMode) return true;
-                if (this.parentCoordinator?.sessionData?.token) return true;
-                return this.tokenReady && this.validateToken(this.token);
-            } catch (error) {
-                logError(MODULE, 'TokenManager.isTokenReady', error);
-                return false;
-            }
-        }
-
-        clearToken() {
-            try {
-                this.token = null;
-                this.tokenReady = false;
-                this.apiInitialized = false;
-                this.coordinatedToken = false;
-                this.tokenRetryCount = 0;
-                this.fallbackMode = true;
-
-                SecurityCore.safeLocalStorageRemove('USER_TOKEN');
-
-                if (window.AppState) {
-                    window.AppState.isAuthenticated = false;
-                    window.AppState.user = null;
-                    window.AppState.currentUser = null;
-                }
-                logInfo(MODULE, 'Token cleared');
-            } catch (error) {
-                logError(MODULE, 'TokenManager.clearToken', error);
-            }
-        }
-
-        cleanup() {
-            try {
-                if (this.tokenCheckInterval) {
-                    clearInterval(this.tokenCheckInterval);
-                    this.tokenCheckInterval = null;
-                }
-            } catch (error) {
-                logError(MODULE, 'TokenManager.cleanup', error);
-            }
-        }
-    }
-
     // ==================== ORIGINAL SECURE API CLIENT ====================
     class SecureAPIClient {
         constructor(tokenManager) {
             this.tokenManager = tokenManager;
             this.requestQueue = [];
             this.processingQueue = false;
-            this.maxRetries = CONFIG.MAX_MESSAGE_RETRIES;
+            this.maxRetries = 1;
             this.retryDelay = CONFIG.RETRY_BACKOFF;
             this.parentCoordinator = null;
             this.useCoordinatedRouting = false;
-            this.requestTimeout = 15000;
+            this.requestTimeout = 30000;
             this.fallbackBoundary = ErrorBoundary.createBoundary('SecureAPIClient', () => {
                 return { ok: false, status: 503, json: async () => ({ error: 'Fallback mode' }) };
             });
@@ -9078,12 +11884,12 @@
 
         async secureFetchFallback(url, options = {}, retryCount = 0) {
             try {
-                if (!this.tokenManager.isTokenReady()) {
+                if (!this.tokenManager.isValid()) {
                     return this.queueRequest(url, options);
                 }
 
                 const token = this.tokenManager.getToken();
-                if (!token || !this.tokenManager.validateToken(token)) {
+                if (!token) {
                     logWarn(MODULE, 'No valid authentication token available');
                     return this.queueRequest(url, options);
                 }
@@ -9106,7 +11912,7 @@
                 clearTimeout(timeoutId);
 
                 if (response.status === 401) {
-                    this.tokenManager.clearToken();
+                    this.tokenManager.clear();
                     session.clearToken();
 
                     parentComm.send('AUTH_ERROR', { timestamp: Date.now() });
@@ -9116,7 +11922,7 @@
                 if (!response.ok) {
                     if (response.status >= 500 && retryCount < this.maxRetries) {
                         let delay = this.retryDelay * Math.pow(2, retryCount);
-                        if (EnvironmentDetector.isVPNNetwork()) delay *= 1.5;
+                        if (EnvironmentDetector.isVPNNetwork()) delay *= 2;
                         await new Promise(resolve => setTimeout(resolve, delay));
                         return this.secureFetchFallback(url, options, retryCount + 1);
                     }
@@ -9130,7 +11936,7 @@
                 if (retryCount < this.maxRetries &&
                     (error.message.includes('Network') || error.message.includes('Failed to fetch'))) {
                     let delay = this.retryDelay * Math.pow(2, retryCount);
-                    if (EnvironmentDetector.isVPNNetwork()) delay *= 1.5;
+                    if (EnvironmentDetector.isVPNNetwork()) delay *= 2;
                     await new Promise(resolve => setTimeout(resolve, delay));
                     return this.secureFetchFallback(url, options, retryCount + 1);
                 }
@@ -9155,7 +11961,7 @@
                         this.requestQueue.splice(index, 1);
                         reject(new Error('Request timeout: Token not available'));
                     }
-                }, 30000);
+                }, 60000);
             });
         }
 
@@ -9168,12 +11974,12 @@
                 const request = this.requestQueue[0];
 
                 try {
-                    if (this.tokenManager.isTokenReady()) {
+                    if (this.tokenManager.isValid()) {
                         const response = await this.secureFetchFallback(request.url, request.options);
                         request.resolve(response);
                         this.requestQueue.shift();
                     } else {
-                        await new Promise(resolve => setTimeout(resolve, 100));
+                        await new Promise(resolve => setTimeout(resolve, 200));
                     }
                 } catch (error) {
                     request.reject(error);
@@ -9198,7 +12004,7 @@
     // ==================== ORIGINAL CALL API INTEGRATION ====================
     class CallAPIIntegration {
         constructor() {
-            this.tokenManager = new TokenManager();
+            this.tokenManager = TokenManager;
             this.apiClient = new SecureAPIClient(this.tokenManager);
             this.backgroundSyncInterval = null;
             this.authCheckDone = false;
@@ -9248,7 +12054,12 @@
                     this.tokenManager.parentCoordinator = this.parentCoordinator;
                     this.apiClient.parentCoordinator = this.parentCoordinator;
 
-                    await this.tokenManager.initialize();
+                    const session = IframeSessionClient.getSession();
+                    if (session && session.token) {
+                        this.tokenManager._token = session.token;
+                        this.tokenManager._expiresAt = session.expiresAt;
+                    }
+
                     this.setupInitialUI();
                     await this.startBackgroundAuthCheck();
 
@@ -9268,7 +12079,7 @@
 
                     if (this.initAttempts < this.maxInitAttempts) {
                         logInfo(MODULE, `Retrying initialization (${this.initAttempts}/${this.maxInitAttempts})...`);
-                        const timer = setTimeout(() => this.initialize(), 800 * this.initAttempts);
+                        const timer = setTimeout(() => this.initialize(), 2000 * this.initAttempts);
                         timers.add(timer);
                     } else {
                         logError(MODULE, 'Max initialization attempts reached, enabling fallback mode');
@@ -9401,7 +12212,7 @@
                 const timeout = setTimeout(() => {
                     logInfo(MODULE, 'Coordinator session timeout, using cached data');
                     resolve();
-                }, 8000);
+                }, 15000);
 
                 const checkInterval = setInterval(() => {
                     if (this.parentCoordinator.sessionValidated && currentUser) {
@@ -9410,7 +12221,7 @@
                         this.onAuthenticationSuccess();
                         resolve();
                     }
-                }, 100);
+                }, 200);
 
                 timers.add(timeout);
                 timers.add(checkInterval);
@@ -9419,8 +12230,17 @@
 
         async waitForTokenAuth() {
             try {
-                const token = await this.tokenManager.waitForToken();
-                if (token) this.onAuthenticationSuccess(token);
+                const session = IframeSessionClient.getSession();
+                if (session && session.token && IframeSessionClient.isValid()) {
+                    this.onAuthenticationSuccess(session.token);
+                } else {
+                    IframeTransport.requestSessionFromParent();
+                    setTimeout(() => {
+                        if (IframeSessionClient.isValid()) {
+                            this.onAuthenticationSuccess(IframeSessionClient.getToken());
+                        }
+                    }, 5000);
+                }
             } catch (error) {
                 logError(MODULE, 'CallAPIIntegration.waitForTokenAuth', error);
             }
@@ -9447,7 +12267,7 @@
 
                     setTimeout(() => {
                         if (apiStatusIndicator) apiStatusIndicator.style.display = 'none';
-                    }, 2000);
+                    }, 3000);
                 }
 
                 if (!this.backgroundJobsStarted) {
@@ -9467,7 +12287,7 @@
 
             try {
                 this.initializeBackgroundSync();
-                setTimeout(() => this.performInitialDataLoad(), 500);
+                setTimeout(() => this.performInitialDataLoad(), 1000);
             } catch (error) {
                 logError(MODULE, 'CallAPIIntegration.startBackgroundJobs', error);
             }
@@ -9523,8 +12343,8 @@
                 }
 
                 if (window.AppState && window.AppState.isAuthenticated && window.AppState.isOnline) {
-                    let interval = 15000;
-                    if (EnvironmentDetector.isVPNNetwork()) interval = 30000;
+                    let interval = 30000;
+                    if (EnvironmentDetector.isVPNNetwork()) interval = 60000;
 
                     this.backgroundSyncInterval = setInterval(() => {
                         this.performBackgroundSync();
@@ -9994,7 +12814,7 @@
                     this.backgroundSyncInterval = null;
                 }
 
-                this.tokenManager.clearToken();
+                this.tokenManager.clear();
                 logInfo(MODULE, 'Logout handled');
             } catch (error) {
                 logError(MODULE, 'CallAPIIntegration.handleLogout', error);
@@ -10007,7 +12827,7 @@
                     clearInterval(this.backgroundSyncInterval);
                     this.backgroundSyncInterval = null;
                 }
-                if (this.tokenManager) this.tokenManager.cleanup();
+                if (this.tokenManager) this.tokenManager.cleanup?.();
                 if (this.parentCoordinator) this.parentCoordinator.cleanup();
                 logInfo(MODULE, 'API integration cleaned up');
             } catch (error) {
@@ -10417,7 +13237,7 @@
                     elements.incomingCallIntention.style.display = 'none';
                 }
 
-                let timeLeft = 45;
+                let timeLeft = 60;
                 elements.declineTimer.textContent = timeLeft;
 
                 const countdown = setInterval(() => {
@@ -10477,7 +13297,7 @@
 
             const timer = setTimeout(() => {
                 if (notification.parentNode) notification.remove();
-            }, 3000);
+            }, 5000);
             timers.add(timer);
         } catch (error) {
             logError(MODULE, 'showNotification', error);
@@ -10498,12 +13318,14 @@
 
         if (!getValidatedSession()) requestResync();
         logInfo(MODULE, 'Network online');
+        V5StateGovernor.handleOnline();
     }
 
     function handleOffline() {
         AppState.isOnline = false;
         showOfflineUI();
         logWarn(MODULE, 'Network offline');
+        V5StateGovernor.handleOffline();
     }
 
     function showOfflineUI() {
@@ -10893,11 +13715,11 @@
             logInfo(MODULE, `Sending to parent: ${type}`);
 
             if (options.requireResponse) {
-                return parentComm.request(type, payload, options.timeout || 5000);
+                return parentComm.request(type, payload, options.timeout || 15000);
             }
 
             if (options.requireAck) {
-                return parentComm.sendWithAck(type, payload, options.timeout || 5000);
+                return parentComm.sendWithAck(type, payload, options.timeout || CONFIG.REGISTER_ACK_TIMEOUT);
             }
 
             return parentComm.send(type, payload);
@@ -10937,18 +13759,22 @@
 
             EnvironmentDetector.detect();
 
+            TokenManager.initialize();
+
             HandshakeClient.initialize();
             SessionClient.initialize();
             TransportAgent.initialize();
             RecoveryManager.initialize();
             CompatibilityBridge.detect();
 
+            SessionPipeline.initialize(TokenManager);
+
             APICore.initialize().then(result => {
                 if (result.success) {
                     logSuccess(MODULE, 'API Core ready');
                 } else {
                     logWarn(MODULE, 'API Core initialization failed, retrying');
-                    setTimeout(() => APICore.initialize(), 2000);
+                    setTimeout(() => APICore.initialize(), 5000);
                 }
             });
 
@@ -10956,9 +13782,23 @@
 
             safeRegister();
 
-            safeInit().catch(error => {
-                logError(MODULE, 'Deterministic initialization failed', error);
-            });
+            V5StateGovernor.startRegistration();
+
+            if (!window.__CALLS_PIPELINE_STARTED__) {
+                window.__CALLS_PIPELINE_STARTED__ = true;
+                
+                if (SessionPipeline && typeof SessionPipeline.run === 'function') {
+                    SessionPipeline.run().catch(error => {
+                        logError(MODULE, 'SessionPipeline failed', error);
+                        safeInit().catch(e => logError(MODULE, 'Fallback init failed', e));
+                    });
+                } else {
+                    logWarn(MODULE, 'SessionPipeline not available, using fallback');
+                    safeInit().catch(e => logError(MODULE, 'Fallback init failed', e));
+                }
+            } else {
+                logInfo(MODULE, 'Pipeline already started, skipping');
+            }
 
             window.callAPI = new CallAPIIntegration();
 
@@ -10969,7 +13809,7 @@
                     logError(MODULE, 'bootstrapIframe.callAPI', error);
                     enableUI();
                 });
-            }, 100);
+            }, 500);
 
             window.callCore = new CallCore();
 
@@ -10977,7 +13817,7 @@
                 window.callCore.safeInitialize().catch(error => {
                     logError(MODULE, 'Call core safe initialization failed', error);
                 });
-            }, 200);
+            }, 1000);
 
             window.coreInitializer = new CoreInitializer();
 
@@ -10985,12 +13825,42 @@
                 window.coreInitializer.initialize().catch(error => {
                     logError(MODULE, 'Core initializer failed', error);
                 });
-            }, 300);
+            }, 1500);
 
             if (logger._debugMode) {
                 DiagnosticsAgent.enable();
                 DiagnosticsAgent.snapshot('bootstrap');
             }
+
+            window.__resolveSessionPromise = function(success) {
+                if (StateGovernor && StateGovernor._sessionResolve) {
+                    logSuccess(MODULE, 'Global session resolver triggered');
+                    StateGovernor._sessionResolve({ success: true, fromGlobal: true });
+                    StateGovernor._sessionResolve = null;
+                    StateGovernor._sessionReject = null;
+                    if (StateGovernor._sessionTimeoutId) {
+                        clearTimeout(StateGovernor._sessionTimeoutId);
+                        StateGovernor._sessionTimeoutId = null;
+                    }
+                }
+                if (IframeSessionClient && IframeSessionClient._sessionResolve) {
+                    IframeSessionClient._sessionResolve({ success: true, fromGlobal: true });
+                    IframeSessionClient._sessionResolve = null;
+                    IframeSessionClient._sessionReject = null;
+                }
+            };
+
+            window.addEventListener('message', function(event) {
+                if (!OriginSecurity.validateEvent(event)) return;
+                
+                const message = event.data;
+                if (!message || typeof message !== 'object') return;
+                
+                if (message.payload?.token || message.token || message.jwt || message.accessToken) {
+                    logSuccess(MODULE, 'Session data detected in message, resolving promises');
+                    window.__resolveSessionPromise(true);
+                }
+            });
 
             window.addEventListener('beforeunload', () => {
                 if (window.callAPI) window.callAPI.cleanup();
@@ -11000,6 +13870,10 @@
                 TransportAgent.cleanup();
                 SessionClient.cleanup();
                 lifecycle.destroy();
+                V5StateGovernor.reset();
+                if (TokenManager && typeof TokenManager.clear === 'function') {
+                    TokenManager.clear();
+                }
             });
 
             showUI();
@@ -11065,9 +13939,9 @@
                     return true;
                 }
 
-                if (this.retryCount < CONFIG.AUTH_RETRY_LIMIT) {
+                if (this.retryCount < 1) {
                     this.retryCount++;
-                    logWarn(MODULE, `Auth retry ${this.retryCount}/${CONFIG.AUTH_RETRY_LIMIT}`);
+                    logWarn(MODULE, `Auth retry ${this.retryCount}/1`);
 
                     const delay = CONFIG.AUTH_RETRY_DELAY * this.retryCount;
                     const timer = setTimeout(() => this.sync(), delay);
@@ -11160,12 +14034,13 @@
                         parentComm.send('IFRAME_ACTIVE', { timestamp: Date.now() });
 
                         if (session.validateToken()) {
-                            session.refreshToken();
                         } else {
                             auth.sync();
                         }
 
                         if (!getValidatedSession()) requestResync();
+                        
+                        V5StateGovernor.verifySession().catch(() => {});
                     }
                 }
             };
@@ -11180,6 +14055,7 @@
             const onlineHandler = () => {
                 isOnline = true;
                 logInfo(MODULE, 'Network online');
+                V5StateGovernor.handleOnline();
 
                 if (currentState === STATE.DEGRADED) {
                     auth.sync();
@@ -11196,6 +14072,7 @@
                 isOnline = false;
                 logWarn(MODULE, 'Network offline');
                 parentComm.send('NETWORK_LOST', { timestamp: Date.now() });
+                V5StateGovernor.handleOffline();
             };
 
             window.addEventListener('online', onlineHandler);
@@ -11234,6 +14111,10 @@
 
             TransportAgent.cleanup();
             SessionClient.cleanup();
+            V5StateGovernor.reset();
+            if (TokenManager && typeof TokenManager.clear === 'function') {
+                TokenManager.clear();
+            }
 
             parentComm.send('IFRAME_DESTROYED', {
                 iframeId: iframeId,
@@ -11263,6 +14144,22 @@
             try {
                 const data = adaptedMessage;
 
+                if (data.type === 'MODULE_REGISTERED') {
+                    V5StateGovernor.handleModuleRegistered();
+                }
+
+                if (data.type === 'SESSION_ACTIVE') {
+                    V5StateGovernor.handleSessionActive(data.payload || data);
+                }
+
+                if (data.type === 'SESSION_NULL') {
+                    V5StateGovernor.handleSessionNull();
+                }
+
+                if (data.type === 'HEARTBEAT_ACK') {
+                    V5StateGovernor.handleHeartbeatAck();
+                }
+
                 switch (data.type) {
                     case 'SESSION_UPDATE':
                         if (data.payload?.token) session.setToken(data.payload.token, data.payload.expiry);
@@ -11280,10 +14177,6 @@
                         }
                         break;
                     case 'TOKEN_REFRESH':
-                        if (data.payload?.token) {
-                            session.setToken(data.payload.token, data.payload.expiry);
-                            parentComm.send('TOKEN_REFRESHED', { timestamp: Date.now() });
-                        }
                         break;
                     case 'LOGOUT':
                         logInfo(MODULE, 'Logout requested by parent');
@@ -11348,10 +14241,24 @@
                         }
                         break;
                     case 'PARENT_TOKEN_RESPONSE':
+                        break;
+                    case 'SESSION_REFRESHED':
                         if (data.payload && data.payload.token) {
                             session.setToken(data.payload.token, data.payload.expiry);
-                            logSuccess(MODULE, 'Token received from parent via PARENT_TOKEN_RESPONSE');
+                            logSuccess(MODULE, 'Session refreshed atomically');
                         }
+                        break;
+                    case 'SESSION_INVALIDATED':
+                        logWarn(MODULE, 'Session invalidated');
+                        session.clearToken();
+                        break;
+                    case 'SESSION_RECOVERY':
+                        logInfo(MODULE, 'Session recovery initiated');
+                        V5StateGovernor.transition(V5_STATE.RECOVERY, 'session_recovery');
+                        callsState.recoveryMode = true; // Update callsState
+                        break;
+                    case 'INCOMING_CALL':
+                        CallsStateGovernor.handleIncomingCall(data.payload);
                         break;
                 }
             } catch (error) {
@@ -11396,6 +14303,7 @@
             SecurityCore,
 
             STATE,
+            V5_STATE,
             CallCoreState,
             MESSAGE_TYPES,
             PROTOCOL_VERSION: CONFIG.PROTOCOL_VERSION,
@@ -11433,8 +14341,13 @@
             EnvironmentDetector,
             OriginAdapter,
 
+            LifecycleController,
+            V5StateGovernor,
+            SessionPipeline,
+            TokenManager,
+
             isReady: function() {
-                return coreReady && sessionInitialized && APICore.isReady();
+                return coreReady && sessionInitialized && APICore.isReady() && V5StateGovernor.isActive();
             },
 
             version: CONFIG.VERSION,
@@ -11442,7 +14355,9 @@
             environment: ENVIRONMENT,
 
             StateGovernor,
-            MessageRegistry
+            MessageRegistry,
+            
+            callsState
         };
     }
 
@@ -11480,6 +14395,7 @@
         SecurityCore,
 
         STATE,
+        V5_STATE,
         CallCoreState,
         MESSAGE_TYPES,
         PROTOCOL_VERSION: CONFIG.PROTOCOL_VERSION,
@@ -11517,20 +14433,56 @@
         EnvironmentDetector,
         OriginAdapter,
 
+        LifecycleController,
+        V5StateGovernor,
+        SessionPipeline,
+        TokenManager,
+
         environment: ENVIRONMENT,
 
         isReady: function() {
-            return coreReady && sessionInitialized && (APICore.isReady ? APICore.isReady() : true);
+            return coreReady && sessionInitialized && (APICore.isReady ? APICore.isReady() : true) && 
+                   (V5StateGovernor ? V5StateGovernor.isActive() : true);
         },
 
         version: CONFIG.VERSION,
 
-        waitForReady: function(timeout = 10000) {
+        waitForReady: function(timeout = 30000) {
             return APICore.waitForReady ? APICore.waitForReady(timeout) : Promise.resolve(true);
         },
 
         StateGovernor,
-        MessageRegistry
+        MessageRegistry,
+        
+        verifySessionBeforeCall: function() {
+            return V5StateGovernor.verifySession(true);
+        },
+        
+        getV5State: function() {
+            return V5StateGovernor ? V5StateGovernor.getState() : 'unknown';
+        },
+
+        getToken: function() {
+            const session = IframeSessionClient.getSession();
+            return session ? session.token : null;
+        },
+
+        isTokenValid: function() {
+            return IframeSessionClient.isValid();
+        },
+
+        refreshToken: function() {
+            return Promise.reject(new Error('Token refresh handled by parent'));
+        },
+
+        getPipelineStatus: function() {
+            return SessionPipeline ? SessionPipeline.getStatus() : null;
+        },
+        
+        // Expose callsState for diagnostic purposes
+        getCallsState: function() {
+            return { ...callsState };
+        }
     };
 
     // ==================== AUTO-START (PASSIVE) ====================

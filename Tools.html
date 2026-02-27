@@ -1,6 +1,33 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 <head>
+<script>
+// Suppress iframe sandbox warnings (usually from extensions)
+(function() {
+    const originalError = console.error;
+    const originalWarn = console.warn;
+    
+    console.error = function(msg) {
+        if (msg && msg.includes && (
+            msg.includes('iframe which has both') ||
+            msg.includes('sandbox')
+        )) {
+            return;
+        }
+        originalError.apply(console, arguments);
+    };
+    
+    console.warn = function(msg) {
+        if (msg && msg.includes && (
+            msg.includes('iframe which has both') ||
+            msg.includes('sandbox')
+        )) {
+            return;
+        }
+        originalWarn.apply(console, arguments);
+    };
+})();
+</script>
     <link rel="manifest" href="../manifest.json">
     <meta name="theme-color" content="#4F46E5">
     <link rel="icon" href="../icons/moodchat-192.png">
@@ -10,22 +37,24 @@
     <title>Marketplace | Knecta Chat</title>
     
     <!-- Font Awesome -->
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="/css/vendor/font-awesome.min.css">
+<link rel="stylesheet" href="/css/vendor/pickr-nano.min.css">
+<link rel="stylesheet" href="/css/vendor/viewer.min.css">
+<link rel="stylesheet" href="/css/vendor/spectrum.min.css">
+<link rel="stylesheet" href="/css/vendor/video-js.min.css">
     
     <!-- Color Picker Library -->
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/spectrum/1.8.1/spectrum.min.css">
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/spectrum/1.8.1/spectrum.min.js"></script>
+     <link rel="stylesheet" href="/css/vendor/spectrum.min.css">
     
     <!-- Emoji Picker -->
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/emoji-picker-element@1.12.0/css/picker.css">
-    
+    <link rel="stylesheet" href="/css/vendor/pickr-nano.min.css">
     <!-- Video Player -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/video.js/7.21.5/video.min.js"></script>
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/video.js/7.21.5/video-js.min.css" rel="stylesheet">
-    
+     <script src="/js/vendor/video.min.js"></script>
+    <link href="/css/vendor/video-js.min.css" rel="stylesheet">
+
     <!-- Chart.js for Analytics -->
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    
+    <script src="/js/vendor/chart.min.js"></script>
+
     <!-- Link CSS (external file) -->
     <link rel="stylesheet" href="Tool.css">
 
@@ -969,6 +998,7 @@
             background: rgba(244, 67, 54, 0.2) !important;
         }
     </style>
+    <link rel="stylesheet" href="/css/suppress-webgl.css">
 </head>
 <body>
     <div class="app-container">
@@ -2052,29 +2082,29 @@
             </div>
             <div style="padding: 20px;">
                 <div class="reaction-picker" id="reactionPicker">
-                    <div class="reaction-option" data-reaction="👍">
-                        👍
+                    <div class="reaction-option" data-reaction="ðŸ‘">
+                        ðŸ‘
                     </div>
-                    <div class="reaction-option" data-reaction="❤️">
-                        ❤️
+                    <div class="reaction-option" data-reaction="â¤ï¸">
+                        â¤ï¸
                     </div>
-                    <div class="reaction-option" data-reaction="😮">
-                        😮
+                    <div class="reaction-option" data-reaction="ðŸ˜®">
+                        ðŸ˜®
                     </div>
-                    <div class="reaction-option" data-reaction="😄">
-                        😄
+                    <div class="reaction-option" data-reaction="ðŸ˜„">
+                        ðŸ˜„
                     </div>
-                    <div class="reaction-option premium" data-reaction="👑">
-                        👑
+                    <div class="reaction-option premium" data-reaction="ðŸ‘‘">
+                        ðŸ‘‘
                     </div>
-                    <div class="reaction-option premium" data-reaction="⭐">
-                        ⭐
+                    <div class="reaction-option premium" data-reaction="â­">
+                        â­
                     </div>
-                    <div class="reaction-option premium" data-reaction="🏆">
-                        🏆
+                    <div class="reaction-option premium" data-reaction="ðŸ†">
+                        ðŸ†
                     </div>
-                    <div class="reaction-option premium" data-reaction="💎">
-                        💎
+                    <div class="reaction-option premium" data-reaction="ðŸ’Ž">
+                        ðŸ’Ž
                     </div>
                 </div>
             </div>
@@ -2114,30 +2144,37 @@
             // Listen for core ready
             window.addEventListener('marketplaceCoreReady', function() {
                 coreReady = true;
-                console.log('[Tools] 🔵 READY - Core ready');
+                console.log('[Tools] ðŸ”µ READY - Core ready');
                 checkAllReady();
             });
             
             // Listen for UI ready (dispatched from Tool-ui.js)
             window.addEventListener('marketplaceUIReady', function() {
                 uiReady = true;
-                console.log('[Tools] 🔵 READY - UI ready');
+                console.log('[Tools] ðŸ”µ READY - UI ready');
                 checkAllReady();
             });
             
             function checkAllReady() {
                 if (coreReady && uiReady) {
-                    console.log('[Tools] ✅ SUCCESS - Marketplace module fully initialized');
+                    console.log('[Tools] âœ… SUCCESS - Marketplace module fully initialized');
                 }
             }
             
             // Fallback timeout
             setTimeout(function() {
                 if (!coreReady || !uiReady) {
-                    console.log('[Tools] ⚪ INFO - Module ready (fallback)');
+                    console.log('[Tools] âšª INFO - Module ready (fallback)');
                 }
             }, 5000);
         })();
     </script>
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script src="/js/vendor/spectrum.min.js"></script>
 </body>
 </html>
+
+
+
+
+

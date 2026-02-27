@@ -1,6 +1,33 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 <head>
+<script>
+// Suppress iframe sandbox warnings (usually from extensions)
+(function() {
+    const originalError = console.error;
+    const originalWarn = console.warn;
+    
+    console.error = function(msg) {
+        if (msg && msg.includes && (
+            msg.includes('iframe which has both') ||
+            msg.includes('sandbox')
+        )) {
+            return;
+        }
+        originalError.apply(console, arguments);
+    };
+    
+    console.warn = function(msg) {
+        if (msg && msg.includes && (
+            msg.includes('iframe which has both') ||
+            msg.includes('sandbox')
+        )) {
+            return;
+        }
+        originalWarn.apply(console, arguments);
+    };
+})();
+</script>
     <link rel="manifest" href="../manifest.json">
     <meta name="theme-color" content="#4F46E5">
     <link rel="icon" href="../icons/moodchat-192.png">
@@ -18,10 +45,13 @@
     <script type="module" src="/js/settingsManager.js"></script>
 
     <!-- Font Awesome -->
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    
+<link rel="stylesheet" href="/css/vendor/font-awesome.min.css">
+<link rel="stylesheet" href="/css/vendor/pickr-nano.min.css">
+<link rel="stylesheet" href="/css/vendor/viewer.min.css">
+<link rel="stylesheet" href="/css/vendor/spectrum.min.css">
+<link rel="stylesheet" href="/css/vendor/video-js.min.css">    
     <!-- QR Code Library -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+    <script src="/js/vendor/qrcode.min.js"></script>
     <!-- Link CSS -->
     <link rel="stylesheet" href="group.css">
 
@@ -751,6 +781,7 @@
             white-space: nowrap;
         }
     </style>
+    <link rel="stylesheet" href="/css/suppress-webgl.css">
 </head>
 <body>
     <!-- ========== MODIFIED: Toast Container at Bottom ========== -->
@@ -801,8 +832,8 @@
     <!-- ========== MODIFIED: Debug Panel at Bottom ========== -->
     <div class="debug-panel" id="debugPanel">
         <div class="debug-header">
-            <span>🔍 Debug Panel</span>
-            <span class="debug-close" id="debugClose">✕</span>
+            <span>ðŸ” Debug Panel</span>
+            <span class="debug-close" id="debugClose">âœ•</span>
         </div>
         
         <div class="debug-section">
@@ -1058,7 +1089,7 @@
                         <div class="chat-header-title" id="chatTitle">Group Chat</div>
                         <div class="chat-header-subtitle" id="chatSubtitle">
                             <span id="chatMemberCount">0 members</span>
-                            <span>•</span>
+                            <span>â€¢</span>
                             <span id="chatActive">Active now</span>
                             <!-- EXISTING: Group Purpose & Pulse -->
                             <span id="chatPurposeTag" class="group-purpose-tag" style="display: none;"></span>
@@ -1095,9 +1126,9 @@
                 <div id="topicSelection" style="display: none; padding: 5px 10px; background: var(--secondary-color); border-bottom: 1px solid var(--border-color);">
                     <select id="messageTopic" style="width: 100%; padding: 4px 8px; border-radius: 4px; border: 1px solid var(--border-color); font-size: 12px;">
                         <option value="">Select topic (optional)</option>
-                        <option value="announcement">📢 Announcement</option>
-                        <option value="question">❓ Question</option>
-                        <option value="discussion">💬 Discussion</option>
+                        <option value="announcement">ðŸ“¢ Announcement</option>
+                        <option value="question">â“ Question</option>
+                        <option value="discussion">ðŸ’¬ Discussion</option>
                     </select>
                 </div>
                 <div class="chat-input-actions">
@@ -1301,16 +1332,16 @@
                         <label class="input-label">Group Purpose *</label>
                         <select class="text-input" id="groupPurposeSelect">
                             <option value="">Select a purpose</option>
-                            <option value="study">📚 Study / Learning</option>
-                            <option value="prayer">🙏 Prayer / Spiritual</option>
-                            <option value="work">💼 Work / Professional</option>
-                            <option value="family">👨‍👩‍👧‍👦 Family</option>
-                            <option value="event">🎉 Event / Celebration</option>
-                            <option value="project">📋 Project Collaboration</option>
-                            <option value="support">🤝 Support Group</option>
-                            <option value="hobby">🎨 Hobby / Interest</option>
-                            <option value="fitness">💪 Fitness / Health</option>
-                            <option value="other">🔮 Other</option>
+                            <option value="study">ðŸ“š Study / Learning</option>
+                            <option value="prayer">ðŸ™ Prayer / Spiritual</option>
+                            <option value="work">ðŸ’¼ Work / Professional</option>
+                            <option value="family">ðŸ‘¨â€ðŸ‘©â€ðŸ‘§â€ðŸ‘¦ Family</option>
+                            <option value="event">ðŸŽ‰ Event / Celebration</option>
+                            <option value="project">ðŸ“‹ Project Collaboration</option>
+                            <option value="support">ðŸ¤ Support Group</option>
+                            <option value="hobby">ðŸŽ¨ Hobby / Interest</option>
+                            <option value="fitness">ðŸ’ª Fitness / Health</option>
+                            <option value="other">ðŸ”® Other</option>
                         </select>
                         <div style="font-size: 12px; color: var(--text-secondary); margin-top: 5px;">This helps members understand the group's focus</div>
                     </div>
@@ -1320,23 +1351,23 @@
                         <div style="display: flex; gap: 10px; margin-top: 10px; flex-wrap: wrap;">
                             <div class="mood-option" data-mood="calm" style="flex: 1; min-width: 100px; padding: 12px; border: 2px solid var(--border-color); border-radius: 8px; text-align: center; cursor: pointer; background: #e3f2fd; color: #1976d2;">
                                 <i class="fas fa-check" style="display: none;"></i>
-                                <div>😌 Calm</div>
+                                <div>ðŸ˜Œ Calm</div>
                             </div>
                             <div class="mood-option" data-mood="busy" style="flex: 1; min-width: 100px; padding: 12px; border: 2px solid var(--border-color); border-radius: 8px; text-align: center; cursor: pointer; background: #fff3e0; color: #f57c00;">
                                 <i class="fas fa-check" style="display: none;"></i>
-                                <div>🏃 Busy</div>
+                                <div>ðŸƒ Busy</div>
                             </div>
                             <div class="mood-option" data-mood="celebratory" style="flex: 1; min-width: 100px; padding: 12px; border: 2px solid var(--border-color); border-radius: 8px; text-align: center; cursor: pointer; background: #fce4ec; color: #c2185b;">
                                 <i class="fas fa-check" style="display: none;"></i>
-                                <div>🎉 Celebratory</div>
+                                <div>ðŸŽ‰ Celebratory</div>
                             </div>
                             <div class="mood-option" data-mood="silent" style="flex: 1; min-width: 100px; padding: 12px; border: 2px solid var(--border-color); border-radius: 8px; text-align: center; cursor: pointer; background: #f5f5f5; color: #616161;">
                                 <i class="fas fa-check" style="display: none;"></i>
-                                <div>🔇 Silent</div>
+                                <div>ðŸ”‡ Silent</div>
                             </div>
                             <div class="mood-option" data-mood="urgent" style="flex: 1; min-width: 100px; padding: 12px; border: 2px solid var(--border-color); border-radius: 8px; text-align: center; cursor: pointer; background: #ffebee; color: #d32f2f;">
                                 <i class="fas fa-check" style="display: none;"></i>
-                                <div>🚨 Urgent</div>
+                                <div>ðŸš¨ Urgent</div>
                             </div>
                         </div>
                     </div>
@@ -1420,23 +1451,23 @@
                     <div class="input-group">
                         <label class="input-label">Custom Reactions (Optional)</label>
                         <div style="display: flex; gap: 10px; margin-top: 10px; flex-wrap: wrap;">
-                            <div class="reaction-option" data-reaction="👍" style="padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; cursor: pointer; text-align: center; font-size: 20px;">
-                                👍
+                            <div class="reaction-option" data-reaction="ðŸ‘" style="padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; cursor: pointer; text-align: center; font-size: 20px;">
+                                ðŸ‘
                             </div>
-                            <div class="reaction-option" data-reaction="❤️" style="padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; cursor: pointer; text-align: center; font-size: 20px;">
-                                ❤️
+                            <div class="reaction-option" data-reaction="â¤ï¸" style="padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; cursor: pointer; text-align: center; font-size: 20px;">
+                                â¤ï¸
                             </div>
-                            <div class="reaction-option" data-reaction="😂" style="padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; cursor: pointer; text-align: center; font-size: 20px;">
-                                😂
+                            <div class="reaction-option" data-reaction="ðŸ˜‚" style="padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; cursor: pointer; text-align: center; font-size: 20px;">
+                                ðŸ˜‚
                             </div>
-                            <div class="reaction-option" data-reaction="🙏" style="padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; cursor: pointer; text-align: center; font-size: 20px;">
-                                🙏
+                            <div class="reaction-option" data-reaction="ðŸ™" style="padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; cursor: pointer; text-align: center; font-size: 20px;">
+                                ðŸ™
                             </div>
-                            <div class="reaction-option" data-reaction="🔥" style="padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; cursor: pointer; text-align: center; font-size: 20px;">
-                                🔥
+                            <div class="reaction-option" data-reaction="ðŸ”¥" style="padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; cursor: pointer; text-align: center; font-size: 20px;">
+                                ðŸ”¥
                             </div>
-                            <div class="reaction-option" data-reaction="👏" style="padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; cursor: pointer; text-align: center; font-size: 20px;">
-                                👏
+                            <div class="reaction-option" data-reaction="ðŸ‘" style="padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; cursor: pointer; text-align: center; font-size: 20px;">
+                                ðŸ‘
                             </div>
                         </div>
                         <div style="font-size: 12px; color: var(--text-secondary); margin-top: 5px;">Select custom reactions for your group</div>
@@ -1596,26 +1627,26 @@
                                 <label class="admin-settings-label">Update Group Purpose:</label>
                                 <select class="text-input" id="adminGroupPurpose" style="margin-top: 8px; width: 100%;">
                                     <option value="">Select purpose</option>
-                                    <option value="study">📚 Study / Learning</option>
-                                    <option value="prayer">🙏 Prayer / Spiritual</option>
-                                    <option value="work">💼 Work / Professional</option>
-                                    <option value="family">👨‍👩‍👧‍👦 Family</option>
-                                    <option value="event">🎉 Event / Celebration</option>
-                                    <option value="project">📋 Project Collaboration</option>
-                                    <option value="support">🤝 Support Group</option>
-                                    <option value="hobby">🎨 Hobby / Interest</option>
-                                    <option value="fitness">💪 Fitness / Health</option>
-                                    <option value="other">🔮 Other</option>
+                                    <option value="study">ðŸ“š Study / Learning</option>
+                                    <option value="prayer">ðŸ™ Prayer / Spiritual</option>
+                                    <option value="work">ðŸ’¼ Work / Professional</option>
+                                    <option value="family">ðŸ‘¨â€ðŸ‘©â€ðŸ‘§â€ðŸ‘¦ Family</option>
+                                    <option value="event">ðŸŽ‰ Event / Celebration</option>
+                                    <option value="project">ðŸ“‹ Project Collaboration</option>
+                                    <option value="support">ðŸ¤ Support Group</option>
+                                    <option value="hobby">ðŸŽ¨ Hobby / Interest</option>
+                                    <option value="fitness">ðŸ’ª Fitness / Health</option>
+                                    <option value="other">ðŸ”® Other</option>
                                 </select>
                             </div>
                             <div class="admin-settings-option">
                                 <label class="admin-settings-label">Current Group Mood:</label>
                                 <div style="display: flex; gap: 10px; margin-top: 8px; flex-wrap: wrap;">
-                                    <button class="mood-select-btn" data-mood="calm" style="padding: 8px 12px; border: 1px solid #1976d2; border-radius: 6px; background: #e3f2fd; color: #1976d2; cursor: pointer;">😌 Calm</button>
-                                    <button class="mood-select-btn" data-mood="busy" style="padding: 8px 12px; border: 1px solid #f57c00; border-radius: 6px; background: #fff3e0; color: #f57c00; cursor: pointer;">🏃 Busy</button>
-                                    <button class="mood-select-btn" data-mood="celebratory" style="padding: 8px 12px; border: 1px solid #c2185b; border-radius: 6px; background: #fce4ec; color: #c2185b; cursor: pointer;">🎉 Celebratory</button>
-                                    <button class="mood-select-btn" data-mood="silent" style="padding: 8px 12px; border: 1px solid #616161; border-radius: 6px; background: #f5f5f5; color: #616161; cursor: pointer;">🔇 Silent</button>
-                                    <button class="mood-select-btn" data-mood="urgent" style="padding: 8px 12px; border: 1px solid #d32f2f; border-radius: 6px; background: #ffebee; color: #d32f2f; cursor: pointer;">🚨 Urgent</button>
+                                    <button class="mood-select-btn" data-mood="calm" style="padding: 8px 12px; border: 1px solid #1976d2; border-radius: 6px; background: #e3f2fd; color: #1976d2; cursor: pointer;">ðŸ˜Œ Calm</button>
+                                    <button class="mood-select-btn" data-mood="busy" style="padding: 8px 12px; border: 1px solid #f57c00; border-radius: 6px; background: #fff3e0; color: #f57c00; cursor: pointer;">ðŸƒ Busy</button>
+                                    <button class="mood-select-btn" data-mood="celebratory" style="padding: 8px 12px; border: 1px solid #c2185b; border-radius: 6px; background: #fce4ec; color: #c2185b; cursor: pointer;">ðŸŽ‰ Celebratory</button>
+                                    <button class="mood-select-btn" data-mood="silent" style="padding: 8px 12px; border: 1px solid #616161; border-radius: 6px; background: #f5f5f5; color: #616161; cursor: pointer;">ðŸ”‡ Silent</button>
+                                    <button class="mood-select-btn" data-mood="urgent" style="padding: 8px 12px; border: 1px solid #d32f2f; border-radius: 6px; background: #ffebee; color: #d32f2f; cursor: pointer;">ðŸš¨ Urgent</button>
                                 </div>
                             </div>
                         </div>
@@ -1722,7 +1753,7 @@
                             <div id="transparencyLog" style="max-height: 300px; overflow-y: auto; padding: 10px; background: var(--secondary-color); border-radius: 8px;">
                                 <div class="transparency-log-item">
                                     <div><strong>Group created</strong></div>
-                                    <div style="font-size: 12px; color: var(--text-secondary);">By you • Just now</div>
+                                    <div style="font-size: 12px; color: var(--text-secondary);">By you â€¢ Just now</div>
                                 </div>
                             </div>
                         </div>
@@ -1911,3 +1942,7 @@
     </script>
 </body>
 </html>
+
+
+
+

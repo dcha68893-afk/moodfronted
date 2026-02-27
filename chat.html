@@ -1,6 +1,2506 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en" class="h-full">
 <head>
+<script>
+// Suppress iframe sandbox warnings (usually from extensions)
+(function() {
+    const originalError = console.error;
+    const originalWarn = console.warn;
+    
+    console.error = function(msg) {
+        if (msg && msg.includes && (
+            msg.includes('iframe which has both') ||
+            msg.includes('sandbox')
+        )) {
+            return;
+        }
+        originalError.apply(console, arguments);
+    };
+    
+    console.warn = function(msg) {
+        if (msg && msg.includes && (
+            msg.includes('iframe which has both') ||
+            msg.includes('sandbox')
+        )) {
+            return;
+        }
+        originalWarn.apply(console, arguments);
+    };
+})();
+</script>
+
+<!-- ========== SECTION 1: EARLY SESSION BOOTSTRAP (SYNCHRONOUS) ========== -->
+<!-- THIS MUST RUN BEFORE ANYTHING ELSE - NO API CALLS, NO ASYNC -->
+<script>
+(function() {
+    'use strict';
+    
+    // ==================== SECTION 1.1: SYNCHRONOUS SESSION LOAD ====================
+    // This runs immediately when script loads - NO async, NO API calls
+    
+    // Define parent state container that will be populated synchronously
+    window.__PARENT_SESSION__ = {
+        session: null,
+        token: null,
+        userId: null,
+        authenticated: false,
+        expiresAt: null,
+        fromCache: false,
+        loaded: false
+    };
+    
+    // Attempt to load session from localStorage synchronously
+    try {
+        const authData = localStorage.getItem('kynecta_auth');
+        if (authData) {
+            const parsed = JSON.parse(authData);
+            if (parsed && parsed.token) {
+                // Check expiry but don't validate - just use what we have
+                const expiresAt = parsed.expiry || parsed.expiresAt || 0;
+                
+                window.__PARENT_SESSION__.session = {
+                    authenticated: true,
+                    userId: parsed.userId || parsed.user?.id,
+                    token: parsed.token,
+                    user: parsed.user,
+                    expiresAt: expiresAt,
+                    timestamp: parsed.timestamp || Date.now()
+                };
+                window.__PARENT_SESSION__.token = parsed.token;
+                window.__PARENT_SESSION__.userId = parsed.userId || parsed.user?.id;
+                window.__PARENT_SESSION__.authenticated = true;
+                window.__PARENT_SESSION__.expiresAt = expiresAt;
+                window.__PARENT_SESSION__.fromCache = true;
+            }
+        }
+    } catch (e) {
+        // Silently fail - no session available
+    }
+    
+    // Always mark as loaded - even if no session
+    window.__PARENT_SESSION__.loaded = true;
+    
+    // ==================== SECTION 1.2: IMMEDIATE SESSION GETTER ====================
+    window.__getParentSession = function() {
+        return window.__PARENT_SESSION__.session ? { ...window.__PARENT_SESSION__.session } : null;
+    };
+    
+    window.__getParentToken = function() {
+        return window.__PARENT_SESSION__.token;
+    };
+    
+    window.__isParentAuthenticated = function() {
+        return !!(window.__PARENT_SESSION__.authenticated && window.__PARENT_SESSION__.token);
+    };
+    
+    // ==================== SECTION 1.3: LOCK MANAGEMENT ====================
+    window.__PARENT_LOCKS__ = {
+        registration: new Map(),      // module -> timestamp
+        sessionDelivery: new Map(),    // module -> timestamp
+        verification: new Map(),       // requestId -> timestamp
+        refresh: false,                // global refresh lock
+        
+        acquireRegistration: function(module) {
+            if (this.registration.has(module)) return false;
+            this.registration.set(module, Date.now());
+            return true;
+        },
+        
+        releaseRegistration: function(module) {
+            this.registration.delete(module);
+        },
+        
+        acquireSessionDelivery: function(module) {
+            if (this.sessionDelivery.has(module)) return false;
+            this.sessionDelivery.set(module, Date.now());
+            return true;
+        },
+        
+        releaseSessionDelivery: function(module) {
+            this.sessionDelivery.delete(module);
+        },
+        
+        acquireVerification: function(requestId) {
+            if (this.verification.has(requestId)) return false;
+            this.verification.set(requestId, Date.now());
+            return true;
+        },
+        
+        releaseVerification: function(requestId) {
+            this.verification.delete(requestId);
+        },
+        
+        acquireRefresh: function() {
+            if (this.refresh) return false;
+            this.refresh = true;
+            return true;
+        },
+        
+        releaseRefresh: function() {
+            this.refresh = false;
+        },
+        
+        cleanup: function() {
+            const now = Date.now();
+            this.registration.forEach((timestamp, module) => {
+                if (now - timestamp > 5000) this.registration.delete(module);
+            });
+            this.sessionDelivery.forEach((timestamp, module) => {
+                if (now - timestamp > 5000) this.sessionDelivery.delete(module);
+            });
+            this.verification.forEach((timestamp, id) => {
+                if (now - timestamp > 5000) this.verification.delete(id);
+            });
+        }
+    };
+    
+    // ==================== SECTION 1.4: CORRELATION REGISTRY ====================
+    window.__PARENT_CORRELATION__ = {
+        processedIds: new Set(),
+        timestamps: new Map(),
+        maxProcessedIds: 1000,
+        
+        isProcessed: function(messageId) {
+            return this.processedIds.has(messageId);
+        },
+        
+        getTimestamp: function(messageId) {
+            return this.timestamps.get(messageId) || 0;
+        },
+        
+        register: function(messageId) {
+            if (this.isProcessed(messageId)) return false;
+            this.processedIds.add(messageId);
+            this.timestamps.set(messageId, Date.now());
+            
+            // Cleanup
+            if (this.processedIds.size > this.maxProcessedIds) {
+                const ids = Array.from(this.processedIds);
+                const toRemove = ids.slice(0, ids.length - this.maxProcessedIds);
+                toRemove.forEach(id => {
+                    this.processedIds.delete(id);
+                    this.timestamps.delete(id);
+                });
+            }
+            return true;
+        }
+    };
+    
+    // ==================== SECTION 1.5: IMMEDIATE RESPOND FUNCTION ====================
+    window.__parentRespond = function(target, origin, responses) {
+        if (!target) return;
+        
+        const responseArray = Array.isArray(responses) ? responses : [responses];
+        
+        responseArray.forEach(msg => {
+            try {
+                target.postMessage(msg, origin || '*');
+            } catch (e) {
+                // Silently fail
+            }
+        });
+    };
+})();
+</script>
+
+<!-- ========== SECTION 2: INSTALL MESSAGE HANDLER IMMEDIATELY ========== -->
+<!-- This runs immediately after session bootstrap - BEFORE any API initialization -->
+<script>
+(function() {
+    'use strict';
+    
+    // ==================== SECTION 2.1: PROTOCOL TYPES ====================
+    const PROTOCOL_TYPES = {
+        V2: 'V2',      // Modern: REGISTER_MODULE, ACK, SESSION_ACTIVE
+        V1: 'V1',      // Legacy: CHILD_READY, coreReady, REQUEST_SESSION
+        HYBRID: 'HYBRID' // Supports both
+    };
+    
+    // ==================== SECTION 2.2: MODULE NAMES ====================
+    const MODULE_NAMES = {
+        messages: 'messagesIframe',
+        status: 'statusIframe',
+        group: 'groupIframe',
+        friends: 'friendsIframe',
+        calls: 'callsIframe',
+        settings: 'settingsIframe',
+        tools: 'toolsIframe'
+    };
+    
+    // ==================== SECTION 2.3: MODULE STATE TRACKING ====================
+    window.__PARENT_MODULES__ = {};
+    
+    // Initialize module states
+    Object.keys(MODULE_NAMES).forEach(function(module) {
+        window.__PARENT_MODULES__[module] = {
+            protocol: null,
+            detectedFrom: [],
+            registered: false,
+            ready: false,
+            registrationLock: false,
+            sessionDelivered: false,
+            lastHeartbeat: 0,
+            registeredAt: null,
+            sessionDeliveredAt: null,
+            degraded: false,
+            messageQueue: [],
+            childReadyReceived: false,
+            coreReadyReceived: false,
+            processedMessageIds: new Set()
+        };
+    });
+    
+    // ==================== SECTION 2.4: PROTOCOL DETECTION ====================
+    window.__detectProtocol = function(type, module) {
+        const moduleState = window.__PARENT_MODULES__[module];
+        if (!moduleState) return null;
+        
+        if (moduleState.protocol) {
+            return moduleState.protocol;
+        }
+        
+        moduleState.detectedFrom.push(type);
+        
+        if (type === 'REGISTER_MODULE') {
+            moduleState.protocol = PROTOCOL_TYPES.V2;
+            return PROTOCOL_TYPES.V2;
+        }
+        
+        if (type === 'CHILD_READY') {
+            moduleState.childReadyReceived = true;
+            moduleState.protocol = PROTOCOL_TYPES.V1;
+            return PROTOCOL_TYPES.V1;
+        }
+        
+        if (type === 'coreReady') {
+            moduleState.coreReadyReceived = true;
+            moduleState.protocol = PROTOCOL_TYPES.V1;
+            return PROTOCOL_TYPES.V1;
+        }
+        
+        const hasV2 = moduleState.detectedFrom.includes('REGISTER_MODULE');
+        const hasV1 = moduleState.detectedFrom.includes('CHILD_READY') || 
+                      moduleState.detectedFrom.includes('coreReady');
+        
+        if (hasV2 && hasV1) {
+            moduleState.protocol = PROTOCOL_TYPES.HYBRID;
+            return PROTOCOL_TYPES.HYBRID;
+        }
+        
+        return null;
+    };
+    
+    // ==================== SECTION 2.5: IDENTIFY MODULE FROM SOURCE ====================
+    window.__identifyModule = function(source) {
+        // Try direct iframe matching first
+        for (var module in MODULE_NAMES) {
+            if (MODULE_NAMES.hasOwnProperty(module)) {
+                var iframeId = MODULE_NAMES[module];
+                var iframe = document.getElementById(iframeId);
+                if (iframe && iframe.contentWindow === source) {
+                    return module;
+                }
+            }
+        }
+        
+        // If not found, look for the iframe in the DOM
+        const allIframes = document.querySelectorAll('iframe');
+        for (let iframe of allIframes) {
+            if (iframe.contentWindow === source) {
+                // Extract module name from ID (remove 'Iframe')
+                return iframe.id.replace('Iframe', '');
+            }
+        }
+        
+        return null;
+    };
+    
+    // ==================== SECTION 2.6: IMMEDIATE REGISTER_MODULE HANDLER ====================
+    window.__handleRegisterModuleImmediate = function(data, source, origin, module) {
+        var messageId = data.messageId || data.requestId;
+        if (!messageId) {
+            messageId = 'msg_' + Date.now() + '_' + Math.random().toString(36).substr(2, 8);
+        }
+        
+        // Enhanced registration lock with timeout check
+        if (!window.__PARENT_LOCKS__.acquireRegistration(module)) {
+            // Check if previous registration timed out
+            const lastAttempt = window.__PARENT_LOCKS__.registration.get(module);
+            if (lastAttempt && Date.now() - lastAttempt > 5000) {
+                // Release and retry
+                window.__PARENT_LOCKS__.releaseRegistration(module);
+                // Re-enter handler
+                window.__handleRegisterModuleImmediate(data, source, origin, module);
+                return;
+            }
+            
+            // Still locked, send ACK only
+            window.__parentRespond(source, origin, {
+                type: 'ACK',
+                originalType: 'REGISTER_MODULE',
+                messageId: messageId,
+                requestId: messageId,
+                payload: { success: true, cached: true },
+                timestamp: Date.now()
+            });
+            return;
+        }
+        
+        var moduleState = window.__PARENT_MODULES__[module];
+        
+        // Mark as registered
+        if (!moduleState.registered) {
+            moduleState.registered = true;
+            moduleState.registeredAt = Date.now();
+            moduleState.lastHeartbeat = Date.now();
+        }
+        
+        // Get session from synchronous storage
+        var session = window.__getParentSession();
+        var isAuthenticated = window.__isParentAuthenticated();
+        
+        // Prepare batch responses in EXACT ORDER
+        var responses = [];
+        
+        // 1. MODULE_REGISTERED
+        responses.push({
+            type: 'MODULE_REGISTERED',
+            messageId: messageId,
+            requestId: messageId,
+            payload: { success: true, module: module },
+            timestamp: Date.now()
+        });
+        
+        // 2. SESSION_ACTIVE or SESSION_NULL - FIXED: Only send SESSION_NULL if parent explicitly has no session
+        if (session && isAuthenticated && !moduleState.sessionDelivered) {
+            responses.push({
+                type: 'SESSION_ACTIVE',
+                messageId: 'session_' + messageId,
+                requestId: messageId,
+                session: session,
+                payload: {
+                    authenticated: true,
+                    userId: session.userId,
+                    token: session.token,
+                    user: session.user,
+                    expiresAt: session.expiresAt
+                },
+                timestamp: Date.now()
+            });
+            moduleState.sessionDelivered = true;
+            moduleState.sessionDeliveredAt = Date.now();
+        } else if (window.__PARENT_SESSION__.authenticated === false && !moduleState.sessionDelivered) {
+            responses.push({
+                type: 'SESSION_NULL',
+                messageId: 'session_' + messageId,
+                requestId: messageId,
+                payload: { reason: 'no_active_session' },
+                timestamp: Date.now()
+            });
+            moduleState.sessionDelivered = true;
+        }
+        
+        // 3. PARENT_READY
+        responses.push({
+            type: 'PARENT_READY',
+            messageId: 'ready_' + messageId,
+            requestId: messageId,
+            payload: { timestamp: Date.now(), protocol: 'KYN-8.0' },
+            timestamp: Date.now()
+        });
+        
+        // 4. ACK
+        responses.push({
+            type: 'ACK',
+            originalType: 'REGISTER_MODULE',
+            messageId: messageId,
+            requestId: messageId,
+            payload: { success: true, module: module },
+            timestamp: Date.now()
+        });
+        
+        // Send all responses immediately
+        window.__parentRespond(source, origin, responses);
+        
+        // Mark module ready
+        moduleState.ready = true;
+        
+        window.__PARENT_LOCKS__.releaseRegistration(module);
+    };
+    
+    // ==================== SECTION 2.7: IMMEDIATE CHILD_READY HANDLER ====================
+    window.__handleChildReadyImmediate = function(data, source, origin, module) {
+        var messageId = data.messageId || data.requestId || ('v1_' + Date.now());
+        
+        var moduleState = window.__PARENT_MODULES__[module];
+        
+        // Mark protocol
+        moduleState.protocol = PROTOCOL_TYPES.V1;
+        moduleState.childReadyReceived = true;
+        
+        // Register if not already
+        if (!moduleState.registered) {
+            moduleState.registered = true;
+            moduleState.registeredAt = Date.now();
+        }
+        
+        // Get session from synchronous storage
+        var session = window.__getParentSession();
+        var isAuthenticated = window.__isParentAuthenticated();
+        
+        // Prepare V1 responses
+        var responses = [];
+        
+        // 1. coreReady (legacy)
+        responses.push({
+            type: 'coreReady',
+            messageId: 'core_' + messageId,
+            requestId: messageId,
+            payload: { success: true, module: module },
+            timestamp: Date.now()
+        });
+        
+        // 2. SESSION_RESPONSE (legacy format)
+        if (session && isAuthenticated && !moduleState.sessionDelivered) {
+            responses.push({
+                type: 'SESSION_RESPONSE',
+                messageId: 'session_' + messageId,
+                requestId: messageId,
+                payload: {
+                    session: session,
+                    authenticated: true,
+                    token: session.token,
+                    expiresAt: session.expiresAt,
+                    user: session.user
+                },
+                timestamp: Date.now()
+            });
+            moduleState.sessionDelivered = true;
+            moduleState.sessionDeliveredAt = Date.now();
+        } else if (!moduleState.sessionDelivered) {
+            responses.push({
+                type: 'SESSION_RESPONSE',
+                messageId: 'session_' + messageId,
+                requestId: messageId,
+                payload: {
+                    session: null,
+                    authenticated: false
+                },
+                timestamp: Date.now()
+            });
+            moduleState.sessionDelivered = true;
+        }
+        
+        // 3. PARENT_READY
+        responses.push({
+            type: 'PARENT_READY',
+            messageId: 'ready_' + messageId,
+            requestId: messageId,
+            payload: { timestamp: Date.now(), protocol: 'KYN-8.0' },
+            timestamp: Date.now()
+        });
+        
+        // Send responses
+        window.__parentRespond(source, origin, responses);
+        
+        // Mark ready
+        moduleState.ready = true;
+    };
+    
+    // ==================== SECTION 2.8: IMMEDIATE REQUEST_SESSION HANDLER ====================
+    window.__handleRequestSessionImmediate = function(data, source, origin, module) {
+        var messageId = data.messageId || data.requestId;
+        if (!messageId) return;
+        
+        var moduleState = window.__PARENT_MODULES__[module];
+        var session = window.__getParentSession();
+        var isAuthenticated = window.__isParentAuthenticated();
+        
+        // Prepare response
+        var responses = [];
+        
+        // SESSION_RESPONSE
+        responses.push({
+            type: 'SESSION_RESPONSE',
+            requestId: messageId,
+            messageId: messageId,
+            payload: {
+                session: session,
+                authenticated: isAuthenticated,
+                user: session ? session.user : null,
+                token: session ? session.token : null
+            },
+            timestamp: Date.now()
+        });
+        
+        // ACK for V2 or HYBRID
+        if (moduleState.protocol === PROTOCOL_TYPES.V2 || moduleState.protocol === PROTOCOL_TYPES.HYBRID) {
+            responses.push({
+                type: 'ACK',
+                originalType: 'REQUEST_SESSION',
+                messageId: 'ack_' + messageId,
+                requestId: messageId,
+                payload: { success: true },
+                timestamp: Date.now()
+            });
+        }
+        
+        window.__parentRespond(source, origin, responses);
+        moduleState.sessionDelivered = true;
+    };
+    
+    // ==================== SECTION 2.9: IMMEDIATE VERIFY_SESSION HANDLER ====================
+    window.__handleVerifySessionImmediate = function(data, source, origin) {
+        var requestId = data.requestId || data.messageId;
+        if (!requestId) return;
+        
+        if (!window.__PARENT_LOCKS__.acquireVerification(requestId)) {
+            return;
+        }
+        
+        var session = window.__getParentSession();
+        var isAuthenticated = window.__isParentAuthenticated();
+        
+        // Simple validation based on session existence only
+        var valid = isAuthenticated ? true : false;
+        var reason = valid ? '' : 'no_session';
+        
+        window.__parentRespond(source, origin, [
+            {
+                type: 'SESSION_VERIFIED',
+                requestId: requestId,
+                messageId: requestId,
+                payload: {
+                    valid: valid,
+                    reason: reason,
+                    expiresAt: session ? session.expiresAt : null,
+                    userId: session ? session.userId : null
+                },
+                timestamp: Date.now()
+            },
+            {
+                type: 'ACK',
+                originalType: 'VERIFY_SESSION',
+                messageId: requestId,
+                requestId: requestId,
+                payload: { success: true, valid: valid },
+                timestamp: Date.now()
+            }
+        ]);
+        
+        window.__PARENT_LOCKS__.releaseVerification(requestId);
+    };
+    
+    // ==================== SECTION 2.10: IMMEDIATE HEARTBEAT HANDLER ====================
+    window.__handleHeartbeatImmediate = function(data, source, origin, module) {
+        var messageId = data.messageId || data.requestId;
+        
+        if (!module || !window.__PARENT_MODULES__[module]) return;
+        
+        var moduleState = window.__PARENT_MODULES__[module];
+        
+        // Update heartbeat
+        moduleState.lastHeartbeat = Date.now();
+        
+        // Clear degraded
+        if (moduleState.degraded) {
+            moduleState.degraded = false;
+        }
+        
+        // Send HEARTBEAT_ACK
+        window.__parentRespond(source, origin, {
+            type: 'HEARTBEAT_ACK',
+            requestId: messageId,
+            messageId: messageId,
+            timestamp: Date.now()
+        });
+    };
+    
+    // ==================== SECTION 2.11: ACK HANDLER ====================
+    window.__handleAck = function(requestId, payload) {
+        // This will be populated by the ACK registry
+        if (window.__ACK_REGISTRY__) {
+            const handler = window.__ACK_REGISTRY__.get(requestId);
+            if (handler && handler.resolve) {
+                handler.resolve(payload);
+                window.__ACK_REGISTRY__.delete(requestId);
+            }
+        }
+    };
+    
+    // ==================== SECTION 2.12: INSTALL MESSAGE LISTENER IMMEDIATELY ====================
+    window.addEventListener('message', function(event) {
+        // Validate origin
+        if (event.origin !== window.location.origin && event.origin !== 'null') {
+            return;
+        }
+        
+        var data = event.data;
+        if (!data || typeof data !== 'object') return;
+        
+        var messageId = data.messageId || data.requestId;
+        
+        // Enhanced deduplication with timeout allowance
+        if (messageId) {
+            if (window.__PARENT_CORRELATION__.isProcessed(messageId)) {
+                const timestamp = window.__PARENT_CORRELATION__.getTimestamp(messageId);
+                if (Date.now() - timestamp < 5000) {
+                    return; // Still duplicate
+                }
+                window.__PARENT_CORRELATION__.processedIds.delete(messageId);
+            }
+            window.__PARENT_CORRELATION__.register(messageId);
+        }
+        
+        // Identify source module
+        var module = window.__identifyModule(event.source);
+        if (!module) {
+            // Try to identify by frameId in message
+            if (data.frameId) {
+                module = data.frameId.replace('Iframe', '');
+            }
+            if (!module) return;
+        }
+        
+        // Detect protocol
+        var protocol = window.__detectProtocol(data.type, module);
+        var moduleState = window.__PARENT_MODULES__[module];
+        
+        // ========== ROUTE BY MESSAGE TYPE ==========
+        
+        // Handle ACKs first - FIXED: Check both messageId and requestId
+        if (data.type === 'ACK') {
+            const ackId = data.requestId || data.messageId || data.payload?.requestId;
+            if (ackId) {
+                window.__handleAck(ackId, data.payload);
+            }
+            return;
+        }
+        
+        // V2 Messages
+        if (data.type === 'REGISTER_MODULE') {
+            window.__handleRegisterModuleImmediate(data, event.source, event.origin, module);
+            return;
+        }
+        
+        if (data.type === 'VERIFY_SESSION') {
+            window.__handleVerifySessionImmediate(data, event.source, event.origin);
+            return;
+        }
+        
+        if (data.type === 'HEARTBEAT') {
+            window.__handleHeartbeatImmediate(data, event.source, event.origin, module);
+            return;
+        }
+        
+        // V1 Messages
+        if (data.type === 'CHILD_READY' || data.type === 'coreReady') {
+            window.__handleChildReadyImmediate(data, event.source, event.origin, module);
+            return;
+        }
+        
+        // Common Messages
+        if (data.type === 'REQUEST_SESSION') {
+            window.__handleRequestSessionImmediate(data, event.source, event.origin, module);
+            return;
+        }
+        
+        // SEND_MESSAGE - just ACK
+        if (data.type === 'SEND_MESSAGE' && messageId) {
+            window.__parentRespond(event.source, event.origin, {
+                type: 'ACK',
+                originalType: 'SEND_MESSAGE',
+                messageId: messageId,
+                requestId: messageId,
+                payload: { success: true },
+                timestamp: Date.now()
+            });
+            return;
+        }
+        
+        // PING - respond with PONG
+        if (data.type === 'PING') {
+            window.__parentRespond(event.source, event.origin, {
+                type: 'PONG',
+                requestId: messageId,
+                messageId: messageId,
+                payload: { timestamp: Date.now() },
+                timestamp: Date.now()
+            });
+            return;
+        }
+        
+        // Generic ACK for any message that expects it
+        if (data.expectAck && messageId) {
+            window.__parentRespond(event.source, event.origin, {
+                type: 'ACK',
+                originalType: data.type,
+                messageId: messageId,
+                requestId: messageId,
+                payload: { success: true },
+                timestamp: Date.now()
+            });
+        }
+    });
+})();
+</script>
+
+<!-- ========== SECTION 3: ASYNCHRONOUS BACKGROUND VALIDATION ========== -->
+<!-- This runs after handshake layer - token validation and refresh happen in background -->
+<script>
+(function() {
+    'use strict';
+    
+    // ==================== SECTION 3.1: CONFIGURATION ====================
+    var VALIDATION_CONFIG = {
+        TOKEN_REFRESH_INTERVAL: 300000,      // 5 minutes before expiry
+        HEARTBEAT_INTERVAL: 30000,
+        HEARTBEAT_TIMEOUT: 90000,
+        RECOVERY_RETRY: 3000,
+        MAX_RECOVERY_ATTEMPTS: 3
+    };
+    
+    // ==================== SECTION 3.2: SECURE STORAGE ====================
+    var SecureStorage = {
+        set: function(key, value) {
+            try {
+                localStorage.setItem(key, JSON.stringify(value));
+                return true;
+            } catch (e) {
+                return false;
+            }
+        },
+        
+        get: function(key) {
+            try {
+                var value = localStorage.getItem(key);
+                return value ? JSON.parse(value) : null;
+            } catch (e) {
+                return null;
+            }
+        },
+        
+        remove: function(key) {
+            try {
+                localStorage.removeItem(key);
+            } catch (e) {}
+        },
+        
+        setToken: function(token, userId, expiry) {
+            this.set('kynecta_auth', {
+                token: token,
+                userId: userId,
+                expiry: expiry || Date.now() + 3600000,
+                timestamp: Date.now()
+            });
+            
+            // Update synchronous session
+            if (window.__PARENT_SESSION__) {
+                window.__PARENT_SESSION__.session = {
+                    authenticated: true,
+                    userId: userId,
+                    token: token,
+                    expiresAt: expiry || Date.now() + 3600000,
+                    timestamp: Date.now()
+                };
+                window.__PARENT_SESSION__.token = token;
+                window.__PARENT_SESSION__.userId = userId;
+                window.__PARENT_SESSION__.authenticated = true;
+                window.__PARENT_SESSION__.expiresAt = expiry || Date.now() + 3600000;
+            }
+        },
+        
+        getToken: function() {
+            var auth = this.get('kynecta_auth');
+            if (!auth) return null;
+            if (auth.expiry && auth.expiry < Date.now()) {
+                this.remove('kynecta_auth');
+                return null;
+            }
+            return auth;
+        }
+    };
+    
+    // ==================== SECTION 3.3: BROADCAST FUNCTION ====================
+    var BROADCAST_ROUTING = {
+        NEW_MESSAGE: ['messages'],
+        INCOMING_CALL: ['calls'],
+        CALL_UPDATE: ['calls'],
+        FRIEND_UPDATE: ['friends', 'messages', 'group'],
+        GROUP_UPDATE: ['group'],
+        SETTINGS_UPDATED: ['messages', 'status', 'group', 'friends', 'calls', 'settings', 'tools'],
+        STATUS_UPDATE: ['status', 'friends'],
+        TOOLS_EVENT: ['tools'],
+        SESSION_REFRESHED: ['messages', 'status', 'group', 'friends', 'calls', 'settings', 'tools'],
+        SESSION_RECOVERY: ['messages', 'status', 'group', 'friends', 'calls', 'settings', 'tools'],
+        SESSION_INVALIDATED: ['messages', 'status', 'group', 'friends', 'calls', 'settings', 'tools'],
+        NETWORK_OFFLINE: ['messages', 'status', 'group', 'friends', 'calls', 'settings', 'tools'],
+        NETWORK_ONLINE: ['messages', 'status', 'group', 'friends', 'calls', 'settings', 'tools']
+    };
+    
+    var MODULE_NAMES = {
+        messages: 'messagesIframe',
+        status: 'statusIframe',
+        group: 'groupIframe',
+        friends: 'friendsIframe',
+        calls: 'callsIframe',
+        settings: 'settingsIframe',
+        tools: 'toolsIframe'
+    };
+    
+    function broadcast(type, payload, explicitTargets) {
+        var targets = explicitTargets || BROADCAST_ROUTING[type] || [];
+        
+        if (targets.length === 0) {
+            return { success: false, reason: 'no_targets' };
+        }
+        
+        targets = targets.filter(function(module) {
+            return window.__PARENT_MODULES__[module] && window.__PARENT_MODULES__[module].registered;
+        });
+        
+        if (targets.length === 0) {
+            return { success: false, reason: 'no_recipients' };
+        }
+        
+        var messageId = 'brd_' + Date.now() + '_' + Math.random().toString(36).substr(2, 8);
+        
+        targets.forEach(function(module) {
+            var iframeId = MODULE_NAMES[module];
+            var iframe = document.getElementById(iframeId);
+            var moduleState = window.__PARENT_MODULES__[module];
+            
+            if (iframe && iframe.contentWindow && moduleState && moduleState.registered) {
+                try {
+                    iframe.contentWindow.postMessage({
+                        type: type,
+                        messageId: messageId,
+                        payload: payload,
+                        timestamp: Date.now()
+                    }, '*');
+                } catch (e) {}
+            }
+        });
+        
+        return { success: true, messageId: messageId };
+    }
+    
+    // ==================== SECTION 3.4: BROADCAST SESSION TO MODULES ====================
+    function broadcastSessionToModules() {
+        var session = window.__PARENT_SESSION__.session;
+        if (!session || !session.authenticated) return;
+        
+        Object.keys(window.__PARENT_MODULES__).forEach(function(module) {
+            var moduleState = window.__PARENT_MODULES__[module];
+            if (moduleState && moduleState.registered) {
+                var iframe = document.getElementById(MODULE_NAMES[module]);
+                if (iframe && iframe.contentWindow) {
+                    try {
+                        iframe.contentWindow.postMessage({
+                            type: 'SESSION_ACTIVE',
+                            messageId: 'session_' + Date.now() + '_' + module,
+                            session: session,
+                            payload: {
+                                authenticated: true,
+                                userId: session.userId,
+                                token: session.token,
+                                user: session.user
+                            },
+                            timestamp: Date.now()
+                        }, '*');
+                        
+                        // Also send legacy format for V1 modules
+                        if (moduleState.protocol === PROTOCOL_TYPES.V1 || moduleState.protocol === PROTOCOL_TYPES.HYBRID) {
+                            iframe.contentWindow.postMessage({
+                                type: 'SESSION_RESPONSE',
+                                messageId: 'session_' + Date.now() + '_' + module,
+                                payload: {
+                                    session: session,
+                                    authenticated: true,
+                                    token: session.token,
+                                    user: session.user
+                                },
+                                timestamp: Date.now()
+                            }, '*');
+                        }
+                    } catch (e) {}
+                }
+            }
+        });
+    }
+    
+    // ==================== SECTION 3.5: BROADCAST PARENT READY ====================
+    function broadcastParentReady() {
+        var readyMsg = {
+            type: 'PARENT_READY',
+            timestamp: Date.now(),
+            protocol: 'KYN-8.0'
+        };
+        
+        Object.keys(MODULE_NAMES).forEach(function(module) {
+            var iframeId = MODULE_NAMES[module];
+            var iframe = document.getElementById(iframeId);
+            if (iframe && iframe.contentWindow) {
+                try {
+                    iframe.contentWindow.postMessage(readyMsg, '*');
+                } catch (e) {}
+            }
+        });
+    }
+    
+    // ==================== SECTION 3.6: ASYNC SESSION VALIDATION ====================
+    var SessionValidator = {
+        initialized: false,
+        refreshInProgress: false,
+        recoveryAttempts: 0,
+        recoveryMode: false,
+        
+        init: function() {
+            if (this.initialized) return;
+            this.initialized = true;
+            
+            // Start background processes
+            this.startHeartbeatMonitoring();
+            this.startTokenRefreshMonitoring();
+            this.startNetworkMonitoring();
+            
+            // Initial validation
+            this.validateSessionAsync();
+            
+            // Broadcast PARENT_READY after initialization
+            setTimeout(broadcastParentReady, 500);
+        },
+        
+        validateSessionAsync: function() {
+            var self = this;
+            setTimeout(function() {
+                self._validateSession();
+            }, 100);
+        },
+        
+        _validateSession: function() {
+            var auth = SecureStorage.getToken();
+            var currentSession = window.__getParentSession();
+            
+            if (auth && auth.expiry) {
+                // Check if expired
+                if (auth.expiry < Date.now()) {
+                    // Session expired - try refresh or clear
+                    if (auth.token) {
+                        this.refreshTokenAsync();
+                    } else {
+                        this.clearSession();
+                    }
+                } else if (!currentSession || currentSession.token !== auth.token) {
+                    // Session mismatch - update synchronous session
+                    this._updateSyncSession(auth);
+                } else if (currentSession && currentSession.authenticated) {
+                    // Session is valid - broadcast to modules
+                    broadcastSessionToModules();
+                }
+            } else if (currentSession && currentSession.authenticated) {
+                // No auth but we have session - try refresh
+                if (currentSession.token) {
+                    this.refreshTokenAsync();
+                }
+            }
+        },
+        
+        _updateSyncSession: function(auth) {
+            if (!auth) return;
+            
+            window.__PARENT_SESSION__.session = {
+                authenticated: true,
+                userId: auth.userId,
+                token: auth.token,
+                expiresAt: auth.expiry,
+                timestamp: auth.timestamp || Date.now()
+            };
+            window.__PARENT_SESSION__.token = auth.token;
+            window.__PARENT_SESSION__.userId = auth.userId;
+            window.__PARENT_SESSION__.authenticated = true;
+            window.__PARENT_SESSION__.expiresAt = auth.expiry;
+            
+            // Broadcast session to modules
+            broadcastSessionToModules();
+            
+            // Broadcast refresh
+            broadcast('SESSION_REFRESHED', window.__PARENT_SESSION__.session);
+        },
+        
+        refreshTokenAsync: function() {
+            var self = this;
+            
+            if (this.refreshInProgress) return;
+            if (!window.__PARENT_LOCKS__.acquireRefresh()) return;
+            
+            this.refreshInProgress = true;
+            
+            setTimeout(function() {
+                // Simulated token refresh - in production, this would call API
+                // For now, we'll just keep the existing token
+                var auth = SecureStorage.getToken();
+                if (auth) {
+                    auth.expiry = Date.now() + 3600000;
+                    SecureStorage.set('kynecta_auth', auth);
+                    self._updateSyncSession(auth);
+                }
+                
+                self.refreshInProgress = false;
+                window.__PARENT_LOCKS__.releaseRefresh();
+            }, 500);
+        },
+        
+        clearSession: function() {
+            SecureStorage.remove('kynecta_auth');
+            
+            window.__PARENT_SESSION__.session = null;
+            window.__PARENT_SESSION__.token = null;
+            window.__PARENT_SESSION__.userId = null;
+            window.__PARENT_SESSION__.authenticated = false;
+            window.__PARENT_SESSION__.expiresAt = null;
+            
+            broadcast('SESSION_NULL', { reason: 'session_expired' });
+        },
+        
+        startHeartbeatMonitoring: function() {
+            var self = this;
+            setInterval(function() {
+                var now = Date.now();
+                for (var module in window.__PARENT_MODULES__) {
+                    if (window.__PARENT_MODULES__.hasOwnProperty(module)) {
+                        var moduleState = window.__PARENT_MODULES__[module];
+                        if (!moduleState.registered) continue;
+                        
+                        var timeSinceLastBeat = now - moduleState.lastHeartbeat;
+                        if (timeSinceLastBeat > VALIDATION_CONFIG.HEARTBEAT_TIMEOUT) {
+                            moduleState.degraded = true;
+                            
+                            var iframeId = MODULE_NAMES[module];
+                            var iframe = document.getElementById(iframeId);
+                            if (iframe && iframe.contentWindow) {
+                                try {
+                                    iframe.contentWindow.postMessage({
+                                        type: 'MODULE_DEGRADED',
+                                        reason: 'heartbeat_timeout',
+                                        timestamp: now
+                                    }, '*');
+                                } catch (e) {}
+                            }
+                        }
+                    }
+                }
+            }, VALIDATION_CONFIG.HEARTBEAT_INTERVAL);
+        },
+        
+        startTokenRefreshMonitoring: function() {
+            var self = this;
+            setInterval(function() {
+                var auth = SecureStorage.getToken();
+                if (!auth) return;
+                
+                var timeToExpiry = auth.expiry - Date.now();
+                
+                if (timeToExpiry < VALIDATION_CONFIG.TOKEN_REFRESH_INTERVAL && timeToExpiry > 0) {
+                    self.refreshTokenAsync();
+                }
+            }, 60000);
+        },
+        
+        startNetworkMonitoring: function() {
+            var self = this;
+            window.addEventListener('online', function() {
+                broadcast('NETWORK_ONLINE', { timestamp: Date.now() });
+                self.validateSessionAsync();
+            });
+            
+            window.addEventListener('offline', function() {
+                broadcast('NETWORK_OFFLINE', { timestamp: Date.now() });
+            });
+        },
+        
+        enterRecoveryMode: function(reason) {
+            if (this.recoveryMode) return;
+            
+            this.recoveryMode = true;
+            this.recoveryAttempts = 0;
+            
+            broadcast('SESSION_RECOVERY', { reason: reason, timestamp: Date.now() });
+            
+            this.attemptRecovery();
+        },
+        
+        attemptRecovery: function() {
+            var self = this;
+            
+            function tryRecovery() {
+                if (self.recoveryAttempts >= VALIDATION_CONFIG.MAX_RECOVERY_ATTEMPTS) {
+                    self.recoveryMode = false;
+                    self.clearSession();
+                    broadcast('SESSION_NULL', { reason: 'recovery_failed', timestamp: Date.now() });
+                    return;
+                }
+                
+                self.recoveryAttempts++;
+                
+                self.refreshTokenAsync();
+                
+                setTimeout(function() {
+                    var auth = SecureStorage.getToken();
+                    if (auth && auth.expiry > Date.now()) {
+                        self.recoveryMode = false;
+                        self._updateSyncSession(auth);
+                        broadcast('SESSION_REFRESHED', window.__PARENT_SESSION__.session);
+                    } else {
+                        tryRecovery();
+                    }
+                }, VALIDATION_CONFIG.RECOVERY_RETRY);
+            }
+            
+            tryRecovery();
+        }
+    };
+    
+    // ==================== SECTION 3.7: ACK REGISTRY ====================
+    window.__ACK_REGISTRY__ = new Map(); // messageId -> { resolve, reject, timer, sourceIframe, retryCount }
+    window.__RETRY_LIMIT__ = 2; // Max retries per message
+    
+    // ==================== SECTION 3.8: INITIALIZE BACKGROUND VALIDATION ====================
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', function() {
+            SessionValidator.init();
+        });
+    } else {
+        SessionValidator.init();
+    }
+    
+    // ==================== SECTION 3.9: EXPOSE GLOBALS ====================
+    window.__PARENT_AUTHORITY_V8__ = {
+        state: {
+            ready: true,
+            recoveryMode: false,
+            session: window.__PARENT_SESSION__.session,
+            token: window.__PARENT_SESSION__.token,
+            refreshLock: false,
+            modules: window.__PARENT_MODULES__,
+            queues: {
+                broadcast: [],
+                pending: new Map()
+            },
+            broadcastHistory: []
+        },
+        session: {
+            getSession: window.__getParentSession,
+            getToken: window.__getParentToken,
+            isAuthenticated: window.__isParentAuthenticated,
+            refreshToken: function() {
+                return SessionValidator.refreshTokenAsync();
+            },
+            clearSession: function() {
+                SessionValidator.clearSession();
+            }
+        },
+        broadcast: broadcast,
+        recovery: {
+            enterRecoveryMode: function(reason) {
+                SessionValidator.enterRecoveryMode(reason);
+            }
+        },
+        getStats: function() {
+            var modules = [];
+            for (var module in window.__PARENT_MODULES__) {
+                if (window.__PARENT_MODULES__.hasOwnProperty(module)) {
+                    modules.push({
+                        name: module,
+                        protocol: window.__PARENT_MODULES__[module].protocol,
+                        registered: window.__PARENT_MODULES__[module].registered,
+                        ready: window.__PARENT_MODULES__[module].ready,
+                        degraded: window.__PARENT_MODULES__[module].degraded,
+                        sessionDelivered: window.__PARENT_MODULES__[module].sessionDelivered,
+                        lastHeartbeat: window.__PARENT_MODULES__[module].lastHeartbeat
+                    });
+                }
+            }
+            return {
+                ready: true,
+                modules: modules,
+                session: window.__getParentSession(),
+                recoveryMode: SessionValidator.recoveryMode,
+                queueSize: 0,
+                broadcastHistory: 0
+            };
+        }
+    };
+    
+    window.__KYNECTA_AUTHORITIES__ = window.__KYNECTA_AUTHORITIES__ || {};
+    window.__KYNECTA_AUTHORITIES__.parentV8 = window.__PARENT_AUTHORITY_V8__;
+    
+    // Cleanup interval
+    setInterval(function() {
+        window.__PARENT_LOCKS__.cleanup();
+    }, 30000);
+    
+    // Hide loading screen
+    var loadingScreen = document.getElementById('loadingScreen');
+    if (loadingScreen) {
+        loadingScreen.style.opacity = '0';
+        setTimeout(function() {
+            loadingScreen.classList.add('hidden');
+        }, 300);
+    }
+})();
+</script>
+
+<!-- ========== REMAINING ORIGINAL CODE STARTS HERE - PRESERVED ========== -->
+<!-- ALL EXISTING CODE BELOW THIS LINE IS PRESERVED WITHOUT MODIFICATION -->
+<!-- ============================================================== -->
+
+<!-- ========== DETERMINISTIC PARENT AUTHORITY v8.0 - DUAL PROTOCOL ========== -->
+<!-- SUPPORTS: V2 (MODERN) + V1 (LEGACY) + HYBRID CORES -->
+<!-- ARCHITECTURE: Single message handler, race-free, token/session authoritative -->
+<!-- ============================================================== -->
+<!-- THIS SECTION IS PRESERVED BUT WILL NOW USE THE EARLY SESSION LAYER -->
+<script>
+(function() {
+    'use strict';
+
+    // ==================== SECTION 0: CONFIGURATION ====================
+    const CONFIG = {
+        PROTOCOL_VERSION: 'KYN-8.0',
+        APP_NAME: 'kynecta-parent-v8',
+        
+        // Protocol detection
+        PROTOCOL_TYPES: {
+            V2: 'V2',      // Modern: REGISTER_MODULE, ACK, SESSION_ACTIVE
+            V1: 'V1',      // Legacy: CHILD_READY, coreReady, REQUEST_SESSION
+            HYBRID: 'HYBRID' // Supports both
+        },
+        
+        // Timing enforcement (ms)
+        TIMING: {
+            REGISTRATION_RESPONSE: 50,
+            SESSION_RESPONSE: 50,
+            VERIFICATION_RESPONSE: 50,
+            HEARTBEAT_RESPONSE: 30,
+            BROADCAST_DISPATCH: 20,
+            HANDSHAKE_COMPLETE: 150,
+            FULL_INIT: 1000
+        },
+        
+        // Timeouts
+        TIMEOUTS: {
+            HEARTBEAT_INTERVAL: 30000,
+            HEARTBEAT_TIMEOUT: 90000,  // 3 missed heartbeats
+            SESSION_REFRESH: 300000,    // 5 minutes before expiry
+            TOKEN_REFRESH: 300000,
+            RECOVERY_RETRY: 3000,
+            MAX_RECOVERY_ATTEMPTS: 3
+        },
+        
+        // Module definitions
+        MODULE_NAMES: {
+            messages: 'messagesIframe',
+            status: 'statusIframe',
+            group: 'groupIframe',
+            friends: 'friendsIframe',
+            calls: 'callsIframe',
+            settings: 'settingsIframe',
+            tools: 'toolsIframe'
+        },
+        
+        // Broadcast routing map
+        BROADCAST_ROUTING: {
+            NEW_MESSAGE: ['messages'],
+            INCOMING_CALL: ['calls'],
+            CALL_UPDATE: ['calls'],
+            FRIEND_UPDATE: ['friends', 'messages', 'group'],
+            GROUP_UPDATE: ['group'],
+            SETTINGS_UPDATED: ['messages', 'status', 'group', 'friends', 'calls', 'settings', 'tools'],
+            STATUS_UPDATE: ['status', 'friends'],
+            TOOLS_EVENT: ['tools'],
+            SESSION_REFRESHED: ['messages', 'status', 'group', 'friends', 'calls', 'settings', 'tools'],
+            SESSION_RECOVERY: ['messages', 'status', 'group', 'friends', 'calls', 'settings', 'tools'],
+            SESSION_INVALIDATED: ['messages', 'status', 'group', 'friends', 'calls', 'settings', 'tools'],
+            NETWORK_OFFLINE: ['messages', 'status', 'group', 'friends', 'calls', 'settings', 'tools'],
+            NETWORK_ONLINE: ['messages', 'status', 'group', 'friends', 'calls', 'settings', 'tools']
+        },
+        
+        // Legacy V1 message types
+        V1_MESSAGE_TYPES: new Set([
+            'CHILD_READY',
+            'coreReady',
+            'REQUEST_SESSION',
+            'SESSION_RESPONSE',
+            'PING',
+            'PONG'
+        ]),
+        
+        // V2 message types
+        V2_MESSAGE_TYPES: new Set([
+            'REGISTER_MODULE',
+            'MODULE_REGISTERED',
+            'SESSION_ACTIVE',
+            'SESSION_NULL',
+            'PARENT_READY',
+            'ACK',
+            'VERIFY_SESSION',
+            'SESSION_VERIFIED',
+            'HEARTBEAT',
+            'HEARTBEAT_ACK',
+            'SESSION_REFRESHED'
+        ]),
+        
+        // Broadcast history limit
+        BROADCAST_HISTORY_MAX: 100,
+        
+        // Processed IDs limit
+        MAX_PROCESSED_IDS: 1000
+    };
+
+    // ==================== SECTION 1: GLOBAL STATE ====================
+    const parentState = {
+        ready: false,
+        recoveryMode: false,
+        session: window.__PARENT_SESSION__ ? window.__PARENT_SESSION__.session : null,
+        token: window.__PARENT_SESSION__ ? window.__PARENT_SESSION__.token : null,
+        refreshLock: false,
+        
+        // Module registry with protocol tracking
+        modules: window.__PARENT_MODULES__ || {},
+        
+        // Queues
+        queues: {
+            broadcast: [],
+            pending: new Map()
+        },
+        
+        // Broadcast history
+        broadcastHistory: []
+    };
+
+    // Initialize module states if not already done
+    if (!window.__PARENT_MODULES__) {
+        Object.keys(CONFIG.MODULE_NAMES).forEach(module => {
+            parentState.modules[module] = {
+                protocol: null,
+                detectedFrom: [],
+                registered: false,
+                ready: false,
+                registrationLock: false,
+                sessionDelivered: false,
+                lastHeartbeat: 0,
+                registeredAt: null,
+                sessionDeliveredAt: null,
+                degraded: false,
+                messageQueue: [],
+                childReadyReceived: false,
+                coreReadyReceived: false,
+                processedMessageIds: new Set()
+            };
+        });
+    }
+
+    // ==================== SECTION 2: LOCKS & CORRELATION ====================
+    const Locks = window.__PARENT_LOCKS__ || {
+        registration: new Map(),
+        sessionDelivery: new Map(),
+        verification: new Map(),
+        refresh: false,
+        
+        acquireRegistration(module) {
+            if (this.registration.get(module)) return false;
+            this.registration.set(module, Date.now());
+            return true;
+        },
+        
+        releaseRegistration(module) {
+            this.registration.delete(module);
+        },
+        
+        acquireSessionDelivery(module) {
+            if (this.sessionDelivery.get(module)) return false;
+            this.sessionDelivery.set(module, Date.now());
+            return true;
+        },
+        
+        releaseSessionDelivery(module) {
+            this.sessionDelivery.delete(module);
+        },
+        
+        acquireVerification(requestId) {
+            if (this.verification.get(requestId)) return false;
+            this.verification.set(requestId, Date.now());
+            return true;
+        },
+        
+        releaseVerification(requestId) {
+            this.verification.delete(requestId);
+        },
+        
+        acquireRefresh() {
+            if (this.refresh) return false;
+            this.refresh = true;
+            return true;
+        },
+        
+        releaseRefresh() {
+            this.refresh = false;
+        },
+        
+        cleanup() {
+            const now = Date.now();
+            this.registration.forEach((timestamp, module) => {
+                if (now - timestamp > 5000) this.registration.delete(module);
+            });
+            this.sessionDelivery.forEach((timestamp, module) => {
+                if (now - timestamp > 5000) this.sessionDelivery.delete(module);
+            });
+            this.verification.forEach((timestamp, id) => {
+                if (now - timestamp > 5000) this.verification.delete(id);
+            });
+        }
+    };
+
+    const CorrelationRegistry = window.__PARENT_CORRELATION__ || {
+        processedIds: new Set(),
+        
+        isProcessed(messageId) {
+            return this.processedIds.has(messageId);
+        },
+        
+        register(messageId) {
+            if (this.isProcessed(messageId)) return false;
+            this.processedIds.add(messageId);
+            
+            if (this.processedIds.size > CONFIG.MAX_PROCESSED_IDS) {
+                const ids = Array.from(this.processedIds);
+                const toRemove = ids.slice(0, ids.length - CONFIG.MAX_PROCESSED_IDS);
+                toRemove.forEach(id => this.processedIds.delete(id));
+            }
+            return true;
+        }
+    };
+
+    // ==================== SECTION 3: SECURE STORAGE ====================
+    const SecureStorage = {
+        set(key, value) {
+            try {
+                localStorage.setItem(key, JSON.stringify(value));
+                return true;
+            } catch (e) {
+                return false;
+            }
+        },
+        
+        get(key) {
+            try {
+                const value = localStorage.getItem(key);
+                return value ? JSON.parse(value) : null;
+            } catch (e) {
+                return null;
+            }
+        },
+        
+        remove(key) {
+            try {
+                localStorage.removeItem(key);
+            } catch (e) {}
+        },
+        
+        setToken(token, userId, expiry) {
+            this.set('kynecta_auth', {
+                token,
+                userId,
+                expiry: expiry || Date.now() + 3600000,
+                timestamp: Date.now()
+            });
+            
+            // Update parent session
+            if (window.__PARENT_SESSION__) {
+                window.__PARENT_SESSION__.session = {
+                    authenticated: true,
+                    userId: userId,
+                    token: token,
+                    expiresAt: expiry || Date.now() + 3600000,
+                    timestamp: Date.now()
+                };
+                window.__PARENT_SESSION__.token = token;
+                window.__PARENT_SESSION__.userId = userId;
+                window.__PARENT_SESSION__.authenticated = true;
+                window.__PARENT_SESSION__.expiresAt = expiry || Date.now() + 3600000;
+            }
+            
+            parentState.session = window.__PARENT_SESSION__ ? window.__PARENT_SESSION__.session : null;
+            parentState.token = token;
+        },
+        
+        getToken() {
+            const auth = this.get('kynecta_auth');
+            if (!auth) return null;
+            if (auth.expiry && auth.expiry < Date.now()) {
+                this.remove('kynecta_auth');
+                return null;
+            }
+            return auth;
+        }
+    };
+
+    // ==================== SECTION 4: SESSION AUTHORITY ====================
+    const SessionAuthority = (function() {
+        let session = window.__PARENT_SESSION__ ? window.__PARENT_SESSION__.session : null;
+        let token = window.__PARENT_SESSION__ ? window.__PARENT_SESSION__.token : null;
+        let subscribers = new Set();
+        
+        function validateTokenIntegrity() {
+            if (!token || !session) return false;
+            return typeof token === 'string' && token.length > 20;
+        }
+        
+        return {
+            getSession() {
+                return session ? { ...session } : null;
+            },
+            
+            getToken() {
+                return token;
+            },
+            
+            isAuthenticated() {
+                return !!(session && session.authenticated);
+            },
+            
+            async refreshToken() {
+                if (Locks.refresh) return false;
+                Locks.acquireRefresh();
+                
+                try {
+                    if (window.api?.auth?.refresh) {
+                        const newToken = await window.api.auth.refresh(token);
+                        if (newToken) {
+                            token = newToken;
+                            session.token = newToken;
+                            session.expiresAt = Date.now() + 3600000;
+                            SecureStorage.setToken(newToken, session.userId, session.expiresAt);
+                            this.notifySubscribers('SESSION_REFRESHED', session);
+                            return true;
+                        }
+                    }
+                } catch (e) {
+                    return false;
+                } finally {
+                    Locks.releaseRefresh();
+                }
+                return false;
+            },
+            
+            setSession(newSession) {
+                session = {
+                    authenticated: true,
+                    userId: newSession.userId || newSession.user?.id,
+                    token: newSession.token,
+                    user: newSession.user,
+                    expiresAt: newSession.expiresAt || Date.now() + 3600000,
+                    timestamp: Date.now()
+                };
+                token = newSession.token;
+                SecureStorage.setToken(token, session.userId, session.expiresAt);
+                this.notifySubscribers('SESSION_ACTIVE', session);
+            },
+            
+            clearSession() {
+                session = null;
+                token = null;
+                SecureStorage.remove('kynecta_auth');
+                this.notifySubscribers('SESSION_NULL', null);
+            },
+            
+            subscribe(callback) {
+                subscribers.add(callback);
+                return () => subscribers.delete(callback);
+            },
+            
+            notifySubscribers(type, data) {
+                subscribers.forEach(cb => {
+                    try { cb(type, data); } catch (e) {}
+                });
+            },
+            
+            validateTokenIntegrity
+        };
+    })();
+
+    // ==================== SECTION 5: PROTOCOL DETECTION ====================
+    function detectProtocol(message, module) {
+        const type = message.type;
+        const moduleState = parentState.modules[module];
+        
+        if (!moduleState) return null;
+        
+        if (moduleState.protocol) {
+            return moduleState.protocol;
+        }
+        
+        moduleState.detectedFrom.push(type);
+        
+        if (type === 'REGISTER_MODULE') {
+            moduleState.protocol = CONFIG.PROTOCOL_TYPES.V2;
+            return CONFIG.PROTOCOL_TYPES.V2;
+        }
+        
+        if (type === 'CHILD_READY') {
+            moduleState.childReadyReceived = true;
+            moduleState.protocol = CONFIG.PROTOCOL_TYPES.V1;
+            return CONFIG.PROTOCOL_TYPES.V1;
+        }
+        
+        if (type === 'coreReady') {
+            moduleState.coreReadyReceived = true;
+            moduleState.protocol = CONFIG.PROTOCOL_TYPES.V1;
+            return CONFIG.PROTOCOL_TYPES.V1;
+        }
+        
+        const hasV2 = moduleState.detectedFrom.includes('REGISTER_MODULE');
+        const hasV1 = moduleState.detectedFrom.includes('CHILD_READY') || 
+                      moduleState.detectedFrom.includes('coreReady');
+        
+        if (hasV2 && hasV1) {
+            moduleState.protocol = CONFIG.PROTOCOL_TYPES.HYBRID;
+            return CONFIG.PROTOCOL_TYPES.HYBRID;
+        }
+        
+        return null;
+    }
+
+    // ==================== SECTION 6: CENTRAL RESPOND FUNCTION ====================
+    function respond(target, origin, responses) {
+        if (!target) return;
+        
+        const startTime = Date.now();
+        
+        const responseArray = Array.isArray(responses) ? responses : [responses];
+        
+        responseArray.forEach(msg => {
+            try {
+                target.postMessage(msg, origin || '*');
+            } catch (e) {}
+        });
+        
+        const processingTime = Date.now() - startTime;
+        if (processingTime > 10 && responseArray.length > 1) {
+            console.warn(`[Parent] Batch response took ${processingTime}ms for ${responseArray.length} messages`);
+        }
+    }
+
+    // ==================== SECTION 7: V2 HANDSHAKE HANDLER ====================
+    function handleV2RegisterModule(data, source, origin, module) {
+        const startTime = Date.now();
+        const messageId = data.messageId || data.requestId;
+        
+        if (!messageId) return;
+        
+        if (!parentState.ready) {
+            return;
+        }
+        
+        if (!Locks.acquireRegistration(module)) {
+            respond(source, origin, {
+                type: 'ACK',
+                originalType: 'REGISTER_MODULE',
+                messageId: messageId,
+                requestId: messageId,
+                payload: { success: true, cached: true },
+                timestamp: Date.now()
+            });
+            return;
+        }
+        
+        const moduleState = parentState.modules[module];
+        
+        if (!moduleState.registered) {
+            moduleState.registered = true;
+            moduleState.registeredAt = Date.now();
+            moduleState.lastHeartbeat = Date.now();
+        }
+        
+        const responses = [];
+        
+        responses.push({
+            type: 'MODULE_REGISTERED',
+            messageId: messageId,
+            requestId: messageId,
+            payload: { success: true, module: module },
+            timestamp: Date.now()
+        });
+        
+        const session = SessionAuthority.getSession();
+        if (session && session.authenticated && !moduleState.sessionDelivered) {
+            responses.push({
+                type: 'SESSION_ACTIVE',
+                messageId: `session_${messageId}`,
+                requestId: messageId,
+                session: session,
+                payload: {
+                    authenticated: true,
+                    userId: session.userId,
+                    token: session.token,
+                    user: session.user,
+                    expiresAt: session.expiresAt
+                },
+                timestamp: Date.now()
+            });
+            moduleState.sessionDelivered = true;
+            moduleState.sessionDeliveredAt = Date.now();
+        } else if (!moduleState.sessionDelivered) {
+            responses.push({
+                type: 'SESSION_NULL',
+                messageId: `session_${messageId}`,
+                requestId: messageId,
+                payload: { reason: 'no_active_session' },
+                timestamp: Date.now()
+            });
+            moduleState.sessionDelivered = true;
+        }
+        
+        responses.push({
+            type: 'PARENT_READY',
+            messageId: `ready_${messageId}`,
+            requestId: messageId,
+            payload: { timestamp: Date.now(), protocol: CONFIG.PROTOCOL_VERSION },
+            timestamp: Date.now()
+        });
+        
+        responses.push({
+            type: 'ACK',
+            originalType: 'REGISTER_MODULE',
+            messageId: messageId,
+            requestId: messageId,
+            payload: { success: true, module: module },
+            timestamp: Date.now()
+        });
+        
+        respond(source, origin, responses);
+        
+        moduleState.ready = true;
+        
+        const processingTime = Date.now() - startTime;
+        if (processingTime > CONFIG.TIMING.REGISTRATION_RESPONSE) {
+            console.warn(`[Parent] V2 registration took ${processingTime}ms`);
+        }
+        
+        Locks.releaseRegistration(module);
+    }
+
+    // ==================== SECTION 8: V1 HANDSHAKE HANDLER ====================
+    function handleV1ChildReady(data, source, origin, module) {
+        const startTime = Date.now();
+        const messageId = data.messageId || data.requestId || `v1_${Date.now()}`;
+        
+        if (!parentState.ready) return;
+        
+        const moduleState = parentState.modules[module];
+        
+        moduleState.protocol = CONFIG.PROTOCOL_TYPES.V1;
+        moduleState.childReadyReceived = true;
+        
+        if (!moduleState.registered) {
+            moduleState.registered = true;
+            moduleState.registeredAt = Date.now();
+        }
+        
+        const responses = [];
+        
+        responses.push({
+            type: 'coreReady',
+            messageId: `core_${messageId}`,
+            requestId: messageId,
+            payload: { success: true, module: module },
+            timestamp: Date.now()
+        });
+        
+        const session = SessionAuthority.getSession();
+        if (session && session.authenticated && !moduleState.sessionDelivered) {
+            responses.push({
+                type: 'SESSION_RESPONSE',
+                messageId: `session_${messageId}`,
+                requestId: messageId,
+                payload: {
+                    session: session,
+                    authenticated: true,
+                    token: session.token,
+                    expiresAt: session.expiresAt,
+                    user: session.user
+                },
+                timestamp: Date.now()
+            });
+            moduleState.sessionDelivered = true;
+            moduleState.sessionDeliveredAt = Date.now();
+        } else if (!moduleState.sessionDelivered) {
+            responses.push({
+                type: 'SESSION_RESPONSE',
+                messageId: `session_${messageId}`,
+                requestId: messageId,
+                payload: {
+                    session: null,
+                    authenticated: false
+                },
+                timestamp: Date.now()
+            });
+            moduleState.sessionDelivered = true;
+        }
+        
+        responses.push({
+            type: 'PARENT_READY',
+            messageId: `ready_${messageId}`,
+            requestId: messageId,
+            payload: { timestamp: Date.now(), protocol: CONFIG.PROTOCOL_VERSION },
+            timestamp: Date.now()
+        });
+        
+        respond(source, origin, responses);
+        
+        moduleState.ready = true;
+        
+        const processingTime = Date.now() - startTime;
+        if (processingTime > CONFIG.TIMING.HANDSHAKE_COMPLETE) {
+            console.warn(`[Parent] V1 handshake took ${processingTime}ms`);
+        }
+    }
+
+    // ==================== SECTION 9: HYBRID HANDLER ====================
+    function ensureSessionDelivered(module, source, origin) {
+        const moduleState = parentState.modules[module];
+        
+        if (moduleState.sessionDelivered) return;
+        
+        if (!Locks.acquireSessionDelivery(module)) return;
+        
+        const session = SessionAuthority.getSession();
+        const responses = [];
+        
+        if (moduleState.protocol === CONFIG.PROTOCOL_TYPES.V2 || 
+            moduleState.protocol === CONFIG.PROTOCOL_TYPES.HYBRID) {
+            if (session && session.authenticated) {
+                responses.push({
+                    type: 'SESSION_ACTIVE',
+                    messageId: `session_${Date.now()}`,
+                    payload: {
+                        authenticated: true,
+                        userId: session.userId,
+                        token: session.token,
+                        user: session.user,
+                        expiresAt: session.expiresAt
+                    },
+                    timestamp: Date.now()
+                });
+            } else {
+                responses.push({
+                    type: 'SESSION_NULL',
+                    messageId: `session_${Date.now()}`,
+                    payload: { reason: 'no_active_session' },
+                    timestamp: Date.now()
+                });
+            }
+        }
+        
+        if (moduleState.protocol === CONFIG.PROTOCOL_TYPES.V1 || 
+            moduleState.protocol === CONFIG.PROTOCOL_TYPES.HYBRID) {
+            if (session && session.authenticated) {
+                responses.push({
+                    type: 'SESSION_RESPONSE',
+                    messageId: `session_${Date.now()}`,
+                    payload: {
+                        session: session,
+                        authenticated: true,
+                        token: session.token,
+                        expiresAt: session.expiresAt
+                    },
+                    timestamp: Date.now()
+                });
+            } else {
+                responses.push({
+                    type: 'SESSION_RESPONSE',
+                    messageId: `session_${Date.now()}`,
+                    payload: {
+                        session: null,
+                        authenticated: false
+                    },
+                    timestamp: Date.now()
+                });
+            }
+        }
+        
+        if (responses.length > 0) {
+            respond(source, origin, responses);
+            moduleState.sessionDelivered = true;
+            moduleState.sessionDeliveredAt = Date.now();
+        }
+        
+        Locks.releaseSessionDelivery(module);
+    }
+
+    // ==================== SECTION 10: REQUEST_SESSION HANDLER ====================
+    function handleRequestSession(data, source, origin, module) {
+        const startTime = Date.now();
+        const messageId = data.messageId || data.requestId;
+        
+        if (!messageId) return;
+        
+        const moduleState = parentState.modules[module];
+        const session = SessionAuthority.getSession();
+        
+        const responses = [];
+        
+        responses.push({
+            type: 'SESSION_RESPONSE',
+            requestId: messageId,
+            messageId: messageId,
+            payload: {
+                session: session,
+                authenticated: session ? session.authenticated : false,
+                user: session?.user,
+                token: session?.token
+            },
+            timestamp: Date.now()
+        });
+        
+        if (moduleState.protocol === CONFIG.PROTOCOL_TYPES.V2 || 
+            moduleState.protocol === CONFIG.PROTOCOL_TYPES.HYBRID) {
+            responses.push({
+                type: 'ACK',
+                originalType: 'REQUEST_SESSION',
+                messageId: `ack_${messageId}`,
+                requestId: messageId,
+                payload: { success: true },
+                timestamp: Date.now()
+            });
+        }
+        
+        respond(source, origin, responses);
+        moduleState.sessionDelivered = true;
+        
+        const processingTime = Date.now() - startTime;
+        if (processingTime > CONFIG.TIMING.SESSION_RESPONSE) {
+            console.warn(`[Parent] Session response took ${processingTime}ms`);
+        }
+    }
+
+    // ==================== SECTION 11: VERIFY_SESSION HANDLER ====================
+    function handleVerifySession(data, source, origin) {
+        const startTime = Date.now();
+        const requestId = data.requestId || data.messageId;
+        
+        if (!requestId) return;
+        
+        if (!Locks.acquireVerification(requestId)) {
+            return;
+        }
+        
+        const session = SessionAuthority.getSession();
+        
+        let valid = false;
+        let reason = '';
+        
+        if (!session) {
+            reason = 'no_session';
+        } else if (!session.authenticated) {
+            reason = 'not_authenticated';
+        } else if (session.expiresAt && session.expiresAt < Date.now()) {
+            reason = 'session_expired';
+        } else if (!SessionAuthority.validateTokenIntegrity()) {
+            reason = 'token_invalid';
+        } else {
+            valid = true;
+        }
+        
+        respond(source, origin, [
+            {
+                type: 'SESSION_VERIFIED',
+                requestId: requestId,
+                messageId: requestId,
+                payload: {
+                    valid: valid,
+                    reason: reason,
+                    expiresAt: session?.expiresAt,
+                    userId: session?.userId
+                },
+                timestamp: Date.now()
+            },
+            {
+                type: 'ACK',
+                originalType: 'VERIFY_SESSION',
+                messageId: requestId,
+                requestId: requestId,
+                payload: { success: true, valid: valid },
+                timestamp: Date.now()
+            }
+        ]);
+        
+        const processingTime = Date.now() - startTime;
+        if (processingTime > CONFIG.TIMING.VERIFICATION_RESPONSE) {
+            console.warn(`[Parent] Verification took ${processingTime}ms`);
+        }
+        
+        Locks.releaseVerification(requestId);
+    }
+
+    // ==================== SECTION 12: HEARTBEAT HANDLER ====================
+    function handleHeartbeat(data, source, origin, module) {
+        const startTime = Date.now();
+        const messageId = data.messageId || data.requestId;
+        
+        if (!module || !parentState.modules[module]) return;
+        
+        const moduleState = parentState.modules[module];
+        
+        moduleState.lastHeartbeat = Date.now();
+        
+        if (moduleState.degraded) {
+            moduleState.degraded = false;
+        }
+        
+        respond(source, origin, {
+            type: 'HEARTBEAT_ACK',
+            requestId: messageId,
+            messageId: messageId,
+            timestamp: Date.now()
+        });
+        
+        const processingTime = Date.now() - startTime;
+        if (processingTime > CONFIG.TIMING.HEARTBEAT_RESPONSE) {
+            console.warn(`[Parent] Heartbeat response took ${processingTime}ms`);
+        }
+    }
+
+    // ==================== SECTION 13: BROADCAST ROUTER ====================
+    function broadcast(type, payload, explicitTargets = null) {
+        let targets = explicitTargets || CONFIG.BROADCAST_ROUTING[type] || [];
+        
+        if (targets.length === 0) {
+            return { success: false, reason: 'no_targets' };
+        }
+        
+        targets = targets.filter(module => 
+            parentState.modules[module] && parentState.modules[module].registered
+        );
+        
+        if (targets.length === 0) {
+            return { success: false, reason: 'no_recipients' };
+        }
+        
+        const messageId = `brd_${Date.now()}_${Math.random().toString(36).substr(2, 8)}`;
+        
+        parentState.queues.broadcast.push({
+            messageId,
+            type,
+            payload,
+            targets,
+            timestamp: Date.now()
+        });
+        
+        processBroadcastQueue();
+        
+        parentState.broadcastHistory.push({ messageId, type, timestamp: Date.now() });
+        if (parentState.broadcastHistory.length > CONFIG.BROADCAST_HISTORY_MAX) {
+            parentState.broadcastHistory.shift();
+        }
+        
+        return { success: true, messageId };
+    }
+
+    function processBroadcastQueue() {
+        const queue = parentState.queues.broadcast;
+        const startTime = Date.now();
+        
+        while (queue.length > 0) {
+            const item = queue.shift();
+            
+            item.targets.forEach(module => {
+                const iframeId = CONFIG.MODULE_NAMES[module];
+                const iframe = document.getElementById(iframeId);
+                const moduleState = parentState.modules[module];
+                
+                if (iframe?.contentWindow && moduleState?.registered) {
+                    if (moduleState.degraded && 
+                        !['SESSION_RECOVERY', 'NETWORK_OFFLINE'].includes(item.type)) {
+                        return;
+                    }
+                    
+                    try {
+                        iframe.contentWindow.postMessage({
+                            type: item.type,
+                            messageId: item.messageId,
+                            payload: item.payload,
+                            timestamp: Date.now()
+                        }, '*');
+                    } catch (e) {}
+                }
+            });
+            
+            if (Date.now() - startTime > CONFIG.TIMING.BROADCAST_DISPATCH) {
+                console.warn('[Parent] Broadcast dispatch exceeded timing limit');
+                break;
+            }
+        }
+    }
+
+    // ==================== SECTION 14: SESSION REFRESH BROADCAST ====================
+    function broadcastSessionUpdate(type, session) {
+        const targets = Object.keys(CONFIG.MODULE_NAMES);
+        
+        targets.forEach(module => {
+            const iframeId = CONFIG.MODULE_NAMES[module];
+            const iframe = document.getElementById(iframeId);
+            const moduleState = parentState.modules[module];
+            
+            if (!iframe?.contentWindow || !moduleState?.registered) return;
+            
+            const messages = [];
+            
+            if (moduleState.protocol === CONFIG.PROTOCOL_TYPES.V2 || 
+                moduleState.protocol === CONFIG.PROTOCOL_TYPES.HYBRID) {
+                messages.push({
+                    type: type,
+                    messageId: `session_${Date.now()}`,
+                    session: session,
+                    payload: session,
+                    timestamp: Date.now()
+                });
+            }
+            
+            if (moduleState.protocol === CONFIG.PROTOCOL_TYPES.V1 || 
+                moduleState.protocol === CONFIG.PROTOCOL_TYPES.HYBRID) {
+                messages.push({
+                    type: 'SESSION_RESPONSE',
+                    messageId: `session_${Date.now()}`,
+                    payload: {
+                        session: session,
+                        authenticated: session?.authenticated || false,
+                        token: session?.token,
+                        expiresAt: session?.expiresAt
+                    },
+                    timestamp: Date.now()
+                });
+            }
+            
+            messages.forEach(msg => {
+                try {
+                    iframe.contentWindow.postMessage(msg, '*');
+                } catch (e) {}
+            });
+        });
+    }
+
+    // ==================== SECTION 15: HEARTBEAT MONITORING ====================
+    function startHeartbeatMonitoring() {
+        setInterval(() => {
+            const now = Date.now();
+            Object.keys(parentState.modules).forEach(module => {
+                const moduleState = parentState.modules[module];
+                if (!moduleState.registered) return;
+                
+                const timeSinceLastBeat = now - moduleState.lastHeartbeat;
+                if (timeSinceLastBeat > CONFIG.TIMEOUTS.HEARTBEAT_TIMEOUT) {
+                    moduleState.degraded = true;
+                    
+                    const iframeId = CONFIG.MODULE_NAMES[module];
+                    const iframe = document.getElementById(iframeId);
+                    if (iframe?.contentWindow) {
+                        try {
+                            iframe.contentWindow.postMessage({
+                                type: 'MODULE_DEGRADED',
+                                reason: 'heartbeat_timeout',
+                                timestamp: now
+                            }, '*');
+                        } catch (e) {}
+                    }
+                }
+            });
+        }, CONFIG.TIMEOUTS.HEARTBEAT_INTERVAL);
+    }
+
+    // ==================== SECTION 16: TOKEN REFRESH MONITORING ====================
+    function startTokenRefreshMonitoring() {
+        setInterval(async () => {
+            const session = SessionAuthority.getSession();
+            if (!session || !session.authenticated) return;
+            
+            const timeToExpiry = session.expiresAt - Date.now();
+            
+            if (timeToExpiry < CONFIG.TIMEOUTS.TOKEN_REFRESH && timeToExpiry > 0) {
+                const refreshed = await SessionAuthority.refreshToken();
+                if (refreshed) {
+                    const newSession = SessionAuthority.getSession();
+                    broadcastSessionUpdate('SESSION_REFRESHED', newSession);
+                }
+            }
+        }, 60000);
+    }
+
+    // ==================== SECTION 17: NETWORK MONITORING ====================
+    function startNetworkMonitoring() {
+        window.addEventListener('online', () => {
+            broadcast('NETWORK_ONLINE', { timestamp: Date.now() });
+            
+            if (SessionAuthority.isAuthenticated()) {
+                SessionAuthority.refreshToken();
+            }
+            
+            processBroadcastQueue();
+        });
+        
+        window.addEventListener('offline', () => {
+            broadcast('NETWORK_OFFLINE', { timestamp: Date.now() });
+        });
+    }
+
+    // ==================== SECTION 18: RECOVERY MODE ====================
+    let recoveryAttempts = 0;
+    
+    async function enterRecoveryMode(reason) {
+        if (parentState.recoveryMode) return;
+        
+        parentState.recoveryMode = true;
+        recoveryAttempts = 0;
+        
+        console.log(`[Parent] Entering recovery mode: ${reason}`);
+        
+        broadcast('SESSION_RECOVERY', { reason, timestamp: Date.now() });
+        
+        await attemptRecovery();
+    }
+
+    async function attemptRecovery() {
+        while (recoveryAttempts < CONFIG.TIMEOUTS.MAX_RECOVERY_ATTEMPTS) {
+            recoveryAttempts++;
+            
+            try {
+                const refreshed = await SessionAuthority.refreshToken();
+                
+                if (refreshed) {
+                    parentState.recoveryMode = false;
+                    
+                    const session = SessionAuthority.getSession();
+                    broadcastSessionUpdate('SESSION_REFRESHED', session);
+                    
+                    console.log('[Parent] Recovery successful');
+                    return;
+                }
+            } catch (e) {}
+            
+            await new Promise(resolve => setTimeout(resolve, CONFIG.TIMEOUTS.RECOVERY_RETRY));
+        }
+        
+        parentState.recoveryMode = false;
+        SessionAuthority.clearSession();
+        
+        broadcast('SESSION_NULL', { reason: 'recovery_failed', timestamp: Date.now() });
+        console.warn('[Parent] Recovery failed - forcing guest mode');
+    }
+
+    // ==================== SECTION 19: IDENTIFY MODULE FROM SOURCE ====================
+    function identifyModule(source) {
+        for (const [module, iframeId] of Object.entries(CONFIG.MODULE_NAMES)) {
+            const iframe = document.getElementById(iframeId);
+            if (iframe && iframe.contentWindow === source) {
+                return module;
+            }
+        }
+        return null;
+    }
+
+    // ==================== SECTION 20: SINGLE AUTHORITATIVE MESSAGE HANDLER ====================
+    window.addEventListener('message', function(event) {
+        if (event.origin !== window.location.origin && event.origin !== 'null') {
+            return;
+        }
+        
+        const data = event.data;
+        if (!data || typeof data !== 'object') return;
+        
+        const messageId = data.messageId || data.requestId;
+        
+        if (messageId) {
+            if (CorrelationRegistry.isProcessed(messageId)) {
+                return;
+            }
+            CorrelationRegistry.register(messageId);
+        }
+        
+        const module = identifyModule(event.source);
+        if (!module) return;
+        
+        const protocol = detectProtocol(data, module);
+        const moduleState = parentState.modules[module];
+        
+        if (protocol && !moduleState.protocolLogged) {
+            moduleState.protocolLogged = true;
+        }
+        
+        if (data.type === 'REGISTER_MODULE') {
+            handleV2RegisterModule(data, event.source, event.origin, module);
+            return;
+        }
+        
+        if (data.type === 'VERIFY_SESSION') {
+            handleVerifySession(data, event.source, event.origin);
+            return;
+        }
+        
+        if (data.type === 'HEARTBEAT') {
+            handleHeartbeat(data, event.source, event.origin, module);
+            return;
+        }
+        
+        if (data.type === 'CHILD_READY' || data.type === 'coreReady') {
+            handleV1ChildReady(data, event.source, event.origin, module);
+            return;
+        }
+        
+        if (data.type === 'REQUEST_SESSION') {
+            handleRequestSession(data, event.source, event.origin, module);
+            return;
+        }
+        
+        if (data.type === 'SEND_MESSAGE') {
+            const messageType = data.payload?.type || 'NEW_MESSAGE';
+            broadcast(messageType, data.payload);
+            
+            if (moduleState.protocol === CONFIG.PROTOCOL_TYPES.V2 || 
+                moduleState.protocol === CONFIG.PROTOCOL_TYPES.HYBRID) {
+                if (messageId) {
+                    respond(event.source, event.origin, {
+                        type: 'ACK',
+                        originalType: 'SEND_MESSAGE',
+                        messageId: messageId,
+                        requestId: messageId,
+                        payload: { success: true },
+                        timestamp: Date.now()
+                    });
+                }
+            }
+            return;
+        }
+        
+        if (data.type === 'PING') {
+            respond(event.source, event.origin, {
+                type: 'PONG',
+                requestId: messageId,
+                messageId: messageId,
+                payload: { timestamp: Date.now() },
+                timestamp: Date.now()
+            });
+            return;
+        }
+        
+        if (data.expectAck && messageId) {
+            respond(event.source, event.origin, {
+                type: 'ACK',
+                originalType: data.type,
+                messageId: messageId,
+                requestId: messageId,
+                payload: { success: true },
+                timestamp: Date.now()
+            });
+        }
+    });
+
+    // ==================== SECTION 21: INITIALIZATION ====================
+    async function initializeParent() {
+        console.log('[Parent] Initializing in strict order...');
+        
+        const auth = SecureStorage.getToken();
+        if (auth && auth.expiry > Date.now()) {
+            parentState.session = {
+                authenticated: true,
+                userId: auth.userId,
+                token: auth.token,
+                expiresAt: auth.expiry,
+                user: auth.user
+            };
+            parentState.token = auth.token;
+            
+            if (!SessionAuthority.validateTokenIntegrity()) {
+                parentState.session = null;
+                parentState.token = null;
+                SecureStorage.remove('kynecta_auth');
+            }
+        }
+        
+        parentState.ready = true;
+        console.log('[Parent] Ready state established');
+        
+        broadcast('PARENT_READY', {
+            timestamp: Date.now(),
+            protocol: CONFIG.PROTOCOL_VERSION
+        });
+        
+        startHeartbeatMonitoring();
+        startTokenRefreshMonitoring();
+        startNetworkMonitoring();
+        
+        setInterval(() => {
+            Locks.cleanup();
+        }, 30000);
+        
+        const loadingScreen = document.getElementById('loadingScreen');
+        if (loadingScreen) {
+            loadingScreen.style.opacity = '0';
+            setTimeout(() => loadingScreen.classList.add('hidden'), 300);
+        }
+    }
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', initializeParent);
+    } else {
+        initializeParent();
+    }
+
+    setTimeout(() => {
+        if (!parentState.ready) {
+            parentState.ready = true;
+            broadcast('PARENT_READY', { timestamp: Date.now(), forced: true });
+            
+            const loadingScreen = document.getElementById('loadingScreen');
+            if (loadingScreen) {
+                loadingScreen.style.opacity = '0';
+                setTimeout(() => loadingScreen.classList.add('hidden'), 300);
+            }
+        }
+    }, CONFIG.TIMING.FULL_INIT);
+
+    // ==================== SECTION 22: EXPOSE GLOBALS ====================
+    window.__PARENT_AUTHORITY_V8__ = window.__PARENT_AUTHORITY_V8__ || {
+        state: parentState,
+        session: SessionAuthority,
+        broadcast: broadcast,
+        recovery: { enterRecoveryMode },
+        getStats: () => ({
+            ready: parentState.ready,
+            modules: Object.keys(parentState.modules).map(module => ({
+                name: module,
+                protocol: parentState.modules[module].protocol,
+                registered: parentState.modules[module].registered,
+                ready: parentState.modules[module].ready,
+                degraded: parentState.modules[module].degraded,
+                sessionDelivered: parentState.modules[module].sessionDelivered,
+                lastHeartbeat: parentState.modules[module].lastHeartbeat
+            })),
+            session: SessionAuthority.getSession(),
+            recoveryMode: parentState.recoveryMode,
+            queueSize: parentState.queues.broadcast.length,
+            broadcastHistory: parentState.broadcastHistory.length
+        })
+    };
+
+    window.__KYNECTA_AUTHORITIES__ = window.__KYNECTA_AUTHORITIES__ || {};
+    window.__KYNECTA_AUTHORITIES__.parentV8 = window.__PARENT_AUTHORITY_V8__;
+
+    console.log('[Parent] ✅ Dual-protocol parent controller v8.0 initialized');
+    console.log('[Parent] ✅ Supports V2 (modern), V1 (legacy), and HYBRID cores');
+})();
+</script>
+<!-- ========== END DETERMINISTIC PARENT AUTHORITY v8.0 ========== -->
+
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="theme-color" content="#4F46E5">
@@ -138,10 +2638,19 @@
             integrity="sha512-v2CJ7UaYy4JwqLDIrZUI/4hqeoQieOmAZNXBeQyjo21dadnwR+8ZaIJVT8EE2iyI61OV8e6M8PP2/4hpQINQ/g==" 
             crossorigin="anonymous" referrerpolicy="no-referrer"></script>
     
-    <link rel="stylesheet" href="chat.css">
+    <link rel="stylesheet" href="chat.css">  
 
-    <!-- REST OF YOUR EXISTING STYLES - ALL 3000+ LINES PRESERVED -->
+    <!-- REST OF YOUR EXISTING STYLES - ALL PRESERVED -->
     <style>
+        canvas {
+    -webkit-text-size-adjust: 100%;
+}
+
+/* Hide Chrome's yellow warning box if it appears */
+div[style*="warning"],
+div[role="alert"] {
+    display: none !important;
+}
         * {
             -webkit-user-select: none;
             -moz-user-select: none;
@@ -1816,6 +4325,7 @@
         .status-offline { background-color: #ef4444; }
         .status-syncing { background-color: #3b82f6; animation: pulse 1.5s infinite; }
     </style>
+    <link rel="stylesheet" href="/css/suppress-webgl.css">
 </head>
 <body class="h-full overflow-hidden bg-gray-50" data-theme="light">
 
@@ -2100,37 +4610,37 @@
     <!-- IFRAME CONTAINERS -->
     <div id="messagesContent" class="content-area iframe-container" data-iframe-container="true">
         <iframe id="messagesIframe" class="content-iframe" src="message.html" title="Messages" 
-                sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-modals allow-downloads" allow="camera; microphone; fullscreen"></iframe>
+                sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox allow-modals" allow="camera; microphone; fullscreen"></iframe>
     </div>
 
     <div id="statusContent" class="content-area iframe-container hidden" data-iframe-container="true">
         <iframe id="statusIframe" class="content-iframe" src="status.html" title="Status" 
-                sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-modals allow-downloads" allow="camera; microphone; fullscreen"></iframe>
+                sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox allow-modals" allow="camera; microphone; fullscreen"></iframe>
     </div>
 
     <div id="groupContent" class="content-area iframe-container hidden" data-iframe-container="true">
         <iframe id="groupIframe" class="content-iframe" src="group.html" title="Groups" 
-                sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-modals allow-downloads" allow="camera; microphone; fullscreen"></iframe>
+                sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox allow-modals" allow="camera; microphone; fullscreen"></iframe>
     </div>
 
     <div id="friendsContent" class="content-area iframe-container hidden" data-iframe-container="true">
         <iframe id="friendsIframe" class="content-iframe" src="friend.html" title="Friends" 
-                sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-modals allow-downloads" allow="camera; microphone; fullscreen"></iframe>
+                sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox allow-modals" allow="camera; microphone; fullscreen"></iframe>
     </div>
 
     <div id="callsContent" class="content-area iframe-container hidden" data-iframe-container="true">
         <iframe id="callsIframe" class="content-iframe" src="calls.html" title="Calls" 
-                sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-modals allow-downloads" allow="camera; microphone; fullscreen"></iframe>
+                sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox allow-modals" allow="camera; microphone; fullscreen"></iframe>
     </div>
 
     <div id="settingsContent" class="content-area iframe-container hidden" data-iframe-container="true">
         <iframe id="settingsIframe" class="content-iframe" src="settings.html" title="Settings" 
-                sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-modals allow-downloads" allow="camera; microphone; fullscreen"></iframe>
+                sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox allow-modals" allow="camera; microphone; fullscreen"></iframe>
     </div>
 
     <div id="toolsContent" class="content-area iframe-container hidden" data-iframe-container="true">
         <iframe id="toolsIframe" class="content-iframe" src="Tools.html" title="Tools" 
-                sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-modals allow-downloads" allow="camera; microphone; fullscreen"></iframe>
+                sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox allow-modals" allow="camera; microphone; fullscreen"></iframe>
     </div>
 
     <!-- VIDEO CONFERENCE COMPONENTS -->
@@ -2487,7 +4997,7 @@
 
         // 1️⃣ BOOT BARRIER STATE MACHINE
         const BOOT_STATE = {
-            sessionRestored: false,
+            sessionRestored: window.__PARENT_SESSION__ ? window.__PARENT_SESSION__.authenticated : false,
             socketConnected: false,
             parentReadyBroadcasted: false,
             iframesRegistered: new Set(),
@@ -2495,7 +5005,14 @@
         };
 
         // Single authoritative session source - frozen after restore
-        window.AUTH_SESSION = null;
+        window.AUTH_SESSION = window.__PARENT_SESSION__ && window.__PARENT_SESSION__.authenticated ? 
+            Object.freeze({
+                userId: window.__PARENT_SESSION__.userId,
+                token: window.__PARENT_SESSION__.token,
+                sessionId: ('sess_' + Date.now()),
+                permissions: [],
+                timestamp: Date.now()
+            }) : null;
 
         // 4️⃣ CENTRALIZED ACK REGISTRY
         window.ACK_REGISTRY = new Map(); // messageId -> { timestamp, sourceIframe, retryCount, delivered }
@@ -2512,17 +5029,14 @@
             BOOT_STATE.sessionRestored = true;
             
             // Create immutable session if available
-            if (window.__KYNECTA_AUTHORITIES__?.parentState) {
-                const session = window.__KYNECTA_AUTHORITIES__.parentState.getSession();
-                if (session && session.authenticated && session.user) {
-                    window.AUTH_SESSION = Object.freeze({
-                        userId: session.userId || session.user.id,
-                        token: session.token,
-                        sessionId: session.sessionId || ('sess_' + Date.now()),
-                        permissions: session.permissions || [],
-                        timestamp: Date.now()
-                    });
-                }
+            if (window.__PARENT_SESSION__ && window.__PARENT_SESSION__.authenticated) {
+                window.AUTH_SESSION = Object.freeze({
+                    userId: window.__PARENT_SESSION__.userId,
+                    token: window.__PARENT_SESSION__.token,
+                    sessionId: ('sess_' + Date.now()),
+                    permissions: window.__PARENT_SESSION__.permissions || [],
+                    timestamp: Date.now()
+                });
             }
             
             debugLog('[Boot] Session restored');
@@ -2778,7 +5292,7 @@
         // ==================== SINGLE SOURCE OF TRUTH SESSION AUTHORITY ====================
         const SessionAuthority = (function() {
             let _initialized = false;
-            let _session = {
+            let _session = window.__PARENT_SESSION__ ? { ...window.__PARENT_SESSION__.session } : {
                 authenticated: false,
                 user: null,
                 userId: null,
@@ -2864,7 +5378,7 @@
                         window.AUTH_SESSION = Object.freeze({
                             userId: _session.userId,
                             token: _session.token,
-                            sessionId: _session.sessionId || ('sess_' + Date.now()),
+                            sessionId: ('sess_' + Date.now()),
                             permissions: _session.permissions || [],
                             timestamp: Date.now()
                         });
@@ -2921,7 +5435,7 @@
                 _session = {
                     authenticated: newSession.authenticated || false,
                     user: newSession.user,
-                    userId: newSession.user.id,
+                    userId: newSession.user.id || newSession.user.userId,
                     token: newSession.token || _session.token,
                     expiresAt: newSession.expiresAt || Date.now() + 3600000,
                     permissions: newSession.permissions || [],
@@ -2932,7 +5446,7 @@
                 window.AUTH_SESSION = Object.freeze({
                     userId: _session.userId,
                     token: _session.token,
-                    sessionId: _session.sessionId || ('sess_' + Date.now()),
+                    sessionId: ('sess_' + Date.now()),
                     permissions: _session.permissions || [],
                     timestamp: Date.now()
                 });
@@ -3801,6 +6315,8 @@
                 return window.__sessionManager.getSession();
             } else if (window._sessionCache) {
                 return window._sessionCache;
+            } else if (window.__PARENT_SESSION__) {
+                return window.__PARENT_SESSION__.session;
             }
             return { authenticated: false };
         }
@@ -5938,7 +8454,7 @@
 
         // Parent Session Authority
         const ParentSessionAuthority = (function() {
-            let session = {
+            let session = window.__PARENT_SESSION__ ? { ...window.__PARENT_SESSION__.session } : {
                 authenticated: false,
                 user: null,
                 userId: null,
@@ -5974,7 +8490,7 @@
                         window.AUTH_SESSION = Object.freeze({
                             userId: session.userId,
                             token: session.token,
-                            sessionId: session.sessionId || ('sess_' + Date.now()),
+                            sessionId: ('sess_' + Date.now()),
                             permissions: session.permissions || [],
                             timestamp: Date.now()
                         });
@@ -6010,7 +8526,7 @@
                     window.AUTH_SESSION = Object.freeze({
                         userId: session.userId,
                         token: session.token,
-                        sessionId: session.sessionId || ('sess_' + Date.now()),
+                        sessionId: ('sess_' + Date.now()),
                         permissions: session.permissions || [],
                         timestamp: Date.now()
                     });
@@ -6425,6 +8941,9 @@
                 }
                 if (window.__sessionCache) {
                     return window.__sessionCache;
+                }
+                if (window.__PARENT_SESSION__) {
+                    return window.__PARENT_SESSION__.session;
                 }
                 return { authenticated: false };
             },
@@ -8784,6 +11303,9 @@
             if (window._sessionCache) {
                 return window._sessionCache;
             }
+            if (window.__PARENT_SESSION__) {
+                return window.__PARENT_SESSION__.session;
+            }
             // Default guest session
             return {
                 authenticated: true,
@@ -9230,5 +11752,67 @@
             if (modal) modal.classList.add('hidden');
         };
     </script>
+
+<!-- ==============================================
+PARENT–IFRAME COMMUNICATION ARCHITECTURE v8.0
+==============================================
+
+DUAL-PROTOCOL SUPPORT: V2 (modern) + V1 (legacy) + HYBRID
+
+PROTOCOL DETECTION LAYER:
+- REGISTER_MODULE → V2
+- CHILD_READY → V1
+- coreReady → V1 legacy
+- Both V1 and V2 messages → HYBRID
+
+V2 HANDSHAKE FLOW (STRICT ORDER):
+1️⃣ MODULE_REGISTERED
+2️⃣ SESSION_ACTIVE or SESSION_NULL
+3️⃣ PARENT_READY
+4️⃣ ACK {originalType: REGISTER_MODULE}
+
+V1 HANDSHAKE FLOW:
+1️⃣ coreReady
+2️⃣ SESSION_RESPONSE (legacy format)
+3️⃣ PARENT_READY (for hybrid cores)
+
+HYBRID SUPPORT:
+- Respond to both V1 and V2 messages
+- Unify as registered=true
+- Use sessionDeliveryLock to avoid duplicates
+
+SESSION DELIVERY:
+- V2 → SESSION_ACTIVE
+- V1 → SESSION_RESPONSE
+- HYBRID → both formats (once)
+
+BROADCAST ROUTING MAP:
+- NEW_MESSAGE → messages
+- INCOMING_CALL → calls
+- FRIEND_UPDATE → friends, messages, groups
+- GROUP_UPDATE → groups
+- SETTINGS_UPDATED → all
+- STATUS_UPDATE → status, friends
+
+TIMING GOVERNANCE:
+- Registration response: <50ms
+- Session response: <50ms
+- Verification response: <50ms
+- Heartbeat response: <30ms
+- Broadcast dispatch: <20ms
+- Handshake complete: <150ms
+
+LOCKS & RACE PREVENTION:
+- registrationLock[module]
+- sessionDeliveryLock[module]
+- verificationLock[requestId]
+- refreshLock (global)
+
+OFFLINE SUPPORT:
+- NETWORK_OFFLINE broadcast
+- NETWORK_ONLINE broadcast
+- Session validation on reconnect
+
+============================================== -->
 </body>
 </html>

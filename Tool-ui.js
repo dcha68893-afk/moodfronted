@@ -9,12 +9,6 @@
 // 1. IMPORT VERIFICATION – STRICT CORE BRIDGE
 // ----------------------------------------------------------------------
 import {
-    // ---------- Core State (validated) ----------
-    currentUser, userData, myListings, allListings, savedItems, privateNotes,
-    userGroups, userFriends, currentMoodFilter, offlineDrafts, trustStats,
-    userSubscription, teamMembers, leaderboardData, analyticsData, streakData,
-    premiumFeatures, paymentMethods,
-
     // ---------- Constants (fully preserved) ----------
     LISTING_TYPES, AVAILABILITY, MOOD_CONTEXTS, TRUST_CIRCLES, DURATION_OPTIONS,
     TRUST_INDICATORS, SUBSCRIPTION_PLANS, SERVICE_CATEGORIES, PREMIUM_CATEGORIES,
@@ -174,6 +168,34 @@ import {
     updateTeamMemberRole as updateTeamMemberRoleCore
     
 } from './Tool-core.js';
+
+// ----------------------------------------------------------------------
+// GLOBAL VARIABLES FROM WINDOW (instead of imports)
+// ----------------------------------------------------------------------
+const allListings = window.allListings || [];
+const myListings = window.myListings || [];
+const savedItems = window.savedItems || [];
+const userGroups = window.userGroups || [];
+const userFriends = window.userFriends || [];
+const currentUser = window.currentUser || null;
+const userData = window.userData || null;
+const privateNotes = window.privateNotes || [];
+const currentMoodFilter = window.currentMoodFilter || null;
+const offlineDrafts = window.offlineDrafts || [];
+const trustStats = window.trustStats || {};
+const userSubscription = window.userSubscription || null;
+const teamMembers = window.teamMembers || [];
+const leaderboardData = window.leaderboardData || [];
+const analyticsData = window.analyticsData || {};
+const streakData = window.streakData || {};
+const premiumFeatures = window.premiumFeatures || {};
+const paymentMethods = window.paymentMethods || [];
+const sessionData = window.sessionData || null;
+const isBootstrapped = window.isBootstrapped || false;
+const isAuthReady = window.isAuthReady || false;
+const isReady = window.isReady || false;
+const handshakeComplete = window.handshakeComplete || false;
+const sessionValid = window.sessionValid || false;
 
 // ----------------------------------------------------------------------
 // 2. DOM CACHE – RESILIENT ELEMENT REFERENCES
@@ -3195,4 +3217,5 @@ export {
     renderers,
     UIState,
     pageCore
+    
 };
