@@ -36,9 +36,6 @@
     'use strict';
     
     // ==================== SECTION 1.1: SYNCHRONOUS SESSION LOAD ====================
-    // This runs immediately when script loads - NO async, NO API calls
-    
-    // Define parent state container that will be populated synchronously
     window.__PARENT_SESSION__ = {
         session: null,
         token: null,
@@ -49,13 +46,11 @@
         loaded: false
     };
     
-    // Attempt to load session from localStorage synchronously
     try {
         const authData = localStorage.getItem('kynecta_auth');
         if (authData) {
             const parsed = JSON.parse(authData);
             if (parsed && parsed.token) {
-                // Check expiry but don't validate - just use what we have
                 const expiresAt = parsed.expiry || parsed.expiresAt || 0;
                 
                 window.__PARENT_SESSION__.session = {
@@ -73,14 +68,10 @@
                 window.__PARENT_SESSION__.fromCache = true;
             }
         }
-    } catch (e) {
-        // Silently fail - no session available
-    }
+    } catch (e) {}
     
-    // Always mark as loaded - even if no session
     window.__PARENT_SESSION__.loaded = true;
     
-    // ==================== SECTION 1.2: IMMEDIATE SESSION GETTER ====================
     window.__getParentSession = function() {
         return window.__PARENT_SESSION__.session ? { ...window.__PARENT_SESSION__.session } : null;
     };
@@ -93,12 +84,11 @@
         return !!(window.__PARENT_SESSION__.authenticated && window.__PARENT_SESSION__.token);
     };
     
-    // ==================== SECTION 1.3: LOCK MANAGEMENT ====================
     window.__PARENT_LOCKS__ = {
-        registration: new Map(),      // module -> timestamp
-        sessionDelivery: new Map(),    // module -> timestamp
-        verification: new Map(),       // requestId -> timestamp
-        refresh: false,                // global refresh lock
+        registration: new Map(),
+        sessionDelivery: new Map(),
+        verification: new Map(),
+        refresh: false,
         
         acquireRegistration: function(module) {
             if (this.registration.has(module)) return false;
@@ -154,7 +144,6 @@
         }
     };
     
-    // ==================== SECTION 1.4: CORRELATION REGISTRY ====================
     window.__PARENT_CORRELATION__ = {
         processedIds: new Set(),
         timestamps: new Map(),
@@ -173,7 +162,6 @@
             this.processedIds.add(messageId);
             this.timestamps.set(messageId, Date.now());
             
-            // Cleanup
             if (this.processedIds.size > this.maxProcessedIds) {
                 const ids = Array.from(this.processedIds);
                 const toRemove = ids.slice(0, ids.length - this.maxProcessedIds);
@@ -186,7 +174,6 @@
         }
     };
     
-    // ==================== SECTION 1.5: IMMEDIATE RESPOND FUNCTION ====================
     window.__parentRespond = function(target, origin, responses) {
         if (!target) return;
         
@@ -195,11 +182,98 @@
         responseArray.forEach(msg => {
             try {
                 target.postMessage(msg, origin || '*');
-            } catch (e) {
-                // Silently fail
-            }
+            } catch (e) {}
         });
     };
+})();
+</script>
+
+<!-- ========== SECTION 2: COORDINATOR - MANAGES ALL OTHER SECTIONS ========== -->
+<script>
+(function() {
+    'use strict';
+    
+    // This coordinator ensures all sections work together without conflict
+    window.__KYNECTA_COORDINATOR__ = {
+        sections: {
+            section2: { ready: false, name: 'Immediate Handler' },
+            section3: { ready: false, name: 'Background Validation' },
+            section4: { ready: false, name: 'Dual Protocol Controller' },
+            section5: { ready: false, name: 'Boot Barrier' },
+            section6: { ready: false, name: 'Parent Authority Engine' },
+            section7: { ready: false, name: 'Message Handler' },
+            section8: { ready: false, name: 'Frame Registration' },
+            section9: { ready: false, name: 'Stability Layer' },
+            section10: { ready: false, name: 'Early Bridge' },
+            section11: { ready: false, name: 'Orchestration Engine' },
+            section12: { ready: false, name: 'Authoritative Handler' }
+        },
+        
+        iframes: {
+            messages: { ready: false, waiting: false, requests: [] },
+            status: { ready: false, waiting: false, requests: [] },
+            group: { ready: false, waiting: false, requests: [] },
+            friends: { ready: false, waiting: false, requests: [] },
+            calls: { ready: false, waiting: false, requests: [] },
+            settings: { ready: false, waiting: false, requests: [] },
+            tools: { ready: false, waiting: false, requests: [] }
+        },
+        
+        markSectionReady: function(sectionId) {
+            if (this.sections[sectionId]) {
+                this.sections[sectionId].ready = true;
+            }
+        },
+        
+        isSectionReady: function(sectionId) {
+            return this.sections[sectionId]?.ready || false;
+        },
+        
+        queueIframeRequest: function(iframeName, request) {
+            if (!this.iframes[iframeName]) return false;
+            
+            if (!this.iframes[iframeName].ready) {
+                this.iframes[iframeName].requests.push(request);
+                this.iframes[iframeName].waiting = true;
+                return false;
+            }
+            return true;
+        },
+        
+        markIframeReady: function(iframeName) {
+            if (this.iframes[iframeName]) {
+                this.iframes[iframeName].ready = true;
+                this.iframes[iframeName].waiting = false;
+                
+                // Process queued requests
+                while (this.iframes[iframeName].requests.length > 0) {
+                    const request = this.iframes[iframeName].requests.shift();
+                    try {
+                        if (request.source && request.message) {
+                            request.source.postMessage(request.message, request.origin || '*');
+                        }
+                    } catch (e) {}
+                }
+            }
+        },
+        
+        getStatus: function() {
+            return {
+                sections: Object.fromEntries(
+                    Object.entries(this.sections).map(([id, data]) => [id, { ready: data.ready, name: data.name }])
+                ),
+                iframes: Object.fromEntries(
+                    Object.entries(this.iframes).map(([name, data]) => [name, { 
+                        ready: data.ready, 
+                        waiting: data.waiting,
+                        queueLength: data.requests.length 
+                    }])
+                )
+            };
+        }
+    };
+    
+    console.log('[Coordinator] ✅ Initialized - will manage all sections');
 })();
 </script>
 
@@ -209,14 +283,12 @@
 (function() {
     'use strict';
     
-    // ==================== SECTION 2.1: PROTOCOL TYPES ====================
     const PROTOCOL_TYPES = {
-        V2: 'V2',      // Modern: REGISTER_MODULE, ACK, SESSION_ACTIVE
-        V1: 'V1',      // Legacy: CHILD_READY, coreReady, REQUEST_SESSION
-        HYBRID: 'HYBRID' // Supports both
+        V2: 'V2',
+        V1: 'V1',
+        HYBRID: 'HYBRID'
     };
     
-    // ==================== SECTION 2.2: MODULE NAMES ====================
     const MODULE_NAMES = {
         messages: 'messagesIframe',
         status: 'statusIframe',
@@ -227,30 +299,31 @@
         tools: 'toolsIframe'
     };
     
-    // ==================== SECTION 2.3: MODULE STATE TRACKING ====================
-    window.__PARENT_MODULES__ = {};
+    // ==================== CRITICAL FIX: Initialize module state properly ====================
+    window.__PARENT_MODULES__ = window.__PARENT_MODULES__ || {};
     
-    // Initialize module states
+    // Ensure all modules have initial state
     Object.keys(MODULE_NAMES).forEach(function(module) {
-        window.__PARENT_MODULES__[module] = {
-            protocol: null,
-            detectedFrom: [],
-            registered: false,
-            ready: false,
-            registrationLock: false,
-            sessionDelivered: false,
-            lastHeartbeat: 0,
-            registeredAt: null,
-            sessionDeliveredAt: null,
-            degraded: false,
-            messageQueue: [],
-            childReadyReceived: false,
-            coreReadyReceived: false,
-            processedMessageIds: new Set()
-        };
+        if (!window.__PARENT_MODULES__[module]) {
+            window.__PARENT_MODULES__[module] = {
+                protocol: null,
+                detectedFrom: [],
+                registered: false,
+                ready: false,
+                registrationLock: false,
+                sessionDelivered: false,
+                lastHeartbeat: 0,
+                registeredAt: null,
+                sessionDeliveredAt: null,
+                degraded: false,
+                messageQueue: [],
+                childReadyReceived: false,
+                coreReadyReceived: false,
+                processedMessageIds: new Set()
+            };
+        }
     });
     
-    // ==================== SECTION 2.4: PROTOCOL DETECTION ====================
     window.__detectProtocol = function(type, module) {
         const moduleState = window.__PARENT_MODULES__[module];
         if (!moduleState) return null;
@@ -290,9 +363,7 @@
         return null;
     };
     
-    // ==================== SECTION 2.5: IDENTIFY MODULE FROM SOURCE ====================
     window.__identifyModule = function(source) {
-        // Try direct iframe matching first
         for (var module in MODULE_NAMES) {
             if (MODULE_NAMES.hasOwnProperty(module)) {
                 var iframeId = MODULE_NAMES[module];
@@ -303,155 +374,105 @@
             }
         }
         
-        // If not found, look for the iframe in the DOM
         const allIframes = document.querySelectorAll('iframe');
         for (let iframe of allIframes) {
             if (iframe.contentWindow === source) {
-                // Extract module name from ID (remove 'Iframe')
                 return iframe.id.replace('Iframe', '');
             }
         }
         
         return null;
     };
-    
-    // ==================== SECTION 2.6: IMMEDIATE REGISTER_MODULE HANDLER ====================
+
     window.__handleRegisterModuleImmediate = function(data, source, origin, module) {
-        var messageId = data.messageId || data.requestId;
-        if (!messageId) {
-            messageId = 'msg_' + Date.now() + '_' + Math.random().toString(36).substr(2, 8);
-        }
-        
-        // Enhanced registration lock with timeout check
-        if (!window.__PARENT_LOCKS__.acquireRegistration(module)) {
-            // Check if previous registration timed out
-            const lastAttempt = window.__PARENT_LOCKS__.registration.get(module);
-            if (lastAttempt && Date.now() - lastAttempt > 5000) {
-                // Release and retry
-                window.__PARENT_LOCKS__.releaseRegistration(module);
-                // Re-enter handler
-                window.__handleRegisterModuleImmediate(data, source, origin, module);
-                return;
-            }
-            
-            // Still locked, send ACK only
-            window.__parentRespond(source, origin, {
-                type: 'ACK',
-                originalType: 'REGISTER_MODULE',
-                messageId: messageId,
-                requestId: messageId,
-                payload: { success: true, cached: true },
-                timestamp: Date.now()
-            });
-            return;
-        }
-        
-        var moduleState = window.__PARENT_MODULES__[module];
-        
-        // Mark as registered
-        if (!moduleState.registered) {
-            moduleState.registered = true;
-            moduleState.registeredAt = Date.now();
-            moduleState.lastHeartbeat = Date.now();
-        }
-        
-        // Get session from synchronous storage
-        var session = window.__getParentSession();
-        var isAuthenticated = window.__isParentAuthenticated();
-        
-        // Prepare batch responses in EXACT ORDER
-        var responses = [];
-        
-        // 1. MODULE_REGISTERED
-        responses.push({
+    var messageId = data.messageId || data.requestId;
+    if (!messageId) {
+        messageId = 'msg_' + Date.now() + '_' + Math.random().toString(36).substr(2, 8);
+    }
+    
+    // CRITICAL: Always respond to REGISTER_MODULE immediately
+    var moduleState = window.__PARENT_MODULES__[module] || {
+        registered: false,
+        ready: false,
+        sessionDelivered: false
+    };
+    
+    // Mark as registered
+    if (!moduleState.registered) {
+        moduleState.registered = true;
+        moduleState.registeredAt = Date.now();
+        moduleState.lastHeartbeat = Date.now();
+    }
+    
+    // Send MODULE_REGISTERED response FIRST (before anything else)
+    try {
+        source.postMessage({
             type: 'MODULE_REGISTERED',
             messageId: messageId,
             requestId: messageId,
             payload: { success: true, module: module },
             timestamp: Date.now()
-        });
-        
-        // 2. SESSION_ACTIVE or SESSION_NULL - FIXED: Only send SESSION_NULL if parent explicitly has no session
-        if (session && isAuthenticated && !moduleState.sessionDelivered) {
-            responses.push({
-                type: 'SESSION_ACTIVE',
-                messageId: 'session_' + messageId,
-                requestId: messageId,
-                session: session,
-                payload: {
-                    authenticated: true,
-                    userId: session.userId,
-                    token: session.token,
-                    user: session.user,
-                    expiresAt: session.expiresAt
-                },
-                timestamp: Date.now()
-            });
-            moduleState.sessionDelivered = true;
-            moduleState.sessionDeliveredAt = Date.now();
-        } else if (window.__PARENT_SESSION__.authenticated === false && !moduleState.sessionDelivered) {
-            responses.push({
-                type: 'SESSION_NULL',
-                messageId: 'session_' + messageId,
-                requestId: messageId,
-                payload: { reason: 'no_active_session' },
-                timestamp: Date.now()
-            });
-            moduleState.sessionDelivered = true;
-        }
-        
-        // 3. PARENT_READY
-        responses.push({
-            type: 'PARENT_READY',
-            messageId: 'ready_' + messageId,
-            requestId: messageId,
-            payload: { timestamp: Date.now(), protocol: 'KYN-8.0' },
-            timestamp: Date.now()
-        });
-        
-        // 4. ACK
-        responses.push({
+        }, origin);
+    } catch (e) {}
+    
+    // Then send ACK
+    try {
+        source.postMessage({
             type: 'ACK',
             originalType: 'REGISTER_MODULE',
             messageId: messageId,
             requestId: messageId,
             payload: { success: true, module: module },
             timestamp: Date.now()
-        });
-        
-        // Send all responses immediately
-        window.__parentRespond(source, origin, responses);
-        
-        // Mark module ready
-        moduleState.ready = true;
-        
-        window.__PARENT_LOCKS__.releaseRegistration(module);
-    };
+        }, origin);
+    } catch (e) {}
     
-    // ==================== SECTION 2.7: IMMEDIATE CHILD_READY HANDLER ====================
+    moduleState.ready = true;
+    
+    // Mark iframe as ready in coordinator
+    if (window.__KYNECTA_COORDINATOR__) {
+        window.__KYNECTA_COORDINATOR__.markIframeReady(module);
+    }
+};
+
     window.__handleChildReadyImmediate = function(data, source, origin, module) {
         var messageId = data.messageId || data.requestId || ('v1_' + Date.now());
         
+        // CRITICAL FIX: Ensure module state exists
+        if (!window.__PARENT_MODULES__[module]) {
+            window.__PARENT_MODULES__[module] = {
+                protocol: null,
+                detectedFrom: [],
+                registered: false,
+                ready: false,
+                registrationLock: false,
+                sessionDelivered: false,
+                lastHeartbeat: 0,
+                registeredAt: null,
+                sessionDeliveredAt: null,
+                degraded: false,
+                messageQueue: [],
+                childReadyReceived: false,
+                coreReadyReceived: false,
+                processedMessageIds: new Set()
+            };
+        }
+        
         var moduleState = window.__PARENT_MODULES__[module];
         
-        // Mark protocol
         moduleState.protocol = PROTOCOL_TYPES.V1;
         moduleState.childReadyReceived = true;
         
-        // Register if not already
         if (!moduleState.registered) {
             moduleState.registered = true;
             moduleState.registeredAt = Date.now();
         }
         
-        // Get session from synchronous storage
         var session = window.__getParentSession();
         var isAuthenticated = window.__isParentAuthenticated();
         
-        // Prepare V1 responses
         var responses = [];
         
-        // 1. coreReady (legacy)
         responses.push({
             type: 'coreReady',
             messageId: 'core_' + messageId,
@@ -460,7 +481,6 @@
             timestamp: Date.now()
         });
         
-        // 2. SESSION_RESPONSE (legacy format)
         if (session && isAuthenticated && !moduleState.sessionDelivered) {
             responses.push({
                 type: 'SESSION_RESPONSE',
@@ -491,7 +511,6 @@
             moduleState.sessionDelivered = true;
         }
         
-        // 3. PARENT_READY
         responses.push({
             type: 'PARENT_READY',
             messageId: 'ready_' + messageId,
@@ -500,26 +519,46 @@
             timestamp: Date.now()
         });
         
-        // Send responses
         window.__parentRespond(source, origin, responses);
         
-        // Mark ready
         moduleState.ready = true;
+        
+        // Mark iframe as ready in coordinator
+        if (window.__KYNECTA_COORDINATOR__) {
+            window.__KYNECTA_COORDINATOR__.markIframeReady(module);
+        }
     };
     
-    // ==================== SECTION 2.8: IMMEDIATE REQUEST_SESSION HANDLER ====================
     window.__handleRequestSessionImmediate = function(data, source, origin, module) {
         var messageId = data.messageId || data.requestId;
         if (!messageId) return;
+        
+        // CRITICAL FIX: Ensure module state exists
+        if (!window.__PARENT_MODULES__[module]) {
+            window.__PARENT_MODULES__[module] = {
+                protocol: null,
+                detectedFrom: [],
+                registered: false,
+                ready: false,
+                registrationLock: false,
+                sessionDelivered: false,
+                lastHeartbeat: 0,
+                registeredAt: null,
+                sessionDeliveredAt: null,
+                degraded: false,
+                messageQueue: [],
+                childReadyReceived: false,
+                coreReadyReceived: false,
+                processedMessageIds: new Set()
+            };
+        }
         
         var moduleState = window.__PARENT_MODULES__[module];
         var session = window.__getParentSession();
         var isAuthenticated = window.__isParentAuthenticated();
         
-        // Prepare response
         var responses = [];
         
-        // SESSION_RESPONSE
         responses.push({
             type: 'SESSION_RESPONSE',
             requestId: messageId,
@@ -533,65 +572,55 @@
             timestamp: Date.now()
         });
         
-        // ACK for V2 or HYBRID
-        if (moduleState.protocol === PROTOCOL_TYPES.V2 || moduleState.protocol === PROTOCOL_TYPES.HYBRID) {
-            responses.push({
-                type: 'ACK',
-                originalType: 'REQUEST_SESSION',
-                messageId: 'ack_' + messageId,
-                requestId: messageId,
-                payload: { success: true },
-                timestamp: Date.now()
-            });
-        }
+        responses.push({
+            type: 'ACK',
+            originalType: 'REQUEST_SESSION',
+            messageId: messageId,
+            requestId: messageId,
+            payload: { success: true },
+            timestamp: Date.now()
+        });
         
         window.__parentRespond(source, origin, responses);
         moduleState.sessionDelivered = true;
     };
-    
-    // ==================== SECTION 2.9: IMMEDIATE VERIFY_SESSION HANDLER ====================
+
     window.__handleVerifySessionImmediate = function(data, source, origin) {
-        var requestId = data.requestId || data.messageId;
-        if (!requestId) return;
-        
-        if (!window.__PARENT_LOCKS__.acquireVerification(requestId)) {
-            return;
-        }
-        
-        var session = window.__getParentSession();
-        var isAuthenticated = window.__isParentAuthenticated();
-        
-        // Simple validation based on session existence only
-        var valid = isAuthenticated ? true : false;
-        var reason = valid ? '' : 'no_session';
-        
-        window.__parentRespond(source, origin, [
-            {
-                type: 'SESSION_VERIFIED',
-                requestId: requestId,
-                messageId: requestId,
-                payload: {
-                    valid: valid,
-                    reason: reason,
-                    expiresAt: session ? session.expiresAt : null,
-                    userId: session ? session.userId : null
-                },
-                timestamp: Date.now()
-            },
-            {
-                type: 'ACK',
-                originalType: 'VERIFY_SESSION',
-                messageId: requestId,
-                requestId: requestId,
-                payload: { success: true, valid: valid },
-                timestamp: Date.now()
-            }
-        ]);
-        
-        window.__PARENT_LOCKS__.releaseVerification(requestId);
-    };
+    var requestId = data.requestId || data.messageId || data.payload?.requestId;
+    if (!requestId) return;
     
-    // ==================== SECTION 2.10: IMMEDIATE HEARTBEAT HANDLER ====================
+    var session = window.__getParentSession();
+    var isAuthenticated = window.__isParentAuthenticated();
+    
+    var valid = isAuthenticated ? true : false;
+    var reason = valid ? '' : 'no_session';
+    
+    // Send SESSION_VERIFIED with CORRECT IDs
+    window.__parentRespond(source, origin, [
+        {
+            type: 'SESSION_VERIFIED',
+            requestId: requestId,  // MUST match exactly
+            messageId: requestId,   // MUST match exactly
+            payload: {
+                valid: valid,
+                reason: reason,
+                expiresAt: session ? session.expiresAt : null,
+                userId: session ? session.userId : null
+            },
+            timestamp: Date.now()
+        },
+        {
+            type: 'ACK',
+            originalType: 'VERIFY_SESSION',
+            // CRITICAL FIX: Use the SAME requestId, NOT 'ack_' + requestId
+            requestId: requestId,   // This MUST be the original ID
+            messageId: requestId,    // This MUST be the original ID
+            payload: { success: true, valid: valid },
+            timestamp: Date.now()
+        }
+    ]);
+};
+    
     window.__handleHeartbeatImmediate = function(data, source, origin, module) {
         var messageId = data.messageId || data.requestId;
         
@@ -599,15 +628,12 @@
         
         var moduleState = window.__PARENT_MODULES__[module];
         
-        // Update heartbeat
         moduleState.lastHeartbeat = Date.now();
         
-        // Clear degraded
         if (moduleState.degraded) {
             moduleState.degraded = false;
         }
         
-        // Send HEARTBEAT_ACK
         window.__parentRespond(source, origin, {
             type: 'HEARTBEAT_ACK',
             requestId: messageId,
@@ -616,9 +642,7 @@
         });
     };
     
-    // ==================== SECTION 2.11: ACK HANDLER ====================
     window.__handleAck = function(requestId, payload) {
-        // This will be populated by the ACK registry
         if (window.__ACK_REGISTRY__) {
             const handler = window.__ACK_REGISTRY__.get(requestId);
             if (handler && handler.resolve) {
@@ -628,9 +652,13 @@
         }
     };
     
-    // ==================== SECTION 2.12: INSTALL MESSAGE LISTENER IMMEDIATELY ====================
     window.addEventListener('message', function(event) {
-        // Validate origin
+        // Only handle messages that belong to this section (first response)
+        // We'll use a flag to prevent duplicate processing
+        if (event.data && event.data._processedBy) {
+            return; // Already processed by another section
+        }
+        
         if (event.origin !== window.location.origin && event.origin !== 'null') {
             return;
         }
@@ -640,44 +668,63 @@
         
         var messageId = data.messageId || data.requestId;
         
-        // Enhanced deduplication with timeout allowance
         if (messageId) {
             if (window.__PARENT_CORRELATION__.isProcessed(messageId)) {
                 const timestamp = window.__PARENT_CORRELATION__.getTimestamp(messageId);
                 if (Date.now() - timestamp < 5000) {
-                    return; // Still duplicate
+                    return;
                 }
                 window.__PARENT_CORRELATION__.processedIds.delete(messageId);
             }
             window.__PARENT_CORRELATION__.register(messageId);
         }
         
-        // Identify source module
         var module = window.__identifyModule(event.source);
         if (!module) {
-            // Try to identify by frameId in message
             if (data.frameId) {
                 module = data.frameId.replace('Iframe', '');
             }
             if (!module) return;
         }
         
-        // Detect protocol
-        var protocol = window.__detectProtocol(data.type, module);
-        var moduleState = window.__PARENT_MODULES__[module];
-        
-        // ========== ROUTE BY MESSAGE TYPE ==========
-        
-        // Handle ACKs first - FIXED: Check both messageId and requestId
-        if (data.type === 'ACK') {
-            const ackId = data.requestId || data.messageId || data.payload?.requestId;
-            if (ackId) {
-                window.__handleAck(ackId, data.payload);
-            }
-            return;
+        // Mark this message as processed by section 2
+        if (event.data && typeof event.data === 'object') {
+            event.data._processedBy = 'section2';
         }
         
-        // V2 Messages
+        // CRITICAL FIX: Ensure module state exists before any handler runs
+        if (!window.__PARENT_MODULES__[module]) {
+            window.__PARENT_MODULES__[module] = {
+                protocol: null,
+                detectedFrom: [],
+                registered: false,
+                ready: false,
+                registrationLock: false,
+                sessionDelivered: false,
+                lastHeartbeat: 0,
+                registeredAt: null,
+                sessionDeliveredAt: null,
+                degraded: false,
+                messageQueue: [],
+                childReadyReceived: false,
+                coreReadyReceived: false,
+                processedMessageIds: new Set()
+            };
+        }
+        
+        // ========== ROUTE BY MESSAGE TYPE ==========
+        if (data.type === 'ACK') {
+    const ackId = data.requestId || data.messageId;  // Don't use payload?.requestId
+    if (ackId && window.__ACK_REGISTRY__) {
+        const handler = window.__ACK_REGISTRY__.get(ackId);
+        if (handler && handler.resolve) {
+            handler.resolve(data.payload);
+            window.__ACK_REGISTRY__.delete(ackId);
+        }
+    }
+    return;
+}
+        
         if (data.type === 'REGISTER_MODULE') {
             window.__handleRegisterModuleImmediate(data, event.source, event.origin, module);
             return;
@@ -693,19 +740,16 @@
             return;
         }
         
-        // V1 Messages
         if (data.type === 'CHILD_READY' || data.type === 'coreReady') {
             window.__handleChildReadyImmediate(data, event.source, event.origin, module);
             return;
         }
         
-        // Common Messages
         if (data.type === 'REQUEST_SESSION') {
             window.__handleRequestSessionImmediate(data, event.source, event.origin, module);
             return;
         }
         
-        // SEND_MESSAGE - just ACK
         if (data.type === 'SEND_MESSAGE' && messageId) {
             window.__parentRespond(event.source, event.origin, {
                 type: 'ACK',
@@ -718,7 +762,6 @@
             return;
         }
         
-        // PING - respond with PONG
         if (data.type === 'PING') {
             window.__parentRespond(event.source, event.origin, {
                 type: 'PONG',
@@ -730,7 +773,6 @@
             return;
         }
         
-        // Generic ACK for any message that expects it
         if (data.expectAck && messageId) {
             window.__parentRespond(event.source, event.origin, {
                 type: 'ACK',
@@ -742,6 +784,11 @@
             });
         }
     });
+    
+    // Mark section as ready
+    if (window.__KYNECTA_COORDINATOR__) {
+        window.__KYNECTA_COORDINATOR__.markSectionReady('section2');
+    }
 })();
 </script>
 
@@ -751,16 +798,14 @@
 (function() {
     'use strict';
     
-    // ==================== SECTION 3.1: CONFIGURATION ====================
     var VALIDATION_CONFIG = {
-        TOKEN_REFRESH_INTERVAL: 300000,      // 5 minutes before expiry
+        TOKEN_REFRESH_INTERVAL: 300000,
         HEARTBEAT_INTERVAL: 30000,
         HEARTBEAT_TIMEOUT: 90000,
         RECOVERY_RETRY: 3000,
         MAX_RECOVERY_ATTEMPTS: 3
     };
     
-    // ==================== SECTION 3.2: SECURE STORAGE ====================
     var SecureStorage = {
         set: function(key, value) {
             try {
@@ -794,7 +839,6 @@
                 timestamp: Date.now()
             });
             
-            // Update synchronous session
             if (window.__PARENT_SESSION__) {
                 window.__PARENT_SESSION__.session = {
                     authenticated: true,
@@ -821,7 +865,6 @@
         }
     };
     
-    // ==================== SECTION 3.3: BROADCAST FUNCTION ====================
     var BROADCAST_ROUTING = {
         NEW_MESSAGE: ['messages'],
         INCOMING_CALL: ['calls'],
@@ -871,13 +914,16 @@
             var moduleState = window.__PARENT_MODULES__[module];
             
             if (iframe && iframe.contentWindow && moduleState && moduleState.registered) {
+                // Add processed flag to prevent duplicate handling
+                var message = {
+                    type: type,
+                    messageId: messageId,
+                    payload: payload,
+                    timestamp: Date.now(),
+                    _processedBy: 'section3'
+                };
                 try {
-                    iframe.contentWindow.postMessage({
-                        type: type,
-                        messageId: messageId,
-                        payload: payload,
-                        timestamp: Date.now()
-                    }, '*');
+                    iframe.contentWindow.postMessage(message, '*');
                 } catch (e) {}
             }
         });
@@ -885,7 +931,6 @@
         return { success: true, messageId: messageId };
     }
     
-    // ==================== SECTION 3.4: BROADCAST SESSION TO MODULES ====================
     function broadcastSessionToModules() {
         var session = window.__PARENT_SESSION__.session;
         if (!session || !session.authenticated) return;
@@ -906,10 +951,10 @@
                                 token: session.token,
                                 user: session.user
                             },
-                            timestamp: Date.now()
+                            timestamp: Date.now(),
+                            _processedBy: 'section3'
                         }, '*');
                         
-                        // Also send legacy format for V1 modules
                         if (moduleState.protocol === PROTOCOL_TYPES.V1 || moduleState.protocol === PROTOCOL_TYPES.HYBRID) {
                             iframe.contentWindow.postMessage({
                                 type: 'SESSION_RESPONSE',
@@ -920,7 +965,8 @@
                                     token: session.token,
                                     user: session.user
                                 },
-                                timestamp: Date.now()
+                                timestamp: Date.now(),
+                                _processedBy: 'section3'
                             }, '*');
                         }
                     } catch (e) {}
@@ -929,12 +975,12 @@
         });
     }
     
-    // ==================== SECTION 3.5: BROADCAST PARENT READY ====================
     function broadcastParentReady() {
         var readyMsg = {
             type: 'PARENT_READY',
             timestamp: Date.now(),
-            protocol: 'KYN-8.0'
+            protocol: 'KYN-8.0',
+            _processedBy: 'section3'
         };
         
         Object.keys(MODULE_NAMES).forEach(function(module) {
@@ -948,7 +994,6 @@
         });
     }
     
-    // ==================== SECTION 3.6: ASYNC SESSION VALIDATION ====================
     var SessionValidator = {
         initialized: false,
         refreshInProgress: false,
@@ -959,15 +1004,12 @@
             if (this.initialized) return;
             this.initialized = true;
             
-            // Start background processes
             this.startHeartbeatMonitoring();
             this.startTokenRefreshMonitoring();
             this.startNetworkMonitoring();
             
-            // Initial validation
             this.validateSessionAsync();
             
-            // Broadcast PARENT_READY after initialization
             setTimeout(broadcastParentReady, 500);
         },
         
@@ -983,23 +1025,18 @@
             var currentSession = window.__getParentSession();
             
             if (auth && auth.expiry) {
-                // Check if expired
                 if (auth.expiry < Date.now()) {
-                    // Session expired - try refresh or clear
                     if (auth.token) {
                         this.refreshTokenAsync();
                     } else {
                         this.clearSession();
                     }
                 } else if (!currentSession || currentSession.token !== auth.token) {
-                    // Session mismatch - update synchronous session
                     this._updateSyncSession(auth);
                 } else if (currentSession && currentSession.authenticated) {
-                    // Session is valid - broadcast to modules
                     broadcastSessionToModules();
                 }
             } else if (currentSession && currentSession.authenticated) {
-                // No auth but we have session - try refresh
                 if (currentSession.token) {
                     this.refreshTokenAsync();
                 }
@@ -1021,10 +1058,7 @@
             window.__PARENT_SESSION__.authenticated = true;
             window.__PARENT_SESSION__.expiresAt = auth.expiry;
             
-            // Broadcast session to modules
             broadcastSessionToModules();
-            
-            // Broadcast refresh
             broadcast('SESSION_REFRESHED', window.__PARENT_SESSION__.session);
         },
         
@@ -1037,8 +1071,6 @@
             this.refreshInProgress = true;
             
             setTimeout(function() {
-                // Simulated token refresh - in production, this would call API
-                // For now, we'll just keep the existing token
                 var auth = SecureStorage.getToken();
                 if (auth) {
                     auth.expiry = Date.now() + 3600000;
@@ -1083,7 +1115,8 @@
                                     iframe.contentWindow.postMessage({
                                         type: 'MODULE_DEGRADED',
                                         reason: 'heartbeat_timeout',
-                                        timestamp: now
+                                        timestamp: now,
+                                        _processedBy: 'section3'
                                     }, '*');
                                 } catch (e) {}
                             }
@@ -1161,11 +1194,9 @@
         }
     };
     
-    // ==================== SECTION 3.7: ACK REGISTRY ====================
-    window.__ACK_REGISTRY__ = new Map(); // messageId -> { resolve, reject, timer, sourceIframe, retryCount }
-    window.__RETRY_LIMIT__ = 2; // Max retries per message
+    window.__ACK_REGISTRY__ = new Map();
+    window.__RETRY_LIMIT__ = 2;
     
-    // ==================== SECTION 3.8: INITIALIZE BACKGROUND VALIDATION ====================
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', function() {
             SessionValidator.init();
@@ -1174,7 +1205,6 @@
         SessionValidator.init();
     }
     
-    // ==================== SECTION 3.9: EXPOSE GLOBALS ====================
     window.__PARENT_AUTHORITY_V8__ = {
         state: {
             ready: true,
@@ -1235,18 +1265,21 @@
     window.__KYNECTA_AUTHORITIES__ = window.__KYNECTA_AUTHORITIES__ || {};
     window.__KYNECTA_AUTHORITIES__.parentV8 = window.__PARENT_AUTHORITY_V8__;
     
-    // Cleanup interval
     setInterval(function() {
         window.__PARENT_LOCKS__.cleanup();
     }, 30000);
     
-    // Hide loading screen
     var loadingScreen = document.getElementById('loadingScreen');
     if (loadingScreen) {
         loadingScreen.style.opacity = '0';
         setTimeout(function() {
             loadingScreen.classList.add('hidden');
         }, 300);
+    }
+    
+    // Mark section as ready
+    if (window.__KYNECTA_COORDINATOR__) {
+        window.__KYNECTA_COORDINATOR__.markSectionReady('section3');
     }
 })();
 </script>
@@ -1264,19 +1297,16 @@
 (function() {
     'use strict';
 
-    // ==================== SECTION 0: CONFIGURATION ====================
     const CONFIG = {
         PROTOCOL_VERSION: 'KYN-8.0',
         APP_NAME: 'kynecta-parent-v8',
         
-        // Protocol detection
         PROTOCOL_TYPES: {
-            V2: 'V2',      // Modern: REGISTER_MODULE, ACK, SESSION_ACTIVE
-            V1: 'V1',      // Legacy: CHILD_READY, coreReady, REQUEST_SESSION
-            HYBRID: 'HYBRID' // Supports both
+            V2: 'V2',
+            V1: 'V1',
+            HYBRID: 'HYBRID'
         },
         
-        // Timing enforcement (ms)
         TIMING: {
             REGISTRATION_RESPONSE: 50,
             SESSION_RESPONSE: 50,
@@ -1287,17 +1317,15 @@
             FULL_INIT: 1000
         },
         
-        // Timeouts
         TIMEOUTS: {
             HEARTBEAT_INTERVAL: 30000,
-            HEARTBEAT_TIMEOUT: 90000,  // 3 missed heartbeats
-            SESSION_REFRESH: 300000,    // 5 minutes before expiry
+            HEARTBEAT_TIMEOUT: 90000,
+            SESSION_REFRESH: 300000,
             TOKEN_REFRESH: 300000,
             RECOVERY_RETRY: 3000,
             MAX_RECOVERY_ATTEMPTS: 3
         },
         
-        // Module definitions
         MODULE_NAMES: {
             messages: 'messagesIframe',
             status: 'statusIframe',
@@ -1308,7 +1336,6 @@
             tools: 'toolsIframe'
         },
         
-        // Broadcast routing map
         BROADCAST_ROUTING: {
             NEW_MESSAGE: ['messages'],
             INCOMING_CALL: ['calls'],
@@ -1325,7 +1352,6 @@
             NETWORK_ONLINE: ['messages', 'status', 'group', 'friends', 'calls', 'settings', 'tools']
         },
         
-        // Legacy V1 message types
         V1_MESSAGE_TYPES: new Set([
             'CHILD_READY',
             'coreReady',
@@ -1335,7 +1361,6 @@
             'PONG'
         ]),
         
-        // V2 message types
         V2_MESSAGE_TYPES: new Set([
             'REGISTER_MODULE',
             'MODULE_REGISTERED',
@@ -1350,35 +1375,24 @@
             'SESSION_REFRESHED'
         ]),
         
-        // Broadcast history limit
         BROADCAST_HISTORY_MAX: 100,
-        
-        // Processed IDs limit
         MAX_PROCESSED_IDS: 1000
     };
 
-    // ==================== SECTION 1: GLOBAL STATE ====================
     const parentState = {
         ready: false,
         recoveryMode: false,
         session: window.__PARENT_SESSION__ ? window.__PARENT_SESSION__.session : null,
         token: window.__PARENT_SESSION__ ? window.__PARENT_SESSION__.token : null,
         refreshLock: false,
-        
-        // Module registry with protocol tracking
         modules: window.__PARENT_MODULES__ || {},
-        
-        // Queues
         queues: {
             broadcast: [],
             pending: new Map()
         },
-        
-        // Broadcast history
         broadcastHistory: []
     };
 
-    // Initialize module states if not already done
     if (!window.__PARENT_MODULES__) {
         Object.keys(CONFIG.MODULE_NAMES).forEach(module => {
             parentState.modules[module] = {
@@ -1400,7 +1414,6 @@
         });
     }
 
-    // ==================== SECTION 2: LOCKS & CORRELATION ====================
     const Locks = window.__PARENT_LOCKS__ || {
         registration: new Map(),
         sessionDelivery: new Map(),
@@ -1481,7 +1494,6 @@
         }
     };
 
-    // ==================== SECTION 3: SECURE STORAGE ====================
     const SecureStorage = {
         set(key, value) {
             try {
@@ -1515,7 +1527,6 @@
                 timestamp: Date.now()
             });
             
-            // Update parent session
             if (window.__PARENT_SESSION__) {
                 window.__PARENT_SESSION__.session = {
                     authenticated: true,
@@ -1545,7 +1556,6 @@
         }
     };
 
-    // ==================== SECTION 4: SESSION AUTHORITY ====================
     const SessionAuthority = (function() {
         let session = window.__PARENT_SESSION__ ? window.__PARENT_SESSION__.session : null;
         let token = window.__PARENT_SESSION__ ? window.__PARENT_SESSION__.token : null;
@@ -1629,7 +1639,6 @@
         };
     })();
 
-    // ==================== SECTION 5: PROTOCOL DETECTION ====================
     function detectProtocol(message, module) {
         const type = message.type;
         const moduleState = parentState.modules[module];
@@ -1671,7 +1680,6 @@
         return null;
     }
 
-    // ==================== SECTION 6: CENTRAL RESPOND FUNCTION ====================
     function respond(target, origin, responses) {
         if (!target) return;
         
@@ -1680,6 +1688,10 @@
         const responseArray = Array.isArray(responses) ? responses : [responses];
         
         responseArray.forEach(msg => {
+            // Add processed flag to prevent duplicate handling
+            if (msg && typeof msg === 'object') {
+                msg._processedBy = 'section4';
+            }
             try {
                 target.postMessage(msg, origin || '*');
             } catch (e) {}
@@ -1691,26 +1703,16 @@
         }
     }
 
-    // ==================== SECTION 7: V2 HANDSHAKE HANDLER ====================
     function handleV2RegisterModule(data, source, origin, module) {
+        // Check if this message was already processed
+        if (data._processedBy) return;
+        
         const startTime = Date.now();
         const messageId = data.messageId || data.requestId;
         
         if (!messageId) return;
         
         if (!parentState.ready) {
-            return;
-        }
-        
-        if (!Locks.acquireRegistration(module)) {
-            respond(source, origin, {
-                type: 'ACK',
-                originalType: 'REGISTER_MODULE',
-                messageId: messageId,
-                requestId: messageId,
-                payload: { success: true, cached: true },
-                timestamp: Date.now()
-            });
             return;
         }
         
@@ -1786,12 +1788,12 @@
         if (processingTime > CONFIG.TIMING.REGISTRATION_RESPONSE) {
             console.warn(`[Parent] V2 registration took ${processingTime}ms`);
         }
-        
-        Locks.releaseRegistration(module);
     }
 
-    // ==================== SECTION 8: V1 HANDSHAKE HANDLER ====================
     function handleV1ChildReady(data, source, origin, module) {
+        // Check if this message was already processed
+        if (data._processedBy) return;
+        
         const startTime = Date.now();
         const messageId = data.messageId || data.requestId || `v1_${Date.now()}`;
         
@@ -1866,7 +1868,6 @@
         }
     }
 
-    // ==================== SECTION 9: HYBRID HANDLER ====================
     function ensureSessionDelivered(module, source, origin) {
         const moduleState = parentState.modules[module];
         
@@ -1938,8 +1939,10 @@
         Locks.releaseSessionDelivery(module);
     }
 
-    // ==================== SECTION 10: REQUEST_SESSION HANDLER ====================
     function handleRequestSession(data, source, origin, module) {
+        // Check if this message was already processed
+        if (data._processedBy) return;
+        
         const startTime = Date.now();
         const messageId = data.messageId || data.requestId;
         
@@ -1984,16 +1987,14 @@
         }
     }
 
-    // ==================== SECTION 11: VERIFY_SESSION HANDLER ====================
     function handleVerifySession(data, source, origin) {
+        // Check if this message was already processed
+        if (data._processedBy) return;
+        
         const startTime = Date.now();
         const requestId = data.requestId || data.messageId;
         
         if (!requestId) return;
-        
-        if (!Locks.acquireVerification(requestId)) {
-            return;
-        }
         
         const session = SessionAuthority.getSession();
         
@@ -2039,12 +2040,12 @@
         if (processingTime > CONFIG.TIMING.VERIFICATION_RESPONSE) {
             console.warn(`[Parent] Verification took ${processingTime}ms`);
         }
-        
-        Locks.releaseVerification(requestId);
     }
 
-    // ==================== SECTION 12: HEARTBEAT HANDLER ====================
     function handleHeartbeat(data, source, origin, module) {
+        // Check if this message was already processed
+        if (data._processedBy) return;
+        
         const startTime = Date.now();
         const messageId = data.messageId || data.requestId;
         
@@ -2071,7 +2072,6 @@
         }
     }
 
-    // ==================== SECTION 13: BROADCAST ROUTER ====================
     function broadcast(type, payload, explicitTargets = null) {
         let targets = explicitTargets || CONFIG.BROADCAST_ROUTING[type] || [];
         
@@ -2130,7 +2130,8 @@
                             type: item.type,
                             messageId: item.messageId,
                             payload: item.payload,
-                            timestamp: Date.now()
+                            timestamp: Date.now(),
+                            _processedBy: 'section4'
                         }, '*');
                     } catch (e) {}
                 }
@@ -2143,7 +2144,6 @@
         }
     }
 
-    // ==================== SECTION 14: SESSION REFRESH BROADCAST ====================
     function broadcastSessionUpdate(type, session) {
         const targets = Object.keys(CONFIG.MODULE_NAMES);
         
@@ -2183,6 +2183,7 @@
             }
             
             messages.forEach(msg => {
+                msg._processedBy = 'section4';
                 try {
                     iframe.contentWindow.postMessage(msg, '*');
                 } catch (e) {}
@@ -2190,7 +2191,6 @@
         });
     }
 
-    // ==================== SECTION 15: HEARTBEAT MONITORING ====================
     function startHeartbeatMonitoring() {
         setInterval(() => {
             const now = Date.now();
@@ -2209,7 +2209,8 @@
                             iframe.contentWindow.postMessage({
                                 type: 'MODULE_DEGRADED',
                                 reason: 'heartbeat_timeout',
-                                timestamp: now
+                                timestamp: now,
+                                _processedBy: 'section4'
                             }, '*');
                         } catch (e) {}
                     }
@@ -2218,7 +2219,6 @@
         }, CONFIG.TIMEOUTS.HEARTBEAT_INTERVAL);
     }
 
-    // ==================== SECTION 16: TOKEN REFRESH MONITORING ====================
     function startTokenRefreshMonitoring() {
         setInterval(async () => {
             const session = SessionAuthority.getSession();
@@ -2236,7 +2236,6 @@
         }, 60000);
     }
 
-    // ==================== SECTION 17: NETWORK MONITORING ====================
     function startNetworkMonitoring() {
         window.addEventListener('online', () => {
             broadcast('NETWORK_ONLINE', { timestamp: Date.now() });
@@ -2253,7 +2252,6 @@
         });
     }
 
-    // ==================== SECTION 18: RECOVERY MODE ====================
     let recoveryAttempts = 0;
     
     async function enterRecoveryMode(reason) {
@@ -2297,7 +2295,6 @@
         console.warn('[Parent] Recovery failed - forcing guest mode');
     }
 
-    // ==================== SECTION 19: IDENTIFY MODULE FROM SOURCE ====================
     function identifyModule(source) {
         for (const [module, iframeId] of Object.entries(CONFIG.MODULE_NAMES)) {
             const iframe = document.getElementById(iframeId);
@@ -2308,8 +2305,12 @@
         return null;
     }
 
-    // ==================== SECTION 20: SINGLE AUTHORITATIVE MESSAGE HANDLER ====================
     window.addEventListener('message', function(event) {
+        // Only handle messages that haven't been processed by earlier sections
+        if (event.data && event.data._processedBy) {
+            return;
+        }
+        
         if (event.origin !== window.location.origin && event.origin !== 'null') {
             return;
         }
@@ -2404,7 +2405,6 @@
         }
     });
 
-    // ==================== SECTION 21: INITIALIZATION ====================
     async function initializeParent() {
         console.log('[Parent] Initializing in strict order...');
         
@@ -2468,7 +2468,6 @@
         }
     }, CONFIG.TIMING.FULL_INIT);
 
-    // ==================== SECTION 22: EXPOSE GLOBALS ====================
     window.__PARENT_AUTHORITY_V8__ = window.__PARENT_AUTHORITY_V8__ || {
         state: parentState,
         session: SessionAuthority,
@@ -2497,6 +2496,11 @@
 
     console.log('[Parent] ✅ Dual-protocol parent controller v8.0 initialized');
     console.log('[Parent] ✅ Supports V2 (modern), V1 (legacy), and HYBRID cores');
+    
+    // Mark section as ready
+    if (window.__KYNECTA_COORDINATOR__) {
+        window.__KYNECTA_COORDINATOR__.markSectionReady('section4');
+    }
 })();
 </script>
 <!-- ========== END DETERMINISTIC PARENT AUTHORITY v8.0 ========== -->
@@ -5081,7 +5085,8 @@ div[role="alert"] {
                 type: "PARENT_READY",
                 session: window.AUTH_SESSION,
                 protocolVersion: "1.0.0",
-                timestamp: Date.now()
+                timestamp: Date.now(),
+                _processedBy: 'section5'
             };
 
             IFRAME_IDS.forEach(frameId => {
@@ -5210,6 +5215,11 @@ div[role="alert"] {
         window.__wsMessageHandler = window.__wsMessageHandler || window.__wsMessageHandler;
 
         debugLog('[Boot] Architectural enhancements loaded');
+        
+        // Mark section as ready
+        if (window.__KYNECTA_COORDINATOR__) {
+            window.__KYNECTA_COORDINATOR__.markSectionReady('section5');
+        }
     })();
     </script>
 
@@ -5577,7 +5587,8 @@ div[role="alert"] {
                     session: window.AUTH_SESSION ? { 
                         userId: window.AUTH_SESSION.userId,
                         authenticated: true
-                    } : { authenticated: false }
+                    } : { authenticated: false },
+                    _processedBy: 'section6'
                 };
             }
         };
@@ -5769,6 +5780,11 @@ div[role="alert"] {
             },
             
             route(event) {
+                // Check if this message was already processed
+                if (event.data && event.data._processedBy) {
+                    return;
+                }
+                
                 // Validate origin
                 if (event.origin !== window.location.origin && event.origin !== 'null') {
                     return;
@@ -6038,7 +6054,11 @@ div[role="alert"] {
                 }
             }
         }, CONFIG.BOOT_TIMEOUT);
-
+        
+        // Mark section as ready
+        if (window.__KYNECTA_COORDINATOR__) {
+            window.__KYNECTA_COORDINATOR__.markSectionReady('section6');
+        }
     })();
     </script>
 
@@ -6106,6 +6126,12 @@ div[role="alert"] {
                 if (iframe) {
                     iframe.addEventListener('load', function() {
                         window.__IFRAME_READY__ = true;
+                        
+                        // Mark iframe ready in coordinator
+                        if (window.__KYNECTA_COORDINATOR__) {
+                            const module = id.replace('Iframe', '');
+                            window.__KYNECTA_COORDINATOR__.markIframeReady(module);
+                        }
                     });
                 }
             });
@@ -6115,6 +6141,11 @@ div[role="alert"] {
         // Helper to safely send messages (queues if not ready)
         window.__safePostMessage = function(iframe, message, targetOrigin) {
             if (!iframe || !iframe.contentWindow) return false;
+            
+            // Add processed flag
+            if (message && typeof message === 'object') {
+                message._processedBy = 'section7';
+            }
             
             // If not ready, queue it
             if (!window.__IFRAME_READY__ || !window.__HANDSHAKE_COMPLETE__) {
@@ -6164,6 +6195,11 @@ div[role="alert"] {
         window.__markSessionResponded = function(iframeId) {
             sessionResponded.add(iframeId);
         };
+        
+        // Mark section as ready
+        if (window.__KYNECTA_COORDINATOR__) {
+            window.__KYNECTA_COORDINATOR__.markSectionReady('section7');
+        }
     })();
     </script>
 
@@ -6246,7 +6282,8 @@ div[role="alert"] {
                 const message = {
                     type: "PARENT_RECOVERY",
                     timestamp: Date.now(),
-                    authority: "parent"
+                    authority: "parent",
+                    _processedBy: 'section8'
                 };
                 
                 document.querySelectorAll("iframe").forEach(frame => {
@@ -6271,6 +6308,11 @@ div[role="alert"] {
                 this.lastHeartbeatReset = Date.now();
             }
         };
+        
+        // Mark section as ready
+        if (window.__KYNECTA_COORDINATOR__) {
+            window.__KYNECTA_COORDINATOR__.markSectionReady('section8');
+        }
     })();
     </script>
 
@@ -6302,7 +6344,8 @@ div[role="alert"] {
             messageId: requestId,        // Use requestId directly, not 'ack_' + requestId
             requestId: requestId,         // This MUST match
             payload: payload,
-            timestamp: Date.now()
+            timestamp: Date.now(),
+            _processedBy: 'section9'
         }, targetOrigin || '*');
     } catch (e) {}
 };
@@ -6329,6 +6372,9 @@ div[role="alert"] {
 
         // Handle REQUEST_SESSION - with duplicate prevention
         function handleSessionRequest(event) {
+            // Check if already processed
+            if (event.data && event.data._processedBy) return;
+            
             const requestId = event.data?.requestId || event.data?.messageId;
             const source = event.source;
             const origin = event.origin;
@@ -6371,7 +6417,8 @@ div[role="alert"] {
                     type: "SESSION_RESPONSE",
                     payload: sessionPayload,
                     requestId: requestId,
-                    timestamp: Date.now()
+                    timestamp: Date.now(),
+                    _processedBy: 'section9'
                 }, origin);
             } catch (e) {}
 
@@ -6391,6 +6438,9 @@ div[role="alert"] {
 
         // Handle SESSION_SYNC - only send if session is valid
         function handleSessionSync(event) {
+            // Check if already processed
+            if (event.data && event.data._processedBy) return;
+            
             const requestId = event.data?.requestId || event.data?.messageId;
             const source = event.source;
             const origin = event.origin;
@@ -6425,7 +6475,8 @@ div[role="alert"] {
                     payload: sessionPayload,
                     requestId: requestId,
                     messageId: requestId,
-                    timestamp: Date.now()
+                    timestamp: Date.now(),
+                    _processedBy: 'section9'
                 }, origin);
             } catch (e) {}
 
@@ -6440,6 +6491,9 @@ div[role="alert"] {
 
         // Handle HANDSHAKE_REQUEST
         function handleHandshakeRequest(event) {
+            // Check if already processed
+            if (event.data && event.data._processedBy) return;
+            
             const requestId = event.data?.requestId || event.data?.messageId;
             const source = event.source;
             const origin = event.origin;
@@ -6485,7 +6539,8 @@ div[role="alert"] {
                     requestId: requestId,
                     messageId: requestId,
                     payload: handshakeResponse,
-                    timestamp: Date.now()
+                    timestamp: Date.now(),
+                    _processedBy: 'section9'
                 }, origin);
             } catch (e) {}
 
@@ -6499,7 +6554,8 @@ div[role="alert"] {
                         success: true,
                         sessionReady: sessionReady,
                         timestamp: Date.now()
-                    }
+                    },
+                    _processedBy: 'section9'
                 }, origin);
             } catch (e) {}
 
@@ -6514,6 +6570,9 @@ div[role="alert"] {
 
         // Handle HEARTBEAT_ACK
         function handleHeartbeatAck(event) {
+            // Check if already processed
+            if (event.data && event.data._processedBy) return;
+            
             const requestId = event.data?.requestId || event.data?.messageId;
             
             // Update parent authority
@@ -6524,6 +6583,9 @@ div[role="alert"] {
 
         // Handle HEARTBEAT
         function handleHeartbeat(event) {
+            // Check if already processed
+            if (event.data && event.data._processedBy) return;
+            
             const requestId = event.data?.requestId || event.data?.messageId;
             const source = event.source;
             const origin = event.origin;
@@ -6533,7 +6595,8 @@ div[role="alert"] {
                 source.postMessage({
                     type: "HEARTBEAT_ACK",
                     requestId: requestId,
-                    timestamp: Date.now()
+                    timestamp: Date.now(),
+                    _processedBy: 'section9'
                 }, origin);
             } catch (e) {}
 
@@ -6550,6 +6613,9 @@ div[role="alert"] {
 
         // Handle IFRAME_REGISTERED with deduplication
         function handleIframeRegistered(event) {
+            // Check if already processed
+            if (event.data && event.data._processedBy) return;
+            
             const module = event.data?.module || event.data?.frameId || event.data?.source;
             const requestId = event.data?.requestId || event.data?.messageId;
             const source = event.source;
@@ -6576,6 +6642,9 @@ div[role="alert"] {
 
         // Handle CHILD_READY
         function handleChildReady(event) {
+            // Check if already processed
+            if (event.data && event.data._processedBy) return;
+            
             const module = event.data?.module || event.data?.frameId || 'unknown';
             const requestId = event.data?.requestId || event.data?.messageId;
             const source = event.source;
@@ -6598,7 +6667,8 @@ div[role="alert"] {
                 source.postMessage({
                     type: "CHILD_READY_ACK",
                     requestId: requestId,
-                    timestamp: Date.now()
+                    timestamp: Date.now(),
+                    _processedBy: 'section9'
                 }, origin);
             } catch (e) {}
 
@@ -6609,6 +6679,9 @@ div[role="alert"] {
         // Handle VERIFY_SESSION (NEW - for calls-core.js)
        
         function handleVerifySession(event) {
+    // Check if already processed
+    if (event.data && event.data._processedBy) return;
+    
     // CRITICAL: Get the requestId from the message - MUST match exactly what the iframe sent
     const requestId = event.data?.requestId || 
                       event.data?.messageId || 
@@ -6642,7 +6715,8 @@ div[role="alert"] {
                     userId: session.userId,
                     timestamp: Date.now()
                 },
-                timestamp: Date.now()
+                timestamp: Date.now(),
+                _processedBy: 'section9'
             }, origin);
             
             // Send ACK with the SAME requestId
@@ -6652,7 +6726,8 @@ div[role="alert"] {
                 messageId: requestId,     // Use the original requestId, not 'ack_' + requestId
                 requestId: requestId,      // This MUST match exactly
                 payload: { success: true, valid: isValid },
-                timestamp: Date.now()
+                timestamp: Date.now(),
+                _processedBy: 'section9'
             }, origin);
         } catch (e) {}
     }
@@ -6660,6 +6735,11 @@ div[role="alert"] {
         
        // MAIN MESSAGE LISTENER - Single source of truth with origin validation
     window.addEventListener("message", function(event) {
+        // Only handle messages that haven't been processed by earlier sections
+        if (event.data && event.data._processedBy) {
+            return;
+        }
+        
         // FIX: Use dynamic origin validation, never hardcode localhost/127.0.0.1
         if (event.origin !== window.location.origin && event.origin !== 'null') {
             return;
@@ -6690,7 +6770,8 @@ div[role="alert"] {
                     event.source.postMessage({
                         type: "RETRY_LIMIT_REACHED",
                         messageId: messageId,
-                        timestamp: Date.now()
+                        timestamp: Date.now(),
+                        _processedBy: 'section9'
                     }, event.origin);
                 } catch (e) {}
                 return;
@@ -6828,6 +6909,9 @@ div[role="alert"] {
      * Handle settings updates from settings module
      */
     function handleSettingsUpdated(event) {
+        // Check if already processed
+        if (event.data && event.data._processedBy) return;
+        
         const data = event.data;
         const requestId = data.requestId || data.messageId;
         const payload = data.payload || {};
@@ -6853,7 +6937,8 @@ div[role="alert"] {
                             settings: payload.settings,
                             timestamp: Date.now()
                         },
-                        timestamp: Date.now()
+                        timestamp: Date.now(),
+                        _processedBy: 'section9'
                     }, '*');
                 } catch (e) {}
             }
@@ -6867,6 +6952,9 @@ div[role="alert"] {
      * Handle profile updates from settings module
      */
     function handleProfileUpdated(event) {
+        // Check if already processed
+        if (event.data && event.data._processedBy) return;
+        
         const data = event.data;
         const requestId = data.requestId || data.messageId;
         const payload = data.payload || {};
@@ -6891,7 +6979,8 @@ div[role="alert"] {
                             user: payload.user,
                             timestamp: Date.now()
                         },
-                        timestamp: Date.now()
+                        timestamp: Date.now(),
+                        _processedBy: 'section9'
                     }, '*');
                 } catch (e) {}
             }
@@ -6904,6 +6993,9 @@ div[role="alert"] {
      * Handle privacy updates from settings module
      */
     function handlePrivacyUpdated(event) {
+        // Check if already processed
+        if (event.data && event.data._processedBy) return;
+        
         const data = event.data;
         const requestId = data.requestId || data.messageId;
         const payload = data.payload || {};
@@ -6928,7 +7020,8 @@ div[role="alert"] {
                             privacy: payload.privacy,
                             timestamp: Date.now()
                         },
-                        timestamp: Date.now()
+                        timestamp: Date.now(),
+                        _processedBy: 'section9'
                     }, '*');
                 } catch (e) {}
             }
@@ -6941,6 +7034,9 @@ div[role="alert"] {
      * Handle notification settings updates
      */
     function handleNotificationsUpdated(event) {
+        // Check if already processed
+        if (event.data && event.data._processedBy) return;
+        
         const data = event.data;
         const requestId = data.requestId || data.messageId;
         const payload = data.payload || {};
@@ -6960,6 +7056,9 @@ div[role="alert"] {
      * Handle appearance/theme updates
      */
     function handleAppearanceUpdated(event) {
+        // Check if already processed
+        if (event.data && event.data._processedBy) return;
+        
         const data = event.data;
         const requestId = data.requestId || data.messageId;
         const payload = data.payload || {};
@@ -6987,7 +7086,8 @@ div[role="alert"] {
                             appearance: appearance,
                             timestamp: Date.now()
                         },
-                        timestamp: Date.now()
+                        timestamp: Date.now(),
+                        _processedBy: 'section9'
                     }, '*');
                 } catch (e) {}
             }
@@ -7000,6 +7100,9 @@ div[role="alert"] {
      * Handle user blocked event
      */
     function handleUserBlocked(event) {
+        // Check if already processed
+        if (event.data && event.data._processedBy) return;
+        
         const data = event.data;
         const requestId = data.requestId || data.messageId;
         const payload = data.payload || {};
@@ -7023,6 +7126,9 @@ div[role="alert"] {
      * Handle user unblocked event
      */
     function handleUserUnblocked(event) {
+        // Check if already processed
+        if (event.data && event.data._processedBy) return;
+        
         const data = event.data;
         const requestId = data.requestId || data.messageId;
         const payload = data.payload || {};
@@ -7043,6 +7149,9 @@ div[role="alert"] {
      * Handle session terminated event
      */
     function handleSessionTerminated(event) {
+        // Check if already processed
+        if (event.data && event.data._processedBy) return;
+        
         const data = event.data;
         const requestId = data.requestId || data.messageId;
         
@@ -7053,6 +7162,9 @@ div[role="alert"] {
      * Handle all sessions terminated event
      */
     function handleAllSessionsTerminated(event) {
+        // Check if already processed
+        if (event.data && event.data._processedBy) return;
+        
         const data = event.data;
         const requestId = data.requestId || data.messageId;
         
@@ -7063,6 +7175,9 @@ div[role="alert"] {
      * Handle profile photo updated event
      */
     function handleProfilePhotoUpdated(event) {
+        // Check if already processed
+        if (event.data && event.data._processedBy) return;
+        
         const data = event.data;
         const requestId = data.requestId || data.messageId;
         const payload = data.payload || {};
@@ -7088,7 +7203,8 @@ div[role="alert"] {
                             photoUrl: photoUrl,
                             timestamp: Date.now()
                         },
-                        timestamp: Date.now()
+                        timestamp: Date.now(),
+                        _processedBy: 'section9'
                     }, '*');
                 } catch (e) {}
             }
@@ -7101,6 +7217,9 @@ div[role="alert"] {
      * Handle password changed event
      */
     function handlePasswordChanged(event) {
+        // Check if already processed
+        if (event.data && event.data._processedBy) return;
+        
         const data = event.data;
         const requestId = data.requestId || data.messageId;
         
@@ -7111,6 +7230,9 @@ div[role="alert"] {
      * Handle data export requested event
      */
     function handleDataExportRequested(event) {
+        // Check if already processed
+        if (event.data && event.data._processedBy) return;
+        
         const data = event.data;
         const requestId = data.requestId || data.messageId;
         
@@ -7121,6 +7243,9 @@ div[role="alert"] {
      * Handle account deletion requested event
      */
     function handleAccountDeletionRequested(event) {
+        // Check if already processed
+        if (event.data && event.data._processedBy) return;
+        
         const data = event.data;
         const requestId = data.requestId || data.messageId;
         
@@ -7136,6 +7261,9 @@ div[role="alert"] {
      * Handle cache cleared event
      */
     function handleCacheCleared(event) {
+        // Check if already processed
+        if (event.data && event.data._processedBy) return;
+        
         const data = event.data;
         const requestId = data.requestId || data.messageId;
         
@@ -7184,6 +7312,9 @@ div[role="alert"] {
 
     // Handle VERIFY_SESSION (for calls-core.js)
     function handleVerifySession(event) {
+        // Check if already processed
+        if (event.data && event.data._processedBy) return;
+        
         // CRITICAL: Get the requestId from the message - MUST match exactly what the iframe sent
         const requestId = event.data?.requestId || 
                           event.data?.messageId || 
@@ -7217,7 +7348,8 @@ div[role="alert"] {
                         userId: session.userId,
                         timestamp: Date.now()
                     },
-                    timestamp: Date.now()
+                    timestamp: Date.now(),
+                    _processedBy: 'section9'
                 }, origin);
                 
                 // Send ACK with the SAME requestId
@@ -7227,7 +7359,8 @@ div[role="alert"] {
                     messageId: requestId,     // Use the original requestId
                     requestId: requestId,      // This MUST match exactly
                     payload: { success: true, valid: isValid },
-                    timestamp: Date.now()
+                    timestamp: Date.now(),
+                    _processedBy: 'section9'
                 }, origin);
             } catch (e) {}
         }
@@ -7235,6 +7368,9 @@ div[role="alert"] {
 
     // Handle PING requests from iframes
     function handlePing(event) {
+        // Check if already processed
+        if (event.data && event.data._processedBy) return;
+        
         const requestId = event.data?.requestId || event.data?.messageId;
         const source = event.source;
         const origin = event.origin;
@@ -7249,7 +7385,8 @@ div[role="alert"] {
                     timestamp: Date.now(),
                     echo: event.data.payload || {}
                 },
-                timestamp: Date.now()
+                timestamp: Date.now(),
+                _processedBy: 'section9'
             }, origin);
         } catch (e) {}
         
@@ -7262,10 +7399,16 @@ div[role="alert"] {
                     messageId: 'ack_' + requestId,
                     requestId: requestId,
                     payload: { success: true },
-                    timestamp: Date.now()
+                    timestamp: Date.now(),
+                    _processedBy: 'section9'
                 }, origin);
             } catch (e) {}
         }
+    }
+    
+    // Mark section as ready
+    if (window.__KYNECTA_COORDINATOR__) {
+        window.__KYNECTA_COORDINATOR__.markSectionReady('section9');
     }
 })();
     </script>
@@ -7315,6 +7458,11 @@ div[role="alert"] {
             REGISTERED_MODULES.clear();
             registrationCountLogged = false;
         };
+        
+        // Mark section as ready
+        if (window.__KYNECTA_COORDINATOR__) {
+            window.__KYNECTA_COORDINATOR__.markSectionReady('section10');
+        }
     })();
     </script>
 
@@ -7361,7 +7509,8 @@ div[role="alert"] {
                         userId: window.AUTH_SESSION.userId,
                         authenticated: true
                     } : { authenticated: false },
-                    legacy: options.legacy || false
+                    legacy: options.legacy || false,
+                    _processedBy: 'section11'
                 };
             },
             adaptLegacyMessage(message) {
@@ -7381,7 +7530,8 @@ div[role="alert"] {
                     target: message.target || 'unknown',
                     timestamp: timestamp,
                     payload: payload,
-                    legacy: true
+                    legacy: true,
+                    _processedBy: 'section11'
                 };
             },
             generateMessageId() {
@@ -7873,7 +8023,11 @@ div[role="alert"] {
                 }
             });
         }, 1000);
-
+        
+        // Mark section as ready
+        if (window.__KYNECTA_COORDINATOR__) {
+            window.__KYNECTA_COORDINATOR__.markSectionReady('section11');
+        }
     })();
     
     </script>
@@ -8068,7 +8222,8 @@ div[role="alert"] {
                                 userId: window.AUTH_SESSION.userId,
                                 authenticated: true
                             } : { authenticated: false },
-                            expectAck: options.expectAck || false
+                            expectAck: options.expectAck || false,
+                            _processedBy: 'section12'
                         };
                         
                         if (options.expectAck) {
@@ -8177,6 +8332,12 @@ div[role="alert"] {
                     frame.loadCount++;
                     frame.lastActivity = Date.now();
                     frame.degraded = false;
+                    
+                    // Mark iframe ready in coordinator
+                    if (window.__KYNECTA_COORDINATOR__) {
+                        const module = id.replace('Iframe', '');
+                        window.__KYNECTA_COORDINATOR__.markIframeReady(module);
+                    }
                 }
             }
 
@@ -8734,7 +8895,8 @@ div[role="alert"] {
             moduleRegistry: window.__moduleRegistry,
             sessionManager: window.__sessionManager,
             environment: Environment,
-            parentState: window.__KYNECTA_AUTHORITIES__?.parentState || ParentStateManager
+            parentState: window.__KYNECTA_AUTHORITIES__?.parentState || ParentStateManager,
+            coordinator: window.__KYNECTA_COORDINATOR__
         };
         
         // Check boot completion after authorities are ready
@@ -8743,6 +8905,11 @@ div[role="alert"] {
             if (window.__socketConnected) {
                 window.__BOOT_STATE__.socketConnected = true;
             }
+        }
+        
+        // Mark section as ready
+        if (window.__KYNECTA_COORDINATOR__) {
+            window.__KYNECTA_COORDINATOR__.markSectionReady('section12');
         }
     })();
     </script>
@@ -9011,7 +9178,8 @@ div[role="alert"] {
                         requestId: messageId,
                         payload: safeSession,
                         timestamp: Date.now(),
-                        expectAck: true
+                        expectAck: true,
+                        _processedBy: 'governance'
                     }, '*');
                 });
                 
@@ -9088,7 +9256,8 @@ div[role="alert"] {
                                     payload: handler.originalPayload,
                                     timestamp: Date.now(),
                                     expectAck: true,
-                                    retry: true
+                                    retry: true,
+                                    _processedBy: 'governance'
                                 }, '*');
                             }
                         }, 500 * Math.pow(1.5, retryCount));
@@ -9309,7 +9478,8 @@ div[role="alert"] {
                     authenticated: true
                 } : { authenticated: false },
                 expectAck: messageObject.expectAck || false,
-                signature: messageObject.signature !== undefined ? messageObject.signature : null
+                signature: messageObject.signature !== undefined ? messageObject.signature : null,
+                _processedBy: 'stabilization'
             };
 
             // Use safe postMessage (queues if not ready)
@@ -9373,6 +9543,11 @@ div[role="alert"] {
                 });
                 if (!isKnownIframe && event.source !== window) return;
                 if (!event.data || typeof event.data !== 'object') return;
+                
+                // Add processed flag
+                if (event.data && typeof event.data === 'object') {
+                    event.data._processedBy = 'early-bridge';
+                }
             } catch (e) {}
         }
         window.removeEventListener('message', safeMessageBridge);
@@ -9421,7 +9596,8 @@ div[role="alert"] {
                         timestamp: Date.now(),
                         session: window._sessionCache || { authenticated: false },
                         payload: message.payload || message,
-                        signature: 'sig_' + Date.now()
+                        signature: 'sig_' + Date.now(),
+                        _processedBy: 'early-bridge'
                     };
                 }
             } catch (e) {}
@@ -9468,7 +9644,7 @@ div[role="alert"] {
                     const iframe = document.getElementById(iframeId);
                     if (iframe && iframe.contentWindow) {
                         try {
-                            iframe.contentWindow.postMessage({ type: 'HANDSHAKE_RETRY', timestamp: Date.now() }, '*');
+                            iframe.contentWindow.postMessage({ type: 'HANDSHAKE_RETRY', timestamp: Date.now(), _processedBy: 'early-bridge' }, '*');
                         } catch (e) {}
                     }
                 }
@@ -10093,7 +10269,8 @@ div[role="alert"] {
                                 messageId,
                                 requestId: messageId,
                                 timestamp,
-                                expectAck: true
+                                expectAck: true,
+                                _processedBy: 'orchestration'
                             }, '*');
                         } catch (e) {
                             reject(e);
@@ -10149,7 +10326,8 @@ div[role="alert"] {
                             frame.contentWindow.postMessage({
                                 source: 'parent',
                                 type: msg.type,
-                                payload: msg.payload
+                                payload: msg.payload,
+                                _processedBy: 'orchestration'
                             }, '*');
                         }
                     }
@@ -10203,7 +10381,8 @@ div[role="alert"] {
                             messageId: SecurityCore.generateUUID(),
                             requestId: SecurityCore.generateUUID(),
                             timestamp: Date.now(),
-                            expectAck: true
+                            expectAck: true,
+                            _processedBy: 'orchestration'
                         }, '*');
                         
                         setTimeout(() => {}, 2000);
@@ -10424,7 +10603,8 @@ div[role="alert"] {
                                 type: 'ACK',
                                 requestId: requestId || sequence,
                                 payload: { success: true, result },
-                                timestamp: Date.now()
+                                timestamp: Date.now(),
+                                _processedBy: 'orchestration'
                             }, event.origin);
                         }
                     } catch (error) {
@@ -10436,7 +10616,8 @@ div[role="alert"] {
                                 type: 'ACK',
                                 requestId: requestId || sequence,
                                 payload: { success: false, error: SecurityCore.sanitizeString(error.message) },
-                                timestamp: Date.now()
+                                timestamp: Date.now(),
+                                _processedBy: 'orchestration'
                             }, event.origin);
                         }
                     }
@@ -10478,7 +10659,8 @@ div[role="alert"] {
                         authenticated: true
                     } : { authenticated: false },
                     expectAck,
-                    timestamp: Date.now()
+                    timestamp: Date.now(),
+                    _processedBy: 'orchestration'
                 };
 
                 if (!MessageValidator.validateOutbound(message, '*')) {
@@ -10741,7 +10923,8 @@ div[role="alert"] {
                         type: 'SESSION_DATA',
                         payload: session,
                         frameId,
-                        timestamp: Date.now()
+                        timestamp: Date.now(),
+                        _processedBy: 'orchestration'
                     };
                     try {
                         event.source.postMessage(response, event.origin);
@@ -10841,6 +11024,12 @@ div[role="alert"] {
                             // Mark iframe ready
                             if (window.__IFRAME_READY__ === false) {
                                 window.__IFRAME_READY__ = true;
+                            }
+                            
+                            // Mark iframe ready in coordinator
+                            if (window.__KYNECTA_COORDINATOR__) {
+                                const module = cfg.id.replace('Iframe', '');
+                                window.__KYNECTA_COORDINATOR__.markIframeReady(module);
                             }
                         }
                     });
@@ -11229,7 +11418,7 @@ div[role="alert"] {
             if (messagesIframe && messagesIframe.contentWindow) {
                 try {
                     // Ping the iframe
-                    messagesIframe.contentWindow.postMessage({ type: 'PING', timestamp: Date.now() }, '*');
+                    messagesIframe.contentWindow.postMessage({ type: 'PING', timestamp: Date.now(), _processedBy: 'final' }, '*');
                 } catch (e) {
                     // If error, reload the iframe silently
                     messagesIframe.src = messagesIframe.src.split('?')[0] + '?reload=' + Date.now();
@@ -11239,519 +11428,340 @@ div[role="alert"] {
     })();
     </script>
 
-    <!-- ========== SINGLE AUTHORITATIVE MESSAGE HANDLER - COMPLETE FIX ========== -->
-    <!-- This handler ensures ALL message types get proper ACKs, especially REGISTER_MODULE -->
-    <script>
-    (function() {
-        'use strict';
-
-        // ==================== CONFIGURATION ====================
-        const PROTOCOL_VERSION = 'KYN-4.0';
-        const MAX_RETRIES = 2;
-        const ACK_TIMEOUT = 3000;
-        const PROCESSED_IDS_CLEANUP_INTERVAL = 60000;
-        const MAX_PROCESSED_IDS = 1000;
-
-        // ==================== PROCESSED IDS DEDUPLICATION ====================
-        const processedMessageIds = new Set();
-        const pendingAcks = new Map();
-
-        function cleanupProcessedIds() {
-            if (processedMessageIds.size > MAX_PROCESSED_IDS) {
-                const idsArray = Array.from(processedMessageIds);
-                const toRemove = idsArray.slice(0, idsArray.length - MAX_PROCESSED_IDS);
-                toRemove.forEach(id => processedMessageIds.delete(id));
-            }
+    // ========== SINGLE UNIFIED MESSAGE HANDLER - UPDATED WITH COMPATIBILITY ==========
+<script>
+(function() {
+    'use strict';
+    
+    console.log('[UNIFIED] ✅ Installing unified message handler with compatibility');
+    const sessionRequestCache = new Set()
+    
+    window.addEventListener('message', function(event) {
+        if (event.origin !== window.location.origin && event.origin !== 'null') {
+            return;
         }
-
-        // ==================== ACK HANDLER ====================
-        window.__registerAck = function(requestId, resolve, reject, timeout = ACK_TIMEOUT) {
-            const timer = setTimeout(() => {
-                if (pendingAcks.has(requestId)) {
-                    pendingAcks.delete(requestId);
-                    reject(new Error(`ACK timeout for ${requestId}`));
-                }
-            }, timeout);
+        
+        const data = event.data;
+        if (!data || typeof data !== 'object') return;
+        
+        const messageId = data.messageId || data.requestId;
+        const source = event.source;
+        const origin = event.origin;
+        
+        // ===== HANDLE REGISTER_MODULE =====
+        if (data.type === 'REGISTER_MODULE') {
+            console.log('[UNIFIED] 📥 REGISTER_MODULE received');
             
-            pendingAcks.set(requestId, { resolve, reject, timer });
-            return true;
-        };
-
-        window.__handleAck = function(requestId, payload) {
-            const handler = pendingAcks.get(requestId);
-            if (handler) {
-                clearTimeout(handler.timer);
-                handler.resolve(payload);
-                pendingAcks.delete(requestId);
-                return true;
-            }
-            return false;
-        };
-
-        // ==================== SESSION GETTER ====================
-        function getCurrentSession() {
-            // Try multiple sources for session
-            if (window.AUTH_SESSION) {
-                return window.AUTH_SESSION;
-            }
-            if (window.__KYNECTA_AUTHORITIES__?.parentState?.getSession) {
-                return window.__KYNECTA_AUTHORITIES__.parentState.getSession();
-            }
-            if (window.__KYNECTA_AUTHORITIES__?.session?.get) {
-                return window.__KYNECTA_AUTHORITIES__.session.get();
-            }
-            if (window._sessionCache) {
-                return window._sessionCache;
-            }
-            if (window.__PARENT_SESSION__) {
-                return window.__PARENT_SESSION__.session;
-            }
-            // Default guest session
-            return {
-                authenticated: true,
-                userId: 'guest_' + Date.now(),
-                token: 'token_' + Date.now(),
-                user: {
-                    id: 'guest_' + Date.now(),
-                    name: 'Guest User',
-                    guest: true
-                }
-            };
-        }
-
-        // ==================== MESSAGE FORMATTER ====================
-        function generateMessageId() {
-            return 'msg_' + Date.now() + '_' + Math.random().toString(36).substr(2, 8) + '_' + Math.floor(Math.random() * 1000);
-        }
-
-        // ==================== AUTHORITATIVE MESSAGE HANDLER ====================
-        const messageHandlers = new Map();
-
-        // ==================== REGISTER_MODULE HANDLER - CRITICAL FIX ====================
-        messageHandlers.set('REGISTER_MODULE', (data, source, origin) => {
-            const messageId = data.messageId || data.requestId || generateMessageId();
             const module = data.module || data.frameId || 'unknown';
             
-            // Register the module
-            if (window.__registerFrame) {
-                window.__registerFrame(module, source);
-            }
+            if (window.__registerFrame) window.__registerFrame(module, source);
+            if (window.__PARENT_AUTHORITY__) window.__PARENT_AUTHORITY__.registerFrame(source);
+            if (window.__BOOT_STATE__) window.__BOOT_STATE__.iframesRegistered.add(module);
             
-            // Track in boot state
-            if (window.__BOOT_STATE__ && module) {
-                window.__BOOT_STATE__.iframesRegistered.add(module);
-            }
+            const session = window.__PARENT_SESSION__?.session || 
+                           window.AUTH_SESSION || 
+                           window._sessionCache || 
+                           { authenticated: false };
             
-            // Register with PARENT_AUTHORITY
-            if (window.__PARENT_AUTHORITY__) {
-                window.__PARENT_AUTHORITY__.registerFrame(source);
-            }
-            
-            // Get session
-            const session = getCurrentSession();
-            
-            // Send MODULE_REGISTERED response (this is what messages-core.js expects)
+            // Send MODULE_REGISTERED
             try {
                 source.postMessage({
                     type: 'MODULE_REGISTERED',
                     messageId: messageId,
                     requestId: messageId,
                     timestamp: Date.now(),
-                    payload: {
-                        success: true,
-                        module: module,
-                        session: {
-                            authenticated: session.authenticated || false,
-                            userId: session.userId || session.user?.id,
-                            token: session.token ? 'present' : null
-                        }
-                    }
+                    payload: { success: true, module: module }
                 }, origin);
             } catch (e) {}
             
-            // Send SESSION_ACTIVE if session exists
-            if (session && session.authenticated) {
-                try {
-                    source.postMessage({
-                        type: 'SESSION_ACTIVE',
-                        messageId: generateMessageId(),
-                        requestId: messageId,
-                        timestamp: Date.now(),
-                        session: session
-                    }, origin);
-                } catch (e) {}
-            }
-            
-            // Send ACK (this is what AckController expects)
+            // Send ACK
             try {
                 source.postMessage({
                     type: 'ACK',
                     originalType: 'REGISTER_MODULE',
                     messageId: messageId,
                     requestId: messageId,
-                    payload: { 
-                        success: true,
-                        module: module,
-                        timestamp: Date.now()
-                    },
+                    payload: { success: true, module: module },
                     timestamp: Date.now()
                 }, origin);
             } catch (e) {}
-        });
-
-        // ==================== HANDSHAKE_REQUEST HANDLER ====================
-        messageHandlers.set('HANDSHAKE_REQUEST', (data, source, origin) => {
-            const messageId = data.messageId || data.requestId || generateMessageId();
-            const module = data.module || data.frameId || 'unknown';
             
-            // Register frame
-            if (window.__PARENT_AUTHORITY__) {
-                window.__PARENT_AUTHORITY__.registerFrame(source);
-            }
-            
-            // Track in boot state
-            if (window.__BOOT_STATE__ && module) {
-                window.__BOOT_STATE__.iframesRegistered.add(module);
-            }
-            
-            // Send HANDSHAKE_ACK
-            try {
-                source.postMessage({
-                    type: 'HANDSHAKE_ACK',
-                    messageId: messageId,
-                    requestId: messageId,
-                    timestamp: Date.now(),
-                    payload: { success: true }
-                }, origin);
-            } catch (e) {}
-            
-            // Send ACK
-            try {
-                source.postMessage({
-                    type: 'ACK',
-                    originalType: 'HANDSHAKE_REQUEST',
-                    messageId: messageId,
-                    requestId: messageId,
-                    payload: { success: true },
-                    timestamp: Date.now()
-                }, origin);
-            } catch (e) {}
-        });
-
-        // ==================== IFRAME_INIT HANDLER ====================
-        messageHandlers.set('IFRAME_INIT', (data, source, origin) => {
-            const frameId = data.iframeId;
-            if (frameId) {
-                if (window.__BOOT_STATE__) {
-                    window.__BOOT_STATE__.iframesRegistered.add(frameId);
-                }
-                
-                // Send PARENT_READY if parent is ready
-                if (window.__PARENT_READY__) {
-                    const session = getCurrentSession();
+            if (session.authenticated) {
+                setTimeout(() => {
                     try {
                         source.postMessage({
-                            type: 'PARENT_READY',
-                            timestamp: Date.now(),
+                            type: 'SESSION_ACTIVE',
+                            messageId: 'session_' + Date.now(),
+                            requestId: messageId,
                             session: session,
-                            protocolVersion: PROTOCOL_VERSION
-                        }, origin);
-                    } catch (e) {}
-                }
-            }
-        });
-
-        // ==================== CHILD_READY HANDLER ====================
-        messageHandlers.set('CHILD_READY', (data, source, origin) => {
-            const messageId = data.messageId || data.requestId || generateMessageId();
-            const module = data.module || data.frameId || 'unknown';
-            
-            // Register frame
-            if (window.__PARENT_AUTHORITY__) {
-                window.__PARENT_AUTHORITY__.registerFrame(source);
-            }
-            
-            // Track in boot state
-            if (window.__BOOT_STATE__ && module) {
-                window.__BOOT_STATE__.iframesRegistered.add(module);
-            }
-            
-            // Send CHILD_READY_ACK
-            try {
-                source.postMessage({
-                    type: 'CHILD_READY_ACK',
-                    messageId: messageId,
-                    requestId: messageId,
-                    timestamp: Date.now()
-                }, origin);
-            } catch (e) {}
-            
-            // Send ACK
-            try {
-                source.postMessage({
-                    type: 'ACK',
-                    originalType: 'CHILD_READY',
-                    messageId: messageId,
-                    requestId: messageId,
-                    payload: { success: true },
-                    timestamp: Date.now()
-                }, origin);
-            } catch (e) {}
-        });
-
-        // ==================== REQUEST_SESSION HANDLER ====================
-        messageHandlers.set('REQUEST_SESSION', (data, source, origin) => {
-            const messageId = data.messageId || data.requestId || generateMessageId();
-            const session = getCurrentSession();
-            
-            // Send SESSION_RESPONSE
-            try {
-                source.postMessage({
-                    type: 'SESSION_RESPONSE',
-                    requestId: messageId,
-                    payload: {
-                        session: session,
-                        authenticated: session.authenticated || false
-                    },
-                    timestamp: Date.now()
-                }, origin);
-            } catch (e) {}
-            
-            // Send ACK
-            try {
-                source.postMessage({
-                    type: 'ACK',
-                    originalType: 'REQUEST_SESSION',
-                    messageId: messageId,
-                    requestId: messageId,
-                    payload: { success: true },
-                    timestamp: Date.now()
-                }, origin);
-            } catch (e) {}
-        });
-
-        // ==================== SEND_MESSAGE HANDLER ====================
-        messageHandlers.set('SEND_MESSAGE', (data, source, origin) => {
-            const messageId = data.messageId || data.requestId;
-            
-            // Track in ACK registry for retry cap enforcement
-            if (messageId && window.__ACK_REGISTRY__) {
-                const retryCount = window.__ACK_REGISTRY__.has(messageId) ? 
-                    window.__ACK_REGISTRY__.get(messageId).retryCount + 1 : 1;
-                
-                if (retryCount > window.__RETRY_LIMIT__) {
-                    try {
-                        source.postMessage({
-                            type: 'RETRY_LIMIT_REACHED',
-                            messageId: messageId,
+                            payload: session,
                             timestamp: Date.now()
                         }, origin);
                     } catch (e) {}
-                    return;
-                }
-                
-                window.__ACK_REGISTRY__.set(messageId, {
-                    timestamp: Date.now(),
-                    sourceIframe: source,
-                    retryCount: retryCount,
-                    delivered: false
-                });
+                }, 10);
             }
             
-            // Send ACK
-            if (messageId) {
-                try {
-                    source.postMessage({
-                        type: 'ACK',
-                        originalType: 'SEND_MESSAGE',
-                        messageId: messageId,
-                        requestId: messageId,
-                        payload: { success: true },
-                        timestamp: Date.now()
-                    }, origin);
-                } catch (e) {}
-            }
-        });
-
-        // ==================== VERIFY_SESSION HANDLER ====================
-        messageHandlers.set('VERIFY_SESSION', (data, source, origin) => {
-            const messageId = data.messageId || data.requestId || data.payload?.requestId;
-            if (!messageId) return;
+            if (event.data) event.data._processedBy = 'unified';
+            return;
+        }
+        
+        // ===== HANDLE VERIFY_SESSION - WITH COMPATIBILITY =====
+        if (data.type === 'VERIFY_SESSION') {
+            const requestId = messageId || data.payload?.requestId;
+            if (!requestId) return;
             
-            const session = getCurrentSession();
-            const isValid = session && session.authenticated && session.token;
+            console.log('[UNIFIED] 📥 VERIFY_SESSION received:', requestId);
             
-            // Send SESSION_VERIFIED
+            const session = window.__PARENT_SESSION__?.session;
+            const authenticated = !!(session?.authenticated);
+            const userId = session?.userId || session?.user?.id;
+            
+            // ===== FORMAT 1: MODERN FORMAT (what your handler already does) =====
             try {
                 source.postMessage({
                     type: 'SESSION_VERIFIED',
-                    requestId: messageId,
-                    messageId: messageId,
-                    payload: { 
-                        valid: isValid,
-                        userId: session.userId,
-                        timestamp: Date.now()
+                    requestId: requestId,
+                    messageId: requestId,
+                    payload: {
+                        valid: authenticated,
+                        userId: userId,
+                        expiresAt: session?.expiresAt || null
                     },
                     timestamp: Date.now()
                 }, origin);
             } catch (e) {}
             
-            // Send ACK
+            // ===== FORMAT 2: LEGACY FORMAT (what calls-core.js might expect) =====
+            try {
+                source.postMessage({
+                    type: 'VERIFY_RESPONSE',  // Some cores expect this
+                    requestId: requestId,
+                    messageId: requestId,
+                    valid: authenticated,      // Direct property, not in payload
+                    userId: userId,
+                    timestamp: Date.now()
+                }, origin);
+            } catch (e) {}
+            
+            // ===== FORMAT 3: ACK WITH VALID DATA =====
             try {
                 source.postMessage({
                     type: 'ACK',
                     originalType: 'VERIFY_SESSION',
-                    messageId: messageId,
-                    requestId: messageId,
-                    payload: { success: true, valid: isValid },
+                    requestId: requestId,
+                    messageId: requestId,
+                    payload: { 
+                        success: true, 
+                        valid: authenticated,
+                        userId: userId
+                    },
                     timestamp: Date.now()
                 }, origin);
             } catch (e) {}
-        });
-
-        // ==================== HEARTBEAT HANDLER ====================
-        messageHandlers.set('HEARTBEAT', (data, source, origin) => {
-            const messageId = data.messageId || data.requestId || generateMessageId();
             
-            // Send HEARTBEAT_ACK
+            console.log('[UNIFIED] ✅ Sent all verification responses');
+            
+            if (event.data) event.data._processedBy = 'unified';
+            return;
+        }
+        
+// ===== HANDLE REQUEST_SESSION =====
+if (data.type === 'REQUEST_SESSION') {
+    const requestId = messageId;
+    if (!requestId) return;
+    
+    // ===== ADD DEDUPLICATION =====
+    if (sessionRequestCache.has(requestId)) {
+        console.log('[UNIFIED] ⏭️ Duplicate REQUEST_SESSION ignored:', requestId);
+        return;
+    }
+    sessionRequestCache.add(requestId);
+    setTimeout(() => sessionRequestCache.delete(requestId), 30000);
+    // =============================
+    
+    console.log('[UNIFIED] 📥 REQUEST_SESSION received');
+    
+    const session = window.__PARENT_SESSION__?.session;
+    
+    // Send SESSION_RESPONSE
+    try {
+        source.postMessage({
+            type: 'SESSION_RESPONSE',
+            requestId: requestId,
+            messageId: requestId,
+            payload: {
+                session: session,
+                authenticated: session?.authenticated || false,
+                user: session?.user,
+                token: session?.token,
+                userId: session?.userId
+            },
+            timestamp: Date.now()
+        }, origin);
+    } catch (e) {}
+    
+    // Send ACK
+    try {
+        source.postMessage({
+            type: 'ACK',
+            originalType: 'REQUEST_SESSION',
+            requestId: requestId,
+            messageId: requestId,
+            payload: { success: true },
+            timestamp: Date.now()
+        }, origin);
+    } catch (e) {}
+    
+    // ===== ADD BROADCAST TO ALL IFRAMES AFTER SESSION RESPONSE =====
+    if (session?.authenticated) {
+        setTimeout(() => {
+            const iframeIds = [
+                'messagesIframe', 'statusIframe', 'groupIframe', 
+                'friendsIframe', 'callsIframe', 'settingsIframe', 'toolsIframe'
+            ];
+            
+            iframeIds.forEach(id => {
+                const iframe = document.getElementById(id);
+                if (iframe && iframe.contentWindow && iframe.contentWindow !== source) {
+                    try {
+                        iframe.contentWindow.postMessage({
+                            type: 'SESSION_ACTIVE',
+                            messageId: 'session_broadcast_' + Date.now(),
+                            session: session,
+                            payload: {
+                                authenticated: true,
+                                userId: session.userId,
+                                token: session.token,
+                                user: session.user
+                            },
+                            timestamp: Date.now()
+                        }, '*');
+                        console.log('[UNIFIED] 📢 Broadcast SESSION_ACTIVE to', id);
+                    } catch (e) {}
+                }
+            });
+        }, 50);
+    }
+    // ==============================================================
+    
+    if (event.data) event.data._processedBy = 'unified';
+    return;
+}
+
+        // ===== HANDLE CHILD_READY =====
+        if (data.type === 'CHILD_READY' || data.type === 'coreReady') {
+            const requestId = messageId || ('child_' + Date.now());
+            const module = data.module || data.frameId || 'unknown';
+            
+            if (window.__PARENT_AUTHORITY__) window.__PARENT_AUTHORITY__.registerFrame(source);
+            if (window.__BOOT_STATE__) window.__BOOT_STATE__.iframesRegistered.add(module);
+            
+            try {
+                source.postMessage({
+                    type: 'ACK',
+                    originalType: data.type,
+                    requestId: requestId,
+                    messageId: requestId,
+                    payload: { success: true },
+                    timestamp: Date.now()
+                }, origin);
+            } catch (e) {}
+            
+            if (event.data) event.data._processedBy = 'unified';
+            return;
+        }
+        
+        // ===== HANDLE HEARTBEAT =====
+        if (data.type === 'HEARTBEAT') {
+            const requestId = messageId || ('hb_' + Date.now());
+            
             try {
                 source.postMessage({
                     type: 'HEARTBEAT_ACK',
-                    requestId: messageId,
-                    messageId: messageId,
+                    requestId: requestId,
+                    messageId: requestId,
                     timestamp: Date.now()
                 }, origin);
             } catch (e) {}
             
-            // Send ACK
             if (data.expectAck) {
                 try {
                     source.postMessage({
                         type: 'ACK',
                         originalType: 'HEARTBEAT',
-                        messageId: messageId,
-                        requestId: messageId,
+                        requestId: requestId,
+                        messageId: requestId,
                         payload: { success: true },
                         timestamp: Date.now()
                     }, origin);
                 } catch (e) {}
             }
             
-            // Update parent authority
-            if (window.__PARENT_AUTHORITY__) {
-                window.__PARENT_AUTHORITY__.heartbeatSuccess();
-            }
-        });
-
-        // ==================== PING HANDLER ====================
-        messageHandlers.set('PING', (data, source, origin) => {
-            const messageId = data.messageId || data.requestId || generateMessageId();
+            if (window.__PARENT_AUTHORITY__) window.__PARENT_AUTHORITY__.heartbeatSuccess();
+            if (event.data) event.data._processedBy = 'unified';
+            return;
+        }
+        
+        // ===== HANDLE PING =====
+        if (data.type === 'PING') {
+            const requestId = messageId || ('ping_' + Date.now());
             
-            // Send PONG
             try {
                 source.postMessage({
                     type: 'PONG',
-                    requestId: messageId,
-                    messageId: messageId,
-                    payload: {
-                        timestamp: Date.now(),
-                        echo: data.payload || {}
-                    },
+                    requestId: requestId,
+                    messageId: requestId,
+                    payload: { timestamp: Date.now(), echo: data.payload },
                     timestamp: Date.now()
                 }, origin);
             } catch (e) {}
             
-            // Send ACK
             if (data.expectAck) {
                 try {
                     source.postMessage({
                         type: 'ACK',
                         originalType: 'PING',
-                        messageId: messageId,
-                        requestId: messageId,
+                        requestId: requestId,
+                        messageId: requestId,
                         payload: { success: true },
                         timestamp: Date.now()
                     }, origin);
                 } catch (e) {}
             }
-        });
-
-        // ==================== GENERIC HANDLER FOR ANY TYPE WITH expectAck ====================
-        messageHandlers.set('*', (data, source, origin) => {
-            const messageId = data.messageId || data.requestId;
-            if (data.expectAck && messageId) {
-                try {
-                    source.postMessage({
-                        type: 'ACK',
-                        originalType: data.type,
-                        messageId: messageId,
-                        requestId: messageId,
-                        payload: { success: true },
-                        timestamp: Date.now()
-                    }, origin);
-                } catch (e) {}
-            }
-        });
-
-        // ==================== MAIN MESSAGE LISTENER ====================
-        window.addEventListener('message', function(event) {
-            // Validate origin
-            if (event.origin !== window.location.origin && event.origin !== 'null') {
-                return;
-            }
-
-            const data = event.data;
-            if (!data || typeof data !== 'object') return;
-
-            const messageId = data.messageId || data.requestId;
             
-            // Deduplicate
-            if (messageId) {
-                if (processedMessageIds.has(messageId)) {
-                    return;
-                }
-                processedMessageIds.add(messageId);
-                cleanupProcessedIds();
-            }
+            if (event.data) event.data._processedBy = 'unified';
+            return;
+        }
+        
+        // ===== HANDLE ANY MESSAGE WITH expectAck =====
+        if (data.expectAck && messageId) {
+            try {
+                source.postMessage({
+                    type: 'ACK',
+                    originalType: data.type,
+                    requestId: messageId,
+                    messageId: messageId,
+                    payload: { success: true },
+                    timestamp: Date.now()
+                }, origin);
+            } catch (e) {}
+            
+            if (event.data) event.data._processedBy = 'unified';
+        }
+        
+    }, true);
+    
+    console.log('[UNIFIED] ✅ Unified message handler installed with compatibility');
+})();
+</script>
 
-            // Handle ACKs
-            if (data.type === 'ACK' && data.requestId) {
-                window.__handleAck(data.requestId, data.payload);
-                return;
-            }
-
-            // Find specific handler
-            const handler = messageHandlers.get(data.type);
-            if (handler) {
-                handler(data, event.source, event.origin);
-            } else {
-                // Use generic handler for any message with expectAck
-                messageHandlers.get('*')(data, event.source, event.origin);
-            }
-        });
-
-        // ==================== CLEANUP INTERVAL ====================
-        setInterval(() => {
-            cleanupProcessedIds();
-        }, PROCESSED_IDS_CLEANUP_INTERVAL);
-
-        // ==================== EXPOSE FOR DEBUGGING ====================
-        window.__MESSAGE_HANDLER_STATS__ = {
-            processedCount: () => processedMessageIds.size,
-            pendingAcks: () => pendingAcks.size
-        };
-
-        console.log('[Parent] ✅ Single authoritative message handler installed - REGISTER_MODULE ACK fix applied');
-    })();
-    </script>
-
-    <!-- Legacy support functions -->
-    <script>
-        window.closeModal = window.closeModal || function(modalId) {
-            const modal = document.getElementById(modalId);
-            if (modal) modal.classList.add('hidden');
-        };
-    </script>
+<!-- Legacy support functions -->
+<script>
+    window.closeModal = window.closeModal || function(modalId) {
+        const modal = document.getElementById(modalId);
+        if (modal) modal.classList.add('hidden');
+    };
+</script>
 
 <!-- ==============================================
 PARENT–IFRAME COMMUNICATION ARCHITECTURE v8.0

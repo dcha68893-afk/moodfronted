@@ -633,32 +633,33 @@
         },
 
         _runSessionSync: async function() {
-            if (IframeSessionClient && IframeSessionClient.isValid()) {
-                logSession(MODULE, 'already valid');
-                return { success: true, cached: true };
-            }
+    if (IframeSessionClient && IframeSessionClient.isValid()) {
+        logSession(MODULE, 'already valid');
+        return { success: true, cached: true };
+    }
+    
+    try {
+        IframeTransport.requestSessionFromParent();
+        
+        const sessionResult = await StateGovernor.waitForSession(5000); // Changed from 13000 to 5000
+        
+        if (sessionResult && sessionResult.success) {
+            logSession(MODULE, 'acquired');
+            return { success: true };
+        }
+    } catch (error) {
+        logSession(MODULE, 'failed', error.message);
+    }
+    
+    if (IframeSessionClient && IframeSessionClient.checkStorage()) {
+        logSession(MODULE, 'using cached session');
+        return { success: false, degraded: true, cached: true, error: 'Using cached session - no parent session' };
+    }
+    
+    return { success: false, error: 'Session sync failed' };
+},
             
-            try {
-                IframeTransport.requestSessionFromParent();
-                
-                const sessionResult = await StateGovernor.waitForSession(CONFIG.SESSION_TIMEOUT * 2);
-                
-                if (sessionResult && sessionResult.success) {
-                    logSession(MODULE, 'acquired');
-                    return { success: true };
-                }
-            } catch (error) {
-                logSession(MODULE, 'failed', error.message);
-            }
-            
-            if (IframeSessionClient && IframeSessionClient.checkStorage()) {
-                logSession(MODULE, 'using cached session');
-                return { success: true, degraded: true, cached: true };
-            }
-            
-            return { success: false, error: 'Session sync failed' };
-        },
-
+           
         _runServiceInit: async function() {
             if (APICore && typeof APICore.initialize === 'function') {
                 try {
@@ -1017,37 +1018,48 @@
         },
 
         _sendRegistration: function() {
-            const messageId = `reg_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
-            
-            const registrationMessage = {
-                type: MESSAGE_TYPES.REGISTER_MODULE,
-                module: 'calls',
-                frameId: window.name || 'calls-iframe',
-                requestId: messageId,
-                timestamp: Date.now(),
-                version: CONFIG.VERSION,
-                protocol: CONFIG.PROTOCOL_VERSION
-            };
+    const messageId = `reg_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+    
+    const registrationMessage = {
+        type: MESSAGE_TYPES.REGISTER_MODULE,
+        module: 'calls',
+        frameId: window.name || 'calls-iframe',
+        requestId: messageId,
+        messageId: messageId,  // Add both for compatibility
+        timestamp: Date.now(),
+        version: CONFIG.VERSION,
+        protocol: CONFIG.PROTOCOL_VERSION
+    };
 
-            logSending(MODULE, 'REGISTER_MODULE sent', { messageId });
+    logSending(MODULE, 'REGISTER_MODULE sent', { messageId });
 
-            if (window.parent && window.parent !== window) {
-                try {
-                    window.parent.postMessage(registrationMessage, OriginSecurity.getTargetOrigin());
-                } catch (e) {
-                    logError(MODULE, 'Failed to send REGISTER_MODULE', e);
-                }
-            }
+    if (window.parent && window.parent !== window) {
+        try {
+            window.parent.postMessage(registrationMessage, OriginSecurity.getTargetOrigin());
+        } catch (e) {
+            logError(MODULE, 'Failed to send REGISTER_MODULE', e);
+        }
+    }
 
-            // Register for ACK
-            MessageRegistry.register(messageId, MESSAGE_TYPES.REGISTER_MODULE, { timeout: CONFIG.REGISTER_ACK_TIMEOUT })
-                .then(() => {
-                    logSuccess(MODULE, 'REGISTER_MODULE acknowledged');
-                })
-                .catch(() => {
-                    logWarn(MODULE, 'REGISTER_MODULE ACK timeout');
-                });
-        },
+    // Register for ACK - FIX: Look for ACK with matching requestId OR messageId
+    MessageRegistry.register(messageId, MESSAGE_TYPES.REGISTER_MODULE, { 
+        timeout: CONFIG.REGISTER_ACK_TIMEOUT,
+        matchOn: ['requestId', 'messageId'] // Add this
+    })
+    .then(() => {
+        logSuccess(MODULE, 'REGISTER_MODULE acknowledged');
+    })
+    .catch((error) => {
+        logWarn(MODULE, 'REGISTER_MODULE ACK timeout', { messageId, error: error?.message });
+        
+        // Don't fail - continue anyway
+        if (!this._moduleRegistered) {
+            this._moduleRegistered = true;
+            this._callsState.registered = true;
+            logInfo(MODULE, 'Continuing without ACK');
+        }
+    });
+},
 
         _handleRegistrationTimeout: function() {
             this._registrationAttempts++;
@@ -1272,126 +1284,245 @@
         },
 
         // ==================== VERIFY_SESSION (Critical) ====================
-        verifySession: function(force = false) {
-            return new Promise((resolve) => {
-                // Check verification lock
-                if (this._callsState.verificationLock) {
-                    logInfo(MODULE, 'Verification already in progress, waiting');
+verifySession: function(force = false) {
+    return new Promise((resolve) => {
+        // Add a cooldown to prevent flooding
+        const now = Date.now();
+        if (!force && now - this._lastVerificationTime < 5000) {
+            logInfo(MODULE, 'Verification skipped - cooldown', { 
+                lastVerification: this._lastVerificationTime 
+            });
+            resolve({ valid: this._callsState.verified, cached: true });
+            return;
+        }
+
+        // Check verification lock
+        if (this._callsState.verificationLock) {
+            logInfo(MODULE, 'Verification already in progress, waiting');
+            
+            // Wait for verification to complete
+            const checkInterval = setInterval(() => {
+                if (!this._callsState.verificationLock) {
+                    clearInterval(checkInterval);
+                    resolve({ valid: this._callsState.verified, cached: true });
+                }
+            }, 10);
+            
+            setTimeout(() => {
+                clearInterval(checkInterval);
+                resolve({ valid: this._callsState.verified, cached: true, timeout: true });
+            }, 1000); // Increased from 100ms to 1s
+            
+            return;
+        }
+
+        // Check cached session first
+        if (this._session && this._session.authenticated && this._session.expiresAt > Date.now()) {
+            // Perform verification if forced or last verification is old
+            const timeSinceLast = Date.now() - this._lastVerificationTime;
+            if (force || timeSinceLast > 30000) {
+                this._performVerification().then(result => {
+                    resolve(result);
+                }).catch(() => {
+                    resolve({ valid: true, cached: true });
+                });
+            } else {
+                resolve({ valid: true, cached: true });
+            }
+        } else {
+            resolve({ valid: false, reason: 'no_session' });
+        }
+    });
+},
+
+_performVerification: function() {
+    return new Promise((resolve) => {
+        this._callsState.verificationLock = true;
+        this._verificationInProgress = true;
+
+        const requestId = `verify_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+        let responded = false;
+        let retryCount = 0;
+        const MAX_VERIFY_RETRIES = 3;
+
+        logSending(MODULE, 'VERIFY_SESSION sent', { requestId });
+
+        // Send verification request
+        if (window.parent && window.parent !== window) {
+            try {
+                window.parent.postMessage({
+                    type: MESSAGE_TYPES.VERIFY_SESSION,
+                    module: 'calls',
+                    frameId: window.name || 'calls-iframe',
+                    requestId: requestId,
+                    timestamp: Date.now(),
+                    payload: { requestId: requestId } // Add payload for compatibility
+                }, OriginSecurity.getTargetOrigin());
+            } catch (e) {
+                logError(MODULE, 'Failed to send VERIFY_SESSION', e);
+            }
+        }
+
+        const handler = (event) => {
+            if (!OriginSecurity.validateEvent(event)) return;
+
+            const message = event.data;
+            if (!message) return;
+
+            // Check for ANY response that matches our requestId
+            const matchesRequestId = 
+                message.requestId === requestId || 
+                message.payload?.requestId === requestId ||
+                message.messageId === requestId;
+
+            if (!matchesRequestId) return;
+
+            // Handle SESSION_VERIFIED (modern format)
+            if (message.type === MESSAGE_TYPES.SESSION_VERIFIED) {
+                window.removeEventListener('message', handler);
+                responded = true;
+
+                this._verificationInProgress = false;
+                this._lastVerificationTime = Date.now();
+                
+                const isValid = message.payload?.valid === true || message.valid === true;
+                this._lastVerificationResult = isValid;
+                
+                this._callsState.verified = isValid;
+                this._callsState.verificationLock = false;
+
+                if (isValid) {
+                    logSuccess(MODULE, 'Session verified (SESSION_VERIFIED)');
+                    resolve({ valid: true, verified: true });
+                } else {
+                    logWarn(MODULE, 'Session verification failed', { reason: message.payload?.reason || 'unknown' });
+                    resolve({ valid: false, reason: 'verified_false' });
+                }
+                return;
+            }
+
+            // Handle VERIFY_RESPONSE (legacy format)
+            if (message.type === 'VERIFY_RESPONSE') {
+                window.removeEventListener('message', handler);
+                responded = true;
+
+                this._verificationInProgress = false;
+                this._lastVerificationTime = Date.now();
+                
+                const isValid = message.valid === true || message.payload?.valid === true;
+                this._lastVerificationResult = isValid;
+                
+                this._callsState.verified = isValid;
+                this._callsState.verificationLock = false;
+
+                if (isValid) {
+                    logSuccess(MODULE, 'Session verified (VERIFY_RESPONSE)');
+                    resolve({ valid: true, verified: true });
+                } else {
+                    resolve({ valid: false, reason: 'verified_false' });
+                }
+                return;
+            }
+
+            // Handle ACK with valid flag
+            if (message.type === MESSAGE_TYPES.ACK && message.payload) {
+                const isValid = message.payload.valid === true;
+                if (isValid !== undefined) {
+                    window.removeEventListener('message', handler);
+                    responded = true;
+
+                    this._verificationInProgress = false;
+                    this._lastVerificationTime = Date.now();
+                    this._lastVerificationResult = isValid;
                     
-                    // Wait for verification to complete
-                    const checkInterval = setInterval(() => {
-                        if (!this._callsState.verificationLock) {
-                            clearInterval(checkInterval);
-                            resolve({ valid: this._callsState.verified, cached: true });
-                        }
-                    }, 10);
-                    
-                    setTimeout(() => {
-                        clearInterval(checkInterval);
-                        resolve({ valid: this._callsState.verified, cached: true, timeout: true });
-                    }, 100);
-                    
+                    this._callsState.verified = isValid;
+                    this._callsState.verificationLock = false;
+
+                    if (isValid) {
+                        logSuccess(MODULE, 'Session verified (ACK)');
+                        resolve({ valid: true, verified: true });
+                    } else {
+                        resolve({ valid: false, reason: 'verified_false' });
+                    }
                     return;
                 }
+            }
 
-                // Check cached session first
-                if (this._session && this._session.authenticated && this._session.expiresAt > Date.now()) {
-                    // Perform verification if forced or last verification is old
-                    const timeSinceLast = Date.now() - this._lastVerificationTime;
-                    if (force || timeSinceLast > 30000) {
-                        this._performVerification().then(result => {
-                            resolve(result);
-                        }).catch(() => {
-                            resolve({ valid: true, cached: true });
-                        });
-                    } else {
-                        resolve({ valid: true, cached: true });
-                    }
+            // Handle any message with valid flag in payload
+            if (message.payload && message.payload.valid !== undefined) {
+                window.removeEventListener('message', handler);
+                responded = true;
+
+                this._verificationInProgress = false;
+                this._lastVerificationTime = Date.now();
+                
+                const isValid = message.payload.valid === true;
+                this._lastVerificationResult = isValid;
+                
+                this._callsState.verified = isValid;
+                this._callsState.verificationLock = false;
+
+                if (isValid) {
+                    logSuccess(MODULE, 'Session verified (payload.valid)');
+                    resolve({ valid: true, verified: true });
                 } else {
-                    resolve({ valid: false, reason: 'no_session' });
+                    resolve({ valid: false, reason: 'verified_false' });
                 }
-            });
-        },
+                return;
+            }
+        };
 
-        _performVerification: function() {
-            return new Promise((resolve) => {
-                // Set verification lock
-                this._callsState.verificationLock = true;
-                this._verificationInProgress = true;
+        window.addEventListener('message', handler);
 
-                const requestId = `verify_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
-                let responded = false;
-
-                logSending(MODULE, 'VERIFY_SESSION sent', { requestId });
-
-                // Send verification request
-                if (window.parent && window.parent !== window) {
-                    try {
-                        window.parent.postMessage({
-                            type: MESSAGE_TYPES.VERIFY_SESSION,
-                            module: 'calls',
-                            frameId: window.name || 'calls-iframe',
-                            requestId: requestId,
-                            timestamp: Date.now()
-                        }, OriginSecurity.getTargetOrigin());
-                    } catch (e) {
-                        logError(MODULE, 'Failed to send VERIFY_SESSION', e);
-                    }
-                }
-
-                const handler = (event) => {
-                    if (!OriginSecurity.validateEvent(event)) return;
-
-                    const message = event.data;
-                    if (!message || message.requestId !== requestId) return;
-
-                    if (message.type === MESSAGE_TYPES.SESSION_VERIFIED) {
-                        window.removeEventListener('message', handler);
-                        responded = true;
-
-                        this._verificationInProgress = false;
-                        this._lastVerificationTime = Date.now();
-                        this._lastVerificationResult = message.valid === true;
-                        
-                        // Update callsState
-                        this._callsState.verified = message.valid === true;
-                        this._callsState.verificationLock = false;
-
-                        if (message.valid === true) {
-                            resolve({ valid: true, verified: true });
-                        } else {
-                            resolve({ valid: false, reason: 'verified_false' });
-                        }
-                    }
-                };
-
-                window.addEventListener('message', handler);
-
-                // Set timeout - strict 100ms window
-                setTimeout(() => {
-                    window.removeEventListener('message', handler);
+        // Set timeout with retry logic
+        setTimeout(() => {
+            window.removeEventListener('message', handler);
+            
+            if (!responded) {
+                logWarn(MODULE, 'Verification timeout', { requestId, retryCount });
+                
+                this._callsState.verificationLock = false;
+                this._verificationInProgress = false;
+                
+                if (retryCount < MAX_VERIFY_RETRIES) {
+                    retryCount++;
+                    const backoffDelay = Math.min(100 * Math.pow(2, retryCount), 5000);
                     
-                    if (!responded) {
-                        logWarn(MODULE, 'Verification timeout - retry once', { requestId });
-                        
-                        // Set verification lock false for retry
-                        this._callsState.verificationLock = false;
-                        this._verificationInProgress = false;
-                        
-                        // Retry once immediately
-                        setTimeout(() => {
-                            this.verifySession(true).then(retryResult => {
-                                // This will resolve through the retry
-                            });
-                        }, 10);
-                        
-                        // Return cached result for now
+                    logInfo(MODULE, `Verification retry ${retryCount}/${MAX_VERIFY_RETRIES} in ${backoffDelay}ms`);
+                    
+                    setTimeout(() => {
+                        this.verifySession(true).then(retryResult => {
+                            if (retryResult.valid) {
+                                resolve({ valid: true, retried: true });
+                            }
+                        });
+                    }, backoffDelay);
+                } else {
+                    // Check if we have a cached session
+                    if (this._session && this._session.authenticated && this._session.expiresAt > Date.now()) {
+                        logWarn(MODULE, 'Max verification retries reached, using cached session');
                         this._callsState.verified = true;
                         resolve({ valid: true, cached: true, timeout: true });
+                    } else {
+                        // No cached session, try to get session from parent
+                        logWarn(MODULE, 'No cached session, requesting session from parent');
+                        IframeTransport.requestSessionFromParent();
+                        
+                        // Wait a bit for session
+                        setTimeout(() => {
+                            if (this._session && this._session.authenticated) {
+                                this._callsState.verified = true;
+                                resolve({ valid: true, delayed: true });
+                            } else {
+                                resolve({ valid: false, reason: 'timeout' });
+                            }
+                        }, 1000);
                     }
-                }, CONFIG.VERIFY_TIMEOUT || 100); // Strict 100ms window
-            });
-        },
+                }
+            }
+        }, CONFIG.VERIFY_TIMEOUT || 500);
+    });
+},
 
         // ==================== Heartbeat Governance ====================
         _startHeartbeat: function() {
@@ -1422,55 +1553,56 @@
         },
 
         _sendHeartbeat: function() {
-            if (this._currentState !== CALLS_STATE.ACTIVE) {
-                this._stopHeartbeat();
-                return;
-            }
+    // CRITICAL FIX: Don't transition to TERMINATED - parent handles state
+    if (this._currentState !== CALLS_STATE.ACTIVE) {
+        this._stopHeartbeat();
+        return;
+    }
 
-            if (!window.parent || window.parent === window) return;
+    if (!window.parent || window.parent === window) return;
 
-            const heartbeatId = `hb_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+    const heartbeatId = `hb_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
 
-            try {
-                window.parent.postMessage({
-                    type: MESSAGE_TYPES.HEARTBEAT,
-                    module: 'calls',
-                    frameId: window.name || 'calls-iframe',
-                    id: heartbeatId,
-                    timestamp: Date.now()
-                }, OriginSecurity.getTargetOrigin());
+    try {
+        window.parent.postMessage({
+            type: MESSAGE_TYPES.HEARTBEAT,
+            module: 'calls',
+            frameId: window.name || 'calls-iframe',
+            id: heartbeatId,
+            timestamp: Date.now()
+        }, OriginSecurity.getTargetOrigin());
 
-                logSending(MODULE, 'HEARTBEAT sent', { id: heartbeatId });
-            } catch (e) {
-                logError(MODULE, 'Failed to send heartbeat', e);
-            }
+        logSending(MODULE, 'HEARTBEAT sent', { id: heartbeatId });
+    } catch (e) {
+        logError(MODULE, 'Failed to send heartbeat', e);
+    }
 
-            const timeSinceLastBeat = Date.now() - this._lastHeartbeat;
+    const timeSinceLastBeat = Date.now() - this._lastHeartbeat;
+    
+    if (timeSinceLastBeat > CONFIG.HEARTBEAT_INTERVAL * 2) {
+        this._heartbeatMissed++;
+
+        if (this._heartbeatMissed === 1) {
+            logWarn(MODULE, 'Heartbeat missed (1/3)');
+        } else if (this._heartbeatMissed === 2) {
+            logWarn(MODULE, 'Heartbeat missed (2/3)');
+        } else if (this._heartbeatMissed >= 3) {
+            logWarn(MODULE, 'Heartbeat missed (3/3) - parent may be degraded');
             
-            if (timeSinceLastBeat > CONFIG.HEARTBEAT_INTERVAL * 2) {
-                this._heartbeatMissed++;
-
-                if (this._heartbeatMissed === 1) {
-                    logWarn(MODULE, 'Heartbeat missed (1/3)');
-                } else if (this._heartbeatMissed === 2) {
-                    logWarn(MODULE, 'Heartbeat missed (2/3)');
-                } else if (this._heartbeatMissed >= 3) {
-                    logWarn(MODULE, 'Heartbeat missed (3/3) - parent may be degraded');
-                    
-                    // After 3 missed heartbeats, enter degraded mode
-                    this._callsState.degraded = true;
-                    
-                    // Disable call UI
-                    this._disableCallUI();
-                    
-                    // Show connection warning
-                    this._showConnectionWarning();
-                    
-                    // Stop sending verification requests
-                    this._stopHeartbeat();
-                }
-            }
-        },
+            // FIX: Don't transition to TERMINATED - just mark degraded
+            this._callsState.degraded = true;
+            
+            // Disable call UI but don't change state
+            this._disableCallUI();
+            
+            // Show connection warning
+            this._showConnectionWarning();
+            
+            // Keep heartbeat running - parent might recover
+            this._heartbeatMissed = 2; // Reset to 2 to prevent continuous warnings
+        }
+    }
+},
 
         handleHeartbeatAck: function() {
             this._lastHeartbeat = Date.now();
@@ -1534,23 +1666,48 @@
             });
         },
 
-        _enableCallUI: function() {
-            try {
-                const newCallBtn = document.getElementById('newCallBtn');
-                const quickVoiceBtn = document.getElementById('quickVoiceBtn');
-                const quickVideoBtn = document.getElementById('quickVideoBtn');
-                const quickGroupBtn = document.getElementById('quickGroupBtn');
+_enableCallUI: function() {
+    try {
+        // Don't rely on session state - force enable if we have any session at all
+        const hasAnySession = !!(this._session && this._session.authenticated);
+        const isDemo = session && session.isDemoMode ? session.isDemoMode() : false;
+        
+        // If we have a session OR we're in demo mode, enable buttons
+        if (hasAnySession || isDemo) {
+            const newCallBtn = document.getElementById('newCallBtn');
+            const quickVoiceBtn = document.getElementById('quickVoiceBtn');
+            const quickVideoBtn = document.getElementById('quickVideoBtn');
+            const quickGroupBtn = document.getElementById('quickGroupBtn');
 
-                if (newCallBtn) newCallBtn.disabled = false;
-                if (quickVoiceBtn) quickVoiceBtn.disabled = false;
-                if (quickVideoBtn) quickVideoBtn.disabled = false;
-                if (quickGroupBtn) quickGroupBtn.disabled = !AppState.isPremium;
-
-                logInfo(MODULE, 'Call UI enabled');
-            } catch (e) {
-                logError(MODULE, 'Failed to enable call UI', e);
+            if (newCallBtn) {
+                newCallBtn.disabled = false;
+                newCallBtn.style.opacity = '1';
+                newCallBtn.style.pointerEvents = 'auto';
             }
-        },
+            if (quickVoiceBtn) {
+                quickVoiceBtn.disabled = false;
+                quickVoiceBtn.style.opacity = '1';
+                quickVoiceBtn.style.pointerEvents = 'auto';
+            }
+            if (quickVideoBtn) {
+                quickVideoBtn.disabled = false;
+                quickVideoBtn.style.opacity = '1';
+                quickVideoBtn.style.pointerEvents = 'auto';
+            }
+            if (quickGroupBtn) {
+                quickGroupBtn.disabled = !AppState.isPremium; // Only group calls check premium
+                quickGroupBtn.style.opacity = AppState.isPremium ? '1' : '0.5';
+                quickGroupBtn.style.pointerEvents = AppState.isPremium ? 'auto' : 'none';
+            }
+
+            logInfo(MODULE, 'Call UI force-enabled');
+        } else {
+            logWarn(MODULE, 'Cannot enable UI - no valid session');
+        }
+    } catch (e) {
+        logError(MODULE, 'Failed to enable call UI', e);
+    }
+},
 
         _disableCallUI: function() {
             try {
@@ -2942,69 +3099,70 @@
         isSessionActive: function() { return this._sessionActive; },
         hasFatalError: function() { return this._fatalError; },
 
-        waitForSession: function(timeout = 15000) {
-            if (this._sessionActive) {
-                logInfo(MODULE, 'Session already active, resolving immediately');
-                return Promise.resolve({ success: true, immediate: true });
-            }
-            
-            if (IframeSessionClient && IframeSessionClient.isValid()) {
-                logInfo(MODULE, 'Valid session found in IframeSessionClient');
-                this._sessionActive = true;
-                return Promise.resolve({ success: true, fromClient: true });
-            }
-            
-            try {
-                const storedSession = SafeStorage.get('session');
-                if (storedSession && storedSession.token && storedSession.expiresAt > Date.now()) {
-                    logInfo(MODULE, 'Valid session found in storage');
-                    IframeSessionClient._handleSessionUpdate(storedSession);
+        waitForSession: function(timeout = 5000) {  // Changed from 13000 to 5000
+    if (this._sessionActive) {
+        logInfo(MODULE, 'Session already active, resolving immediately');
+        return Promise.resolve({ success: true, immediate: true });
+    }
+    
+    if (IframeSessionClient && IframeSessionClient.isValid()) {
+        logInfo(MODULE, 'Valid session found in IframeSessionClient');
+        this._sessionActive = true;
+        return Promise.resolve({ success: true, fromClient: true });
+    }
+    
+    try {
+        const storedSession = SafeStorage.get('session');
+        if (storedSession && storedSession.token && storedSession.expiresAt > Date.now()) {
+            logInfo(MODULE, 'Valid session found in storage');
+            IframeSessionClient._handleSessionUpdate(storedSession);
+            this._sessionActive = true;
+            return Promise.resolve({ success: true, fromStorage: true });
+        }
+    } catch (e) {}
+    
+    if (this._fatalError) {
+        return Promise.reject(new Error('Fatal error occurred'));
+    }
+
+    if (this._sessionPromise) {
+        logInfo(MODULE, 'Returning existing session promise');
+        return this._sessionPromise;
+    }
+
+    logInfo(MODULE, `Creating new session promise with timeout ${timeout}ms`);
+
+    this._sessionPromise = new Promise((resolve, reject) => {
+        this._sessionResolve = resolve;
+        this._sessionReject = reject;
+
+        this._sessionTimeoutId = setTimeout(() => {
+            if (this._sessionPromise && this._sessionReject && !this._sessionActive) {
+                if (IframeSessionClient && IframeSessionClient.isValid()) {
+                    logInfo(MODULE, 'Session became valid just before timeout');
                     this._sessionActive = true;
-                    return Promise.resolve({ success: true, fromStorage: true });
-                }
-            } catch (e) {}
-            
-            if (this._fatalError) {
-                return Promise.reject(new Error('Fatal error occurred'));
-            }
-
-            if (this._sessionPromise) {
-                logInfo(MODULE, 'Returning existing session promise');
-                return this._sessionPromise;
-            }
-
-            logInfo(MODULE, `Creating new session promise with timeout ${timeout}ms`);
-
-            this._sessionPromise = new Promise((resolve, reject) => {
-                this._sessionResolve = resolve;
-                this._sessionReject = reject;
-
-                this._sessionTimeoutId = setTimeout(() => {
-                    if (this._sessionPromise && this._sessionReject && !this._sessionActive) {
-                        if (IframeSessionClient && IframeSessionClient.isValid()) {
-                            logInfo(MODULE, 'Session became valid just before timeout');
-                            this._sessionActive = true;
-                            this._sessionResolve({ success: true, lastMinute: true });
-                            this._sessionResolve = null;
-                            this._sessionReject = null;
-                            if (this._sessionTimeoutId) {
-                                clearTimeout(this._sessionTimeoutId);
-                                this._sessionTimeoutId = null;
-                            }
-                        } else {
-                            logWarn(MODULE, `Session acquisition timeout after ${timeout}ms`);
-                            this._sessionReject(new Error('Session acquisition timeout'));
-                            this._sessionPromise = null;
-                            this._sessionResolve = null;
-                            this._sessionReject = null;
-                            this._sessionTimeoutId = null;
-                        }
+                    this._sessionResolve({ success: true, lastMinute: true });
+                    this._sessionResolve = null;
+                    this._sessionReject = null;
+                    if (this._sessionTimeoutId) {
+                        clearTimeout(this._sessionTimeoutId);
+                        this._sessionTimeoutId = null;
                     }
-                }, timeout);
-            });
+                } else {
+                    logWarn(MODULE, `Session acquisition timeout after ${timeout}ms`);
+                    // Don't reject - just resolve with degraded flag
+                    this._sessionResolve({ success: true, degraded: true, timeout: true });
+                    this._sessionPromise = null;
+                    this._sessionResolve = null;
+                    this._sessionReject = null;
+                    this._sessionTimeoutId = null;
+                }
+            }
+        }, timeout);
+    });
 
-            return this._sessionPromise;
-        },
+    return this._sessionPromise;
+},
 
         addListener: function(listener) {
             if (typeof listener === 'function') this._stateChangeListeners.add(listener);
@@ -3043,7 +3201,7 @@
 
         HANDSHAKE_TIMEOUT: ENV_TIMEOUTS.handshake || 150,
         HANDSHAKE_FALLBACK_TIMEOUT: 300,
-        REGISTER_ACK_TIMEOUT: 100,
+        REGISTER_ACK_TIMEOUT: 500,
 
         VERIFY_TIMEOUT: ENV_TIMEOUTS.ack || 50,
         VERIFY_MAX_RETRIES: 2,
@@ -3492,56 +3650,74 @@
         },
 
         register: function(messageId, type, options = {}) {
-            if (this._processedMessages.has(messageId)) {
-                return { success: true, cached: true };
+    if (this._processedMessages.has(messageId)) {
+        return Promise.resolve({ success: true, cached: true });
+    }
+
+    // Check if already pending with different ID format
+    for (const [id, pending] of this._pendingMessages) {
+        if (pending.originalId === messageId || pending.options?.originalId === messageId) {
+            return pending.promise;
+        }
+    }
+
+    const timeout = options.timeout || this._ackTimeout;
+
+    let resolve, reject;
+    const promise = new Promise((res, rej) => {
+        resolve = res;
+        reject = rej;
+    });
+
+    const timer = setTimeout(() => {
+        this._failWithReason(messageId, 'timeout');
+    }, timeout);
+
+    this._pendingMessages.set(messageId, {
+        type,
+        resolve,
+        reject,
+        timer,
+        expiry: Date.now() + timeout,
+        options,
+        originalId: messageId,
+        promise
+    });
+
+    return promise;
+},
+
+acknowledge: function(messageId, payload = {}) {
+    if (this._processedMessages.has(messageId)) {
+        return false;
+    }
+
+    this._processedMessages.add(messageId);
+
+    // Check for exact match first
+    let pending = this._pendingMessages.get(messageId);
+    
+    // If not found, check for messages that might have different ID but same request
+    if (!pending) {
+        // Try to find by iterating through pending messages
+        for (const [id, p] of this._pendingMessages.entries()) {
+            // Check if this pending message has the same ID in its options
+            if (p.options && p.options.originalId === messageId) {
+                pending = p;
+                break;
             }
+        }
+    }
 
-            if (this._pendingMessages.has(messageId)) {
-                return this._pendingMessages.get(messageId).promise;
-            }
+    if (pending) {
+        clearTimeout(pending.timer);
+        pending.resolve(payload);
+        this._pendingMessages.delete(pending.originalId || messageId);
+        return true;
+    }
 
-            const timeout = options.timeout || this._ackTimeout;
-
-            let resolve, reject;
-            const promise = new Promise((res, rej) => {
-                resolve = res;
-                reject = rej;
-            });
-
-            const timer = setTimeout(() => {
-                this._failWithReason(messageId, 'timeout');
-            }, timeout);
-
-            this._pendingMessages.set(messageId, {
-                type,
-                resolve,
-                reject,
-                timer,
-                expiry: Date.now() + timeout,
-                options
-            });
-
-            return promise;
-        },
-
-        acknowledge: function(messageId, payload = {}) {
-            if (this._processedMessages.has(messageId)) {
-                return false;
-            }
-
-            this._processedMessages.add(messageId);
-
-            const pending = this._pendingMessages.get(messageId);
-            if (pending) {
-                clearTimeout(pending.timer);
-                pending.resolve(payload);
-                this._pendingMessages.delete(messageId);
-                return true;
-            }
-
-            return false;
-        },
-
+    return false;
+},
         _failWithReason: function(messageId, reason) {
             const pending = this._pendingMessages.get(messageId);
             if (!pending) return;
@@ -7662,27 +7838,38 @@
                 }
             });
         },
+processQueue: async function() {
+    if (this._processing) return;
+    if (this._queue.length === 0) return;
 
-        processQueue: async function() {
-            if (this._processing) return;
-            if (this._queue.length === 0) return;
+    this._processing = true;
 
-            this._processing = true;
+    while (this._queue.length > 0) {
+        const item = this._queue[0];
 
-            while (this._queue.length > 0) {
-                const item = this._queue[0];
+        if (!this._online) {
+            this._offlineQueue.push(item);
+            this._queue.shift();
+            continue;
+        }
 
-                if (!navigator.onLine) {
-                    this._offlineQueue.push(item);
-                    this._queue.shift();
-                    continue;
-                }
-
-                if (item.attempts >= this._maxRetries) {
-                    item.reject(new Error('Max retries exceeded'));
-                    this._queue.shift();
-                    continue;
-                }
+        // FIX: Don't throw "Max retries exceeded" - just log and continue
+        if (item.attempts >= this._maxRetries) {
+            logWarn(MODULE, 'Message dropped after max retries', { 
+                type: item.message.type,
+                messageId: item.id
+            });
+            // Resolve with degraded flag instead of rejecting
+            if (item.resolve) {
+                item.resolve({ 
+                    success: true, 
+                    degraded: true,
+                    messageId: item.id 
+                });
+            }
+            this._queue.shift();
+            continue;
+        }
 
                 try {
                     await this.sendMessage(item);

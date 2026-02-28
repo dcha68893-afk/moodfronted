@@ -5102,5 +5102,61 @@
             RenderingPipeline.skeleton();
         }
     });
+    // Add this at the end of initializeUISystem function (around line 3250)
+async function initializeUISystem() {
+    if (UIState.initialized) {
+        if (DEBUG) {
+            logOnce('info', 'UI system already initialized');
+        }
+        return { success: true, stages: UIState.renderStages };
+    }
+    
+    if (DEBUG) {
+        logOnce('info', 'Initializing UI system');
+    }
+    
+    const coreReady = await waitForCoreReady(10000);
+    if (coreReady) {
+        logOnce('success', 'Core is ready, proceeding with UI initialization');
+    } else {
+        logOnce('warn', 'Core not ready, initializing UI with fallback');
+    }
+    
+    cacheElements();
+    await RenderingPipeline.execute();
+    CoreIntegration.subscribeToCore();
+    
+    UIState.renderStages.initial = true;
+    UIState.initialized = true;
+    
+    // ===== ADD THIS EVENT DISPATCH =====
+    window.dispatchEvent(new CustomEvent('calls.ui.ready', {
+        detail: { timestamp: Date.now() }
+    }));
+    // ===================================
+    
+    if (DiagnosticsAgent && typeof DiagnosticsAgent.snapshot === 'function') {
+        DiagnosticsAgent.snapshot('ui_ready');
+    }
+    
+    if (DEBUG) {
+        logOnce('info', 'UI initialization complete', {
+            renderStages: UIState.renderStages,
+            renderCount: UIState.renderCount,
+            elementsCached: UIState.cachedElements.size,
+            handshake: {
+                parentReady,
+                sessionReady,
+                handshakeComplete
+            }
+        });
+    }
+    
+    return {
+        success: true,
+        stages: UIState.renderStages,
+        diagnostics: UIDiagnostics.getReport()
+    };
+}
 
 })();
