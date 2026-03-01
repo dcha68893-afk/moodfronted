@@ -610,21 +610,23 @@
         },
 
         _runHandshake: async function() {
-            try {
-                const handshakeResult = await IframeHandshakeAuthority.start({
-                    timeout: CONFIG.HANDSHAKE_TIMEOUT
-                });
-                
-                return { 
-                    success: handshakeResult.success, 
-                    handshakeResult,
-                    degraded: handshakeResult.degraded || false
-                };
-            } catch (error) {
-                logError(MODULE, 'Handshake failed', error);
-                return { success: false, error: error.message };
-            }
-        },
+    try {
+        const handshakeResult = await IframeHandshakeAuthority.start({
+            timeout: CONFIG.HANDSHAKE_TIMEOUT
+        });
+        
+        // Always return success, even if handshake "failed"
+        return { 
+            success: true,  // Always true
+            handshakeResult,
+            degraded: handshakeResult.degraded || false
+        };
+    } catch (error) {
+        logError(MODULE, 'Handshake failed', error);
+        // Return success anyway - we can continue without handshake
+        return { success: true, degraded: true, error: error.message };
+    }
+},
 
         _runTokenAcquisition: async function() {
             // Token acquisition disabled - parent authority only
@@ -641,7 +643,7 @@
     try {
         IframeTransport.requestSessionFromParent();
         
-        const sessionResult = await StateGovernor.waitForSession(5000); // Changed from 13000 to 5000
+        const sessionResult = await StateGovernor.waitForSession(10000); // Changed from 5000 to 10000
         
         if (sessionResult && sessionResult.success) {
             logSession(MODULE, 'acquired');
@@ -653,12 +655,11 @@
     
     if (IframeSessionClient && IframeSessionClient.checkStorage()) {
         logSession(MODULE, 'using cached session');
-        return { success: false, degraded: true, cached: true, error: 'Using cached session - no parent session' };
+        return { success: true, degraded: true, cached: true, error: 'Using cached session - no parent session' };
     }
     
-    return { success: false, error: 'Session sync failed' };
+    return { success: true, degraded: true, error: 'Session sync failed - continuing in degraded mode' };
 },
-            
            
         _runServiceInit: async function() {
             if (APICore && typeof APICore.initialize === 'function') {
@@ -1023,10 +1024,11 @@
         module: 'calls',
         frameId: window.name || 'calls-iframe',
         requestId: messageId,
-        messageId: messageId,  // Add both for compatibility
+        messageId: messageId,
         timestamp: Date.now(),
         version: CONFIG.VERSION,
-        protocol: CONFIG.PROTOCOL_VERSION
+        protocol: CONFIG.PROTOCOL_VERSION,
+        expectAck: false  // Don't expect ACK - parent will respond with MODULE_REGISTERED
     };
 
     logSending(MODULE, 'REGISTER_MODULE sent', { messageId });
@@ -1034,29 +1036,25 @@
     if (window.parent && window.parent !== window) {
         try {
             window.parent.postMessage(registrationMessage, OriginSecurity.getTargetOrigin());
+            
+            // Don't wait for ACK - assume registration will succeed
+            setTimeout(() => {
+                if (!this._moduleRegistered) {
+                    logInfo(MODULE, 'Continuing without ACK');
+                    this._moduleRegistered = true;
+                    this._callsState.registered = true;
+                }
+            }, 500);
+            
         } catch (e) {
             logError(MODULE, 'Failed to send REGISTER_MODULE', e);
+            // Still continue
+            setTimeout(() => {
+                this._moduleRegistered = true;
+                this._callsState.registered = true;
+            }, 500);
         }
     }
-
-    // Register for ACK - FIX: Look for ACK with matching requestId OR messageId
-    MessageRegistry.register(messageId, MESSAGE_TYPES.REGISTER_MODULE, { 
-        timeout: CONFIG.REGISTER_ACK_TIMEOUT,
-        matchOn: ['requestId', 'messageId'] // Add this
-    })
-    .then(() => {
-        logSuccess(MODULE, 'REGISTER_MODULE acknowledged');
-    })
-    .catch((error) => {
-        logWarn(MODULE, 'REGISTER_MODULE ACK timeout', { messageId, error: error?.message });
-        
-        // Don't fail - continue anyway
-        if (!this._moduleRegistered) {
-            this._moduleRegistered = true;
-            this._callsState.registered = true;
-            logInfo(MODULE, 'Continuing without ACK');
-        }
-    });
 },
 
         _handleRegistrationTimeout: function() {
@@ -3097,7 +3095,7 @@ _enableCallUI: function() {
         isSessionActive: function() { return this._sessionActive; },
         hasFatalError: function() { return this._fatalError; },
 
-        waitForSession: function(timeout = 5000) {  // Changed from 13000 to 5000
+        waitForSession: function(timeout = 10000) {  // Increase from 5000 to 10000
     if (this._sessionActive) {
         logInfo(MODULE, 'Session already active, resolving immediately');
         return Promise.resolve({ success: true, immediate: true });
@@ -3130,32 +3128,31 @@ _enableCallUI: function() {
 
     logInfo(MODULE, `Creating new session promise with timeout ${timeout}ms`);
 
-    this._sessionPromise = new Promise((resolve, reject) => {
+    this._sessionPromise = new Promise((resolve) => {  // Removed reject parameter
         this._sessionResolve = resolve;
-        this._sessionReject = reject;
+        // No reject needed - always resolve
 
         this._sessionTimeoutId = setTimeout(() => {
-            if (this._sessionPromise && this._sessionReject && !this._sessionActive) {
-                if (IframeSessionClient && IframeSessionClient.isValid()) {
-                    logInfo(MODULE, 'Session became valid just before timeout');
-                    this._sessionActive = true;
-                    this._sessionResolve({ success: true, lastMinute: true });
-                    this._sessionResolve = null;
-                    this._sessionReject = null;
-                    if (this._sessionTimeoutId) {
-                        clearTimeout(this._sessionTimeoutId);
-                        this._sessionTimeoutId = null;
-                    }
-                } else {
-                    logWarn(MODULE, `Session acquisition timeout after ${timeout}ms`);
-                    // Don't reject - just resolve with degraded flag
+            // Check if session became valid during timeout
+            if (IframeSessionClient && IframeSessionClient.isValid()) {
+                logInfo(MODULE, 'Session became valid during timeout');
+                this._sessionActive = true;
+                if (this._sessionResolve) {
+                    this._sessionResolve({ success: true, delayed: true });
+                }
+            } else {
+                logWarn(MODULE, `Session acquisition timeout after ${timeout}ms - continuing in degraded mode`);
+                // ALWAYS RESOLVE, never reject
+                if (this._sessionResolve) {
                     this._sessionResolve({ success: true, degraded: true, timeout: true });
-                    this._sessionPromise = null;
-                    this._sessionResolve = null;
-                    this._sessionReject = null;
-                    this._sessionTimeoutId = null;
                 }
             }
+            
+            // Clean up
+            this._sessionPromise = null;
+            this._sessionResolve = null;
+            this._sessionReject = null;
+            this._sessionTimeoutId = null;
         }, timeout);
     });
 

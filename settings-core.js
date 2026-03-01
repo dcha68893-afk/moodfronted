@@ -1,9 +1,21 @@
 // =============================================
-// SETTINGS CORE - PARENT AUTHORITY v7.0.0
-// DETERMINISTIC STATE MACHINE UNDER PARENT CONTROL
-// NO DEMO_MODE | NO INDEPENDENT SESSION | NO RECOVERY LOOPS
-// COMPLETE INTEGRATION WITH PARENT ORCHESTRATION
+// INITIALIZATION GUARD - PREVENT MULTIPLE INITIALIZATIONS
 // =============================================
+(function() {
+    if (window.__SETTINGS_CORE_INITIALIZED__) {
+        console.log('[settings-core] Already initialized, skipping');
+        return;
+    }
+    window.__SETTINGS_CORE_INITIALIZED__ = true;
+    window.__SETTINGS_INITIALIZING__ = true;
+
+    // Force immediate parent detection
+    try {
+        if (window.parent && window.parent !== window) {
+            window.__PARENT_DETECTED__ = true;
+        }
+    } catch (e) {}
+})();
 
 // =============================================
 // MODULE IDENTITY & VERSION
@@ -4284,24 +4296,85 @@ function handleSessionNull() {
 }
 
 // =============================================
-// HANDLE PARENT READY - STEP 4
+// HANDLE PARENT READY - STEP 4 (FIXED)
 // =============================================
 function handleParentReady(message) {
     parentReady = true;
     parentReadyReceived = true;
     parentCommunicationReady = true;
     
-    if (currentState !== SETTINGS_STATES.SESSION_RECEIVED) return;
+    console.log('[settings-core] 📥 PARENT_READY received');
     
-    if (isSessionValid()) {
-        transitionTo(SETTINGS_STATES.ACTIVE, 'parent_ready_with_session');
-        
-        HeartbeatManager.start();
-        
-        loadSettingsFromAPI();
-    } else {
-        disableSettingsControls();
+    // CRITICAL FIX: Don't wait for session if we already have cached user
+    if (currentState === SETTINGS_STATES.REGISTERED || currentState === SETTINGS_STATES.SESSION_RECEIVED || currentState === SETTINGS_STATES.INIT) {
+        if (isSessionValid() || currentUser) {
+            console.log('[settings-core] ✅ Using cached user, going ACTIVE');
+            transitionTo(SETTINGS_STATES.ACTIVE, 'parent_ready_with_cached_session');
+            HeartbeatManager.start();
+            
+            // Load settings immediately
+            setTimeout(() => {
+                if (currentState === SETTINGS_STATES.ACTIVE) {
+                    console.log('[settings-core] ✅ Settings READY with cached user');
+                    transitionTo(SETTINGS_STATES.READY, 'cached_user_ready');
+                    isReady = true;
+                    dispatchSettingsLoadedEvent();
+                    
+                    // Notify parent we're ready
+                    sendToParent({
+                        type: 'SETTINGS_READY',
+                        timestamp: Date.now()
+                    }, 0, false);
+                }
+            }, 100);
+        } else {
+            console.log('[settings-core] ⚠️ No cached user, requesting session');
+            // Request session if we don't have it
+            sendToParent({
+                type: 'REQUEST_SESSION',
+                module: 'settings',
+                timestamp: Date.now()
+            }, 0, false);
+            
+            // Retry after 2 seconds
+            setTimeout(() => {
+                if (!parentSessionReceived && currentState !== SETTINGS_STATES.READY) {
+                    console.log('[settings-core] ⚠️ Session request retry');
+                    sendToParent({
+                        type: 'REQUEST_SESSION',
+                        module: 'settings',
+                        timestamp: Date.now()
+                    }, 0, false);
+                }
+            }, 2000);
+        }
     }
+}
+// =============================================
+// REQUEST SESSION FROM PARENT - WITH RETRY
+// =============================================
+function requestSessionFromParent() {
+    if (parentSessionReceived) return;
+    
+    console.log('[settings-core] 📤 Requesting session from parent');
+    
+    sendToParent({
+        type: 'REQUEST_SESSION',
+        module: 'settings',
+        timestamp: Date.now()
+    }, 0, false);
+    
+    // Retry after 2 seconds if no response
+    setTimeout(() => {
+        if (!parentSessionReceived && currentState !== SETTINGS_STATES.READY) {
+            console.log('[settings-core] ⚠️ Session request retry');
+            sendToParent({
+                type: 'REQUEST_SESSION',
+                module: 'settings',
+                timestamp: Date.now()
+            }, 0, false);
+        }
+    }, 2000);
 }
 
 // =============================================
@@ -4756,6 +4829,11 @@ export async function loadFromLocalStorage() {
         if (cachedUser) {
             currentUser = cachedUser;
             coreData.user = cachedUser;
+            // CRITICAL: Update session object
+            session.user = cachedUser;
+            session.expiresAt = Date.now() + 3600000; // 1 hour cache expiry
+            session.version = 1;
+            console.log('[settings-core] ✅ Loaded cached user:', cachedUser.displayName);
         }
         
         const savedSettings = SafeStorage.getJSON('user_settings', null);
@@ -4776,14 +4854,12 @@ export async function loadFromLocalStorage() {
         calculateStorageUsage();
         return true;
     } catch (error) {
+        console.log('[settings-core] ⚠️ Error loading from localStorage:', error);
         userSettings = JSON.parse(JSON.stringify(DEFAULT_SETTINGS));
         coreData.settings = JSON.parse(JSON.stringify(DEFAULT_SETTINGS));
-        currentUser = { displayName: 'User', id: 'local-user' };
-        coreData.user = { displayName: 'User', id: 'local-user' };
         return false;
     }
 }
-
 // =============================================
 // UPDATE USER UI
 // =============================================
@@ -5556,15 +5632,27 @@ export async function initializeCore(options = {}) {
                 activeIntervals.add(checkInterval);
                 
                 safeSetTimeout(() => {
-                    clearInterval(checkInterval);
-                    activeIntervals.delete(checkInterval);
-                    initializationInProgress = false;
-                    initializationPromise = null;
-                    if (currentState === SETTINGS_STATES.INIT || currentState === SETTINGS_STATES.REGISTERING) {
-                        transitionTo(SETTINGS_STATES.DEGRADED, 'initialization_timeout');
-                    }
-                    resolve({ success: true, state: currentState, authenticated: false });
-                }, 5000);
+    clearInterval(checkInterval);
+    activeIntervals.delete(checkInterval);
+    initializationInProgress = false;
+    initializationPromise = null;
+    if (currentState === SETTINGS_STATES.INIT || currentState === SETTINGS_STATES.REGISTERING) {
+        // Don't degrade immediately - check if we have cached user
+        if (currentUser) {
+            console.log('[settings-core] ✅ Using cached user after timeout');
+            transitionTo(SETTINGS_STATES.READY, 'cached_user_timeout');
+            isReady = true;
+            dispatchSettingsLoadedEvent();
+            resolve({ success: true, state: SETTINGS_STATES.READY, authenticated: false });
+        } else {
+            console.log('[settings-core] ⚠️ No cached user, entering degraded mode');
+            transitionTo(SETTINGS_STATES.DEGRADED, 'initialization_timeout');
+            resolve({ success: true, state: SETTINGS_STATES.DEGRADED, authenticated: false });
+        }
+    } else {
+        resolve({ success: true, state: currentState, authenticated: isSessionValid() });
+    }
+}, 5000);
             });
             
         } catch (error) {

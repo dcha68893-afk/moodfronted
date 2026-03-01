@@ -2,9 +2,21 @@
 <!DOCTYPE html>
 <html lang="en" class="h-full">
 <head>
-<!-- ========== CSP META TAG - FIRST IN HEAD (NO BOM) ========== -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' 'unsafe-eval' https: http: data: blob:; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; connect-src 'self' https: http: ws: wss:; frame-src 'self' https: http:; child-src 'self' https: http:; img-src 'self' https: http: data:;">
     
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#4F46E5">
+    <link rel="icon" href="favicon.ico" type="image/x-icon">
+    <link rel="icon" type="image/png" sizes="192x192" href="icons/moodchat-192.png">
+    <link rel="icon" type="image/png" sizes="512x512" href="icons/moodchat-512.png">
+    <link rel="apple-touch-icon" href="icons/moodchat-192.png">
+    <meta name="theme-color" content="#000000">
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<!-- ========== CSP META TAG - FIRST IN HEAD (NO BOM) ========== -->
+ <!-- ========== CSP META TAG - FIRST IN HEAD (NO BOM) ========== -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' 'unsafe-eval' https: http: data: blob:; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; connect-src 'self' https: http: ws: wss:; frame-src 'self' https: http:; child-src 'self' https: http:; img-src 'self' https: http: data:;">
+
+<script>
 // Suppress iframe sandbox warnings (usually from extensions)
 (function() {
     const originalError = console.error;
@@ -31,7 +43,6 @@
     };
 })();
 </script>
-
 <!-- ========== SECTION 1: EARLY SESSION BOOTSTRAP (SYNCHRONOUS) ========== -->
 <!-- THIS MUST RUN BEFORE ANYTHING ELSE - NO API CALLS, NO ASYNC -->
 <script>
@@ -2515,16 +2526,6 @@
 </script>
 <!-- ========== END DETERMINISTIC PARENT AUTHORITY v8.0 ========== -->
 
-    <link rel="manifest" href="../manifest.json">
-    
-    <meta name="theme-color" content="#4F46E5">
-    <link rel="icon" href="favicon.ico" type="image/x-icon">
-    <link rel="icon" type="image/png" sizes="192x192" href="icons/moodchat-192.png">
-    <link rel="icon" type="image/png" sizes="512x512" href="icons/moodchat-512.png">
-    <link rel="apple-touch-icon" href="icons/moodchat-192.png">
-    <meta name="theme-color" content="#000000">
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Kynecta - Advanced Mood-Based Chat</title>
     
     <!-- FIXED: Local fallback for Tailwind CSS -->
@@ -11446,19 +11447,32 @@ div[role="alert"] {
     'use strict';
     
     console.log('[UNIFIED] ✅ Installing unified message handler with compatibility');
-    const sessionRequestCache = new Map() // Use Map to track with timestamps
-    const SESSION_REQUEST_TTL = 30000 // 30 seconds TTL
     
-    // Cleanup function for session request cache
-    function cleanupSessionCache() {
+    // ===== DUPLICATE PREVENTION CACHES =====
+    const sessionRequestCache = new Map(); // Track REQUEST_SESSION by requestId
+    const processedMessages = new Map();    // Track all processed messages by messageId
+    const SESSION_REQUEST_TTL = 30000;      // 30 seconds TTL
+    const MESSAGE_TTL = 10000;               // 10 seconds for general messages
+    
+    // Cleanup function for all caches
+    function cleanupCaches() {
         const now = Date.now();
+        
+        // Clean session request cache
         for (const [requestId, timestamp] of sessionRequestCache.entries()) {
             if (now - timestamp > SESSION_REQUEST_TTL) {
                 sessionRequestCache.delete(requestId);
             }
         }
+        
+        // Clean processed messages cache
+        for (const [msgId, timestamp] of processedMessages.entries()) {
+            if (now - timestamp > MESSAGE_TTL) {
+                processedMessages.delete(msgId);
+            }
+        }
     }
-    setInterval(cleanupSessionCache, 10000);
+    setInterval(cleanupCaches, 10000);
     
     window.addEventListener('message', function(event) {
         if (event.origin !== window.location.origin && event.origin !== 'null') {
@@ -11472,7 +11486,16 @@ div[role="alert"] {
         const source = event.source;
         const origin = event.origin;
         
-        // ===== HANDLE REGISTER_MODULE =====
+        // ===== GLOBAL DUPLICATE PREVENTION =====
+        if (messageId) {
+            if (processedMessages.has(messageId)) {
+                // Silent drop - already processed this exact message
+                return;
+            }
+            processedMessages.set(messageId, Date.now());
+        }
+        
+        // ===== HANDLE REGISTER_MODULE - FIXED =====
         if (data.type === 'REGISTER_MODULE') {
             console.log('[UNIFIED] 📥 REGISTER_MODULE received');
             
@@ -11483,9 +11506,9 @@ div[role="alert"] {
             if (window.__BOOT_STATE__) window.__BOOT_STATE__.iframesRegistered.add(module);
             
             const session = window.__PARENT_SESSION__?.session || 
-                           window.AUTH_SESSION || 
-                           window._sessionCache || 
-                           { authenticated: false };
+                            window.AUTH_SESSION || 
+                            window._sessionCache || 
+                            { authenticated: false };
             
             // Send MODULE_REGISTERED
             try {
@@ -11508,8 +11531,28 @@ div[role="alert"] {
                     payload: { success: true, module: module },
                     timestamp: Date.now()
                 }, origin);
+                console.log('[UNIFIED] ✅ ACK sent for REGISTER_MODULE');
             } catch (e) {}
             
+            // Send PARENT_READY
+            setTimeout(() => {
+                try {
+                    source.postMessage({
+                        type: 'PARENT_READY',
+                        messageId: 'parent_ready_' + Date.now(),
+                        requestId: messageId,
+                        payload: { 
+                            timestamp: Date.now(), 
+                            protocol: 'KYN-8.0',
+                            module: module 
+                        },
+                        timestamp: Date.now()
+                    }, origin);
+                    console.log('[UNIFIED] 📤 PARENT_READY sent to', module);
+                } catch (e) {}
+            }, 10);
+            
+            // Send session if available
             if (session.authenticated) {
                 setTimeout(() => {
                     try {
@@ -11518,11 +11561,18 @@ div[role="alert"] {
                             messageId: 'session_' + Date.now(),
                             requestId: messageId,
                             session: session,
-                            payload: session,
+                            payload: {
+                                authenticated: true,
+                                userId: session.userId,
+                                token: session.token,
+                                user: session.user,
+                                expiresAt: session.expiresAt
+                            },
                             timestamp: Date.now()
                         }, origin);
+                        console.log('[UNIFIED] 📤 SESSION_ACTIVE sent to', module);
                     } catch (e) {}
-                }, 10);
+                }, 5);
             }
             
             if (event.data) event.data._processedBy = 'unified';
@@ -11540,7 +11590,7 @@ div[role="alert"] {
             const authenticated = !!(session?.authenticated);
             const userId = session?.userId || session?.user?.id;
             
-            // ===== FORMAT 1: MODERN FORMAT (what your handler already does) =====
+            // ===== FORMAT 1: MODERN FORMAT =====
             try {
                 source.postMessage({
                     type: 'SESSION_VERIFIED',
@@ -11555,13 +11605,13 @@ div[role="alert"] {
                 }, origin);
             } catch (e) {}
             
-            // ===== FORMAT 2: LEGACY FORMAT (what calls-core.js might expect) =====
+            // ===== FORMAT 2: LEGACY FORMAT =====
             try {
                 source.postMessage({
-                    type: 'VERIFY_RESPONSE',  // Some cores expect this
+                    type: 'VERIFY_RESPONSE',
                     requestId: requestId,
                     messageId: requestId,
-                    valid: authenticated,      // Direct property, not in payload
+                    valid: authenticated,
                     userId: userId,
                     timestamp: Date.now()
                 }, origin);
@@ -11589,25 +11639,32 @@ div[role="alert"] {
             return;
         }
         
-        // ===== HANDLE REQUEST_SESSION =====
+        // ===== HANDLE REQUEST_SESSION - WITH PROPER DUPLICATE HANDLING =====
         if (data.type === 'REQUEST_SESSION') {
             const requestId = messageId;
             if (!requestId) return;
             
-            // ===== FIXED: Don't ignore duplicates, just mark as processed but still respond =====
-            if (sessionRequestCache.has(requestId)) {
-                console.log('[UNIFIED] ⚠️ Duplicate REQUEST_SESSION received, responding again:', requestId);
-            }
-            sessionRequestCache.set(requestId, Date.now());
+            // ===== FIXED: Track duplicates but STILL RESPOND (parent authority must respond) =====
+            const isDuplicate = sessionRequestCache.has(requestId);
             
-            console.log('[UNIFIED] 📥 REQUEST_SESSION received');
+            if (isDuplicate) {
+                console.log('[UNIFIED] ⚠️ Duplicate REQUEST_SESSION received:', requestId);
+                // Still respond - parent must always respond to session requests
+            } else {
+                console.log('[UNIFIED] 📥 REQUEST_SESSION received');
+            }
+            
+            // Store/update timestamp
+            sessionRequestCache.set(requestId, Date.now());
             
             const session = window.__PARENT_SESSION__?.session || 
                            window.AUTH_SESSION || 
                            window._sessionCache || 
                            { authenticated: false };
             
-            // Send SESSION_RESPONSE
+            // ===== ALWAYS SEND RESPONSE (parent authority) =====
+            
+            // Send SESSION_RESPONSE (primary response)
             try {
                 source.postMessage({
                     type: 'SESSION_RESPONSE',
@@ -11622,12 +11679,12 @@ div[role="alert"] {
                     },
                     timestamp: Date.now()
                 }, origin);
-                console.log('[UNIFIED] ✅ SESSION_RESPONSE sent');
+                console.log('[UNIFIED] ✅ SESSION_RESPONSE sent' + (isDuplicate ? ' (duplicate)' : ''));
             } catch (e) {
                 console.error('[UNIFIED] Failed to send SESSION_RESPONSE:', e);
             }
             
-            // Send ACK
+            // Send ACK (secondary confirmation)
             try {
                 source.postMessage({
                     type: 'ACK',
@@ -11639,8 +11696,28 @@ div[role="alert"] {
                 }, origin);
             } catch (e) {}
             
-            // ===== BROADCAST TO ALL IFRAMES AFTER SESSION RESPONSE =====
+            // Send SESSION_ACTIVE if authenticated (extra format)
             if (session?.authenticated) {
+                try {
+                    source.postMessage({
+                        type: 'SESSION_ACTIVE',
+                        requestId: requestId,
+                        messageId: requestId,
+                        session: session,
+                        payload: {
+                            authenticated: true,
+                            userId: session.userId,
+                            token: session.token,
+                            user: session.user
+                        },
+                        timestamp: Date.now()
+                    }, origin);
+                } catch (e) {}
+            }
+            
+            // ===== BROADCAST TO ALL IFRAMES AFTER FIRST SESSION RESPONSE =====
+            // Only broadcast on first request, not duplicates
+            if (!isDuplicate && session?.authenticated) {
                 setTimeout(() => {
                     const iframeIds = [
                         'messagesIframe', 'statusIframe', 'groupIframe', 
@@ -11779,6 +11856,7 @@ div[role="alert"] {
     
     console.log('[UNIFIED] ✅ Unified message handler installed with compatibility');
 })();
+
 // ========== VERIFY_SESSION COMPATIBILITY LAYER ==========
 // This ensures calls-core.js receives verification responses
 (function() {
@@ -11903,6 +11981,7 @@ div[role="alert"] {
     
     console.log('[COMPAT] ✅ VERIFY_SESSION compatibility layer installed');
 })();
+
 // ========== FINAL OPTIMIZATIONS ==========
 (function() {
     'use strict';
@@ -11944,79 +12023,7 @@ div[role="alert"] {
         console.log('[OPTIMIZE] PARENT_READY broadcast complete');
     }, 100);
     
-    // 3. Suppress non-critical warnings (optional - for cleaner console)
-    const suppressedWarnings = [
-        'Handshake slow',
-        'Handshake timeout',
-        'Handshake fallback',
-        'Duplicate REQUEST_SESSION'
-    ];
-    
-    const originalWarn = console.warn;
-    console.warn = function(msg, ...args) {
-        if (msg && typeof msg === 'string') {
-            for (const pattern of suppressedWarnings) {
-                if (msg.includes(pattern)) {
-                    return; // Suppress these warnings
-                }
-            }
-        }
-        originalWarn.call(console, msg, ...args);
-    };
-    
-    // 4. Fix status module retry
-    if (window.statusCore && window.statusCore.retryHandshake) {
-        const originalRetry = window.statusCore.retryHandshake;
-        window.statusCore.retryHandshake = function() {
-            // Check if we already have session before retrying
-            const hasSession = !!(window.__PARENT_SESSION__?.session?.authenticated || 
-                                 window.AUTH_SESSION || 
-                                 window._sessionCache);
-            
-            if (hasSession) {
-                // If we have session, just send session data instead of full handshake
-                const statusIframe = document.getElementById('statusIframe');
-                if (statusIframe && statusIframe.contentWindow) {
-                    statusIframe.contentWindow.postMessage({
-                        type: 'SESSION_ACTIVE',
-                        session: window.__PARENT_SESSION__?.session || window.AUTH_SESSION,
-                        timestamp: Date.now(),
-                        _processedBy: 'optimizer'
-                    }, '*');
-                    return;
-                }
-            }
-            
-            return originalRetry.call(this);
-        };
-    }
-    
-    // 5. Reduce duplicate REQUEST_SESSION by caching responses
-    const sessionResponseCache = new Map();
-    const originalPostMessage = window.postMessage;
-    window.postMessage = function(message, targetOrigin, transfer) {
-        // Cache SESSION_RESPONSE messages
-        if (message && message.type === 'SESSION_RESPONSE' && message.requestId) {
-            sessionResponseCache.set(message.requestId, {
-                message: message,
-                timestamp: Date.now()
-            });
-            
-            // Cleanup old cache entries
-            if (sessionResponseCache.size > 50) {
-                const now = Date.now();
-                for (const [id, data] of sessionResponseCache.entries()) {
-                    if (now - data.timestamp > 30000) {
-                        sessionResponseCache.delete(id);
-                    }
-                }
-            }
-        }
-        
-        return originalPostMessage.call(this, message, targetOrigin, transfer);
-    };
-    
-    // 6. Tools module recovery
+    // 3. Tools module recovery
     setTimeout(function recoverTools() {
         const toolsIframe = document.getElementById('toolsIframe');
         if (toolsIframe && toolsIframe.contentWindow) {

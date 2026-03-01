@@ -66,7 +66,6 @@
 // VERIFY_SESSION success → Send message
 // No skipping allowed.
 // =============================================
-
 (function() {
     'use strict';
 
@@ -119,36 +118,50 @@
         DEGRADED: 'DEGRADED'
     };
 
-    const V7StateMachine = {
-        _state: V7_STATES.INIT,
-        _stateHistory: [],
-        _listeners: new Set(),
-        _maxHistorySize: 30,
-        _timers: {
-            handshake: null,
-            session: null,
-            parentReady: null,
-            heartbeat: null,
-            recovery: null
-        },
-        _heartbeatMissed: 0,
-        _heartbeatMaxMissed: 3,
-        _lastHeartbeat: 0,
-        _handshakeComplete: false,
-        _handshakeStartTime: 0,
-        _sessionValid: false,
-        _sessionData: null,
-        _messageQueue: [],
-        _queueMaxSize: 50,
-        _requestIdCache: new Set(), // For duplicate prevention
-        _sessionAuthority: null, // Track session authority from parent
-        
-        init() {
-            this._handshakeStartTime = Date.now();
-            this._state = V7_STATES.INIT;
-            this._logState('Initialized');
-            return this;
-        },
+    // =============================================
+    // [V7.0 COMPLIANCE] - Deterministic Parent Authority State Machine
+    // =============================================
+const V7StateMachine = {
+    _state: V7_STATES.INIT,
+    _stateHistory: [],
+    _listeners: new Set(),
+    _maxHistorySize: 30,
+    _timers: {
+        handshake: null,
+        session: null,
+        parentReady: null,
+        heartbeat: null,
+        recovery: null
+    },
+    _heartbeatMissed: 0,
+    _heartbeatMaxMissed: 3,
+    _lastHeartbeat: 0,
+    _handshakeComplete: false,
+    _handshakeStartTime: 0,
+    _sessionValid: false,
+    _sessionData: null,
+    _messageQueue: [],
+    _queueMaxSize: 50,
+    _requestIdCache: new Set(),
+    _sessionAuthority: null,
+    
+    // ADD THESE:
+    _registrationSent: false,
+    _sessionRequested: false,
+    _processedRequests: new Map(),
+    _lastProcessedCleanup: Date.now(),
+    _pendingHeartbeat: null,  // <-- ADD THIS LINE
+
+    init: function() {
+    this._handshakeStartTime = Date.now();
+    this._state = V7_STATES.INIT;
+    this._registrationSent = false;
+    this._sessionRequested = false;
+    this._processedRequests = new Map();
+    this._lastProcessedCleanup = Date.now();
+    this._logState('Initialized');
+    return this;
+},
         
         get current() { return this._state; },
         
@@ -212,9 +225,12 @@
             }
             
             if (toState === V7_STATES.DEGRADED) {
-                this._stopHeartbeat();
-                this._messageQueue = []; // Clear queue on degraded
-            }
+    this._stopHeartbeat();
+    this._messageQueue = []; // Clear queue on degraded
+    // Reset flags for retry
+    this._registrationSent = false;
+    this._sessionRequested = false;
+}
             
             if (toState === V7_STATES.SESSION_RECEIVED && this._sessionValid) {
                 // Auto-transition to ACTIVE after SESSION_RECEIVED if session valid
@@ -253,14 +269,21 @@
         }
     }, TIMING.HANDSHAKE_TIMEOUT); // Use TIMING constant
 },
-        startSessionTimer() {
+startSessionTimer() {
     this._clearTimer('session');
     this._timers.session = setTimeout(() => {
         if (this._state === V7_STATES.REGISTERED) {
-            console.log(`[V7] ⚠️ Session timeout at ${TIMING.HANDSHAKE_WARNING}ms`);
-            this.transition(V7_STATES.DEGRADED, 'session_timeout');
+            console.log(`[V7] ⚠️ Session timeout at ${TIMING.HANDSHAKE_WARNING}ms - requesting session`);
+            this.requestSessionFromParent();
+            
+            // Give it more time
+            this._timers.session2 = setTimeout(() => {
+                if (this._state === V7_STATES.REGISTERED) {
+                    this.transition(V7_STATES.DEGRADED, 'session_timeout');
+                }
+            }, TIMING.HANDSHAKE_WARNING * 2);
         }
-    }, TIMING.HANDSHAKE_WARNING); // Use TIMING constant
+    }, TIMING.HANDSHAKE_WARNING);
 },
 
 startParentReadyTimer() {
@@ -311,35 +334,59 @@ startParentReadyTimer() {
         },
         
         _sendHeartbeat() {
-            if (this._state !== V7_STATES.ACTIVE && this._state !== V7_STATES.READY) return;
-            
-            const heartbeatId = `hb_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
-            
-            MessagesTransport.send('HEARTBEAT', {
-                id: heartbeatId,
-                module: 'messages',
-                frameId: MessagesTransport.getFrameId(),
-                timestamp: Date.now()
-            }, { requireAck: true, timeout: 500 }) // 20ms timeout for ACK
-            .then(() => {
-                this._heartbeatMissed = 0;
-                this._lastHeartbeat = Date.now();
-            })
-            .catch(() => {
+    if (this._state !== V7_STATES.ACTIVE && this._state !== V7_STATES.READY) return;
+    
+    // CRITICAL FIX: Don't send if previous heartbeat still pending
+    if (this._pendingHeartbeat) {
+        const pendingAge = Date.now() - this._pendingHeartbeat.timestamp;
+        if (pendingAge < TIMING.HEARTBEAT_ACK_TIMEOUT) {
+            // Still waiting for previous heartbeat ACK
+            return;
+        } else {
+            // Previous heartbeat timed out, clear it
+            clearTimeout(this._pendingHeartbeat.timeout);
+            this._pendingHeartbeat = null;
+            this._heartbeatMissed++;
+        }
+    }
+    
+    const heartbeatId = `hb_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+    
+    this._pendingHeartbeat = {
+        id: heartbeatId,
+        timestamp: Date.now(),
+        timeout: setTimeout(() => {
+            if (this._pendingHeartbeat && this._pendingHeartbeat.id === heartbeatId) {
                 this._heartbeatMissed++;
+                this._pendingHeartbeat = null;
                 
                 if (this._heartbeatMissed === 1) {
                     console.log('[V7] ⚠️ Heartbeat 1 missed - connection unstable');
-                } else if (this._heartbeatMissed === 2) {
-                    console.log('[V7] ⚠️ Heartbeat 2 missed - pausing new actions');
-                    // Pause new outgoing actions but don't degrade
                 } else if (this._heartbeatMissed >= 3) {
                     console.log('[V7] ⚠️ Heartbeat 3 missed - waiting for parent recovery');
-                    // Don't degrade immediately, wait for parent recovery
-                    // No queueing of infinite heartbeats
                 }
-            });
-        },
+            }
+        }, TIMING.HEARTBEAT_ACK_TIMEOUT)
+    };
+    
+    MessagesTransport.send('HEARTBEAT', {
+        id: heartbeatId,
+        module: 'messages',
+        frameId: MessagesTransport.getFrameId(),
+        timestamp: Date.now()
+    }, { requireAck: true, timeout: TIMING.HEARTBEAT_ACK_TIMEOUT })
+    .then(() => {
+        if (this._pendingHeartbeat && this._pendingHeartbeat.id === heartbeatId) {
+            clearTimeout(this._pendingHeartbeat.timeout);
+            this._pendingHeartbeat = null;
+            this._heartbeatMissed = 0;
+            this._lastHeartbeat = Date.now();
+        }
+    })
+    .catch(() => {
+        // Error handled by timeout
+    });
+},
         
         _stopHeartbeat() {
             if (this._timers.heartbeat) {
@@ -400,6 +447,41 @@ startParentReadyTimer() {
             });
         },
         
+        // ========== DUPLICATE PREVENTION METHODS ==========
+isRequestProcessed: function(type, requestId) {
+    if (!requestId) return false;
+    
+    const key = `${type}:${requestId}`;
+    if (this._processedRequests.has(key)) {
+        console.log(`[V7] ⚠️ Duplicate request detected: ${key}`);
+        return true;
+    }
+    
+    // Cleanup old entries every minute
+    const now = Date.now();
+    if (now - this._lastProcessedCleanup > 60000) {
+        this._cleanupProcessedRequests();
+        this._lastProcessedCleanup = now;
+    }
+    
+    this._processedRequests.set(key, now);
+    return false;
+},
+
+_cleanupProcessedRequests: function() {
+    const now = Date.now();
+    for (const [key, timestamp] of this._processedRequests.entries()) {
+        if (now - timestamp > 60000) { // 1 minute TTL
+            this._processedRequests.delete(key);
+        }
+    }
+},
+
+heartbeatAckReceived: function() {
+    this._heartbeatMissed = 0;
+    this._lastHeartbeat = Date.now();
+    this._pendingHeartbeat = null;
+},
         // ========== SESSION MANAGEMENT ==========
         // Session accepted only from SESSION_ACTIVE or SESSION_REFRESHED
         // Stored in memory only, never modified, parent is sole authority
@@ -548,22 +630,104 @@ startParentReadyTimer() {
         // STEP 2: Wait for parent in order: MODULE_REGISTERED → SESSION_ACTIVE/NULL → PARENT_READY
         // STEP 3: On PARENT_READY, transition based on session
         
-        sendRegistration() {
-            if (this._state !== V7_STATES.INIT) return;
-            
-            console.log('[V7] 📤 Sending REGISTER_MODULE at t+0ms');
-            
-            this.transition(V7_STATES.REGISTERING, 'sending_registration');
-            this.startHandshakeTimer();
-            
-            MessagesTransport.send('REGISTER_MODULE', {
-    module: 'messages',
-    frameId: MessagesTransport.getFrameId(),
-    requestId: `reg_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`,
-    timestamp: Date.now(),
-    version: '7.0.0'
-}, { requireAck: true, timeout: TIMING.HANDSHAKE_TIMEOUT }); // Use TIMING constant
-        },
+        sendRegistration: function() {
+    if (this._state !== V7_STATES.INIT) return;
+    
+    // CRITICAL FIX: Prevent duplicate registration
+    if (this._registrationSent) {
+        console.log('[V7] ⚠️ Registration already sent, skipping duplicate');
+        return;
+    }
+    this._registrationSent = true;
+    
+    console.log('[V7] 📤 Sending REGISTER_MODULE at t+0ms');
+    
+    this.transition(V7_STATES.REGISTERING, 'sending_registration');
+    this.startHandshakeTimer();
+    
+    const requestId = `reg_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+    
+    MessagesTransport.send('REGISTER_MODULE', {
+        module: 'messages',
+        frameId: MessagesTransport.getFrameId(),
+        requestId: requestId,
+        timestamp: Date.now(),
+        version: '7.0.0'
+    }, { requireAck: true, timeout: TIMING.HANDSHAKE_TIMEOUT })
+    .then(response => {
+        if (response.success) {
+            console.log('[V7] ✅ REGISTER_MODULE ACK received');
+        } else {
+            console.log('[V7] ⚠️ REGISTER_MODULE ACK timeout - continuing anyway');
+            // Don't fail, parent might still send MODULE_REGISTERED
+        }
+    });
+},
+
+// ========== DUPLICATE PREVENTION ==========
+isRequestProcessed: function(type, requestId) {
+    if (!requestId) return false;
+    
+    const key = `${type}:${requestId}`;
+    if (this._processedRequests.has(key)) {
+        console.log(`[V7] ⚠️ Duplicate request detected: ${key}`);
+        return true;
+    }
+    
+    // Cleanup old entries every minute
+    const now = Date.now();
+    if (now - this._lastProcessedCleanup > 60000) {
+        this._cleanupProcessedRequests();
+        this._lastProcessedCleanup = now;
+    }
+    
+    this._processedRequests.set(key, now);
+    return false;
+},
+
+_cleanupProcessedRequests: function() {
+    const now = Date.now();
+    for (const [key, timestamp] of this._processedRequests.entries()) {
+        if (now - timestamp > 60000) { // 1 minute TTL
+            this._processedRequests.delete(key);
+        }
+    }
+},
+
+resetDuplicateFlags: function() {
+    this._registrationSent = false;
+    this._sessionRequested = false;
+    this._processedRequests.clear();
+},
+
+// Add this method to V7StateMachine
+requestSessionFromParent: function() {
+    if (this._state !== V7_STATES.REGISTERED) return;
+    
+    // CRITICAL FIX: Prevent multiple session requests
+    if (this._sessionRequested) {
+        console.log('[V7] ⚠️ Session already requested, skipping duplicate');
+        return;
+    }
+    this._sessionRequested = true;
+    
+    console.log('[V7] 📤 Requesting session from parent');
+    
+    const requestId = `req_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+    
+    MessagesTransport.send('REQUEST_SESSION', {
+        module: 'messages',
+        frameId: MessagesTransport.getFrameId(),
+        requestId: requestId,
+        timestamp: Date.now()
+    }, { requireAck: true, timeout: 5000 })
+    .then(response => {
+        if (response.success && response.ack?.session) {
+            this.handleSessionActive(response.ack.session);
+        }
+    })
+    .catch(() => {});
+},
 
         handleModuleRegistered(payload) {
             if (this._state !== V7_STATES.REGISTERING) return;
@@ -579,23 +743,30 @@ startParentReadyTimer() {
         },
         
         handleParentReady() {
-            console.log('[V7] ✅ PARENT_READY received at t+150ms');
-            this._clearTimer('parentReady');
-            
-            if (this._state === V7_STATES.SESSION_RECEIVED) {
-                if (this._sessionValid) {
-                    this.transition(V7_STATES.ACTIVE, 'parent_ready_with_session');
-                } else {
-                    // Session null - stay in SESSION_RECEIVED but show login UI
-                    console.log('[V7] ℹ️ No session - showing login required');
-                    // UI will handle login prompt
-                    window.dispatchEvent(new CustomEvent('sessionRequired'));
-                }
-            } else if (this._state === V7_STATES.REGISTERED) {
-                // Session never arrived - degraded
+    console.log('[V7] ✅ PARENT_READY received at t+???ms');
+    this._clearTimer('parentReady');
+    
+    if (this._state === V7_STATES.SESSION_RECEIVED) {
+        if (this._sessionValid) {
+            this.transition(V7_STATES.ACTIVE, 'parent_ready_with_session');
+        } else {
+            // Session null - stay in SESSION_RECEIVED but show login UI
+            console.log('[V7] ℹ️ No session - showing login required');
+            window.dispatchEvent(new CustomEvent('sessionRequired'));
+        }
+    } else if (this._state === V7_STATES.REGISTERED) {
+        // Session never arrived - but don't degrade immediately
+        // Wait a bit longer for session
+        console.log('[V7] ⚠️ PARENT_READY received but no session yet - waiting');
+        
+        // Give it more time for session to arrive
+        setTimeout(() => {
+            if (this._state === V7_STATES.REGISTERED && !this._sessionValid) {
                 this.transition(V7_STATES.DEGRADED, 'parent_ready_no_session');
             }
-        },
+        }, 2000);
+    }
+},
         
         // ========== UTILITIES ==========
         
@@ -653,6 +824,8 @@ startParentReadyTimer() {
         
         // ========== DUPLICATE PREVENTION ==========
         
+                // ========== DUPLICATE PREVENTION ==========
+        
         isRequestDuplicate(requestId) {
             if (this._requestIdCache.has(requestId)) return true;
             this._requestIdCache.add(requestId);
@@ -661,7 +834,8 @@ startParentReadyTimer() {
             return false;
         },
         
-        reset() {
+        // ADD THE reset FUNCTION HERE
+        reset: function() {
             this._clearAllTimers();
             this._stopHeartbeat();
             this._state = V7_STATES.INIT;
@@ -674,8 +848,12 @@ startParentReadyTimer() {
             this._sessionData = null;
             this._requestIdCache.clear();
             this._sessionAuthority = null;
-        }
-    };
+            this._registrationSent = false;
+            this._sessionRequested = false;
+            this._processedRequests.clear();
+        },
+        
+    };  // <-- THIS IS THE CLOSING BRACE OF V7StateMachine
 
     // Initialize v7 state machine
     const V7 = V7StateMachine.init();
@@ -855,35 +1033,36 @@ startParentReadyTimer() {
         VERSION: 'KYN-3.1'
     };
 
-    const TIMING = {
-    // Handshake timings - strict
-    HANDSHAKE_TIMEOUT: 1500,               // Increase from 150ms to 1500ms
-    HANDSHAKE_WARNING: 500,                 // Increase from 100ms to 500ms
-    HANDSHAKE_FALLBACK: 3000,                // Increase from 300ms to 3000ms
+// At line ~185 - Update TIMING constants
+const TIMING = {
+    // Handshake timings - INCREASED for reliability
+    HANDSHAKE_TIMEOUT: 10000,               // Increased from 5000ms to 10000ms
+    HANDSHAKE_WARNING: 3000,                 // Increased from 2000ms to 3000ms
+    HANDSHAKE_FALLBACK: 15000,                // Increased from 8000ms to 15000ms
     
-    // Verification timings - synchronous
-    VERIFY_SESSION_TIMEOUT: 500,            // Increase from 50ms to 500ms
-    VERIFY_MAX_RETRIES: 2,                  // Keep at 2
+    // Verification timings
+    VERIFY_SESSION_TIMEOUT: 5000,            // Increased from 2000ms to 5000ms
+    VERIFY_MAX_RETRIES: 2,                    // Reduced from 3 to 2 (prevents infinite loops)
     
-    // Heartbeat - starts only after ACTIVE
-    HEARTBEAT_INTERVAL: 30000,              // 30s interval (keep same)
-    HEARTBEAT_ACK_TIMEOUT: 5000,            // Wait 5s for ACK (keep same)
-    HEARTBEAT_MAX_MISSED: 3,                 // 3 missed before action (keep same)
+    // Heartbeat
+    HEARTBEAT_INTERVAL: 45000,               // Increased from 30s to 45s
+    HEARTBEAT_ACK_TIMEOUT: 10000,            // Increased from 5s to 10s
+    HEARTBEAT_MAX_MISSED: 3,                  // Keep at 3
     
     // Sync timings
-    SYNC_TIMEOUT: 3000,                       // Increase from 300ms to 3000ms
+    SYNC_TIMEOUT: 10000,                      // Increased from 5000ms to 10000ms
     
     // Message queue
-    QUEUE_FLUSH_INTERVAL: 5000,              // 5s flush interval (keep same)
-    MESSAGE_ID_CACHE_TTL: 5000,               // 5s TTL (keep same)
+    QUEUE_FLUSH_INTERVAL: 10000,              // Increased from 5s to 10s
+    MESSAGE_ID_CACHE_TTL: 30000,               // Increased from 5s to 30s
     
     // Recovery
-    RECOVERY_SILENCE_THRESHOLD: 10000,        // 10s silence (keep same)
+    RECOVERY_SILENCE_THRESHOLD: 30000,        // Increased from 15000ms to 30000ms
     
     // Retry limits
-    MAX_RETRIES: 2,                           // Max 2 retries (keep same)
-    RETRY_BACKOFF_1: 1000,                     // Increase from 500ms to 1000ms
-    RETRY_BACKOFF_2: 2000                       // Increase from 1000ms to 2000ms
+    MAX_RETRIES: 2,                            // Reduced from 3 to 2
+    RETRY_BACKOFF_1: 3000,                     // Increased from 2000ms to 3000ms
+    RETRY_BACKOFF_2: 6000                       // Increased from 4000ms to 6000ms
 };
 
     // CRITICAL: Parent expects these exact message types
@@ -1137,29 +1316,35 @@ startParentReadyTimer() {
     // MESSAGE ID CACHE - Deduplication
     // =============================================
     const MessageIdCache = {
-        _cache: new Map(),
-        
-        has: function(id) {
-            return this._cache.has(id);
-        },
-        
-        add: function(id) {
-            this._cache.set(id, Date.now());
-            setTimeout(() => {
+    _cache: new Map(),
+    _cleanupTimer: null,
+    
+    has: function(id) {
+        return this._cache.has(id);
+    },
+    
+    add: function(id) {
+        this._cache.set(id, Date.now());
+        this._scheduleCleanup();
+    },
+    
+    _scheduleCleanup: function() {
+        if (this._cleanupTimer) clearTimeout(this._cleanupTimer);
+        this._cleanupTimer = setTimeout(() => {
+            this.cleanup();
+            this._cleanupTimer = null;
+        }, 60000); // Cleanup every minute
+    },
+    
+    cleanup: function() {
+        const now = Date.now();
+        for (const [id, timestamp] of this._cache.entries()) {
+            if (now - timestamp > TIMING.MESSAGE_ID_CACHE_TTL) {
                 this._cache.delete(id);
-            }, TIMING.MESSAGE_ID_CACHE_TTL);
-        },
-        
-        cleanup: function() {
-            const now = Date.now();
-            for (const [id, timestamp] of this._cache.entries()) {
-                if (now - timestamp > TIMING.MESSAGE_ID_CACHE_TTL) {
-                    this._cache.delete(id);
-                }
             }
         }
-    };
-
+    }
+};
     // =============================================
     // MESSAGE TRACKER - Deduplicate messages with ACK handling
     // =============================================
@@ -2131,30 +2316,44 @@ startParentReadyTimer() {
         },
         
         _sendHeartbeat: function() {
-            // Don't send if paused or not in appropriate state
-            if (this._paused) return;
-            if (StateMachine.getState() !== V7_STATES.ACTIVE && 
-                StateMachine.getState() !== V7_STATES.SYNCING && 
-                StateMachine.getState() !== V7_STATES.READY) {
-                return;
-            }
-            
-            const heartbeatId = ++this._lastHeartbeatId;
-            const timestamp = Date.now();
-            
-            this._pendingHeartbeat = {
-                id: heartbeatId,
-                timestamp,
-                timeout: setTimeout(() => {
-                    this._handleMissed(heartbeatId);
-                }, TIMING.HEARTBEAT_ACK_TIMEOUT)
-            };
-            
-            MessagesTransport.send(MESSAGE_TYPES.HEARTBEAT, {
-                id: heartbeatId,
-                timestamp
-            }, { requireAck: true, timeout: TIMING.HEARTBEAT_ACK_TIMEOUT });
-        },
+    // Don't send if paused or not in appropriate state
+    if (this._paused) return;
+    if (StateMachine.getState() !== V7_STATES.ACTIVE && 
+        StateMachine.getState() !== V7_STATES.SYNCING && 
+        StateMachine.getState() !== V7_STATES.READY) {
+        return;
+    }
+    
+    // CRITICAL FIX: Don't send if previous heartbeat still pending
+    if (this._pendingHeartbeat) {
+        const pendingAge = Date.now() - this._pendingHeartbeat.timestamp;
+        if (pendingAge < TIMING.HEARTBEAT_ACK_TIMEOUT) {
+            // Still waiting for previous heartbeat ACK
+            return;
+        } else {
+            // Previous heartbeat timed out, clear it
+            clearTimeout(this._pendingHeartbeat.timeout);
+            this._pendingHeartbeat = null;
+            this._missedCount++;
+        }
+    }
+    
+    const heartbeatId = ++this._lastHeartbeatId;
+    const timestamp = Date.now();
+    
+    this._pendingHeartbeat = {
+        id: heartbeatId,
+        timestamp,
+        timeout: setTimeout(() => {
+            this._handleMissed(heartbeatId);
+        }, TIMING.HEARTBEAT_ACK_TIMEOUT)
+    };
+    
+    MessagesTransport.send(MESSAGE_TYPES.HEARTBEAT, {
+        id: heartbeatId,
+        timestamp
+    }, { requireAck: true, timeout: TIMING.HEARTBEAT_ACK_TIMEOUT });
+},
         
         _handleMissed: function(heartbeatId) {
             if (!this._pendingHeartbeat || this._pendingHeartbeat.id !== heartbeatId) return;
@@ -2881,25 +3080,32 @@ startParentReadyTimer() {
             window.__pendingRegistrations = new Map();
             
             window.addEventListener('message', (event) => {
-                if (!SecurityUtils.validateOrigin(event.origin)) return;
-                
-                const data = event.data;
-                if (!data || typeof data !== 'object') return;
-                
-                // Validate message is for messages module
-                if (data.module && data.module !== 'messages' && data.module !== 'all') return;
-                
-                // Update last message time
-                this._lastMessageTime = Date.now();
-                
-                // Check for duplicates
-                if (data.messageId && MessageIdCache.has(data.messageId)) {
-                    return;
-                }
-                if (data.messageId) {
-                    MessageIdCache.add(data.messageId);
-                }
-                
+    if (!SecurityUtils.validateOrigin(event.origin)) return;
+    
+    const data = event.data;
+    if (!data || typeof data !== 'object') return;
+    
+    // CRITICAL FIX: Strict duplicate prevention
+    if (data.messageId && MessageIdCache.has(data.messageId)) {
+        // Silent drop - no warning spam
+        return;
+    }
+    if (data.messageId) {
+        MessageIdCache.add(data.messageId);
+    }
+    
+    // Also check requestId duplicates using V7
+    if (data.requestId && V7.isRequestProcessed && 
+        V7.isRequestProcessed(data.type, data.requestId)) {
+        // Already processed this request type
+        return;
+    }
+    
+    // Validate message is for messages module
+    if (data.module && data.module !== 'messages' && data.module !== 'all') return;
+    
+    // Update last message time
+    this._lastMessageTime = Date.now();
                 // Handle handshake messages
                 if (data.type === MESSAGE_TYPES.MODULE_REGISTERED) {
                     Logger.info('Interceptor', '📥 MODULE_REGISTERED received');

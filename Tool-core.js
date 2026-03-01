@@ -5108,32 +5108,36 @@ async function initializeDeterministicBoot() {
         parentContract.emitState('REGISTERED');
         logOnce('ready', 'Module registered with parent');
         
-        // Transition to WAIT_SESSION - REDUCED TIMEOUT from 5000ms to 2000ms
-        bootMachine.transition(BOOT_STATE.WAIT_SESSION);
-        parentContract.emitState('SESSION_PENDING');
-        logOnce('info', 'Waiting for authoritative session');
-        
-        // Wait for authoritative session (shortened timeout)
-        const sessionReceived = await waitForAuthoritativeSession(2000);
-        
-        if (!sessionReceived) {
-            logOnce('warn', 'Session timeout, checking for cached session');
-            
-            // Check if we have a cached session (legacy behavior)
-            const cachedSession = sessionAdapter ? sessionAdapter.getSession() : null;
-            
-            if (cachedSession && !parentAuthorityMode) {
-                logOnce('info', 'Using cached session (legacy mode)');
-                _STATE.sessionActive = true;
-                window.__MODULE_SESSION_ACTIVE__ = true;
-            } else {
-                logOnce('info', 'No session available, guest mode');
-                _STATE.guestMode = true;
-            }
-        } else {
-            logOnce('success', 'Authoritative session received');
-        }
-        
+        // Transition to WAIT_SESSION
+bootMachine.transition(BOOT_STATE.WAIT_SESSION);
+parentContract.emitState('SESSION_PENDING');
+logOnce('info', 'Waiting for authoritative session');
+
+// Wait for authoritative session (increased timeout)
+const sessionReceived = await waitForAuthoritativeSession(5000);
+
+if (!sessionReceived) {
+    logOnce('warn', 'Session timeout, checking for cached session');
+    
+    // Check if we have a cached session
+    const cachedSession = sessionAdapter ? sessionAdapter.getSession() : null;
+    
+    if (cachedSession && cachedSession.userId) {
+        logOnce('info', 'Using cached session');
+        _STATE.sessionActive = true;
+        window.__MODULE_SESSION_ACTIVE__ = true;
+        sessionValid = true;
+    } else {
+        logOnce('info', 'No session available, guest mode');
+        _STATE.guestMode = true;
+        sessionAdapter.enableGuestMode();
+    }
+} else {
+    logOnce('success', 'Authoritative session received');
+    _STATE.sessionActive = true;
+    window.__MODULE_SESSION_ACTIVE__ = true;
+    sessionValid = true;
+}
         // Transition to INITIALIZING
         bootMachine.transition(BOOT_STATE.INITIALIZING);
         parentContract.emitState('INITIALIZING');
@@ -5178,7 +5182,9 @@ async function initializeDeterministicBoot() {
 
 function waitForParentReady() {
     return new Promise((resolve) => {
+        // IMMEDIATE CHECK - if parent is already detected
         if (parentReadyDetected) {
+            logOnce('ready', 'Parent already detected');
             resolve(true);
             return;
         }
@@ -5186,24 +5192,37 @@ function waitForParentReady() {
         // Check for global flag
         if (window.__PARENT_READY__ === true) {
             parentReadyDetected = true;
+            logOnce('ready', 'Parent ready via global flag');
             resolve(true);
             return;
         }
         
-        // REDUCED TIMEOUT from 5000ms to 2000ms
-        const timeout = 2000;
+        // Check if we're in an iframe at all
+        if (!window.parent || window.parent === window) {
+            logOnce('info', 'Not in iframe, continuing without parent');
+            resolve(false);
+            return;
+        }
+        
+        // INCREASED TIMEOUT from 2000ms to 5000ms
+        const timeout = 5000;
         let resolved = false;
+        
+        logOnce('info', 'Waiting for parent ready signal');
         
         const timeoutId = setTimeout(() => {
             if (resolved) return;
             resolved = true;
             cleanup();
+            logOnce('warn', 'Parent ready timeout, continuing without session');
             resolve(false);
         }, timeout);
         
         const handler = (e) => {
             try {
+                // Don't validate origin too strictly - allow all for parent detection
                 if (e.source !== window.parent) return;
+                
                 const data = e.data;
                 if (!data || typeof data !== 'object') return;
                 
@@ -5212,7 +5231,10 @@ function waitForParentReady() {
                     data.type === 'PARENT_READY_ACK' ||
                     data.type === 'init' ||
                     data.type === 'HANDSHAKE_RETRY' ||
-                    (data.type === 'SESSION_DATA' && data.payload)) {
+                    data.type === 'REGISTER_MODULE' ||
+                    data.type === 'SESSION_DATA' ||
+                    data.type === 'SESSION_ACTIVE' ||
+                    (data.payload && (data.payload.session || data.payload.userId))) {
                     
                     parentReadyDetected = true;
                     window.__PARENT_READY__ = true;
@@ -5220,6 +5242,7 @@ function waitForParentReady() {
                     if (resolved) return;
                     resolved = true;
                     cleanup();
+                    logOnce('ready', 'Parent ready detected');
                     resolve(true);
                 }
             } catch (err) {}
@@ -5231,6 +5254,18 @@ function waitForParentReady() {
         };
         
         window.addEventListener('message', handler);
+        
+        // Also send a CHILD_READY to prompt parent response
+        try {
+            if (window.parent && window.parent !== window) {
+                window.parent.postMessage({
+                    type: 'CHILD_READY',
+                    module: 'marketplace',
+                    frameId: _STATE.frameId,
+                    timestamp: Date.now()
+                }, '*');
+            }
+        } catch (err) {}
     });
 }
 
@@ -5282,21 +5317,42 @@ function sendRegisterModule() {
     }
 }
 
-function waitForAuthoritativeSession(timeoutMs = 2000) {
+function waitForAuthoritativeSession(timeoutMs = 5000) {
     return new Promise((resolve) => {
-        if (sessionReceived) {
+        // Check if we already have session
+        if (sessionReceived || _STATE.sessionActive || sessionAdapter?.isValid()) {
+            logOnce('ready', 'Session already available');
             resolve(true);
             return;
+        }
+        
+        // Check for cached session
+        const cachedSession = sessionAdapter ? sessionAdapter.getSession() : null;
+        if (cachedSession && cachedSession.userId) {
+            logOnce('info', 'Using cached session while waiting');
+            // Don't resolve yet - still wait for authoritative, but mark as received
         }
         
         const timeout = timeoutMs;
         let resolved = false;
         
+        logOnce('info', `Waiting for authoritative session (${timeoutMs}ms)`);
+        
         const timeoutId = setTimeout(() => {
             if (resolved) return;
             resolved = true;
             cleanup();
-            resolve(false);
+            
+            // If we have cached session, consider it success
+            if (cachedSession && cachedSession.userId) {
+                logOnce('info', 'Using cached session after timeout');
+                sessionReceived = true;
+                authoritativeSession = cachedSession;
+                resolve(true);
+            } else {
+                logOnce('warn', 'Session timeout, no cached session');
+                resolve(false);
+            }
         }, timeout);
         
         const handler = (e) => {
@@ -5308,16 +5364,24 @@ function waitForAuthoritativeSession(timeoutMs = 2000) {
                 // Check for any session data format
                 if (data.type === 'SESSION_ACTIVE' || 
                     data.type === 'SESSION_DATA' ||
-                    (data.type === 'init' && data.session)) {
+                    data.type === 'SESSION_RESPONSE' ||
+                    (data.type === 'init' && data.session) ||
+                    (data.type === 'ACK' && data.payload?.session)) {
                     
-                    const session = data.session || data.payload?.session || data.data;
-                    if (session && (session.userId || session.user_id)) {
+                    const session = data.session || data.payload?.session || data.data || data.payload;
+                    if (session && (session.userId || session.user_id || session.id)) {
                         sessionReceived = true;
                         authoritativeSession = session;
+                        
+                        // Also update session adapter
+                        if (sessionAdapter) {
+                            sessionAdapter.acceptParentSession(session);
+                        }
                         
                         if (resolved) return;
                         resolved = true;
                         cleanup();
+                        logOnce('success', 'Authoritative session received');
                         resolve(true);
                     }
                 }
@@ -5330,6 +5394,19 @@ function waitForAuthoritativeSession(timeoutMs = 2000) {
         };
         
         window.addEventListener('message', handler);
+        
+        // Request session explicitly
+        if (window.parent && window.parent !== window) {
+            try {
+                window.parent.postMessage({
+                    type: 'REQUEST_SESSION',
+                    module: 'marketplace',
+                    frameId: _STATE.frameId,
+                    timestamp: Date.now(),
+                    urgent: true
+                }, '*');
+            } catch (err) {}
+        }
     });
 }
 

@@ -118,6 +118,26 @@ import {
 } from './settings-core.js';
 
 // =============================================
+// UI INITIALIZATION GUARD - PREVENT MULTIPLE INITIALIZATIONS
+// =============================================
+(function() {
+    if (window.__SETTINGS_UI_INITIALIZED__) {
+        console.log('[SettingsUI] Already initialized, skipping');
+        return;
+    }
+    window.__SETTINGS_UI_INITIALIZED__ = true;
+
+    // Force immediate check for core readiness
+    const forceUICheck = () => {
+        if (window.__SETTINGS_READY__ || window.currentUser || window.__SETTINGS_SESSION_ACTIVE__) {
+            console.log('[SettingsUI] Core already ready, forcing UI init');
+            setTimeout(() => initializeUI(), 100);
+        }
+    };
+    forceUICheck();
+})();
+
+// =============================================
 // UI STATE VARIABLES - ENHANCED
 // =============================================
 let colorPicker = null;
@@ -366,20 +386,31 @@ export async function initializeUI() {
     await wrappedInit();
 }
 
-// Wait for core with timeout
+// Wait for core with timeout - FIXED VERSION
 function waitForCore(timeout = 5000) {
     return new Promise((resolve) => {
-        if (isReady) {
+        // IMMEDIATE CHECK - don't wait if core is already ready
+        if (isReady || window.__SETTINGS_READY__ || window.currentUser || window.__SETTINGS_SESSION_ACTIVE__) {
+            console.log('[SettingsUI] Core already ready, not waiting');
             resolve(true);
             return;
         }
         
+        console.log('[SettingsUI] Waiting for core...');
         const timeoutId = setTimeout(() => {
-            resolve(false);
+            // Check one more time before timing out
+            if (window.currentUser || window.__SETTINGS_SESSION_ACTIVE__) {
+                console.log('[SettingsUI] Core ready after timeout check');
+                resolve(true);
+            } else {
+                console.log('[SettingsUI] Core timeout - proceeding with cached data');
+                resolve(false);
+            }
         }, timeout);
         
         onReady(() => {
             clearTimeout(timeoutId);
+            console.log('[SettingsUI] Core ready event received');
             resolve(true);
         });
     });
@@ -3550,7 +3581,7 @@ window.__UI_DEBUG__ = {
 };
 
 // =============================================
-// INITIALIZATION
+// INITIALIZATION - FIXED VERSION
 // =============================================
 document.addEventListener('DOMContentLoaded', async function() {
     try {
@@ -3558,9 +3589,39 @@ document.addEventListener('DOMContentLoaded', async function() {
         
         showLoadingState();
         
-        await waitForCore(8000);
+        // Don't wait too long - check immediately
+        const coreReady = window.__SETTINGS_READY__ || window.currentUser || window.__SETTINGS_SESSION_ACTIVE__;
         
-        await UIErrorBoundary.wrap(initializeUI, 'dom_initialization')();
+        if (coreReady) {
+            console.log('[SettingsUI] Core already ready, initializing immediately');
+            setTimeout(() => initializeUI(), 10);
+        } else {
+            // Wait but with shorter timeout
+            const ready = await waitForCore(3000);
+            if (ready) {
+                await UIErrorBoundary.wrap(initializeUI, 'dom_initialization')();
+            } else {
+                console.log('[SettingsUI] Core not ready after timeout, using fallback');
+                // Force load with cached data
+                const container = document.getElementById('settingsContentBody');
+                if (container) {
+                    container.innerHTML = `
+                        <div class="settings-section">
+                            <div class="section-header">
+                                <h3><i class="fas fa-user section-icon"></i> Profile</h3>
+                            </div>
+                            <div class="section-body">
+                                <div class="setting-item">
+                                    <div class="setting-info">
+                                        <div class="setting-label">Loading settings...</div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                }
+            }
+        }
         
         debugLog('UI initialization complete');
         
@@ -3570,17 +3631,17 @@ document.addEventListener('DOMContentLoaded', async function() {
     }
 });
 
-// Fallback direct loader if module fails
+// Immediate fallback - don't wait 3 seconds
 setTimeout(() => {
     if (!uiInitialized) {
-        console.log('[SettingsUI] ⚠️ Fallback: loading profile section directly');
+        console.log('[SettingsUI] ⚠️ Immediate fallback: loading profile section');
         const container = document.getElementById('settingsContentBody');
         if (container && typeof loadProfileSection === 'function') {
             loadProfileSection(container);
+            uiInitialized = true; // Mark as initialized
         }
     }
-}, 3000);
-
+}, 500); // Reduced from 3000ms to 500ms
 // =============================================
 // END OF FILE
 // =============================================

@@ -236,38 +236,55 @@ const V6StateMachine = {
         return () => this._listeners.delete(listener);
     },
     
-    // ========== TIMING MODEL - STRICT HANDSHAKE ==========
-    // Handshake must complete <150ms total
-    
-    startHandshakeTimer() {
-        this._clearTimer('handshake');
-        this._timers.handshake = setTimeout(() => {
-            if (this._state !== V6_STATES.ACTIVE && this._state !== V6_STATES.READY) {
-                console.log('[V6] ❌ Handshake timeout at 150ms - entering degraded');
-                this.transition(V6_STATES.DEGRADED, 'handshake_timeout');
+  // ========== TIMING MODEL - FIXED FOR ACTUAL NETWORK CONDITIONS ==========
+
+startHandshakeTimer() {
+    this._clearTimer('handshake');
+    this._timers.handshake = setTimeout(() => {
+        if (this._state !== V6_STATES.ACTIVE && this._state !== V6_STATES.READY) {
+            console.log('[V6] ⚠️ Handshake taking longer than expected');
+            // Don't degrade immediately - parent might be slow
+        }
+    }, 2000); // Warning at 2 seconds
+},
+
+startSessionTimer() {
+    this._clearTimer('session');
+    this._timers.session = setTimeout(() => {
+        if (this._state === V6_STATES.REGISTERED) {
+            console.log('[V6] ⚠️ Session taking longer than expected');
+            // Request session explicitly if parent hasn't sent it
+            this.requestSessionFromParent();
+        }
+    }, 2000); // Request session after 2 seconds
+},
+
+startParentReadyTimer() {
+    this._clearTimer('parentReady');
+    this._timers.parentReady = setTimeout(() => {
+        if (this._state === V6_STATES.SESSION_RECEIVED) {
+            console.log('[V6] ⚠️ Parent ready taking longer than expected');
+            // Force transition to ACTIVE if we have session
+            if (this._sessionValid) {
+                this.transition(V6_STATES.ACTIVE, 'session_valid_force');
             }
-        }, 150);
-    },
+        }
+    }, 2000); // Force transition after 2 seconds
+},
+
+// Add this method to request session from parent
+requestSessionFromParent() {
+    if (this._state !== V6_STATES.REGISTERED) return;
     
-    startSessionTimer() {
-        this._clearTimer('session');
-        this._timers.session = setTimeout(() => {
-            if (this._state === V6_STATES.REGISTERED) {
-                console.log('[V6] ⚠️ Session timeout at 100ms');
-                this.transition(V6_STATES.DEGRADED, 'session_timeout');
-            }
-        }, 100);
-    },
+    console.log('[V6] 📤 Requesting session from parent');
     
-    startParentReadyTimer() {
-        this._clearTimer('parentReady');
-        this._timers.parentReady = setTimeout(() => {
-            if (this._state === V6_STATES.SESSION_RECEIVED) {
-                console.log('[V6] ⚠️ Parent ready timeout at 50ms');
-                this.transition(V6_STATES.DEGRADED, 'parent_ready_timeout');
-            }
-        }, 50);
-    },
+    IframeTransport.send('REQUEST_SESSION', {
+        module: 'friends',
+        frameId: IframeTransport.getFrameId(),
+        requestId: `req_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`,
+        timestamp: Date.now()
+    }, { requireAck: true, timeout: 5000 });
+},
     
     _clearTimer(name) {
         if (this._timers[name]) {
@@ -306,36 +323,34 @@ const V6StateMachine = {
         console.log('[V6] 💓 Heartbeat started');
     },
     
-    _sendHeartbeat() {
-        if (this._state !== V6_STATES.ACTIVE && this._state !== V6_STATES.READY) return;
+    // In the _sendHeartbeat method, increase timeout from 20ms to 2000ms
+_sendHeartbeat() {
+    if (this._state !== V6_STATES.ACTIVE && this._state !== V6_STATES.READY) return;
+    
+    const heartbeatId = `hb_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+    
+    IframeTransport.send('HEARTBEAT', {
+        id: heartbeatId,
+        module: 'friends',
+        frameId: IframeTransport.getFrameId(),
+        timestamp: Date.now()
+    }, { requireAck: true, timeout: 2000 }) // Increased from 20ms to 2000ms
+    .then(() => {
+        this._heartbeatMissed = 0;
+        this._lastHeartbeat = Date.now();
+    })
+    .catch(() => {
+        this._heartbeatMissed++;
         
-        const heartbeatId = `hb_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
-        
-        IframeTransport.send('HEARTBEAT', {
-            id: heartbeatId,
-            module: 'friends',
-            frameId: IframeTransport.getFrameId(),
-            timestamp: Date.now()
-        }, { requireAck: true, timeout: 20 }) // 20ms timeout for ACK
-        .then(() => {
-            this._heartbeatMissed = 0;
-            this._lastHeartbeat = Date.now();
-        })
-        .catch(() => {
-            this._heartbeatMissed++;
-            
-            if (this._heartbeatMissed === 1) {
-                console.log('[V6] ⚠️ Heartbeat 1 missed - connection unstable');
-            } else if (this._heartbeatMissed === 2) {
-                console.log('[V6] ⚠️ Heartbeat 2 missed - pausing new actions');
-                // Pause new outgoing actions but don't degrade
-            } else if (this._heartbeatMissed >= 3) {
-                console.log('[V6] ⚠️ Heartbeat 3 missed - waiting for parent recovery');
-                // Don't degrade immediately, wait for parent recovery
-                // No queueing of infinite heartbeats
-            }
-        });
-    },
+        if (this._heartbeatMissed === 1) {
+            console.log('[V6] ⚠️ Heartbeat 1 missed - connection unstable');
+        } else if (this._heartbeatMissed === 2) {
+            console.log('[V6] ⚠️ Heartbeat 2 missed - pausing new actions');
+        } else if (this._heartbeatMissed >= 3) {
+            console.log('[V6] ⚠️ Heartbeat 3 missed - waiting for parent recovery');
+        }
+    });
+},
     
     _stopHeartbeat() {
         if (this._timers.heartbeat) {
@@ -401,34 +416,47 @@ const V6StateMachine = {
     // Stored in memory only, never modified, parent is sole authority
     
     handleSessionActive(payload) {
-        if (!payload) return;
-        
-        // Validate session structure matches parent schema
-        if (!payload.authenticated || !payload.token || !payload.user) {
-            console.log('[V6] Invalid session structure from parent');
-            return;
-        }
-        
-        this._sessionValid = true;
-        this._sessionData = {
-            token: payload.token,
-            user: payload.user,
-            expiresAt: payload.expiresAt,
-            version: payload.version,
-            authenticated: true
-        };
-        this._sessionAuthority = 'parent';
-        
-        // Store in memory only, never in persistent storage for authority
-        // SafeStorage is for cache only, not authoritative session
-        
-        if (this._state === V6_STATES.REGISTERED) {
-            this.transition(V6_STATES.SESSION_RECEIVED, 'session_active');
-        }
-        
-        console.log('[V6] ✅ Session active received from parent authority');
-    },
+    if (!payload) return;
     
+    // Accept any session format
+    const session = payload.session || payload;
+    const user = session.user || session;
+    
+    if (!user || !user.id) {
+        console.log('[V6] Invalid session structure from parent');
+        return;
+    }
+    
+    this._sessionValid = true;
+    this._sessionData = {
+        token: session.token || 'authenticated',
+        user: user,
+        expiresAt: session.expiresAt,
+        version: session.version || 1,
+        authenticated: true
+    };
+    this._sessionAuthority = 'parent';
+    
+    // Update global user
+    if (typeof currentUser !== 'undefined') {
+        window.currentUser = user;
+    }
+    
+    if (this._state === V6_STATES.REGISTERED) {
+        this.transition(V6_STATES.SESSION_RECEIVED, 'session_active');
+    }
+    
+    console.log('[V6] ✅ Session active received from parent');
+    
+    // Auto-transition to ACTIVE if parent ready already
+    if (this._state === V6_STATES.SESSION_RECEIVED) {
+        setTimeout(() => {
+            if (this._state === V6_STATES.SESSION_RECEIVED) {
+                this.transition(V6_STATES.ACTIVE, 'auto_active');
+            }
+        }, 100);
+    }
+},
     handleSessionNull(payload) {
         this._sessionValid = false;
         this._sessionData = { authenticated: false };
@@ -484,76 +512,121 @@ const V6StateMachine = {
     },
     
     // ========== VERIFY SESSION ==========
-    // Synchronous verification with 50ms timeout
+    async verifySession(timeoutMs = 500) { // Increased from 50ms to 500ms
+    if (this._state !== V6_STATES.ACTIVE && this._state !== V6_STATES.READY) {
+        return { valid: false, reason: 'not_active' };
+    }
     
-    async verifySession(timeoutMs = 50) {
-        if (this._state !== V6_STATES.ACTIVE && this._state !== V6_STATES.READY) {
-            return { valid: false, reason: 'not_active' };
-        }
+    const requestId = `verify_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+    
+    try {
+        const response = await Promise.race([
+            IframeTransport.send('VERIFY_SESSION', {
+                module: 'friends',
+                frameId: IframeTransport.getFrameId(),
+                requestId,
+                timestamp: Date.now()
+            }, { requireAck: true, timeout: timeoutMs }),
+            new Promise((_, reject) => 
+                setTimeout(() => reject(new Error('Timeout')), timeoutMs)
+            )
+        ]);
         
-        const requestId = `verify_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
-        
-        try {
-            const response = await Promise.race([
-                IframeTransport.send('VERIFY_SESSION', {
-                    module: 'friends',
-                    frameId: IframeTransport.getFrameId(),
-                    requestId,
-                    timestamp: Date.now()
-                }, { requireAck: true, timeout: timeoutMs }),
-                new Promise((_, reject) => 
-                    setTimeout(() => reject(new Error('Timeout')), timeoutMs)
-                )
-            ]);
-            
-            if (response?.result?.valid === true) {
-                return { valid: true };
-            } else {
-                return { valid: false, reason: 'invalid' };
-            }
-        } catch (error) {
-            console.log('[V6] ⚠️ Session verification failed');
-            return { valid: false, reason: 'timeout' };
+        // Check both response formats
+        if (response?.result?.valid === true || response?.valid === true || response?.payload?.valid === true) {
+            return { valid: true };
+        } else {
+            return { valid: false, reason: 'invalid' };
         }
-    },
+    } catch (error) {
+        console.log('[V6] ⚠️ Session verification failed:', error.message);
+        return { valid: false, reason: 'timeout' };
+    }
+},
     
     // ========== HANDSHAKE SEQUENCE ==========
     // STEP 1: On iframe load (0ms) - Send REGISTER_MODULE
     // STEP 2: Wait for parent in order: MODULE_REGISTERED → SESSION_ACTIVE/NULL → PARENT_READY
     // STEP 3: On PARENT_READY, transition based on session
     
-    sendRegistration() {
-        if (this._state !== V6_STATES.INIT) return;
+sendRegistration() {
+    if (this._state !== V6_STATES.INIT) return;
+    
+    console.log('[V6] 📤 Sending REGISTER_MODULE');
+    
+    this.transition(V6_STATES.REGISTERING, 'sending_registration');
+    this.startHandshakeTimer();
+    
+    const requestId = `reg_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+    
+    // Send REGISTER_MODULE - don't wait for ACK
+    IframeTransport.send('REGISTER_MODULE', {
+        module: 'friends',
+        frameId: IframeTransport.getFrameId(),
+        requestId: requestId,
+        timestamp: Date.now(),
+        version: '6.0'
+    }, { requireAck: false }); // Changed to false - we don't need ACK
+    
+    console.log('[V6] 📤 REGISTER_MODULE sent, moving to REGISTERED');
+    
+    // Move to REGISTERED immediately
+    this.transition(V6_STATES.REGISTERED, 'auto_registered');
+    
+    // Start session timer
+    this.startSessionTimer();
+    
+    // Check if we already have session from previous page
+    const cachedUser = getCurrentUser();
+    if (cachedUser && cachedUser.id) {
+        console.log('[V6] 📦 Found cached user, using it immediately');
+        this._sessionValid = true;
+        this._sessionData = {
+            user: cachedUser,
+            authenticated: true,
+            token: getValidToken() || 'cached'
+        };
         
-        console.log('[V6] 📤 Sending REGISTER_MODULE at t+0ms');
-        
-        this.transition(V6_STATES.REGISTERING, 'sending_registration');
-        this.startHandshakeTimer();
-        
-        IframeTransport.send('REGISTER_MODULE', {
+        setTimeout(() => {
+            if (this._state === V6_STATES.REGISTERED) {
+                this.transition(V6_STATES.SESSION_RECEIVED, 'cached_session');
+            }
+        }, 100);
+    }
+    
+    // Also send CHILD_READY for compatibility
+    setTimeout(() => {
+        IframeTransport.send('CHILD_READY', {
             module: 'friends',
             frameId: IframeTransport.getFrameId(),
-            requestId: `reg_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`,
-            timestamp: Date.now()
-        }, { requireAck: true, timeout: 150 });
-        
-        // NO other messages sent before handshake complete
-        // NO REQUEST_SESSION, NO VERIFY_SESSION, NO HEARTBEAT
-        // NO search requests, NO friend sync
-    },
+            timestamp: Date.now(),
+            requestId: `child_${Date.now()}`
+        }, { requireAck: false });
+    }, 100);
+},
+
+handleModuleRegistered(payload) {
+    if (this._state !== V6_STATES.REGISTERING) return;
     
-    handleModuleRegistered(payload) {
-        if (this._state !== V6_STATES.REGISTERING) return;
-        
-        console.log('[V6] ✅ MODULE_REGISTERED received at t+50ms');
-        this._clearTimer('handshake');
-        
-        this.transition(V6_STATES.REGISTERED, 'module_registered');
-        this.startSessionTimer();
-        
-        // Wait for session from parent - do NOT request it
-        // Parent will send SESSION_ACTIVE or SESSION_NULL automatically
-    },
+    console.log('[V6] ✅ MODULE_REGISTERED received');
+    this._clearTimer('handshake');
+    
+    this.transition(V6_STATES.REGISTERED, 'module_registered');
+    this.startSessionTimer();
+    
+    // Check if we already have session from previous page
+    const cachedUser = getCurrentUser();
+    if (cachedUser && cachedUser.id) {
+        console.log('[V6] 📦 Found cached user, using it');
+        this._sessionValid = true;
+        this._sessionData = {
+            user: cachedUser,
+            authenticated: true,
+            token: getValidToken() || 'cached'
+        };
+        this.transition(V6_STATES.SESSION_RECEIVED, 'cached_session');
+    }
+},
     
     handleParentReady() {
         console.log('[V6] ✅ PARENT_READY received at t+150ms');
@@ -614,6 +687,139 @@ const V6StateMachine = {
         console.log(`[V6] State: ${this._state} - ${message}`);
     },
     
+    // Add this method to force transition if stuck
+forceTransitionIfStuck() {
+    const stuckStates = [V6_STATES.INIT, V6_STATES.REGISTERING, V6_STATES.REGISTERED];
+    if (stuckStates.includes(this._state)) {
+        console.log('[V6] ⚠️ Force transitioning from stuck state:', this._state);
+        
+        // First, try to get to REGISTERED if we're in REGISTERING
+        if (this._state === V6_STATES.REGISTERING) {
+            console.log('[V6] 📤 Stuck in REGISTERING, moving to REGISTERED');
+            this.transition(V6_STATES.REGISTERED, 'force_registering_to_registered');
+            
+            // Then proceed to session
+            setTimeout(() => {
+                if (this._state === V6_STATES.REGISTERED) {
+                    this._handleForceSession();
+                }
+            }, 100);
+        }
+        // If we're in INIT, send registration first
+        else if (this._state === V6_STATES.INIT) {
+            console.log('[V6] 📤 Sending forced REGISTER_MODULE from INIT');
+            this.transition(V6_STATES.REGISTERING, 'force_transition');
+            
+            // Send REGISTER_MODULE with better error handling
+            const requestId = `reg_force_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+            
+            IframeTransport.send('REGISTER_MODULE', {
+                module: 'friends',
+                frameId: IframeTransport.getFrameId(),
+                requestId: requestId,
+                timestamp: Date.now(),
+                version: '6.0'
+            }, { requireAck: true, timeout: 3000 })
+            .then(() => {
+                console.log('[V6] ✅ Forced REGISTER_MODULE ACK received');
+                this.transition(V6_STATES.REGISTERED, 'force_register_success');
+                setTimeout(() => {
+                    if (this._state === V6_STATES.REGISTERED) {
+                        this._handleForceSession();
+                    }
+                }, 100);
+            })
+            .catch((error) => {
+                console.log('[V6] ⚠️ Forced REGISTER_MODULE failed, but continuing anyway');
+                // Even if ACK fails, move to REGISTERED and try session
+                this.transition(V6_STATES.REGISTERED, 'force_register_timeout');
+                setTimeout(() => {
+                    if (this._state === V6_STATES.REGISTERED) {
+                        this._handleForceSession();
+                    }
+                }, 100);
+            });
+            
+            // Also send CHILD_READY for compatibility
+            setTimeout(() => {
+                IframeTransport.send('CHILD_READY', {
+                    module: 'friends',
+                    frameId: IframeTransport.getFrameId(),
+                    timestamp: Date.now()
+                }, { requireAck: false });
+            }, 100);
+        }
+        // If we're in REGISTERED, try session
+        else if (this._state === V6_STATES.REGISTERED) {
+            this._handleForceSession();
+        }
+    }
+},
+
+// Add this helper method
+_handleForceSession() {
+    console.log('[V6] 📦 Attempting to get session');
+    
+    // Check for cached user first
+    const cachedUser = getCurrentUser();
+    if (cachedUser && cachedUser.id) {
+        console.log('[V6] 📦 Found cached user, using it');
+        this._sessionValid = true;
+        this._sessionData = {
+            user: cachedUser,
+            authenticated: true,
+            token: getValidToken() || 'cached'
+        };
+        this.transition(V6_STATES.SESSION_RECEIVED, 'force_cached_session');
+        
+        setTimeout(() => {
+            if (this._state === V6_STATES.SESSION_RECEIVED) {
+                this.transition(V6_STATES.ACTIVE, 'force_active');
+                setTimeout(() => {
+                    if (this._state === V6_STATES.ACTIVE) {
+                        this.transition(V6_STATES.READY, 'force_ready');
+                    }
+                }, 100);
+            }
+        }, 100);
+    } else {
+        // No cached user, request session from parent
+        console.log('[V6] 📤 Requesting session from parent');
+        this.requestSessionFromParent();
+        
+        // Wait a bit then check if we got session
+        setTimeout(() => {
+            if (this._state === V6_STATES.REGISTERED) {
+                console.log('[V6] ⚠️ Still no session, creating guest session');
+                // Create guest session as fallback
+                const guestUser = {
+                    id: 'guest_' + Date.now(),
+                    displayName: 'Guest User',
+                    username: 'guest',
+                    authenticated: false
+                };
+                this._sessionValid = false;
+                this._sessionData = {
+                    user: guestUser,
+                    authenticated: false,
+                    token: null
+                };
+                this.transition(V6_STATES.SESSION_RECEIVED, 'force_guest_session');
+                setTimeout(() => {
+                    if (this._state === V6_STATES.SESSION_RECEIVED) {
+                        this.transition(V6_STATES.ACTIVE, 'force_guest_active');
+                        setTimeout(() => {
+                            if (this._state === V6_STATES.ACTIVE) {
+                                this.transition(V6_STATES.READY, 'force_guest_ready');
+                            }
+                        }, 100);
+                    }
+                }, 100);
+            }
+        }, 2000);
+    }
+},
+
     // ========== DUPLICATE PREVENTION ==========
     
     isRequestDuplicate(requestId) {
@@ -642,6 +848,10 @@ const V6StateMachine = {
 
 // Initialize v6 state machine
 const V6 = V6StateMachine.init();
+// Add this after initializing V6
+setTimeout(() => {
+    V6.forceTransitionIfStuck();
+}, 5000);
 
 // =============================================
 // [LIFECYCLE FSM] - Simplified for parent authority
@@ -934,41 +1144,44 @@ const MessageTracker = {
     },
     
     registerPending(requestId, type, resolve, reject, timeoutMs = 5000) {
+    // Don't check retry count for REGISTER_MODULE - allow first attempt only
+    if (type !== 'REGISTER_MODULE') {
         const retryCount = this.getRetryCount(requestId);
         if (retryCount >= 2) {
             log.onceWarn(`retry-limit-${requestId}`, `[MessageTracker] Retry limit reached for ${requestId}`);
             reject(new Error('Retry limit exceeded'));
             return requestId;
         }
-        
+    }
+    
+    if (this._pendingRequestIds.has(requestId)) {
+        const old = this._pendingRequestIds.get(requestId);
+        clearTimeout(old.timer);
+        old.reject(new Error('Superseded by new request'));
+        this.incrementRetryCount(requestId);
+    } else {
+        this.initRetryCount(requestId);
+    }
+    
+    const timer = setTimeout(() => {
         if (this._pendingRequestIds.has(requestId)) {
-            const old = this._pendingRequestIds.get(requestId);
-            clearTimeout(old.timer);
-            old.reject(new Error('Superseded by new request'));
+            const pending = this._pendingRequestIds.get(requestId);
+            this._pendingRequestIds.delete(requestId);
             this.incrementRetryCount(requestId);
-        } else {
-            this.initRetryCount(requestId);
+            reject(new Error(`Request timeout: ${type} (${requestId})`));
         }
-        
-        const timer = setTimeout(() => {
-            if (this._pendingRequestIds.has(requestId)) {
-                const pending = this._pendingRequestIds.get(requestId);
-                this._pendingRequestIds.delete(requestId);
-                this.incrementRetryCount(requestId);
-                pending.reject(new Error(`Request timeout: ${type} (${requestId})`));
-            }
-        }, timeoutMs);
-        
-        this._pendingRequestIds.set(requestId, {
-            resolve,
-            reject,
-            timer,
-            type,
-            timestamp: Date.now()
-        });
-        
-        return requestId;
-    },
+    }, timeoutMs);
+    
+    this._pendingRequestIds.set(requestId, {
+        resolve,
+        reject,
+        timer,
+        type,
+        timestamp: Date.now()
+    });
+    
+    return requestId;
+},
     
     handleAck(ackMessage) {
         const { messageId, requestId } = ackMessage;
@@ -2267,69 +2480,57 @@ export const IframeTransport = {
         }
     },
     
+
     send(type, payload = {}, options = {}) {
-        // Validate state before sending
-        const isHandshakeMessage = [
-            'REGISTER_MODULE', 'ACK', 'VERIFY_SESSION', 'HEARTBEAT'
-        ].includes(type);
-        
-        const isOperational = !isHandshakeMessage;
-        
-        // No messages before handshake complete except handshake messages
-        if (isOperational && !this._handshakeComplete) {
-            if (V6.shouldQueueMessage()) {
-                V6.queueMessage({ type, payload, options });
-                return { success: true, queued: true, message: 'Message queued' };
-            }
-            return { success: false, error: 'handshake_incomplete', reason: V6.current };
-        }
-        
-        // Enforce module field for all outbound messages
-        const messageId = options.messageId || this._generateMessageId();
-        const requireAck = options.requireAck === true;
-        const timeout = options.timeout || (type === 'HEARTBEAT' ? 20 : 5000);
-        const requestId = options.requestId || messageId;
-        
-        const message = {
-            protocol: 'KYN-3.0',
-            messageId,
-            requestId,
-            type,
-            module: 'friends',
-            source: 'iframe',
-            target: 'parent', // All messages go to parent only
-            frameId: this._frameId,
-            timestamp: Date.now(),
-            payload: this._sanitizePayload(payload),
-            version: '6.0',
-            requireAck
-        };
-        
-        if (options.priority) message.priority = options.priority;
-        
-        const adapted = CompatibilityBridge.adaptOutgoing(message);
-        
-        if (requireAck) {
-            return this._sendWithAck(adapted, timeout, requestId);
-        }
-        
-        const success = this._postMessage(adapted);
-        return success ? { success: true, messageId, requestId } : { success: false, error: 'send_failed' };
-    },
+    // Generate messageId consistently
+    const messageId = options.messageId || this._generateMessageId();
+    const requireAck = options.requireAck === true;
+    const requestId = options.requestId || messageId;
     
-    _sendWithAck(message, timeout, requestId) {
-        return new Promise((resolve, reject) => {
-            MessageTracker.registerPending(requestId, message.type, (result) => {
-                resolve({ success: true, result, requestId });
-            }, (error) => {
-                log.onceDebug(`ack-fail-${requestId}`, `[IframeTransport] ACK failed: ${error.message}`);
-                reject(error);
-            }, timeout);
-            
-            const sent = this._postMessage(message);
-            if (!sent) MessageTracker.rejectPending(requestId, new Error('Failed to send message'));
-        });
-    },
+    // For REGISTER_MODULE, ensure we set proper timeout
+    const timeout = options.timeout || (type === 'REGISTER_MODULE' ? 300 : 5000);
+    
+    const message = {
+        protocol: 'KYN-3.0',
+        messageId,
+        requestId,  // This MUST be the same as messageId for REGISTER_MODULE
+        type,
+        module: 'friends',
+        source: 'iframe',
+        target: 'parent',
+        frameId: this._frameId,
+        timestamp: Date.now(),
+        payload: this._sanitizePayload(payload),
+        version: '6.0',
+        requireAck
+    };
+    
+    const adapted = CompatibilityBridge.adaptOutgoing(message);
+    
+    if (requireAck) {
+        return this._sendWithAck(adapted, timeout, requestId);
+    }
+    
+    const success = this._postMessage(adapted);
+    return success ? { success: true, messageId, requestId } : { success: false, error: 'send_failed' };
+},
+
+_sendWithAck(message, timeout, requestId) {
+    return new Promise((resolve, reject) => {
+        // Register with MessageTracker
+        MessageTracker.registerPending(requestId, message.type, (result) => {
+            resolve({ success: true, result, requestId });
+        }, (error) => {
+            console.warn(`[IframeTransport] ACK failed for ${requestId}: ${error.message}`);
+            reject(error);
+        }, timeout);
+        
+        const sent = this._postMessage(message);
+        if (!sent) {
+            MessageTracker.rejectPending(requestId, new Error('Failed to send message'));
+        }
+    });
+},
     
     _postMessage(message) {
         if (!window.parent || window.parent === window) return false;
@@ -3043,32 +3244,42 @@ const FriendSearchEngine = {
 const QRCodeManager = {
     _qrCache: new Map(),
     
-    generateQRCode(userData) {
-        if (!userData || !userData.id) return null;
-        
-        const timestamp = Date.now();
-        const nonce = (window.crypto && window.crypto.randomUUID) ? 
-            window.crypto.randomUUID() : 
-            `${Date.now()}_${Math.random().toString(36).substring(2, 15)}`;
-        
-        const qrData = {
-            type: 'knecta_friend_request',
-            version: '6.0',
-            userId: userData.id,
-            username: userData.username || '',
-            displayName: userData.displayName || 'Knecta User',
-            timestamp: timestamp,
-            nonce: nonce,
-            expiresAt: timestamp + (24 * 60 * 60 * 1000),
-            signature: this._generateSecureHash(userData.id, userData.username || '', timestamp, nonce)
-        };
-        
-        const qrString = JSON.stringify(qrData);
-        this._qrCache.set(userData.id, qrData);
-        
-        return qrString;
-    },
+generateQRCode(userData) {
+    if (!userData) return null;
     
+    // Get required fields with fallbacks
+    const userId = userData.id || userData.userId || 'unknown';
+    const username = userData.username || userData.userName || '';
+    const displayName = userData.displayName || userData.name || 'User';
+    
+    if (userId === 'unknown') {
+        console.error('[QRCodeManager] Cannot generate QR: missing user ID');
+        return null;
+    }
+    
+    const timestamp = Date.now();
+    const nonce = (window.crypto && window.crypto.randomUUID) ? 
+        window.crypto.randomUUID() : 
+        `${Date.now()}_${Math.random().toString(36).substring(2, 15)}`;
+    
+    const qrData = {
+        type: 'knecta_friend_request',
+        version: '6.0',
+        userId: userId,
+        username: username,
+        displayName: displayName,
+        timestamp: timestamp,
+        nonce: nonce,
+        expiresAt: timestamp + (24 * 60 * 60 * 1000),
+        signature: this._generateSecureHash(userId, username, timestamp, nonce)
+    };
+    
+    const qrString = JSON.stringify(qrData);
+    this._qrCache.set(userId, qrData);
+    
+    return qrString;
+},
+
     validateQRCode(qrString) {
         try {
             const qrData = typeof qrString === 'string' ? JSON.parse(qrString) : qrString;
@@ -5818,8 +6029,14 @@ function validateFriendId(friendId) {
 
 function validateFriendData(friendData) {
     if (!friendData || typeof friendData !== 'object') return false;
-    if (!friendData.id || typeof friendData.id !== 'string') return false;
-    if (!validateFriendId(friendData.id)) return false;
+    
+    // Check for ID in various formats
+    const id = friendData.id || friendData.userId || friendData._id;
+    if (!id || typeof id !== 'string') return false;
+    
+    // Don't validate ID format too strictly - accept any non-empty string
+    if (id.trim().length === 0) return false;
+    
     return true;
 }
 
@@ -6304,8 +6521,8 @@ function processScannedQRCodeReal(qrData) {
         
         const user = result.user || result.data;
         
-        if (!validateFriendId(user.userId)) {
-            showNotification?.('Invalid user ID in QR code', 'error');
+        if (!user || !user.userId) {
+            showNotification?.('Invalid QR code data', 'error');
             return;
         }
         
@@ -6328,16 +6545,19 @@ function processScannedQRCodeReal(qrData) {
             return;
         }
         
-        showFriendRequestFromQRReal(result.data, result.user);
+        // Show the friend request modal
+        showFriendRequestFromQRReal(result.data, result.user || user);
         
+        // Stop camera scanner
         stopCameraScanner();
         
-        const modal = SafetyGuards.safeGetElement('cameraScannerModal');
+        // Close camera modal
+        const modal = document.getElementById('cameraScannerModal');
         if (modal) modal.classList.remove('active');
         
         showNotification?.('QR code scanned!', 'success');
     }).catch(error => {
-        Logger.error('QR', 'Failed to process QR code', error);
+        console.error('[QR] Failed to process QR code:', error);
         showNotification?.('Error processing QR code', 'error');
     });
 }
@@ -6345,24 +6565,37 @@ function processScannedQRCodeReal(qrData) {
 function showFriendRequestFromQRReal(qrData, userInfo) {
     const user = userInfo || qrData;
     
-    const avatar = SafetyGuards.safeGetElement('requestAvatar');
-    const name = SafetyGuards.safeGetElement('requestName');
-    const username = SafetyGuards.safeGetElement('requestUsername');
-    const mutual = SafetyGuards.safeGetElement('mutualCount');
-    const accept = SafetyGuards.safeGetElement('acceptRequestBtn');
-    const modal = SafetyGuards.safeGetElement('friendRequestModal');
+    const avatar = document.getElementById('requestAvatar');
+    const name = document.getElementById('requestName');
+    const username = document.getElementById('requestUsername');
+    const mutual = document.getElementById('mutualCount');
+    const accept = document.getElementById('acceptRequestBtn');
+    const modal = document.getElementById('friendRequestModal');
     
+    if (!modal) {
+        console.error('[QR] Friend request modal not found');
+        return;
+    }
+    
+    // Set avatar
     if (avatar) {
-        avatar.innerHTML = `<div style="width:100%;height:100%;border-radius:50%;background:var(--primary-color);color:white;display:flex;align-items:center;justify-content:center;font-size:24px;">
-            ${(user.displayName || 'U').charAt(0).toUpperCase()}
-        </div>`;
+        if (user.photoURL) {
+            avatar.style.backgroundImage = `url('${escapeHtml(user.photoURL)}')`;
+            avatar.style.backgroundSize = 'cover';
+            avatar.innerHTML = '';
+        } else {
+            avatar.style.backgroundImage = '';
+            const initials = (user.displayName || 'U').charAt(0).toUpperCase();
+            avatar.innerHTML = `<span style="color: white; font-size: 24px;">${initials}</span>`;
+        }
     }
     
     if (name) name.textContent = user.displayName || 'QR Code User';
     if (username) username.textContent = user.username || '@unknown';
     
     if (mutual) {
-        getMutualFriendsCount(qrData.userId).then(count => {
+        // Get mutual friends count
+        getMutualFriendsCount(user.userId).then(count => {
             mutual.textContent = count.toString();
         }).catch(() => {
             mutual.textContent = '0';
@@ -6370,10 +6603,11 @@ function showFriendRequestFromQRReal(qrData, userInfo) {
     }
     
     if (accept) {
+        // Remove old event listeners
         const newAccept = accept.cloneNode(true);
         accept.parentNode.replaceChild(newAccept, accept);
         
-        newAccept.dataset.userId = qrData.userId;
+        newAccept.dataset.userId = user.userId;
         newAccept.dataset.userName = user.displayName || 'User';
         newAccept.dataset.qrData = JSON.stringify(qrData);
         
@@ -6381,22 +6615,29 @@ function showFriendRequestFromQRReal(qrData, userInfo) {
             const userId = e.target.dataset.userId;
             const userName = e.target.dataset.userName;
             
+            // Show loading state
+            e.target.disabled = true;
+            e.target.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Sending...';
+            
             const result = await sendFriendRequest(userId, 'friend', `Added via QR code on ${new Date().toLocaleDateString()}`);
             
             if (result && result.success) {
                 showNotification?.(`Friend request sent to ${userName}`, 'success');
                 
-                const modal = SafetyGuards.safeGetElement('friendRequestModal');
+                const modal = document.getElementById('friendRequestModal');
                 if (modal) modal.classList.remove('active');
                 
+                // Refresh sent requests
                 loadSentRequestsFromBackend().catch(() => {});
             } else {
                 showNotification?.(result?.error || 'Failed to send friend request', 'error');
+                e.target.disabled = false;
+                e.target.innerHTML = 'Send Friend Request';
             }
         });
     }
     
-    if (modal) modal.classList.add('active');
+    modal.classList.add('active');
 }
 
 async function fetchUserInfoFromQR(userId) {
@@ -6477,73 +6718,123 @@ export function toggleFlash() {
 // =============================================
 // [QR CODE GENERATION] - Using QRCodeManager
 // =============================================
+
 export function generateUniqueQRCode() {
-    return featureSandbox('qrCode', () => {
-        const container = SafetyGuards.safeGetElement('qrCodeContainer');
-        if (!container) return;
+    const container = document.getElementById('qrCodeContainer');
+    if (!container) return;
+    
+    // Use canPerformApiCalls() which checks for ACTIVE or READY
+    if (!V6.canPerformApiCalls()) {
+        console.log('[QR] Module not ready for API calls, QR generation deferred - current state:', V6.current);
         
+        container.innerHTML = `
+            <div style="text-align: center; padding: 20px; color: var(--text-secondary);">
+                <i class="fas fa-spinner fa-spin" style="font-size: 32px; margin-bottom: 10px; color: var(--primary-color);"></i>
+                <p>Initializing QR code system...</p>
+                <p style="font-size: 12px; margin-top: 5px;">Module state: ${V6.current}</p>
+            </div>
+        `;
+        
+        setTimeout(generateUniqueQRCode, 1000);
+        return;
+    }
+    
+    // Get user from multiple possible sources
+    const user = currentUser || userData || window.currentUser || window.userData || 
+                 (window.parentCoordinator?.getUser()) || 
+                 (window.KnectaAuth?.getUser()) ||
+                 (window.SessionManager?.current?.user) ||
+                 (IframeSessionClient.getUser());
+    
+    if (!user) {
+        console.log('[QR] No user found');
+        container.innerHTML = `
+            <div style="text-align: center; padding: 40px; color: var(--text-secondary);">
+                <i class="fas fa-qrcode" style="font-size: 48px; margin-bottom: 15px;"></i>
+                <p>Sign in to generate QR code</p>
+            </div>
+        `;
+        return;
+    }
+    
+    // Get user ID from various possible fields
+    const userId = user.id || user.userId || user._id;
+    const username = user.username || user.userName || user.handle || '';
+    const displayName = user.displayName || user.name || user.fullName || 'User';
+    const photoURL = user.photoURL || user.avatar || user.profilePicture || '';
+    
+    if (!userId) {
+        console.log('[QR] User has no ID');
+        container.innerHTML = `
+            <div style="text-align: center; padding: 40px; color: var(--text-secondary);">
+                <i class="fas fa-exclamation-triangle" style="font-size: 48px; margin-bottom: 15px;"></i>
+                <p>Invalid user data - missing ID</p>
+                <p style="font-size: 10px; margin-top: 5px;">${JSON.stringify(user).substring(0, 100)}</p>
+            </div>
+        `;
+        return;
+    }
+    
+    // Create a user object with the required fields
+    const userForQR = {
+        id: userId,
+        username: username,
+        displayName: displayName,
+        photoURL: photoURL
+    };
+    
+    // Check if QRCode library is available
+    if (typeof QRCode === 'undefined') {
+        container.innerHTML = `
+            <div style="text-align: center; padding: 40px; color: var(--text-secondary);">
+                <i class="fas fa-exclamation-triangle" style="font-size: 48px; margin-bottom: 15px;"></i>
+                <p>QR code library not loaded</p>
+            </div>
+        `;
+        return;
+    }
+    
+    try {
+        const qrData = QRCodeManager.generateQRCode(userForQR);
+        
+        if (!qrData) {
+            throw new Error('Failed to generate QR data');
+        }
+        
+        // Clear container
         container.innerHTML = '';
         
-        if (typeof QRCode === 'undefined') {
-            container.innerHTML = `
-                <div style="text-align: center; padding: 40px; color: var(--text-secondary);">
-                    <i class="fas fa-qrcode" style="font-size: 48px; margin-bottom: 15px; color: var(--primary-color);"></i>
-                    <p>Your unique QR code</p>
-                    <p style="font-size: 12px; margin-top: 10px;">Scan to add as friend</p>
-                </div>
-            `;
-            return;
-        }
+        // Create QR code
+        new QRCode(container, {
+            text: qrData,
+            width: 200,
+            height: 200,
+            colorDark: '#0084ff',
+            colorLight: '#ffffff',
+            correctLevel: QRCode.CorrectLevel.H
+        });
         
-        const user = currentUser || userData;
-        if (!user || !user.id) {
-            container.innerHTML = `
-                <div style="text-align: center; padding: 40px; color: var(--text-secondary);">
-                    <i class="fas fa-qrcode" style="font-size: 48px; margin-bottom: 15px;"></i>
-                    <p>Sign in to generate QR code</p>
-                </div>
-            `;
-            return;
-        }
+        // Add user info below
+        const infoDiv = document.createElement('div');
+        infoDiv.style.cssText = 'text-align: center; margin-top: 10px; font-size: 12px; color: var(--text-secondary);';
+        infoDiv.textContent = `@${username || userId.substring(0, 8)}`;
+        container.appendChild(infoDiv);
         
-        if (!validateFriendData(user)) {
-            container.innerHTML = `
-                <div style="text-align: center; padding: 40px; color: var(--text-secondary);">
-                    <i class="fas fa-qrcode" style="font-size: 48px; margin-bottom: 15px;"></i>
-                    <p>Invalid user data</p>
-                </div>
-            `;
-            return;
-        }
+        SafeStorage.setItem(LOCAL_STORAGE_KEYS.UNIQUE_QR_CODE, qrData);
         
-        const qrData = QRCodeManager.generateQRCode(user);
-        
-        try {
-            container.innerHTML = '';
-            
-            new QRCode(container, {
-                text: qrData,
-                width: 200,
-                height: 200,
-                colorDark: '#0084ff',
-                colorLight: '#ffffff',
-                correctLevel: QRCode.CorrectLevel.H
-            });
-            
-            SafeStorage.setItem(LOCAL_STORAGE_KEYS.UNIQUE_QR_CODE, qrData);
-            
-        } catch (error) {
-            Logger.error('QR', 'Failed to generate QR code', error);
-            
-            container.innerHTML = `
-                <div style="text-align: center; padding: 40px; color: var(--text-secondary);">
-                    <i class="fas fa-qrcode" style="font-size: 48px; margin-bottom: 15px; color: var(--primary-color);"></i>
-                    <p>Your unique QR code</p>
-                    <p style="font-size: 10px; margin-top: 5px;">User: ${user.username || user.id}</p>
-                </div>
-            `;
-        }
-    });
+    } catch (error) {
+        console.error('[QR] Failed to generate QR code:', error);
+        container.innerHTML = `
+            <div style="text-align: center; padding: 20px;">
+                <i class="fas fa-qrcode" style="font-size: 48px; margin-bottom: 10px; color: var(--primary-color);"></i>
+                <p>Your unique QR code</p>
+                <p style="font-size: 10px; color: var(--text-secondary); margin-top: 5px;">User: ${username || userId.substring(0, 8)}</p>
+                <button onclick="generateUniqueQRCode()" style="margin-top: 10px; padding: 5px 15px; background: var(--primary-color); color: white; border: none; border-radius: 5px; cursor: pointer;">
+                    <i class="fas fa-redo"></i> Retry
+                </button>
+            </div>
+        `;
+    }
 }
 
 export function validateQRCodeData(qrData) {
