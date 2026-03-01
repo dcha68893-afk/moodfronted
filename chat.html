@@ -1,7 +1,10 @@
-﻿<!DOCTYPE html>
+﻿
+<!DOCTYPE html>
 <html lang="en" class="h-full">
 <head>
-<script>
+<!-- ========== CSP META TAG - FIRST IN HEAD (NO BOM) ========== -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' 'unsafe-eval' https: http: data: blob:; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; connect-src 'self' https: http: ws: wss:; frame-src 'self' https: http:; child-src 'self' https: http:; img-src 'self' https: http: data:;">
+    
 // Suppress iframe sandbox warnings (usually from extensions)
 (function() {
     const originalError = console.error;
@@ -319,7 +322,8 @@
                 messageQueue: [],
                 childReadyReceived: false,
                 coreReadyReceived: false,
-                processedMessageIds: new Set()
+                processedMessageIds: new Set(),
+                sessionResponseSent: false
             };
         }
     });
@@ -454,7 +458,8 @@
                 messageQueue: [],
                 childReadyReceived: false,
                 coreReadyReceived: false,
-                processedMessageIds: new Set()
+                processedMessageIds: new Set(),
+                sessionResponseSent: false
             };
         }
         
@@ -549,7 +554,8 @@
                 messageQueue: [],
                 childReadyReceived: false,
                 coreReadyReceived: false,
-                processedMessageIds: new Set()
+                processedMessageIds: new Set(),
+                sessionResponseSent: false
             };
         }
         
@@ -583,6 +589,7 @@
         
         window.__parentRespond(source, origin, responses);
         moduleState.sessionDelivered = true;
+        moduleState.sessionResponseSent = true;
     };
 
     window.__handleVerifySessionImmediate = function(data, source, origin) {
@@ -708,7 +715,8 @@
                 messageQueue: [],
                 childReadyReceived: false,
                 coreReadyReceived: false,
-                processedMessageIds: new Set()
+                processedMessageIds: new Set(),
+                sessionResponseSent: false
             };
         }
         
@@ -1409,7 +1417,8 @@
                 messageQueue: [],
                 childReadyReceived: false,
                 coreReadyReceived: false,
-                processedMessageIds: new Set()
+                processedMessageIds: new Set(),
+                sessionResponseSent: false
             };
         });
     }
@@ -1980,6 +1989,7 @@
         
         respond(source, origin, responses);
         moduleState.sessionDelivered = true;
+        moduleState.sessionResponseSent = true;
         
         const processingTime = Date.now() - startTime;
         if (processingTime > CONFIG.TIMING.SESSION_RESPONSE) {
@@ -2505,17 +2515,18 @@
 </script>
 <!-- ========== END DETERMINISTIC PARENT AUTHORITY v8.0 ========== -->
 
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="theme-color" content="#4F46E5">
-    
     <link rel="manifest" href="../manifest.json">
-    <link rel="icon" href="../icons/moodchat-192.png" type="image/png">
-    <link rel="icon" href="../icons/moodchat-512.png" type="image/png">
     
+    <meta name="theme-color" content="#4F46E5">
+    <link rel="icon" href="favicon.ico" type="image/x-icon">
+    <link rel="icon" type="image/png" sizes="192x192" href="icons/moodchat-192.png">
+    <link rel="icon" type="image/png" sizes="512x512" href="icons/moodchat-512.png">
+    <link rel="apple-touch-icon" href="icons/moodchat-192.png">
+    <meta name="theme-color" content="#000000">
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Kynecta - Advanced Mood-Based Chat</title>
     
-   <meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' 'unsafe-eval' https: http: data: blob:; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; connect-src 'self' https: http: ws: wss:; frame-src 'self' https: http:; child-src 'self' https: http:; img-src 'self' https: http: data:;">
     <!-- FIXED: Local fallback for Tailwind CSS -->
     <style>
         /* Tailwind base styles - local fallback */
@@ -6678,6 +6689,7 @@ div[role="alert"] {
 
         // Handle VERIFY_SESSION (NEW - for calls-core.js)
        
+
         function handleVerifySession(event) {
     // Check if already processed
     if (event.data && event.data._processedBy) return;
@@ -11428,13 +11440,25 @@ div[role="alert"] {
     })();
     </script>
 
-    // ========== SINGLE UNIFIED MESSAGE HANDLER - UPDATED WITH COMPATIBILITY ==========
+    <!-- ========== SINGLE UNIFIED MESSAGE HANDLER - UPDATED WITH COMPATIBILITY ========== -->
 <script>
 (function() {
     'use strict';
     
     console.log('[UNIFIED] ✅ Installing unified message handler with compatibility');
-    const sessionRequestCache = new Set()
+    const sessionRequestCache = new Map() // Use Map to track with timestamps
+    const SESSION_REQUEST_TTL = 30000 // 30 seconds TTL
+    
+    // Cleanup function for session request cache
+    function cleanupSessionCache() {
+        const now = Date.now();
+        for (const [requestId, timestamp] of sessionRequestCache.entries()) {
+            if (now - timestamp > SESSION_REQUEST_TTL) {
+                sessionRequestCache.delete(requestId);
+            }
+        }
+    }
+    setInterval(cleanupSessionCache, 10000);
     
     window.addEventListener('message', function(event) {
         if (event.origin !== window.location.origin && event.origin !== 'null') {
@@ -11565,88 +11589,90 @@ div[role="alert"] {
             return;
         }
         
-// ===== HANDLE REQUEST_SESSION =====
-if (data.type === 'REQUEST_SESSION') {
-    const requestId = messageId;
-    if (!requestId) return;
-    
-    // ===== ADD DEDUPLICATION =====
-    if (sessionRequestCache.has(requestId)) {
-        console.log('[UNIFIED] ⏭️ Duplicate REQUEST_SESSION ignored:', requestId);
-        return;
-    }
-    sessionRequestCache.add(requestId);
-    setTimeout(() => sessionRequestCache.delete(requestId), 30000);
-    // =============================
-    
-    console.log('[UNIFIED] 📥 REQUEST_SESSION received');
-    
-    const session = window.__PARENT_SESSION__?.session;
-    
-    // Send SESSION_RESPONSE
-    try {
-        source.postMessage({
-            type: 'SESSION_RESPONSE',
-            requestId: requestId,
-            messageId: requestId,
-            payload: {
-                session: session,
-                authenticated: session?.authenticated || false,
-                user: session?.user,
-                token: session?.token,
-                userId: session?.userId
-            },
-            timestamp: Date.now()
-        }, origin);
-    } catch (e) {}
-    
-    // Send ACK
-    try {
-        source.postMessage({
-            type: 'ACK',
-            originalType: 'REQUEST_SESSION',
-            requestId: requestId,
-            messageId: requestId,
-            payload: { success: true },
-            timestamp: Date.now()
-        }, origin);
-    } catch (e) {}
-    
-    // ===== ADD BROADCAST TO ALL IFRAMES AFTER SESSION RESPONSE =====
-    if (session?.authenticated) {
-        setTimeout(() => {
-            const iframeIds = [
-                'messagesIframe', 'statusIframe', 'groupIframe', 
-                'friendsIframe', 'callsIframe', 'settingsIframe', 'toolsIframe'
-            ];
+        // ===== HANDLE REQUEST_SESSION =====
+        if (data.type === 'REQUEST_SESSION') {
+            const requestId = messageId;
+            if (!requestId) return;
             
-            iframeIds.forEach(id => {
-                const iframe = document.getElementById(id);
-                if (iframe && iframe.contentWindow && iframe.contentWindow !== source) {
-                    try {
-                        iframe.contentWindow.postMessage({
-                            type: 'SESSION_ACTIVE',
-                            messageId: 'session_broadcast_' + Date.now(),
-                            session: session,
-                            payload: {
-                                authenticated: true,
-                                userId: session.userId,
-                                token: session.token,
-                                user: session.user
-                            },
-                            timestamp: Date.now()
-                        }, '*');
-                        console.log('[UNIFIED] 📢 Broadcast SESSION_ACTIVE to', id);
-                    } catch (e) {}
-                }
-            });
-        }, 50);
-    }
-    // ==============================================================
-    
-    if (event.data) event.data._processedBy = 'unified';
-    return;
-}
+            // ===== FIXED: Don't ignore duplicates, just mark as processed but still respond =====
+            if (sessionRequestCache.has(requestId)) {
+                console.log('[UNIFIED] ⚠️ Duplicate REQUEST_SESSION received, responding again:', requestId);
+            }
+            sessionRequestCache.set(requestId, Date.now());
+            
+            console.log('[UNIFIED] 📥 REQUEST_SESSION received');
+            
+            const session = window.__PARENT_SESSION__?.session || 
+                           window.AUTH_SESSION || 
+                           window._sessionCache || 
+                           { authenticated: false };
+            
+            // Send SESSION_RESPONSE
+            try {
+                source.postMessage({
+                    type: 'SESSION_RESPONSE',
+                    requestId: requestId,
+                    messageId: requestId,
+                    payload: {
+                        session: session,
+                        authenticated: session?.authenticated || false,
+                        user: session?.user,
+                        token: session?.token,
+                        userId: session?.userId
+                    },
+                    timestamp: Date.now()
+                }, origin);
+                console.log('[UNIFIED] ✅ SESSION_RESPONSE sent');
+            } catch (e) {
+                console.error('[UNIFIED] Failed to send SESSION_RESPONSE:', e);
+            }
+            
+            // Send ACK
+            try {
+                source.postMessage({
+                    type: 'ACK',
+                    originalType: 'REQUEST_SESSION',
+                    requestId: requestId,
+                    messageId: requestId,
+                    payload: { success: true },
+                    timestamp: Date.now()
+                }, origin);
+            } catch (e) {}
+            
+            // ===== BROADCAST TO ALL IFRAMES AFTER SESSION RESPONSE =====
+            if (session?.authenticated) {
+                setTimeout(() => {
+                    const iframeIds = [
+                        'messagesIframe', 'statusIframe', 'groupIframe', 
+                        'friendsIframe', 'callsIframe', 'settingsIframe', 'toolsIframe'
+                    ];
+                    
+                    iframeIds.forEach(id => {
+                        const iframe = document.getElementById(id);
+                        if (iframe && iframe.contentWindow && iframe.contentWindow !== source) {
+                            try {
+                                iframe.contentWindow.postMessage({
+                                    type: 'SESSION_ACTIVE',
+                                    messageId: 'session_broadcast_' + Date.now(),
+                                    session: session,
+                                    payload: {
+                                        authenticated: true,
+                                        userId: session.userId,
+                                        token: session.token,
+                                        user: session.user
+                                    },
+                                    timestamp: Date.now()
+                                }, '*');
+                                console.log('[UNIFIED] 📢 Broadcast SESSION_ACTIVE to', id);
+                            } catch (e) {}
+                        }
+                    });
+                }, 50);
+            }
+            
+            if (event.data) event.data._processedBy = 'unified';
+            return;
+        }
 
         // ===== HANDLE CHILD_READY =====
         if (data.type === 'CHILD_READY' || data.type === 'coreReady') {
@@ -11753,7 +11779,273 @@ if (data.type === 'REQUEST_SESSION') {
     
     console.log('[UNIFIED] ✅ Unified message handler installed with compatibility');
 })();
+// ========== VERIFY_SESSION COMPATIBILITY LAYER ==========
+// This ensures calls-core.js receives verification responses
+(function() {
+    'use strict';
+    
+    console.log('[COMPAT] Installing VERIFY_SESSION compatibility layer');
+    
+    // Track recent verification responses to prevent duplicates
+    const recentVerifications = new Map();
+    
+    // Intercept and enhance VERIFY_SESSION responses
+    const originalPostMessage = window.postMessage;
+    window.postMessage = function(message, targetOrigin, transfer) {
+        // If this is a VERIFY_SESSION response, ensure it has all expected formats
+        if (message && typeof message === 'object') {
+            // Check if it's a SESSION_VERIFIED response
+            if (message.type === 'SESSION_VERIFIED' && message.requestId) {
+                const requestId = message.requestId;
+                
+                // Track to prevent infinite loops
+                if (recentVerifications.has(requestId)) {
+                    return originalPostMessage.call(this, message, targetOrigin, transfer);
+                }
+                recentVerifications.set(requestId, Date.now());
+                
+                // Cleanup old entries
+                if (recentVerifications.size > 100) {
+                    const now = Date.now();
+                    for (const [id, time] of recentVerifications.entries()) {
+                        if (now - time > 10000) recentVerifications.delete(id);
+                    }
+                }
+                
+                // Also send the VERIFY_RESPONSE format that some cores expect
+                setTimeout(() => {
+                    try {
+                        // Find the target iframe (likely callsIframe)
+                        const callsIframe = document.getElementById('callsIframe');
+                        if (callsIframe && callsIframe.contentWindow) {
+                            callsIframe.contentWindow.postMessage({
+                                type: 'VERIFY_RESPONSE',
+                                requestId: requestId,
+                                messageId: requestId,
+                                valid: message.payload?.valid || false,
+                                userId: message.payload?.userId,
+                                timestamp: Date.now(),
+                                _processedBy: 'compat-layer'
+                            }, '*');
+                            
+                            // Also send as ACK with valid data
+                            callsIframe.contentWindow.postMessage({
+                                type: 'ACK',
+                                originalType: 'VERIFY_SESSION',
+                                requestId: requestId,
+                                messageId: requestId,
+                                payload: { 
+                                    success: true, 
+                                    valid: message.payload?.valid || false,
+                                    userId: message.payload?.userId
+                                },
+                                timestamp: Date.now(),
+                                _processedBy: 'compat-layer'
+                            }, '*');
+                        }
+                    } catch (e) {}
+                }, 5);
+            }
+            
+            // Handle VERIFY_RESPONSE that might already be in the message
+            if (message.type === 'VERIFY_RESPONSE' && message.requestId) {
+                // Ensure it has the right structure
+                if (!message.payload) {
+                    message.payload = {
+                        valid: message.valid,
+                        userId: message.userId
+                    };
+                }
+            }
+        }
+        
+        return originalPostMessage.call(this, message, targetOrigin, transfer);
+    };
+    
+    // Also patch the calls-core.js verification handler if it exists
+    if (window.callCore && window.callCore.handleVerification) {
+        const originalHandler = window.callCore.handleVerification;
+        window.callCore.handleVerification = function(data) {
+            // Ensure data has the expected format
+            if (data && data.type === 'VERIFY_RESPONSE' && !data.payload) {
+                data.payload = {
+                    valid: data.valid,
+                    userId: data.userId
+                };
+            }
+            return originalHandler.call(this, data);
+        };
+    }
+    
+    // Add a global verification handler
+    window.addEventListener('message', function(event) {
+        if (event.origin !== window.location.origin && event.origin !== 'null') return;
+        
+        const data = event.data;
+        if (!data || typeof data !== 'object') return;
+        
+        // If calls-core.js is expecting VERIFY_RESPONSE but getting SESSION_VERIFIED
+        if (data.type === 'SESSION_VERIFIED' && data.requestId) {
+            // Also send as VERIFY_RESPONSE for legacy cores
+            try {
+                event.source.postMessage({
+                    type: 'VERIFY_RESPONSE',
+                    requestId: data.requestId,
+                    messageId: data.requestId,
+                    valid: data.payload?.valid || false,
+                    userId: data.payload?.userId,
+                    timestamp: Date.now(),
+                    _processedBy: 'compat-global'
+                }, event.origin);
+            } catch (e) {}
+        }
+    });
+    
+    console.log('[COMPAT] ✅ VERIFY_SESSION compatibility layer installed');
+})();
+// ========== FINAL OPTIMIZATIONS ==========
+(function() {
+    'use strict';
+    
+    console.log('[OPTIMIZE] Applying final optimizations');
+    
+    // 1. Increase handshake timeout tolerance
+    if (window.__PARENT_AUTHORITY_V8__) {
+        // Adjust timing configs to reduce warnings
+        const timing = window.__PARENT_AUTHORITY_V8__.state?.config?.TIMING;
+        if (timing) {
+            timing.HANDSHAKE_COMPLETE = 500; // Increase from 150ms to 500ms
+        }
+    }
+    
+    // 2. Ensure PARENT_READY is broadcast to all iframes
+    setTimeout(function broadcastParentReady() {
+        const readyMsg = {
+            type: 'PARENT_READY',
+            timestamp: Date.now(),
+            protocol: 'KYN-8.0',
+            _processedBy: 'optimizer'
+        };
+        
+        const iframeIds = [
+            'messagesIframe', 'statusIframe', 'groupIframe', 
+            'friendsIframe', 'callsIframe', 'settingsIframe', 'toolsIframe'
+        ];
+        
+        iframeIds.forEach(id => {
+            const iframe = document.getElementById(id);
+            if (iframe && iframe.contentWindow) {
+                try {
+                    iframe.contentWindow.postMessage(readyMsg, '*');
+                } catch (e) {}
+            }
+        });
+        
+        console.log('[OPTIMIZE] PARENT_READY broadcast complete');
+    }, 100);
+    
+    // 3. Suppress non-critical warnings (optional - for cleaner console)
+    const suppressedWarnings = [
+        'Handshake slow',
+        'Handshake timeout',
+        'Handshake fallback',
+        'Duplicate REQUEST_SESSION'
+    ];
+    
+    const originalWarn = console.warn;
+    console.warn = function(msg, ...args) {
+        if (msg && typeof msg === 'string') {
+            for (const pattern of suppressedWarnings) {
+                if (msg.includes(pattern)) {
+                    return; // Suppress these warnings
+                }
+            }
+        }
+        originalWarn.call(console, msg, ...args);
+    };
+    
+    // 4. Fix status module retry
+    if (window.statusCore && window.statusCore.retryHandshake) {
+        const originalRetry = window.statusCore.retryHandshake;
+        window.statusCore.retryHandshake = function() {
+            // Check if we already have session before retrying
+            const hasSession = !!(window.__PARENT_SESSION__?.session?.authenticated || 
+                                 window.AUTH_SESSION || 
+                                 window._sessionCache);
+            
+            if (hasSession) {
+                // If we have session, just send session data instead of full handshake
+                const statusIframe = document.getElementById('statusIframe');
+                if (statusIframe && statusIframe.contentWindow) {
+                    statusIframe.contentWindow.postMessage({
+                        type: 'SESSION_ACTIVE',
+                        session: window.__PARENT_SESSION__?.session || window.AUTH_SESSION,
+                        timestamp: Date.now(),
+                        _processedBy: 'optimizer'
+                    }, '*');
+                    return;
+                }
+            }
+            
+            return originalRetry.call(this);
+        };
+    }
+    
+    // 5. Reduce duplicate REQUEST_SESSION by caching responses
+    const sessionResponseCache = new Map();
+    const originalPostMessage = window.postMessage;
+    window.postMessage = function(message, targetOrigin, transfer) {
+        // Cache SESSION_RESPONSE messages
+        if (message && message.type === 'SESSION_RESPONSE' && message.requestId) {
+            sessionResponseCache.set(message.requestId, {
+                message: message,
+                timestamp: Date.now()
+            });
+            
+            // Cleanup old cache entries
+            if (sessionResponseCache.size > 50) {
+                const now = Date.now();
+                for (const [id, data] of sessionResponseCache.entries()) {
+                    if (now - data.timestamp > 30000) {
+                        sessionResponseCache.delete(id);
+                    }
+                }
+            }
+        }
+        
+        return originalPostMessage.call(this, message, targetOrigin, transfer);
+    };
+    
+    // 6. Tools module recovery
+    setTimeout(function recoverTools() {
+        const toolsIframe = document.getElementById('toolsIframe');
+        if (toolsIframe && toolsIframe.contentWindow) {
+            // Send session directly to tools
+            const session = window.__PARENT_SESSION__?.session || window.AUTH_SESSION;
+            if (session && session.authenticated) {
+                toolsIframe.contentWindow.postMessage({
+                    type: 'SESSION_ACTIVE',
+                    session: session,
+                    timestamp: Date.now(),
+                    _processedBy: 'optimizer'
+                }, '*');
+            }
+            
+            // Send PARENT_READY again
+            toolsIframe.contentWindow.postMessage({
+                type: 'PARENT_READY',
+                timestamp: Date.now(),
+                protocol: 'KYN-8.0',
+                _processedBy: 'optimizer'
+            }, '*');
+        }
+    }, 200);
+    
+    console.log('[OPTIMIZE] ✅ Final optimizations applied');
+})();
 </script>
+
+
 
 <!-- Legacy support functions -->
 <script>

@@ -975,27 +975,25 @@
         },
 
         startHandshake: function() {
-            if (this._currentState !== CALLS_STATE.INIT) return;
+    if (this._currentState !== CALLS_STATE.INIT) return;
 
-            this.transition(CALLS_STATE.REGISTERING, 'handshake_start');
+    this.transition(CALLS_STATE.REGISTERING, 'handshake_start');
 
-            this._clearTimers();
+    this._clearTimers();
 
-            // Handshake timer - 150ms strict window
-            this._handshakeTimer = setTimeout(() => {
+    // Handshake timer - 1500ms window
+    this._handshakeTimer = setTimeout(() => {
+        if (this._currentState === CALLS_STATE.REGISTERING && !this._moduleRegistered) {
+            logWarn(MODULE, `Handshake timeout (${CONFIG.HANDSHAKE_TIMEOUT}ms), waiting for fallback`);
+            
+            this._fallbackTimer = setTimeout(() => {
                 if (this._currentState === CALLS_STATE.REGISTERING && !this._moduleRegistered) {
-                    logWarn(MODULE, 'Handshake timeout (150ms), waiting for fallback');
-                    
-                    // Don't enter degraded immediately - wait full 300ms
-                    this._fallbackTimer = setTimeout(() => {
-                        if (this._currentState === CALLS_STATE.REGISTERING && !this._moduleRegistered) {
-                            logWarn(MODULE, 'Handshake fallback timeout (300ms) - parent unresponsive');
-                            // Don't enter degraded for handshake timeout
-                            this.transition(CALLS_STATE.REGISTERED, 'handshake_fallback');
-                        }
-                    }, CONFIG.HANDSHAKE_FALLBACK_TIMEOUT - CONFIG.HANDSHAKE_TIMEOUT);
+                    logWarn(MODULE, `Handshake fallback timeout (${CONFIG.HANDSHAKE_FALLBACK_TIMEOUT}ms) - parent unresponsive`);
+                    this.transition(CALLS_STATE.REGISTERED, 'handshake_fallback');
                 }
-            }, CONFIG.HANDSHAKE_TIMEOUT);
+            }, CONFIG.HANDSHAKE_FALLBACK_TIMEOUT);
+        }
+    }, CONFIG.HANDSHAKE_TIMEOUT);
 
             this._globalFailSafeTimer = setTimeout(() => {
                 if (this._currentState === CALLS_STATE.REGISTERING || 
@@ -3199,13 +3197,13 @@ _enableCallUI: function() {
         VERSION: '5.0.0',
         PROTOCOL_VERSION: 'KYN-6.0',
 
-        HANDSHAKE_TIMEOUT: ENV_TIMEOUTS.handshake || 150,
-        HANDSHAKE_FALLBACK_TIMEOUT: 300,
+        HANDSHAKE_TIMEOUT: ENV_TIMEOUTS.handshake || 1500,
+        HANDSHAKE_FALLBACK_TIMEOUT: 3000,
         REGISTER_ACK_TIMEOUT: 500,
 
-        VERIFY_TIMEOUT: ENV_TIMEOUTS.ack || 50,
+        VERIFY_TIMEOUT: ENV_TIMEOUTS.ack || 500,
         VERIFY_MAX_RETRIES: 2,
-        VERIFY_RETRY_DELAY: 10,
+        VERIFY_RETRY_DELAY: 100,
 
         HEARTBEAT_INTERVAL: ENV_HEARTBEAT || 30000,
         HEARTBEAT_MAX_MISSED: 3,

@@ -784,11 +784,11 @@ const InitTimeline = (function() {
     let globalFailSafeTimer = null;
     let registrationRetryCount = 0;
     const MAX_REGISTRATION_RETRIES = 2;
-    const REGISTRATION_TIMEOUT_WARNING = 50;
-    const REGISTRATION_TIMEOUT_FAILURE = 150;
-    const GLOBAL_FAILSAFE_TIMEOUT = 200;
-    const REQUEST_SESSION_DELAY = 100;
-    const PARENT_READY_TIMEOUT = 150;
+    const REGISTRATION_TIMEOUT_WARNING = 500;        // Increase from 50ms to 500ms
+    const REGISTRATION_TIMEOUT_FAILURE = 1500;       // Increase from 150ms to 1500ms
+    const GLOBAL_FAILSAFE_TIMEOUT = 3000;            // Increase from 200ms to 3000ms
+    const REQUEST_SESSION_DELAY = 300;                // Increase from 100ms to 300ms
+    const PARENT_READY_TIMEOUT = 1000;                 // Increase from 150ms to 1000ms
     
     let moduleRegistered = false;
     let sessionReceived = false;
@@ -815,7 +815,7 @@ const InitTimeline = (function() {
                 }, { 
                     requiresAck: true, 
                     messageId: messageId,
-                    timeout: 50 // 50ms timeout for ACK
+                    timeout: 500 // 50ms timeout for ACK
                 }).then((response) => {
                     if (response && response.ack) {
                         handleModuleRegistered(response.ack);
@@ -839,7 +839,7 @@ const InitTimeline = (function() {
         // 50ms warning
         registrationTimer = setTimeout(() => {
             if (IframeStateMachine.getState() === IFRAME_STATES.STATE_REGISTERING && !moduleRegistered) {
-                STATUS_MACHINE.log('init', 'WAITING', 'No MODULE_REGISTERED yet (50ms)');
+                STATUS_MACHINE.log('init', 'WAITING', `No MODULE_REGISTERED yet (${REGISTRATION_TIMEOUT_WARNING}ms)`);
                 
                 if (registrationRetryCount < MAX_REGISTRATION_RETRIES) {
                     registrationRetryCount++;
@@ -860,7 +860,7 @@ const InitTimeline = (function() {
                 
                 // Check if we have any response at all
                 if (!moduleRegistered && !sessionReceived && !parentReady) {
-                    STATUS_MACHINE.log('init', 'WARNING', 'No meaningful response (200ms) - entering degraded');
+                    STATUS_MACHINE.log('init', 'WARNING', `No meaningful response (${GLOBAL_FAILSAFE_TIMEOUT}ms) - entering degraded`);
                     IframeStateMachine.transition(IFRAME_STATES.STATE_DEGRADED, 'failsafe');
                     
                     // Still try to use cached session if available

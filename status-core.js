@@ -210,9 +210,9 @@ const IframeEnvironment = {
     
     getConfig() {
         const baseConfig = {
-            handshakeTimeout: 15000,
+            handshakeTimeout: 5000,
             heartbeatInterval: 30000,
-            maxRetries: 5,
+            maxRetries: 3,
             maxRecoveryAttempts: 3,
             originChecks: 'standard',
             crypto: 'enabled',
@@ -2290,22 +2290,22 @@ const IframeHandshakeAuthority = {
     },
     
     waitForParentReady() {
-        return new Promise((resolve) => {
-            if (this.parentReadyReceived) {
+    return new Promise((resolve) => {
+        if (this.parentReadyReceived) {
+            resolve();
+            return;
+        }
+        
+        const timeout = setTimeout(() => {
+            if (!this.parentReadyReceived) {
+                // Still resolve - parent might not send PARENT_READY
                 resolve();
-                return;
             }
-            
-            const timeout = setTimeout(() => {
-                if (!this.parentReadyReceived) {
-                    // Still resolve - parent might not send PARENT_READY
-                    resolve();
-                }
-            }, IframeEnvironment.isVPNNetwork ? 6000 : 3000);
-            
-            const handler = (message) => {
-                if (message.type === MESSAGE_TYPES.PARENT_READY) {
-                    clearTimeout(timeout);
+        }, IframeEnvironment.isVPNNetwork ? 3000 : 1500);  // ← Reduced from 6000/3000 to 3000/1500
+        
+        const handler = (message) => {
+            if (message.type === MESSAGE_TYPES.PARENT_READY) {
+                clearTimeout(timeout);
                     
                     if (typeof MessageBus !== 'undefined') {
                         MessageBus.removeMessageHandler(MESSAGE_TYPES.PARENT_READY, handler);
@@ -2628,16 +2628,16 @@ const IframeHandshakeAuthority = {
             logStatus('FAILED', `Handshake error: ${error.message}`);
         }
         
-        if (this.retries < this.maxRetries) {
-            // Retry with exponential backoff
-            const baseDelay = IframeEnvironment.isVPNNetwork ? 2000 : 1000;
-            const delay = Math.min(baseDelay * Math.pow(2, this.retries - 1), 10000);
-            
-            logStatus('WAITING', `Retrying handshake in ${Math.round(delay)}ms`);
-            
-            setTimeout(() => {
-                this.startHandshakeSequence();
-            }, delay);
+       if (this.retries < this.maxRetries) {
+    // Retry with exponential backoff
+    const baseDelay = IframeEnvironment.isVPNNetwork ? 1000 : 500;  // ← Reduced from 2000/1000 to 1000/500
+    const delay = Math.min(baseDelay * Math.pow(2, this.retries - 1), 5000);  // ← Reduced max from 10000 to 5000
+    
+    logStatus('WAITING', `Retrying handshake in ${Math.round(delay)}ms`);
+    
+    setTimeout(() => {
+        this.startHandshakeSequence();
+    }, delay);
         } else {
             logStatus('WARNING', 'Handshake failed, using guest mode');
             

@@ -244,37 +244,34 @@
         },
         
         // ========== TIMING MODEL - STRICT HANDSHAKE ==========
-        // Handshake must complete <150ms total
-        
         startHandshakeTimer() {
-            this._clearTimer('handshake');
-            this._timers.handshake = setTimeout(() => {
-                if (this._state !== V7_STATES.ACTIVE && this._state !== V7_STATES.READY) {
-                    console.log('[V7] ❌ Handshake timeout at 150ms - entering degraded');
-                    this.transition(V7_STATES.DEGRADED, 'handshake_timeout');
-                }
-            }, 150);
-        },
-        
+    this._clearTimer('handshake');
+    this._timers.handshake = setTimeout(() => {
+        if (this._state !== V7_STATES.ACTIVE && this._state !== V7_STATES.READY) {
+            console.log(`[V7] ❌ Handshake timeout at ${TIMING.HANDSHAKE_TIMEOUT}ms - entering degraded`);
+            this.transition(V7_STATES.DEGRADED, 'handshake_timeout');
+        }
+    }, TIMING.HANDSHAKE_TIMEOUT); // Use TIMING constant
+},
         startSessionTimer() {
-            this._clearTimer('session');
-            this._timers.session = setTimeout(() => {
-                if (this._state === V7_STATES.REGISTERED) {
-                    console.log('[V7] ⚠️ Session timeout at 100ms');
-                    this.transition(V7_STATES.DEGRADED, 'session_timeout');
-                }
-            }, 100);
-        },
-        
-        startParentReadyTimer() {
-            this._clearTimer('parentReady');
-            this._timers.parentReady = setTimeout(() => {
-                if (this._state === V7_STATES.SESSION_RECEIVED) {
-                    console.log('[V7] ⚠️ Parent ready timeout at 50ms');
-                    this.transition(V7_STATES.DEGRADED, 'parent_ready_timeout');
-                }
-            }, 50);
-        },
+    this._clearTimer('session');
+    this._timers.session = setTimeout(() => {
+        if (this._state === V7_STATES.REGISTERED) {
+            console.log(`[V7] ⚠️ Session timeout at ${TIMING.HANDSHAKE_WARNING}ms`);
+            this.transition(V7_STATES.DEGRADED, 'session_timeout');
+        }
+    }, TIMING.HANDSHAKE_WARNING); // Use TIMING constant
+},
+
+startParentReadyTimer() {
+    this._clearTimer('parentReady');
+    this._timers.parentReady = setTimeout(() => {
+        if (this._state === V7_STATES.SESSION_RECEIVED) {
+            console.log(`[V7] ⚠️ Parent ready timeout at ${TIMING.VERIFY_SESSION_TIMEOUT}ms`);
+            this.transition(V7_STATES.DEGRADED, 'parent_ready_timeout');
+        }
+    }, TIMING.VERIFY_SESSION_TIMEOUT); // Use TIMING constant
+},
         
         _clearTimer(name) {
             if (this._timers[name]) {
@@ -323,7 +320,7 @@
                 module: 'messages',
                 frameId: MessagesTransport.getFrameId(),
                 timestamp: Date.now()
-            }, { requireAck: true, timeout: 20 }) // 20ms timeout for ACK
+            }, { requireAck: true, timeout: 500 }) // 20ms timeout for ACK
             .then(() => {
                 this._heartbeatMissed = 0;
                 this._lastHeartbeat = Date.now();
@@ -513,9 +510,9 @@
         },
         
         // ========== VERIFY SESSION ==========
-        // Synchronous verification with 50ms timeout
-        
-        async verifySession(timeoutMs = 50) {
+        // Synchronous verification with timeout
+        async verifySession(timeoutMs = TIMING.VERIFY_SESSION_TIMEOUT) {
+
             if (this._state !== V7_STATES.ACTIVE && this._state !== V7_STATES.READY) {
                 return { valid: false, reason: 'not_active' };
             }
@@ -560,18 +557,14 @@
             this.startHandshakeTimer();
             
             MessagesTransport.send('REGISTER_MODULE', {
-                module: 'messages',
-                frameId: MessagesTransport.getFrameId(),
-                requestId: `reg_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`,
-                timestamp: Date.now(),
-                version: '7.0.0'
-            }, { requireAck: true, timeout: 150 });
-            
-            // NO other messages sent before handshake complete
-            // NO REQUEST_SESSION, NO VERIFY_SESSION, NO HEARTBEAT
-            // NO message requests, NO chat sync
+    module: 'messages',
+    frameId: MessagesTransport.getFrameId(),
+    requestId: `reg_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`,
+    timestamp: Date.now(),
+    version: '7.0.0'
+}, { requireAck: true, timeout: TIMING.HANDSHAKE_TIMEOUT }); // Use TIMING constant
         },
-        
+
         handleModuleRegistered(payload) {
             if (this._state !== V7_STATES.REGISTERING) return;
             
@@ -862,37 +855,36 @@
         VERSION: 'KYN-3.1'
     };
 
-    // CRITICAL: Parent expects these exact timings
     const TIMING = {
-        // Handshake timings - strict
-        HANDSHAKE_TIMEOUT: 150,               // Total handshake must complete <150ms
-        HANDSHAKE_WARNING: 100,                 // Warning at 100ms
-        HANDSHAKE_FALLBACK: 300,                // Fallback threshold - still don't degrade
-        
-        // Verification timings - synchronous
-        VERIFY_SESSION_TIMEOUT: 50,            // 50ms max for VERIFY_SESSION
-        VERIFY_MAX_RETRIES: 2,                  // Max 2 retries
-        
-        // Heartbeat - starts only after ACTIVE
-        HEARTBEAT_INTERVAL: 30000,              // 30s interval
-        HEARTBEAT_ACK_TIMEOUT: 5000,            // Wait 5s for ACK
-        HEARTBEAT_MAX_MISSED: 3,                 // 3 missed before action
-        
-        // Sync timings
-        SYNC_TIMEOUT: 300,                       // 300ms max for initial sync
-        
-        // Message queue
-        QUEUE_FLUSH_INTERVAL: 5000,              // 5s flush interval
-        MESSAGE_ID_CACHE_TTL: 5000,               // 5s TTL for deduplication
-        
-        // Recovery
-        RECOVERY_SILENCE_THRESHOLD: 10000,        // 10s silence before DEGRADED
-        
-        // Retry limits
-        MAX_RETRIES: 2,                           // Max 2 retries for any operation
-        RETRY_BACKOFF_1: 500,                      // First retry backoff
-        RETRY_BACKOFF_2: 1000                       // Second retry backoff
-    };
+    // Handshake timings - strict
+    HANDSHAKE_TIMEOUT: 1500,               // Increase from 150ms to 1500ms
+    HANDSHAKE_WARNING: 500,                 // Increase from 100ms to 500ms
+    HANDSHAKE_FALLBACK: 3000,                // Increase from 300ms to 3000ms
+    
+    // Verification timings - synchronous
+    VERIFY_SESSION_TIMEOUT: 500,            // Increase from 50ms to 500ms
+    VERIFY_MAX_RETRIES: 2,                  // Keep at 2
+    
+    // Heartbeat - starts only after ACTIVE
+    HEARTBEAT_INTERVAL: 30000,              // 30s interval (keep same)
+    HEARTBEAT_ACK_TIMEOUT: 5000,            // Wait 5s for ACK (keep same)
+    HEARTBEAT_MAX_MISSED: 3,                 // 3 missed before action (keep same)
+    
+    // Sync timings
+    SYNC_TIMEOUT: 3000,                       // Increase from 300ms to 3000ms
+    
+    // Message queue
+    QUEUE_FLUSH_INTERVAL: 5000,              // 5s flush interval (keep same)
+    MESSAGE_ID_CACHE_TTL: 5000,               // 5s TTL (keep same)
+    
+    // Recovery
+    RECOVERY_SILENCE_THRESHOLD: 10000,        // 10s silence (keep same)
+    
+    // Retry limits
+    MAX_RETRIES: 2,                           // Max 2 retries (keep same)
+    RETRY_BACKOFF_1: 1000,                     // Increase from 500ms to 1000ms
+    RETRY_BACKOFF_2: 2000                       // Increase from 1000ms to 2000ms
+};
 
     // CRITICAL: Parent expects these exact message types
     const MESSAGE_TYPES = {
@@ -1589,30 +1581,30 @@
             }
         },
         
-        _handleStateTransition: function(state, oldState) {
-            switch (state) {
-                case V7_STATES.REGISTERING:
-                    // Start handshake timer
-                    this._handshakeWarningTimer = setTimeout(() => {
-                        if (this._state === V7_STATES.REGISTERING) {
-                            Logger.warn('StateMachine', 'Handshake slow - at 100ms');
-                        }
-                    }, TIMING.HANDSHAKE_WARNING);
-                    
-                    this._handshakeTimer = setTimeout(() => {
-                        if (this._state === V7_STATES.REGISTERING) {
-                            Logger.warn('StateMachine', 'Handshake timeout at 150ms - still waiting');
-                        }
-                    }, TIMING.HANDSHAKE_TIMEOUT);
-                    
-                    this._handshakeFallbackTimer = setTimeout(() => {
-                        if (this._state === V7_STATES.REGISTERING) {
-                            Logger.warn('StateMachine', 'Handshake fallback at 300ms - proceeding with caution');
-                            // Don't degrade, just proceed with what we have
-                            this.transition(V7_STATES.REGISTERED, 'handshake-fallback');
-                        }
-                    }, TIMING.HANDSHAKE_FALLBACK);
-                    break;
+       _handleStateTransition: function(state, oldState) {
+    switch (state) {
+        case V7_STATES.REGISTERING:
+            // Start handshake timer
+            this._handshakeWarningTimer = setTimeout(() => {
+                if (this._state === V7_STATES.REGISTERING) {
+                    Logger.warn('StateMachine', `Handshake slow - at ${TIMING.HANDSHAKE_WARNING}ms`);
+                }
+            }, TIMING.HANDSHAKE_WARNING);
+            
+            this._handshakeTimer = setTimeout(() => {
+                if (this._state === V7_STATES.REGISTERING) {
+                    Logger.warn('StateMachine', `Handshake timeout at ${TIMING.HANDSHAKE_TIMEOUT}ms - still waiting`);
+                }
+            }, TIMING.HANDSHAKE_TIMEOUT);
+            
+            this._handshakeFallbackTimer = setTimeout(() => {
+                if (this._state === V7_STATES.REGISTERING) {
+                    Logger.warn('StateMachine', `Handshake fallback at ${TIMING.HANDSHAKE_FALLBACK}ms - proceeding with caution`);
+                    // Don't degrade, just proceed with what we have
+                    this.transition(V7_STATES.REGISTERED, 'handshake-fallback');
+                }
+            }, TIMING.HANDSHAKE_FALLBACK);
+            break;
                     
                 case V7_STATES.REGISTERED:
                     // Clear registration timers
@@ -6598,7 +6590,7 @@ ${message.fileSize ? `Size: ${formatFileSize(message.fileSize)}\n` : ''}`;
             V7.sendRegistration();
             
             // Wait for parent with timeout
-            MessagesTransport.waitForParentReady(150).then((parentReady) => {
+            MessagesTransport.waitForParentReady(TIMING.HANDSHAKE_TIMEOUT).then((parentReady) => {
                 if (!parentReady) {
                     log.onceWarn('standalone-mode', '[MessagesCore] No parent authority, entering degraded');
                     LifecycleFSM.transition(FSM_STATES.DEGRADED, 'no_parent');
