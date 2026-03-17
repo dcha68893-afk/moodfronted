@@ -1,10 +1,9 @@
 // calls-ui.js
-// ==================== RESILIENT UI CONTROLLER ====================
-// Version: 3.2.2
+// ==================== RESILIENT UI CONTROLLER - STABILIZED ====================
+// Version: 3.4.3 - STABILIZED: Event-driven, parent-controlled, no fallbacks
 // Purpose: Fault-tolerant, responsive UI layer for calls iframe
-// Dependencies: calls-core.js v4.0.6
-// Security: XSS protected, input sanitized, CSP compliant
-// ===============================================================
+// Dependencies: calls-core.js v7.2.2
+// =============================================================================
 
 (function() {
     'use strict';
@@ -27,6 +26,22 @@
     // ==================== DEBUG FLAG ====================
     window.__IFRAME_DEBUG__ = window.__IFRAME_DEBUG__ || false;
     const DEBUG = window.__IFRAME_DEBUG__;
+
+    // ==================== CORE READY STATE ====================
+    let coreReady = false;
+    let coreInstance = null;
+    let coreInitializationStartTime = Date.now();
+    let coreReadyPromiseResolve = null;
+    let coreReadyPromise = new Promise((resolve) => {
+        coreReadyPromiseResolve = resolve;
+    });
+
+    // ==================== LIFECYCLE STATE TRACKING ====================
+    let parentReady = false;
+    let sessionReady = false;
+    let handshakeComplete = false;
+    let fallbackModeActive = false;
+    let inPassiveMode = false;
 
     // ==================== ERROR CACHE FOR ONCE LOGGING ====================
     const _onceErrors = new Map();
@@ -56,37 +71,38 @@
     // ==================== PARENT CONNECTION WRAPPER ====================
     function sendToParent(type, payload = {}) {
         try {
+            // Don't send if in passive mode
+            if (inPassiveMode) {
+                if (DEBUG) {
+                    logOnce('info', `Not sending ${type} - in passive mode`);
+                }
+                return false;
+            }
+            
             if (window.parent && window.parent !== window) {
-                if (window.callsCore && window.callsCore.IframeTransport) {
-                    window.callsCore.IframeTransport.send(type, payload, { requireAck: false })
+                if (window.callCore && window.callCore.sendAction) {
+                    window.callCore.sendAction(type, payload);
+                    return true;
+                }
+                
+                if (window.callCore && window.callCore.sendToParent) {
+                    window.callCore.sendToParent(type, payload, { requireAck: false })
                         .catch(() => {});
                     return true;
                 }
                 
-                if (window.callsCore && window.callsCore.MessageBridge) {
-                    const message = window.callsCore.MessageBridge.createMessage(
-                        type, 
-                        payload, 
-                        { legacy: true }
-                    );
-                    window.parent.postMessage(message, window.callsCore.OriginAdapter ? 
-                        window.callsCore.OriginAdapter.getTargetOrigin() : '*');
-                    return true;
-                }
-                
+                // Use modern message format
                 const message = {
-                    id: (window.crypto && window.crypto.randomUUID) ? 
+                    protocol: 'KYN-8.0',
+                    type: type,
+                    source: CURRENT_MODULE_NAME,
+                    target: 'parent',
+                    messageId: (window.crypto && window.crypto.randomUUID) ? 
                         window.crypto.randomUUID() : 
                         'msg-' + Date.now() + '-' + Math.random().toString(36).substring(2, 9),
-                    type,
-                    source: "child",
-                    module: CURRENT_MODULE_NAME,
                     timestamp: Date.now(),
-                    session: {
-                        token: window.__CHILD_SESSION__?.token ? 'present' : null,
-                        userId: window.__CHILD_SESSION__?.userId
-                    },
-                    payload
+                    payload: payload || {},
+                    version: '7.1.0'
                 };
                 window.parent.postMessage(message, window.location.origin);
                 return true;
@@ -99,397 +115,349 @@
         return false;
     }
 
-    // ==================== WAIT FOR CORE READY ====================
-    let coreReady = false;
-    let coreReadyCheckInterval = null;
-    
-    function waitForCoreReady(timeout = 10000) {
-        return new Promise((resolve) => {
-            if (coreReady) {
-                resolve(true);
-                return;
-            }
-            
-            // Check if core is already available
-            if (window.callsCore && window.callsCore.isReady && window.callsCore.isReady()) {
-                coreReady = true;
-                resolve(true);
-                return;
-            }
-            
-            // Check if core has a waitForReady method
-            if (window.callsCore && window.callsCore.waitForReady) {
-                window.callsCore.waitForReady(timeout).then(() => {
-                    coreReady = true;
-                    resolve(true);
-                }).catch(() => {
-                    logOnce('warn', 'Core ready timeout, proceeding with fallback');
-                    resolve(false);
-                });
-                return;
-            }
-            
-            // Fallback to event listening
-            const timeoutId = setTimeout(() => {
-                window.removeEventListener('core.ready', readyHandler);
-                if (coreReadyCheckInterval) {
-                    clearInterval(coreReadyCheckInterval);
-                    coreReadyCheckInterval = null;
-                }
-                // Check one more time before giving up
-                if (window.callsCore && window.callsCore.isReady && window.callsCore.isReady()) {
-                    coreReady = true;
-                    resolve(true);
-                } else {
-                    logOnce('warn', 'Core ready timeout, proceeding with fallback');
-                    resolve(false);
-                }
-            }, timeout);
-            
-            const readyHandler = () => {
-                clearTimeout(timeoutId);
-                if (coreReadyCheckInterval) {
-                    clearInterval(coreReadyCheckInterval);
-                    coreReadyCheckInterval = null;
-                }
-                window.removeEventListener('core.ready', readyHandler);
-                coreReady = true;
-                resolve(true);
-            };
-            
-            window.addEventListener('core.ready', readyHandler);
-            
-            // Also check periodically
-            coreReadyCheckInterval = setInterval(() => {
-                if (window.callsCore && window.callsCore.isReady && window.callsCore.isReady()) {
-                    clearTimeout(timeoutId);
-                    clearInterval(coreReadyCheckInterval);
-                    coreReadyCheckInterval = null;
-                    window.removeEventListener('core.ready', readyHandler);
-                    coreReady = true;
-                    resolve(true);
-                }
-            }, 500);
-        });
-    }
-
-    // ==================== IMPORTS FROM CORE ====================
-    let core;
-    
-    if (window.callsCore) {
-        core = window.callsCore;
-    } else {
-        core = {};
+    // ==================== EVENT-DRIVEN CORE READINESS ====================
+    function setupCoreReadyListener() {
         if (DEBUG) {
-            logOnce('warn', 'Waiting for core to load...');
+            logOnce('info', 'Setting up core ready listeners');
+        }
+
+        window.addEventListener('CALLS_CORE_READY', function(event) {
+            if (DEBUG) {
+                logOnce('success', 'Received CALLS_CORE_READY event', event.detail);
+            }
+            handleCoreReady(window.callCore || window.CallsCore || window.callsCore);
+        });
+
+        window.addEventListener('MODULE_READY', function(event) {
+            if (event.detail?.module === 'calls' || !event.detail) {
+                if (DEBUG) {
+                    logOnce('success', 'Received MODULE_READY for calls module', event.detail);
+                }
+                handleCoreReady(window.callCore || window.CallsCore || window.callsCore);
+            }
+        });
+
+        window.addEventListener('core.ready', function(event) {
+            if (event.detail?.module === 'calls' || !event.detail) {
+                if (DEBUG) {
+                    logOnce('success', 'Received core.ready for calls module');
+                }
+                handleCoreReady(window.callCore || window.CallsCore || window.callsCore);
+            }
+        });
+
+        window.addEventListener('calls-ready', function(event) {
+            if (DEBUG) {
+                logOnce('success', 'Received calls-ready event');
+            }
+            handleCoreReady(window.callCore || window.CallsCore || window.callsCore);
+        });
+
+        const messageHandler = function(event) {
+            if (!event.data) return;
+            
+            const data = event.data;
+            
+            if (data.type === 'CALLS_CORE_READY') {
+                if (DEBUG) {
+                    logOnce('success', 'Received CALLS_CORE_READY via message event');
+                }
+                handleCoreReady(window.callCore || window.CallsCore || window.callsCore);
+            }
+            
+            if (data.type === 'MODULE_READY' && (data.module === 'calls' || !data.module)) {
+                if (DEBUG) {
+                    logOnce('success', 'Received MODULE_READY via message event');
+                }
+                handleCoreReady(window.callCore || window.CallsCore || window.callsCore);
+            }
+        };
+        
+        window.addEventListener('message', messageHandler);
+        
+        // Polling as last resort, but will be resolved by events first
+        const checkInterval = setInterval(() => {
+            if (window.callCore && typeof window.callCore.isCoreReady === 'function' && window.callCore.isCoreReady()) {
+                clearInterval(checkInterval);
+                handleCoreReady(window.callCore);
+            } else if (window.callCore && window.callCore.getState && window.callCore.getState().coreReady) {
+                clearInterval(checkInterval);
+                handleCoreReady(window.callCore);
+            } else if (window.callCore && window.callCore.getLifecycleState) {
+                const state = window.callCore.getLifecycleState();
+                if (state === 'ACTIVE') {
+                    clearInterval(checkInterval);
+                    handleCoreReady(window.callCore);
+                }
+            }
+        }, 200);
+        
+        if (DEBUG) {
+            logOnce('info', 'Core ready listeners established');
         }
     }
 
-    const {
-        AppState = {},
-        iframeId = 'calls-iframe',
-        currentState = 'INIT',
-        STATE = {
-            INIT: 'INIT', PREFLIGHT: 'PREFLIGHT', DEPENDENCY: 'DEPENDENCY',
-            PARENT_DETECT: 'PARENT_DETECT', HANDSHAKE: 'HANDSHAKE', SYNC: 'SYNC',
-            PERMISSIONS: 'PERMISSIONS', READY: 'READY', ACTIVE: 'ACTIVE',
-            SUSPENDED: 'SUSPENDED', DEGRADED: 'DEGRADED', DESTROYED: 'DESTROYED', 
-            DEMO: 'DEMO', RECOVERING: 'RECOVERING'
-        },
-        session = { isDemoMode: () => false, validateToken: () => false, getStatus: () => ({}) },
-        auth = { check: () => false, refresh: () => Promise.resolve(false), logout: () => {} },
-        currentUser = null,
-        userDataLoaded = false,
-        sessionAuthorityReady = false,
-        parentCoordinator = null,
-        coreLogger = { info: console.log, warn: console.warn, error: console.error, once: console.log },
-        parentComm = { send: () => false, sendWithAck: () => Promise.reject(), request: () => Promise.reject() },
-        lifecycle = { destroy: () => ({ success: true }) },
-        CoreInitializer,
-        CallCore,
-        ParentCoordinator,
-        TokenManager,
-        SecureAPIClient,
-        CallAPIIntegration,
-        coreElements = {},
-        coreCacheElements = () => {},
-        initializeOfflineDetection = () => {},
-        coreShowUI = () => {},
-        coreEnableUI = () => {},
-        checkUrlParameters = () => {},
-        makeDraggable = () => {},
-        closePip = () => {},
-        checkPremiumFeature = () => true,
-        updatePremiumUI = () => {},
-        loadSettings = () => {},
-        saveSettings = () => {},
-        applySettingsToUI = () => {},
-        updateSetting = () => {},
-        applySettingChange = () => {},
-        resetSettings = () => {},
-        handleOnline = () => {},
-        handleOffline = () => {},
-        showOfflineUI = () => {},
-        handleStorageEvent = () => {},
-        coreDebounce = (fn, wait) => {
-            let timeout;
-            return (...args) => {
-                clearTimeout(timeout);
-                timeout = setTimeout(() => fn(...args), wait);
-            };
-        },
-        stringToColor = (str) => {
-            if (!str) return '#6c5ce7';
-            let hash = 0;
-            for (let i = 0; i < str.length; i++) {
-                hash = str.charCodeAt(i) + ((hash << 5) - hash);
-            }
-            const colors = ['#6c5ce7', '#00b894', '#0984e3', '#fdcb6e', '#e17055', '#d63031', '#e84342'];
-            return colors[Math.abs(hash) % colors.length];
-        },
-        formatTimeAgo = (date) => {
-            const seconds = Math.floor((Date.now() - date) / 1000);
-            if (seconds < 60) return 'just now';
-            const minutes = Math.floor(seconds / 60);
-            if (minutes < 60) return `${minutes}m ago`;
-            const hours = Math.floor(minutes / 60);
-            if (hours < 24) return `${hours}h ago`;
-            const days = Math.floor(hours / 24);
-            return `${days}d ago`;
-        },
-        formatDuration = (seconds) => {
-            if (!seconds && seconds !== 0) return '0:00';
-            const mins = Math.floor(seconds / 60);
-            const secs = seconds % 60;
-            return `${mins}:${secs.toString().padStart(2, '0')}`;
-        },
-        closeUrlParamOverlay = () => {},
-        joinUrlParamCall = () => {},
-        updateMoodIndicator = () => {},
-        updateIntentionIndicator = () => {},
-        updateParticipantBadge = () => {},
-        updateChatBadge = () => {},
-        updateGroupCallButton = () => {},
-        updateVideoLayout = () => {},
-        initializeWhiteboard = () => {},
-        sendChatMessage = () => {},
-        saveSharedNotes = () => {},
-        coreRenderCallHistory = () => {},
-        createCallHistoryItem = () => '',
-        simulateIncomingCall = () => false,
-        bootstrapIframe = () => {},
-        safeInit = () => Promise.resolve(),
-        coreShowNotification = (msg, type) => {
+    function handleCoreReady(core) {
+        if (coreReady) {
             if (DEBUG) {
-                logOnce('info', `[Notification] ${type}: ${msg}`);
+                logOnce('info', 'Core already marked as ready, skipping duplicate');
             }
-        },
-        SecurityCore = {
-            sanitizeString: (str) => str || '',
-            sanitizeURL: (url) => url || '',
-            safeJSONParse: (json, fallback) => {
-                try { return JSON.parse(json); } catch { return fallback; }
-            },
-            safeLocalStorageGet: (key, fallback) => {
-                try { return localStorage.getItem(key) || fallback; } catch { return fallback; }
-            },
-            safeLocalStorageSet: (key, value) => {
-                try { localStorage.setItem(key, value); return true; } catch { return false; }
-            },
-            safeLocalStorageRemove: (key) => {
-                try { localStorage.removeItem(key); return true; } catch { return false; }
-            },
-            safeSessionStorageGet: (key, fallback) => {
-                try { return sessionStorage.getItem(key) || fallback; } catch { return fallback; }
-            },
-            safeSessionStorageSet: (key, value) => {
-                try { sessionStorage.setItem(key, value); return true; } catch { return false; }
-            },
-            generateUUID: () => 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
-                const r = Math.random() * 16 | 0;
-                const v = c === 'x' ? r : (r & 0x3 | 0x8);
-                return v.toString(16);
-            }),
-            createSignature: (payload, timestamp) => {
-                try {
-                    const str = JSON.stringify(payload) + timestamp + 'calls-ui-secret';
-                    let hash = 0;
-                    for (let i = 0; i < str.length; i++) {
-                        const char = str.charCodeAt(i);
-                        hash = ((hash << 5) - hash) + char;
-                        hash = hash & hash;
+            return;
+        }
+        
+        if (DEBUG) {
+            logOnce('success', 'Core is now ready after ' + (Date.now() - coreInitializationStartTime) + 'ms');
+        }
+        
+        coreReady = true;
+        coreInstance = core || window.callCore || window.CallsCore || window.callsCore;
+        
+        // Update passive mode from core if available
+        if (coreInstance && coreInstance.isInPassiveMode) {
+            inPassiveMode = coreInstance.isInPassiveMode();
+        } else if (coreInstance && coreInstance.getState) {
+            const state = coreInstance.getState();
+            inPassiveMode = state.inPassiveMode || false;
+        }
+        
+        if (coreReadyPromiseResolve) {
+            coreReadyPromiseResolve(true);
+            coreReadyPromiseResolve = null;
+        }
+        
+        performFullInitialization();
+    }
+
+    function detectExistingCore() {
+        if (window.callCore) {
+            if (window.callCore.isCoreReady && typeof window.callCore.isCoreReady === 'function') {
+                if (window.callCore.isCoreReady()) {
+                    if (DEBUG) {
+                        logOnce('success', 'callCore.isCoreReady() returned true');
                     }
-                    return hash.toString(36);
-                } catch { return ''; }
+                    coreReady = true;
+                    coreInstance = window.callCore;
+                    
+                    // Check passive mode
+                    if (window.callCore.isInPassiveMode) {
+                        inPassiveMode = window.callCore.isInPassiveMode();
+                    } else if (window.callCore.getState) {
+                        const state = window.callCore.getState();
+                        inPassiveMode = state.inPassiveMode || false;
+                    }
+                    
+                    return true;
+                }
             }
-        },
-        isValidSession = () => false,
-        getValidatedSession = () => null,
-        waitForSession = () => Promise.resolve(null),
-        waitForParent = () => Promise.resolve(false),
-        waitForHandshake = () => Promise.resolve({ success: false }),
-        verifySession = () => Promise.resolve(false),
-        requestResync = () => {},
-        sendSessionAck = () => {},
-        MessageValidator = {
-            validateOrigin: (origin) => {
-                const trusted = [
-                    window.location.origin,
-                    'http://localhost:5500', 'https://localhost:5500',
-                    'http://127.0.0.1:5500', 'https://127.0.0.1:5500'
-                ];
-                return trusted.includes(origin) || origin.includes('localhost') || origin.includes('.onrender.com');
-            },
-            validate: () => true,
-            createMessage: (type, payload) => ({ type, payload, id: Date.now(), timestamp: Date.now() }),
-            generateId: () => Date.now() + '-' + Math.random().toString(36)
-        },
-        RetryManager,
-        ErrorBoundary = {
-            execute: (fn, context, fallback) => {
-                try { return fn(); } catch (e) { 
-                    if (DEBUG) logOnce('error', `UI Error in ${context}:`, e); 
-                    return fallback; 
+            
+            if (window.callCore.getSessionStatus && window.callCore.getSessionStatus() === 'valid') {
+                if (DEBUG) {
+                    logOnce('success', 'callCore session status is valid');
                 }
-            },
-            executeAsync: async (fn, context, fallback) => {
-                try { return await fn(); } catch (e) { 
-                    if (DEBUG) logOnce('error', `UI Async Error in ${context}:`, e); 
-                    return fallback; 
+                coreReady = true;
+                coreInstance = window.callCore;
+                
+                if (window.callCore.isInPassiveMode) {
+                    inPassiveMode = window.callCore.isInPassiveMode();
                 }
-            },
-            wrap: (fn, context) => (...args) => {
-                try { return fn(...args); } catch (e) { 
-                    if (DEBUG) logOnce('error', `UI Error in ${context}:`, e); 
-                    return null; 
+                
+                return true;
+            }
+            
+            if (window.callCore.getState) {
+                const state = window.callCore.getState();
+                if (state && state.coreReady) {
+                    if (DEBUG) {
+                        logOnce('success', 'callCore state shows coreReady');
+                    }
+                    coreReady = true;
+                    coreInstance = window.callCore;
+                    inPassiveMode = state.inPassiveMode || false;
+                    return true;
                 }
-            },
-            createBoundary: (name, fallbackFn) => ({
-                execute: (fn) => { try { return fn(); } catch { return fallbackFn ? fallbackFn() : null; } },
-                executeAsync: async (fn) => { try { return await fn(); } catch { return fallbackFn ? fallbackFn() : null; } }
-            })
-        },
-        MessageIdGenerator = {
-            generateId: () => Date.now() + '-' + Math.random().toString(36).substring(2, 8)
-        },
-        MessageBridge,
-        HandshakeClient,
-        SessionClient,
-        TransportAgent,
-        RecoveryManager,
-        CompatibilityBridge,
-        DiagnosticsAgent,
-        StartupGovernor,
-        EnvironmentDetector,
-        OriginAdapter,
-        MESSAGE_TYPES,
-        IframeEnvironment,
-        OriginSecurity,
-        SafeStorage,
-        IframeTransport,
-        IframeHandshakeAuthority,
-        IframeSessionClient,
-        ReliabilityEngine,
-        MultiModuleCoordinator,
-        UIFailsafe,
-        NavigationGuard,
-        APICore
-    } = core;
+            }
+            
+            if (window.callCore.getLifecycleState) {
+                const lifecycleState = window.callCore.getLifecycleState();
+                if (lifecycleState === 'ACTIVE' || lifecycleState === 'SYNCED') {
+                    if (DEBUG) {
+                        logOnce('success', `callCore lifecycle state: ${lifecycleState}`);
+                    }
+                    coreReady = true;
+                    coreInstance = window.callCore;
+                    inPassiveMode = lifecycleState === 'PASSIVE_WAITING';
+                    return true;
+                }
+            }
+        }
+        
+        return false;
+    }
 
-    // ==================== DEFERRED INITIALIZATION GATES ====================
-    let parentReady = false;
-    let sessionReady = false;
-    let handshakeComplete = false;
-
-    // ==================== UI STATE MANAGEMENT ====================
-    const UIState = {
-        currentView: 'sidebar',
-        viewHistory: [],
-        restorePoints: new Map(),
-        
-        activePanels: new Set(),
-        activeModals: new Set(),
-        activeOverlays: new Set(),
-        
-        renderStages: {
-            skeleton: false,
-            initial: false,
-            enhanced: false,
-            live: false
-        },
-        
-        renderStartTime: 0,
-        lastRenderTime: 0,
-        renderCount: 0,
-        
-        cachedElements: new Map(),
-        cachedTemplates: new Map(),
-        mutationObserver: null,
-        
-        breakpoints: {
-            mobile: 480,
-            tablet: 768,
-            desktop: 1024,
-            wide: 1440
-        },
-        
-        inputMode: 'mouse',
-        
-        errorRecovery: {
-            attempts: new Map(),
-            maxAttempts: 3,
-            backoffMs: 1000
-        },
-        
-        security: {
-            sanitizing: false,
-            maxSanitizeDepth: 10,
-            currentDepth: 0
-        },
-        
-        initialized: false,
-        
-        selectedMood: 'neutral',
-        selectedIntention: 'quick',
-        currentCallCategory: 'all',
-        currentNewCallTab: 'contacts',
-        selectedContacts: [],
-        selectedGroupContacts: [],
-        groupCallOption: null,
-        callLink: null,
-        
-        localStream: null,
-        remoteStreams: new Map(),
-        screenStream: null,
-        isMuted: false,
-        isVideoOff: false,
-        isScreenSharing: false,
-        isSpeakerOn: true,
-        currentFocusMode: false,
-        
-        callStartTime: null,
-        callDurationInterval: null,
-        activeCallId: null,
-        callType: null,
-        callParticipants: [],
-        
-        chatMessages: [],
-        unreadChatCount: 0,
-        
-        activePolls: [],
-        pollResults: [],
-        
-        sharedNotes: [],
-        privateNotes: {},
-        
-        relationshipData: null,
-        
-        // Handshake tracking
-        handshakeAttempts: 0,
-        lastHandshakeAttempt: 0,
-        handshakeTimer: null,
-        sessionSyncTimer: null
-    };
+    function waitForCoreReady(timeout = 8000) {
+        return new Promise((resolve) => {
+            if (detectExistingCore()) {
+                if (DEBUG) {
+                    logOnce('success', 'Core already ready, resolving immediately');
+                }
+                resolve(true);
+                return;
+            }
+            
+            if (DEBUG) {
+                logOnce('info', 'Waiting for core to become ready (timeout: ' + timeout + 'ms)');
+            }
+            
+            if (coreReadyPromise && !coreReady) {
+                coreReadyPromise.then(() => {
+                    if (DEBUG) {
+                        logOnce('success', 'Core ready via shared promise');
+                    }
+                    resolve(true);
+                });
+                
+                // Safety timeout - but events should resolve first
+                setTimeout(() => {
+                    if (!coreReady) {
+                        if (detectExistingCore()) {
+                            resolve(true);
+                        } else {
+                            logOnce('error', 'Core ready timeout after ' + timeout + 'ms - core not available');
+                            resolve(false);
+                        }
+                    }
+                }, timeout);
+                
+                return;
+            }
+            
+            const readyHandler = function() {
+                window.removeEventListener('CALLS_CORE_READY', readyHandler);
+                window.removeEventListener('MODULE_READY', moduleHandler);
+                window.removeEventListener('core.ready', coreReadyHandler);
+                window.removeEventListener('calls-ready', callsReadyHandler);
+                clearTimeout(safetyTimeout);
+                
+                if (DEBUG) {
+                    logOnce('success', 'Core ready detected via event');
+                }
+                
+                coreReady = true;
+                coreInstance = window.callCore || window.CallsCore || window.callsCore;
+                
+                if (coreInstance && coreInstance.isInPassiveMode) {
+                    inPassiveMode = coreInstance.isInPassiveMode();
+                }
+                
+                resolve(true);
+            };
+            
+            const moduleHandler = function(event) {
+                if (event.detail?.module === 'calls' || !event.detail) {
+                    window.removeEventListener('CALLS_CORE_READY', readyHandler);
+                    window.removeEventListener('MODULE_READY', moduleHandler);
+                    window.removeEventListener('core.ready', coreReadyHandler);
+                    window.removeEventListener('calls-ready', callsReadyHandler);
+                    clearTimeout(safetyTimeout);
+                    
+                    if (DEBUG) {
+                        logOnce('success', 'Core ready detected via MODULE_READY');
+                    }
+                    
+                    coreReady = true;
+                    coreInstance = window.callCore || window.CallsCore || window.callsCore;
+                    
+                    if (coreInstance && coreInstance.isInPassiveMode) {
+                        inPassiveMode = coreInstance.isInPassiveMode();
+                    }
+                    
+                    resolve(true);
+                }
+            };
+            
+            const coreReadyHandler = function(event) {
+                if (event.detail?.module === 'calls' || !event.detail) {
+                    window.removeEventListener('CALLS_CORE_READY', readyHandler);
+                    window.removeEventListener('MODULE_READY', moduleHandler);
+                    window.removeEventListener('core.ready', coreReadyHandler);
+                    window.removeEventListener('calls-ready', callsReadyHandler);
+                    clearTimeout(safetyTimeout);
+                    
+                    if (DEBUG) {
+                        logOnce('success', 'Core ready detected via core.ready');
+                    }
+                    
+                    coreReady = true;
+                    coreInstance = window.callCore || window.CallsCore || window.callsCore;
+                    
+                    if (coreInstance && coreInstance.isInPassiveMode) {
+                        inPassiveMode = coreInstance.isInPassiveMode();
+                    }
+                    
+                    resolve(true);
+                }
+            };
+            
+            const callsReadyHandler = function() {
+                window.removeEventListener('CALLS_CORE_READY', readyHandler);
+                window.removeEventListener('MODULE_READY', moduleHandler);
+                window.removeEventListener('core.ready', coreReadyHandler);
+                window.removeEventListener('calls-ready', callsReadyHandler);
+                clearTimeout(safetyTimeout);
+                
+                if (DEBUG) {
+                    logOnce('success', 'Core ready detected via calls-ready');
+                }
+                
+                coreReady = true;
+                coreInstance = window.callCore || window.CallsCore || window.callsCore;
+                
+                if (coreInstance && coreInstance.isInPassiveMode) {
+                    inPassiveMode = coreInstance.isInPassiveMode();
+                }
+                
+                resolve(true);
+            };
+            
+            window.addEventListener('CALLS_CORE_READY', readyHandler);
+            window.addEventListener('MODULE_READY', moduleHandler);
+            window.addEventListener('core.ready', coreReadyHandler);
+            window.addEventListener('calls-ready', callsReadyHandler);
+            
+            const checkInterval = setInterval(() => {
+                if (detectExistingCore()) {
+                    clearInterval(checkInterval);
+                    window.removeEventListener('CALLS_CORE_READY', readyHandler);
+                    window.removeEventListener('MODULE_READY', moduleHandler);
+                    window.removeEventListener('core.ready', coreReadyHandler);
+                    window.removeEventListener('calls-ready', callsReadyHandler);
+                    clearTimeout(safetyTimeout);
+                    
+                    if (DEBUG) {
+                        logOnce('success', 'Core ready detected via polling');
+                    }
+                    
+                    resolve(true);
+                }
+            }, 200);
+            
+            const safetyTimeout = setTimeout(() => {
+                clearInterval(checkInterval);
+                window.removeEventListener('CALLS_CORE_READY', readyHandler);
+                window.removeEventListener('MODULE_READY', moduleHandler);
+                window.removeEventListener('core.ready', coreReadyHandler);
+                window.removeEventListener('calls-ready', callsReadyHandler);
+                
+                if (detectExistingCore()) {
+                    resolve(true);
+                } else {
+                    logOnce('error', 'Core ready timeout after ' + timeout + 'ms - core not available');
+                    // Don't enter fallback mode - just resolve false and let UI show skeleton
+                    resolve(false);
+                }
+            }, timeout);
+        });
+    }
 
     // ==================== DOM ELEMENTS CACHE ====================
     const elements = {};
@@ -497,10 +465,6 @@
     function cacheElements() {
         return UIErrorBoundary.execute(() => {
             const startTime = performance.now();
-            
-            if (coreElements && typeof coreElements === 'object') {
-                Object.assign(elements, coreElements);
-            }
             
             const selectors = {
                 appContainer: '#appContainer',
@@ -642,7 +606,9 @@
                 envBadge: '#envBadge',
                 envText: '#envText',
                 recoveryIndicator: '#recoveryIndicator',
-                recoveryMessage: '#recoveryMessage'
+                recoveryMessage: '#recoveryMessage',
+                
+                fallbackBanner: '#fallbackBanner'
             };
             
             Object.entries(selectors).forEach(([key, selector]) => {
@@ -934,10 +900,6 @@
             });
             
             if (this.errors.length > 20) this.errors.shift();
-            
-            if (coreLogger && coreLogger.error) {
-                coreLogger.error(`UI:${context}`, error);
-            }
         },
         
         getReport: function() {
@@ -960,18 +922,17 @@
                 handshake: {
                     parentReady,
                     sessionReady,
-                    handshakeComplete
-                },
-                environment: IframeEnvironment ? IframeEnvironment.getFullReport() : 
-                             (EnvironmentDetector ? EnvironmentDetector.getFullReport() : null)
+                    handshakeComplete,
+                    inPassiveMode
+                }
             };
         },
         
         getCurrentBreakpoint: function() {
             const width = window.innerWidth;
-            if (width <= UIState.breakpoints.mobile) return 'mobile';
-            if (width <= UIState.breakpoints.tablet) return 'tablet';
-            if (width <= UIState.breakpoints.desktop) return 'desktop';
+            if (width <= 480) return 'mobile';
+            if (width <= 768) return 'tablet';
+            if (width <= 1024) return 'desktop';
             return 'wide';
         }
     };
@@ -1266,6 +1227,93 @@
         }
     };
 
+    // ==================== UI STATE MANAGEMENT ====================
+    const UIState = {
+        currentView: 'sidebar',
+        viewHistory: [],
+        restorePoints: new Map(),
+        
+        activePanels: new Set(),
+        activeModals: new Set(),
+        activeOverlays: new Set(),
+        
+        renderStages: {
+            skeleton: false,
+            initial: false,
+            enhanced: false,
+            live: false
+        },
+        
+        renderStartTime: 0,
+        lastRenderTime: 0,
+        renderCount: 0,
+        
+        cachedElements: new Map(),
+        cachedTemplates: new Map(),
+        mutationObserver: null,
+        
+        breakpoints: {
+            mobile: 480,
+            tablet: 768,
+            desktop: 1024,
+            wide: 1440
+        },
+        
+        inputMode: 'mouse',
+        
+        errorRecovery: {
+            attempts: new Map(),
+            maxAttempts: 3,
+            backoffMs: 1000
+        },
+        
+        security: {
+            sanitizing: false,
+            maxSanitizeDepth: 10,
+            currentDepth: 0
+        },
+        
+        initialized: false,
+        
+        selectedMood: 'neutral',
+        selectedIntention: 'quick',
+        currentCallCategory: 'all',
+        currentNewCallTab: 'contacts',
+        selectedContacts: [],
+        selectedGroupContacts: [],
+        groupCallOption: null,
+        callLink: null,
+        
+        localStream: null,
+        remoteStreams: new Map(),
+        screenStream: null,
+        isMuted: false,
+        isVideoOff: false,
+        isScreenSharing: false,
+        isSpeakerOn: true,
+        currentFocusMode: false,
+        
+        callStartTime: null,
+        callDurationInterval: null,
+        activeCallId: null,
+        callType: null,
+        callParticipants: [],
+        
+        chatMessages: [],
+        unreadChatCount: 0,
+        
+        activePolls: [],
+        pollResults: [],
+        
+        sharedNotes: [],
+        privateNotes: {},
+        
+        relationshipData: null,
+        
+        // Handshake tracking - removed to prevent attempts
+        handshakeCheckInterval: null
+    };
+
     // ==================== RENDERING PIPELINE ====================
     const RenderingPipeline = {
         skeleton: function() {
@@ -1341,31 +1389,9 @@
                 
                 await this.waitForCoreReady();
                 
-                if (typeof loadSettings === 'function') {
-                    loadSettings();
-                }
-                
-                if (typeof applySettingsToUI === 'function') {
-                    applySettingsToUI();
-                }
-                
-                if (typeof coreRenderCallHistory === 'function') {
-                    coreRenderCallHistory();
-                }
-                
                 this.renderCachedContacts();
                 
-                if (typeof updatePremiumUI === 'function') {
-                    updatePremiumUI();
-                }
-                
                 this.updateSyncIndicator();
-                
-                if (typeof checkUrlParameters === 'function') {
-                    checkUrlParameters();
-                }
-                
-                this.showHandshakeStatus();
                 
                 if (elements.appContainer) {
                     elements.appContainer.classList.remove('ui-skeleton');
@@ -1379,14 +1405,18 @@
             }, 'initialRender', false);
         },
         
-        showHandshakeStatus: function() {
+        updateSyncIndicator: function() {
             if (!elements.syncIndicator) return;
             
-            const isDemo = session && session.isDemoMode ? session.isDemoMode() : false;
+            if (inPassiveMode) {
+                elements.syncIndicator.innerHTML = '<i class="fas fa-clock"></i><span>Waiting for parent</span>';
+                elements.syncIndicator.className = 'sync-indicator passive';
+                return;
+            }
             
-            if (isDemo) {
-                elements.syncIndicator.innerHTML = '<i class="fas fa-eye"></i><span>Demo Mode</span>';
-                elements.syncIndicator.className = 'sync-indicator demo';
+            if (fallbackModeActive) {
+                elements.syncIndicator.innerHTML = '<i class="fas fa-exclamation-triangle"></i><span>Limited Mode</span>';
+                elements.syncIndicator.className = 'sync-indicator error';
                 return;
             }
             
@@ -1404,10 +1434,6 @@
         
         waitForCoreReady: function() {
             return new Promise((resolve) => {
-                if (typeof coreCacheElements === 'function') {
-                    coreCacheElements();
-                }
-                
                 cacheElements();
                 
                 if (elements.appContainer && elements.sidebar) {
@@ -1419,9 +1445,6 @@
                 const interval = setInterval(() => {
                     attempts++;
                     
-                    if (typeof coreCacheElements === 'function') {
-                        coreCacheElements();
-                    }
                     cacheElements();
                     
                     if ((elements.appContainer && elements.sidebar) || attempts > 20) {
@@ -1429,8 +1452,6 @@
                         resolve();
                     }
                 }, 50);
-                
-                UIState.cachedElements.set('waitForCoreReady', { interval, attempts: 0 });
             });
         },
         
@@ -1438,11 +1459,7 @@
             try {
                 let cachedContacts = null;
                 
-                if (SafeStorage && typeof SafeStorage.get === 'function') {
-                    cachedContacts = SafeStorage.get('cachedContacts');
-                } else {
-                    cachedContacts = SecuritySanitizer.safeLocalStorageGet('cachedContacts');
-                }
+                cachedContacts = SecuritySanitizer.safeLocalStorageGet('cachedContacts');
                 
                 if (cachedContacts && elements.contactsList) {
                     const contacts = typeof cachedContacts === 'string' ? 
@@ -1474,7 +1491,7 @@
                 contacts.slice(0, 20).forEach(contact => {
                     const name = contact.name || 'Unknown';
                     const initials = name.split(' ').map(n => n[0]).join('').toUpperCase().substring(0, 2);
-                    const bgColor = stringToColor ? stringToColor(name) : '#6c5ce7';
+                    const bgColor = '#6c5ce7'; // Default color
                     
                     html += `
                         <div class="contact-item" data-id="${SecuritySanitizer.sanitizeString(contact.id)}">
@@ -1521,24 +1538,9 @@
         
         attachContactEvents: function() {
             document.querySelectorAll('.contact-item').forEach(item => {
-                item.removeEventListener('click', this.handleContactClick);
-                item.addEventListener('click', this.handleContactClick);
+                item.removeEventListener('click', handleContactClick);
+                item.addEventListener('click', handleContactClick);
             });
-        },
-        
-        handleContactClick: function(e) {
-            if (e.target.closest('.contact-checkbox')) return;
-            
-            const checkbox = this.querySelector('.contact-checkbox');
-            if (checkbox) {
-                checkbox.checked = !checkbox.checked;
-                
-                if (checkbox.checked) {
-                    this.classList.add('selected');
-                } else {
-                    this.classList.remove('selected');
-                }
-            }
         },
         
         progressiveEnhancement: function() {
@@ -1550,24 +1552,7 @@
                 
                 EventSystem.initialize();
                 
-                if (window.ResponsiveEngine) {
-                    ResponsiveEngine.initialize();
-                }
-                
                 SecuritySanitizer.initialize();
-                
-                if (elements.pipContainer && typeof makeDraggable === 'function') {
-                    makeDraggable(elements.pipContainer);
-                }
-                
-                if (typeof initializeOfflineDetection === 'function') {
-                    initializeOfflineDetection();
-                }
-                
-                const whiteboardCanvas = document.querySelector('.whiteboard-canvas');
-                if (whiteboardCanvas && typeof initializeWhiteboard === 'function') {
-                    initializeWhiteboard(whiteboardCanvas);
-                }
                 
                 this.attachReactionEvents();
                 
@@ -1594,71 +1579,10 @@
                 
                 CoreIntegration.subscribeToCore();
                 
-                this.startLiveDataSync();
-                
                 UIState.renderStages.live = true;
                 
                 return true;
             }, 'liveUpdate', false);
-        },
-        
-        startLiveDataSync: function() {
-            if (AppState && (AppState.isAuthenticated || (session && session.isDemoMode && session.isDemoMode()))) {
-                let interval = 30000;
-                if (IframeEnvironment && IframeEnvironment.isVPNNetwork && IframeEnvironment.isVPNNetwork()) {
-                    interval = 60000;
-                } else if (EnvironmentDetector && EnvironmentDetector.isVPNNetwork && EnvironmentDetector.isVPNNetwork()) {
-                    interval = 60000;
-                }
-                
-                const syncInterval = setInterval(() => {
-                    if (window.callAPI && typeof window.callAPI.performBackgroundSync === 'function') {
-                        window.callAPI.performBackgroundSync().catch(() => {});
-                    }
-                }, interval);
-                
-                UIState.cachedElements.set('liveSyncInterval', syncInterval);
-            }
-        },
-        
-        updateSyncIndicator: function() {
-            if (!elements.syncIndicator) return;
-            
-            try {
-                const isDemo = session && session.isDemoMode ? session.isDemoMode() : false;
-                
-                let startupState = null;
-                if (StartupGovernor && typeof StartupGovernor.getState === 'function') {
-                    startupState = StartupGovernor.getState();
-                }
-                
-                if (!AppState?.isOnline) {
-                    elements.syncIndicator.innerHTML = '<i class="fas fa-cloud-slash"></i><span>Offline</span>';
-                    elements.syncIndicator.className = 'sync-indicator offline';
-                } else if (!parentReady && !handshakeComplete) {
-                    elements.syncIndicator.innerHTML = '<i class="fas fa-handshake"></i><span>Connecting...</span>';
-                    elements.syncIndicator.className = 'sync-indicator connecting';
-                } else if (!sessionReady) {
-                    elements.syncIndicator.innerHTML = '<i class="fas fa-sync-alt"></i><span>Syncing...</span>';
-                    elements.syncIndicator.className = 'sync-indicator syncing';
-                } else if (startupState === 'RECOVERING') {
-                    elements.syncIndicator.innerHTML = '<i class="fas fa-ambulance"></i><span>Recovering...</span>';
-                    elements.syncIndicator.className = 'sync-indicator connecting';
-                } else if (isDemo) {
-                    elements.syncIndicator.innerHTML = '<i class="fas fa-eye"></i><span>Demo Mode</span>';
-                    elements.syncIndicator.className = 'sync-indicator demo';
-                } else if (AppState?.syncPending) {
-                    elements.syncIndicator.innerHTML = '<i class="fas fa-sync fa-spin"></i><span>Syncing...</span>';
-                    elements.syncIndicator.className = 'sync-indicator syncing';
-                } else {
-                    elements.syncIndicator.innerHTML = '<i class="fas fa-check-circle"></i><span>Synced</span>';
-                    elements.syncIndicator.className = 'sync-indicator synced';
-                }
-            } catch (error) {
-                if (DEBUG) {
-                    logOnce('warn', 'Failed to update sync indicator', error);
-                }
-            }
         },
         
         sanitizeHTML: function(str) {
@@ -1695,209 +1619,446 @@
     // ==================== CORE INTEGRATION BRIDGE ====================
     const CoreIntegration = {
         _subscriptions: new Set(),
-        _validationCache: new Map(),
-        _handshakeCheckInterval: null,
-        _sessionCheckInterval: null,
         
         subscribeToCore: function() {
             if (DEBUG) {
                 logOnce('info', 'Subscribing to core events');
             }
             
-            if (window.iframeCore && typeof window.iframeCore.onStateChange === 'function') {
-                const unsubscribe = window.iframeCore.onStateChange(this.handleStateChange.bind(this));
-                if (unsubscribe) this._subscriptions.add({ type: 'state', unsubscribe });
+            if (coreInstance && coreInstance.addListener) {
+                coreInstance.addListener(this.handleCoreEvent.bind(this));
+                this._subscriptions.add('coreListener');
+            }
+            
+            if (coreInstance && coreInstance.addMediaListener) {
+                coreInstance.addMediaListener(this.handleMediaEvent.bind(this));
+                this._subscriptions.add('mediaListener');
+            }
+            
+            if (coreInstance && coreInstance.addWebRTCListener) {
+                coreInstance.addWebRTCListener(this.handleWebRTCEvent.bind(this));
+                this._subscriptions.add('webrtcListener');
             }
             
             this.setupParentMessageHandler();
             
             this.observeAppState();
             
-            this.setupHandshakeListener();
-            
-            if (RecoveryManager && typeof RecoveryManager.addListener === 'function') {
-                RecoveryManager.addListener(this.handleRecovery.bind(this));
-            }
-            
-            if (IframeHandshakeAuthority && typeof IframeHandshakeAuthority.addListener === 'function') {
-                IframeHandshakeAuthority.addListener(this.handleHandshakeEvent.bind(this));
-            }
-            
-            if (IframeSessionClient && typeof IframeSessionClient.addListener === 'function') {
-                IframeSessionClient.addListener(this.handleSessionEvent.bind(this));
-            }
-            
-            window.addEventListener('core.ready', this.handleCoreReady.bind(this));
-            
-            this._startHandshakeCheck();
+            // Update initial state from core if available
+            this.updateStateFromCore();
         },
         
-        _startHandshakeCheck: function() {
-            if (this._handshakeCheckInterval) {
-                clearInterval(this._handshakeCheckInterval);
-            }
+        updateStateFromCore: function() {
+            if (!coreInstance) return;
             
-            this._handshakeCheckInterval = setInterval(() => {
-                if (!parentReady && !handshakeComplete) {
-                    const isDemo = session && session.isDemoMode ? session.isDemoMode() : false;
-                    if (!isDemo && window.parent && window.parent !== window) {
-                        this.checkHandshakeStatus();
-                    }
-                }
-            }, 3000);
-        },
-        
-        checkHandshakeStatus: function() {
-            if (window.callsCore && window.callsCore.IframeHandshakeAuthority) {
-                const status = window.callsCore.IframeHandshakeAuthority.getStatus();
-                if (status) {
-                    parentReady = status.parentReady || false;
-                    handshakeComplete = status.handshakeDone || false;
+            if (coreInstance.getState) {
+                const state = coreInstance.getState();
+                if (state) {
+                    parentReady = state.parentReady || false;
+                    sessionReady = state.sessionStatus === 'valid';
+                    handshakeComplete = state.registered && state.sessionReceived;
+                    fallbackModeActive = state.degraded || false;
+                    inPassiveMode = state.inPassiveMode || false;
                     RenderingPipeline.updateSyncIndicator();
-                    
-                    if (!parentReady && !handshakeComplete && !UIState.handshakeTimer) {
-                        UIState.handshakeTimer = setTimeout(() => {
-                            if (!parentReady && !handshakeComplete && window.callsCore && window.callsCore.IframeHandshakeAuthority) {
-                                window.callsCore.IframeHandshakeAuthority.start().catch(() => {});
-                            }
-                            UIState.handshakeTimer = null;
-                        }, 5000);
-                    }
                 }
             }
             
-            if (window.callsCore && window.callsCore.IframeSessionClient) {
-                sessionReady = window.callsCore.IframeSessionClient.isValid() || false;
+            if (coreInstance.isInPassiveMode) {
+                inPassiveMode = coreInstance.isInPassiveMode();
                 RenderingPipeline.updateSyncIndicator();
             }
         },
         
-        handleCoreReady: function(event) {
-            logOnce('success', 'Core ready event received');
-            coreReady = true;
-            parentReady = true;
-            sessionReady = true;
-            handshakeComplete = true;
+        handleCoreEvent: function(event, data) {
+            if (DEBUG) {
+                logOnce('info', `Core event: ${event}`, data);
+            }
+            
+            switch (event) {
+                case 'session_update':
+                case 'session_valid':
+                    sessionReady = true;
+                    RenderingPipeline.updateSyncIndicator();
+                    break;
+                case 'incoming_call':
+                    this.handleIncomingCall(data);
+                    break;
+                case 'call_started':
+                    this.handleCallStarted(data);
+                    break;
+                case 'call_connected':
+                    this.handleCallConnected(data);
+                    break;
+                case 'call_ended':
+                case 'call_rejected':
+                case 'call_failed':
+                    this.handleCallEnded(data);
+                    break;
+                case 'logout':
+                    this.handleLogout();
+                    break;
+                case 'mood_updated':
+                    if (data && data.mood && elements.callMoodIndicator) {
+                        elements.callMoodIndicator.dataset.mood = data.mood;
+                    }
+                    break;
+                case 'intention_updated':
+                    if (data && data.intention && elements.callIntentionIndicator) {
+                        elements.callIntentionIndicator.dataset.intention = data.intention;
+                    }
+                    break;
+                case 'focus_mode_toggled':
+                    if (data && data.enabled !== undefined && elements.focusModeBtn) {
+                        if (data.enabled) {
+                            elements.focusModeBtn.classList.add('active');
+                        } else {
+                            elements.focusModeBtn.classList.remove('active');
+                        }
+                    }
+                    break;
+                case 'remote_stream_added':
+                    this.handleRemoteStreamAdded(data);
+                    break;
+                case 'remote_stream_removed':
+                    this.handleRemoteStreamRemoved(data);
+                    break;
+                case 'degraded_mode':
+                    fallbackModeActive = true;
+                    this.handleDegradedMode();
+                    break;
+                case 'passive_mode_entered':
+                    inPassiveMode = true;
+                    RenderingPipeline.updateSyncIndicator();
+                    break;
+            }
+        },
+        
+        handleMediaEvent: function(event, data) {
+            if (DEBUG) {
+                logOnce('info', `Media event: ${event}`);
+            }
+            
+            switch (event) {
+                case 'local_stream_ready':
+                    UIState.localStream = data.stream;
+                    break;
+                case 'local_stream_stopped':
+                    UIState.localStream = null;
+                    break;
+                case 'mic_toggled':
+                    UIState.isMuted = !data.enabled;
+                    if (elements.muteBtn) {
+                        const icon = elements.muteBtn.querySelector('i');
+                        if (icon) {
+                            icon.className = UIState.isMuted ? 'fas fa-microphone-slash' : 'fas fa-microphone';
+                        }
+                    }
+                    break;
+                case 'camera_toggled':
+                    UIState.isVideoOff = !data.enabled;
+                    if (elements.videoBtn) {
+                        const icon = elements.videoBtn.querySelector('i');
+                        if (icon) {
+                            icon.className = UIState.isVideoOff ? 'fas fa-video-slash' : 'fas fa-video';
+                        }
+                    }
+                    break;
+                case 'camera_switched':
+                    if (data && data.facingMode && elements.videoBtn) {
+                        elements.videoBtn.title = `Camera (${data.facingMode})`;
+                    }
+                    break;
+                case 'screen_share_started':
+                    UIState.isScreenSharing = true;
+                    if (elements.screenShareBtn) {
+                        elements.screenShareBtn.classList.add('active');
+                    }
+                    break;
+                case 'screen_share_ended':
+                    UIState.isScreenSharing = false;
+                    if (elements.screenShareBtn) {
+                        elements.screenShareBtn.classList.remove('active');
+                    }
+                    break;
+                case 'stream_error':
+                    showNotification(data.error || 'Media error', 'error');
+                    break;
+            }
+        },
+        
+        handleWebRTCEvent: function(event, data) {
+            if (DEBUG) {
+                logOnce('info', `WebRTC event: ${event}`);
+            }
+            
+            switch (event) {
+                case 'remote_stream_added':
+                    if (data && data.stream) {
+                        const streamId = data.stream.id;
+                        UIState.remoteStreams.set(streamId, data.stream);
+                        this.addRemoteVideo(streamId, data.stream);
+                    }
+                    break;
+                case 'remote_stream_removed':
+                    if (data && data.streamId) {
+                        UIState.remoteStreams.delete(data.streamId);
+                        const videoEl = document.querySelector(`.video-container[data-stream-id="${data.streamId}"]`);
+                        if (videoEl) videoEl.remove();
+                    }
+                    break;
+                case 'ice_state':
+                    if (data && data.state === 'failed') {
+                        showNotification('Connection unstable, reconnecting...', 'warning');
+                    } else if (data && data.state === 'connected') {
+                        if (elements.callStatusText) {
+                            elements.callStatusText.textContent = 'Connected';
+                        }
+                    }
+                    break;
+                case 'data_message':
+                    if (data && data.type === 'chat' && data.message) {
+                        this.addChatMessage(data.sender, data.message, data.timestamp);
+                    }
+                    break;
+                case 'call_failed':
+                    if (data && data.reason === 'ice_failed') {
+                        showNotification('Call connection failed', 'error');
+                    }
+                    break;
+            }
+        },
+        
+        addRemoteVideo: function(streamId, stream) {
+            if (!elements.videoGrid) return;
+            
+            const container = document.createElement('div');
+            container.className = 'video-container';
+            container.dataset.streamId = streamId;
+            
+            const video = document.createElement('video');
+            video.className = 'video-element';
+            video.autoplay = true;
+            video.playsInline = true;
+            video.srcObject = stream;
+            
+            const overlay = document.createElement('div');
+            overlay.className = 'video-overlay';
+            overlay.innerHTML = `
+                <div class="video-name">
+                    <span>Participant</span>
+                </div>
+            `;
+            
+            container.appendChild(video);
+            container.appendChild(overlay);
+            elements.videoGrid.appendChild(container);
+            
+            video.play().catch(e => UILogger.warn('Error playing remote video', e));
+        },
+        
+        addChatMessage: function(sender, message, timestamp) {
+            const chatPanel = document.querySelector('.chat-panel .chat-messages');
+            if (!chatPanel) return;
+            
+            const msgEl = document.createElement('div');
+            msgEl.className = 'chat-message';
+            msgEl.innerHTML = `
+                <div class="message-sender">${SecuritySanitizer.sanitizeString(sender || 'Participant')}</div>
+                <div class="message-content">${SecuritySanitizer.sanitizeString(message)}</div>
+                <div class="message-time">${timestamp ? new Date(timestamp).toLocaleTimeString() : 'now'}</div>
+            `;
+            
+            chatPanel.appendChild(msgEl);
+            chatPanel.scrollTop = chatPanel.scrollHeight;
+        },
+        
+        handleIncomingCall: function(callData) {
+            if (elements.incomingCallModal) {
+                if (elements.incomingCallName) {
+                    elements.incomingCallName.textContent = callData.callerName || 'Incoming Call';
+                }
+                if (elements.incomingCallType) {
+                    elements.incomingCallType.textContent = callData.callType === 'video' ? 'Video Call' : 'Voice Call';
+                }
+                if (elements.incomingCallAvatar) {
+                    const initials = (callData.callerName || 'C').charAt(0).toUpperCase();
+                    elements.incomingCallAvatar.textContent = initials;
+                }
+                if (elements.incomingCallMood) {
+                    elements.incomingCallMood.dataset.mood = callData.callerMood || 'neutral';
+                }
+                if (elements.incomingCallIntention) {
+                    elements.incomingCallIntention.dataset.intention = callData.callerIntention || 'quick';
+                }
+                
+                let timeLeft = 30;
+                if (elements.declineTimer) {
+                    elements.declineTimer.textContent = timeLeft;
+                }
+                
+                const timer = setInterval(() => {
+                    timeLeft--;
+                    if (elements.declineTimer) {
+                        elements.declineTimer.textContent = timeLeft;
+                    }
+                    if (timeLeft <= 0) {
+                        clearInterval(timer);
+                        if (elements.incomingCallModal && elements.incomingCallModal.classList.contains('active')) {
+                            UIEventHandlers.declineIncomingCall();
+                        }
+                    }
+                }, 1000);
+                
+                elements.incomingCallModal.dataset.timer = timer;
+                
+                elements.incomingCallModal.classList.add('active');
+                UIState.activeModals.add('incomingCallModal');
+            }
+        },
+        
+        handleCallStarted: function(callData) {
+            UIState.activeCallId = callData.callId;
+            UIState.callParticipants = callData.participants || [];
+            UIState.callStartTime = Date.now();
+            UIState.callType = callData.callType;
+            
+            if (elements.callContainer) {
+                elements.callContainer.classList.add('active');
+            }
+            if (elements.sidebar) {
+                elements.sidebar.style.display = 'none';
+            }
+            
+            const participantNames = UIState.callParticipants.map(p => p.name).join(', ') || 'Call';
+            if (elements.callWithName) {
+                elements.callWithName.textContent = SecuritySanitizer.sanitizeString(participantNames);
+            }
+            if (elements.callStatusText) {
+                elements.callStatusText.textContent = 'Connecting...';
+            }
+            
+            const icon = UIState.callType === 'video' ? 'fa-video' : 'fa-phone';
+            if (elements.callTypeIcon) {
+                elements.callTypeIcon.innerHTML = `<i class="fas ${icon}"></i>`;
+            }
+            
+            if (elements.focusModeBtn) {
+                elements.focusModeBtn.style.display = 'block';
+            }
+            
+            UIState.currentView = 'call';
+            
+            this.startCallTimer();
+        },
+        
+        handleCallConnected: function(callData) {
+            if (elements.callStatusText) {
+                elements.callStatusText.textContent = 'In call';
+            }
+        },
+        
+        handleCallEnded: function(callData) {
+            if (elements.callContainer) {
+                elements.callContainer.classList.remove('active');
+            }
+            if (elements.sidebar) {
+                elements.sidebar.style.display = 'flex';
+            }
+            
+            if (UIState.callDurationInterval) {
+                clearInterval(UIState.callDurationInterval);
+                UIState.callDurationInterval = null;
+            }
+            
+            if (elements.videoGrid) {
+                elements.videoGrid.innerHTML = '';
+                if (elements.offlineCallPlaceholder) {
+                    elements.offlineCallPlaceholder.style.display = 'flex';
+                }
+            }
+            
+            if (elements.focusModeBtn) {
+                elements.focusModeBtn.style.display = 'none';
+            }
+            
+            if (UIState.currentFocusMode) {
+                UIEventHandlers.disableFocusMode();
+            }
+            
+            UIState.activeCallId = null;
+            UIState.callParticipants = [];
+            UIState.callStartTime = null;
+            UIState.callType = null;
+            UIState.localStream = null;
+            UIState.remoteStreams.clear();
+            
+            UIState.currentView = 'sidebar';
+            
+            setTimeout(() => {
+                UIEventHandlers.showPrivateNotesModal();
+            }, 500);
+        },
+        
+        handleRemoteStreamAdded: function(payload) {
+            if (payload.stream) {
+                UIState.remoteStreams.set(payload.stream.id, payload.stream);
+                this.addRemoteVideo(payload.stream.id, payload.stream);
+            }
+        },
+        
+        handleRemoteStreamRemoved: function(payload) {
+            if (payload.streamId) {
+                UIState.remoteStreams.delete(payload.streamId);
+                const videoEl = document.querySelector(`.video-container[data-stream-id="${payload.streamId}"]`);
+                if (videoEl) videoEl.remove();
+            }
+        },
+        
+        handleLogout: function() {
+            if (DEBUG) {
+                logOnce('info', 'Logout triggered');
+            }
+            
+            window.__CHILD_SESSION__.token = null;
+            window.__CHILD_SESSION__.userId = null;
+            window.__CHILD_SESSION__.expires = null;
+            sessionReady = false;
+            parentReady = false;
+            handshakeComplete = false;
+            
+            const protectedButtons = [
+                elements.newCallBtn,
+                elements.quickVoiceBtn,
+                elements.quickVideoBtn,
+                elements.quickGroupBtn
+            ];
+            
+            protectedButtons.forEach(btn => {
+                if (btn) {
+                    btn.disabled = true;
+                }
+            });
+            
             RenderingPipeline.updateSyncIndicator();
             
-            if (this._handshakeCheckInterval) {
-                clearInterval(this._handshakeCheckInterval);
-                this._handshakeCheckInterval = null;
-            }
+            showNotification('Logged out', 'info');
         },
         
-        handleHandshakeEvent: function(event, data) {
-            if (event === 'handshake_ack') {
-                handshakeComplete = true;
-                parentReady = true;
-                RenderingPipeline.updateSyncIndicator();
-            } else if (event === 'parent_ready') {
-                parentReady = true;
-                RenderingPipeline.updateSyncIndicator();
-            }
-        },
-        
-        handleSessionEvent: function(event, data) {
-            if (event === 'update' || event === 'token') {
-                sessionReady = true;
-                RenderingPipeline.updateSyncIndicator();
-            } else if (event === 'expired' || event === 'clear') {
-                sessionReady = false;
-                RenderingPipeline.updateSyncIndicator();
-            }
-        },
-        
-        setupHandshakeListener: function() {
-            const handler = (event) => {
-                if (OriginSecurity && !OriginSecurity.validateEvent(event)) return;
-                if (OriginAdapter && !OriginAdapter.validateEvent(event)) return;
-                
-                const data = event.data;
-                if (!data || typeof data !== 'object') return;
-                
-                switch (data.type) {
-                    case 'PARENT_READY':
-                        parentReady = true;
-                        RenderingPipeline.updateSyncIndicator();
-                        break;
-                    case 'SESSION_UPDATE':
-                    case 'SESSION_SYNC':
-                    case 'PARENT_SESSION_RESPONSE':
-                        sessionReady = true;
-                        RenderingPipeline.updateSyncIndicator();
-                        break;
-                    case 'HANDSHAKE_ACK':
-                        handshakeComplete = true;
-                        parentReady = true;
-                        RenderingPipeline.updateSyncIndicator();
-                        break;
-                }
-            };
+        startCallTimer: function() {
+            if (!UIState.callStartTime) return;
             
-            window.addEventListener('message', handler);
-            this._subscriptions.add({ type: 'handshake', handler });
-        },
-        
-        handleStateChange: function(newState, oldState) {
-            try {
-                if (DEBUG) {
-                    logOnce('info', `Core state changed: ${oldState} → ${newState}`);
-                }
-                
-                switch (newState) {
-                    case 'ACTIVE':
-                        RenderingPipeline.liveUpdate();
-                        break;
-                    case 'SUSPENDED':
-                        this.pauseUIUpdates();
-                        break;
-                    case 'DEGRADED':
-                    case 'DEMO':
-                        this.handleDegradedMode();
-                        break;
-                    case 'RECOVERING':
-                        this.handleRecoveringMode();
-                        break;
-                }
-                
-                RenderingPipeline.updateSyncIndicator();
-                
-            } catch (error) {
-                UILogger.error('handleStateChange', error);
+            if (UIState.callDurationInterval) {
+                clearInterval(UIState.callDurationInterval);
             }
-        },
-        
-        handleRecovery: function(event, data) {
-            if (event === 'start') {
-                if (DEBUG) {
-                    logOnce('info', 'Recovery started', data);
-                }
-                this.showRecoveryNotification();
-            } else if (event === 'success') {
-                if (DEBUG) {
-                    logOnce('info', 'Recovery successful');
-                }
-                showNotification('Connection restored', 'success');
-                parentReady = true;
-                sessionReady = true;
-                RenderingPipeline.updateSyncIndicator();
-            } else if (event === 'failed') {
-                if (DEBUG) {
-                    logOnce('warn', 'Recovery failed', data);
-                }
-                showNotification('Connection issues detected', 'warning');
-            }
-        },
-        
-        showRecoveryNotification: function() {
-            showNotification('Attempting to reconnect...', 'info');
-        },
-        
-        handleRecoveringMode: function() {
-            if (DEBUG) {
-                logOnce('info', 'Entering recovery mode');
-            }
-            showNotification('Reconnecting...', 'info');
+            
+            UIState.callDurationInterval = setInterval(() => {
+                if (!UIState.callStartTime || !elements.callDuration) return;
+                
+                const elapsed = Math.floor((Date.now() - UIState.callStartTime) / 1000);
+                const minutes = Math.floor(elapsed / 60).toString().padStart(2, '0');
+                const seconds = (elapsed % 60).toString().padStart(2, '0');
+                elements.callDuration.textContent = `${minutes}:${seconds}`;
+            }, 1000);
         },
         
         setupParentMessageHandler: function() {
@@ -1922,9 +2083,6 @@
                     case 'CALL_HISTORY_UPDATE':
                         this.handleCallHistoryUpdate(data.payload || data);
                         break;
-                    case 'PING':
-                        this.sendPong(data.payload?.requestId);
-                        break;
                     case 'PAGE_ACTIVATED':
                         if (DEBUG) {
                             logOnce('info', 'Parent page activated');
@@ -1935,15 +2093,23 @@
                             logOnce('info', 'Parent navigation:', data.payload);
                         }
                         break;
-                    case 'PARENT_SESSION_RESPONSE':
-                        if (data.payload && data.payload.session) {
-                            this.handleSessionUpdate(data.payload.session);
+                    case 'NEW_MESSAGE':
+                        if (data.payload && data.payload.message) {
+                            this.addChatMessage(data.payload.sender, data.payload.message, data.payload.timestamp);
                         }
                         break;
-                    case 'PARENT_TOKEN_RESPONSE':
-                        if (data.payload && data.payload.token) {
-                            this.handleTokenUpdate(data.payload);
-                        }
+                    case 'PARENT_READY':
+                        parentReady = true;
+                        RenderingPipeline.updateSyncIndicator();
+                        break;
+                    case 'MODULE_REGISTERED':
+                        handshakeComplete = true;
+                        RenderingPipeline.updateSyncIndicator();
+                        break;
+                    case 'SESSION_SYNC':
+                        sessionReady = true;
+                        this.handleSessionUpdate(data.payload || data);
+                        RenderingPipeline.updateSyncIndicator();
                         break;
                 }
             };
@@ -1955,19 +2121,26 @@
         validateParentMessage: function(event) {
             if (!event || !event.data) return false;
             
-            if (OriginSecurity && !OriginSecurity.validateEvent(event)) {
-                return false;
-            }
-            
-            if (OriginAdapter && !OriginAdapter.validateEvent(event)) {
+            // Check origin
+            if (event.origin !== window.location.origin && 
+                !event.origin.includes('localhost') && 
+                !event.origin.includes('127.0.0.1')) {
                 return false;
             }
             
             const data = event.data;
+            
+            // Validate required fields
             if (!data.type || typeof data.type !== 'string') {
                 return false;
             }
             
+            // Validate source is parent
+            if (data.source && data.source !== 'parent') {
+                return false;
+            }
+            
+            // Check timestamp if present
             if (data.timestamp && (data.timestamp < Date.now() - 300000 || data.timestamp > Date.now() + 60000)) {
                 return false;
             }
@@ -1976,45 +2149,26 @@
         },
         
         handleSessionUpdate: function(data) {
-            if (!this.validatePayload(data, ['user', 'token', 'authenticated'])) {
-                if (DEBUG) {
-                    logOnce('warn', 'Invalid session update payload');
-                }
-                return;
-            }
-            
             if (DEBUG) {
                 logOnce('info', 'Received session update');
             }
             
             if (data.token) {
                 window.__CHILD_SESSION__.token = data.token;
-                sessionReady = true;
             }
-            if (data.user && data.user.id) {
-                window.__CHILD_SESSION__.userId = data.user.id;
+            if (data.userId) {
+                window.__CHILD_SESSION__.userId = data.userId;
             }
             if (data.expiry) {
                 window.__CHILD_SESSION__.expires = data.expiry;
             }
             
-            if (data.user && AppState) {
-                AppState.user = { ...AppState.user, ...data.user };
-                AppState.currentUser = { ...AppState.currentUser, ...data.user };
-                AppState.isAuthenticated = data.authenticated !== undefined ? data.authenticated : AppState.isAuthenticated;
-                
-                this.updateUserUI(AppState.user);
-            }
-            
-            if (data.token && session && typeof session.setToken === 'function') {
-                session.setToken(data.token, data.expiry);
-            }
-            
+            sessionReady = true;
             RenderingPipeline.updateSyncIndicator();
         },
         
         handleTokenUpdate: function(data) {
-            if (!this.validatePayload(data, ['token'])) return;
+            if (!data || !data.token) return;
             
             window.__CHILD_SESSION__.token = data.token;
             if (data.expiry) {
@@ -2022,19 +2176,11 @@
             }
             sessionReady = true;
             
-            if (session && typeof session.setToken === 'function') {
-                session.setToken(data.token, data.expiry);
-            }
-            
             RenderingPipeline.updateSyncIndicator();
         },
         
         handleContactsUpdate: function(data) {
-            if (!this.validatePayload(data, ['contacts']) || !Array.isArray(data.contacts)) return;
-            
-            if (AppState) {
-                AppState.contacts = data.contacts;
-            }
+            if (!data || !data.contacts || !Array.isArray(data.contacts)) return;
             
             if (elements.contactsList) {
                 RenderingPipeline.renderContactsList(data.contacts);
@@ -2042,99 +2188,7 @@
         },
         
         handleCallHistoryUpdate: function(data) {
-            if (!this.validatePayload(data, ['history']) || !Array.isArray(data.history)) return;
-            
-            if (AppState) {
-                AppState.callHistory = data.history;
-            }
-            
-            if (typeof coreRenderCallHistory === 'function') {
-                coreRenderCallHistory();
-            }
-        },
-        
-        sendPong: function(requestId) {
-            if (!requestId) return;
-            
-            sendToParent('PONG', {
-                requestId,
-                timestamp: Date.now(),
-                state: UIState.renderStages
-            });
-        },
-        
-        validatePayload: function(payload, requiredFields) {
-            if (!payload || typeof payload !== 'object') return false;
-            
-            return requiredFields.every(field => 
-                payload.hasOwnProperty(field) || payload[field] !== undefined
-            );
-        },
-        
-        updateUserUI: function(user) {
-            if (!user) return;
-            
-            try {
-                const isDemo = session && session.isDemoMode ? session.isDemoMode() : false;
-                
-                document.querySelectorAll('.user-name, .username').forEach(el => {
-                    if (el.textContent.includes('User') || el.textContent.includes('Loading') || !currentUser) {
-                        el.textContent = SecuritySanitizer.sanitizeString(user.name || user.username || 'User');
-                    }
-                });
-                
-                if (elements.callStatusText) {
-                    elements.callStatusText.textContent = isDemo ? 'Demo Mode' : 
-                        `Ready (${SecuritySanitizer.sanitizeString(user.name || user.username || 'User')})`;
-                }
-                
-                this.updateApiStatus(user);
-                
-            } catch (error) {
-                UILogger.error('updateUserUI', error);
-            }
-        },
-        
-        updateApiStatus: function(user) {
-            if (!elements.apiStatusIndicator || !elements.apiStatusText) return;
-            
-            try {
-                const isDemo = session && session.isDemoMode ? session.isDemoMode() : false;
-                
-                if (isDemo) {
-                    elements.apiStatusIndicator.className = 'api-status-indicator demo';
-                    elements.apiStatusText.textContent = 'Demo Mode';
-                } else if (user) {
-                    elements.apiStatusIndicator.className = 'api-status-indicator connected';
-                    elements.apiStatusText.textContent = `Authenticated as ${SecuritySanitizer.sanitizeString(user.name || user.username || 'User')}`;
-                } else {
-                    elements.apiStatusIndicator.className = 'api-status-indicator connecting';
-                    elements.apiStatusText.textContent = 'Connecting...';
-                }
-                
-                elements.apiStatusIndicator.style.display = 'inline-flex';
-                
-                setTimeout(() => {
-                    if (elements.apiStatusIndicator) {
-                        elements.apiStatusIndicator.style.display = 'none';
-                    }
-                }, 3000);
-                
-            } catch (error) {
-                UILogger.error('updateApiStatus', error);
-            }
-        },
-        
-        pauseUIUpdates: function() {
-            if (DEBUG) {
-                logOnce('info', 'Pausing UI updates');
-            }
-            
-            const syncInterval = UIState.cachedElements.get('liveSyncInterval');
-            if (syncInterval) {
-                clearInterval(syncInterval);
-                UIState.cachedElements.delete('liveSyncInterval');
-            }
+            // Handle call history update if needed
         },
         
         handleDegradedMode: function() {
@@ -2142,20 +2196,28 @@
                 logOnce('info', 'Handling degraded mode');
             }
             
-            const isDemo = session && session.isDemoMode ? session.isDemoMode() : false;
+            fallbackModeActive = true;
             
-            if (isDemo) {
-                document.querySelectorAll('button, input, select').forEach(el => {
-                    if (el.id !== 'premiumLocked') {
-                        el.disabled = false;
-                    }
-                });
-                
-                if (elements.syncIndicator) {
-                    elements.syncIndicator.innerHTML = '<i class="fas fa-eye"></i><span>Demo Mode</span>';
-                    elements.syncIndicator.className = 'sync-indicator demo';
+            document.querySelectorAll('button, input, select').forEach(el => {
+                if (!el.classList.contains('critical-control') && el.id !== 'endCallBtn' && el.id !== 'muteBtn') {
+                    el.disabled = true;
                 }
+            });
+            
+            if (elements.fallbackBanner) {
+                elements.fallbackBanner.style.display = 'block';
+                elements.fallbackBanner.innerHTML = `
+                    <div class="fallback-banner-content">
+                        <i class="fas fa-exclamation-triangle"></i>
+                        <span>Limited connectivity - Some features may be unavailable</span>
+                        <button class="fallback-banner-retry" onclick="window.location.reload()">
+                            <i class="fas fa-redo"></i> Retry
+                        </button>
+                    </div>
+                `;
             }
+            
+            RenderingPipeline.updateSyncIndicator();
         },
         
         observeAppState: function() {
@@ -2178,11 +2240,6 @@
                         case 'contacts':
                             if (Array.isArray(value)) {
                                 RenderingPipeline.renderContactsList(value);
-                            }
-                            break;
-                        case 'callHistory':
-                            if (typeof coreRenderCallHistory === 'function') {
-                                coreRenderCallHistory();
                             }
                             break;
                     }
@@ -2212,11 +2269,9 @@
                 elements.quickGroupBtn
             ];
             
-            const isDemo = session && session.isDemoMode ? session.isDemoMode() : false;
-            
             protectedButtons.forEach(btn => {
                 if (btn) {
-                    btn.disabled = !isAuthenticated && !isDemo;
+                    btn.disabled = !isAuthenticated || fallbackModeActive;
                 }
             });
             
@@ -2226,12 +2281,6 @@
         handleConnectivityChange: function(isOnline) {
             if (DEBUG) {
                 logOnce('info', `Connectivity changed: ${isOnline ? 'online' : 'offline'}`);
-            }
-            
-            if (isOnline) {
-                if (typeof handleOnline === 'function') handleOnline();
-            } else {
-                if (typeof handleOffline === 'function') handleOffline();
             }
         },
         
@@ -2245,8 +2294,6 @@
             this._subscriptions.forEach(sub => {
                 if (sub.unsubscribe && typeof sub.unsubscribe === 'function') {
                     try { sub.unsubscribe(); } catch (e) {}
-                } else if (sub.handler && sub.type) {
-                    window.removeEventListener('message', sub.handler);
                 }
             });
             this._subscriptions.clear();
@@ -2256,11 +2303,6 @@
                 window.removeEventListener('message', handler);
                 UIState.cachedElements.delete('parentMessageHandler');
             }
-            
-            if (this._handshakeCheckInterval) {
-                clearInterval(this._handshakeCheckInterval);
-                this._handshakeCheckInterval = null;
-            }
         }
     };
 
@@ -2268,8 +2310,6 @@
     const ResponsiveEngine = {
         _currentBreakpoint: 'desktop',
         _orientation: 'landscape',
-        _mediaQueries: new Map(),
-        _listeners: new Set(),
         
         initialize: function() {
             this.detectBreakpoint();
@@ -2310,45 +2350,19 @@
         
         setupMediaQueryListeners: function() {
             const mobileQuery = window.matchMedia(`(max-width: ${UIState.breakpoints.mobile}px)`);
-            this._mediaQueries.set('mobile', mobileQuery);
-            
-            if (typeof mobileQuery.addListener === 'function') {
-                mobileQuery.addListener(this.handleBreakpointChange.bind(this));
-            } else {
-                mobileQuery.addEventListener('change', this.handleBreakpointChange.bind(this));
-            }
+            mobileQuery.addEventListener('change', this.handleBreakpointChange.bind(this));
             
             const tabletQuery = window.matchMedia(`(min-width: ${UIState.breakpoints.mobile + 1}px) and (max-width: ${UIState.breakpoints.tablet}px)`);
-            this._mediaQueries.set('tablet', tabletQuery);
-            if (typeof tabletQuery.addListener === 'function') {
-                tabletQuery.addListener(this.handleBreakpointChange.bind(this));
-            } else {
-                tabletQuery.addEventListener('change', this.handleBreakpointChange.bind(this));
-            }
+            tabletQuery.addEventListener('change', this.handleBreakpointChange.bind(this));
             
             const desktopQuery = window.matchMedia(`(min-width: ${UIState.breakpoints.tablet + 1}px) and (max-width: ${UIState.breakpoints.desktop}px)`);
-            this._mediaQueries.set('desktop', desktopQuery);
-            if (typeof desktopQuery.addListener === 'function') {
-                desktopQuery.addListener(this.handleBreakpointChange.bind(this));
-            } else {
-                desktopQuery.addEventListener('change', this.handleBreakpointChange.bind(this));
-            }
+            desktopQuery.addEventListener('change', this.handleBreakpointChange.bind(this));
             
             const wideQuery = window.matchMedia(`(min-width: ${UIState.breakpoints.desktop + 1}px)`);
-            this._mediaQueries.set('wide', wideQuery);
-            if (typeof wideQuery.addListener === 'function') {
-                wideQuery.addListener(this.handleBreakpointChange.bind(this));
-            } else {
-                wideQuery.addEventListener('change', this.handleBreakpointChange.bind(this));
-            }
+            wideQuery.addEventListener('change', this.handleBreakpointChange.bind(this));
             
             const orientationQuery = window.matchMedia('(orientation: portrait)');
-            if (typeof orientationQuery.addListener === 'function') {
-                orientationQuery.addListener(this.handleOrientationChange.bind(this));
-            } else {
-                orientationQuery.addEventListener('change', this.handleOrientationChange.bind(this));
-            }
-            this._mediaQueries.set('orientation', orientationQuery);
+            orientationQuery.addEventListener('change', this.handleOrientationChange.bind(this));
         },
         
         setupInputDetection: function() {
@@ -2386,12 +2400,6 @@
                     logOnce('info', `Breakpoint changed: ${oldBreakpoint} → ${this._currentBreakpoint}`);
                 }
                 this.applyResponsiveLayout();
-                
-                this._listeners.forEach(listener => {
-                    try {
-                        listener('breakpoint', this._currentBreakpoint, oldBreakpoint);
-                    } catch (e) {}
-                });
             }
         },
         
@@ -2408,18 +2416,10 @@
         },
         
         debouncedResize: function() {
-            if (typeof coreDebounce === 'function') {
-                const debounced = coreDebounce(() => {
-                    this.handleBreakpointChange();
-                    this.handleOrientationChange();
-                }, 150);
-                debounced();
-            } else {
-                setTimeout(() => {
-                    this.handleBreakpointChange();
-                    this.handleOrientationChange();
-                }, 150);
-            }
+            setTimeout(() => {
+                this.handleBreakpointChange();
+                this.handleOrientationChange();
+            }, 150);
         },
         
         applyResponsiveLayout: function() {
@@ -2438,10 +2438,6 @@
                 case 'wide':
                     this.applyDesktopLayout();
                     break;
-            }
-            
-            if (AppState?.isInCall && typeof updateVideoLayout === 'function') {
-                updateVideoLayout();
             }
         },
         
@@ -2512,11 +2508,6 @@
             }
         },
         
-        onBreakpointChange: function(listener) {
-            this._listeners.add(listener);
-            return () => this._listeners.delete(listener);
-        },
-        
         isMobile: function() {
             return this._currentBreakpoint === 'mobile';
         },
@@ -2535,7 +2526,6 @@
         _listeners: new Map(),
         _debounced: new Map(),
         _throttled: new Map(),
-        _once: new Set(),
         
         initialize: function() {
             this.setupGlobalListeners();
@@ -2547,17 +2537,11 @@
         
         setupGlobalListeners: function() {
             this.addListener(window, 'online', () => {
-                if (AppState) AppState.isOnline = true;
-                if (typeof handleOnline === 'function') handleOnline();
+                if (window.AppState) window.AppState.isOnline = true;
             });
             
             this.addListener(window, 'offline', () => {
-                if (AppState) AppState.isOnline = false;
-                if (typeof handleOffline === 'function') handleOffline();
-            });
-            
-            this.addListener(window, 'storage', (e) => {
-                if (typeof handleStorageEvent === 'function') handleStorageEvent(e);
+                if (window.AppState) window.AppState.isOnline = false;
             });
             
             this.addListener(window, 'beforeunload', () => {
@@ -2565,9 +2549,7 @@
             });
             
             this.addListener(document, 'visibilitychange', () => {
-                if (!document.hidden && session && typeof session.validateToken === 'function' && session.validateToken()) {
-                    if (typeof session.refreshToken === 'function') session.refreshToken();
-                }
+                // Handle visibility change if needed
             });
         },
         
@@ -2754,52 +2736,12 @@
                 this.addListener(elements.summaryDoneBtn, 'click', UIEventHandlers.closeCallSummary);
             }
             
-            if (elements.urlParamCancelBtn) {
-                this.addListener(elements.urlParamCancelBtn, 'click', closeUrlParamOverlay);
-            }
-            
-            if (elements.urlParamJoinBtn) {
-                this.addListener(elements.urlParamJoinBtn, 'click', joinUrlParamCall);
-            }
-            
             if (elements.settingsToggle) {
                 this.addListener(elements.settingsToggle, 'click', UIEventHandlers.toggleSettingsPanel);
             }
             
             if (elements.resetSettingsBtn) {
-                this.addListener(elements.resetSettingsBtn, 'click', resetSettings);
-            }
-            
-            if (elements.emotionalContextToggle) {
-                this.addListener(elements.emotionalContextToggle, 'change', updateSetting);
-            }
-            
-            if (elements.callIntentionToggle) {
-                this.addListener(elements.callIntentionToggle, 'change', updateSetting);
-            }
-            
-            if (elements.inCallChatToggle) {
-                this.addListener(elements.inCallChatToggle, 'change', updateSetting);
-            }
-            
-            if (elements.whiteboardToggle) {
-                this.addListener(elements.whiteboardToggle, 'change', updateSetting);
-            }
-            
-            if (elements.pollsToggle) {
-                this.addListener(elements.pollsToggle, 'change', updateSetting);
-            }
-            
-            if (elements.notesToggle) {
-                this.addListener(elements.notesToggle, 'change', updateSetting);
-            }
-            
-            if (elements.focusModeToggle) {
-                this.addListener(elements.focusModeToggle, 'change', updateSetting);
-            }
-            
-            if (elements.liveReactionsToggle) {
-                this.addListener(elements.liveReactionsToggle, 'change', updateSetting);
+                this.addListener(elements.resetSettingsBtn, 'click', () => {});
             }
             
             document.querySelectorAll('.category-btn').forEach(btn => {
@@ -2817,7 +2759,7 @@
             });
             
             if (elements.pipCloseBtn) {
-                this.addListener(elements.pipCloseBtn, 'click', closePip);
+                this.addListener(elements.pipCloseBtn, 'click', () => {});
             }
             
             if (elements.contactSearch) {
@@ -2917,20 +2859,6 @@
             return throttledFn;
         },
         
-        once: function(element, eventType, handler) {
-            const onceHandler = function(...args) {
-                handler.apply(this, args);
-                element.removeEventListener(eventType, onceHandler);
-            };
-            
-            element.addEventListener(eventType, onceHandler);
-            
-            const key = `${eventType}_${handler.toString()}_once`;
-            this._once.add(key);
-            
-            return onceHandler;
-        },
-        
         trigger: function(element, eventType, detail = {}) {
             if (!element) return false;
             
@@ -2950,7 +2878,6 @@
             this._listeners.clear();
             this._debounced.clear();
             this._throttled.clear();
-            this._once.clear();
             
             if (DEBUG) {
                 logOnce('info', 'Event system cleaned up');
@@ -2975,19 +2902,27 @@
         },
         
         openNewCallModal: function() {
-            const isDemo = session && session.isDemoMode ? session.isDemoMode() : false;
+            if (inPassiveMode) {
+                showNotification('Waiting for parent connection...', 'info');
+                return;
+            }
             
-            if (!parentReady && !handshakeComplete && !isDemo) {
+            if (fallbackModeActive) {
+                showNotification('Limited connectivity - Please retry later', 'warning');
+                return;
+            }
+            
+            if (!coreReady) {
+                showNotification('Call system initializing...', 'info');
+                return;
+            }
+            
+            if (!parentReady && !handshakeComplete) {
                 showNotification('Connecting to server...', 'info');
                 return;
             }
             
-            if (parentCoordinator && !parentCoordinator.sessionValidated && !isDemo) {
-                showNotification('Please wait for authentication', 'warning');
-                return;
-            }
-            
-            if (!AppState?.isOnline && !isDemo) {
+            if (!window.AppState?.isOnline) {
                 showNotification('Cannot load contacts while offline', 'warning');
                 return;
             }
@@ -2996,23 +2931,8 @@
                 elements.newCallModal.classList.add('active');
                 UIState.activeModals.add('newCallModal');
                 
-                if (APICore && APICore.isReady && APICore.isReady()) {
-                    APICore.get('/api/contacts', {}, { allowFallback: true })
-                        .then(contacts => {
-                            if (contacts && Array.isArray(contacts)) {
-                                AppState.contacts = contacts;
-                                RenderingPipeline.renderContactsList(contacts);
-                            }
-                        })
-                        .catch(() => {
-                            if (AppState?.contacts?.length > 0) {
-                                RenderingPipeline.renderContactsList(AppState.contacts);
-                            }
-                        });
-                } else if (AppState?.contacts?.length > 0) {
-                    RenderingPipeline.renderContactsList(AppState.contacts);
-                } else if (window.callAPI && typeof window.callAPI.fetchContacts === 'function') {
-                    window.callAPI.fetchContacts();
+                if (window.AppState?.contacts?.length > 0) {
+                    RenderingPipeline.renderContactsList(window.AppState.contacts);
                 }
                 
                 UIEventHandlers.switchNewCallTab('contacts');
@@ -3086,7 +3006,7 @@
             const selected = [];
             document.querySelectorAll('.contact-checkbox:checked').forEach(checkbox => {
                 const contactId = checkbox.id.replace('contact-', '');
-                const contact = AppState?.contacts?.find(c => c.id === contactId);
+                const contact = window.AppState?.contacts?.find(c => c.id === contactId);
                 if (contact) selected.push(contact);
             });
             return selected;
@@ -3096,7 +3016,7 @@
             const selected = [];
             document.querySelectorAll('.group-contact:checked').forEach(checkbox => {
                 const contactId = checkbox.id.replace('group-contact-', '');
-                const contact = AppState?.contacts?.find(c => c.id === contactId);
+                const contact = window.AppState?.contacts?.find(c => c.id === contactId);
                 if (contact) selected.push(contact);
             });
             return selected;
@@ -3111,15 +3031,23 @@
         },
         
         startCallGeneric: function(type) {
-            const isDemo = session && session.isDemoMode ? session.isDemoMode() : false;
-            
-            if (!parentReady && !handshakeComplete && !isDemo) {
-                showNotification('Connecting to server...', 'info');
+            if (inPassiveMode) {
+                showNotification('Waiting for parent connection...', 'info');
                 return;
             }
             
-            if (parentCoordinator && !parentCoordinator.sessionValidated && !isDemo) {
-                showNotification('Please wait for authentication', 'warning');
+            if (fallbackModeActive) {
+                showNotification('Limited connectivity - Please retry later', 'warning');
+                return;
+            }
+            
+            if (!coreReady) {
+                showNotification('Call system initializing...', 'info');
+                return;
+            }
+            
+            if (!parentReady && !handshakeComplete) {
+                showNotification('Connecting to server...', 'info');
                 return;
             }
             
@@ -3130,90 +3058,35 @@
                 return;
             }
             
-            if (selectedContacts.length > 1 && typeof checkPremiumFeature === 'function' && !checkPremiumFeature('groupCalls')) {
-                return;
+            if (coreInstance && coreInstance.initCall) {
+                coreInstance.initCall(type, selectedContacts)
+                    .then(result => {
+                        if (result.success) {
+                            showNotification(`${type} call started`, 'success');
+                        } else {
+                            showNotification(result.error || 'Failed to start call', 'error');
+                        }
+                    })
+                    .catch(error => {
+                        showNotification('Failed to start call', 'error');
+                        UILogger.error('Call failed', error);
+                    });
+            } else {
+                this.simulateCall(type, selectedContacts);
             }
             
-            this.startCall(type, selectedContacts);
             UIEventHandlers.closeNewCallModal();
-        },
-        
-        startGroupCall: function() {
-            if (typeof checkPremiumFeature === 'function' && !checkPremiumFeature('groupCalls')) return;
-            
-            const selectedContacts = this.getSelectedGroupContacts();
-            const groupOption = UIState.groupCallOption;
-            
-            if (selectedContacts.length < 2) {
-                showNotification('Please select at least 2 contacts for group call', 'warning');
-                return;
-            }
-            
-            if (!groupOption) {
-                showNotification('Please select a group call option', 'warning');
-                return;
-            }
-            
-            const isInstant = groupOption === 'instantGroupOption';
-            
-            if (isInstant) {
-                this.startCall('video', selectedContacts);
-                UIEventHandlers.closeNewCallModal();
-            } else {
-                this.scheduleGroupCall(selectedContacts);
-            }
-        },
-        
-        startCall: function(type, participants) {
-            if (AppState?.isInCall) {
-                showNotification('You are already in a call', 'warning');
-                return;
-            }
-            
-            if (DEBUG) {
-                logOnce('info', `Starting ${type} call with ${participants.length} participants`);
-            }
-            
-            const isDemo = session && session.isDemoMode ? session.isDemoMode() : false;
-            
-            if (window.callCore && typeof window.callCore.startCall === 'function' && !isDemo) {
-                window.callCore.startCall({
-                    type,
-                    participants,
-                    callId: 'call-' + Date.now()
-                }).then(callId => {
-                    if (AppState) {
-                        AppState.activeCallId = callId;
-                        AppState.callType = type;
-                        AppState.callParticipants = participants;
-                        AppState.isInCall = true;
-                    }
-                    
-                    UIState.activeCallId = callId;
-                    UIState.callType = type;
-                    UIState.callParticipants = participants;
-                    
-                    this.showCallUI();
-                    this.startCallTimer();
-                    
-                }).catch(error => {
-                    UILogger.error('Failed to start call via core', error);
-                    this.simulateCall(type, participants);
-                });
-            } else {
-                this.simulateCall(type, participants);
-            }
         },
         
         simulateCall: function(type, participants) {
             requestMediaPermissionsFn(type)
                 .then(stream => {
-                    if (AppState) {
-                        AppState.localStream = stream;
-                        AppState.callType = type;
-                        AppState.callParticipants = participants;
-                        AppState.activeCallId = 'call-' + Date.now();
-                        AppState.isInCall = true;
+                    if (window.AppState) {
+                        window.AppState.localStream = stream;
+                        window.AppState.callType = type;
+                        window.AppState.callParticipants = participants;
+                        window.AppState.activeCallId = 'call-' + Date.now();
+                        window.AppState.isInCall = true;
                     }
                     
                     UIState.localStream = stream;
@@ -3223,7 +3096,6 @@
                     
                     this.showCallUI();
                     this.startCallTimer();
-                    this.initializeCallFeatures();
                     
                     showNotification(`Started ${type} call with ${participants.length} participant(s)`, 'success');
                 })
@@ -3243,35 +3115,21 @@
             const icon = UIState.callType === 'video' ? 'fa-video' : 'fa-phone';
             if (elements.callTypeIcon) elements.callTypeIcon.innerHTML = `<i class="fas ${icon}"></i>`;
             
-            if (AppState?.settings?.emotionalContext) {
-                if (typeof updateMoodIndicator === 'function') {
-                    updateMoodIndicator(UIState.selectedMood || 'neutral');
-                }
-                if (typeof updateIntentionIndicator === 'function') {
-                    updateIntentionIndicator(UIState.selectedIntention || 'quick');
-                }
-            }
-            
             if (elements.focusModeBtn) elements.focusModeBtn.style.display = 'block';
-            
-            if (typeof updateParticipantBadge === 'function') {
-                updateParticipantBadge();
-            }
             
             UIState.currentView = 'call';
         },
         
         startCallTimer: function() {
-            if (!AppState) return;
+            if (!UIState.callStartTime) return;
             
-            AppState.callStartTime = Date.now();
             UIState.callStartTime = Date.now();
             
-            if (AppState.callDurationInterval) {
-                clearInterval(AppState.callDurationInterval);
+            if (UIState.callDurationInterval) {
+                clearInterval(UIState.callDurationInterval);
             }
             
-            AppState.callDurationInterval = setInterval(() => {
+            UIState.callDurationInterval = setInterval(() => {
                 if (!UIState.callStartTime || !elements.callDuration) return;
                 
                 const elapsed = Math.floor((Date.now() - UIState.callStartTime) / 1000);
@@ -3279,98 +3137,65 @@
                 const seconds = (elapsed % 60).toString().padStart(2, '0');
                 elements.callDuration.textContent = `${minutes}:${seconds}`;
             }, 1000);
-            
-            UIState.callDurationInterval = AppState.callDurationInterval;
-        },
-        
-        initializeCallFeatures: function() {
-            if (UIState.localStream && UIState.callType === 'video' && elements.videoGrid) {
-                const container = elements.videoGrid;
-                container.innerHTML = '';
-                
-                const videoContainer = document.createElement('div');
-                videoContainer.className = 'video-container';
-                videoContainer.dataset.id = 'local';
-                
-                const video = document.createElement('video');
-                video.className = 'video-element';
-                video.autoplay = true;
-                video.playsInline = true;
-                video.muted = true;
-                video.srcObject = UIState.localStream;
-                
-                const overlay = document.createElement('div');
-                overlay.className = 'video-overlay';
-                overlay.innerHTML = `
-                    <div class="video-name">
-                        <span>You</span>
-                        <span class="video-status">Host</span>
-                    </div>
-                `;
-                
-                videoContainer.appendChild(video);
-                videoContainer.appendChild(overlay);
-                container.appendChild(videoContainer);
-                
-                video.play().catch(e => UILogger.warn('Error playing local video', e));
-            }
-            
-            if (AppState?.settings?.liveReactions && elements.reactionsContainer) {
-                elements.reactionsContainer.style.display = 'flex';
-            }
-            
-            if (AppState?.settings?.focusMode) {
-                this.enableFocusMode();
-            }
         },
         
         toggleMute: function() {
-            if (!UIState.localStream || !elements.muteBtn) return;
+            if (inPassiveMode) {
+                showNotification('Waiting for parent connection...', 'info');
+                return;
+            }
             
-            const audioTracks = UIState.localStream.getAudioTracks();
-            if (audioTracks.length > 0) {
-                UIState.isMuted = !UIState.isMuted;
-                audioTracks.forEach(track => {
-                    track.enabled = !UIState.isMuted;
-                });
-                
-                const icon = elements.muteBtn.querySelector('i');
-                if (icon) {
-                    icon.className = UIState.isMuted ? 'fas fa-microphone-slash' : 'fas fa-microphone';
+            if (coreInstance && coreInstance.toggleMic) {
+                coreInstance.toggleMic();
+            } else if (UIState.localStream) {
+                const audioTracks = UIState.localStream.getAudioTracks();
+                if (audioTracks.length > 0) {
+                    UIState.isMuted = !UIState.isMuted;
+                    audioTracks.forEach(track => {
+                        track.enabled = !UIState.isMuted;
+                    });
+                    
+                    const icon = elements.muteBtn.querySelector('i');
+                    if (icon) {
+                        icon.className = UIState.isMuted ? 'fas fa-microphone-slash' : 'fas fa-microphone';
+                    }
+                    
+                    showNotification(UIState.isMuted ? 'Microphone muted' : 'Microphone unmuted', 'info');
                 }
-                elements.muteBtn.title = UIState.isMuted ? 'Unmute' : 'Mute';
-                
-                showNotification(UIState.isMuted ? 'Microphone muted' : 'Microphone unmuted', 'info');
             }
         },
         
         toggleVideo: function() {
-            if (!UIState.localStream || !elements.videoBtn) return;
+            if (inPassiveMode) {
+                showNotification('Waiting for parent connection...', 'info');
+                return;
+            }
             
-            const videoTracks = UIState.localStream.getVideoTracks();
-            if (videoTracks.length > 0) {
-                UIState.isVideoOff = !UIState.isVideoOff;
-                videoTracks.forEach(track => {
-                    track.enabled = !UIState.isVideoOff;
-                });
-                
-                const icon = elements.videoBtn.querySelector('i');
-                if (icon) {
-                    icon.className = UIState.isVideoOff ? 'fas fa-video-slash' : 'fas fa-video';
+            if (coreInstance && coreInstance.toggleCamera) {
+                coreInstance.toggleCamera();
+            } else if (UIState.localStream) {
+                const videoTracks = UIState.localStream.getVideoTracks();
+                if (videoTracks.length > 0) {
+                    UIState.isVideoOff = !UIState.isVideoOff;
+                    videoTracks.forEach(track => {
+                        track.enabled = !UIState.isVideoOff;
+                    });
+                    
+                    const icon = elements.videoBtn.querySelector('i');
+                    if (icon) {
+                        icon.className = UIState.isVideoOff ? 'fas fa-video-slash' : 'fas fa-video';
+                    }
+                    
+                    showNotification(UIState.isVideoOff ? 'Camera turned off' : 'Camera turned on', 'info');
                 }
-                elements.videoBtn.title = UIState.isVideoOff ? 'Turn Video On' : 'Turn Video Off';
-                
-                const localVideo = elements.videoGrid?.querySelector('.video-container[data-id="local"]');
-                if (localVideo) {
-                    localVideo.style.display = UIState.isVideoOff ? 'none' : 'block';
-                }
-                
-                showNotification(UIState.isVideoOff ? 'Camera turned off' : 'Camera turned on', 'info');
             }
         },
         
         toggleScreenShare: function() {
-            if (typeof checkPremiumFeature === 'function' && !checkPremiumFeature('screenSharing')) return;
+            if (inPassiveMode) {
+                showNotification('Waiting for parent connection...', 'info');
+                return;
+            }
             
             if (UIState.isScreenSharing) {
                 this.stopScreenShare();
@@ -3390,39 +3215,24 @@
                     UIState.screenStream = stream;
                     UIState.isScreenSharing = true;
                     
-                    if (AppState) {
-                        AppState.screenStream = stream;
-                        AppState.isScreenSharing = true;
+                    if (window.AppState) {
+                        window.AppState.screenStream = stream;
+                        window.AppState.isScreenSharing = true;
                     }
                     
                     if (elements.screenShareBtn) {
                         elements.screenShareBtn.classList.add('active');
-                        elements.screenShareBtn.title = 'Stop Sharing';
                     }
                     
-                    const videoTrack = stream.getVideoTracks()[0];
-                    
-                    const localVideo = elements.videoGrid?.querySelector('.video-container[data-id="local"] video');
-                    if (localVideo && UIState.localStream) {
-                        const newStream = new MediaStream();
-                        newStream.addTrack(videoTrack);
-                        const audioTrack = UIState.localStream.getAudioTracks()[0];
-                        if (audioTrack) newStream.addTrack(audioTrack);
-                        
-                        localVideo.srcObject = newStream;
+                    if (coreInstance && coreInstance.startScreenShare) {
+                        coreInstance.startScreenShare().catch(() => {});
                     }
-                    
-                    videoTrack.addEventListener('ended', () => {
-                        this.stopScreenShare();
-                    });
                     
                     showNotification('Screen sharing started', 'success');
                 })
                 .catch(error => {
                     UILogger.error('Error starting screen share', error);
-                    showNotification(error.name === 'NotAllowedError' ? 
-                        'Screen sharing permission denied' : 
-                        'Failed to start screen sharing', 'error');
+                    showNotification('Failed to start screen sharing', 'error');
                 });
         },
         
@@ -3433,42 +3243,35 @@
             UIState.screenStream = null;
             UIState.isScreenSharing = false;
             
-            if (AppState) {
-                AppState.screenStream = null;
-                AppState.isScreenSharing = false;
-            }
-            
-            if (UIState.localStream) {
-                const localVideo = elements.videoGrid?.querySelector('.video-container[data-id="local"] video');
-                if (localVideo) {
-                    localVideo.srcObject = UIState.localStream;
-                }
+            if (window.AppState) {
+                window.AppState.screenStream = null;
+                window.AppState.isScreenSharing = false;
             }
             
             if (elements.screenShareBtn) {
                 elements.screenShareBtn.classList.remove('active');
-                elements.screenShareBtn.title = 'Share Screen';
+            }
+            
+            if (coreInstance && coreInstance.stopScreenShare) {
+                coreInstance.stopScreenShare();
             }
             
             showNotification('Screen sharing stopped', 'info');
         },
         
         toggleSpeaker: function() {
-            if (!elements.speakerBtn) return;
-            
             UIState.isSpeakerOn = !UIState.isSpeakerOn;
             
             const icon = elements.speakerBtn.querySelector('i');
             if (icon) {
                 icon.className = UIState.isSpeakerOn ? 'fas fa-volume-up' : 'fas fa-headphones';
             }
-            elements.speakerBtn.title = UIState.isSpeakerOn ? 'Switch to Headphones' : 'Switch to Speaker';
             
             showNotification(`Switched to ${UIState.isSpeakerOn ? 'speaker' : 'headphones'}`, 'info');
         },
         
         endCall: function() {
-            if (!AppState?.isInCall && !UIState.activeCallId) return;
+            if (!UIState.activeCallId) return;
             
             if (confirm('End the call?')) {
                 if (UIState.localStream) {
@@ -3481,8 +3284,8 @@
                     UIState.screenStream = null;
                 }
                 
-                if (window.callCore && typeof window.callCore.endCall === 'function') {
-                    window.callCore.endCall(UIState.activeCallId).catch(() => {});
+                if (coreInstance && typeof coreInstance.endCall === 'function') {
+                    coreInstance.endCall(UIState.activeCallId).catch(() => {});
                 }
                 
                 if (UIState.callDurationInterval) {
@@ -3490,19 +3293,15 @@
                     UIState.callDurationInterval = null;
                 }
                 
-                if (AppState?.callDurationInterval) {
-                    clearInterval(AppState.callDurationInterval);
-                    AppState.callDurationInterval = null;
+                if (window.AppState?.callDurationInterval) {
+                    clearInterval(window.AppState.callDurationInterval);
                 }
                 
-                const callDuration = UIState.callStartTime ? 
-                    Math.floor((Date.now() - UIState.callStartTime) / 1000) : 0;
-                
-                if (AppState) {
-                    AppState.isInCall = false;
-                    AppState.activeCallId = null;
-                    AppState.callParticipants = [];
-                    AppState.callStartTime = null;
+                if (window.AppState) {
+                    window.AppState.isInCall = false;
+                    window.AppState.activeCallId = null;
+                    window.AppState.callParticipants = [];
+                    window.AppState.callStartTime = null;
                 }
                 
                 UIState.activeCallId = null;
@@ -3531,9 +3330,6 @@
                 }, 500);
                 
                 showNotification('Call ended', 'info');
-                if (DEBUG) {
-                    logOnce('info', 'Call ended', { duration: callDuration });
-                }
             }
         },
         
@@ -3571,19 +3367,11 @@
                 UIState.selectedMood = newMood;
                 
                 try {
-                    if (SafeStorage && typeof SafeStorage.set === 'function') {
-                        SafeStorage.set('currentMood', newMood);
-                    } else {
-                        localStorage.setItem('currentMood', newMood);
-                    }
+                    localStorage.setItem('currentMood', newMood);
                 } catch (e) {}
                 
-                if (typeof updateMoodIndicator === 'function') {
-                    updateMoodIndicator(newMood);
-                }
-                
-                if (AppState?.isInCall) {
-                    sendToParent('MOOD_UPDATE', { mood: newMood, timestamp: Date.now() });
+                if (coreInstance && coreInstance.setMood) {
+                    coreInstance.setMood(newMood);
                 }
                 
                 UIEventHandlers.closeMoodSelectionModal();
@@ -3625,19 +3413,11 @@
                 UIState.selectedIntention = newIntention;
                 
                 try {
-                    if (SafeStorage && typeof SafeStorage.set === 'function') {
-                        SafeStorage.set('currentIntention', newIntention);
-                    } else {
-                        localStorage.setItem('currentIntention', newIntention);
-                    }
+                    localStorage.setItem('currentIntention', newIntention);
                 } catch (e) {}
                 
-                if (typeof updateIntentionIndicator === 'function') {
-                    updateIntentionIndicator(newIntention);
-                }
-                
-                if (AppState?.isInCall) {
-                    sendToParent('INTENTION_UPDATE', { intention: newIntention, timestamp: Date.now() });
+                if (coreInstance && coreInstance.setIntention) {
+                    coreInstance.setIntention(newIntention);
                 }
                 
                 UIEventHandlers.closeIntentionSelectionModal();
@@ -3651,6 +3431,10 @@
             } else {
                 this.enableFocusMode();
             }
+            
+            if (coreInstance && coreInstance.toggleFocusMode) {
+                coreInstance.toggleFocusMode();
+            }
         },
         
         enableFocusMode: function() {
@@ -3658,7 +3442,6 @@
             if (elements.appContainer) elements.appContainer.classList.add('focus-mode');
             if (elements.focusModeBtn) {
                 elements.focusModeBtn.classList.add('active');
-                elements.focusModeBtn.title = 'Exit Focus Mode';
             }
             showNotification('Focus mode enabled', 'info');
         },
@@ -3668,7 +3451,6 @@
             if (elements.appContainer) elements.appContainer.classList.remove('focus-mode');
             if (elements.focusModeBtn) {
                 elements.focusModeBtn.classList.remove('active');
-                elements.focusModeBtn.title = 'Focus Mode';
             }
         },
         
@@ -3726,13 +3508,7 @@
         
         savePrivateNotesToStorage: function(contactId, notes) {
             try {
-                let allNotes = {};
-                
-                if (SafeStorage && typeof SafeStorage.get === 'function') {
-                    allNotes = SafeStorage.get('privateCallNotes') || {};
-                } else {
-                    allNotes = JSON.parse(localStorage.getItem('privateCallNotes') || '{}');
-                }
+                let allNotes = JSON.parse(localStorage.getItem('privateCallNotes') || '{}');
                 
                 allNotes[contactId] = {
                     notes: notes,
@@ -3740,11 +3516,7 @@
                     callId: UIState.activeCallId
                 };
                 
-                if (SafeStorage && typeof SafeStorage.set === 'function') {
-                    SafeStorage.set('privateCallNotes', allNotes);
-                } else {
-                    localStorage.setItem('privateCallNotes', JSON.stringify(allNotes));
-                }
+                localStorage.setItem('privateCallNotes', JSON.stringify(allNotes));
                 
                 UIState.privateNotes[contactId] = allNotes[contactId];
             } catch (error) {
@@ -3754,13 +3526,8 @@
         
         getPrivateNotes: function(contactId) {
             try {
-                if (SafeStorage && typeof SafeStorage.get === 'function') {
-                    const allNotes = SafeStorage.get('privateCallNotes') || {};
-                    return allNotes[contactId] ? allNotes[contactId].notes : null;
-                } else {
-                    const allNotes = JSON.parse(localStorage.getItem('privateCallNotes') || '{}');
-                    return allNotes[contactId] ? allNotes[contactId].notes : null;
-                }
+                const allNotes = JSON.parse(localStorage.getItem('privateCallNotes') || '{}');
+                return allNotes[contactId] ? allNotes[contactId].notes : null;
             } catch (error) {
                 UILogger.error('Error loading private notes', error);
                 return null;
@@ -3826,6 +3593,10 @@
             elements.incomingCallModal.classList.remove('active');
             UIState.activeModals.delete('incomingCallModal');
             
+            if (coreInstance && coreInstance.declineCall) {
+                coreInstance.declineCall();
+            }
+            
             showNotification('Call declined', 'info');
         },
         
@@ -3838,6 +3609,11 @@
         },
         
         acceptIncomingCallGeneric: function(asVideo) {
+            if (inPassiveMode) {
+                showNotification('Waiting for parent connection...', 'info');
+                return;
+            }
+            
             if (elements.incomingCallModal.dataset.timer) {
                 clearInterval(parseInt(elements.incomingCallModal.dataset.timer));
             }
@@ -3851,35 +3627,38 @@
             
             showNotification(`Accepting ${callType} call from ${callerName}...`, 'info');
             
-            const simulatedParticipant = {
-                id: 'incoming-caller',
-                name: callerName
-            };
-            
-            requestMediaPermissionsFn(callType)
-                .then(stream => {
-                    UIState.localStream = stream;
-                    UIState.callType = callType;
-                    UIState.callParticipants = [simulatedParticipant];
-                    UIState.activeCallId = 'call-' + Date.now();
-                    
-                    if (AppState) {
-                        AppState.localStream = stream;
-                        AppState.callType = callType;
-                        AppState.callParticipants = [simulatedParticipant];
-                        AppState.activeCallId = UIState.activeCallId;
-                        AppState.isInCall = true;
-                    }
-                    
-                    this.showCallUI();
-                    this.startCallTimer();
-                    this.initializeCallFeatures();
-                    
-                    showNotification(`${callType} call started`, 'success');
-                })
-                .catch(error => {
-                    showNotification(`Failed to start call: ${error.message}`, 'error');
-                });
+            if (coreInstance && coreInstance.answerCall) {
+                coreInstance.answerCall(callType);
+            } else {
+                const simulatedParticipant = {
+                    id: 'incoming-caller',
+                    name: callerName
+                };
+                
+                requestMediaPermissionsFn(callType)
+                    .then(stream => {
+                        UIState.localStream = stream;
+                        UIState.callType = callType;
+                        UIState.callParticipants = [simulatedParticipant];
+                        UIState.activeCallId = 'call-' + Date.now();
+                        
+                        if (window.AppState) {
+                            window.AppState.localStream = stream;
+                            window.AppState.callType = callType;
+                            window.AppState.callParticipants = [simulatedParticipant];
+                            window.AppState.activeCallId = UIState.activeCallId;
+                            window.AppState.isInCall = true;
+                        }
+                        
+                        this.showCallUI();
+                        this.startCallTimer();
+                        
+                        showNotification(`${callType} call started`, 'success');
+                    })
+                    .catch(error => {
+                        showNotification(`Failed to start call: ${error.message}`, 'error');
+                    });
+            }
         },
         
         generateVoiceCallLink: function() {
@@ -3899,6 +3678,10 @@
             
             if (elements.callLinkInput) {
                 elements.callLinkInput.value = callUrl;
+            }
+            
+            if (coreInstance && coreInstance.createCallLink) {
+                coreInstance.createCallLink(type);
             }
             
             showNotification(`${type === 'voice' ? 'Voice' : 'Video'} call link generated`, 'success');
@@ -3939,11 +3722,6 @@
             } else {
                 this.copyCallLink();
             }
-        },
-        
-        scheduleGroupCall: function(participants) {
-            showNotification('Group call scheduled successfully', 'success');
-            UIEventHandlers.closeNewCallModal();
         },
         
         switchCallCategory: function(category) {
@@ -4046,8 +3824,7 @@
             
             setTimeout(() => {
                 UIEventHandlers.closePaymentModal();
-                if (AppState) AppState.isPremium = true;
-                if (typeof updatePremiumUI === 'function') updatePremiumUI();
+                if (window.AppState) window.AppState.isPremium = true;
                 showNotification('Payment successful! Premium features unlocked.', 'success');
             }, 2000);
         },
@@ -4059,7 +3836,7 @@
         },
         
         sendReaction: function(e) {
-            if (!AppState?.isInCall && !UIState.activeCallId) {
+            if (!UIState.activeCallId) {
                 showNotification('Join a call to send reactions', 'info');
                 return;
             }
@@ -4071,6 +3848,10 @@
             }
             
             this.createFloatingReaction(reaction);
+            
+            if (coreInstance && coreInstance.sendReaction) {
+                coreInstance.sendReaction(reaction);
+            }
             
             sendToParent('REACTION', { reaction, timestamp: Date.now() });
             
@@ -4107,10 +3888,10 @@
             parentReady = false;
             handshakeComplete = false;
             
-            if (AppState) {
-                AppState.isAuthenticated = false;
-                AppState.user = null;
-                AppState.currentUser = null;
+            if (window.AppState) {
+                window.AppState.isAuthenticated = false;
+                window.AppState.user = null;
+                window.AppState.currentUser = null;
             }
             
             const protectedButtons = [
@@ -4120,33 +3901,22 @@
                 elements.quickGroupBtn
             ];
             
-            const isDemo = session && session.isDemoMode ? session.isDemoMode() : false;
-            
             protectedButtons.forEach(btn => {
-                if (btn && !isDemo) {
+                if (btn) {
                     btn.disabled = true;
                 }
             });
             
-            if (elements.syncIndicator && !isDemo) {
-                elements.syncIndicator.innerHTML = '<i class="fas fa-exclamation-triangle"></i><span>Disconnected</span>';
-                elements.syncIndicator.className = 'sync-indicator disconnected';
-            }
+            RenderingPipeline.updateSyncIndicator();
             
             showNotification('Logged out', 'info');
-            
-            setTimeout(() => {
-                if (window.callsCore && window.callsCore.IframeHandshakeAuthority) {
-                    window.callsCore.IframeHandshakeAuthority.start().catch(() => {});
-                }
-            }, 1000);
         }
     };
 
     // ==================== UI PANEL HANDLERS ====================
     const UIPanelHandlers = {
         openParticipantsPanel: function() {
-            if (!AppState?.isInCall && !UIState.activeCallId) {
+            if (!UIState.activeCallId) {
                 showNotification('Join a call to see participants', 'info');
                 return;
             }
@@ -4155,13 +3925,8 @@
         },
         
         openChatPanel: function() {
-            if (!AppState?.isInCall && !UIState.activeCallId) {
+            if (!UIState.activeCallId) {
                 showNotification('Join a call to use chat', 'info');
-                return;
-            }
-            
-            if (!AppState?.settings?.inCallChat) {
-                showNotification('Enable in-call chat in settings', 'info');
                 return;
             }
             
@@ -4169,9 +3934,7 @@
         },
         
         openWhiteboardPanel: function() {
-            if (typeof checkPremiumFeature === 'function' && !checkPremiumFeature('whiteboard')) return;
-            
-            if (!AppState?.isInCall && !UIState.activeCallId) {
+            if (!UIState.activeCallId) {
                 showNotification('Join a call to use whiteboard', 'info');
                 return;
             }
@@ -4180,13 +3943,8 @@
         },
         
         openNotesPanel: function() {
-            if (!AppState?.isInCall && !UIState.activeCallId) {
+            if (!UIState.activeCallId) {
                 showNotification('Join a call to use notes', 'info');
-                return;
-            }
-            
-            if (!AppState?.settings?.notes) {
-                showNotification('Enable notes in settings', 'info');
                 return;
             }
             
@@ -4194,15 +3952,8 @@
         },
         
         openPollsPanel: function() {
-            if (typeof checkPremiumFeature === 'function' && !checkPremiumFeature('polls')) return;
-            
-            if (!AppState?.isInCall && !UIState.activeCallId) {
+            if (!UIState.activeCallId) {
                 showNotification('Join a call to create polls', 'info');
-                return;
-            }
-            
-            if (!AppState?.settings?.polls) {
-                showNotification('Enable polls in settings', 'info');
                 return;
             }
             
@@ -4210,8 +3961,6 @@
         },
         
         openRelationshipPanel: function() {
-            if (typeof checkPremiumFeature === 'function' && !checkPremiumFeature('relationshipInsights')) return;
-            
             this.createRelationshipPanel();
         },
         
@@ -4222,14 +3971,14 @@
             const panel = document.createElement('div');
             panel.className = 'feature-panel participants-panel';
             
-            const participants = UIState.callParticipants || AppState?.callParticipants || [];
+            const participants = UIState.callParticipants || window.AppState?.callParticipants || [];
             const participantCount = participants.length + 1;
             
             let participantsHtml = '';
             participants.forEach(participant => {
                 const name = participant.name || 'Participant';
                 const initials = name.split(' ').map(n => n[0]).join('').toUpperCase() || '?';
-                const bgColor = stringToColor ? stringToColor(name) : '#6c5ce7';
+                const bgColor = '#6c5ce7';
                 
                 participantsHtml += `
                     <div class="participant-item">
@@ -4256,7 +4005,7 @@
                 </div>
                 <div class="panel-content">
                     <div class="participant-item">
-                        <div class="participant-avatar" style="background-color: ${stringToColor ? stringToColor('You') : '#6c5ce7'}">Y</div>
+                        <div class="participant-avatar" style="background-color: #6c5ce7">Y</div>
                         <div class="participant-info">
                             <div class="participant-name">You (Host)</div>
                             <div class="participant-status online">
@@ -4292,7 +4041,7 @@
                 <div class="panel-content">
                     <div class="chat-messages" id="chatMessagesPanel">
                         <div class="chat-message system">
-                            <div class="message-content">Chat started. Messages are end-to-end encrypted.</div>
+                            <div class="message-content">Chat started.</div>
                             <div class="message-time">${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>
                         </div>
                     </div>
@@ -4318,8 +4067,10 @@
             
             chatSend.addEventListener('click', () => {
                 const message = chatInput.value.trim();
-                if (message && typeof sendChatMessage === 'function') {
-                    sendChatMessage(message);
+                if (message) {
+                    if (coreInstance && coreInstance.sendChatMessage) {
+                        coreInstance.sendChatMessage(message);
+                    }
                     
                     const msgEl = document.createElement('div');
                     msgEl.className = 'chat-message self';
@@ -4337,22 +4088,7 @@
             
             chatInput.addEventListener('keypress', (e) => {
                 if (e.key === 'Enter') {
-                    const message = chatInput.value.trim();
-                    if (message && typeof sendChatMessage === 'function') {
-                        sendChatMessage(message);
-                        
-                        const msgEl = document.createElement('div');
-                        msgEl.className = 'chat-message self';
-                        msgEl.innerHTML = `
-                            <div class="message-sender">You</div>
-                            <div class="message-content">${SecuritySanitizer.sanitizeString(message)}</div>
-                            <div class="message-time">${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>
-                        `;
-                        panel.querySelector('.chat-messages').appendChild(msgEl);
-                        panel.querySelector('.chat-messages').scrollTop = panel.querySelector('.chat-messages').scrollHeight;
-                        
-                        chatInput.value = '';
-                    }
+                    chatSend.click();
                 }
             });
             
@@ -4404,21 +4140,16 @@
                     </div>
                     <canvas class="whiteboard-canvas" width="800" height="500"></canvas>
                     <div class="whiteboard-status">
-                        <span>Whiteboard ready. Draw something!</span>
+                        <span>Whiteboard ready.</span>
                     </div>
                 </div>
             `;
             
             document.body.appendChild(panel);
             
-            if (typeof initializeWhiteboard === 'function') {
-                initializeWhiteboard(panel.querySelector('.whiteboard-canvas'));
-            }
-            
             const canvas = panel.querySelector('.whiteboard-canvas');
             const ctx = canvas.getContext('2d');
             let drawing = false;
-            let currentTool = 'pen';
             let currentColor = '#ff3b30';
             let currentSize = 3;
             
@@ -4448,7 +4179,6 @@
                 btn.addEventListener('click', () => {
                     panel.querySelectorAll('.tool-btn[data-tool]').forEach(b => b.classList.remove('active'));
                     btn.classList.add('active');
-                    currentTool = btn.dataset.tool;
                 });
             });
             
@@ -4531,8 +4261,8 @@
             
             panel.querySelector('[data-action="save"]').addEventListener('click', () => {
                 const notes = panel.querySelector('#sharedNotesEditor').value;
-                if (notes.trim() && typeof saveSharedNotes === 'function') {
-                    saveSharedNotes(notes);
+                if (notes.trim() && coreInstance && coreInstance.saveNotes) {
+                    coreInstance.saveNotes(notes);
                     showNotification('Notes saved', 'success');
                 }
             });
@@ -4656,10 +4386,11 @@
             
             panel.querySelector('.create-poll-btn').addEventListener('click', () => {
                 const question = panel.querySelector('.poll-question-input').value;
-                if (question.trim()) {
-                    showNotification('Poll created successfully!', 'success');
-                    
-                    panel.querySelector('[data-tab="active"]').click();
+                if (question.trim() && coreInstance && coreInstance.createPoll) {
+                    const options = Array.from(panel.querySelectorAll('.poll-option-input'))
+                        .map(input => input.value)
+                        .filter(v => v.trim());
+                    coreInstance.createPoll(question, options);
                 }
             });
             
@@ -4763,13 +4494,11 @@
                 closeBtn.addEventListener('click', () => notification.remove());
             }
             
-            const timer = setTimeout(() => {
+            setTimeout(() => {
                 if (notification.parentNode) {
                     notification.remove();
                 }
             }, duration);
-            
-            UIState.cachedElements.set(`notification_${Date.now()}`, { notification, timer });
             
             return notification;
         } catch (error) {
@@ -4873,6 +4602,28 @@
         }
     };
 
+    // ==================== FULL INITIALIZATION ====================
+    function performFullInitialization() {
+        if (DEBUG) {
+            logOnce('info', 'Performing full UI initialization with core');
+        }
+        
+        // FIXED: Use coreInstance instead of undefined 'core' variable
+        if (window.callCore) {
+            coreInstance = window.callCore;
+        } else if (window.CallsCore) {
+            coreInstance = window.CallsCore;
+        } else if (window.callsCore) {
+            coreInstance = window.callsCore;
+        }
+        
+        initializeUISystem().catch(error => {
+            if (DEBUG) {
+                logOnce('error', 'Full initialization failed', error);
+            }
+        });
+    }
+
     async function initializeUISystem() {
         if (UIState.initialized) {
             if (DEBUG) {
@@ -4885,23 +4636,25 @@
             logOnce('info', 'Initializing UI system');
         }
         
-        const coreReady = await waitForCoreReady(10000);
-        if (coreReady) {
-            logOnce('success', 'Core is ready, proceeding with UI initialization');
-        } else {
-            logOnce('warn', 'Core not ready, initializing UI with fallback');
-        }
-        
         cacheElements();
         await RenderingPipeline.execute();
-        CoreIntegration.subscribeToCore();
+        
+        if (coreInstance && !fallbackModeActive) {
+            CoreIntegration.subscribeToCore();
+        }
+        
+        if (window.ResponsiveEngine) {
+            ResponsiveEngine.initialize();
+        }
         
         UIState.renderStages.initial = true;
         UIState.initialized = true;
         
-        if (DiagnosticsAgent && typeof DiagnosticsAgent.snapshot === 'function') {
-            DiagnosticsAgent.snapshot('ui_ready');
-        }
+        window.dispatchEvent(new CustomEvent('calls.ui.ready', {
+            detail: { 
+                timestamp: Date.now()
+            }
+        }));
         
         if (DEBUG) {
             logOnce('info', 'UI initialization complete', {
@@ -4911,7 +4664,8 @@
                 handshake: {
                     parentReady,
                     sessionReady,
-                    handshakeComplete
+                    handshakeComplete,
+                    inPassiveMode
                 }
             });
         }
@@ -4924,66 +4678,74 @@
     }
 
     // ==================== EXPORTS ====================
+    // Create bound functions safely
+    const safeBind = (fn, context) => {
+        if (typeof fn === 'function') {
+            return fn.bind(context);
+        }
+        return function() {};
+    };
+
     const PanelHandlers = UIPanelHandlers;
-    const openParticipantsPanel = UIPanelHandlers.openParticipantsPanel.bind(UIPanelHandlers);
-    const openChatPanel = UIPanelHandlers.openChatPanel.bind(UIPanelHandlers);
-    const openWhiteboardPanel = UIPanelHandlers.openWhiteboardPanel.bind(UIPanelHandlers);
-    const openNotesPanel = UIPanelHandlers.openNotesPanel.bind(UIPanelHandlers);
-    const openPollsPanel = UIPanelHandlers.openPollsPanel.bind(UIPanelHandlers);
-    const openRelationshipPanel = UIPanelHandlers.openRelationshipPanel.bind(UIPanelHandlers);
-    const createParticipantsPanel = UIPanelHandlers.createParticipantsPanel.bind(UIPanelHandlers);
-    const createChatPanel = UIPanelHandlers.createChatPanel.bind(UIPanelHandlers);
-    const createWhiteboardPanel = UIPanelHandlers.createWhiteboardPanel.bind(UIPanelHandlers);
-    const createNotesPanel = UIPanelHandlers.createNotesPanel.bind(UIPanelHandlers);
-    const createPollsPanel = UIPanelHandlers.createPollsPanel.bind(UIPanelHandlers);
-    const createRelationshipPanel = UIPanelHandlers.createRelationshipPanel.bind(UIPanelHandlers);
+    const openParticipantsPanel = safeBind(UIPanelHandlers.openParticipantsPanel, UIPanelHandlers);
+    const openChatPanel = safeBind(UIPanelHandlers.openChatPanel, UIPanelHandlers);
+    const openWhiteboardPanel = safeBind(UIPanelHandlers.openWhiteboardPanel, UIPanelHandlers);
+    const openNotesPanel = safeBind(UIPanelHandlers.openNotesPanel, UIPanelHandlers);
+    const openPollsPanel = safeBind(UIPanelHandlers.openPollsPanel, UIPanelHandlers);
+    const openRelationshipPanel = safeBind(UIPanelHandlers.openRelationshipPanel, UIPanelHandlers);
+    const createParticipantsPanel = safeBind(UIPanelHandlers.createParticipantsPanel, UIPanelHandlers);
+    const createChatPanel = safeBind(UIPanelHandlers.createChatPanel, UIPanelHandlers);
+    const createWhiteboardPanel = safeBind(UIPanelHandlers.createWhiteboardPanel, UIPanelHandlers);
+    const createNotesPanel = safeBind(UIPanelHandlers.createNotesPanel, UIPanelHandlers);
+    const createPollsPanel = safeBind(UIPanelHandlers.createPollsPanel, UIPanelHandlers);
+    const createRelationshipPanel = safeBind(UIPanelHandlers.createRelationshipPanel, UIPanelHandlers);
 
     const EventHandlers = UIEventHandlers;
-    const toggleMenuDots = UIEventHandlers.toggleMenuDots.bind(UIEventHandlers);
-    const closeMenuDots = UIEventHandlers.closeMenuDots.bind(UIEventHandlers);
-    const openNewCallModal = UIEventHandlers.openNewCallModal.bind(UIEventHandlers);
-    const closeNewCallModal = UIEventHandlers.closeNewCallModal.bind(UIEventHandlers);
-    const searchContacts = UIEventHandlers.searchContacts.bind(UIEventHandlers);
-    const searchGroupContacts = UIEventHandlers.searchGroupContacts.bind(UIEventHandlers);
-    const selectGroupOption = UIEventHandlers.selectGroupOption.bind(UIEventHandlers);
-    const startVoiceCall = UIEventHandlers.startVoiceCall.bind(UIEventHandlers);
-    const startVideoCall = UIEventHandlers.startVideoCall.bind(UIEventHandlers);
-    const startGroupCall = UIEventHandlers.startGroupCall.bind(UIEventHandlers);
-    const generateVoiceCallLink = UIEventHandlers.generateVoiceCallLink.bind(UIEventHandlers);
-    const generateVideoCallLink = UIEventHandlers.generateVideoCallLink.bind(UIEventHandlers);
-    const copyCallLink = UIEventHandlers.copyCallLink.bind(UIEventHandlers);
-    const shareCallLink = UIEventHandlers.shareCallLink.bind(UIEventHandlers);
-    const toggleMute = UIEventHandlers.toggleMute.bind(UIEventHandlers);
-    const toggleVideo = UIEventHandlers.toggleVideo.bind(UIEventHandlers);
-    const toggleScreenShare = UIEventHandlers.toggleScreenShare.bind(UIEventHandlers);
-    const toggleSpeaker = UIEventHandlers.toggleSpeaker.bind(UIEventHandlers);
-    const openMoodSelectionModal = UIEventHandlers.openMoodSelectionModal.bind(UIEventHandlers);
-    const closeMoodSelectionModal = UIEventHandlers.closeMoodSelectionModal.bind(UIEventHandlers);
-    const setMood = UIEventHandlers.setMood.bind(UIEventHandlers);
-    const openIntentionSelectionModal = UIEventHandlers.openIntentionSelectionModal.bind(UIEventHandlers);
-    const closeIntentionSelectionModal = UIEventHandlers.closeIntentionSelectionModal.bind(UIEventHandlers);
-    const setIntention = UIEventHandlers.setIntention.bind(UIEventHandlers);
-    const toggleFocusMode = UIEventHandlers.toggleFocusMode.bind(UIEventHandlers);
-    const enableFocusMode = UIEventHandlers.enableFocusMode.bind(UIEventHandlers);
-    const disableFocusMode = UIEventHandlers.disableFocusMode.bind(UIEventHandlers);
-    const endCall = UIEventHandlers.endCall.bind(UIEventHandlers);
-    const skipPrivateNotes = UIEventHandlers.skipPrivateNotes.bind(UIEventHandlers);
-    const savePrivateNotes = UIEventHandlers.savePrivateNotes.bind(UIEventHandlers);
-    const showCallSummary = UIEventHandlers.showCallSummary.bind(UIEventHandlers);
-    const closeCallSummary = UIEventHandlers.closeCallSummary.bind(UIEventHandlers);
-    const declineIncomingCall = UIEventHandlers.declineIncomingCall.bind(UIEventHandlers);
-    const acceptIncomingCall = UIEventHandlers.acceptIncomingCall.bind(UIEventHandlers);
-    const acceptIncomingCallAsVideo = UIEventHandlers.acceptIncomingCallAsVideo.bind(UIEventHandlers);
-    const switchCallCategory = UIEventHandlers.switchCallCategory.bind(UIEventHandlers);
-    const switchNewCallTab = UIEventHandlers.switchNewCallTab.bind(UIEventHandlers);
-    const toggleSettingsPanel = UIEventHandlers.toggleSettingsPanel.bind(UIEventHandlers);
-    const openPaymentModal = UIEventHandlers.openPaymentModal.bind(UIEventHandlers);
-    const closePaymentModal = UIEventHandlers.closePaymentModal.bind(UIEventHandlers);
-    const selectPaymentOption = UIEventHandlers.selectPaymentOption.bind(UIEventHandlers);
-    const processPayment = UIEventHandlers.processPayment.bind(UIEventHandlers);
-    const closePremiumLimitModal = UIEventHandlers.closePremiumLimitModal.bind(UIEventHandlers);
-    const sendReaction = UIEventHandlers.sendReaction.bind(UIEventHandlers);
-    const handleLogout = UIEventHandlers.handleLogout.bind(UIEventHandlers);
+    const toggleMenuDots = safeBind(UIEventHandlers.toggleMenuDots, UIEventHandlers);
+    const closeMenuDots = safeBind(UIEventHandlers.closeMenuDots, UIEventHandlers);
+    const openNewCallModal = safeBind(UIEventHandlers.openNewCallModal, UIEventHandlers);
+    const closeNewCallModal = safeBind(UIEventHandlers.closeNewCallModal, UIEventHandlers);
+    const searchContacts = safeBind(UIEventHandlers.searchContacts, UIEventHandlers);
+    const searchGroupContacts = safeBind(UIEventHandlers.searchGroupContacts, UIEventHandlers);
+    const selectGroupOption = safeBind(UIEventHandlers.selectGroupOption, UIEventHandlers);
+    const startVoiceCall = safeBind(UIEventHandlers.startVoiceCall, UIEventHandlers);
+    const startVideoCall = safeBind(UIEventHandlers.startVideoCall, UIEventHandlers);
+    const startGroupCall = safeBind(UIEventHandlers.startGroupCall, UIEventHandlers);
+    const generateVoiceCallLink = safeBind(UIEventHandlers.generateVoiceCallLink, UIEventHandlers);
+    const generateVideoCallLink = safeBind(UIEventHandlers.generateVideoCallLink, UIEventHandlers);
+    const copyCallLink = safeBind(UIEventHandlers.copyCallLink, UIEventHandlers);
+    const shareCallLink = safeBind(UIEventHandlers.shareCallLink, UIEventHandlers);
+    const toggleMute = safeBind(UIEventHandlers.toggleMute, UIEventHandlers);
+    const toggleVideo = safeBind(UIEventHandlers.toggleVideo, UIEventHandlers);
+    const toggleScreenShare = safeBind(UIEventHandlers.toggleScreenShare, UIEventHandlers);
+    const toggleSpeaker = safeBind(UIEventHandlers.toggleSpeaker, UIEventHandlers);
+    const openMoodSelectionModal = safeBind(UIEventHandlers.openMoodSelectionModal, UIEventHandlers);
+    const closeMoodSelectionModal = safeBind(UIEventHandlers.closeMoodSelectionModal, UIEventHandlers);
+    const setMood = safeBind(UIEventHandlers.setMood, UIEventHandlers);
+    const openIntentionSelectionModal = safeBind(UIEventHandlers.openIntentionSelectionModal, UIEventHandlers);
+    const closeIntentionSelectionModal = safeBind(UIEventHandlers.closeIntentionSelectionModal, UIEventHandlers);
+    const setIntention = safeBind(UIEventHandlers.setIntention, UIEventHandlers);
+    const toggleFocusMode = safeBind(UIEventHandlers.toggleFocusMode, UIEventHandlers);
+    const enableFocusMode = safeBind(UIEventHandlers.enableFocusMode, UIEventHandlers);
+    const disableFocusMode = safeBind(UIEventHandlers.disableFocusMode, UIEventHandlers);
+    const endCall = safeBind(UIEventHandlers.endCall, UIEventHandlers);
+    const skipPrivateNotes = safeBind(UIEventHandlers.skipPrivateNotes, UIEventHandlers);
+    const savePrivateNotes = safeBind(UIEventHandlers.savePrivateNotes, UIEventHandlers);
+    const showCallSummary = safeBind(UIEventHandlers.showCallSummary, UIEventHandlers);
+    const closeCallSummary = safeBind(UIEventHandlers.closeCallSummary, UIEventHandlers);
+    const declineIncomingCall = safeBind(UIEventHandlers.declineIncomingCall, UIEventHandlers);
+    const acceptIncomingCall = safeBind(UIEventHandlers.acceptIncomingCall, UIEventHandlers);
+    const acceptIncomingCallAsVideo = safeBind(UIEventHandlers.acceptIncomingCallAsVideo, UIEventHandlers);
+    const switchCallCategory = safeBind(UIEventHandlers.switchCallCategory, UIEventHandlers);
+    const switchNewCallTab = safeBind(UIEventHandlers.switchNewCallTab, UIEventHandlers);
+    const toggleSettingsPanel = safeBind(UIEventHandlers.toggleSettingsPanel, UIEventHandlers);
+    const openPaymentModal = safeBind(UIEventHandlers.openPaymentModal, UIEventHandlers);
+    const closePaymentModal = safeBind(UIEventHandlers.closePaymentModal, UIEventHandlers);
+    const selectPaymentOption = safeBind(UIEventHandlers.selectPaymentOption, UIEventHandlers);
+    const processPayment = safeBind(UIEventHandlers.processPayment, UIEventHandlers);
+    const closePremiumLimitModal = safeBind(UIEventHandlers.closePremiumLimitModal, UIEventHandlers);
+    const sendReaction = safeBind(UIEventHandlers.sendReaction, UIEventHandlers);
+    const handleLogout = safeBind(UIEventHandlers.handleLogout, UIEventHandlers);
 
     const requestMediaPermissionsFnExport = requestMediaPermissionsFn;
 
@@ -5080,83 +4842,71 @@
         getHandshakeStatus: () => ({
             parentReady,
             sessionReady,
-            handshakeComplete
+            handshakeComplete,
+            fallbackModeActive,
+            inPassiveMode
         }),
         getDiagnostics: () => UIDiagnostics.getReport(),
-        getEnvironment: () => IframeEnvironment ? IframeEnvironment.getFullReport() : 
-                             (EnvironmentDetector ? EnvironmentDetector.getFullReport() : null),
         getUIState: () => ({ ...UIState })
     };
 
-    // Wait for core but don't block
-    waitForCoreReady(10000).then((ready) => {
-        if (ready) {
-            initializeUISystem().catch(error => {
-                if (DEBUG) {
-                    logOnce('error', 'Auto-initialization failed', error);
-                }
-                RenderingPipeline.skeleton();
-            });
-        } else {
-            // Core not ready, still show UI with skeleton
-            RenderingPipeline.skeleton();
+    // ==================== BOOTSTRAP ====================
+    
+    coreInitializationStartTime = Date.now();
+    
+    setupCoreReadyListener();
+    
+    // Define handleContactClick to fix the bind error at line 5732
+    const handleContactClick = function(e) {
+        if (e.target.closest('.contact-checkbox')) return;
+        
+        const checkbox = this.querySelector('.contact-checkbox');
+        if (checkbox) {
+            checkbox.checked = !checkbox.checked;
+            
+            if (checkbox.checked) {
+                this.classList.add('selected');
+            } else {
+                this.classList.remove('selected');
+            }
         }
-    });
-    // Add this at the end of initializeUISystem function (around line 3250)
-async function initializeUISystem() {
-    if (UIState.initialized) {
+    };
+    
+    if (detectExistingCore()) {
         if (DEBUG) {
-            logOnce('info', 'UI system already initialized');
+            logOnce('success', 'Core already available, initializing UI immediately');
         }
-        return { success: true, stages: UIState.renderStages };
-    }
-    
-    if (DEBUG) {
-        logOnce('info', 'Initializing UI system');
-    }
-    
-    const coreReady = await waitForCoreReady(10000);
-    if (coreReady) {
-        logOnce('success', 'Core is ready, proceeding with UI initialization');
+        initializeUISystem().catch(error => {
+            if (DEBUG) {
+                logOnce('error', 'Auto-initialization failed', error);
+            }
+            RenderingPipeline.skeleton();
+        });
     } else {
-        logOnce('warn', 'Core not ready, initializing UI with fallback');
-    }
-    
-    cacheElements();
-    await RenderingPipeline.execute();
-    CoreIntegration.subscribeToCore();
-    
-    UIState.renderStages.initial = true;
-    UIState.initialized = true;
-    
-    // ===== ADD THIS EVENT DISPATCH =====
-    window.dispatchEvent(new CustomEvent('calls.ui.ready', {
-        detail: { timestamp: Date.now() }
-    }));
-    // ===================================
-    
-    if (DiagnosticsAgent && typeof DiagnosticsAgent.snapshot === 'function') {
-        DiagnosticsAgent.snapshot('ui_ready');
-    }
-    
-    if (DEBUG) {
-        logOnce('info', 'UI initialization complete', {
-            renderStages: UIState.renderStages,
-            renderCount: UIState.renderCount,
-            elementsCached: UIState.cachedElements.size,
-            handshake: {
-                parentReady,
-                sessionReady,
-                handshakeComplete
+        if (DEBUG) {
+            logOnce('info', 'Core not immediately available, showing skeleton and waiting');
+        }
+        
+        RenderingPipeline.skeleton();
+        
+        waitForCoreReady(8000).then((ready) => {
+            if (ready) {
+                if (DEBUG) {
+                    logOnce('success', 'Core became ready after ' + (Date.now() - coreInitializationStartTime) + 'ms, initializing full UI');
+                }
+                performFullInitialization();
+            } else {
+                logOnce('error', 'Core not ready after timeout - showing skeleton UI');
+                // Don't enter fallback mode, just show skeleton
+                if (elements.syncIndicator) {
+                    elements.syncIndicator.innerHTML = '<i class="fas fa-exclamation-triangle"></i><span>Cannot connect to server</span>';
+                    elements.syncIndicator.className = 'sync-indicator error';
+                }
+                // Keep showing skeleton UI
+                RenderingPipeline.skeleton();
+                RenderingPipeline.initialRender().catch(() => {});
             }
         });
     }
-    
-    return {
-        success: true,
-        stages: UIState.renderStages,
-        diagnostics: UIDiagnostics.getReport()
-    };
-}
 
 })();

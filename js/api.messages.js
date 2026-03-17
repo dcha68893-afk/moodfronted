@@ -2,7 +2,8 @@
 // ============================================================================
 // AUTHORITATIVE MESSAGING SERVICE - VERSION 2.0.3
 // ============================================================================
-// PRODUCTION-READY - WITH ALL EXPORTS - NO ERRORS
+// PRODUCTION-READY - WITH ALL EXPORTS - COMPLETE IMPLEMENTATION
+// INCLUDES ALL FUNCTIONS REQUIRED BY FRIEND-CORE.JS
 // ============================================================================
 
 // ============================================================================
@@ -36,7 +37,88 @@ export const STRICT_MESSAGE_TYPES = Object.freeze({
     INCOMING_CALL: 'INCOMING_CALL',
     CALL_ACCEPTED: 'CALL_ACCEPTED',
     CALL_REJECTED: 'CALL_REJECTED',
-    CALL_ENDED: 'CALL_ENDED'
+    CALL_ENDED: 'CALL_ENDED',
+    // Additional types for friend-core.js compatibility
+    GET_MESSAGES: 'GET_MESSAGES',
+    GET_CONVERSATIONS: 'GET_CONVERSATIONS',
+    SEND_MESSAGE: 'SEND_MESSAGE',
+    EDIT_MESSAGE: 'EDIT_MESSAGE',
+    DELETE_MESSAGE: 'DELETE_MESSAGE',
+    FORWARD_MESSAGE: 'FORWARD_MESSAGE',
+    REACT_TO_MESSAGE: 'REACT_TO_MESSAGE',
+    GET_MESSAGE_HISTORY: 'GET_MESSAGE_HISTORY',
+    CREATE_CONVERSATION: 'CREATE_CONVERSATION',
+    ARCHIVE_CONVERSATION: 'ARCHIVE_CONVERSATION',
+    MUTE_CONVERSATION: 'MUTE_CONVERSATION',
+    PIN_CONVERSATION: 'PIN_CONVERSATION',
+    SEARCH_MESSAGES: 'SEARCH_MESSAGES',
+    UPLOAD_FILE: 'UPLOAD_FILE',
+    DOWNLOAD_FILE: 'DOWNLOAD_FILE',
+    GET_FILE_INFO: 'GET_FILE_INFO',
+    GET_MESSAGE_STATUS: 'GET_MESSAGE_STATUS',
+    GET_UNREAD_COUNT: 'GET_UNREAD_COUNT',
+    GET_TYPING_STATUS: 'GET_TYPING_STATUS',
+    SET_TYPING_STATUS: 'SET_TYPING_STATUS',
+    GET_ONLINE_STATUS: 'GET_ONLINE_STATUS',
+    GET_LAST_SEEN: 'GET_LAST_SEEN',
+    GET_MESSAGE_REACTIONS: 'GET_MESSAGE_REACTIONS',
+    GET_MESSAGE_THREAD: 'GET_MESSAGE_THREAD',
+    GET_PINNED_MESSAGES: 'GET_PINNED_MESSAGES',
+    GET_STARRED_MESSAGES: 'GET_STARRED_MESSAGES',
+    GET_SAVED_MESSAGES: 'GET_SAVED_MESSAGES',
+    SAVE_MESSAGE: 'SAVE_MESSAGE',
+    UNSAVE_MESSAGE: 'UNSAVE_MESSAGE',
+    QUOTE_MESSAGE: 'QUOTE_MESSAGE',
+    GET_MESSAGE_LINK: 'GET_MESSAGE_LINK',
+    SHARE_MESSAGE: 'SHARE_MESSAGE',
+    REPORT_MESSAGE: 'REPORT_MESSAGE',
+    DELETE_FOR_EVERYONE: 'DELETE_FOR_EVERYONE',
+    DELETE_FOR_ME: 'DELETE_FOR_ME',
+    GET_DELETED_MESSAGES: 'GET_DELETED_MESSAGES',
+    RESTORE_DELETED_MESSAGE: 'RESTORE_DELETED_MESSAGE',
+    GET_ARCHIVED_CONVERSATIONS: 'GET_ARCHIVED_CONVERSATIONS',
+    GET_MUTED_CONVERSATIONS: 'GET_MUTED_CONVERSATIONS',
+    GET_PINNED_CONVERSATIONS: 'GET_PINNED_CONVERSATIONS',
+    GET_CONVERSATION_SETTINGS: 'GET_CONVERSATION_SETTINGS',
+    UPDATE_CONVERSATION_SETTINGS: 'UPDATE_CONVERSATION_SETTINGS',
+    GET_CONVERSATION_MEMBERS: 'GET_CONVERSATION_MEMBERS',
+    ADD_CONVERSATION_MEMBERS: 'ADD_CONVERSATION_MEMBERS',
+    REMOVE_CONVERSATION_MEMBERS: 'REMOVE_CONVERSATION_MEMBERS',
+    PROMOTE_CONVERSATION_MEMBER: 'PROMOTE_CONVERSATION_MEMBER',
+    DEMOTE_CONVERSATION_MEMBER: 'DEMOTE_CONVERSATION_MEMBER',
+    LEAVE_CONVERSATION: 'LEAVE_CONVERSATION',
+    JOIN_CONVERSATION: 'JOIN_CONVERSATION',
+    GET_CONVERSATION_INVITE_LINK: 'GET_CONVERSATION_INVITE_LINK',
+    REVOKE_CONVERSATION_INVITE_LINK: 'REVOKE_CONVERSATION_INVITE_LINK',
+    GET_CONVERSATION_BANS: 'GET_CONVERSATION_BANS',
+    BAN_CONVERSATION_MEMBER: 'BAN_CONVERSATION_MEMBER',
+    UNBAN_CONVERSATION_MEMBER: 'UNBAN_CONVERSATION_MEMBER',
+    GET_CONVERSATION_MUTES: 'GET_CONVERSATION_MUTES',
+    MUTE_CONVERSATION_MEMBER: 'MUTE_CONVERSATION_MEMBER',
+    UNMUTE_CONVERSATION_MEMBER: 'UNMUTE_CONVERSATION_MEMBER',
+    GET_CONVERSATION_PINS: 'GET_CONVERSATION_PINS',
+    PIN_CONVERSATION_MESSAGE: 'PIN_CONVERSATION_MESSAGE',
+    UNPIN_CONVERSATION_MESSAGE: 'UNPIN_CONVERSATION_MESSAGE',
+    GET_CONVERSATION_MEDIA: 'GET_CONVERSATION_MEDIA',
+    GET_CONVERSATION_FILES: 'GET_CONVERSATION_FILES',
+    GET_CONVERSATION_LINKS: 'GET_CONVERSATION_LINKS',
+    GET_CONVERSATION_VOICE_MESSAGES: 'GET_CONVERSATION_VOICE_MESSAGES',
+    GET_CONVERSATION_VIDEO_MESSAGES: 'GET_CONVERSATION_VIDEO_MESSAGES',
+    GET_CONVERSATION_STICKERS: 'GET_CONVERSATION_STICKERS',
+    GET_CONVERSATION_GIFS: 'GET_CONVERSATION_GIFS',
+    SEARCH_CONVERSATION: 'SEARCH_CONVERSATION',
+    FILTER_CONVERSATION_BY_TYPE: 'FILTER_CONVERSATION_BY_TYPE',
+    FILTER_CONVERSATION_BY_DATE: 'FILTER_CONVERSATION_BY_DATE',
+    FILTER_CONVERSATION_BY_SENDER: 'FILTER_CONVERSATION_BY_SENDER',
+    FILTER_CONVERSATION_BY_MENTION: 'FILTER_CONVERSATION_BY_MENTION',
+    FILTER_CONVERSATION_BY_HASHTAG: 'FILTER_CONVERSATION_BY_HASHTAG',
+    EXPORT_CONVERSATION: 'EXPORT_CONVERSATION',
+    IMPORT_CONVERSATION: 'IMPORT_CONVERSATION',
+    BACKUP_CONVERSATIONS: 'BACKUP_CONVERSATIONS',
+    RESTORE_CONVERSATIONS: 'RESTORE_CONVERSATIONS',
+    CLEAR_CONVERSATION_HISTORY: 'CLEAR_CONVERSATION_HISTORY',
+    DELETE_CONVERSATION: 'DELETE_CONVERSATION',
+    REPLY_TO_MESSAGE: 'REPLY_TO_MESSAGE'
 });
 
 export const MESSAGE_TYPES = STRICT_MESSAGE_TYPES;
@@ -111,7 +193,12 @@ const SECURITY_CONFIG = Object.freeze({
 const ALLOWED_ORIGINS = Object.freeze([
     window.location.origin,
     'http://localhost:3000',
-    'http://localhost:8080'
+    'http://localhost:8080',
+    'http://localhost:5500',
+    'http://127.0.0.1:5500',
+    'http://localhost:4000',
+    'https://moodchat-fy56.onrender.com',
+    'https://moodfronted.onrender.com'
 ]);
 
 const MESSAGE_SCHEMAS = Object.freeze({
@@ -483,6 +570,12 @@ class ValidationEngine {
         }
         
         if (this.allowedOrigins.includes(origin)) {
+            this.originCache.set(origin, { allowed: true, timestamp: Date.now() });
+            return true;
+        }
+        
+        // Check for pattern matches (render.com domains)
+        if (origin.includes('.onrender.com') || origin.includes('render.com')) {
             this.originCache.set(origin, { allowed: true, timestamp: Date.now() });
             return true;
         }
@@ -1345,6 +1438,10 @@ async function safeFetch(url, options = {}) {
     }
 }
 
+// ============================================================================
+// MESSAGE API FUNCTIONS - All functions required by friend-core.js
+// ============================================================================
+
 export async function sendMessageHTTP(conversationId, content, messageType = 'text', metadata = {}) {
     try {
         const response = await safeFetch(`/api/conversations/${conversationId}/messages`, {
@@ -2103,6 +2200,755 @@ export async function sendBulkMessages(conversationIds, content, messageType = '
     }
 }
 
+// ============================================================================
+// ADDITIONAL FUNCTIONS REQUIRED BY FRIEND-CORE.JS
+// ============================================================================
+
+export async function reactToMessage(messageId, reaction) {
+    return addReaction(messageId, reaction);
+}
+
+export async function getMessageHistory(conversationId, limit = 50, before = null) {
+    return fetchMessages(conversationId, limit, before);
+}
+
+export async function archiveConversation(conversationId) {
+    return updateConversation(conversationId, { archived: true });
+}
+
+export async function muteConversation(conversationId, muted = true) {
+    return updateConversation(conversationId, { muted });
+}
+
+export async function pinConversation(conversationId, pinned = true) {
+    return updateConversation(conversationId, { pinned });
+}
+
+export async function getMessageStatus(messageId) {
+    try {
+        const response = await safeFetch(`/api/messages/${messageId}/status`, {
+            method: 'GET',
+            headers: {}
+        });
+        return await response.json();
+    } catch (error) {
+        throw error;
+    }
+}
+
+export async function getTypingStatus(conversationId) {
+    try {
+        const response = await safeFetch(`/api/conversations/${conversationId}/typing`, {
+            method: 'GET',
+            headers: {}
+        });
+        return await response.json();
+    } catch (error) {
+        throw error;
+    }
+}
+
+export async function setTypingStatus(conversationId, isTyping) {
+    return sendTypingIndicator(conversationId, isTyping);
+}
+
+export async function getOnlineStatus(userId) {
+    try {
+        const response = await safeFetch(`/api/users/${userId}/online`, {
+            method: 'GET',
+            headers: {}
+        });
+        return await response.json();
+    } catch (error) {
+        throw error;
+    }
+}
+
+export async function getLastSeen(userId) {
+    try {
+        const response = await safeFetch(`/api/users/${userId}/last-seen`, {
+            method: 'GET',
+            headers: {}
+        });
+        return await response.json();
+    } catch (error) {
+        throw error;
+    }
+}
+
+export async function getMessageReactions(messageId) {
+    try {
+        const response = await safeFetch(`/api/messages/${messageId}/reactions`, {
+            method: 'GET',
+            headers: {}
+        });
+        return await response.json();
+    } catch (error) {
+        throw error;
+    }
+}
+
+export async function getMessageThread(messageId) {
+    try {
+        const response = await safeFetch(`/api/messages/${messageId}/thread`, {
+            method: 'GET',
+            headers: {}
+        });
+        return await response.json();
+    } catch (error) {
+        throw error;
+    }
+}
+
+export async function getPinnedMessages(conversationId) {
+    try {
+        const response = await safeFetch(`/api/conversations/${conversationId}/pinned`, {
+            method: 'GET',
+            headers: {}
+        });
+        return await response.json();
+    } catch (error) {
+        throw error;
+    }
+}
+
+export async function getStarredMessages(userId) {
+    try {
+        const response = await safeFetch(`/api/users/${userId}/starred`, {
+            method: 'GET',
+            headers: {}
+        });
+        return await response.json();
+    } catch (error) {
+        throw error;
+    }
+}
+
+export async function getSavedMessages(userId) {
+    try {
+        const response = await safeFetch(`/api/users/${userId}/saved`, {
+            method: 'GET',
+            headers: {}
+        });
+        return await response.json();
+    } catch (error) {
+        throw error;
+    }
+}
+
+export async function saveMessage(messageId) {
+    try {
+        const response = await safeFetch(`/api/messages/${messageId}/save`, {
+            method: 'POST',
+            headers: {}
+        });
+        return await response.json();
+    } catch (error) {
+        throw error;
+    }
+}
+
+export async function unsaveMessage(messageId) {
+    try {
+        const response = await safeFetch(`/api/messages/${messageId}/unsave`, {
+            method: 'POST',
+            headers: {}
+        });
+        return await response.json();
+    } catch (error) {
+        throw error;
+    }
+}
+
+export async function replyToMessage(messageId, content) {
+    return sendMessageHTTP(null, content, 'reply', { replyTo: messageId });
+}
+
+export async function quoteMessage(messageId, content) {
+    return sendMessageHTTP(null, content, 'quote', { quote: messageId });
+}
+
+export async function getMessageLink(messageId) {
+    try {
+        const response = await safeFetch(`/api/messages/${messageId}/link`, {
+            method: 'GET',
+            headers: {}
+        });
+        return await response.json();
+    } catch (error) {
+        throw error;
+    }
+}
+
+export async function shareMessage(messageId, targetUserId) {
+    try {
+        const response = await safeFetch(`/api/messages/${messageId}/share`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ targetUserId })
+        });
+        return await response.json();
+    } catch (error) {
+        throw error;
+    }
+}
+
+export async function reportMessage(messageId, reason) {
+    try {
+        const response = await safeFetch(`/api/messages/${messageId}/report`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ reason })
+        });
+        return await response.json();
+    } catch (error) {
+        throw error;
+    }
+}
+
+export async function deleteForEveryone(messageId) {
+    return deleteMessage(messageId, true);
+}
+
+export async function deleteForMe(messageId) {
+    return deleteMessage(messageId, false);
+}
+
+export async function getDeletedMessages(conversationId) {
+    try {
+        const response = await safeFetch(`/api/conversations/${conversationId}/deleted`, {
+            method: 'GET',
+            headers: {}
+        });
+        return await response.json();
+    } catch (error) {
+        throw error;
+    }
+}
+
+export async function restoreDeletedMessage(messageId) {
+    try {
+        const response = await safeFetch(`/api/messages/${messageId}/restore`, {
+            method: 'POST',
+            headers: {}
+        });
+        return await response.json();
+    } catch (error) {
+        throw error;
+    }
+}
+
+export async function getArchivedConversations() {
+    try {
+        const response = await safeFetch('/api/conversations/archived', {
+            method: 'GET',
+            headers: {}
+        });
+        return await response.json();
+    } catch (error) {
+        throw error;
+    }
+}
+
+export async function getMutedConversations() {
+    try {
+        const response = await safeFetch('/api/conversations/muted', {
+            method: 'GET',
+            headers: {}
+        });
+        return await response.json();
+    } catch (error) {
+        throw error;
+    }
+}
+
+export async function getPinnedConversations() {
+    try {
+        const response = await safeFetch('/api/conversations/pinned', {
+            method: 'GET',
+            headers: {}
+        });
+        return await response.json();
+    } catch (error) {
+        throw error;
+    }
+}
+
+export async function getConversationSettings(conversationId) {
+    try {
+        const response = await safeFetch(`/api/conversations/${conversationId}/settings`, {
+            method: 'GET',
+            headers: {}
+        });
+        return await response.json();
+    } catch (error) {
+        throw error;
+    }
+}
+
+export async function updateConversationSettings(conversationId, settings) {
+    return updateConversation(conversationId, { settings });
+}
+
+export async function getConversationMembers(conversationId) {
+    return getGroupMembers(conversationId);
+}
+
+export async function addConversationMembers(conversationId, memberIds) {
+    return addParticipants(conversationId, memberIds);
+}
+
+export async function removeConversationMembers(conversationId, memberIds) {
+    return removeParticipants(conversationId, memberIds);
+}
+
+export async function promoteConversationMember(conversationId, memberId) {
+    try {
+        const response = await safeFetch(`/api/conversations/${conversationId}/members/${memberId}/promote`, {
+            method: 'POST',
+            headers: {}
+        });
+        return await response.json();
+    } catch (error) {
+        throw error;
+    }
+}
+
+export async function demoteConversationMember(conversationId, memberId) {
+    try {
+        const response = await safeFetch(`/api/conversations/${conversationId}/members/${memberId}/demote`, {
+            method: 'POST',
+            headers: {}
+        });
+        return await response.json();
+    } catch (error) {
+        throw error;
+    }
+}
+
+export async function joinConversation(conversationId) {
+    return addParticipants(conversationId, ['me']);
+}
+
+export async function getConversationInviteLink(conversationId) {
+    try {
+        const response = await safeFetch(`/api/conversations/${conversationId}/invite`, {
+            method: 'GET',
+            headers: {}
+        });
+        return await response.json();
+    } catch (error) {
+        throw error;
+    }
+}
+
+export async function revokeConversationInviteLink(conversationId) {
+    try {
+        const response = await safeFetch(`/api/conversations/${conversationId}/invite`, {
+            method: 'DELETE',
+            headers: {}
+        });
+        return await response.json();
+    } catch (error) {
+        throw error;
+    }
+}
+
+export async function getConversationBans(conversationId) {
+    try {
+        const response = await safeFetch(`/api/conversations/${conversationId}/bans`, {
+            method: 'GET',
+            headers: {}
+        });
+        return await response.json();
+    } catch (error) {
+        throw error;
+    }
+}
+
+export async function banConversationMember(conversationId, memberId) {
+    try {
+        const response = await safeFetch(`/api/conversations/${conversationId}/bans`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ memberId })
+        });
+        return await response.json();
+    } catch (error) {
+        throw error;
+    }
+}
+
+export async function unbanConversationMember(conversationId, memberId) {
+    try {
+        const response = await safeFetch(`/api/conversations/${conversationId}/bans/${memberId}`, {
+            method: 'DELETE',
+            headers: {}
+        });
+        return await response.json();
+    } catch (error) {
+        throw error;
+    }
+}
+
+export async function getConversationMutes(conversationId) {
+    try {
+        const response = await safeFetch(`/api/conversations/${conversationId}/mutes`, {
+            method: 'GET',
+            headers: {}
+        });
+        return await response.json();
+    } catch (error) {
+        throw error;
+    }
+}
+
+export async function muteConversationMember(conversationId, memberId) {
+    try {
+        const response = await safeFetch(`/api/conversations/${conversationId}/mutes`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ memberId })
+        });
+        return await response.json();
+    } catch (error) {
+        throw error;
+    }
+}
+
+export async function unmuteConversationMember(conversationId, memberId) {
+    try {
+        const response = await safeFetch(`/api/conversations/${conversationId}/mutes/${memberId}`, {
+            method: 'DELETE',
+            headers: {}
+        });
+        return await response.json();
+    } catch (error) {
+        throw error;
+    }
+}
+
+export async function getConversationPins(conversationId) {
+    return getPinnedMessages(conversationId);
+}
+
+export async function pinConversationMessage(conversationId, messageId) {
+    return pinMessage(messageId, true);
+}
+
+export async function unpinConversationMessage(conversationId, messageId) {
+    return pinMessage(messageId, false);
+}
+
+export async function getConversationMedia(conversationId) {
+    try {
+        const response = await safeFetch(`/api/conversations/${conversationId}/media`, {
+            method: 'GET',
+            headers: {}
+        });
+        return await response.json();
+    } catch (error) {
+        throw error;
+    }
+}
+
+export async function getConversationFiles(conversationId) {
+    try {
+        const response = await safeFetch(`/api/conversations/${conversationId}/files`, {
+            method: 'GET',
+            headers: {}
+        });
+        return await response.json();
+    } catch (error) {
+        throw error;
+    }
+}
+
+export async function getConversationLinks(conversationId) {
+    try {
+        const response = await safeFetch(`/api/conversations/${conversationId}/links`, {
+            method: 'GET',
+            headers: {}
+        });
+        return await response.json();
+    } catch (error) {
+        throw error;
+    }
+}
+
+export async function getConversationVoiceMessages(conversationId) {
+    try {
+        const response = await safeFetch(`/api/conversations/${conversationId}/voice`, {
+            method: 'GET',
+            headers: {}
+        });
+        return await response.json();
+    } catch (error) {
+        throw error;
+    }
+}
+
+export async function getConversationVideoMessages(conversationId) {
+    try {
+        const response = await safeFetch(`/api/conversations/${conversationId}/video`, {
+            method: 'GET',
+            headers: {}
+        });
+        return await response.json();
+    } catch (error) {
+        throw error;
+    }
+}
+
+export async function getConversationStickers(conversationId) {
+    try {
+        const response = await safeFetch(`/api/conversations/${conversationId}/stickers`, {
+            method: 'GET',
+            headers: {}
+        });
+        return await response.json();
+    } catch (error) {
+        throw error;
+    }
+}
+
+export async function getConversationGifs(conversationId) {
+    try {
+        const response = await safeFetch(`/api/conversations/${conversationId}/gifs`, {
+            method: 'GET',
+            headers: {}
+        });
+        return await response.json();
+    } catch (error) {
+        throw error;
+    }
+}
+
+export async function searchConversation(conversationId, query) {
+    return searchMessages(query, conversationId);
+}
+
+export async function filterConversationByType(conversationId, messageType) {
+    try {
+        const params = new URLSearchParams();
+        params.append('type', messageType);
+        const response = await safeFetch(`/api/conversations/${conversationId}/messages/filter?${params.toString()}`, {
+            method: 'GET',
+            headers: {}
+        });
+        return await response.json();
+    } catch (error) {
+        throw error;
+    }
+}
+
+export async function filterConversationByDate(conversationId, startDate, endDate) {
+    try {
+        const params = new URLSearchParams();
+        params.append('start', startDate);
+        params.append('end', endDate);
+        const response = await safeFetch(`/api/conversations/${conversationId}/messages/date?${params.toString()}`, {
+            method: 'GET',
+            headers: {}
+        });
+        return await response.json();
+    } catch (error) {
+        throw error;
+    }
+}
+
+export async function filterConversationBySender(conversationId, senderId) {
+    try {
+        const params = new URLSearchParams();
+        params.append('sender', senderId);
+        const response = await safeFetch(`/api/conversations/${conversationId}/messages/sender?${params.toString()}`, {
+            method: 'GET',
+            headers: {}
+        });
+        return await response.json();
+    } catch (error) {
+        throw error;
+    }
+}
+
+export async function filterConversationByMention(conversationId, userId) {
+    try {
+        const params = new URLSearchParams();
+        params.append('mention', userId);
+        const response = await safeFetch(`/api/conversations/${conversationId}/messages/mentions?${params.toString()}`, {
+            method: 'GET',
+            headers: {}
+        });
+        return await response.json();
+    } catch (error) {
+        throw error;
+    }
+}
+
+export async function filterConversationByHashtag(conversationId, hashtag) {
+    try {
+        const params = new URLSearchParams();
+        params.append('hashtag', hashtag);
+        const response = await safeFetch(`/api/conversations/${conversationId}/messages/hashtags?${params.toString()}`, {
+            method: 'GET',
+            headers: {}
+        });
+        return await response.json();
+    } catch (error) {
+        throw error;
+    }
+}
+
+export async function importConversation(conversationId, data) {
+    try {
+        const response = await safeFetch(`/api/conversations/${conversationId}/import`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(data)
+        });
+        return await response.json();
+    } catch (error) {
+        throw error;
+    }
+}
+
+export async function backupConversations() {
+    try {
+        const response = await safeFetch('/api/conversations/backup', {
+            method: 'GET',
+            headers: {}
+        });
+        return await response.json();
+    } catch (error) {
+        throw error;
+    }
+}
+
+export async function restoreConversations(backupData) {
+    try {
+        const response = await safeFetch('/api/conversations/restore', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(backupData)
+        });
+        return await response.json();
+    } catch (error) {
+        throw error;
+    }
+}
+
+export async function clearConversationHistory(conversationId) {
+    return clearChatHistory(conversationId, false);
+}
+
+export async function deleteConversation(conversationId) {
+    try {
+        const response = await safeFetch(`/api/conversations/${conversationId}`, {
+            method: 'DELETE',
+            headers: {}
+        });
+        return await response.json();
+    } catch (error) {
+        throw error;
+    }
+}
+
+// ============================================================================
+// FILE UPLOAD/DOWNLOAD FUNCTIONS
+// ============================================================================
+
+export async function uploadFile(conversationId, file, onProgress = null) {
+    try {
+        const formData = new FormData();
+        formData.append('file', file);
+        formData.append('conversationId', conversationId);
+        
+        const xhr = new XMLHttpRequest();
+        
+        const uploadPromise = new Promise((resolve, reject) => {
+            xhr.open('POST', '/api/files/upload');
+            
+            if (onProgress) {
+                xhr.upload.addEventListener('progress', (e) => {
+                    if (e.lengthComputable) {
+                        onProgress(e.loaded / e.total);
+                    }
+                });
+            }
+            
+            xhr.onload = () => {
+                if (xhr.status === 200) {
+                    try {
+                        const response = JSON.parse(xhr.responseText);
+                        resolve(response);
+                    } catch (e) {
+                        reject(new Error('Invalid response'));
+                    }
+                } else {
+                    reject(new Error(`Upload failed: ${xhr.status}`));
+                }
+            };
+            
+            xhr.onerror = () => reject(new Error('Upload failed'));
+            xhr.send(formData);
+        });
+        
+        return uploadPromise;
+    } catch (error) {
+        throw error;
+    }
+}
+
+export async function downloadFile(fileId, fileName) {
+    try {
+        const response = await safeFetch(`/api/files/${fileId}/download`, {
+            method: 'GET'
+        });
+        
+        const blob = await response.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = fileName || `file-${fileId}`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        window.URL.revokeObjectURL(url);
+        
+        return { success: true };
+    } catch (error) {
+        throw error;
+    }
+}
+
+export async function getFileInfo(fileId) {
+    try {
+        const response = await safeFetch(`/api/files/${fileId}`, {
+            method: 'GET',
+            headers: {}
+        });
+        return await response.json();
+    } catch (error) {
+        throw error;
+    }
+}
+
+// ============================================================================
+// INITIALIZATION
+// ============================================================================
+
 export function initializeGlobalAPI() {
     if (GlobalSecurityManager.initState.status === 'ready' || 
         GlobalSecurityManager.initState.status === 'initializing') {
@@ -2132,6 +2978,7 @@ export function initializeGlobalAPI() {
             markAsRead,
             markChatAsRead,
             addReaction,
+            reactToMessage,
             clearChatHistory,
             deleteMessage,
             editMessage,
@@ -2154,7 +3001,75 @@ export function initializeGlobalAPI() {
             getUnreadCount,
             getMessageStatistics,
             exportConversation,
-            sendBulkMessages
+            sendBulkMessages,
+            getMessageHistory,
+            archiveConversation,
+            muteConversation,
+            pinConversation,
+            getMessageStatus,
+            getTypingStatus,
+            setTypingStatus,
+            getOnlineStatus,
+            getLastSeen,
+            getMessageReactions,
+            getMessageThread,
+            getPinnedMessages,
+            getStarredMessages,
+            getSavedMessages,
+            saveMessage,
+            unsaveMessage,
+            replyToMessage,
+            quoteMessage,
+            getMessageLink,
+            shareMessage,
+            reportMessage,
+            deleteForEveryone,
+            deleteForMe,
+            getDeletedMessages,
+            restoreDeletedMessage,
+            getArchivedConversations,
+            getMutedConversations,
+            getPinnedConversations,
+            getConversationSettings,
+            updateConversationSettings,
+            getConversationMembers,
+            addConversationMembers,
+            removeConversationMembers,
+            promoteConversationMember,
+            demoteConversationMember,
+            joinConversation,
+            getConversationInviteLink,
+            revokeConversationInviteLink,
+            getConversationBans,
+            banConversationMember,
+            unbanConversationMember,
+            getConversationMutes,
+            muteConversationMember,
+            unmuteConversationMember,
+            getConversationPins,
+            pinConversationMessage,
+            unpinConversationMessage,
+            getConversationMedia,
+            getConversationFiles,
+            getConversationLinks,
+            getConversationVoiceMessages,
+            getConversationVideoMessages,
+            getConversationStickers,
+            getConversationGifs,
+            searchConversation,
+            filterConversationByType,
+            filterConversationByDate,
+            filterConversationBySender,
+            filterConversationByMention,
+            filterConversationByHashtag,
+            importConversation,
+            backupConversations,
+            restoreConversations,
+            clearConversationHistory,
+            deleteConversation,
+            uploadFile,
+            downloadFile,
+            getFileInfo
         });
     }
     
@@ -2208,6 +3123,7 @@ export function initializeGlobalAPI() {
                 markAsRead,
                 markChatAsRead,
                 addReaction,
+                reactToMessage,
                 clearChatHistory,
                 deleteMessage,
                 editMessage,
@@ -2230,7 +3146,75 @@ export function initializeGlobalAPI() {
                 getUnreadCount,
                 getMessageStatistics,
                 exportConversation,
-                sendBulkMessages
+                sendBulkMessages,
+                getMessageHistory,
+                archiveConversation,
+                muteConversation,
+                pinConversation,
+                getMessageStatus,
+                getTypingStatus,
+                setTypingStatus,
+                getOnlineStatus,
+                getLastSeen,
+                getMessageReactions,
+                getMessageThread,
+                getPinnedMessages,
+                getStarredMessages,
+                getSavedMessages,
+                saveMessage,
+                unsaveMessage,
+                replyToMessage,
+                quoteMessage,
+                getMessageLink,
+                shareMessage,
+                reportMessage,
+                deleteForEveryone,
+                deleteForMe,
+                getDeletedMessages,
+                restoreDeletedMessage,
+                getArchivedConversations,
+                getMutedConversations,
+                getPinnedConversations,
+                getConversationSettings,
+                updateConversationSettings,
+                getConversationMembers,
+                addConversationMembers,
+                removeConversationMembers,
+                promoteConversationMember,
+                demoteConversationMember,
+                joinConversation,
+                getConversationInviteLink,
+                revokeConversationInviteLink,
+                getConversationBans,
+                banConversationMember,
+                unbanConversationMember,
+                getConversationMutes,
+                muteConversationMember,
+                unmuteConversationMember,
+                getConversationPins,
+                pinConversationMessage,
+                unpinConversationMessage,
+                getConversationMedia,
+                getConversationFiles,
+                getConversationLinks,
+                getConversationVoiceMessages,
+                getConversationVideoMessages,
+                getConversationStickers,
+                getConversationGifs,
+                searchConversation,
+                filterConversationByType,
+                filterConversationByDate,
+                filterConversationBySender,
+                filterConversationByMention,
+                filterConversationByHashtag,
+                importConversation,
+                backupConversations,
+                restoreConversations,
+                clearConversationHistory,
+                deleteConversation,
+                uploadFile,
+                downloadFile,
+                getFileInfo
             };
             
             window.__API_MESSAGES.ready = true;
@@ -2312,6 +3296,7 @@ export default {
     markAsRead,
     markChatAsRead,
     addReaction,
+    reactToMessage,
     clearChatHistory,
     deleteMessage,
     editMessage,
@@ -2334,5 +3319,73 @@ export default {
     getUnreadCount,
     getMessageStatistics,
     exportConversation,
-    sendBulkMessages
+    sendBulkMessages,
+    getMessageHistory,
+    archiveConversation,
+    muteConversation,
+    pinConversation,
+    getMessageStatus,
+    getTypingStatus,
+    setTypingStatus,
+    getOnlineStatus,
+    getLastSeen,
+    getMessageReactions,
+    getMessageThread,
+    getPinnedMessages,
+    getStarredMessages,
+    getSavedMessages,
+    saveMessage,
+    unsaveMessage,
+    replyToMessage,
+    quoteMessage,
+    getMessageLink,
+    shareMessage,
+    reportMessage,
+    deleteForEveryone,
+    deleteForMe,
+    getDeletedMessages,
+    restoreDeletedMessage,
+    getArchivedConversations,
+    getMutedConversations,
+    getPinnedConversations,
+    getConversationSettings,
+    updateConversationSettings,
+    getConversationMembers,
+    addConversationMembers,
+    removeConversationMembers,
+    promoteConversationMember,
+    demoteConversationMember,
+    joinConversation,
+    getConversationInviteLink,
+    revokeConversationInviteLink,
+    getConversationBans,
+    banConversationMember,
+    unbanConversationMember,
+    getConversationMutes,
+    muteConversationMember,
+    unmuteConversationMember,
+    getConversationPins,
+    pinConversationMessage,
+    unpinConversationMessage,
+    getConversationMedia,
+    getConversationFiles,
+    getConversationLinks,
+    getConversationVoiceMessages,
+    getConversationVideoMessages,
+    getConversationStickers,
+    getConversationGifs,
+    searchConversation,
+    filterConversationByType,
+    filterConversationByDate,
+    filterConversationBySender,
+    filterConversationByMention,
+    filterConversationByHashtag,
+    importConversation,
+    backupConversations,
+    restoreConversations,
+    clearConversationHistory,
+    deleteConversation,
+    uploadFile,
+    downloadFile,
+    getFileInfo
 };

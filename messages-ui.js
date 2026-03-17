@@ -1,9 +1,10 @@
 // =============================================
-// MESSAGES-UI.js - HARDENED PRODUCTION UI ENGINE v3.4.1
+// MESSAGES-UI.js - HARDENED PRODUCTION UI ENGINE v3.4.2
 // SECURE PARENT-IFRAME UI LAYER
 // ENHANCED: Connection status, recovery UI, session indicators
 // UI FAILURE RESILIENCE - NEVER BLOCKS RENDERING
 // FIXED: Null dataset access error at line 1990
+// FIXED: Message schema validation for FETCH_CONVERSATIONS and REQUEST_SESSION
 // =============================================
 
 (function() {
@@ -12,7 +13,7 @@
     // =============================================
     // CONSTANTS & CONFIGURATION
     // =============================================
-    const VERSION = '3.4.1';
+    const VERSION = '3.4.2';
     const APP_NAME = 'kynecta-messages-ui';
     const SOURCE_CHILD = 'CHILD';
     const FRAME_ID = 'messagesIframe';

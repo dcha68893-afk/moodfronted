@@ -2125,7 +2125,11 @@
             <div class="sidebar-header">
                 <h2>Friends</h2>
                 <div style="display: flex; gap: 10px; align-items: center;">
-                    <!-- V6 Connection Status Indicator -->
+                    <!-- V6 Connection Status Indicator - ADD THIS ID -->
+                    <div class="connection-status" id="connectionStatus">
+                        <i class="fas fa-circle"></i>
+                        <span>Connected</span>
+                    </div>
                     <button class="add-friend-btn" id="startNewChatBtn" title="Start New Chat">
                         <i class="fas fa-comments"></i>
                     </button>
@@ -2136,11 +2140,11 @@
             </div>
             
             <div class="friend-categories">
-                <button class="category-btn active" id="allTab">All Friends</button>
+                <button class="category-btn active" id="allTab">All Friends <span class="badge" id="totalFriends">0</span></button>
                 <button class="category-btn" id="contactsTab">Contacts <span class="badge" id="contactsCount">0</span></button>
                 <button class="category-btn" id="friendsTab">Friends <span class="badge" id="friendsCount">0</span></button>
                 <button class="category-btn" id="requestsTab">Requests <span class="badge" id="requestsCount">0</span></button>
-                <button class="category-btn" id="temporaryTab">Temporary</button>
+                <button class="category-btn" id="temporaryTab">Temporary <span class="badge" id="temporaryCount">0</span></button>
                 <button class="category-btn" id="pinnedTab">Pinned <span class="badge" id="pinnedCount">0</span></button>
                 <button class="category-btn" id="mutedTab">Muted <span class="badge" id="mutedCount">0</span></button>
             </div>
@@ -2564,15 +2568,15 @@
             
             <div style="padding: 25px;">
                 <div class="input-group">
-                    <label class="input-label">Select Friend to Chat With</label>
-                    <div id="chatFriendsList" style="max-height: 300px; overflow-y: auto; margin-top: 10px; border: 1px solid var(--border-color); border-radius: 8px; padding: 10px;">
-                        <!-- Friends will be listed here -->
-                    </div>
+                    <label class="input-label">Search Friends</label>
+                    <input type="text" class="text-input" id="searchChatUser" placeholder="Search by name...">
                 </div>
                 
                 <div class="input-group">
-                    <label class="input-label">Or Search by Username</label>
-                    <input type="text" class="text-input" id="searchChatUser" placeholder="@username">
+                    <label class="input-label">Select Friend</label>
+                    <div id="chatFriendsList" style="max-height: 300px; overflow-y: auto; margin-top: 10px; border: 1px solid var(--border-color); border-radius: 8px; padding: 10px;">
+                        <!-- Friends will be listed here -->
+                    </div>
                 </div>
             </div>
             

@@ -2,7 +2,7 @@
 // GROUPS UI FUNCTIONS - RESILIENT UI CONTROLLER
 // COMPLETE PRODUCTION-READY IMPLEMENTATION
 // HIGHLY SECURE - XSS PROTECTED, CSP COMPLIANT
-// VERSION: 3.3.0 - ADDED API CORE INTEGRATION, ENHANCED SECURITY
+// VERSION: 3.4.0 - UPDATED TO MATCH CORE EXPORTS
 // ENHANCED: Silent loading, No overlay UI, Preserved all functionality
 // =============================================
 
@@ -61,7 +61,7 @@ const DIAGNOSTICS = {
 };
 
 // =============================================
-// IMPORT VERIFICATION - ALL SYMBOLS VALIDATED
+// IMPORT VERIFICATION - UPDATED TO MATCH CORE EXPORTS
 // =============================================
 
 import {
@@ -128,37 +128,9 @@ import {
     tokenQueue,
     isProcessingTokenQueue,
 
-    // Parent connection
-    PARENT_MESSAGE_TYPES,
-    SESSION_SCHEMA,
-    HandshakeClient,
-    ParentConnectionManager,
-    SessionMirror,
-
-    // Parent coordination functions
-    initializeParentConnection,
-    verifyParentPresence,
-    setupParentMessageListener,
-    handleParentMessage,
-    startHandshakeProtocol,
-    scheduleHandshakeRetry,
-    sendMessageToParent,
-    handleParentReady,
-    handleSessionData,
-    validateSessionData,
-    updateLocalStateFromSession,
-    handleSessionUpdate,
-    handleLogout,
-    clearLocalSessionState,
-    handleParentUnavailable,
-    sendStatusToParent,
-    handleLegacySessionMessage,
-    enableProtectedUI,
-    disableProtectedUI,
-    showReconnectState,
-    startBackgroundProcesses,
-    stopBackgroundProcesses,
-
+    // Parent connection - UPDATED: Removed deprecated exports
+    // Using LifecycleState and ParentMessaging instead
+    
     // Token management
     initializeTokenSystem,
     waitForTokenReady,
@@ -1454,7 +1426,7 @@ export function progressiveEnhancement() {
             setupEventListeners();
             setupResponsiveBehavior();
             
-            if (authReady || (ParentConnectionManager && ParentConnectionManager.handshakeComplete)) {
+            if (authReady) {
                 if (typeof startBackgroundSync === 'function') {
                     startBackgroundSync();
                 }
@@ -1484,7 +1456,7 @@ export function setupLiveUpdates() {
     registerMessageHandlers();
     
     const syncTimer = setInterval(() => {
-        if (authReady && ParentConnectionManager && ParentConnectionManager.handshakeComplete) {
+        if (authReady) {
             if (typeof backgroundSyncWithServer === 'function') {
                 backgroundSyncWithServer().catch(() => {});
             }
@@ -1626,7 +1598,7 @@ export function enhanceTooltips() {
 }
 
 // =============================================
-// MESSAGE HANDLER REGISTRATION
+// MESSAGE HANDLER REGISTRATION - UPDATED TO USE CORE EXPORTS
 // =============================================
 
 /**
@@ -1651,11 +1623,12 @@ export function registerMessageHandlers() {
             
             const message = event.data;
             
-            if (message.type === PARENT_MESSAGE_TYPES.UI_UPDATE) {
+            // Handle UI-specific messages
+            if (message.type === 'UI_UPDATE') {
                 handleUIUpdate(message.payload);
-            } else if (message.type === PARENT_MESSAGE_TYPES.UI_REFRESH) {
+            } else if (message.type === 'UI_REFRESH') {
                 handleUIRefresh(message.payload);
-            } else if (message.type === PARENT_MESSAGE_TYPES.UI_THEME) {
+            } else if (message.type === 'UI_THEME') {
                 handleUITheme(message.payload);
             }
         } catch (error) {}
@@ -2373,7 +2346,7 @@ export function setupCreateGroupButton() {
     
     if (createGroupBtn && createGroupModal) {
         registerUIEventListener(createGroupBtn, 'click', () => {
-            if (!SessionMirror || !SessionMirror.isAuthenticated() || !getCurrentUser()) {
+            if (!getCurrentUser()) {
                 if (typeof showNotification === 'function') {
                     showNotification('Please log in to create groups', 'error');
                 }

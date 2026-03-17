@@ -358,89 +358,7 @@
             100% { opacity: 1; transform: scale(1); }
         }
         
-        /* ========== MODIFIED: Debug Panel (Hidden by default) ========== */
-        .debug-panel {
-            position: fixed;
-            bottom: 60px;
-            right: 10px;
-            width: 300px;
-            max-height: 400px;
-            overflow-y: auto;
-            background: rgba(0,0,0,0.8);
-            color: #00ff00;
-            font-family: monospace;
-            font-size: 11px;
-            padding: 10px;
-            border-radius: 8px;
-            z-index: 20000;
-            display: none;
-            box-shadow: 0 4px 20px rgba(0,0,0,0.3);
-            backdrop-filter: blur(4px);
-            border: 1px solid #333;
-        }
-        
-        .debug-panel.visible {
-            display: block;
-        }
-        
-        .debug-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 8px;
-            padding-bottom: 4px;
-            border-bottom: 1px solid #333;
-            color: #fff;
-            font-weight: bold;
-        }
-        
-        .debug-close {
-            cursor: pointer;
-            color: #ff5555;
-            font-size: 14px;
-        }
-        
-        .debug-section {
-            margin-bottom: 10px;
-            padding: 5px;
-            background: rgba(255,255,255,0.1);
-            border-radius: 4px;
-        }
-        
-        .debug-section-title {
-            color: #ffaa00;
-            font-weight: bold;
-            margin-bottom: 4px;
-            font-size: 12px;
-        }
-        
-        .debug-row {
-            display: flex;
-            justify-content: space-between;
-            margin-bottom: 2px;
-            line-height: 1.4;
-        }
-        
-        .debug-label {
-            color: #88ff88;
-        }
-        
-        .debug-value {
-            color: #ffffff;
-            max-width: 150px;
-            overflow: hidden;
-            text-overflow: ellipsis;
-        }
-        
-        .debug-badge {
-            display: inline-block;
-            padding: 2px 6px;
-            border-radius: 4px;
-            font-size: 9px;
-            background: #333;
-            color: #fff;
-            margin-left: 4px;
-        }
+        /* ========== REMOVED: Debug Panel Styles ========== */
         
         /* ========== MODIFIED: Loading Overlay - HIDDEN BY DEFAULT ========== */
         .loading-overlay {
@@ -658,31 +576,7 @@
             }
         }
         
-        /* ========== MODIFIED: Debug Toggle Button at Bottom ========== */
-        .debug-toggle {
-            position: fixed;
-            bottom: 10px;
-            right: 60px;
-            width: 36px;
-            height: 36px;
-            border-radius: 50%;
-            background: rgba(0,0,0,0.5);
-            color: white;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            cursor: pointer;
-            z-index: 21000;
-            font-size: 16px;
-            backdrop-filter: blur(4px);
-            transition: background 0.2s;
-            opacity: 0.5;
-        }
-        
-        .debug-toggle:hover {
-            background: rgba(0,0,0,0.7);
-            opacity: 1;
-        }
+        /* ========== REMOVED: Debug Toggle Button ========== */
         
         /* ========== MODIFIED: Fallback UI Enhancements ========== */
         .fallback-ui {
@@ -824,86 +718,7 @@
         </div>
     </div>
     
-    <!-- ========== MODIFIED: Debug Toggle at Bottom ========== -->
-    <div class="debug-toggle" id="debugToggle" title="Toggle Debug Panel">
-        <i class="fas fa-bug"></i>
-    </div>
-    
-    <!-- ========== MODIFIED: Debug Panel at Bottom ========== -->
-    <div class="debug-panel" id="debugPanel">
-        <div class="debug-header">
-            <span>ðŸ” Debug Panel</span>
-            <span class="debug-close" id="debugClose">âœ•</span>
-        </div>
-        
-        <div class="debug-section">
-            <div class="debug-section-title">Connection</div>
-            <div class="debug-row">
-                <span class="debug-label">State:</span>
-                <span class="debug-value" id="debugConnState">disconnected</span>
-            </div>
-            <div class="debug-row">
-                <span class="debug-label">Parent Available:</span>
-                <span class="debug-value" id="debugParentAvailable">false</span>
-            </div>
-            <div class="debug-row">
-                <span class="debug-label">Handshake:</span>
-                <span class="debug-value" id="debugHandshake">idle</span>
-            </div>
-            <div class="debug-row">
-                <span class="debug-label">Session:</span>
-                <span class="debug-value" id="debugSession">none</span>
-            </div>
-            <div class="debug-row">
-                <span class="debug-label">Frame ID:</span>
-                <span class="debug-value" id="debugFrameId">-</span>
-            </div>
-        </div>
-        
-        <div class="debug-section">
-            <div class="debug-section-title">Performance</div>
-            <div class="debug-row">
-                <span class="debug-label">Render Time:</span>
-                <span class="debug-value" id="debugRenderTime">0ms</span>
-            </div>
-            <div class="debug-row">
-                <span class="debug-label">Pending ACKs:</span>
-                <span class="debug-value" id="debugPendingAcks">0</span>
-            </div>
-            <div class="debug-row">
-                <span class="debug-label">Queued Msgs:</span>
-                <span class="debug-value" id="debugQueuedMsgs">0</span>
-            </div>
-        </div>
-        
-        <div class="debug-section">
-            <div class="debug-section-title">Session</div>
-            <div class="debug-row">
-                <span class="debug-label">User:</span>
-                <span class="debug-value" id="debugUser">none</span>
-            </div>
-            <div class="debug-row">
-                <span class="debug-label">Auth:</span>
-                <span class="debug-value" id="debugAuth">false</span>
-            </div>
-            <div class="debug-row">
-                <span class="debug-label">From Cache:</span>
-                <span class="debug-value" id="debugFromCache">false</span>
-            </div>
-        </div>
-        
-        <div class="debug-section">
-            <div class="debug-section-title">Timing</div>
-            <div class="debug-row">
-                <span class="debug-label">Uptime:</span>
-                <span class="debug-value" id="debugUptime">0s</span>
-            </div>
-            <div class="debug-row">
-                <span class="debug-label">Last Heartbeat:</span>
-                <span class="debug-value" id="debugLastHeartbeat">-</span>
-            </div>
-        </div>
-    </div>
+    <!-- ========== REMOVED: Debug Toggle and Debug Panel ========== -->
     
     <!-- ========== EXISTING: Offline Overlay - HIDDEN ========== -->
     <div class="offline-overlay" id="offlineOverlay" style="display: none !important;">
@@ -1089,7 +904,7 @@
                         <div class="chat-header-title" id="chatTitle">Group Chat</div>
                         <div class="chat-header-subtitle" id="chatSubtitle">
                             <span id="chatMemberCount">0 members</span>
-                            <span>â€¢</span>
+                            <span>•</span>
                             <span id="chatActive">Active now</span>
                             <!-- EXISTING: Group Purpose & Pulse -->
                             <span id="chatPurposeTag" class="group-purpose-tag" style="display: none;"></span>
@@ -1126,9 +941,9 @@
                 <div id="topicSelection" style="display: none; padding: 5px 10px; background: var(--secondary-color); border-bottom: 1px solid var(--border-color);">
                     <select id="messageTopic" style="width: 100%; padding: 4px 8px; border-radius: 4px; border: 1px solid var(--border-color); font-size: 12px;">
                         <option value="">Select topic (optional)</option>
-                        <option value="announcement">ðŸ“¢ Announcement</option>
-                        <option value="question">â“ Question</option>
-                        <option value="discussion">ðŸ’¬ Discussion</option>
+                        <option value="announcement">📢 Announcement</option>
+                        <option value="question">❓ Question</option>
+                        <option value="discussion">💬 Discussion</option>
                     </select>
                 </div>
                 <div class="chat-input-actions">
@@ -1311,7 +1126,7 @@
                                 <span>Approve new members before they can join</span>
                             </label>
                             <label style="display: flex; align-items: center; gap: 10px; margin-bottom: 10px;">
-                                <input type="checkbox" id="onlyAdminsCanPost" checked>
+                                <input type="checkbox" id="onlyAdminsCanPost">
                                 <span>Only admins can post messages</span>
                             </label>
                             <label style="display: flex; align-items: center; gap: 10px; margin-bottom: 10px;">
@@ -1332,16 +1147,16 @@
                         <label class="input-label">Group Purpose *</label>
                         <select class="text-input" id="groupPurposeSelect">
                             <option value="">Select a purpose</option>
-                            <option value="study">ðŸ“š Study / Learning</option>
-                            <option value="prayer">ðŸ™ Prayer / Spiritual</option>
-                            <option value="work">ðŸ’¼ Work / Professional</option>
-                            <option value="family">ðŸ‘¨â€ðŸ‘©â€ðŸ‘§â€ðŸ‘¦ Family</option>
-                            <option value="event">ðŸŽ‰ Event / Celebration</option>
-                            <option value="project">ðŸ“‹ Project Collaboration</option>
-                            <option value="support">ðŸ¤ Support Group</option>
-                            <option value="hobby">ðŸŽ¨ Hobby / Interest</option>
-                            <option value="fitness">ðŸ’ª Fitness / Health</option>
-                            <option value="other">ðŸ”® Other</option>
+                            <option value="study">📚 Study / Learning</option>
+                            <option value="prayer">🙏 Prayer / Spiritual</option>
+                            <option value="work">💼 Work / Professional</option>
+                            <option value="family">👨‍👩‍👧‍👦 Family</option>
+                            <option value="event">🎉 Event / Celebration</option>
+                            <option value="project">📋 Project Collaboration</option>
+                            <option value="support">🤝 Support Group</option>
+                            <option value="hobby">🎨 Hobby / Interest</option>
+                            <option value="fitness">💪 Fitness / Health</option>
+                            <option value="other">🔮 Other</option>
                         </select>
                         <div style="font-size: 12px; color: var(--text-secondary); margin-top: 5px;">This helps members understand the group's focus</div>
                     </div>
@@ -1351,23 +1166,23 @@
                         <div style="display: flex; gap: 10px; margin-top: 10px; flex-wrap: wrap;">
                             <div class="mood-option" data-mood="calm" style="flex: 1; min-width: 100px; padding: 12px; border: 2px solid var(--border-color); border-radius: 8px; text-align: center; cursor: pointer; background: #e3f2fd; color: #1976d2;">
                                 <i class="fas fa-check" style="display: none;"></i>
-                                <div>ðŸ˜Œ Calm</div>
+                                <div>😌 Calm</div>
                             </div>
                             <div class="mood-option" data-mood="busy" style="flex: 1; min-width: 100px; padding: 12px; border: 2px solid var(--border-color); border-radius: 8px; text-align: center; cursor: pointer; background: #fff3e0; color: #f57c00;">
                                 <i class="fas fa-check" style="display: none;"></i>
-                                <div>ðŸƒ Busy</div>
+                                <div>🏃 Busy</div>
                             </div>
                             <div class="mood-option" data-mood="celebratory" style="flex: 1; min-width: 100px; padding: 12px; border: 2px solid var(--border-color); border-radius: 8px; text-align: center; cursor: pointer; background: #fce4ec; color: #c2185b;">
                                 <i class="fas fa-check" style="display: none;"></i>
-                                <div>ðŸŽ‰ Celebratory</div>
+                                <div>🎉 Celebratory</div>
                             </div>
                             <div class="mood-option" data-mood="silent" style="flex: 1; min-width: 100px; padding: 12px; border: 2px solid var(--border-color); border-radius: 8px; text-align: center; cursor: pointer; background: #f5f5f5; color: #616161;">
                                 <i class="fas fa-check" style="display: none;"></i>
-                                <div>ðŸ”‡ Silent</div>
+                                <div>🔇 Silent</div>
                             </div>
                             <div class="mood-option" data-mood="urgent" style="flex: 1; min-width: 100px; padding: 12px; border: 2px solid var(--border-color); border-radius: 8px; text-align: center; cursor: pointer; background: #ffebee; color: #d32f2f;">
                                 <i class="fas fa-check" style="display: none;"></i>
-                                <div>ðŸš¨ Urgent</div>
+                                <div>🚨 Urgent</div>
                             </div>
                         </div>
                     </div>
@@ -1386,18 +1201,18 @@
                     <div class="input-group" id="quietHoursSection" style="display: none;">
                         <label class="input-label">Quiet Hours</label>
                         <div style="display: flex; gap: 10px;">
-                            <input type="time" class="text-input" id="quietStartTime" value="22:00">
+                            <input type="time" class="text-input" id="quietStart" value="22:00">
                             <span>to</span>
-                            <input type="time" class="text-input" id="quietEndTime" value="08:00">
+                            <input type="time" class="text-input" id="quietEnd" value="08:00">
                         </div>
                     </div>
                     
                     <div class="input-group" id="scheduledPostingSection" style="display: none;">
                         <label class="input-label">Allowed Posting Times</label>
                         <div style="display: flex; gap: 10px;">
-                            <input type="time" class="text-input" id="postingStartTime" value="09:00">
+                            <input type="time" class="text-input" id="postingStart" value="09:00">
                             <span>to</span>
-                            <input type="time" class="text-input" id="postingEndTime" value="18:00">
+                            <input type="time" class="text-input" id="postingEnd" value="18:00">
                         </div>
                     </div>
                     
@@ -1451,23 +1266,23 @@
                     <div class="input-group">
                         <label class="input-label">Custom Reactions (Optional)</label>
                         <div style="display: flex; gap: 10px; margin-top: 10px; flex-wrap: wrap;">
-                            <div class="reaction-option" data-reaction="ðŸ‘" style="padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; cursor: pointer; text-align: center; font-size: 20px;">
-                                ðŸ‘
+                            <div class="reaction-option" data-reaction="👍" style="padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; cursor: pointer; text-align: center; font-size: 20px;">
+                                👍
                             </div>
-                            <div class="reaction-option" data-reaction="â¤ï¸" style="padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; cursor: pointer; text-align: center; font-size: 20px;">
-                                â¤ï¸
+                            <div class="reaction-option" data-reaction="❤️" style="padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; cursor: pointer; text-align: center; font-size: 20px;">
+                                ❤️
                             </div>
-                            <div class="reaction-option" data-reaction="ðŸ˜‚" style="padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; cursor: pointer; text-align: center; font-size: 20px;">
-                                ðŸ˜‚
+                            <div class="reaction-option" data-reaction="😂" style="padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; cursor: pointer; text-align: center; font-size: 20px;">
+                                😂
                             </div>
-                            <div class="reaction-option" data-reaction="ðŸ™" style="padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; cursor: pointer; text-align: center; font-size: 20px;">
-                                ðŸ™
+                            <div class="reaction-option" data-reaction="🙏" style="padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; cursor: pointer; text-align: center; font-size: 20px;">
+                                🙏
                             </div>
-                            <div class="reaction-option" data-reaction="ðŸ”¥" style="padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; cursor: pointer; text-align: center; font-size: 20px;">
-                                ðŸ”¥
+                            <div class="reaction-option" data-reaction="🔥" style="padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; cursor: pointer; text-align: center; font-size: 20px;">
+                                🔥
                             </div>
-                            <div class="reaction-option" data-reaction="ðŸ‘" style="padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; cursor: pointer; text-align: center; font-size: 20px;">
-                                ðŸ‘
+                            <div class="reaction-option" data-reaction="👏" style="padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; cursor: pointer; text-align: center; font-size: 20px;">
+                                👏
                             </div>
                         </div>
                         <div style="font-size: 12px; color: var(--text-secondary); margin-top: 5px;">Select custom reactions for your group</div>
@@ -1627,26 +1442,26 @@
                                 <label class="admin-settings-label">Update Group Purpose:</label>
                                 <select class="text-input" id="adminGroupPurpose" style="margin-top: 8px; width: 100%;">
                                     <option value="">Select purpose</option>
-                                    <option value="study">ðŸ“š Study / Learning</option>
-                                    <option value="prayer">ðŸ™ Prayer / Spiritual</option>
-                                    <option value="work">ðŸ’¼ Work / Professional</option>
-                                    <option value="family">ðŸ‘¨â€ðŸ‘©â€ðŸ‘§â€ðŸ‘¦ Family</option>
-                                    <option value="event">ðŸŽ‰ Event / Celebration</option>
-                                    <option value="project">ðŸ“‹ Project Collaboration</option>
-                                    <option value="support">ðŸ¤ Support Group</option>
-                                    <option value="hobby">ðŸŽ¨ Hobby / Interest</option>
-                                    <option value="fitness">ðŸ’ª Fitness / Health</option>
-                                    <option value="other">ðŸ”® Other</option>
+                                    <option value="study">📚 Study / Learning</option>
+                                    <option value="prayer">🙏 Prayer / Spiritual</option>
+                                    <option value="work">💼 Work / Professional</option>
+                                    <option value="family">👨‍👩‍👧‍👦 Family</option>
+                                    <option value="event">🎉 Event / Celebration</option>
+                                    <option value="project">📋 Project Collaboration</option>
+                                    <option value="support">🤝 Support Group</option>
+                                    <option value="hobby">🎨 Hobby / Interest</option>
+                                    <option value="fitness">💪 Fitness / Health</option>
+                                    <option value="other">🔮 Other</option>
                                 </select>
                             </div>
                             <div class="admin-settings-option">
                                 <label class="admin-settings-label">Current Group Mood:</label>
                                 <div style="display: flex; gap: 10px; margin-top: 8px; flex-wrap: wrap;">
-                                    <button class="mood-select-btn" data-mood="calm" style="padding: 8px 12px; border: 1px solid #1976d2; border-radius: 6px; background: #e3f2fd; color: #1976d2; cursor: pointer;">ðŸ˜Œ Calm</button>
-                                    <button class="mood-select-btn" data-mood="busy" style="padding: 8px 12px; border: 1px solid #f57c00; border-radius: 6px; background: #fff3e0; color: #f57c00; cursor: pointer;">ðŸƒ Busy</button>
-                                    <button class="mood-select-btn" data-mood="celebratory" style="padding: 8px 12px; border: 1px solid #c2185b; border-radius: 6px; background: #fce4ec; color: #c2185b; cursor: pointer;">ðŸŽ‰ Celebratory</button>
-                                    <button class="mood-select-btn" data-mood="silent" style="padding: 8px 12px; border: 1px solid #616161; border-radius: 6px; background: #f5f5f5; color: #616161; cursor: pointer;">ðŸ”‡ Silent</button>
-                                    <button class="mood-select-btn" data-mood="urgent" style="padding: 8px 12px; border: 1px solid #d32f2f; border-radius: 6px; background: #ffebee; color: #d32f2f; cursor: pointer;">ðŸš¨ Urgent</button>
+                                    <button class="mood-select-btn" data-mood="calm" style="padding: 8px 12px; border: 1px solid #1976d2; border-radius: 6px; background: #e3f2fd; color: #1976d2; cursor: pointer;">😌 Calm</button>
+                                    <button class="mood-select-btn" data-mood="busy" style="padding: 8px 12px; border: 1px solid #f57c00; border-radius: 6px; background: #fff3e0; color: #f57c00; cursor: pointer;">🏃 Busy</button>
+                                    <button class="mood-select-btn" data-mood="celebratory" style="padding: 8px 12px; border: 1px solid #c2185b; border-radius: 6px; background: #fce4ec; color: #c2185b; cursor: pointer;">🎉 Celebratory</button>
+                                    <button class="mood-select-btn" data-mood="silent" style="padding: 8px 12px; border: 1px solid #616161; border-radius: 6px; background: #f5f5f5; color: #616161; cursor: pointer;">🔇 Silent</button>
+                                    <button class="mood-select-btn" data-mood="urgent" style="padding: 8px 12px; border: 1px solid #d32f2f; border-radius: 6px; background: #ffebee; color: #d32f2f; cursor: pointer;">🚨 Urgent</button>
                                 </div>
                             </div>
                         </div>
@@ -1753,7 +1568,7 @@
                             <div id="transparencyLog" style="max-height: 300px; overflow-y: auto; padding: 10px; background: var(--secondary-color); border-radius: 8px;">
                                 <div class="transparency-log-item">
                                     <div><strong>Group created</strong></div>
-                                    <div style="font-size: 12px; color: var(--text-secondary);">By you â€¢ Just now</div>
+                                    <div style="font-size: 12px; color: var(--text-secondary);">By you • Just now</div>
                                 </div>
                             </div>
                         </div>
@@ -1865,32 +1680,9 @@
         <span id="notificationText">Operation completed successfully</span>
     </div>
 
-    <!-- ========== MODIFIED: Script to initialize debug panel with bottom placement ========== -->
+    <!-- ========== MODIFIED: Script without debug panel ========== -->
     <script>
-        // Debug panel toggle functionality
         (function() {
-            const debugToggle = document.getElementById('debugToggle');
-            const debugPanel = document.getElementById('debugPanel');
-            const debugClose = document.getElementById('debugClose');
-            
-            if (debugToggle && debugPanel && debugClose) {
-                debugToggle.addEventListener('click', () => {
-                    debugPanel.classList.toggle('visible');
-                });
-                
-                debugClose.addEventListener('click', () => {
-                    debugPanel.classList.remove('visible');
-                });
-                
-                // Show debug panel in development (you can remove this condition for production)
-                if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
-                    // Auto-show in development after 2 seconds - but at bottom
-                    setTimeout(() => {
-                        debugPanel.classList.add('visible');
-                    }, 2000);
-                }
-            }
-            
             // Retry button handler
             const retryBtn = document.getElementById('retryNowBtn');
             if (retryBtn) {
@@ -1927,22 +1719,7 @@
             };
             
             hideAllOverlays();
-            
-            // Show connection status only when needed
-            const connectionStatus = document.getElementById('connectionStatus');
-            if (connectionStatus) {
-                // Only show when not connected for long periods
-                setTimeout(() => {
-                    if (connectionStatus.style.display !== 'none') {
-                        // Keep hidden initially, will be shown by core if needed
-                    }
-                }, 5000);
-            }
         })();
     </script>
 </body>
 </html>
-
-
-
-
