@@ -1,8 +1,8 @@
 // calls-ui.js
-// ==================== RESILIENT UI CONTROLLER - STABILIZED ====================
-// Version: 3.4.3 - STABILIZED: Event-driven, parent-controlled, no fallbacks
+// ==================== RESILIENT UI CONTROLLER - PROTOCOL COMPLIANT ====================
+// Version: 3.4.4 - PROTOCOL COMPLIANT: Event-driven, parent-controlled, no timeouts
 // Purpose: Fault-tolerant, responsive UI layer for calls iframe
-// Dependencies: calls-core.js v7.2.2
+// Dependencies: calls-core.js v7.2.3
 // =============================================================================
 
 (function() {
@@ -42,6 +42,10 @@
     let handshakeComplete = false;
     let fallbackModeActive = false;
     let inPassiveMode = false;
+    
+    // CRITICAL: Don't set timeouts - trust core to emit events
+    let coreCheckAttempts = 0;
+    const MAX_CORE_CHECK_ATTEMPTS = 20; // For polling fallback only
 
     // ==================== ERROR CACHE FOR ONCE LOGGING ====================
     const _onceErrors = new Map();
@@ -121,6 +125,7 @@
             logOnce('info', 'Setting up core ready listeners');
         }
 
+        // CRITICAL: Listen for core ready events - no timeouts
         window.addEventListener('CALLS_CORE_READY', function(event) {
             if (DEBUG) {
                 logOnce('success', 'Received CALLS_CORE_READY event', event.detail);
@@ -175,8 +180,10 @@
         
         window.addEventListener('message', messageHandler);
         
-        // Polling as last resort, but will be resolved by events first
+        // Polling as last resort with limited attempts, but events should fire first
         const checkInterval = setInterval(() => {
+            coreCheckAttempts++;
+            
             if (window.callCore && typeof window.callCore.isCoreReady === 'function' && window.callCore.isCoreReady()) {
                 clearInterval(checkInterval);
                 handleCoreReady(window.callCore);
@@ -189,8 +196,14 @@
                     clearInterval(checkInterval);
                     handleCoreReady(window.callCore);
                 }
+            } else if (coreCheckAttempts >= MAX_CORE_CHECK_ATTEMPTS) {
+                // Don't time out - just stop polling and rely on events
+                if (DEBUG) {
+                    logOnce('info', 'Core polling stopped, waiting for events');
+                }
+                clearInterval(checkInterval);
             }
-        }, 200);
+        }, 500); // Poll less frequently
         
         if (DEBUG) {
             logOnce('info', 'Core ready listeners established');
@@ -212,12 +225,25 @@
         coreReady = true;
         coreInstance = core || window.callCore || window.CallsCore || window.callsCore;
         
-        // Update passive mode from core if available
-        if (coreInstance && coreInstance.isInPassiveMode) {
-            inPassiveMode = coreInstance.isInPassiveMode();
-        } else if (coreInstance && coreInstance.getState) {
-            const state = coreInstance.getState();
-            inPassiveMode = state.inPassiveMode || false;
+        // Update state from core
+        if (coreInstance) {
+            if (coreInstance.getState) {
+                const state = coreInstance.getState();
+                parentReady = state.parentReady || false;
+                sessionReady = state.sessionStatus === 'valid';
+                handshakeComplete = state.registered && state.sessionReceived;
+                fallbackModeActive = state.degraded || false;
+                inPassiveMode = state.inPassiveMode || false;
+            }
+            
+            if (coreInstance.isInPassiveMode) {
+                inPassiveMode = coreInstance.isInPassiveMode();
+            }
+            
+            // Get parent ready status
+            if (coreInstance.getParentReady) {
+                parentReady = coreInstance.getParentReady();
+            }
         }
         
         if (coreReadyPromiseResolve) {
@@ -244,6 +270,8 @@
                     } else if (window.callCore.getState) {
                         const state = window.callCore.getState();
                         inPassiveMode = state.inPassiveMode || false;
+                        parentReady = state.parentReady || false;
+                        sessionReady = state.sessionStatus === 'valid';
                     }
                     
                     return true;
@@ -261,6 +289,10 @@
                     inPassiveMode = window.callCore.isInPassiveMode();
                 }
                 
+                if (window.callCore.getParentReady) {
+                    parentReady = window.callCore.getParentReady();
+                }
+                
                 return true;
             }
             
@@ -273,6 +305,8 @@
                     coreReady = true;
                     coreInstance = window.callCore;
                     inPassiveMode = state.inPassiveMode || false;
+                    parentReady = state.parentReady || false;
+                    sessionReady = state.sessionStatus === 'valid';
                     return true;
                 }
             }
@@ -286,6 +320,7 @@
                     coreReady = true;
                     coreInstance = window.callCore;
                     inPassiveMode = lifecycleState === 'PASSIVE_WAITING';
+                    parentReady = window.callCore.getParentReady ? window.callCore.getParentReady() : false;
                     return true;
                 }
             }
@@ -294,7 +329,7 @@
         return false;
     }
 
-    function waitForCoreReady(timeout = 8000) {
+    function waitForCoreReady() {
         return new Promise((resolve) => {
             if (detectExistingCore()) {
                 if (DEBUG) {
@@ -305,7 +340,7 @@
             }
             
             if (DEBUG) {
-                logOnce('info', 'Waiting for core to become ready (timeout: ' + timeout + 'ms)');
+                logOnce('info', 'Waiting for core to become ready via events');
             }
             
             if (coreReadyPromise && !coreReady) {
@@ -316,18 +351,6 @@
                     resolve(true);
                 });
                 
-                // Safety timeout - but events should resolve first
-                setTimeout(() => {
-                    if (!coreReady) {
-                        if (detectExistingCore()) {
-                            resolve(true);
-                        } else {
-                            logOnce('error', 'Core ready timeout after ' + timeout + 'ms - core not available');
-                            resolve(false);
-                        }
-                    }
-                }, timeout);
-                
                 return;
             }
             
@@ -336,7 +359,6 @@
                 window.removeEventListener('MODULE_READY', moduleHandler);
                 window.removeEventListener('core.ready', coreReadyHandler);
                 window.removeEventListener('calls-ready', callsReadyHandler);
-                clearTimeout(safetyTimeout);
                 
                 if (DEBUG) {
                     logOnce('success', 'Core ready detected via event');
@@ -345,8 +367,15 @@
                 coreReady = true;
                 coreInstance = window.callCore || window.CallsCore || window.callsCore;
                 
-                if (coreInstance && coreInstance.isInPassiveMode) {
-                    inPassiveMode = coreInstance.isInPassiveMode();
+                if (coreInstance) {
+                    if (coreInstance.getState) {
+                        const state = coreInstance.getState();
+                        inPassiveMode = state.inPassiveMode || false;
+                        parentReady = state.parentReady || false;
+                    }
+                    if (coreInstance.isInPassiveMode) {
+                        inPassiveMode = coreInstance.isInPassiveMode();
+                    }
                 }
                 
                 resolve(true);
@@ -358,7 +387,6 @@
                     window.removeEventListener('MODULE_READY', moduleHandler);
                     window.removeEventListener('core.ready', coreReadyHandler);
                     window.removeEventListener('calls-ready', callsReadyHandler);
-                    clearTimeout(safetyTimeout);
                     
                     if (DEBUG) {
                         logOnce('success', 'Core ready detected via MODULE_READY');
@@ -367,8 +395,15 @@
                     coreReady = true;
                     coreInstance = window.callCore || window.CallsCore || window.callsCore;
                     
-                    if (coreInstance && coreInstance.isInPassiveMode) {
-                        inPassiveMode = coreInstance.isInPassiveMode();
+                    if (coreInstance) {
+                        if (coreInstance.getState) {
+                            const state = coreInstance.getState();
+                            inPassiveMode = state.inPassiveMode || false;
+                            parentReady = state.parentReady || false;
+                        }
+                        if (coreInstance.isInPassiveMode) {
+                            inPassiveMode = coreInstance.isInPassiveMode();
+                        }
                     }
                     
                     resolve(true);
@@ -381,7 +416,6 @@
                     window.removeEventListener('MODULE_READY', moduleHandler);
                     window.removeEventListener('core.ready', coreReadyHandler);
                     window.removeEventListener('calls-ready', callsReadyHandler);
-                    clearTimeout(safetyTimeout);
                     
                     if (DEBUG) {
                         logOnce('success', 'Core ready detected via core.ready');
@@ -390,8 +424,15 @@
                     coreReady = true;
                     coreInstance = window.callCore || window.CallsCore || window.callsCore;
                     
-                    if (coreInstance && coreInstance.isInPassiveMode) {
-                        inPassiveMode = coreInstance.isInPassiveMode();
+                    if (coreInstance) {
+                        if (coreInstance.getState) {
+                            const state = coreInstance.getState();
+                            inPassiveMode = state.inPassiveMode || false;
+                            parentReady = state.parentReady || false;
+                        }
+                        if (coreInstance.isInPassiveMode) {
+                            inPassiveMode = coreInstance.isInPassiveMode();
+                        }
                     }
                     
                     resolve(true);
@@ -403,7 +444,6 @@
                 window.removeEventListener('MODULE_READY', moduleHandler);
                 window.removeEventListener('core.ready', coreReadyHandler);
                 window.removeEventListener('calls-ready', callsReadyHandler);
-                clearTimeout(safetyTimeout);
                 
                 if (DEBUG) {
                     logOnce('success', 'Core ready detected via calls-ready');
@@ -412,8 +452,15 @@
                 coreReady = true;
                 coreInstance = window.callCore || window.CallsCore || window.callsCore;
                 
-                if (coreInstance && coreInstance.isInPassiveMode) {
-                    inPassiveMode = coreInstance.isInPassiveMode();
+                if (coreInstance) {
+                    if (coreInstance.getState) {
+                        const state = coreInstance.getState();
+                        inPassiveMode = state.inPassiveMode || false;
+                        parentReady = state.parentReady || false;
+                    }
+                    if (coreInstance.isInPassiveMode) {
+                        inPassiveMode = coreInstance.isInPassiveMode();
+                    }
                 }
                 
                 resolve(true);
@@ -424,38 +471,7 @@
             window.addEventListener('core.ready', coreReadyHandler);
             window.addEventListener('calls-ready', callsReadyHandler);
             
-            const checkInterval = setInterval(() => {
-                if (detectExistingCore()) {
-                    clearInterval(checkInterval);
-                    window.removeEventListener('CALLS_CORE_READY', readyHandler);
-                    window.removeEventListener('MODULE_READY', moduleHandler);
-                    window.removeEventListener('core.ready', coreReadyHandler);
-                    window.removeEventListener('calls-ready', callsReadyHandler);
-                    clearTimeout(safetyTimeout);
-                    
-                    if (DEBUG) {
-                        logOnce('success', 'Core ready detected via polling');
-                    }
-                    
-                    resolve(true);
-                }
-            }, 200);
-            
-            const safetyTimeout = setTimeout(() => {
-                clearInterval(checkInterval);
-                window.removeEventListener('CALLS_CORE_READY', readyHandler);
-                window.removeEventListener('MODULE_READY', moduleHandler);
-                window.removeEventListener('core.ready', coreReadyHandler);
-                window.removeEventListener('calls-ready', callsReadyHandler);
-                
-                if (detectExistingCore()) {
-                    resolve(true);
-                } else {
-                    logOnce('error', 'Core ready timeout after ' + timeout + 'ms - core not available');
-                    // Don't enter fallback mode - just resolve false and let UI show skeleton
-                    resolve(false);
-                }
-            }, timeout);
+            // CRITICAL: No timeout - just wait for events
         });
     }
 
@@ -923,7 +939,8 @@
                     parentReady,
                     sessionReady,
                     handshakeComplete,
-                    inPassiveMode
+                    inPassiveMode,
+                    coreReady
                 }
             };
         },
@@ -1310,7 +1327,7 @@
         
         relationshipData: null,
         
-        // Handshake tracking - removed to prevent attempts
+        // Handshake tracking - removed timeouts
         handshakeCheckInterval: null
     };
 
@@ -1667,6 +1684,10 @@
                 inPassiveMode = coreInstance.isInPassiveMode();
                 RenderingPipeline.updateSyncIndicator();
             }
+            
+            if (coreInstance.getParentReady) {
+                parentReady = coreInstance.getParentReady();
+            }
         },
         
         handleCoreEvent: function(event, data) {
@@ -1728,6 +1749,14 @@
                     break;
                 case 'passive_mode_entered':
                     inPassiveMode = true;
+                    RenderingPipeline.updateSyncIndicator();
+                    break;
+                case 'parent_ready':
+                    parentReady = true;
+                    RenderingPipeline.updateSyncIndicator();
+                    break;
+                case 'session_sync':
+                    sessionReady = true;
                     RenderingPipeline.updateSyncIndicator();
                     break;
             }
@@ -4608,7 +4637,7 @@
             logOnce('info', 'Performing full UI initialization with core');
         }
         
-        // FIXED: Use coreInstance instead of undefined 'core' variable
+        // Use coreInstance from closure
         if (window.callCore) {
             coreInstance = window.callCore;
         } else if (window.CallsCore) {
@@ -4665,7 +4694,8 @@
                     parentReady,
                     sessionReady,
                     handshakeComplete,
-                    inPassiveMode
+                    inPassiveMode,
+                    coreReady
                 }
             });
         }
@@ -4844,7 +4874,8 @@
             sessionReady,
             handshakeComplete,
             fallbackModeActive,
-            inPassiveMode
+            inPassiveMode,
+            coreReady
         }),
         getDiagnostics: () => UIDiagnostics.getReport(),
         getUIState: () => ({ ...UIState })
@@ -4884,26 +4915,22 @@
         });
     } else {
         if (DEBUG) {
-            logOnce('info', 'Core not immediately available, showing skeleton and waiting');
+            logOnce('info', 'Core not immediately available, showing skeleton and waiting for events');
         }
         
         RenderingPipeline.skeleton();
         
-        waitForCoreReady(8000).then((ready) => {
+        // CRITICAL: No timeout - just wait for events
+        waitForCoreReady().then((ready) => {
             if (ready) {
                 if (DEBUG) {
                     logOnce('success', 'Core became ready after ' + (Date.now() - coreInitializationStartTime) + 'ms, initializing full UI');
                 }
                 performFullInitialization();
             } else {
-                logOnce('error', 'Core not ready after timeout - showing skeleton UI');
-                // Don't enter fallback mode, just show skeleton
-                if (elements.syncIndicator) {
-                    elements.syncIndicator.innerHTML = '<i class="fas fa-exclamation-triangle"></i><span>Cannot connect to server</span>';
-                    elements.syncIndicator.className = 'sync-indicator error';
-                }
+                // This should never happen with the event-driven approach
+                logOnce('error', 'Core ready promise resolved false - this should not happen');
                 // Keep showing skeleton UI
-                RenderingPipeline.skeleton();
                 RenderingPipeline.initialRender().catch(() => {});
             }
         });

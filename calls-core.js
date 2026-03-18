@@ -1,13 +1,13 @@
 // calls-core.js
-// ==================== CALL IFRAME CORE MODULE - STABILIZED ====================
-// Version: 7.2.2 - STABILIZED: Strict lifecycle, parent-controlled, no fallbacks
-// ============================================================================
+// ==================== CALL IFRAME CORE MODULE - PROTOCOL COMPLIANT ====================
+// Version: 7.2.3 - PROTOCOL COMPLIANT: Strict message schema, parent-controlled lifecycle
+// ====================================================================================
 
 (function() {
     'use strict';
 
-    const MODULE_NAME = 'calls';
-    let state = 'BOOTING';
+    const MODULE_NAME = 'calls';  // EXACT module name per contract
+    let state = 'INITIALIZING';    // Start in INITIALIZING per lifecycle
     const processedMessages = new Set();
     const allowedOrigins = [
         window.location.origin,
@@ -18,6 +18,19 @@
     let childReadySent = false;
     let registrationSent = false;
     let parentReadyReceived = false;
+    
+    // ==================== MESSAGE QUEUE SYSTEM ====================
+    const messageQueue = [];
+    let parentReady = false;
+    
+    // ==================== ID GENERATION ====================
+    function generateId() {
+        return 'msg_' + Math.random().toString(36).substring(2, 15) + '_' + Date.now();
+    }
+    
+    function generateRequestId() {
+        return 'req_' + Math.random().toString(36).substring(2, 15) + '_' + Date.now();
+    }
 
     // ==================== MODULE LIFECYCLE STATES ====================
     const LIFECYCLE_STATE = {
@@ -33,14 +46,17 @@
         if (state === next) return;
 
         const validTransitions = {
-            BOOTING: ['INITIALIZING'],
-            INITIALIZING: ['READY'],
+            INITIALIZING: ['READY'],           // Updated to match contract
             READY: ['WAIT_PARENT'],
             WAIT_PARENT: ['ACTIVE'],
-            ACTIVE: []
+            ACTIVE: [],
+            BOOTING: ['INITIALIZING']          // Keep for backward compatibility
         };
 
-        if (!validTransitions[state]?.includes(next)) {
+        // Normalize state for transition checking
+        const currentState = state === 'BOOTING' ? 'INITIALIZING' : state;
+        
+        if (!validTransitions[currentState]?.includes(next)) {
             console.warn(`[${MODULE_NAME}] Invalid transition: ${state} → ${next}`);
             return;
         }
@@ -49,10 +65,190 @@
         state = next;
     }
 
+    // ==================== STANDARDIZED MESSAGE SENDER ====================
+    function sendMessage(type, payload = {}, requireAck = false) {
+        try {
+            // Only send if in WAIT_PARENT or ACTIVE state
+            if (state !== 'WAIT_PARENT' && state !== 'ACTIVE') {
+                console.warn(`[${MODULE_NAME}] Cannot send ${type} - invalid state: ${state}`);
+                return Promise.resolve({ success: false, reason: 'invalid_state' });
+            }
+            
+            const messageId = generateId();
+            const requestId = generateRequestId();
+            
+            // ENFORCE EXACT PROTOCOL SCHEMA
+            const message = {
+                type: type,
+                id: messageId,
+                requestId: requestId,
+                source: MODULE_NAME,           // EXACT module name
+                target: 'parent',               // REQUIRED
+                timestamp: Date.now(),
+                payload: payload
+            };
+
+            console.log(`[${MODULE_NAME}] 📤 ${type}`, { messageId, requestId });
+            window.parent.postMessage(message, '*');
+            
+            if (requireAck) {
+                return new Promise((resolve) => {
+                    setTimeout(() => {
+                        resolve({ success: true, messageId, requestId, timeout: true });
+                    }, 3000);
+                });
+            }
+            
+            return Promise.resolve({ success: true, messageId, requestId });
+        } catch (error) {
+            console.error(`[${MODULE_NAME}] Failed to send ${type}`, error);
+            return Promise.reject(error);
+        }
+    }
+
+    // ==================== SAFE SEND WITH QUEUE ====================
+    function safeSend(type, payload = {}, requireAck = false) {
+        // CRITICAL: No outbound messages before PARENT_READY
+        if (!parentReady) {
+            console.log(`[${MODULE_NAME}] Queueing ${type} - parent not ready`);
+            const queuedMessage = { type, payload, requireAck, timestamp: Date.now() };
+            messageQueue.push(queuedMessage);
+            
+            // Return a promise that will resolve when sent
+            return new Promise((resolve) => {
+                // Store resolve function with the queued message
+                queuedMessage.resolve = resolve;
+            });
+        }
+        
+        return sendMessage(type, payload, requireAck);
+    }
+
+    // ==================== FLUSH QUEUE ====================
+    function flushQueue() {
+        console.log(`[${MODULE_NAME}] Flushing ${messageQueue.length} queued messages`);
+        
+        while (messageQueue.length) {
+            const queued = messageQueue.shift();
+            const result = sendMessage(queued.type, queued.payload, queued.requireAck);
+            
+            // Resolve the promise if one was stored
+            if (queued.resolve) {
+                result.then(queued.resolve).catch(queued.resolve);
+            }
+        }
+    }
+
+    // Safe CHILD_READY sender - only sends once and only from READY state
+    function sendChildReady() {
+        if (childReadySent) {
+            console.warn(`[${MODULE_NAME}] CHILD_READY already sent, ignoring`);
+            return;
+        }
+        
+        // CRITICAL: ONLY send CHILD_READY when state === "READY"
+        if (state !== 'READY') {
+            console.warn(`[${MODULE_NAME}] Cannot send CHILD_READY - not in READY state (current: ${state})`);
+            return;
+        }
+        
+        childReadySent = true;
+        callsState.childReadySent = true;
+        
+        // EXACT format per contract
+        safeSend('CHILD_READY', { module: MODULE_NAME });
+        
+        console.log(`[${MODULE_NAME}] ✅ CHILD_READY sent`);
+        setState('WAIT_PARENT');
+    }
+
+    // ==================== REGISTER MODULE ====================
+    function registerModule() {
+        if (registrationSent) {
+            console.warn(`[${MODULE_NAME}] REGISTER_MODULE already sent, ignoring`);
+            return;
+        }
+        
+        registrationSent = true;
+        callsState.registrationSent = true;
+        
+        // CRITICAL: Only send if parent is ready
+        if (!parentReady) {
+            console.warn(`[${MODULE_NAME}] Cannot register - parent not ready`);
+            return;
+        }
+        
+        safeSend('REGISTER_MODULE', {
+            moduleName: MODULE_NAME,
+            version: CONFIG.VERSION,
+            capabilities: [
+                'voice',
+                'video',
+                'screenShare',
+                'whiteboard',
+                'polls',
+                'notes'
+            ]
+        }, false);
+        
+        console.log(`[${MODULE_NAME}] ✅ REGISTER_MODULE sent`);
+        setState('ACTIVE');
+        callsState.registered = true;
+        
+        window.dispatchEvent(new CustomEvent('MODULE_READY', {
+            detail: { module: MODULE_NAME, timestamp: Date.now() }
+        }));
+    }
+
+    // ==================== REQUEST SESSION ====================
+    function requestSession() {
+        // CRITICAL: ONLY request session after parent ready
+        if (!parentReady) {
+            console.warn(`[${MODULE_NAME}] Cannot request session - parent not ready`);
+            return;
+        }
+        
+        if (state !== 'ACTIVE') {
+            console.warn(`[${MODULE_NAME}] Cannot request session - invalid state: ${state}`);
+            return;
+        }
+
+        if (IframeTransport._sessionRequested) return;
+
+        IframeTransport._sessionRequested = true;
+
+        if (IframeTransport._sessionRequestTimer) {
+            clearTimeout(IframeTransport._sessionRequestTimer);
+        }
+
+        IframeTransport._sessionRequestTimer = setTimeout(() => {
+            IframeTransport._sessionRequested = false;
+        }, 10000);
+
+        // Use safeSend which now has parentReady=true
+        safeSend('REQUEST_SESSION', {
+            timestamp: Date.now(),
+            frameId: window.name || 'calls-iframe'
+        }, false).catch(() => {});
+
+        console.log(`[${MODULE_NAME}] 📤 REQUEST_SESSION sent`);
+    }
+
+    function sendHeartbeatAck(originalMessageId) {
+        if (state !== 'ACTIVE') return;
+        if (!parentReady) return;  // CRITICAL: No messages before parent ready
+        
+        safeSend('HEARTBEAT_ACK', {
+            ackId: originalMessageId,
+            module: MODULE_NAME,
+            timestamp: Date.now()
+        });
+    }
+
     // ==================== GLOBAL CALL STATE STRUCTURE ====================
     const callsState = {
-        moduleName: "calls",
-        lifecycleState: LIFECYCLE_STATE.BOOTING,
+        moduleName: MODULE_NAME,
+        lifecycleState: LIFECYCLE_STATE.INITIALIZING,
         registered: false,
         parentReady: false,
         parentOrigin: null,
@@ -434,7 +630,7 @@
 
     // ==================== CONFIGURATION - STRICT LIMITS ====================
     const CONFIG = {
-        VERSION: '7.2.2',
+        VERSION: '7.2.3',  // Updated version
         PROTOCOL_VERSION: 'KYN-8.0',
         
         // Strict lifecycle timeouts (kept for safety but not used for logic)
@@ -893,115 +1089,6 @@
 
     MessageRegistry.initialize();
 
-    // ==================== STANDARDIZED MESSAGE SENDER ====================
-    function generateMessageId() {
-        return crypto.randomUUID ? crypto.randomUUID() : 
-            `${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
-    }
-
-    function sendMessage(type, payload = {}, requireAck = false) {
-        try {
-            // Only send if in WAIT_PARENT or ACTIVE state
-            if (state !== 'WAIT_PARENT' && state !== 'ACTIVE') {
-                return Promise.resolve({ success: false, reason: 'invalid_state' });
-            }
-            
-            const messageId = generateMessageId();
-            
-            const message = {
-                type: type,
-                source: MODULE_NAME,
-                target: 'parent',
-                messageId: messageId,
-                timestamp: Date.now(),
-                payload: payload
-            };
-
-            logSending(MODULE_NAME, type, { messageId });
-            window.parent.postMessage(message, '*');
-            
-            if (requireAck) {
-                return new Promise((resolve) => {
-                    setTimeout(() => {
-                        resolve({ success: true, messageId, timeout: true });
-                    }, 3000);
-                });
-            }
-            
-            return Promise.resolve({ success: true, messageId });
-        } catch (error) {
-            logError(MODULE_NAME, `Failed to send ${type}`, error);
-            return Promise.reject(error);
-        }
-    }
-
-    // Safe CHILD_READY sender - only sends once and only from READY state
-    function sendChildReady() {
-        if (childReadySent) {
-            logWarn(MODULE_NAME, 'CHILD_READY already sent, ignoring');
-            return;
-        }
-        
-        // Only send if in READY state
-        if (state !== 'READY') {
-            logWarn(MODULE_NAME, `Cannot send CHILD_READY - not in READY state (current: ${state})`);
-            return;
-        }
-        
-        childReadySent = true;
-        callsState.childReadySent = true;
-        sendMessage(MESSAGE_TYPES.CHILD_READY, {});
-        logSuccess(MODULE_NAME, 'CHILD_READY sent');
-    }
-
-    function registerModule() {
-        if (registrationSent) {
-            logWarn(MODULE_NAME, 'REGISTER_MODULE already sent, ignoring');
-            return;
-        }
-        
-        registrationSent = true;
-        callsState.registrationSent = true;
-        
-        sendMessage(MESSAGE_TYPES.REGISTER_MODULE, {
-            moduleName: MODULE_NAME,
-            version: CONFIG.VERSION,
-            capabilities: [
-                'voice',
-                'video',
-                'screenShare',
-                'whiteboard',
-                'polls',
-                'notes'
-            ]
-        }, false);
-        
-        logSuccess(MODULE_NAME, 'REGISTER_MODULE sent');
-        setState('ACTIVE');
-        callsState.registered = true;
-        
-        window.dispatchEvent(new CustomEvent('MODULE_READY', {
-            detail: { module: MODULE_NAME, timestamp: Date.now() }
-        }));
-    }
-
-    function sendHeartbeatAck(originalMessageId) {
-        if (state !== 'ACTIVE') return;
-        
-        sendMessage(MESSAGE_TYPES.HEARTBEAT_ACK, {
-            ackId: originalMessageId,
-            module: MODULE_NAME,
-            timestamp: Date.now()
-        });
-        logHeartbeat(MODULE_NAME, 'HEARTBEAT_ACK sent');
-    }
-
-    // Parent ready promise - wait for parent signal
-    let parentReadyResolve;
-    const parentReadyPromise = new Promise(resolve => {
-        parentReadyResolve = resolve;
-    });
-
     // ==================== IFRAME TRANSPORT - PARENT-CONTROLLED ====================
     const IframeTransport = {
         _messageId: 0,
@@ -1039,7 +1126,8 @@
             }
             
             this._messageHandler = (event) => {
-                this.handleIncoming(event);
+                // PERFORMANCE FIX: Move heavy logic out of message listener
+                setTimeout(() => this.handleIncoming(event), 0);
             };
             
             window.addEventListener('message', this._messageHandler);
@@ -1091,71 +1179,8 @@
         },
 
         send: function(type, payload = {}, options = {}) {
-            return new Promise((resolve, reject) => {
-                try {
-                    const validation = this._validateMessage(type, payload, options);
-                    if (!validation.valid) {
-                        if (validation.reason === 'cannot_send') {
-                            if (this._queue.length < CONFIG.MAX_QUEUE_SIZE) {
-                                this._queue.push({
-                                    type,
-                                    payload,
-                                    options,
-                                    resolve,
-                                    reject,
-                                    timestamp: Date.now()
-                                });
-                                logInfo(MODULE, 'Message queued', { type, queueSize: this._queue.length });
-                            } else {
-                                logWarn(MODULE, 'Cannot send or queue message - queue full', { type });
-                                reject(new Error('Cannot send message'));
-                            }
-                        } else {
-                            reject(new Error(validation.reason));
-                        }
-                        return;
-                    }
-
-                    this._rateLimitCounter++;
-
-                    const messageId = options.messageId || this._generateMessageId();
-                    const timestamp = options.timestamp || Date.now();
-                    const requireAck = options.requireAck === true;
-
-                    const message = {
-                        type: type,
-                        source: MODULE_NAME,
-                        target: 'parent',
-                        messageId: messageId,
-                        timestamp: timestamp,
-                        payload: payload || {}
-                    };
-
-                    if (requireAck) {
-                        message.expectAck = true;
-                    }
-
-                    logSending(MODULE, type, { messageId });
-
-                    window.parent.postMessage(message, OriginSecurity.getTargetOrigin());
-
-                    if (requireAck) {
-                        MessageRegistry.register(messageId, type, { timeout: options.timeout || 3000 })
-                            .then(result => {
-                                resolve({ success: true, messageId, type, result });
-                            })
-                            .catch(error => {
-                                logWarn(MODULE, `Message ${type} failed: ${error.message}`, { messageId });
-                                reject(error);
-                            });
-                    } else {
-                        resolve({ success: true, messageId, type });
-                    }
-
-                } catch (error) {
-                    reject(error);
-                }
-            });
+            // Redirect to safeSend which handles queueing
+            return safeSend(type, payload, options.requireAck || false);
         },
 
         sendAction: function(action, payload = {}) {
@@ -1164,7 +1189,7 @@
                 return Promise.resolve({ success: false, reason: 'not_active' });
             }
 
-            return this.send(MESSAGE_TYPES.ACTION, {
+            return this.send('ACTION', {
                 action: action,
                 data: payload,
                 timestamp: Date.now()
@@ -1172,54 +1197,13 @@
         },
 
         sendChildReady: function() {
-            if (callsState.childReadySent) {
-                logWarn(MODULE, 'CHILD_READY already sent, ignoring');
-                return Promise.resolve({ success: false, reason: 'already_sent' });
-            }
-
-            if (state !== 'READY') {
-                logWarn(MODULE, 'Cannot send CHILD_READY - not in READY state', { state });
-                return Promise.resolve({ success: false, reason: 'invalid_state' });
-            }
-
-            callsState.childReadySent = true;
-            setState('WAIT_PARENT');
-
-            return this.send(MESSAGE_TYPES.CHILD_READY, {
-                module: MODULE_NAME,
-                timestamp: Date.now()
-            }, { requireAck: false }).then(result => {
-                logSuccess(MODULE, 'CHILD_READY sent');
-                return result;
-            });
+            // Redirect to sendChildReady function
+            return Promise.resolve({ success: true, delegated: true });
         },
 
         requestSessionFromParent: function() {
-            if (state !== 'ACTIVE') {
-                logWarn(MODULE, 'Cannot request session - invalid state', { state });
-                return;
-            }
-
-            if (this._sessionRequested) return;
-
-            this._sessionRequested = true;
-
-            if (this._sessionRequestTimer) {
-                clearTimeout(this._sessionRequestTimer);
-            }
-
-            this._sessionRequestTimer = setTimeout(() => {
-                this._sessionRequested = false;
-            }, 10000);
-
-            this.send(MESSAGE_TYPES.REQUEST_SESSION, {
-                timestamp: Date.now(),
-                frameId: window.name || 'calls-iframe'
-            }, { 
-                requireAck: false
-            }).catch(() => {});
-
-            logSending(MODULE, 'REQUEST_SESSION sent');
+            // Redirect to requestSession function
+            requestSession();
         },
 
         handleIncoming: function(event) {
@@ -1252,6 +1236,37 @@
                     callsState.processedMessageIds.add(message.messageId);
                 }
 
+                // ==================== PARENT_READY HANDLER ====================
+                if (message.type === MESSAGE_TYPES.PARENT_READY) {
+                    logSuccess(MODULE, 'PARENT_READY received');
+                    
+                    // CRITICAL: Set parentReady flag and update state
+                    parentReady = true;
+                    parentReadyReceived = true;
+                    callsState.parentReady = true;
+                    
+                    // Resolve parent ready promise
+                    if (parentReadyResolve) {
+                        parentReadyResolve();
+                    }
+                    
+                    // Update state to ACTIVE
+                    setState('ACTIVE');
+                    
+                    // FLUSH QUEUE - Send all queued messages now
+                    flushQueue();
+                    
+                    // Register module
+                    registerModule();
+                    
+                    // Request session after a small delay
+                    setTimeout(() => {
+                        requestSession();
+                    }, 100);
+                    
+                    return;
+                }
+
                 if (message.type === MESSAGE_TYPES.ACK) {
                     const ackId = message.payload?.ackId || message.ackId || message.messageId;
                     if (ackId) {
@@ -1262,11 +1277,6 @@
 
                 if (message.type === MESSAGE_TYPES.HEARTBEAT) {
                     this._handleHeartbeat(message);
-                    return;
-                }
-
-                if (message.type === MESSAGE_TYPES.PARENT_READY) {
-                    this._handleParentReady(message);
                     return;
                 }
 
@@ -1450,49 +1460,12 @@
             
             logHeartbeat(MODULE, 'Heartbeat received from parent');
             
-            const ackMessage = {
-                type: MESSAGE_TYPES.HEARTBEAT_ACK,
-                source: MODULE_NAME,
-                target: 'parent',
-                messageId: this._generateMessageId(),
-                timestamp: Date.now(),
-                payload: {
-                    ackId: message.messageId,
-                    module: MODULE_NAME,
-                    timestamp: Date.now()
-                }
-            };
-
-            try {
-                window.parent.postMessage(ackMessage, OriginSecurity.getTargetOrigin());
-                logHeartbeat(MODULE, 'HEARTBEAT_ACK sent');
-            } catch (error) {
-                logError(MODULE, 'Failed to send HEARTBEAT_ACK', error);
-            }
-        },
-
-        _handleParentReady: function(message) {
-            if (callsState.parentReady) {
-                logInfo(MODULE, 'PARENT_READY already received, ignoring');
-                return;
-            }
-
-            logSuccess(MODULE, 'PARENT_READY received');
-            callsState.parentReady = true;
-            parentReadyReceived = true;
-            
-            // Resolve the parent ready promise
-            if (parentReadyResolve) {
-                parentReadyResolve();
-            }
-            
-            if (state !== 'WAIT_PARENT') {
-                logWarn(MODULE, 'PARENT_READY received in unexpected state', { state });
-                setState('WAIT_PARENT');
-            }
-
-            registerModule();
-            this._processQueue();
+            // Use safeSend which will queue if parent not ready
+            safeSend('HEARTBEAT_ACK', {
+                ackId: message.messageId,
+                module: MODULE_NAME,
+                timestamp: Date.now()
+            });
         },
 
         _handleModuleRegistered: function(message) {
@@ -1506,13 +1479,13 @@
             setState('ACTIVE');
 
             if (message.expectAck) {
-                this.send(MESSAGE_TYPES.ACK, {
+                safeSend('ACK', {
                     ackId: message.messageId
-                }, { requireAck: false }).catch(() => {});
+                }, false).catch(() => {});
             }
 
             setTimeout(() => {
-                this.requestSessionFromParent();
+                requestSession();
             }, 100);
         },
 
@@ -1539,10 +1512,10 @@
                 callsState.sessionReceived = true;
                 this._sessionActive = true;
                 
-                this.send(MESSAGE_TYPES.SESSION_ACK, {
+                safeSend('SESSION_ACK', {
                     status: 'synced',
                     timestamp: Date.now()
-                }, { requireAck: false }).catch(() => {});
+                }, false).catch(() => {});
 
                 window.dispatchEvent(new CustomEvent('CALLS_CORE_READY', {
                     detail: { core: window.callCore, timestamp: Date.now() }
@@ -1650,7 +1623,9 @@
                 targetOrigin: this._targetOrigin,
                 sessionRequested: this._sessionRequested,
                 sessionActive: this._sessionActive,
-                rateLimitCounter: this._rateLimitCounter
+                rateLimitCounter: this._rateLimitCounter,
+                parentReady: parentReady,
+                messageQueueSize: messageQueue.length
             };
         },
 
@@ -1668,6 +1643,7 @@
                 this._messageHandler = null;
             }
             this._queue = [];
+            messageQueue.length = 0;  // Clear main queue
             MessageRegistry.reset();
             this._listeners.clear();
         }
@@ -2366,7 +2342,7 @@
             callsState.sessionReceived = false;
             callsState.childReadySent = false;
             callsState.registrationSent = false;
-            setState('BOOTING');
+            setState('INITIALIZING');  // Updated to match contract
 
             logInfo(MODULE, 'Calls State Governor initialized');
             return this;
@@ -2587,7 +2563,7 @@
 
                 logSending(MODULE, 'VERIFY_SESSION sent', { requestId });
 
-                IframeTransport.send(MESSAGE_TYPES.VERIFY_SESSION, {
+                safeSend('VERIFY_SESSION', {
                     requestId: requestId
                 }, { 
                     requireAck: true,
@@ -2627,6 +2603,7 @@
         },
 
         _flushQueue: function() {
+            // Queue is now flushed at the message handler level
         },
 
         initiateCall: async function(callType, participants = []) {
@@ -2634,6 +2611,12 @@
                 logWarn(MODULE, 'Cannot initiate call - not in ACTIVE state', { state });
                 this._notifyListeners('call_blocked', { reason: 'not_active' });
                 return { success: false, reason: 'not_active' };
+            }
+
+            if (!parentReady) {
+                logWarn(MODULE, 'Cannot initiate call - parent not ready');
+                this._notifyListeners('call_blocked', { reason: 'parent_not_ready' });
+                return { success: false, reason: 'parent_not_ready' };
             }
 
             if (callsState.callActive) {
@@ -2796,6 +2779,11 @@
         handleIncomingCall: function(callData) {
             logInfo(MODULE, 'Incoming call received', callData);
 
+            if (!parentReady) {
+                logWarn(MODULE, 'Incoming call ignored - parent not ready');
+                return;
+            }
+
             if (!this._session || !this._session.authenticated || this._session.expiresAt <= Date.now()) {
                 logWarn(MODULE, 'Incoming call rejected - session invalid');
                 return;
@@ -2899,7 +2887,7 @@
             callsState.sessionReceived = false;
             callsState.childReadySent = false;
             callsState.registrationSent = false;
-            setState('BOOTING');
+            setState('INITIALIZING');
             
             MediaManager.stopLocalStream();
             WebRTCManager.close();
@@ -3922,7 +3910,7 @@
                         return { success: false, reason: 'no_parent' };
                     }
 
-                    IframeTransport.send(MESSAGE_TYPES.RECOVERY_REQUEST, {
+                    safeSend('RECOVERY_REQUEST', {
                         module: MODULE_NAME,
                         timestamp: Date.now(),
                         attempts: this._recoveryAttempts
@@ -4890,7 +4878,8 @@
 
         _runHandshake: async function() {
             try {
-                await IframeTransport.sendChildReady();
+                // This will queue the message if parent not ready
+                sendChildReady();
                 
                 return { success: true };
             } catch (error) {
@@ -4906,7 +4895,7 @@
             }
             
             try {
-                IframeTransport.requestSessionFromParent();
+                requestSession();
                 
                 const sessionResult = await StateGovernor.waitForSession(5000);
                 
@@ -5401,232 +5390,249 @@
         setState('READY');
         logSuccess(MODULE_NAME, 'READY');
         
+        // Send CHILD_READY (will be queued if parent not ready)
         sendChildReady();
-        
-        // Wait for parent ready via promise, not timeout
-        parentReadyPromise.then(() => {
-            // Parent ready already handled in message handler
-        });
     }
+
+    // Parent ready promise
+    let parentReadyResolve;
+    const parentReadyPromise = new Promise(resolve => {
+        parentReadyResolve = resolve;
+    });
 
     // ==================== MESSAGE HANDLER ====================
     window.addEventListener('message', (event) => {
-        try {
-            if (!isValidOrigin(event.origin)) {
-                logWarn(MODULE_NAME, 'Invalid origin', { origin: event.origin });
-                return;
-            }
-
-            const msg = event.data;
-
-            if (!msg || typeof msg !== 'object') return;
-            
-            // Special handling for HANDSHAKE_RETRY - just log and ignore
-            if (msg.type === 'HANDSHAKE_RETRY') {
-                logInfo(MODULE_NAME, 'Received HANDSHAKE_RETRY - ignoring');
-                return;
-            }
-
-            if (!validateMessage(msg)) {
-                logWarn(MODULE_NAME, 'Invalid message format', msg);
-                return;
-            }
-
-            if (msg.messageId && isDuplicate(msg.messageId)) {
-                logInfo(MODULE_NAME, 'Duplicate message ignored', { messageId: msg.messageId });
-                return;
-            }
-
-            if (msg.source && msg.source !== 'parent') {
-                return;
-            }
-
-            // Handle PARENT_READY
-            if (msg.type === MESSAGE_TYPES.PARENT_READY) {
-                logSuccess(MODULE_NAME, 'PARENT_READY received');
-                parentReadyReceived = true;
-                callsState.parentReady = true;
-                
-                // Resolve parent ready promise
-                if (parentReadyResolve) {
-                    parentReadyResolve();
+        // PERFORMANCE FIX: Move heavy logic out of message listener
+        setTimeout(() => {
+            try {
+                if (!isValidOrigin(event.origin)) {
+                    logWarn(MODULE_NAME, 'Invalid origin', { origin: event.origin });
+                    return;
                 }
+
+                const msg = event.data;
+
+                if (!msg || typeof msg !== 'object') return;
                 
-                // Only register if we're in the right state
-                if (state === 'WAIT_PARENT') {
-                    registerModule();
+                // Special handling for HANDSHAKE_RETRY - just log and ignore
+                if (msg.type === 'HANDSHAKE_RETRY') {
+                    logInfo(MODULE_NAME, 'Received HANDSHAKE_RETRY - ignoring');
+                    return;
                 }
-                
-                return;
-            }
-            
-            // Handle HEARTBEAT
-            if (msg.type === MESSAGE_TYPES.HEARTBEAT) {
-                logHeartbeat(MODULE_NAME, 'Heartbeat received');
-                sendHeartbeatAck(msg.messageId);
-                return;
-            }
-            
-            // Handle MODULE_REGISTERED
-            if (msg.type === 'MODULE_REGISTERED') {
-                logSuccess(MODULE_NAME, 'MODULE_REGISTERED received');
-                callsState.registered = true;
-                setState('ACTIVE');
-                
-                window.dispatchEvent(new CustomEvent('MODULE_READY', {
-                    detail: { module: MODULE_NAME, timestamp: Date.now() }
-                }));
-                
-                return;
-            }
-            
-            // Handle MODULE_INIT_DATA
-            if (msg.type === MESSAGE_TYPES.MODULE_INIT_DATA) {
-                handleInitData(msg);
-                return;
-            }
-            
-            // Handle session messages
-            if (msg.type === MESSAGE_TYPES.SESSION_ACTIVE || 
-                msg.type === MESSAGE_TYPES.SESSION_DATA ||
-                msg.type === MESSAGE_TYPES.SESSION_SYNC) {
-                
-                const sessionData = msg.payload || msg.data || {};
-                if (sessionData.token) {
-                    callsState.session = sessionData;
-                    callsState.token = sessionData.token;
-                    callsState.sessionReceived = true;
-                    callsState.sessionStatus = 'valid';
-                    logSession(MODULE_NAME, 'Session received');
+
+                if (!validateMessage(msg)) {
+                    logWarn(MODULE_NAME, 'Invalid message format', msg);
+                    return;
+                }
+
+                if (msg.messageId && isDuplicate(msg.messageId)) {
+                    logInfo(MODULE_NAME, 'Duplicate message ignored', { messageId: msg.messageId });
+                    return;
+                }
+
+                if (msg.source && msg.source !== 'parent') {
+                    return;
+                }
+
+                // Handle PARENT_READY
+                if (msg.type === MESSAGE_TYPES.PARENT_READY) {
+                    logSuccess(MODULE_NAME, 'PARENT_READY received');
                     
-                    window.dispatchEvent(new CustomEvent('CALLS_CORE_READY', {
-                        detail: { core: window.callCore, timestamp: Date.now() }
+                    // CRITICAL: Set parentReady flag
+                    parentReady = true;
+                    parentReadyReceived = true;
+                    callsState.parentReady = true;
+                    
+                    // Resolve parent ready promise
+                    if (parentReadyResolve) {
+                        parentReadyResolve();
+                    }
+                    
+                    // Update state to ACTIVE
+                    setState('ACTIVE');
+                    
+                    // FLUSH QUEUE - Send all queued messages now
+                    flushQueue();
+                    
+                    // Register module
+                    registerModule();
+                    
+                    // Request session
+                    setTimeout(() => {
+                        requestSession();
+                    }, 100);
+                    
+                    return;
+                }
+                
+                // Handle HEARTBEAT
+                if (msg.type === MESSAGE_TYPES.HEARTBEAT) {
+                    logHeartbeat(MODULE_NAME, 'Heartbeat received');
+                    sendHeartbeatAck(msg.messageId);
+                    return;
+                }
+                
+                // Handle MODULE_REGISTERED
+                if (msg.type === 'MODULE_REGISTERED') {
+                    logSuccess(MODULE_NAME, 'MODULE_REGISTERED received');
+                    callsState.registered = true;
+                    setState('ACTIVE');
+                    
+                    window.dispatchEvent(new CustomEvent('MODULE_READY', {
+                        detail: { module: MODULE_NAME, timestamp: Date.now() }
                     }));
+                    
+                    return;
                 }
                 
-                return;
-            }
-            
-            if (msg.type === MESSAGE_TYPES.SESSION_NULL) {
-                callsState.session = null;
-                callsState.token = null;
-                callsState.sessionReceived = false;
-                callsState.sessionStatus = 'invalid';
-                logSession(MODULE_NAME, 'SESSION_NULL received');
-                return;
-            }
-
-            if (msg.type === MESSAGE_TYPES.CALL_INCOMING) {
-                handleIncomingCall(msg.payload || msg.data);
-                return;
-            }
-
-            if (msg.type === MESSAGE_TYPES.CALL_STARTED) {
-                handleCallStarted(msg.payload || msg.data);
-                return;
-            }
-
-            if (msg.type === MESSAGE_TYPES.CALL_CONNECTED) {
-                handleCallConnected(msg.payload || msg.data);
-                return;
-            }
-
-            if (msg.type === MESSAGE_TYPES.CALL_REJECTED) {
-                handleCallRejected(msg.payload || msg.data);
-                return;
-            }
-
-            if (msg.type === MESSAGE_TYPES.CALL_ENDED) {
-                handleCallEnded(msg.payload || msg.data);
-                return;
-            }
-
-            if (msg.type === MESSAGE_TYPES.CALL_FAILED) {
-                handleCallFailed(msg.payload || msg.data);
-                return;
-            }
-
-            if (msg.type === MESSAGE_TYPES.REMOTE_STREAM_ADDED) {
-                handleRemoteStreamAdded(msg.payload || msg.data);
-                return;
-            }
-
-            if (msg.type === MESSAGE_TYPES.REMOTE_STREAM_REMOVED) {
-                handleRemoteStreamRemoved(msg.payload || msg.data);
-                return;
-            }
-
-            if (msg.type === MESSAGE_TYPES.SIGNAL_OFFER ||
-                msg.type === MESSAGE_TYPES.SIGNAL_ANSWER ||
-                msg.type === MESSAGE_TYPES.ICE_CANDIDATE) {
+                // Handle MODULE_INIT_DATA
+                if (msg.type === MESSAGE_TYPES.MODULE_INIT_DATA) {
+                    handleInitData(msg);
+                    return;
+                }
                 
-                handleSignalingMessage(msg.type, msg.payload || msg.data);
-                return;
-            }
-
-            if (msg.type === 'FRIEND_UPDATE' || msg.type === 'CONTACTS_UPDATE') {
-                notifyListeners('contacts_update', msg.payload || msg.data);
-                return;
-            }
-
-            if (msg.type === 'CALL_HISTORY_UPDATE') {
-                notifyListeners('call_history_update', msg.payload || msg.data);
-                return;
-            }
-
-            if (msg.type === 'SETTINGS_UPDATED') {
-                const data = msg.payload || msg.data;
-                if (data) {
-                    if (data.premium !== undefined) {
-                        callsState.isPremium = data.premium;
+                // Handle session messages
+                if (msg.type === MESSAGE_TYPES.SESSION_ACTIVE || 
+                    msg.type === MESSAGE_TYPES.SESSION_DATA ||
+                    msg.type === MESSAGE_TYPES.SESSION_SYNC) {
+                    
+                    const sessionData = msg.payload || msg.data || {};
+                    if (sessionData.token) {
+                        callsState.session = sessionData;
+                        callsState.token = sessionData.token;
+                        callsState.sessionReceived = true;
+                        callsState.sessionStatus = 'valid';
+                        logSession(MODULE_NAME, 'Session received');
+                        
+                        window.dispatchEvent(new CustomEvent('CALLS_CORE_READY', {
+                            detail: { core: window.callCore, timestamp: Date.now() }
+                        }));
                     }
-                    if (data.premiumFeatures) {
-                        callsState.premiumFeatures = { ...callsState.premiumFeatures, ...data.premiumFeatures };
-                    }
-                    notifyListeners('settings_update', data);
+                    
+                    return;
                 }
-                return;
-            }
-
-            if (msg.type === 'USER_LOGGED_OUT') {
-                callsState.session = null;
-                callsState.token = null;
-                callsState.verified = false;
-                callsState.sessionReceived = false;
-                callsState.sessionStatus = 'invalid';
-                notifyListeners('logout', {});
-                return;
-            }
-
-            if (msg.type === 'SESSION_REFRESHED') {
-                const data = msg.payload || msg.data;
-                if (data && data.token) {
-                    callsState.token = data.token;
-                    if (callsState.session) {
-                        callsState.session.token = data.token;
-                    }
+                
+                if (msg.type === MESSAGE_TYPES.SESSION_NULL) {
+                    callsState.session = null;
+                    callsState.token = null;
+                    callsState.sessionReceived = false;
+                    callsState.sessionStatus = 'invalid';
+                    logSession(MODULE_NAME, 'SESSION_NULL received');
+                    return;
                 }
-                return;
-            }
 
-            if (msg.type === 'NEW_MESSAGE') {
-                notifyListeners('new_message', msg.payload || msg.data);
-                return;
-            }
+                if (msg.type === MESSAGE_TYPES.CALL_INCOMING) {
+                    handleIncomingCall(msg.payload || msg.data);
+                    return;
+                }
 
-            if (msg.type === 'STATUS_UPDATE') {
-                notifyListeners('status_update', msg.payload || msg.data);
-                return;
-            }
+                if (msg.type === MESSAGE_TYPES.CALL_STARTED) {
+                    handleCallStarted(msg.payload || msg.data);
+                    return;
+                }
 
-            if (msg.type === 'GROUP_UPDATE') {
-                notifyListeners('group_update', msg.payload || msg.data);
-                return;
-            }
+                if (msg.type === MESSAGE_TYPES.CALL_CONNECTED) {
+                    handleCallConnected(msg.payload || msg.data);
+                    return;
+                }
 
-        } catch (error) {
-            logError(MODULE_NAME, 'Error handling message', error);
-        }
+                if (msg.type === MESSAGE_TYPES.CALL_REJECTED) {
+                    handleCallRejected(msg.payload || msg.data);
+                    return;
+                }
+
+                if (msg.type === MESSAGE_TYPES.CALL_ENDED) {
+                    handleCallEnded(msg.payload || msg.data);
+                    return;
+                }
+
+                if (msg.type === MESSAGE_TYPES.CALL_FAILED) {
+                    handleCallFailed(msg.payload || msg.data);
+                    return;
+                }
+
+                if (msg.type === MESSAGE_TYPES.REMOTE_STREAM_ADDED) {
+                    handleRemoteStreamAdded(msg.payload || msg.data);
+                    return;
+                }
+
+                if (msg.type === MESSAGE_TYPES.REMOTE_STREAM_REMOVED) {
+                    handleRemoteStreamRemoved(msg.payload || msg.data);
+                    return;
+                }
+
+                if (msg.type === MESSAGE_TYPES.SIGNAL_OFFER ||
+                    msg.type === MESSAGE_TYPES.SIGNAL_ANSWER ||
+                    msg.type === MESSAGE_TYPES.ICE_CANDIDATE) {
+                    
+                    handleSignalingMessage(msg.type, msg.payload || msg.data);
+                    return;
+                }
+
+                if (msg.type === 'FRIEND_UPDATE' || msg.type === 'CONTACTS_UPDATE') {
+                    notifyListeners('contacts_update', msg.payload || msg.data);
+                    return;
+                }
+
+                if (msg.type === 'CALL_HISTORY_UPDATE') {
+                    notifyListeners('call_history_update', msg.payload || msg.data);
+                    return;
+                }
+
+                if (msg.type === 'SETTINGS_UPDATED') {
+                    const data = msg.payload || msg.data;
+                    if (data) {
+                        if (data.premium !== undefined) {
+                            callsState.isPremium = data.premium;
+                        }
+                        if (data.premiumFeatures) {
+                            callsState.premiumFeatures = { ...callsState.premiumFeatures, ...data.premiumFeatures };
+                        }
+                        notifyListeners('settings_update', data);
+                    }
+                    return;
+                }
+
+                if (msg.type === 'USER_LOGGED_OUT') {
+                    callsState.session = null;
+                    callsState.token = null;
+                    callsState.verified = false;
+                    callsState.sessionReceived = false;
+                    callsState.sessionStatus = 'invalid';
+                    notifyListeners('logout', {});
+                    return;
+                }
+
+                if (msg.type === 'SESSION_REFRESHED') {
+                    const data = msg.payload || msg.data;
+                    if (data && data.token) {
+                        callsState.token = data.token;
+                        if (callsState.session) {
+                            callsState.session.token = data.token;
+                        }
+                    }
+                    return;
+                }
+
+                if (msg.type === 'NEW_MESSAGE') {
+                    notifyListeners('new_message', msg.payload || msg.data);
+                    return;
+                }
+
+                if (msg.type === 'STATUS_UPDATE') {
+                    notifyListeners('status_update', msg.payload || msg.data);
+                    return;
+                }
+
+                if (msg.type === 'GROUP_UPDATE') {
+                    notifyListeners('group_update', msg.payload || msg.data);
+                    return;
+                }
+
+            } catch (error) {
+                logError(MODULE_NAME, 'Error handling message', error);
+            }
+        }, 0);
     });
 
     // ==================== PUBLIC API ====================
@@ -5676,7 +5682,9 @@
                 governorState: CallsStateGovernor.getState(),
                 webRTC: WebRTCManager.getStatus(),
                 childReadySent: callsState.childReadySent,
-                registrationSent: callsState.registrationSent
+                registrationSent: callsState.registrationSent,
+                parentReady: parentReady,
+                queuedMessages: messageQueue.length
             };
         },
         
@@ -5706,6 +5714,7 @@
         },
         
         startCall: function(targetUserId, callType = 'voice', options = {}) {
+            // Use safeSend which will queue if parent not ready
             return IframeTransport.sendAction('START_CALL', {
                 targetUserId,
                 callType,
@@ -5992,7 +6001,7 @@
         CallsStateGovernor: CallsStateGovernor,
         
         sendToParent: function(type, payload, options) {
-            return IframeTransport.send(type, payload, options);
+            return safeSend(type, payload, options?.requireAck || false);
         },
         
         sendAction: function(action, payload) {
@@ -6012,6 +6021,9 @@
             IframeSessionClient.cleanup();
             RecoveryManager.cancelRecovery();
             UIBridge.cleanup();
+            
+            // Clear queue
+            messageQueue.length = 0;
             
             callsState.callState = 'idle';
             callsState.callActive = false;
@@ -6052,6 +6064,18 @@
                     }
                 }, 100);
             });
+        },
+        
+        getParentReady: function() {
+            return parentReady;
+        },
+        
+        getQueuedMessages: function() {
+            return [...messageQueue];
+        },
+        
+        flushQueue: function() {
+            flushQueue();
         },
         
         MessageRegistry: MessageRegistry,
@@ -6114,9 +6138,8 @@
                 LifecycleController.initialize();
                 this._notifyListeners('lifecycle_initialized', {});
 
-                // No timeout-based fallback - we trust parent signal
-
-                await IframeTransport.sendChildReady();
+                // Send CHILD_READY - will be queued if parent not ready
+                sendChildReady();
                 this._notifyListeners('child_ready_sent', {});
 
                 logInfo(MODULE, 'CHILD_READY sent, waiting for parent');

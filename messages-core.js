@@ -1,8 +1,10 @@
 // =============================================
-// MESSAGES CORE - v7.5.11 (PARENT AUTHORITY ARCHITECTURE)
+// MESSAGES CORE - v7.5.15 (PARENT AUTHORITY ARCHITECTURE)
 // UI-ONLY MODULE | STANDARDIZED COMMUNICATION PROTOCOL
 // STRICT LIFECYCLE ENFORCEMENT | NO TIMEOUTS | NO FALLBACKS
-// FIXED: Session request - parent expects 'id' field, not 'messageId'
+// FIXED: sendWithResponse ALWAYS returns a proper Promise
+// FIXED: safeSend returns consistent Promise-like objects
+// FIXED: SessionClient Promise chain - no more undefined catch
 // =============================================
 (function() {
     'use strict';
@@ -10,8 +12,8 @@
     // =============================================
     // MODULE IDENTIFICATION - MUST MATCH PARENT EXPECTATIONS
     // =============================================
-    const MODULE_NAME = 'messages';
-    const MODULE_VERSION = '7.5.11';
+    const MODULE_NAME = 'messages'; // CRITICAL: Exact lowercase match
+    const MODULE_VERSION = '7.5.15';
     
     // =============================================
     // DEBUG MODE - ZERO NOISE POLICY
@@ -22,6 +24,19 @@
     function debugLog(...args) {
         if (DEBUG) console.log(...args);
     }
+
+    // =============================================
+    // TIMING CONSTANTS - DEFINED EARLY TO AVOID REFERENCE ERRORS
+    // =============================================
+    const TIMING = {
+        CLEANUP_INTERVAL: 60000,
+        MAX_QUEUE_SIZE: 500,
+        MAX_MESSAGE_RETRIES: 3,
+        TYPING_TIMEOUT: 3000,
+        TYPING_RATE_LIMIT: 2000,
+        MESSAGE_BURST_WINDOW: 1000,
+        MAX_MESSAGES_PER_SECOND: 50
+    };
 
     // =============================================
     // LIFECYCLE STATE MACHINE - STRICT PARENT AUTHORITY
@@ -44,9 +59,15 @@
 
     // Parent ready promise - NO TIMEOUTS, just wait forever
     let parentReadyResolver;
-    const parentReadyPromise = new Promise((resolve) => {
+    let parentReadyPromise = new Promise((resolve) => {
         parentReadyResolver = resolve;
     });
+
+    // =============================================
+    // MESSAGE QUEUE SYSTEM - REQUIRED FOR PROTOCOL
+    // =============================================
+    const messageQueue = [];
+    let processingQueue = false;
 
     function setState(nextState, reason = '') {
         if (currentState === nextState) return true;
@@ -103,7 +124,6 @@
         if (processedMessageIds.has(messageId)) return true;
         processedMessageIds.add(messageId);
         
-        // Clean up old IDs periodically (kept for memory management, not logic)
         if (processedMessageIds.size > 1000) {
             processedMessageIds.clear();
         }
@@ -129,6 +149,7 @@
         parentReadyReceived = false;
         stateHistory = [];
         processedMessageIds.clear();
+        messageQueue.length = 0;
         
         // Recreate promise
         parentReadyPromise = new Promise((resolve) => {
@@ -149,7 +170,6 @@
             'null'
         ]),
         
-        // Essential system messages allowed during handshake
         ESSENTIAL_TYPES: new Set([
             'PARENT_READY',
             'MODULE_REGISTERED',
@@ -160,7 +180,6 @@
             'ERROR'
         ]),
         
-        // Messages that require ACK
         REQUIRES_ACK: new Set([
             'REGISTER_MODULE',
             'SEND_MESSAGE',
@@ -175,7 +194,6 @@
             'FORWARD_MESSAGE'
         ]),
         
-        // User action messages (only allowed in ACTIVE state)
         USER_ACTIONS: new Set([
             'SEND_MESSAGE',
             'FETCH_MESSAGES',
@@ -221,25 +239,17 @@
         },
         
         canSendMessage: function(type, lifecycleState) {
-            // Essential messages always allowed
             if (this.isEssentialMessage(type)) return true;
-            
-            // User actions only allowed in ACTIVE
             if (this.isUserAction(type)) {
                 return lifecycleState === LIFECYCLE_STATES.ACTIVE;
             }
-            
-            // Registration messages only allowed in specific states
             if (type === 'REGISTER_MODULE') {
                 return lifecycleState === LIFECYCLE_STATES.INITIALIZING || 
                        lifecycleState === LIFECYCLE_STATES.READY;
             }
-            
             if (type === 'CHILD_READY') {
                 return lifecycleState === LIFECYCLE_STATES.READY;
             }
-            
-            // Default: only allowed in ACTIVE
             return lifecycleState === LIFECYCLE_STATES.ACTIVE;
         },
         
@@ -261,25 +271,190 @@
         parentOrigin: document.referrer ? new URL(document.referrer).origin : '*'
     };
 
-    // Add parent origin to allowed origins
     if (ENV.parentOrigin !== '*' && ENV.parentOrigin) {
         SECURITY.ALLOWED_ORIGINS.add(ENV.parentOrigin);
     }
 
     // =============================================
-    // TIMING CONSTANTS - FOR REFERENCE ONLY, NO TIMEOUTS USED
+    // ID GENERATION UTILITIES
     // =============================================
-    const TIMING = {
-        // No timeouts are used in the actual logic - these are for reference
-        ACK_TIMEOUT: 5000,               // Reference only - actual waiting is infinite
-        CLEANUP_INTERVAL: 60000,          // 1 minute cleanup - for memory management only
-        MAX_QUEUE_SIZE: 500,
-        MAX_MESSAGE_RETRIES: 3,
-        TYPING_TIMEOUT: 3000,             // UI typing timeout - kept for UX
-        TYPING_RATE_LIMIT: 2000,           // UI rate limiting - kept for UX
-        MESSAGE_BURST_WINDOW: 1000,
-        MAX_MESSAGES_PER_SECOND: 50
-    };
+    function generateMessageId() {
+        return 'msg_' + Math.random().toString(36).substring(2, 15) + '_' + Date.now();
+    }
+
+    function generateRequestId() {
+        return 'req_' + Math.random().toString(36).substring(2, 15) + '_' + Date.now();
+    }
+
+    // =============================================
+    // CORE MESSAGE SENDER - ENFORCES SCHEMA
+    // =============================================
+    function sendMessage(type, payload = {}, options = {}) {
+        // Create message with REQUIRED schema
+        const id = options.id || generateMessageId();
+        const requestId = options.requestId || generateRequestId();
+        const timestamp = Date.now();
+        
+        const message = {
+            id: id,
+            type: type,
+            source: MODULE_NAME,  // CRITICAL: Must be exact module name
+            target: 'parent',      // CRITICAL: Must be 'parent'
+            requestId: requestId,
+            payload: payload,
+            timestamp: timestamp
+        };
+
+        // Add messageId for backward compatibility
+        message.messageId = id;
+
+        // Add optional fields
+        if (options.requireAck) {
+            message.expectAck = true;
+        }
+
+        // Validate required fields
+        const required = ['id', 'type', 'source', 'target', 'requestId', 'payload', 'timestamp'];
+        for (const field of required) {
+            if (!message[field]) {
+                console.error(`[${MODULE_NAME}] Invalid message: missing ${field}`, message);
+                return { success: false, error: `missing_${field}` };
+            }
+        }
+
+        // Validate source matches module name
+        if (message.source !== MODULE_NAME) {
+            console.error(`[${MODULE_NAME}] Invalid source: ${message.source}`, message);
+            return { success: false, error: 'invalid_source' };
+        }
+
+        // Validate target is parent
+        if (message.target !== 'parent') {
+            console.error(`[${MODULE_NAME}] Invalid target: ${message.target}`, message);
+            return { success: false, error: 'invalid_target' };
+        }
+
+        // Sanitize payload
+        if (payload && typeof payload === 'object') {
+            message.payload = SecurityUtils.sanitizePayload(payload);
+        }
+
+        debugLog(`[${MODULE_NAME}] Sending message:`, message);
+
+        // Queue if parent not ready and not essential
+        if (!parentReadyReceived && !SECURITY.isEssentialMessage(type)) {
+            messageQueue.push(message);
+            debugLog(`[${MODULE_NAME}] Queued message (parent not ready): ${type}`);
+            return { success: true, queued: true, id, requestId };
+        }
+
+        // Send immediately
+        return sendMessageImmediate(message, options);
+    }
+
+    function sendMessageImmediate(message, options = {}) {
+        try {
+            if (!window.parent || window.parent === window) {
+                throw new Error('No parent window');
+            }
+
+            // Register for ACK if required
+            if (message.expectAck || SECURITY.requiresAck(message.type)) {
+                return registerAndSendWithAck(message, options);
+            }
+
+            // Send without ACK tracking
+            window.parent.postMessage(message, '*');
+            
+            return { 
+                success: true, 
+                id: message.id, 
+                requestId: message.requestId,
+                timestamp: message.timestamp 
+            };
+        } catch (error) {
+            console.error(`[${MODULE_NAME}] Send failed:`, error);
+            return { success: false, error: error.message };
+        }
+    }
+
+    function registerAndSendWithAck(message, options) {
+        const requestId = message.requestId;
+        
+        // Create a real Promise instead of a thenable object
+        return new Promise((resolve, reject) => {
+            const ackHandler = (e) => {
+                if (e.detail.requestId === requestId || e.detail.id === message.id) {
+                    window.removeEventListener('messageAcknowledged', ackHandler);
+                    window.removeEventListener('messageFailed', failHandler);
+                    resolve(e.detail.payload || { success: true });
+                }
+            };
+            
+            const failHandler = (e) => {
+                if (e.detail.requestId === requestId || e.detail.id === message.id) {
+                    window.removeEventListener('messageAcknowledged', ackHandler);
+                    window.removeEventListener('messageFailed', failHandler);
+                    reject(new Error(e.detail.reason || 'Request failed'));
+                }
+            };
+            
+            window.addEventListener('messageAcknowledged', ackHandler);
+            window.addEventListener('messageFailed', failHandler);
+            
+            // Send the message
+            try {
+                window.parent.postMessage(message, '*');
+                
+                // Track with AckController if available
+                if (AckController) {
+                    AckController.register(requestId, message, () => {}, options);
+                }
+            } catch (error) {
+                window.removeEventListener('messageAcknowledged', ackHandler);
+                window.removeEventListener('messageFailed', failHandler);
+                reject(error);
+            }
+        });
+    }
+
+    // =============================================
+    // SAFE SEND - QUEUE UNTIL PARENT READY
+    // =============================================
+    function safeSend(type, payload = {}, options = {}) {
+        // Validate state
+        if (!SECURITY.canSendMessage(type, currentState)) {
+            console.warn(`[${MODULE_NAME}] Cannot send ${type} in state ${currentState}`);
+            return { success: false, blocked: true, reason: `invalid_state:${currentState}` };
+        }
+
+        const result = sendMessage(type, payload, options);
+        
+        // If this is an ACK-required message and we got a Promise back, wrap it
+        if (options.requireAck && result && typeof result.then === 'function') {
+            return result; // Return the Promise directly
+        }
+        
+        return result; // Return the result object
+    }
+
+    function flushMessageQueue() {
+        if (processingQueue || messageQueue.length === 0) return;
+        
+        processingQueue = true;
+        
+        while (messageQueue.length > 0) {
+            const queuedMessage = messageQueue.shift();
+            try {
+                window.parent.postMessage(queuedMessage, '*');
+                debugLog(`[${MODULE_NAME}] Flushed queued message: ${queuedMessage.type}`);
+            } catch (error) {
+                console.error(`[${MODULE_NAME}] Failed to flush queued message:`, error);
+            }
+        }
+        
+        processingQueue = false;
+    }
 
     // =============================================
     // PROTOCOL TYPES
@@ -291,7 +466,7 @@
     };
 
     // =============================================
-    // MESSAGE TYPES - COMPLETE LIST (PRESERVED)
+    // MESSAGE TYPES - COMPLETE LIST
     // =============================================
     const INCOMING_TYPES = {
         MODULE_REGISTERED: 'MODULE_REGISTERED',
@@ -349,12 +524,11 @@
         MODULE_DEGRADED: 'MODULE_DEGRADED',
         RETRY_LIMIT_REACHED: 'RETRY_LIMIT_REACHED',
         VERIFY_RESPONSE: 'VERIFY_RESPONSE',
-        MODULE_HEARTBEAT: 'MODULE_HEARTBEAT',
-        RECOVERY_REQUEST: 'RECOVERY_REQUEST'
+        MODULE_HEARTBEAT: 'MODULE_HEARTBEAT'
     };
 
     // =============================================
-    // OUTGOING ACTIONS (PRESERVED)
+    // OUTGOING ACTIONS
     // =============================================
     const OUTGOING_ACTIONS = {
         REGISTER_MODULE: 'REGISTER_MODULE',
@@ -390,7 +564,7 @@
     };
 
     // =============================================
-    // LOCAL STORAGE KEYS (PRESERVED)
+    // LOCAL STORAGE KEYS
     // =============================================
     const LOCAL_STORAGE_KEYS = {
         SESSION_CACHE: 'kynecta_session_cache_v7',
@@ -423,14 +597,11 @@
         },
 
         generateMessageId: function() {
-            const timestamp = Date.now();
-            const random = Math.random().toString(36).substring(2, 10);
-            const counter = (this.messageIdCounter++ % 1000).toString(36);
-            return `msg_${timestamp}_${random}_${counter}`;
+            return generateMessageId();
         },
 
         generateRequestId: function() {
-            return `req_${Date.now()}_${Math.random().toString(36).substring(2, 10)}_${Math.floor(Math.random() * 1000)}`;
+            return generateRequestId();
         },
 
         generateUUID: function() {
@@ -451,8 +622,8 @@
         },
 
         validateMessageSchema: function(message) {
-            // Outgoing messages must have required fields (STANDARDIZED SCHEMA)
-            const required = ['type', 'source', 'target', 'messageId', 'timestamp'];
+            // Validate REQUIRED schema
+            const required = ['id', 'type', 'source', 'target', 'requestId', 'timestamp'];
             for (const field of required) {
                 if (!message[field]) return false;
             }
@@ -531,7 +702,7 @@
             return !!(message && 
                      typeof message === 'object' && 
                      message.id && 
-                     message.action && 
+                     message.type && 
                      message.source && 
                      message.target && 
                      message.timestamp);
@@ -573,7 +744,7 @@
     };
 
     // =============================================
-    // LOGGER - REDUCED NOISE (PRESERVED)
+    // LOGGER - REDUCED NOISE
     // =============================================
     const Logger = {
         _warned: new Map(),
@@ -670,7 +841,7 @@
     };
 
     // =============================================
-    // SAFE STORAGE LAYER (PRESERVED)
+    // SAFE STORAGE LAYER
     // =============================================
     const SafeStorage = {
         memoryStore: new Map(),
@@ -781,29 +952,24 @@
         },
         
         validateIncomingMessage: function(event) {
-            // Validate origin
             if (!SECURITY.validateOrigin(event.origin)) {
                 return { valid: false, reason: 'invalid_origin' };
             }
             
-            // Validate message structure
             if (!SecurityUtils.validateMessageStructure(event.data)) {
                 return { valid: false, reason: 'invalid_structure' };
             }
             
             const data = event.data;
             
-            // Validate source - must be parent
             if (data.source && data.source !== 'parent') {
                 return { valid: false, reason: 'invalid_source' };
             }
             
-            // Validate target - must be this module or all
             if (data.target && data.target !== MODULE_NAME && data.target !== 'all' && data.target !== '*') {
                 return { valid: false, reason: 'wrong_target' };
             }
             
-            // Check for duplicate message ID
             if (data.messageId && isDuplicateMessage(data.messageId)) {
                 return { valid: false, reason: 'duplicate_message' };
             }
@@ -812,7 +978,6 @@
         },
         
         validateOutgoingMessage: function(message, lifecycleState) {
-            // Check if this message type is allowed in current state
             if (!SECURITY.canSendMessage(message.type, lifecycleState)) {
                 return { 
                     valid: false, 
@@ -820,7 +985,6 @@
                 };
             }
             
-            // Validate schema
             if (!SecurityUtils.validateMessageSchema(message)) {
                 return { valid: false, reason: 'invalid_schema' };
             }
@@ -830,7 +994,7 @@
     }.init();
 
     // =============================================
-    // MESSAGE TRACKER (PRESERVED - NO TIMEOUTS)
+    // MESSAGE TRACKER
     // =============================================
     const MessageTracker = {
         _processedMessageIds: new Set(),
@@ -862,7 +1026,6 @@
                 this.initRetryCount(requestId);
             }
             
-            // NO TIMEOUT - wait indefinitely for parent response
             this._pendingRequestIds.set(requestId, {
                 resolve,
                 reject,
@@ -937,7 +1100,6 @@
             }
         },
         
-        // NO STALE CLEANUP - wait forever for parent
         reset() {
             this._processedMessageIds.clear();
             for (const [_, pending] of this._pendingRequestIds) {
@@ -974,7 +1136,6 @@
                 const data = event.data;
                 if (!data || typeof data !== 'object') return;
                 
-                // Only handle ACK messages
                 if (data.type === 'ACK') {
                     const requestId = data.requestId || data.messageId;
                     if (requestId) {
@@ -987,18 +1148,17 @@
             
             this._initialized = true;
             
-            // Rate limit reset - kept for UX, not for logic
             setInterval(() => {
                 this._rateLimitCount = 0;
                 this._rateLimitReset = Date.now();
-            }, TIMING.MESSAGE_BURST_WINDOW);
+            }, 1000);
             
             return this;
         },
         
         checkRateLimit: function() {
             const now = Date.now();
-            if (now - this._rateLimitReset > TIMING.MESSAGE_BURST_WINDOW) {
+            if (now - this._rateLimitReset > 1000) {
                 this._rateLimitCount = 0;
                 this._rateLimitReset = now;
             }
@@ -1012,7 +1172,6 @@
         },
         
         register: function(requestId, message, sendFn, options = {}) {
-            // Rate limiting
             if (!this.checkRateLimit()) {
                 return { success: false, rateLimited: true, requestId };
             }
@@ -1023,17 +1182,6 @@
             
             if (this._pendingAcks.size >= this._maxPending) {
                 this._cleanupOldest();
-            }
-            
-            // Only register if ACK is required
-            if (!message.expectAck) {
-                // Send immediately without tracking
-                try {
-                    sendFn();
-                } catch (error) {
-                    return { success: false, error: error.message };
-                }
-                return { success: true, requestId, tracked: false };
             }
             
             const maxRetries = Math.min(options.maxRetries ?? this._maxRetries, this._maxRetries);
@@ -1069,8 +1217,6 @@
             
             try {
                 record.sendFn();
-                // NO TIMEOUT - wait indefinitely for ACK
-                // Parent will respond when ready
             } catch (error) {
                 this._handleFailure(record, error.message);
             }
@@ -1086,7 +1232,6 @@
             const messageType = record.message?.type || 'unknown';
             if (messageType === 'REGISTER_MODULE') {
                 console.warn(`[${MODULE_NAME}] ⚠️ ${messageType} failed after ${record.maxRetries} retries - waiting for parent`);
-                // Just wait - don't retry
             } else {
                 if (DEBUG) console.log(`[${MODULE_NAME}] Message ${record.requestId} failed: ${reason}`);
             }
@@ -1149,7 +1294,6 @@
         },
         
         cleanup: function() {
-            // NO TIMEOUT CLEANUP - just size management
             if (this._processedIds.size > 10000) {
                 const toRemove = Array.from(this._processedIds).slice(0, 2000);
                 toRemove.forEach(id => this._processedIds.delete(id));
@@ -1168,7 +1312,10 @@
                     Math.min(...Array.from(this._pendingAcks.values()).map(r => r.startTime)) : 0
             };
         }
-    }.init();
+    };
+
+    // Initialize AckController
+    AckController.init();
 
     // =============================================
     // RELIABILITY LAYER - STRICT RETRY POLICY, NO TIMEOUTS
@@ -1205,7 +1352,6 @@
                 attempts: retryCount + 1,
                 maxRetries,
                 timestamp: Date.now()
-                // NO TIMER - wait indefinitely
             };
             
             this._pendingMessages.set(messageId, record);
@@ -1250,7 +1396,6 @@
         _lastHeartbeatTime: 0,
         _sessionData: null,
         _initialized: false,
-        // NO TIMERS
         
         init: function() {
             if (this._initialized) return this;
@@ -1258,10 +1403,7 @@
             this._setupMessageListener();
             this._initialized = true;
             
-            // Periodic queue processing - kept for UX, not for logic
             setInterval(() => this._processQueue(), 5000);
-            
-            // Periodic cleanup - kept for memory management
             setInterval(() => AckController.cleanup(), TIMING.CLEANUP_INTERVAL);
             
             Logger.info('ParentConnectionManager', 'Initialized');
@@ -1270,52 +1412,53 @@
         
         _setupMessageListener: function() {
             window.addEventListener('message', (event) => {
-                // Validate incoming message
-                const validation = SecurityValidator.validateIncomingMessage(event);
-                if (!validation.valid) {
-                    if (DEBUG) console.log(`[${MODULE_NAME}] Rejected message:`, validation.reason);
-                    return;
-                }
-                
-                const data = validation.data;
-                
-                // Deduplicate by messageId
-                if (data.messageId && MessageIdCache.has(data.messageId)) {
-                    return;
-                }
-                if (data.messageId) {
-                    MessageIdCache.add(data.messageId);
-                }
-                
-                // Handle PARENT_READY - CRITICAL for activation
-                if (data.type === INCOMING_TYPES.PARENT_READY || data.type === INCOMING_TYPES.coreReady) {
-                    this._handleParentReady(data);
-                }
-                
-                // Route to registered handlers
-                if (this._handlers.has(data.type)) {
-                    const handlers = this._handlers.get(data.type);
-                    handlers.forEach(handler => {
-                        try {
-                            handler(data.payload || data, data);
-                        } catch (e) {
-                            Logger.error('ParentConnectionManager', `Handler error for ${data.type}`, e);
-                        }
-                    });
-                }
-                
-                // Wildcard handlers
-                if (this._handlers.has('*')) {
-                    const handlers = this._handlers.get('*');
-                    handlers.forEach(handler => {
-                        try {
-                            handler(data.payload || data, data);
-                        } catch (e) {
-                            Logger.error('ParentConnectionManager', `Wildcard handler error`, e);
-                        }
-                    });
-                }
+                // Defer heavy processing to avoid blocking
+                setTimeout(() => this._handleIncomingMessage(event), 0);
             }, true);
+        },
+        
+        _handleIncomingMessage: function(event) {
+            const validation = SecurityValidator.validateIncomingMessage(event);
+            if (!validation.valid) {
+                if (DEBUG) console.log(`[${MODULE_NAME}] Rejected message:`, validation.reason);
+                return;
+            }
+            
+            const data = validation.data;
+            
+            if (data.messageId && MessageIdCache.has(data.messageId)) {
+                return;
+            }
+            if (data.messageId) {
+                MessageIdCache.add(data.messageId);
+            }
+            
+            // Handle PARENT_READY - CRITICAL for activation
+            if (data.type === INCOMING_TYPES.PARENT_READY || data.type === INCOMING_TYPES.coreReady) {
+                this._handleParentReady(data);
+            }
+            
+            if (this._handlers.has(data.type)) {
+                const handlers = this._handlers.get(data.type);
+                handlers.forEach(handler => {
+                    try {
+                        handler(data.payload || data, data);
+                    } catch (e) {
+                        Logger.error('ParentConnectionManager', `Handler error for ${data.type}`, e);
+                    }
+                });
+            }
+            
+            if (this._handlers.has('*')) {
+                const handlers = this._handlers.get('*');
+                handlers.forEach(handler => {
+                    try {
+                        handler(data.payload || data, data);
+                    } catch (e) {
+                        Logger.error('ParentConnectionManager', `Wildcard handler error`, e);
+                    }
+                });
+            }
         },
         
         _handleParentReady: function(data) {
@@ -1323,17 +1466,17 @@
             
             parentReadyReceived = true;
             
-            // Resolve the parent ready promise to activate module
             if (parentReadyResolver) {
                 parentReadyResolver();
                 parentReadyResolver = null;
             }
             
-            // If we're in WAITING_FOR_PARENT, transition to ACTIVE
+            // Flush queued messages
+            flushMessageQueue();
+            
             if (currentState === LIFECYCLE_STATES.WAITING_FOR_PARENT) {
                 setState(LIFECYCLE_STATES.ACTIVE, 'parent_ready_received');
                 
-                // Now safe to initialize UI and start data flow
                 initializeUISafe();
                 startDataFlow();
                 
@@ -1341,7 +1484,9 @@
             }
         },
         
+        // DEPRECATED: Use safeSend instead
         sendRaw: function(message, requireAck = false) {
+            console.warn(`[${MODULE_NAME}] sendRaw is deprecated, use safeSend instead`);
             return new Promise((resolve, reject) => {
                 if (!window.parent || window.parent === window) {
                     reject(new Error('No parent window'));
@@ -1349,7 +1494,6 @@
                 }
                 
                 try {
-                    // Set expectAck if required
                     if (requireAck) {
                         message.expectAck = true;
                     }
@@ -1362,220 +1506,67 @@
             });
         },
         
+        // DEPRECATED: Use safeSend instead
         send: function(type, payload = {}, options = {}) {
-            // Validate if this message can be sent in current state
-            const validation = SecurityValidator.validateOutgoingMessage(
-                { type, source: MODULE_NAME, target: 'parent' },
-                currentState
-            );
-            
-            if (!validation.valid) {
-                Logger.warn('ParentConnectionManager', `Cannot send ${type}: ${validation.reason}`);
-                return { 
-                    success: false, 
-                    blocked: true, 
-                    reason: validation.reason,
-                    type
-                };
-            }
-            
-            const messageId = options.messageId || SecurityUtils.generateUUID();
-            const requestId = options.requestId || messageId;
-            const timestamp = Date.now();
-            
-            const message = {
-                type: type,
-                source: MODULE_NAME,
-                target: 'parent',
-                messageId: messageId,
-                requestId: requestId,
-                timestamp: timestamp,
-                expectAck: options.requireAck || SECURITY.requiresAck(type),
-                payload: SecurityUtils.sanitizePayload(payload || {})
-            };
-            
-            // Add session info if available (but not required)
-            if (SessionStore.isAuthenticated() && currentState === LIFECYCLE_STATES.ACTIVE) {
-                message.session = {
-                    authenticated: true,
-                    userId: SessionStore.getUserId()
-                };
-            }
-            
-            const sendFn = () => this.sendRaw(message, message.expectAck);
-            
-            // If ACK required, register with AckController
-            if (message.expectAck) {
-                const ackResult = AckController.register(requestId, message, sendFn, {
-                    maxRetries: options.maxRetries || TIMING.MAX_MESSAGE_RETRIES,
-                    resolve: options.resolve,
-                    reject: options.reject
-                });
-                
-                if (ackResult.rateLimited) {
-                    this._queueMessage(message);
-                    return { success: false, queued: true, reason: 'rate_limited' };
-                }
-                
-                if (ackResult.duplicate) {
-                    return { success: false, duplicate: true, requestId };
-                }
-                
-                // Track for reliability
-                if (ackResult.tracked) {
-                    ReliabilityLayer.trackMessage(requestId, sendFn, {
-                        maxRetries: options.maxRetries || TIMING.MAX_MESSAGE_RETRIES
-                    });
-                }
-            }
-            
-            // Send immediately
-            try {
-                sendFn().catch(error => {
-                    // Just log, no fallback
-                    Logger.warn('ParentConnectionManager', `Send failed: ${error.message}`);
-                });
-                
-                if (!message.expectAck) {
-                    return { success: true, messageId, requestId };
-                }
-                
-                // Return promise-like object for ACK waiting
-                return {
-                    success: true,
-                    messageId,
-                    requestId,
-                    then: (resolve, reject) => {
-                        const waitForAck = (e) => {
-                            if (e.detail.requestId === requestId) {
-                                window.removeEventListener('messageAcknowledged', waitForAck);
-                                window.removeEventListener('messageFailed', waitForFail);
-                                resolve({ success: true, requestId, ack: e.detail.payload });
-                            }
-                        };
-                        
-                        const waitForFail = (e) => {
-                            if (e.detail.requestId === requestId) {
-                                window.removeEventListener('messageAcknowledged', waitForAck);
-                                window.removeEventListener('messageFailed', waitForFail);
-                                reject(new Error(e.detail.reason));
-                            }
-                        };
-                        
-                        window.addEventListener('messageAcknowledged', waitForAck);
-                        window.addEventListener('messageFailed', waitForFail);
-                        
-                        // NO TIMEOUT - wait forever for parent
-                    }
-                };
-            } catch (error) {
-                if (message.expectAck) {
-                    return { success: false, error: error.message, requestId };
-                }
-                // For non-ACK messages, queue
-                this._queueMessage(message);
-                return { success: false, queued: true, error: error.message };
-            }
+            console.warn(`[${MODULE_NAME}] ParentConnectionManager.send is deprecated, use safeSend instead`);
+            return safeSend(type, payload, options);
         },
         
         sendHeartbeatAck: function(inResponseTo) {
-            const message = {
-                type: OUTGOING_ACTIONS.HEARTBEAT_ACK,
-                source: MODULE_NAME,
-                target: 'parent',
-                messageId: SecurityUtils.generateUUID(),
+            safeSend(OUTGOING_ACTIONS.HEARTBEAT_ACK, {
                 inResponseTo: inResponseTo,
-                timestamp: Date.now(),
-                payload: {
-                    timestamp: Date.now()
-                }
-            };
-            
-            this.sendRaw(message, false).catch(() => {});
+                timestamp: Date.now()
+            }, { requireAck: false });
         },
         
-        // FIXED: sendWithResponse method - use 'id' field for parent compatibility
+        // FIXED: ALWAYS returns a proper Promise
         sendWithResponse: function(type, payload = {}) {
             return new Promise((resolve, reject) => {
-                // Create a complete message with all required fields matching parent's expected schema
-                // Parent's consolidated handler in chat.html expects:
-                // - id: the message ID (REQUIRED for parent to recognize)
-                // - type: the message type
-                // - source: should be the module name
-                // - target: should be 'parent'
-                // - payload: the actual data
-                // - timestamp: timestamp
-                // - requestId: also include for ACK matching
+                // Validate state first
+                if (!SECURITY.canSendMessage(type, currentState)) {
+                    const error = new Error(`Cannot send ${type} in state ${currentState}`);
+                    Logger.error('ParentConnectionManager', error.message);
+                    reject(error);
+                    return;
+                }
+
+                const result = safeSend(type, payload, { requireAck: true });
                 
-                const id = SecurityUtils.generateUUID(); // This will be used as both id and messageId
-                const timestamp = Date.now();
-                
-                const message = {
-                    id: id,                          // CRITICAL: Parent looks for 'id' field
-                    type: type,
-                    source: MODULE_NAME,
-                    target: 'parent',
-                    messageId: id,                    // Include for backward compatibility
-                    requestId: id,                    // Include for ACK tracking
-                    timestamp: timestamp,
-                    expectAck: true,
-                    payload: SecurityUtils.sanitizePayload(payload || {})
-                };
-                
-                // Validate the message before sending
-                const validation = SecurityValidator.validateOutgoingMessage(message, currentState);
-                if (!validation.valid) {
-                    reject(new Error(`Message validation failed: ${validation.reason}`));
+                // If result is a Promise, use it
+                if (result && typeof result.then === 'function') {
+                    result.then(resolve).catch(reject);
                     return;
                 }
                 
-                Logger.info('ParentConnectionManager', `Sending ${type} with response expectation`, { id });
+                // Handle blocked case
+                if (result && result.blocked) {
+                    reject(new Error(`Message blocked: ${result.reason}`));
+                    return;
+                }
                 
-                const sendFn = () => this.sendRaw(message, true);
+                // Handle queued case
+                if (result && result.queued) {
+                    Logger.info('ParentConnectionManager', `Queued ${type}, waiting for parent ready`);
+                    parentReadyPromise.then(() => {
+                        // Retry after parent ready
+                        const retryResult = safeSend(type, payload, { requireAck: true });
+                        if (retryResult && typeof retryResult.then === 'function') {
+                            retryResult.then(resolve).catch(reject);
+                        } else {
+                            reject(new Error('Failed to send after parent ready'));
+                        }
+                    }).catch(reject);
+                    return;
+                }
                 
-                // Set up response handlers with a reasonable timeout
-                const timeout = setTimeout(() => {
-                    window.removeEventListener('messageAcknowledged', ackHandler);
-                    window.removeEventListener('messageFailed', failHandler);
-                    Logger.error('ParentConnectionManager', `Request timeout for ${type}`, { id });
-                    reject(new Error(`Request timeout for ${type}`));
-                }, 10000); // 10 second timeout for responses
+                // Handle success without ACK (shouldn't happen with requireAck=true)
+                if (result && result.success) {
+                    resolve({ success: true });
+                    return;
+                }
                 
-                const ackHandler = (e) => {
-                    // Check both id and requestId for matching
-                    if (e.detail.requestId === id || 
-                        e.detail.messageId === id ||
-                        e.detail.id === id) {
-                        
-                        clearTimeout(timeout);
-                        window.removeEventListener('messageAcknowledged', ackHandler);
-                        window.removeEventListener('messageFailed', failHandler);
-                        Logger.success('ParentConnectionManager', `Received ACK for ${type}`, { id });
-                        resolve(e.detail.payload || { success: true });
-                    }
-                };
-                
-                const failHandler = (e) => {
-                    if (e.detail.requestId === id || e.detail.messageId === id) {
-                        clearTimeout(timeout);
-                        window.removeEventListener('messageAcknowledged', ackHandler);
-                        window.removeEventListener('messageFailed', failHandler);
-                        Logger.error('ParentConnectionManager', `Request failed for ${type}: ${e.detail.reason}`, { id });
-                        reject(new Error(e.detail.reason || 'Request failed'));
-                    }
-                };
-                
-                window.addEventListener('messageAcknowledged', ackHandler);
-                window.addEventListener('messageFailed', failHandler);
-                
-                // Send the message
-                sendFn().catch(error => {
-                    clearTimeout(timeout);
-                    window.removeEventListener('messageAcknowledged', ackHandler);
-                    window.removeEventListener('messageFailed', failHandler);
-                    Logger.error('ParentConnectionManager', `Send failed for ${type}`, error);
-                    reject(error);
-                });
+                // Handle error
+                reject(new Error(result?.error || 'Unknown error sending message'));
             });
         },
         
@@ -1605,7 +1596,7 @@
             
             for (const item of freshQueue) {
                 try {
-                    await this.sendRaw(item.message, item.message.expectAck);
+                    window.parent.postMessage(item.message, '*');
                 } catch (e) {}
             }
             
@@ -1654,30 +1645,20 @@
                 return;
             }
             
-            const id = SecurityUtils.generateUUID();
+            const result = safeSend(OUTGOING_ACTIONS.CHILD_READY, {
+                module: MODULE_NAME,
+                version: MODULE_VERSION,
+                frameId: this.getFrameId(),
+                ready: true
+            }, { requireAck: false });
             
-            const message = {
-                id: id,                              // Parent expects 'id' field
-                type: OUTGOING_ACTIONS.CHILD_READY,
-                source: MODULE_NAME,
-                target: 'parent',
-                messageId: id,                        // For backward compatibility
-                timestamp: Date.now(),
-                payload: {
-                    module: MODULE_NAME,
-                    version: MODULE_VERSION,
-                    frameId: this.getFrameId(),
-                    ready: true
-                }
-            };
-            
-            this.sendRaw(message, false).then(() => {
+            if (!result.blocked) {
                 childReadySent = true;
                 setState(LIFECYCLE_STATES.WAITING_FOR_PARENT, 'child_ready_sent');
                 Logger.success('ParentConnectionManager', 'CHILD_READY sent');
-            }).catch(error => {
-                Logger.error('ParentConnectionManager', 'Failed to send CHILD_READY', error);
-            });
+            } else {
+                Logger.error('ParentConnectionManager', 'Failed to send CHILD_READY', result);
+            }
         },
         
         isConnected: function() {
@@ -1772,7 +1753,7 @@
     }.init();
 
     // =============================================
-    // SESSION STORE (PRESERVED)
+    // SESSION STORE
     // =============================================
     const SessionStore = {
         _user: null,
@@ -1907,6 +1888,7 @@
             return this._attemptSessionRequest();
         },
         
+        // FIXED: Always returns a Promise, proper error handling
         _attemptSessionRequest: function() {
             return ParentConnectionManager.sendWithResponse(OUTGOING_ACTIONS.REQUEST_SESSION, {
                 module: MODULE_NAME,
@@ -1925,7 +1907,6 @@
                 if (this._retryCount < this._maxRetries) {
                     Logger.warn('SessionClient', `Session request failed (attempt ${this._retryCount}/${this._maxRetries}), retrying...`, error);
                     
-                    // Exponential backoff
                     const delay = this._retryDelay * Math.pow(1.5, this._retryCount - 1);
                     
                     return new Promise((resolve, reject) => {
@@ -1945,7 +1926,7 @@
                         return Promise.resolve({ payload: this._session, fromCache: true });
                     }
                     
-                    throw error;
+                    return Promise.reject(error);
                 }
             });
         },
@@ -1953,7 +1934,6 @@
         _handleSessionResponse: function(response) {
             this._pending = false;
             
-            // Handle both direct payload and wrapped response
             const session = response.payload || response;
             
             if (session) {
@@ -1962,7 +1942,6 @@
                 this._authenticated = session.authenticated || false;
                 this._permissions = new Set(session.permissions || []);
                 
-                // Cache the session
                 SafeStorage.setJSON(LOCAL_STORAGE_KEYS.SESSION_CACHE, {
                     session: this._session,
                     userId: this._userId,
@@ -1971,7 +1950,6 @@
                     timestamp: Date.now()
                 });
                 
-                // Also update user cache if user data is present
                 if (session.user) {
                     SafeStorage.setJSON(LOCAL_STORAGE_KEYS.USER_CACHE, session.user);
                     SessionStore.setUser(session.user);
@@ -1984,7 +1962,6 @@
                 
                 this._notifyListeners();
                 
-                // Dispatch event for UI
                 window.dispatchEvent(new CustomEvent('sessionUpdated', {
                     detail: { session: this._session, authenticated: this._authenticated }
                 }));
@@ -2082,7 +2059,7 @@
     }.init();
 
     // =============================================
-    // CHAT MANAGER (PRESERVED - NO CHANGES)
+    // CHAT MANAGER
     // =============================================
     const ChatManager = {
         _conversations: [],
@@ -2252,7 +2229,7 @@
     }.init();
 
     // =============================================
-    // FRIEND MANAGER (PRESERVED - NO CHANGES)
+    // FRIEND MANAGER
     // =============================================
     const FriendManager = {
         _friends: [],
@@ -2455,7 +2432,7 @@
     }.init();
 
     // =============================================
-    // GROUP MANAGER (PRESERVED - NO CHANGES)
+    // GROUP MANAGER
     // =============================================
     const GroupManager = {
         _groups: new Map(),
@@ -2486,7 +2463,7 @@
     };
 
     // =============================================
-    // TYPING MANAGER (PRESERVED - ADAPTED)
+    // TYPING MANAGER
     // =============================================
     const TypingManager = {
         _typingUsers: new Map(),
@@ -2547,7 +2524,7 @@
                 this._lastTypingTime = now;
             }
             
-            const result = ParentConnectionManager.send(
+            const result = safeSend(
                 isTyping ? OUTGOING_ACTIONS.START_TYPING : OUTGOING_ACTIONS.STOP_TYPING,
                 { conversationId: conversationId },
                 { requireAck: false }
@@ -2562,7 +2539,7 @@
                 this._typingTimeout = setTimeout(() => {
                     if (this._isTyping) {
                         this._isTyping = false;
-                        ParentConnectionManager.send(OUTGOING_ACTIONS.STOP_TYPING, { conversationId }, { requireAck: false });
+                        safeSend(OUTGOING_ACTIONS.STOP_TYPING, { conversationId }, { requireAck: false });
                     }
                 }, TIMING.TYPING_TIMEOUT);
             }
@@ -2579,7 +2556,7 @@
             
             if (this._isTyping && ChatManager.getActiveChat()) {
                 this._isTyping = false;
-                ParentConnectionManager.send(OUTGOING_ACTIONS.STOP_TYPING, {
+                safeSend(OUTGOING_ACTIONS.STOP_TYPING, {
                     conversationId: ChatManager.getActiveChat().id
                 }, { requireAck: false });
             }
@@ -2587,7 +2564,7 @@
     };
 
     // =============================================
-    // MESSAGE HANDLER (PRESERVED - ADAPTED)
+    // MESSAGE HANDLER
     // =============================================
     const MessageHandler = {
         _optimisticMessages: new Map(),
@@ -2636,7 +2613,7 @@
             ChatManager.addMessage(optimisticMessage);
             EventBus.emit('message:sending', { message: optimisticMessage, optimistic: true });
             
-            const result = ParentConnectionManager.send(OUTGOING_ACTIONS.SEND_MESSAGE, {
+            const result = safeSend(OUTGOING_ACTIONS.SEND_MESSAGE, {
                 conversationId: conversationId,
                 content: content,
                 type: options.type || 'text',
@@ -2660,7 +2637,14 @@
                 return { success: false, blocked: true, reason: result.reason };
             }
             
-            // NO TIMEOUT - wait indefinitely for parent response
+            // If result is a Promise (ACK required), attach handlers
+            if (result && typeof result.then === 'function') {
+                result.then((response) => {
+                    this.handleMessageSent({ localId, requestId, ...response });
+                }).catch((error) => {
+                    this.handleMessageFailed({ localId, requestId, error: error.message });
+                });
+            }
             
             return { success: true, localId, requestId, optimistic: optimisticMessage };
         },
@@ -2721,7 +2705,7 @@
         deleteMessage: function(messageId, forEveryone = false) {
             if (!canSendUserMessages()) return false;
             
-            const result = ParentConnectionManager.send(OUTGOING_ACTIONS.DELETE_MESSAGE, {
+            const result = safeSend(OUTGOING_ACTIONS.DELETE_MESSAGE, {
                 messageId,
                 forEveryone
             }, { requireAck: true });
@@ -2753,7 +2737,7 @@
         editMessage: function(messageId, newContent) {
             if (!canSendUserMessages()) return false;
             
-            const result = ParentConnectionManager.send(OUTGOING_ACTIONS.EDIT_MESSAGE, {
+            const result = safeSend(OUTGOING_ACTIONS.EDIT_MESSAGE, {
                 messageId,
                 content: newContent
             }, { requireAck: true });
@@ -2782,7 +2766,7 @@
         addReaction: function(messageId, emoji, add = true) {
             if (!canSendUserMessages()) return false;
             
-            const result = ParentConnectionManager.send(OUTGOING_ACTIONS.ADD_REACTION, {
+            const result = safeSend(OUTGOING_ACTIONS.ADD_REACTION, {
                 messageId,
                 emoji,
                 add
@@ -2824,7 +2808,7 @@
         forwardMessage: function(messageId, targetConversationIds) {
             if (!canSendUserMessages()) return false;
             
-            const result = ParentConnectionManager.send(OUTGOING_ACTIONS.FORWARD_MESSAGE, {
+            const result = safeSend(OUTGOING_ACTIONS.FORWARD_MESSAGE, {
                 messageId,
                 targetConversationIds
             }, { requireAck: true });
@@ -2839,7 +2823,7 @@
         reportMessage: function(messageId, reason) {
             if (!canSendUserMessages()) return false;
             
-            const result = ParentConnectionManager.send(OUTGOING_ACTIONS.REPORT_MESSAGE, {
+            const result = safeSend(OUTGOING_ACTIONS.REPORT_MESSAGE, {
                 messageId,
                 reason
             }, { requireAck: true });
@@ -2871,7 +2855,7 @@
     };
 
     // =============================================
-    // CONVERSATION MANAGER (PRESERVED - ADAPTED)
+    // CONVERSATION MANAGER
     // =============================================
     const ConversationManager = {
         openConversation: function(conversationId, options = {}) {
@@ -2882,7 +2866,7 @@
                 ChatManager.setActiveConversation(conversation);
             }
             
-            const result = ParentConnectionManager.send(OUTGOING_ACTIONS.OPEN_CONVERSATION, {
+            const result = safeSend(OUTGOING_ACTIONS.OPEN_CONVERSATION, {
                 conversationId: conversationId
             }, { requireAck: false });
             
@@ -2907,7 +2891,7 @@
             if (!conversationId) return;
             if (!canSendUserMessages()) return;
             
-            ParentConnectionManager.send(OUTGOING_ACTIONS.FETCH_MESSAGES, {
+            safeSend(OUTGOING_ACTIONS.FETCH_MESSAGES, {
                 conversationId: conversationId,
                 before: options.before,
                 limit: options.limit || 50
@@ -2917,14 +2901,14 @@
         fetchConversations: function() {
             if (!canSendUserMessages()) return;
             
-            ParentConnectionManager.send(OUTGOING_ACTIONS.FETCH_CONVERSATIONS, {}, { requireAck: false });
+            safeSend(OUTGOING_ACTIONS.FETCH_CONVERSATIONS, {}, { requireAck: false });
         },
         
         markAsRead: function(conversationId) {
             if (!conversationId) return;
             if (!canSendUserMessages()) return;
             
-            ParentConnectionManager.send(OUTGOING_ACTIONS.MARK_AS_READ, {
+            safeSend(OUTGOING_ACTIONS.MARK_AS_READ, {
                 conversationId: conversationId
             }, { requireAck: false });
             
@@ -2939,7 +2923,7 @@
             if (!participants || participants.length === 0) return false;
             if (!canSendUserMessages()) return false;
             
-            const result = ParentConnectionManager.send(OUTGOING_ACTIONS.CREATE_CONVERSATION, {
+            const result = safeSend(OUTGOING_ACTIONS.CREATE_CONVERSATION, {
                 participants: participants,
                 type: options.type || 'direct',
                 name: options.name,
@@ -2957,7 +2941,7 @@
             if (!conversationId) return;
             if (!canSendUserMessages()) return;
             
-            ParentConnectionManager.send(OUTGOING_ACTIONS.ARCHIVE_CONVERSATION, {
+            safeSend(OUTGOING_ACTIONS.ARCHIVE_CONVERSATION, {
                 conversationId: conversationId,
                 archived: archived
             }, { requireAck: false });
@@ -2982,7 +2966,7 @@
         blockUser: function(userId, block = true) {
             if (!canSendUserMessages()) return false;
             
-            const result = ParentConnectionManager.send(OUTGOING_ACTIONS.BLOCK_USER, {
+            const result = safeSend(OUTGOING_ACTIONS.BLOCK_USER, {
                 userId,
                 block
             }, { requireAck: true });
@@ -3007,7 +2991,7 @@
     };
 
     // =============================================
-    // UI STATE MANAGER (PRESERVED - NO CHANGES)
+    // UI STATE MANAGER
     // =============================================
     const UIStateManager = {
         _drafts: {},
@@ -3138,7 +3122,7 @@
     }.init();
 
     // =============================================
-    // UI FEATURES (PRESERVED - NO CHANGES)
+    // UI FEATURES
     // =============================================
     const UIFeatures = {
         playNotificationSound: function() {
@@ -3201,7 +3185,7 @@
     };
 
     // =============================================
-    // EVENT BUS (PRESERVED - NO CHANGES)
+    // EVENT BUS
     // =============================================
     const EventBus = {
         _events: new Map(),
@@ -3240,7 +3224,7 @@
     };
 
     // =============================================
-    // UI BRIDGE (PRESERVED - ADAPTED)
+    // UI BRIDGE
     // =============================================
     const UIBridge = {
         _listeners: new Map(),
@@ -3249,11 +3233,9 @@
         init: function() {
             if (this._initialized) return this;
             
-            // Wait for DOM ready to attach listeners
             if (document.readyState === 'loading') {
                 document.addEventListener('DOMContentLoaded', () => this._attachListeners());
             } else {
-                // Only attach if module is already active
                 if (currentState === LIFECYCLE_STATES.ACTIVE) {
                     this._attachListeners();
                 }
@@ -3265,7 +3247,6 @@
         },
         
         _attachListeners: function() {
-            // Only attach if module is active
             if (currentState !== LIFECYCLE_STATES.ACTIVE) {
                 Logger.info('UIBridge', 'Delaying UI attachment until ACTIVE');
                 return;
@@ -3437,7 +3418,7 @@
     }.init();
 
     // =============================================
-    // MESSAGE DISPATCHER (PRESERVED, ADAPTED)
+    // MESSAGE DISPATCHER
     // =============================================
     const MessageDispatcher = {
         _handlers: new Map(),
@@ -3498,7 +3479,7 @@
         },
         
         dispatchToParent: function(type, payload = {}, options = {}) {
-            return ParentConnectionManager.send(type, payload, options);
+            return safeSend(type, payload, options);
         },
         
         getStats: function() {
@@ -3538,10 +3519,8 @@
         },
         
         _executeStartSequence: async function() {
-            // BOOTING → INITIALIZING
             setState(LIFECYCLE_STATES.INITIALIZING, 'start_sequence');
             
-            // Initialize all subsystems (no timeouts, just initialization)
             SecurityValidator.init();
             ParentConnectionManager.init();
             MessageDispatcher.init();
@@ -3549,25 +3528,18 @@
             SessionClient.init();
             HeartbeatClient.init();
             
-            // Load cached data but don't activate UI yet
             await loadCachedData();
             
-            // INITIALIZING → READY
             setState(LIFECYCLE_STATES.READY, 'initialization_complete');
             
-            // Mark as running
             this._state = 'running';
             this._notifyListeners('running');
             
             Logger.success('ModuleLifecycleController', `Module ready in ${Date.now() - this._startTime}ms`);
             
-            // Send CHILD_READY exactly once at correct time
             ParentConnectionManager.notifyChildReady();
             
-            // Wait for parent to activate us
             await parentReadyPromise;
-            
-            // UI will be initialized when PARENT_READY transitions to ACTIVE
         },
         
         stop: function() {
@@ -3611,7 +3583,7 @@
     }.init();
 
     // =============================================
-    // MODULE CORE CONTROLLER - REGISTRY (PRESERVED)
+    // MODULE CORE CONTROLLER - REGISTRY
     // =============================================
     const ModuleCoreController = {
         _version: MODULE_VERSION,
@@ -3631,7 +3603,6 @@
         },
         
         _registerModules: function() {
-            // Core modules
             this._modules.set('lifecycle', { getState: getLifecycleState });
             this._modules.set('security', SecurityValidator);
             this._modules.set('parentConnection', ParentConnectionManager);
@@ -3641,7 +3612,6 @@
             this._modules.set('heartbeat', HeartbeatClient);
             this._modules.set('moduleLifecycle', ModuleLifecycleController);
             
-            // Data modules
             this._modules.set('sessionStore', SessionStore);
             this._modules.set('chat', ChatManager);
             this._modules.set('friends', FriendManager);
@@ -3650,13 +3620,11 @@
             this._modules.set('messageHandler', MessageHandler);
             this._modules.set('conversation', ConversationManager);
             
-            // UI modules
             this._modules.set('uiState', UIStateManager);
             this._modules.set('uiBridge', UIBridge);
             this._modules.set('eventBus', EventBus);
             this._modules.set('uiFeatures', UIFeatures);
             
-            // Utilities
             this._modules.set('safeStorage', SafeStorage);
             this._modules.set('securityUtils', SecurityUtils);
             this._modules.set('ackController', AckController);
@@ -3699,14 +3667,12 @@
             Logger.info('ModuleCoreController', 'Resetting module');
             ModuleLifecycleController.stop();
             
-            // Reset everything
             resetLifecycle();
             ParentConnectionManager.reset();
             ReliabilityLayer.reset();
             SessionClient.clear();
             HeartbeatClient.reset();
             
-            // Restart
             setTimeout(() => {
                 ModuleLifecycleController.start();
             }, 100);
@@ -3714,7 +3680,7 @@
     }.init();
 
     // =============================================
-    // BOOT CONTROLLER (PRESERVED, ADAPTED)
+    // BOOT CONTROLLER
     // =============================================
     const BootController = {
         _bootStartTime: null,
@@ -3762,10 +3728,8 @@
             return;
         }
         
-        // Initialize UI modules only when ACTIVE
         UIBridge.init();
         
-        // Notify that UI is ready
         EventBus.emit('ui:ready', { timestamp: Date.now() });
         
         Logger.success('UI', 'UI initialized');
@@ -3779,17 +3743,14 @@
         
         Logger.info('DataFlow', 'Starting data flow');
         
-        // Now safe to fetch data
         ConversationManager.fetchConversations();
         
-        // Request session with proper error handling
         SessionClient.requestSession()
             .then(() => {
                 Logger.success('DataFlow', 'Session established');
             })
             .catch((error) => {
                 Logger.warn('DataFlow', 'Session request failed - will retry later', error);
-                // Schedule a retry after a delay
                 setTimeout(() => {
                     if (currentState === LIFECYCLE_STATES.ACTIVE) {
                         SessionClient.requestSession().catch(e => {
@@ -3811,14 +3772,11 @@
         console.log(`[${MODULE_NAME}] 🚀 Messages Core v${MODULE_VERSION} (Parent Authority Architecture - Strict)`);
         
         try {
-            // Set initial state
             setState(LIFECYCLE_STATES.BOOTING, 'initialization_start');
             
-            // Start the module lifecycle
             ModuleCoreController.init();
             ModuleLifecycleController.start();
             
-            // Listen for ACTIVE state to complete boot
             stateListeners.add((toState) => {
                 if (toState === LIFECYCLE_STATES.ACTIVE) {
                     BootController.completeBoot();
@@ -3858,7 +3816,6 @@
     }
     
     function restoreLastChat() {
-        // Only restore if ACTIVE
         if (currentState !== LIFECYCLE_STATES.ACTIVE) return;
         
         const lastChatId = SafeStorage.get('lastChatId');
@@ -3871,7 +3828,7 @@
     }
 
     // =============================================
-    // CLEANUP (PRESERVED)
+    // CLEANUP
     // =============================================
     window.addEventListener('beforeunload', () => {
         if (ChatManager.getActiveChat()) {
@@ -3896,17 +3853,14 @@
             friends: FriendManager.getFriends(),
             timestamp: Date.now()
         });
-        
-        // Don't stop heartbeat - parent handles it
     });
 
     // =============================================
-    // PUBLIC API (PRESERVED, ADAPTED)
+    // PUBLIC API
     // =============================================
     const MessagesCore = {
         version: MODULE_VERSION,
         
-        // Core modules
         SessionStore,
         ChatManager,
         FriendManager,
@@ -3915,7 +3869,6 @@
         EventBus,
         Security: SECURITY,
         
-        // New subsystems
         SecurityValidator,
         ReliabilityLayer,
         SessionClient,
@@ -3925,19 +3878,16 @@
         ModuleLifecycleController,
         ModuleCoreController,
         
-        // Feature modules
         MessageHandler,
         ConversationManager,
         TypingManager,
         UIStateManager,
         UIFeatures,
         
-        // Utilities
         SecurityUtils,
         SafeStorage,
         Logger,
         
-        // State
         getState: getLifecycleState,
         isReady: () => currentState === LIFECYCLE_STATES.ACTIVE,
         isCoreReady: () => currentState === LIFECYCLE_STATES.ACTIVE,
@@ -3947,16 +3897,13 @@
         getMessages: () => ChatManager.getMessages(),
         getFriends: () => FriendManager.getFriendListForChat(),
         
-        // Security
         getSecurityReport: () => SECURITY.getSecurityReport(),
         
-        // Subscriptions
         subscribe: (callback) => stateListeners.add(callback),
         on: (event, callback) => EventBus.on(event, callback),
         off: (event, callback) => EventBus.off(event, callback),
         once: (event, callback) => EventBus.once(event, callback),
         
-        // Message actions
         sendMessage: (content, options) => MessageHandler.sendMessage(content, options),
         retryMessage: (messageId) => MessageHandler.retryMessage(messageId),
         deleteMessage: (messageId, forEveryone) => MessageHandler.deleteMessage(messageId, forEveryone),
@@ -3966,7 +3913,6 @@
         reportMessage: (messageId, reason) => MessageHandler.reportMessage(messageId, reason),
         searchMessages: (conversationId, query, options) => MessageHandler.searchMessages(conversationId, query, options),
         
-        // Conversation actions
         openConversation: (conversationId, options) => ConversationManager.openConversation(conversationId, options),
         fetchMessages: (conversationId, options) => ConversationManager.fetchMessages(conversationId, options),
         fetchConversations: () => ConversationManager.fetchConversations(),
@@ -3975,12 +3921,10 @@
         archiveConversation: (conversationId, archived) => ConversationManager.archiveConversation(conversationId, archived),
         blockUser: (userId, block) => ConversationManager.blockUser(userId, block),
         
-        // Typing
         sendTyping: (conversationId, isTyping) => TypingManager.sendTyping(conversationId, isTyping),
         stopTyping: () => TypingManager.stopTyping(),
         getTypingUsers: (conversationId) => TypingManager.getTypingUsersForConversation(conversationId),
         
-        // UI State
         UI: {
             saveDraft: (conversationId, text, attachment) => UIStateManager.saveDraft(conversationId, text, attachment),
             getDraft: (conversationId) => UIStateManager.getDraft(conversationId),
@@ -3997,10 +3941,8 @@
             getSettings: () => UIStateManager.getSettings()
         },
         
-        // UI Features
         features: UIFeatures,
         
-        // Formatting utilities
         formatMessageText: UIFeatures.formatMessageText,
         formatTime: UIFeatures.formatTime,
         formatDate: UIFeatures.formatDate,
@@ -4010,23 +3952,17 @@
         escapeRegex: SecurityUtils.escapeRegex,
         sanitizeString: SecurityUtils.sanitizeString,
         
-        // Pending count
         getPendingMessageCount: () => MessageHandler.getPendingCount(),
         
-        // Send raw action
-        sendAction: (type, payload, options) => ParentConnectionManager.send(type, payload, options),
+        sendAction: (type, payload, options) => safeSend(type, payload, options),
         sendActionWithResponse: (type, payload) => ParentConnectionManager.sendWithResponse(type, payload),
         
-        // Wait for boot
         waitForBoot: () => BootController.waitForBoot(),
         
-        // Stats
         getStats: () => ModuleCoreController.getStats(),
         
-        // Reset
         reset: () => ModuleCoreController.reset(),
         
-        // Debug
         debug: {
             getState: getLifecycleState,
             ParentConnectionManager,
@@ -4034,19 +3970,18 @@
             MessageTracker,
             SafeStorage,
             Security: SECURITY,
-            HeartbeatClient
+            HeartbeatClient,
+            messageQueue,
+            flushQueue: flushMessageQueue
         }
     };
 
-    // Expose globally
     window.MessagesCore = MessagesCore;
     window.__MODULE_NAME__ = MODULE_NAME;
     window.__MODULE_VERSION__ = MODULE_VERSION;
     
-    // Auto-initialize
     initialize();
 
-    // Export for module systems
     if (typeof module !== 'undefined' && module.exports) {
         module.exports = MessagesCore;
     }

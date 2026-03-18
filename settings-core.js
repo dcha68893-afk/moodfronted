@@ -1,6 +1,6 @@
 // =============================================
 // SETTINGS MODULE - COMMUNICATION INFRASTRUCTURE UPDATE
-// VERSION: 7.2.9 - STRICT PARENT-CONTROLLED LIFECYCLE
+// VERSION: 7.2.10 - STRICT PARENT-CONTROLLED LIFECYCLE + PROTOCOL COMPLIANCE
 // ALL ORIGINAL FEATURES PRESERVED - 10000+ LINES INTACT
 // =============================================
 
@@ -18,8 +18,8 @@
 // =============================================
 // MODULE IDENTITY & VERSION
 // =============================================
-const MODULE_NAME = 'settings';
-const MODULE_VERSION = '7.2.9';
+const MODULE_NAME = 'settings'; // EXACT match - DO NOT CHANGE
+const MODULE_VERSION = '7.2.10';
 const FRAME_ID = 'settings';
 let moduleId = `settings-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
 
@@ -35,14 +35,13 @@ let CONSOLE_NOISE_SUPPRESSED = true;
 // STRICT LIFECYCLE STATE MACHINE - PARENT CONTROLLED
 // =============================================
 const LifecycleState = {
-    BOOTING: 'BOOTING',
-    INITIALIZING: 'INITIALIZING',
-    READY: 'READY',
-    WAIT_PARENT: 'WAIT_PARENT',
-    ACTIVE: 'ACTIVE'
+    INITIALIZING: 'INITIALIZING', // Start here
+    READY: 'READY',                // After local init
+    WAIT_PARENT: 'WAIT_PARENT',    // After CHILD_READY sent
+    ACTIVE: 'ACTIVE'               // After PARENT_READY received
 };
 
-let currentState = LifecycleState.BOOTING;
+let currentState = LifecycleState.INITIALIZING; // Start in INITIALIZING
 let stateHistory = [];
 let isReady = false;
 
@@ -50,7 +49,6 @@ function setState(newState, reason = '') {
     if (currentState === newState) return false;
     
     const validTransitions = {
-        [LifecycleState.BOOTING]: [LifecycleState.INITIALIZING],
         [LifecycleState.INITIALIZING]: [LifecycleState.READY],
         [LifecycleState.READY]: [LifecycleState.WAIT_PARENT],
         [LifecycleState.WAIT_PARENT]: [LifecycleState.ACTIVE],
@@ -95,6 +93,11 @@ let sessionSyncCompleted = false;
 let childReadySent = false;
 let registrationSent = false;
 
+// Parent ready flag - CRITICAL GATE
+let parentReady = false;
+
+
+
 // Message tracking for deduplication
 const processedMessages = new Set();
 const MAX_PROCESSED_MESSAGES = 100;
@@ -122,7 +125,6 @@ let parentSessionReceived = false;
 let parentOrigin = null;
 let parentSessionData = null;
 let sessionValidated = false;
-let parentReady = false;
 let parentReadyReceived = false;
 let moduleRegistered = false;
 let connectionQuality = 'unknown';
@@ -163,7 +165,7 @@ const activeTimers = new Set();
 const activeIntervals = new Set();
 
 // =============================================
-// UTILITY FUNCTIONS
+// ID GENERATION FUNCTIONS - MANDATORY
 // =============================================
 function generateMessageId() {
     return `msg_${Date.now()}_${Math.random().toString(36).substring(2, 10)}`;
@@ -285,8 +287,8 @@ function validateCanonicalMessage(msg) {
     if (typeof msg.messageId !== 'string') return false;
     if (typeof msg.timestamp !== 'number') return false;
     
-    // Target validation
-    if (msg.target !== 'parent' && msg.target !== '*' && msg.target !== MODULE_NAME && msg.target !== 'all') {
+    // Target validation - MUST be 'parent' for outbound
+    if (msg.target !== 'parent') {
         return false;
     }
     
@@ -294,23 +296,24 @@ function validateCanonicalMessage(msg) {
 }
 
 // =============================================
-// CREATE CANONICAL MESSAGE
+// CREATE CANONICAL MESSAGE - ENFORCES SCHEMA
 // =============================================
 function createCanonicalMessage(type, payload = {}, target = 'parent') {
     return {
         type: type,
-        source: MODULE_NAME,
-        target: target,
+        source: MODULE_NAME, // EXACT module name
+        target: target,      // MUST be 'parent'
         messageId: generateMessageId(),
+        requestId: generateRequestId(), // Always include for request-response
         timestamp: Date.now(),
         payload: payload
     };
 }
 
 // =============================================
-// SAFE POST MESSAGE TO PARENT
+// SAFE SEND TO PARENT - WITH QUEUE AND GATING
 // =============================================
-function sendToParent(message) {
+function sendMessage(message) {
     try {
         // Ensure message follows canonical format
         let canonicalMessage = message;
@@ -329,6 +332,9 @@ function sendToParent(message) {
             return false;
         }
         
+        // Ensure target is 'parent'
+        canonicalMessage.target = 'parent';
+        
         // Send to parent
         if (window.parent && window.parent !== window) {
             window.parent.postMessage(canonicalMessage, '*');
@@ -337,6 +343,28 @@ function sendToParent(message) {
         return false;
     } catch (error) {
         return false;
+    }
+}
+
+// =============================================
+// SAFE SEND WITH QUEUE - GATED BY PARENT_READY
+// =============================================
+function safeSend(msg) {
+    // CRITICAL: Gate all messages by parentReady
+    if (!parentReady) {
+        messageQueue.push(msg);
+        return true;
+    }
+    
+    return sendMessage(msg);
+}
+
+// =============================================
+// FLUSH QUEUE - Called after PARENT_READY
+// =============================================
+function flushQueue() {
+    while (messageQueue.length) {
+        sendMessage(messageQueue.shift());
     }
 }
 
@@ -420,7 +448,8 @@ const MessageTransport = {
         if (this._listenerAttached) return;
         
         window.addEventListener('message', (event) => {
-            this._handleIncoming(event);
+            // PERFORMANCE FIX: Move heavy logic out of listener
+            setTimeout(() => this._handleIncoming(event), 0);
         });
         
         this._listenerAttached = true;
@@ -447,9 +476,14 @@ const MessageTransport = {
             
             receiveLog(message.type);
             
-            // Handle PARENT_READY
+            // Handle PARENT_READY - CRITICAL GATE
             if (message.type === 'PARENT_READY') {
                 handleParentReady(message);
+                return;
+            }
+            
+            // Only process other messages after PARENT_READY
+            if (!parentReady) {
                 return;
             }
             
@@ -592,11 +626,8 @@ const MessageTransport = {
                 }
             }
             
-            try {
-                this._parentWindow.postMessage(message, this._parentOrigin);
-            } catch (e) {
-                this._parentWindow.postMessage(message, '*');
-            }
+            // Use safeSend to gate by parentReady
+            safeSend(message);
             
             return true;
             
@@ -652,7 +683,7 @@ const LifecycleController = {
         initLog('LifecycleController initializing');
         this._setupMessageHandlers();
         
-        // Start at BOOTING, move to INITIALIZING
+        // Start at INITIALIZING
         setState(LifecycleState.INITIALIZING, 'starting');
         
         // Initialize core components
@@ -678,12 +709,16 @@ const LifecycleController = {
         
         childReadySent = true;
         
-        MessageTransport.send('CHILD_READY', {
+        // Use safeSend for CHILD_READY (will queue if parent not ready)
+        // But CHILD_READY must be sent even if parent not ready yet
+        const message = createCanonicalMessage('CHILD_READY', {
             module: MODULE_NAME,
             version: MODULE_VERSION,
             frameId: FRAME_ID,
             environment: IframeEnvironment.getEnvironment()
-        });
+        }, 'parent');
+        
+        sendMessage(message); // Direct send - CHILD_READY bypasses queue
         
         setState(LifecycleState.WAIT_PARENT, 'child_ready_sent');
         initLog('CHILD_READY sent');
@@ -772,7 +807,7 @@ const LifecycleController = {
         if (this._parentReadyReceived) return;
         
         this._parentReadyReceived = true;
-        parentReady = true;
+        parentReady = true; // CRITICAL: Set parentReady gate
         parentReadyReceived = true;
         parentCommunicationReady = true;
         
@@ -780,6 +815,9 @@ const LifecycleController = {
         parentReadyResolve();
         
         setState(LifecycleState.ACTIVE, 'parent_ready_received');
+        
+        // Flush any queued messages
+        flushQueue();
         
         // After activation, request settings
         this._requestSettingsLoad();
@@ -2467,7 +2505,7 @@ const SecurityValidator = {
         
         this.addRule('source_valid', (message) => {
             if (!message.source) return false;
-            if (message.source !== 'parent' && message.source !== 'settings') return false;
+            if (message.source !== 'parent' && message.source !== MODULE_NAME) return false;
             return true;
         });
         
@@ -3422,7 +3460,7 @@ const ORIGIN_BIND = 'ORIGIN_BIND';
 const MultiModuleCoordinator = {
     _modules: new Map(),
     _moduleId: `settings_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
-    _moduleType: 'settings',
+    _moduleType: MODULE_NAME, // Use exact module name
     _busListeners: new Map(),
     _sharedSession: null,
     _masterModule: false,
@@ -5003,9 +5041,11 @@ function startParentHandshake(options = {}) {
 }
 
 // =============================================
-// SEND MESSAGE TO PARENT - ALIAS
+// SEND MESSAGE TO PARENT - ALIAS (UPDATED TO USE SAFESEND)
 // =============================================
-const sendMessageToParent = sendToParent;
+function sendMessageToParent(message) {
+    return safeSend(message);
+}
 
 // =============================================
 // RESET UI FOR LOGOUT
@@ -5277,7 +5317,7 @@ function shutdownCore() {
             reason: 'normal_shutdown'
         });
         
-        currentState = LifecycleState.BOOTING;
+        currentState = LifecycleState.INITIALIZING;
         isReady = false;
         initializationInProgress = false;
         parentReady = false;
@@ -5322,7 +5362,7 @@ async function initializeCore(options = {}) {
         return initializationPromise;
     }
     
-    if (currentState !== LifecycleState.BOOTING) {
+    if (currentState !== LifecycleState.INITIALIZING) {
         return { success: true, state: currentState };
     }
     
@@ -5346,7 +5386,7 @@ async function initializeCore(options = {}) {
             // Setup message handlers
             setupMessageHandlers();
             
-            // Start lifecycle controller (will move through BOOTING -> INITIALIZING -> READY -> WAIT_PARENT)
+            // Start lifecycle controller (will move through INITIALIZING -> READY -> WAIT_PARENT)
             LifecycleController.init();
             
             // Wait for parent ready via promise (no timeout)
@@ -5870,7 +5910,6 @@ export {
     verifyParentPresence,
     setupSecureMessagingChannel,
     startParentHandshake,
-    sendMessageToParent,
     resetUIForLogout,
     showReconnectionState,
     checkAuthenticationState,
@@ -5952,10 +5991,14 @@ export {
     isSessionValid,
     updateSetting,
     handleLogout,
-    sendToParent,
+     sendMessageToParent, // Alias for backward compatibility
     setSilentMode,
     shutdownCore,
-    initializeCore
+    initializeCore,
+    
+    // NEW: Expose queue and parentReady for debugging
+    messageQueue,
+    parentReady
 };
 
 // =============================================
@@ -6010,6 +6053,8 @@ window.__getSessionStatus = () => ({
 });
 window.__getLifecycleState = () => currentState;
 window.__getLifecycleHistory = () => stateHistory;
+window.__getParentReady = () => parentReady;
+window.__getMessageQueue = () => messageQueue.length;
 
 // =============================================
 // END OF FILE

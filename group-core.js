@@ -1,14 +1,14 @@
 // =============================================
 // GROUPS MODULE - PARENT AUTHORITY COMPLIANT
-// DETERMINISTIC STATE MACHINE - VERSION 7.0.2
+// DETERMINISTIC STATE MACHINE - VERSION 7.1.0
 // FIXED MESSAGE SCHEMA - PARENT AUTHORITY ONLY
 // =============================================
 
 // =============================================
 // MODULE IDENTIFICATION - SINGLETON
 // =============================================
-const MODULE_NAME = 'groups';
-const MODULE_VERSION = '7.0.2';
+const MODULE_NAME = 'groups'; // EXACT MATCH - DO NOT CHANGE
+const MODULE_VERSION = '7.1.0';
 const MODULE_CAPABILITIES = [
     'group_management',
     'group_messaging',
@@ -19,6 +19,21 @@ const MODULE_CAPABILITIES = [
     'transparency_logs',
     'energy_suggestions'
 ];
+
+// =============================================
+// PROTOCOL COMPLIANCE FLAGS
+// =============================================
+let parentReady = false;
+let handshakeCompleted = false;
+let sessionReceived = false;
+let childReadySent = false;
+let initializationComplete = false;
+
+// =============================================
+// MESSAGE QUEUE SYSTEM - CRITICAL FOR PROTOCOL
+// =============================================
+const messageQueue = [];
+let isFlushingQueue = false;
 
 // =============================================
 // DEBUG FLAG - CONTROL CONSOLE NOISE
@@ -33,22 +48,93 @@ function debugLog(...args) {
 }
 
 // =============================================
-// STANDARDIZED MESSAGE SCHEMA UTILITIES
+// ID GENERATION - MANDATORY FOR PROTOCOL
 // =============================================
-function generateMessageId() {
+function generateId() {
     return `${MODULE_NAME}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 }
 
+function generateRequestId() {
+    return `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+}
+
+// =============================================
+// STANDARDIZED MESSAGE SCHEMA UTILITIES
+// =============================================
 function createMessage(type, payload = {}, target = 'parent') {
+    const id = generateId();
     return {
         type,
-        source: MODULE_NAME,
-        target,
-        messageId: generateMessageId(),
-        timestamp: Date.now(),
-        module: MODULE_NAME, // CRITICAL: Parent expects this field
+        id,                         // REQUIRED by protocol
+        requestId: id,              // REQUIRED for request-response pairing
+        source: MODULE_NAME,        // EXACT module name
+        target,                     // MUST be "parent"
+        timestamp: Date.now(),      // REQUIRED
+        module: MODULE_NAME,        // CRITICAL: Parent expects this field
         payload
     };
+}
+
+// =============================================
+// SAFE SEND WITH QUEUE - PROTOCOL COMPLIANT
+// =============================================
+function sendMessage(message) {
+    try {
+        if (!window.parent || window.parent === window) {
+            debugLog('No parent window');
+            return { success: false, error: 'no_parent' };
+        }
+        
+        window.parent.postMessage(message, '*');
+        debugLog(`Sent: ${message.type}`, message.id);
+        return { success: true, messageId: message.id };
+    } catch (error) {
+        debugLog('Error sending message:', error);
+        return { success: false, error: error.message };
+    }
+}
+
+function safeSend(type, payload = {}) {
+    const message = createMessage(type, payload);
+    
+    // If parent not ready, queue the message
+    if (!parentReady) {
+        debugLog(`Queueing ${type} - parent not ready`);
+        messageQueue.push(message);
+        
+        // Limit queue size
+        if (messageQueue.length > 100) {
+            messageQueue.shift();
+        }
+        
+        return Promise.resolve({ 
+            success: true, 
+            queued: true, 
+            messageId: message.id 
+        });
+    }
+    
+    // Send immediately if parent ready
+    const result = sendMessage(message);
+    return Promise.resolve(result);
+}
+
+// =============================================
+// FLUSH QUEUE - SEND ALL QUEUED MESSAGES
+// =============================================
+function flushQueue() {
+    if (isFlushingQueue || messageQueue.length === 0) return;
+    
+    isFlushingQueue = true;
+    debugLog(`Flushing ${messageQueue.length} queued messages`);
+    
+    // Process queue synchronously
+    while (messageQueue.length > 0) {
+        const message = messageQueue.shift();
+        sendMessage(message);
+    }
+    
+    isFlushingQueue = false;
 }
 
 // =============================================
@@ -94,7 +180,6 @@ const LifecycleState = (function() {
     // Current state
     let _state = STATES.BOOTING;
     let _registered = false;
-    let _sessionReceived = false;
     let _listeners = new Set();
     
     // Valid transitions
@@ -154,14 +239,6 @@ const LifecycleState = (function() {
         _registered = true;
     }
     
-    function hasSession() {
-        return _sessionReceived;
-    }
-    
-    function setSessionReceived() {
-        _sessionReceived = true;
-    }
-    
     function subscribe(listener) {
         _listeners.add(listener);
         listener(_state, null);
@@ -171,7 +248,10 @@ const LifecycleState = (function() {
     function reset() {
         _state = STATES.BOOTING;
         _registered = false;
-        _sessionReceived = false;
+        parentReady = false;
+        handshakeCompleted = false;
+        sessionReceived = false;
+        childReadySent = false;
     }
     
     return {
@@ -182,8 +262,6 @@ const LifecycleState = (function() {
         isActive,
         isRegistered,
         setRegistered,
-        hasSession,
-        setSessionReceived,
         subscribe,
         reset
     };
@@ -220,46 +298,20 @@ const ParentMessaging = {
         return (
             msg &&
             typeof msg.type === 'string' &&
+            typeof msg.id === 'string' &&           // REQUIRED by protocol
+            typeof msg.requestId === 'string' &&    // REQUIRED by protocol
             typeof msg.source === 'string' &&
             typeof msg.target === 'string' &&
-            typeof msg.messageId === 'string' &&
             typeof msg.timestamp === 'number' &&
             (msg.module !== undefined) && // CRITICAL: Parent expects this
             (msg.payload !== undefined)
         );
     },
     
-    // Send message to parent using standardized schema
+    // Send message to parent using standardized schema - NOW USES safeSend
     send(type, payload = {}) {
-        // Don't send if not in correct state (except for CHILD_READY which is allowed in READY state)
-        if (type !== 'CHILD_READY' && !LifecycleState.isAtLeast(LifecycleState.STATES.WAIT_PARENT)) {
-            debugLog(`Cannot send ${type}: not in WAIT_PARENT or ACTIVE state`);
-            return Promise.resolve({ success: false, error: 'invalid_state' });
-        }
-        
-        const message = createMessage(type, payload);
-        
-        // Add requestId for backward compatibility
-        message.requestId = message.messageId;
-        
-        debugLog(`Sending: ${type}`, message.messageId);
-        
-        return new Promise((resolve) => {
-            try {
-                if (!window.parent || window.parent === window) {
-                    debugLog('No parent window');
-                    resolve({ success: false, error: 'no_parent' });
-                    return;
-                }
-                
-                window.parent.postMessage(message, '*');
-                resolve({ success: true, messageId: message.messageId });
-                
-            } catch (error) {
-                debugLog('Error sending message:', error);
-                resolve({ success: false, error: error.message });
-            }
-        });
+        // Use safeSend which handles queuing
+        return safeSend(type, payload);
     },
     
     // Handle incoming message from parent
@@ -283,12 +335,12 @@ const ParentMessaging = {
         }
         
         // Deduplicate by messageId
-        if (message.messageId && isDuplicate(message.messageId)) {
-            debugLog('Ignoring duplicate message:', message.messageId);
+        if (message.id && isDuplicate(message.id)) {
+            debugLog('Ignoring duplicate message:', message.id);
             return true;
         }
         
-        debugLog('Received:', message.type, message.messageId);
+        debugLog('Received:', message.type, message.id);
         
         // Route to appropriate handler
         return MessageRouter.handle(message);
@@ -301,6 +353,19 @@ const ParentMessaging = {
 const MessageRouter = {
     // Handle messages based on type
     handle(message) {
+        // Use setTimeout to prevent blocking the message listener
+        setTimeout(() => {
+            try {
+                this._handleSync(message);
+            } catch (error) {
+                console.error(`[${MODULE_NAME}] Error handling message:`, error);
+            }
+        }, 0);
+        
+        return true;
+    },
+    
+    _handleSync(message) {
         switch (message.type) {
             // Lifecycle messages
             case 'PARENT_READY':
@@ -404,21 +469,33 @@ const MessageRouter = {
     handleParentReady(message) {
         console.log(`[${MODULE_NAME}] PARENT_READY received`);
         
+        // Set parent ready flag
+        parentReady = true;
+        
         // Resolve parent ready promise
         if (parentReadyResolve) {
             parentReadyResolve();
             parentReadyResolve = null;
         }
         
+        // Flush any queued messages
+        flushQueue();
+        
+        // Transition to ACTIVE if in WAIT_PARENT
         if (LifecycleState.getState() === LifecycleState.STATES.WAIT_PARENT) {
-            // Send registration exactly once
+            LifecycleState.transition(LifecycleState.STATES.ACTIVE);
+            
+            // Send registration if needed
             if (!LifecycleState.isRegistered()) {
-                ParentMessaging.send('REGISTER_MODULE', {
+                safeSend('REGISTER_MODULE', {
                     module: MODULE_NAME,
                     version: MODULE_VERSION,
                     capabilities: MODULE_CAPABILITIES
-                }).catch(() => {});
+                });
             }
+            
+            // Now ACTIVE - initialize UI and start data flow
+            initUIAfterActivation();
         }
     },
     
@@ -427,10 +504,12 @@ const MessageRouter = {
         
         if (LifecycleState.getState() === LifecycleState.STATES.WAIT_PARENT && message.payload?.success) {
             LifecycleState.setRegistered();
-            LifecycleState.transition(LifecycleState.STATES.ACTIVE);
             
-            // Now ACTIVE - initialize UI and start data flow
-            initUIAfterActivation();
+            // Already ACTIVE from PARENT_READY, but ensure UI init
+            if (LifecycleState.getState() !== LifecycleState.STATES.ACTIVE) {
+                LifecycleState.transition(LifecycleState.STATES.ACTIVE);
+                initUIAfterActivation();
+            }
         }
     },
     
@@ -438,8 +517,8 @@ const MessageRouter = {
         const sessionData = message.payload;
         console.log(`[${MODULE_NAME}] SESSION_DATA received`, sessionData ? 'with data' : 'empty');
         
-        if (!LifecycleState.hasSession() && sessionData) {
-            LifecycleState.setSessionReceived();
+        if (!sessionReceived && sessionData) {
+            sessionReceived = true;
             
             // Update session in GroupCore
             if (sessionData) {
@@ -465,12 +544,14 @@ const MessageRouter = {
     handleHeartbeat(message) {
         debugLog('HEARTBEAT received');
         
-        // Only respond with HEARTBEAT_ACK, never initiate
-        ParentMessaging.send('HEARTBEAT_ACK', {
-            inResponseTo: message.messageId,
-            timestamp: Date.now(),
-            state: LifecycleState.getState()
-        }).catch(() => {});
+        // Only respond with HEARTBEAT_ACK if parent is ready
+        if (parentReady) {
+            safeSend('HEARTBEAT_ACK', {
+                inResponseTo: message.id,
+                timestamp: Date.now(),
+                state: LifecycleState.getState()
+            });
+        }
     },
     
     handleError(message) {
@@ -479,7 +560,7 @@ const MessageRouter = {
     },
     
     // =========================================
-    // GROUP MANAGEMENT HANDLERS
+    // GROUP MANAGEMENT HANDLERS (PRESERVED)
     // =========================================
     
     handleGroupListResponse(message) {
@@ -969,10 +1050,8 @@ const MessageRouter = {
 };
 
 // =============================================
-// CHILD READY SENDER - EXACTLY ONCE
+// CHILD READY SENDER - EXACTLY ONCE - PROTOCOL COMPLIANT
 // =============================================
-let childReadySent = false;
-
 function sendChildReady() {
     if (LifecycleState.getState() !== LifecycleState.STATES.READY) {
         debugLog('[Handshake] BLOCKED: Not READY');
@@ -986,12 +1065,11 @@ function sendChildReady() {
     
     childReadySent = true;
     
-    ParentMessaging.send('CHILD_READY', {
-        source: MODULE_NAME,
+    // Use safeSend which will queue if parent not ready
+    safeSend('CHILD_READY', {
+        module: MODULE_NAME,        // EXACT module name
         version: MODULE_VERSION,
         capabilities: MODULE_CAPABILITIES
-    }).catch(() => {
-        debugLog('Failed to send CHILD_READY');
     });
     
     console.log(`[${MODULE_NAME}] CHILD_READY sent`);
@@ -1055,6 +1133,8 @@ function updateSessionInCore(sessionData) {
 // UI INITIALIZATION - ONLY AFTER ACTIVE
 // =============================================
 function initUIAfterActivation() {
+    if (!LifecycleState.isActive()) return;
+    
     debugLog('Initializing UI after activation');
     
     // Load cached data
@@ -1460,7 +1540,7 @@ const GroupCore = {
         
         debugLog('Requesting group list');
         
-        return ParentMessaging.send('GROUP_LIST_REQUEST', {
+        return safeSend('GROUP_LIST_REQUEST', {
             module: MODULE_NAME,
             timestamp: Date.now()
         }).then(response => {
@@ -1496,7 +1576,7 @@ const GroupCore = {
         
         debugLog('Creating group');
         
-        return ParentMessaging.send('GROUP_CREATE', {
+        return safeSend('GROUP_CREATE', {
             module: MODULE_NAME,
             name: groupData.name,
             description: groupData.description || '',
@@ -1541,7 +1621,7 @@ const GroupCore = {
         
         debugLog('Updating group');
         
-        return ParentMessaging.send('GROUP_UPDATE', {
+        return safeSend('GROUP_UPDATE', {
             module: MODULE_NAME,
             groupId,
             name: groupData.name,
@@ -1577,7 +1657,7 @@ const GroupCore = {
         
         debugLog('Deleting group');
         
-        return ParentMessaging.send('GROUP_DELETE', {
+        return safeSend('GROUP_DELETE', {
             module: MODULE_NAME,
             groupId
         }).then(response => {
@@ -1611,7 +1691,7 @@ const GroupCore = {
         
         debugLog('Adding member to group');
         
-        return ParentMessaging.send('GROUP_ADD_MEMBER', {
+        return safeSend('GROUP_ADD_MEMBER', {
             module: MODULE_NAME,
             groupId,
             userId,
@@ -1651,7 +1731,7 @@ const GroupCore = {
         
         debugLog('Removing member from group');
         
-        return ParentMessaging.send('GROUP_REMOVE_MEMBER', {
+        return safeSend('GROUP_REMOVE_MEMBER', {
             module: MODULE_NAME,
             groupId,
             userId
@@ -1686,7 +1766,7 @@ const GroupCore = {
         
         debugLog('Leaving group');
         
-        return ParentMessaging.send('GROUP_LEAVE', {
+        return safeSend('GROUP_LEAVE', {
             module: MODULE_NAME,
             groupId
         }).then(response => {
@@ -1717,7 +1797,7 @@ const GroupCore = {
         
         debugLog('Promoting to admin');
         
-        return ParentMessaging.send('GROUP_PROMOTE_ADMIN', {
+        return safeSend('GROUP_PROMOTE_ADMIN', {
             module: MODULE_NAME,
             groupId,
             userId
@@ -1752,7 +1832,7 @@ const GroupCore = {
         
         debugLog('Demoting from admin');
         
-        return ParentMessaging.send('GROUP_DEMOTE_ADMIN', {
+        return safeSend('GROUP_DEMOTE_ADMIN', {
             module: MODULE_NAME,
             groupId,
             userId
@@ -1787,7 +1867,7 @@ const GroupCore = {
         
         debugLog('Sending join request');
         
-        return ParentMessaging.send('GROUP_JOIN_REQUEST', {
+        return safeSend('GROUP_JOIN_REQUEST', {
             module: MODULE_NAME,
             groupId,
             message
@@ -1812,7 +1892,7 @@ const GroupCore = {
         
         debugLog('Approving join request');
         
-        return ParentMessaging.send('GROUP_JOIN_APPROVE', {
+        return safeSend('GROUP_JOIN_APPROVE', {
             module: MODULE_NAME,
             groupId,
             requestId,
@@ -1838,7 +1918,7 @@ const GroupCore = {
         
         debugLog('Rejecting join request');
         
-        return ParentMessaging.send('GROUP_JOIN_REJECT', {
+        return safeSend('GROUP_JOIN_REJECT', {
             module: MODULE_NAME,
             groupId,
             requestId,
@@ -1980,7 +2060,7 @@ const GroupCore = {
     
     // Check if ready for group operations
     isReady() {
-        return LifecycleState.isActive();
+        return LifecycleState.isActive() && parentReady;
     }
 };
 
@@ -2044,7 +2124,8 @@ function initCoreDependencies() {
 async function activateModule() {
     await parentReadyPromise;
     
-    LifecycleState.transition(LifecycleState.STATES.ACTIVE);
+    // parentReady is set in handleParentReady
+    // Transition happens there
     
     console.log(`[${MODULE_NAME}] Activated`);
 }
@@ -2556,11 +2637,11 @@ function resetRetry(operationId) {
 }
 
 function hasValidSession() {
-    return LifecycleState.hasSession();
+    return sessionReceived;
 }
 
 function isGroupOperationReady() {
-    return LifecycleState.isActive();
+    return LifecycleState.isActive() && parentReady;
 }
 
 function guardGroupOperation(operation, fallback = null) {
@@ -2600,7 +2681,6 @@ let __SESSION_REQUEST_PENDING__ = false;
 
 let handshakeInProgress = false;
 let handshakeAttempts = 0;
-let handshakeCompleted = false;
 
 function initializeTokenSystem() {
     try {
@@ -3283,11 +3363,12 @@ function addMemberToGroup(groupId, userId, role = 'member') {
     
     GroupCore.saveGroups();
     
-    ParentMessaging.send('MEMBER_ADDED', {
+    // Use safeSend for parent communication
+    safeSend('MEMBER_ADDED', {
         groupId: group.id,
         member: newMember,
         timestamp: Date.now()
-    }).catch(() => {});
+    });
     
     return { success: true, member: newMember };
 }
@@ -3321,12 +3402,13 @@ function removeMemberFromGroup(groupId, userId) {
     
     GroupCore.saveGroups();
     
-    ParentMessaging.send('MEMBER_REMOVED', {
+    // Use safeSend for parent communication
+    safeSend('MEMBER_REMOVED', {
         groupId: group.id,
         userId,
         removedMember,
         timestamp: Date.now()
-    }).catch(() => {});
+    });
     
     return { success: true };
 }
@@ -3359,13 +3441,14 @@ function changeMemberRole(groupId, userId, newRole) {
     
     GroupCore.saveGroups();
     
-    ParentMessaging.send('MEMBER_ROLE_CHANGED', {
+    // Use safeSend for parent communication
+    safeSend('MEMBER_ROLE_CHANGED', {
         groupId: group.id,
         userId,
         oldRole,
         newRole,
         timestamp: Date.now()
-    }).catch(() => {});
+    });
     
     return { success: true };
 }
@@ -3406,10 +3489,11 @@ function deleteGroup(groupId) {
         }
     }
     
-    ParentMessaging.send('GROUP_DELETED', {
+    // Use safeSend for parent communication
+    safeSend('GROUP_DELETED', {
         groupId,
         timestamp: Date.now()
-    }).catch(() => {});
+    });
     
     return { success: true };
 }
@@ -3491,7 +3575,7 @@ const openGroupChat = async function(groupData) {
     try {
         if (!groupData) return;
         
-        if (!LifecycleState.hasSession()) {
+        if (!sessionReceived) {
             return;
         }
         
@@ -4280,7 +4364,7 @@ const sendGroupMessage = async function() {
         
         if (!currentChatGroup || !chatInput || !chatInput.value.trim()) return;
         
-        if (!LifecycleState.hasSession()) {
+        if (!sessionReceived) {
             return;
         }
         
@@ -5033,7 +5117,7 @@ const createGroupOnline = async function(groupData) {
     try {
         if (!groupData) return;
         
-        if (!LifecycleState.hasSession()) {
+        if (!sessionReceived) {
             return;
         }
         
@@ -5107,10 +5191,11 @@ const createGroupOnline = async function(groupData) {
         selectedFriends = [];
         showGroupDetails(newGroup, 'my_group');
         
-        ParentMessaging.send('GROUP_CREATED', {
+        // Use safeSend for parent communication
+        safeSend('GROUP_CREATED', {
             group: newGroup,
             timestamp: Date.now()
-        }).catch(() => {});
+        });
         
     } catch (error) {}
 };
@@ -5122,7 +5207,7 @@ const joinGroupOnline = async function(groupId) {
     }
     
     try {
-        if (!LifecycleState.hasSession()) {
+        if (!sessionReceived) {
             return;
         }
         
@@ -5153,7 +5238,8 @@ const joinGroupOnline = async function(groupId) {
         const groupInviteModal = safeGetElement('#groupInviteModal');
         if (groupInviteModal) groupInviteModal.classList.remove('active');
         
-        ParentMessaging.send('MEMBER_ADDED', {
+        // Use safeSend for parent communication
+        safeSend('MEMBER_ADDED', {
             groupId,
             member: {
                 userId: currentUser?.uid || currentUser?.id,
@@ -5161,7 +5247,7 @@ const joinGroupOnline = async function(groupId) {
                 joinedAt: Date.now()
             },
             timestamp: Date.now()
-        }).catch(() => {});
+        });
         
     } catch (error) {}
 };
@@ -5173,7 +5259,7 @@ const leaveGroupOnline = async function(groupId) {
     }
     
     try {
-        if (!LifecycleState.hasSession()) {
+        if (!sessionReceived) {
             return;
         }
         
@@ -5206,11 +5292,12 @@ const leaveGroupOnline = async function(groupId) {
             currentChatGroup = null;
         }
         
-        ParentMessaging.send('MEMBER_REMOVED', {
+        // Use safeSend for parent communication
+        safeSend('MEMBER_REMOVED', {
             groupId,
             userId: currentUser?.uid || currentUser?.id,
             timestamp: Date.now()
-        }).catch(() => {});
+        });
         
     } catch (error) {}
 };
@@ -5222,7 +5309,7 @@ async function acceptGroupInvite(inviteData) {
     }
     
     try {
-        if (!LifecycleState.hasSession()) {
+        if (!sessionReceived) {
             return;
         }
         
@@ -5248,7 +5335,7 @@ async function declineGroupInvite(inviteData) {
     }
     
     try {
-        if (!LifecycleState.hasSession()) {
+        if (!sessionReceived) {
             return;
         }
         
@@ -5611,7 +5698,7 @@ async function loadGroupDetails(groupData, type) {
 // DATA SYNC FUNCTIONS (PRESERVED)
 // =============================================
 async function syncGroupsFromServer() {
-    if (!authReady && !LifecycleState.hasSession()) return;
+    if (!authReady && !sessionReceived) return;
     
     try {
         const response = await secureApiCall('/groups', { silent: true });
@@ -5674,7 +5761,7 @@ async function syncGroupsFromServer() {
 }
 
 async function syncGroupInvitesFromServer() {
-    if (!authReady && !LifecycleState.hasSession()) return;
+    if (!authReady && !sessionReceived) return;
     
     try {
         const response = await secureApiCall('/invites', { silent: true });
@@ -5705,7 +5792,7 @@ async function syncGroupInvitesFromServer() {
 }
 
 async function syncUniqueFeaturesData() {
-    if (!authReady && !LifecycleState.hasSession()) return;
+    if (!authReady && !sessionReceived) return;
     
     try {
         const purposesResponse = await secureApiCall('/groups/purposes', { silent: true });
@@ -6294,7 +6381,7 @@ function startBackgroundSync() {
             return;
         }
         
-        if (!authReady && !LifecycleState.hasSession()) {
+        if (!authReady && !sessionReceived) {
             return;
         }
         
@@ -6305,7 +6392,7 @@ function startBackgroundSync() {
         
         syncIntervalId = setInterval(() => {
             try {
-                if (authReady || LifecycleState.hasSession()) {
+                if (authReady || sessionReceived) {
                     backgroundSyncWithServer();
                 } else {
                     clearInterval(syncIntervalId);
@@ -6322,7 +6409,7 @@ function startBackgroundSync() {
 }
 
 async function backgroundSyncWithServer() {
-    if (!authReady && !LifecycleState.hasSession()) {
+    if (!authReady && !sessionReceived) {
         return;
     }
     
@@ -6380,7 +6467,7 @@ function setupUIEventListeners() {
         const createGroupBtn = safeGetElement('#createGroupBtn');
         if (createGroupBtn) {
             createGroupBtn.addEventListener('click', () => {
-                if (!LifecycleState.hasSession()) {
+                if (!sessionReceived) {
                     return;
                 }
                 const createGroupModal = safeGetElement('#createGroupModal');
@@ -6571,7 +6658,7 @@ export async function initGroupPage() {
  */
 export async function loadUserDataInBackground() {
     try {
-        if (!LifecycleState.hasSession()) {
+        if (!sessionReceived) {
             return;
         }
         
@@ -6669,9 +6756,10 @@ if (typeof window !== 'undefined') {
     secureExpose('getIframeDebug', () => false);
     secureExpose('getIframeState', () => ({
         lifecycle: LifecycleState.getState(),
-        session: LifecycleState.hasSession(),
+        session: sessionReceived,
         registered: LifecycleState.isRegistered(),
-        active: LifecycleState.isActive()
+        active: LifecycleState.isActive(),
+        parentReady
     }));
 }
 

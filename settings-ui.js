@@ -1,10 +1,10 @@
 // =============================================
-// SETTINGS UI - COMPLETE IMPLEMENTATION v6.3.0 (FIXED)
+// SETTINGS UI - COMPLETE IMPLEMENTATION v6.3.1 (FIXED)
 // ENHANCED PARENT COMMUNICATION | FULL SECTION SUPPORT
 // INTEGRATED WITH CORE HARDENING | UI FAILSAFE
 // SILENT BACKGROUND OPERATIONS | MOBILE OPTIMIZED
 // API GATEWAY INTEGRATION | SECTION-BASED NAVIGATION
-// FIXED CONST REASSIGNMENT IN loadSection()
+// UPDATED FOR PARENT-CONTROLLED PROTOCOL COMPLIANCE
 // =============================================
 
 import {
@@ -88,6 +88,7 @@ import {
     clearMediaCache,
     onReady,
     isReady,
+    parentReady, // IMPORTANT: Added parentReady flag
     
     // Enhanced exports from hardened core
     getCoreDiagnostics,
@@ -512,6 +513,16 @@ function registerForCoreUpdates() {
             updateUserStatus();
         });
     }
+    
+    // IMPORTANT: Listen for parentReady changes
+    window.addEventListener('parentReadyChanged', (event) => {
+        if (event.detail.ready) {
+            debugLog('Parent ready, refreshing UI if needed');
+            if (currentSection) {
+                loadSection(currentSection);
+            }
+        }
+    });
 }
 
 // Update connection state in UI
@@ -1557,7 +1568,8 @@ export async function saveSettings() {
         unsavedChanges = false;
         updateSaveButton();
         
-        await sendMessageToParent({
+        // Notify parent about settings update - use safeSend through core
+        sendMessageToParent({
             type: 'SETTINGS_UPDATED',
             section: currentSection,
             timestamp: Date.now()
@@ -3572,7 +3584,8 @@ window.__UI_DEBUG__ = {
         unsavedChanges,
         uiErrorCount,
         isMobileView,
-        currentMobileSection
+        currentMobileSection,
+        parentReady // Expose parentReady for debugging
     }),
     reloadSection: () => {
         if (currentSection) loadSection(currentSection);
@@ -3642,6 +3655,57 @@ setTimeout(() => {
         }
     }
 }, 500); // Reduced from 3000ms to 500ms
+
+// =============================================
+// ADDITIONAL PROTOCOL COMPLIANCE ENHANCEMENTS
+// =============================================
+
+// Listen for parent-ready events from core
+window.addEventListener('parentReadyChanged', (event) => {
+    if (event.detail.ready) {
+        debugLog('Parent ready - refreshing UI if needed');
+        if (currentSection && uiInitialized) {
+            // Refresh current section with fresh data
+            setTimeout(() => loadSection(currentSection), 100);
+        }
+    }
+});
+
+// Ensure all outbound messages use the core's safeSend mechanism
+// This is already handled by importing sendMessageToParent from core
+
+// Add network quality indicator
+function updateNetworkQualityIndicator() {
+    const quality = connectionQuality || 'unknown';
+    const indicator = document.getElementById('networkQualityIndicator');
+    if (!indicator) return;
+    
+    indicator.className = 'network-quality';
+    indicator.classList.add(quality);
+    
+    switch(quality) {
+        case 'excellent':
+            indicator.title = 'Excellent connection';
+            break;
+        case 'good':
+            indicator.title = 'Good connection';
+            break;
+        case 'fair':
+            indicator.title = 'Fair connection';
+            break;
+        case 'poor':
+            indicator.title = 'Poor connection';
+            break;
+        default:
+            indicator.title = 'Connection quality unknown';
+    }
+}
+
+// Call when connection quality changes
+if (ReliabilityEngine && ReliabilityEngine.on) {
+    ReliabilityEngine.on('qualityChanged', updateNetworkQualityIndicator);
+}
+
 // =============================================
 // END OF FILE
 // =============================================

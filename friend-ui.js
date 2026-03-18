@@ -1,5 +1,5 @@
 // =============================================
-// [1] IMPORT VERIFICATION - FIXED
+// [1] IMPORT VERIFICATION - UPDATED WITH PROTOCOL STATE
 // =============================================
 
 import {
@@ -131,9 +131,10 @@ import {
     // V6 State
     V6,
 
-    // Lifecycle
-    LifecycleStateMachine
-
+    // Lifecycle - ADD THESE IMPORTS
+    LifecycleStateMachine,
+    LIFECYCLE_STATES
+    
 } from './friend-core.js';
 
 // =============================================
@@ -152,6 +153,42 @@ function logUI(message, data) {
             }, '*');
         } catch (e) {}
     }
+}
+
+// =============================================
+// [2A] LIFECYCLE UI GUARD - NEW
+// =============================================
+
+/**
+ * Checks if the module is in ACTIVE state and parent is ready
+ * If not, shows a passive loading state or disables interactive elements
+ */
+function isUIActive() {
+    return LifecycleStateMachine && 
+           LifecycleStateMachine.isActive && 
+           LifecycleStateMachine.parentReady;
+}
+
+function guardUIAction(actionName, fn, fallback = null) {
+    return function(...args) {
+        if (!isUIActive()) {
+            logUI(`UI action '${actionName}' blocked - module not active`, {
+                state: LifecycleStateMachine?.current,
+                parentReady: LifecycleStateMachine?.parentReady
+            });
+            
+            // Show notification to user if it's an interactive action
+            if (actionName !== 'passive' && showNotification) {
+                showNotification('Please wait while module initializes...', 'info', 2000);
+            }
+            
+            if (typeof fallback === 'function') {
+                return fallback.apply(this, args);
+            }
+            return fallback;
+        }
+        return fn.apply(this, args);
+    };
 }
 
 // =============================================
@@ -250,7 +287,7 @@ logUI('DOM Elements loaded', {
 });
 
 // =============================================
-// [4] UI STATE MANAGEMENT
+// [4] UI STATE MANAGEMENT - UPDATED WITH LIFECYCLE
 // =============================================
 
 export const UIState = {
@@ -411,13 +448,18 @@ export const UIState = {
                 valid: SessionManager ? SessionManager.isSessionValid() : false
             },
             environment: IframeEnvironment ? IframeEnvironment.type : 'unknown',
-            features: IframeEnvironment ? IframeEnvironment.features : {}
+            features: IframeEnvironment ? IframeEnvironment.features : {},
+            lifecycle: {
+                state: LifecycleStateMachine?.current,
+                isActive: LifecycleStateMachine?.isActive,
+                parentReady: LifecycleStateMachine?.parentReady
+            }
         };
     }
 };
 
 // =============================================
-// [5] UI ERROR BOUNDARIES
+// [5] UI ERROR BOUNDARIES - UPDATED WITH LIFECYCLE
 // =============================================
 
 export const UIBoundaries = {
@@ -427,6 +469,15 @@ export const UIBoundaries = {
         return ErrorHandler.createBoundary(`Section:${sectionId}`, () => {
             const startTime = performance.now();
             try {
+                // If not active, show passive loading state
+                if (!isUIActive()) {
+                    const container = UIState.getElement(sectionId);
+                    if (container && container.children.length === 0) {
+                        container.innerHTML = this.createPassiveLoadingState(sectionId);
+                    }
+                    return null;
+                }
+                
                 const result = renderFn();
                 UIState.metrics.lastRender = performance.now() - startTime;
                 UIState.metrics.renderCount++;
@@ -442,6 +493,25 @@ export const UIBoundaries = {
                 return null;
             }
         }, null);
+    },
+    
+    createPassiveLoadingState(sectionId) {
+        const sectionNames = {
+            'allFriendsSection': 'All Friends',
+            'contactsSection': 'Contacts',
+            'friendsSection': 'Friends',
+            'requestsSection': 'Requests',
+            'temporarySection': 'Temporary',
+            'pinnedSection': 'Pinned',
+            'mutedSection': 'Muted'
+        };
+        return `
+            <div class="empty-state loading-passive">
+                <i class="fas fa-spinner fa-spin" style="font-size: 32px; color: var(--primary-color); margin-bottom: 15px;"></i>
+                <p>Loading ${sectionNames[sectionId] || 'section'}...</p>
+                <p class="subtext">Please wait while we connect</p>
+            </div>
+        `;
     },
 
     createSectionFallback(sectionId) {
@@ -529,6 +599,15 @@ export const RenderPipeline = {
         window.addEventListener('friendCoreReady', () => this.renderProgressive());
         window.addEventListener('kynSessionReady', () => this.handleSessionReady());
         window.addEventListener('userDataLoaded', () => setTimeout(() => this.enableLiveUpdates(), 500));
+        
+        // Listen for lifecycle changes
+        window.addEventListener('lifecycleChanged', (event) => {
+            if (event.detail?.toState === LIFECYCLE_STATES.ACTIVE) {
+                this.renderProgressive();
+                this.enableLiveUpdates();
+            }
+        });
+        
         this._showOnce('init', 'RenderPipeline initialized', 'debug');
     },
 
@@ -538,9 +617,7 @@ export const RenderPipeline = {
     },
 
     renderSkeleton() {
-        // Only render skeleton if not ACTIVE yet
-        if (LifecycleStateMachine && LifecycleStateMachine.isActive) return;
-        
+        // Skeleton always renders - it's passive
         UIBoundaries.renderSection('allFriendsSection', () => {
             if (domElements.allFriendsList && domElements.allFriendsList.children.length === 0) {
                 domElements.allFriendsList.innerHTML = this.createSkeletonLoader('friends', 8);
@@ -608,14 +685,8 @@ export const RenderPipeline = {
         this._showOnce('initial', 'Initial render complete', 'debug');
     },
 
-    renderProgressive() {
+    renderProgressive: guardUIAction('progressive_render', function() {
         if (this.status.progressive) return;
-        
-        // Only render progressively if ACTIVE
-        if (!LifecycleStateMachine || !LifecycleStateMachine.isActive) {
-            this._showOnce('progressive_defer', 'Deferring progressive render - module not active', 'debug');
-            return;
-        }
         
         UIBoundaries.renderSection('allFriendsSection', () => {
             if (apiReady && cacheLoaded) {
@@ -624,27 +695,21 @@ export const RenderPipeline = {
             }
         });
         this._showOnce('progressive', 'Progressive enhancement complete', 'debug');
-    },
+    }),
 
-    enableLiveUpdates() {
+    enableLiveUpdates: guardUIAction('live_updates', function() {
         if (this.status.liveUpdate) return;
-        
-        // Only enable live updates if ACTIVE
-        if (!LifecycleStateMachine || !LifecycleStateMachine.isActive) {
-            this._showOnce('live_defer', 'Deferring live updates - module not active', 'debug');
-            return;
-        }
         
         this.setupLiveUpdateListeners();
         this.status.liveUpdate = true;
         this.status.ready = true;
         this._showOnce('live', 'Live updates enabled', 'debug');
-    },
+    }),
 
     setupLiveUpdateListeners() {
         window.addEventListener('friendsUpdated', () => {
             // Only process if ACTIVE
-            if (!LifecycleStateMachine || !LifecycleStateMachine.isActive) return;
+            if (!isUIActive()) return;
             
             this.queueRender('friends', debounce(() => {
                 if (UIState.activeSection === 'friendsSection') renderFriends();
@@ -654,7 +719,7 @@ export const RenderPipeline = {
         
         window.addEventListener('requestsUpdated', () => {
             // Only process if ACTIVE
-            if (!LifecycleStateMachine || !LifecycleStateMachine.isActive) return;
+            if (!isUIActive()) return;
             
             this.queueRender('requests', debounce(() => {
                 if (UIState.activeSection === 'requestsSection') {
@@ -666,7 +731,7 @@ export const RenderPipeline = {
         
         window.addEventListener('contactsUpdated', () => {
             // Only process if ACTIVE
-            if (!LifecycleStateMachine || !LifecycleStateMachine.isActive) return;
+            if (!isUIActive()) return;
             
             this.queueRender('contacts', debounce(() => {
                 if (UIState.activeSection === 'contactsSection') renderContacts();
@@ -717,6 +782,12 @@ export const RenderPipeline = {
             const allToDisplay = [...pinnedArray, ...friendArray, ...contactArray].slice(0, 25);
 
             if (allToDisplay.length === 0) {
+                // If not active, show passive loading state
+                if (!isUIActive()) {
+                    domElements.allFriendsList.innerHTML = UIBoundaries.createPassiveLoadingState('allFriendsSection');
+                    return;
+                }
+                
                 domElements.allFriendsList.innerHTML = `
                     <div class="empty-state">
                         <i class="fas fa-user-friends"></i>
@@ -730,9 +801,9 @@ export const RenderPipeline = {
 
                 const emptyBtn = document.getElementById('emptyStateAddFriendBtn');
                 if (emptyBtn) {
-                    emptyBtn.addEventListener('click', () => {
+                    emptyBtn.addEventListener('click', guardUIAction('empty_state_add_friend', () => {
                         if (domElements.addFriendModal) domElements.addFriendModal.classList.add('active');
-                    });
+                    }));
                 }
                 return;
             }
@@ -771,7 +842,7 @@ export const RenderPipeline = {
 };
 
 // =============================================
-// [7] CORE INTEGRATION BRIDGE
+// [7] CORE INTEGRATION BRIDGE - UPDATED WITH LIFECYCLE
 // =============================================
 
 export const CoreIntegration = {
@@ -790,6 +861,12 @@ export const CoreIntegration = {
             this._showOnce('core_ready', 'Friend core ready', 'debug');
             if (data.sessionValid) UIState.updateConnectionState('connected');
             else UIState.updateConnectionState('degraded');
+            
+            // Dispatch lifecycle event
+            window.dispatchEvent(new CustomEvent('lifecycleChanged', {
+                detail: { toState: LIFECYCLE_STATES.ACTIVE }
+            }));
+            
             RenderPipeline.renderProgressive();
         });
 
@@ -959,7 +1036,7 @@ export const CoreIntegration = {
 // [8] UI RENDERING FUNCTIONS - UPDATED WITH LIFECYCLE GUARDS
 // =============================================
 
-export function updateFriendCounts() {
+export const updateFriendCounts = guardUIAction('update_friend_counts', function() {
     return ErrorHandler.createBoundary('updateFriendCounts', () => {
         const totalFriendsElement = document.getElementById('totalFriends');
         const onlineFriendsElement = document.getElementById('onlineFriends');
@@ -991,15 +1068,9 @@ export function updateFriendCounts() {
         if (pinnedCountElement) pinnedCountElement.textContent = pinnedArray.length;
         if (mutedCountElement) mutedCountElement.textContent = mutedArray.length;
     }, null);
-}
+});
 
-export function updateCurrentSection() {
-    // Only render if ACTIVE
-    if (!LifecycleStateMachine || !LifecycleStateMachine.isActive) {
-        logUI('Deferring section update - module not active');
-        return;
-    }
-    
+export const updateCurrentSection = guardUIAction('update_section', function() {
     return ErrorHandler.createBoundary('updateCurrentSection', () => {
         updateFriendCounts();
 
@@ -1022,14 +1093,9 @@ export function updateCurrentSection() {
             }
         }
     }, null);
-}
+});
 
-export function renderAllFriendsList() {
-    // Only render if ACTIVE
-    if (!LifecycleStateMachine || !LifecycleStateMachine.isActive) {
-        return;
-    }
-    
+export const renderAllFriendsList = guardUIAction('render_all_friends', function() {
     return ErrorHandler.createBoundary('renderAllFriendsList', () => {
         if (!domElements.allFriendsList) return;
 
@@ -1060,9 +1126,9 @@ export function renderAllFriendsList() {
 
             const emptyBtn = document.getElementById('emptyStateAddFriendBtn');
             if (emptyBtn) {
-                emptyBtn.addEventListener('click', () => {
+                emptyBtn.addEventListener('click', guardUIAction('empty_state_add_friend', () => {
                     if (domElements.addFriendModal) domElements.addFriendModal.classList.add('active');
-                });
+                }));
             }
             return;
         }
@@ -1085,14 +1151,9 @@ export function renderAllFriendsList() {
             domElements.allFriendsList.innerHTML = UIBoundaries.createSectionFallback('allFriendsSection');
         }
     });
-}
+});
 
-export function renderContacts() {
-    // Only render if ACTIVE
-    if (!LifecycleStateMachine || !LifecycleStateMachine.isActive) {
-        return;
-    }
-    
+export const renderContacts = guardUIAction('render_contacts', function() {
     return ErrorHandler.createBoundary('renderContacts', () => {
         if (!domElements.contactsList) return;
 
@@ -1114,7 +1175,7 @@ export function renderContacts() {
 
             const syncBtn = document.getElementById('contactsSyncBtn');
             if (syncBtn) {
-                syncBtn.addEventListener('click', async () => {
+                syncBtn.addEventListener('click', guardUIAction('sync_contacts', async () => {
                     if (!featureFlags.contactsSync) return;
                     syncBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Syncing...';
                     syncBtn.disabled = true;
@@ -1129,7 +1190,7 @@ export function renderContacts() {
                         syncBtn.innerHTML = '<i class="fas fa-sync-alt"></i> Sync Contacts';
                         syncBtn.disabled = false;
                     }
-                });
+                }));
             }
             return;
         }
@@ -1146,14 +1207,9 @@ export function renderContacts() {
             domElements.contactsList.innerHTML = UIBoundaries.createSectionFallback('contactsSection');
         }
     });
-}
+});
 
-export function renderFriends() {
-    // Only render if ACTIVE
-    if (!LifecycleStateMachine || !LifecycleStateMachine.isActive) {
-        return;
-    }
-    
+export const renderFriends = guardUIAction('render_friends', function() {
     return ErrorHandler.createBoundary('renderFriends', () => {
         if (!domElements.friendsList) return;
 
@@ -1176,9 +1232,9 @@ export function renderFriends() {
 
             const addBtn = document.getElementById('friendsEmptyAddBtn');
             if (addBtn) {
-                addBtn.addEventListener('click', () => {
+                addBtn.addEventListener('click', guardUIAction('empty_friends_add', () => {
                     if (domElements.addFriendModal) domElements.addFriendModal.classList.add('active');
-                });
+                }));
             }
             return;
         }
@@ -1204,14 +1260,9 @@ export function renderFriends() {
             domElements.friendsList.innerHTML = UIBoundaries.createSectionFallback('friendsSection');
         }
     });
-}
+});
 
-export function renderFriendRequests() {
-    // Only render if ACTIVE
-    if (!LifecycleStateMachine || !LifecycleStateMachine.isActive) {
-        return;
-    }
-    
+export const renderFriendRequests = guardUIAction('render_requests', function() {
     return ErrorHandler.createBoundary('renderFriendRequests', () => {
         if (!domElements.requestsList) return;
 
@@ -1242,14 +1293,9 @@ export function renderFriendRequests() {
             domElements.requestsList.innerHTML = UIBoundaries.createSectionFallback('requestsSection');
         }
     });
-}
+});
 
-export function renderSentRequests() {
-    // Only render if ACTIVE
-    if (!LifecycleStateMachine || !LifecycleStateMachine.isActive) {
-        return;
-    }
-    
+export const renderSentRequests = guardUIAction('render_sent_requests', function() {
     return ErrorHandler.createBoundary('renderSentRequests', () => {
         if (!domElements.sentRequestsList) return;
 
@@ -1280,14 +1326,9 @@ export function renderSentRequests() {
             domElements.sentRequestsList.innerHTML = UIBoundaries.createSectionFallback('requestsSection');
         }
     });
-}
+});
 
-export function renderTemporaryFriends() {
-    // Only render if ACTIVE
-    if (!LifecycleStateMachine || !LifecycleStateMachine.isActive) {
-        return;
-    }
-    
+export const renderTemporaryFriends = guardUIAction('render_temporary', function() {
     return ErrorHandler.createBoundary('renderTemporaryFriends', () => {
         if (!domElements.temporaryList) return;
 
@@ -1318,14 +1359,9 @@ export function renderTemporaryFriends() {
             domElements.temporaryList.innerHTML = UIBoundaries.createSectionFallback('temporarySection');
         }
     });
-}
+});
 
-export function renderPinnedFriends() {
-    // Only render if ACTIVE
-    if (!LifecycleStateMachine || !LifecycleStateMachine.isActive) {
-        return;
-    }
-    
+export const renderPinnedFriends = guardUIAction('render_pinned', function() {
     return ErrorHandler.createBoundary('renderPinnedFriends', () => {
         if (!domElements.pinnedList) return;
 
@@ -1356,14 +1392,9 @@ export function renderPinnedFriends() {
             domElements.pinnedList.innerHTML = UIBoundaries.createSectionFallback('pinnedSection');
         }
     });
-}
+});
 
-export function renderMutedFriends() {
-    // Only render if ACTIVE
-    if (!LifecycleStateMachine || !LifecycleStateMachine.isActive) {
-        return;
-    }
-    
+export const renderMutedFriends = guardUIAction('render_muted', function() {
     return ErrorHandler.createBoundary('renderMutedFriends', () => {
         if (!domElements.mutedList) return;
 
@@ -1394,14 +1425,9 @@ export function renderMutedFriends() {
             domElements.mutedList.innerHTML = UIBoundaries.createSectionFallback('mutedSection');
         }
     });
-}
+});
 
-export function renderAllUsersList() {
-    // Only render if ACTIVE
-    if (!LifecycleStateMachine || !LifecycleStateMachine.isActive) {
-        return;
-    }
-    
+export const renderAllUsersList = guardUIAction('render_users', function() {
     return ErrorHandler.createBoundary('renderAllUsersList', () => {
         const allUsersListElement = document.getElementById('allUsersList');
         const allUsersStatusElement = document.getElementById('allUsersStatus');
@@ -1474,16 +1500,16 @@ export function renderAllUsersList() {
 
             const retryBtn = allUsersListElement.querySelector('.retry-users-btn');
             if (retryBtn) {
-                retryBtn.addEventListener('click', () => {
+                retryBtn.addEventListener('click', guardUIAction('retry_users', () => {
                     fetchAllUsersFromBackend().then(() => renderAllUsersList());
-                });
+                }));
             }
         }
     });
-}
+});
 
 // =============================================
-// [9] UI ELEMENT CREATORS
+// [9] UI ELEMENT CREATORS - UPDATED WITH ACTION GUARDS
 // =============================================
 
 function createFriendItemElement(friendData, type, instantMode = false) {
@@ -1627,32 +1653,32 @@ function createFriendItemElement(friendData, type, instantMode = false) {
             </div>
         `;
 
-        friendItem.addEventListener('click', (e) => {
+        friendItem.addEventListener('click', guardUIAction('friend_item_click', (e) => {
             if (!e.target.closest('.friend-actions') && !e.target.closest('.mutual-friends')) {
                 logUI(`Friend item clicked: ${friendId}`);
                 showFriendDetails(friendData, type);
             }
-        });
+        }));
 
         const actionButtons = friendItem.querySelectorAll('.friend-action-btn');
         actionButtons.forEach(btn => {
-            btn.addEventListener('click', (e) => {
+            btn.addEventListener('click', guardUIAction(`friend_action_${btn.dataset.action}`, (e) => {
                 e.stopPropagation();
                 const action = btn.dataset.action;
                 logUI(`Friend action: ${action} for ${friendId}`);
                 handleFriendAction(action, friendData, type, btn);
-            });
+            }));
         });
 
         const mutualFriendsElement = friendItem.querySelector('.mutual-friends');
         if (mutualFriendsElement) {
-            mutualFriendsElement.addEventListener('click', (e) => {
+            mutualFriendsElement.addEventListener('click', guardUIAction('mutual_friends_click', (e) => {
                 e.stopPropagation();
                 const userId = mutualFriendsElement.dataset.userId;
                 const userName = mutualFriendsElement.dataset.userName;
                 logUI(`Mutual friends clicked: ${userId}`);
                 showMutualFriends(userId, userName);
-            });
+            }));
         }
 
         return friendItem;
@@ -1745,32 +1771,32 @@ function createFriendRequestItemElement(requestData, type) {
             </div>
         `;
 
-        requestItem.addEventListener('click', (e) => {
+        requestItem.addEventListener('click', guardUIAction('request_item_click', (e) => {
             if (!e.target.closest('.friend-actions') && !e.target.closest('.mutual-friends')) {
                 logUI(`Request item clicked: ${requestData.id}`);
                 showFriendRequestProfile(requestData);
             }
-        });
+        }));
 
         const actionButtons = requestItem.querySelectorAll('.friend-action-btn');
         actionButtons.forEach(btn => {
-            btn.addEventListener('click', (e) => {
+            btn.addEventListener('click', guardUIAction(`request_action_${btn.dataset.action}`, (e) => {
                 e.stopPropagation();
                 const action = btn.dataset.action;
                 logUI(`Request action: ${action} for ${requestData.id}`);
                 handleRequestAction(action, requestData, btn);
-            });
+            }));
         });
 
         const mutualFriendsElement = requestItem.querySelector('.mutual-friends');
         if (mutualFriendsElement) {
-            mutualFriendsElement.addEventListener('click', (e) => {
+            mutualFriendsElement.addEventListener('click', guardUIAction('request_mutual_friends', (e) => {
                 e.stopPropagation();
                 const userId = mutualFriendsElement.dataset.userId;
                 const userName = mutualFriendsElement.dataset.userName;
                 logUI(`Mutual friends clicked from request: ${userId}`);
                 showMutualFriends(userId, userName);
-            });
+            }));
         }
 
         return requestItem;
@@ -1866,16 +1892,16 @@ function createUserSearchItemElement(user) {
             </div>
         `;
 
-        userItem.addEventListener('click', (e) => {
+        userItem.addEventListener('click', guardUIAction('user_search_item_click', (e) => {
             if (!e.target.closest('.user-search-actions')) {
                 logUI(`User search item clicked: ${userId}`);
                 showFriendDetails(user, 'user');
             }
-        });
+        }));
 
         const actionButtons = userItem.querySelectorAll('.friend-action-btn');
         actionButtons.forEach(btn => {
-            btn.addEventListener('click', (e) => {
+            btn.addEventListener('click', guardUIAction(`user_search_action_${btn.dataset.action}`, (e) => {
                 e.stopPropagation();
                 const action = btn.dataset.action;
                 logUI(`User search action: ${action} for ${userId}`);
@@ -1903,7 +1929,7 @@ function createUserSearchItemElement(user) {
                         if (declineRequest) declineFriendRequest(declineRequest);
                         break;
                 }
-            });
+            }));
         });
 
         return userItem;
@@ -1912,10 +1938,10 @@ function createUserSearchItemElement(user) {
 }
 
 // =============================================
-// [10] FRIEND DETAILS AND PROFILE FUNCTIONS
+// [10] FRIEND DETAILS AND PROFILE FUNCTIONS - UPDATED WITH GUARDS
 // =============================================
 
-export function showFriendDetails(friendData, type) {
+export const showFriendDetails = guardUIAction('show_friend_details', function(friendData, type) {
     return ErrorHandler.createBoundary('showFriendDetails', () => {
         if (!friendData || !friendData.id) return;
 
@@ -1939,9 +1965,9 @@ export function showFriendDetails(friendData, type) {
         loadFriendDetails(friendData, type);
 
     }, null);
-}
+});
 
-export async function loadFriendDetails(friendData, type) {
+export const loadFriendDetails = guardUIAction('load_friend_details', async function(friendData, type) {
     return ErrorHandler.createBoundary('loadFriendDetails', async () => {
         const detailsContent = document.getElementById('friendDetailsContent');
         if (!detailsContent) return;
@@ -2210,90 +2236,90 @@ export async function loadFriendDetails(friendData, type) {
 
             const mutualFriendsLink = detailsContent.querySelector('.mutual-friends-link');
             if (mutualFriendsLink) {
-                mutualFriendsLink.addEventListener('click', () => {
+                mutualFriendsLink.addEventListener('click', guardUIAction('details_mutual_friends', () => {
                     logUI(`Mutual friends link clicked: ${friendId}`);
                     showMutualFriends(friendId, displayName);
-                });
+                }));
             }
 
             if (type === 'friend' || type === 'pinned' || type === 'muted' || type === 'temporary') {
                 const startChatBtn = document.getElementById('startChatDetailsBtn');
                 if (startChatBtn) {
-                    startChatBtn.addEventListener('click', function() {
+                    startChatBtn.addEventListener('click', guardUIAction('details_start_chat', function() {
                         logUI(`Start chat from details: ${this.dataset.userId}`);
                         navigateToChat(this.dataset.userId, this.dataset.userName);
-                    });
+                    }));
                 }
 
                 const callBtn = document.getElementById('callFriendBtn');
                 if (callBtn) {
-                    callBtn.addEventListener('click', function() {
+                    callBtn.addEventListener('click', guardUIAction('details_start_call', function() {
                         logUI(`Start call from details: ${this.dataset.userId}`);
                         navigateToCall(this.dataset.userId, this.dataset.userName);
-                    });
+                    }));
                 }
 
                 const optionsBtn = document.getElementById('friendOptionsBtn');
                 if (optionsBtn) {
-                    optionsBtn.addEventListener('click', () => {
+                    optionsBtn.addEventListener('click', guardUIAction('details_show_options', () => {
                         logUI(`Show options from details: ${friendId}`);
                         showFriendOptions(friendData);
-                    });
+                    }));
                 }
 
                 const saveNotesBtn = document.getElementById('saveNotesBtn');
                 if (saveNotesBtn) {
-                    saveNotesBtn.addEventListener('click', () => {
+                    saveNotesBtn.addEventListener('click', guardUIAction('details_save_notes', () => {
                         const notesTextarea = document.getElementById('friendNotesTextarea');
                         if (notesTextarea) {
                             logUI(`Saving notes for: ${friendId}`);
                             savePrivateNote(friendId, notesTextarea.value);
                         }
-                    });
+                    }));
                 }
             }
 
             if (type === 'contact') {
                 const startChatBtn = document.getElementById('startChatWithContactBtn');
                 if (startChatBtn) {
-                    startChatBtn.addEventListener('click', function() {
+                    startChatBtn.addEventListener('click', guardUIAction('contact_start_chat', function() {
                         logUI(`Start chat with contact: ${this.dataset.userId}`);
                         navigateToChat(this.dataset.userId, this.dataset.userName);
-                    });
+                    }));
                 }
 
                 const addContactBtn = document.getElementById('addContactBtn');
                 if (addContactBtn) {
-                    addContactBtn.addEventListener('click', () => {
+                    addContactBtn.addEventListener('click', guardUIAction('contact_add_friend', () => {
                         logUI(`Add contact as friend: ${friendId}`);
                         sendFriendRequest(friendId);
-                    });
+                    }));
                 }
             }
 
             if (type === 'user') {
                 const startChatBtn = document.getElementById('startChatWithUserBtn');
                 if (startChatBtn) {
-                    startChatBtn.addEventListener('click', function() {
+                    startChatBtn.addEventListener('click', guardUIAction('user_start_chat', function() {
                         logUI(`Start chat with user: ${this.dataset.userId}`);
                         navigateToChat(this.dataset.userId, this.dataset.userName);
-                    });
+                    }));
                 }
 
                 const addUserBtn = document.getElementById('addUserBtn');
                 if (addUserBtn) {
-                    addUserBtn.addEventListener('click', () => {
+                    addUserBtn.addEventListener('click', guardUIAction('user_add_friend', () => {
                         logUI(`Add user as friend: ${friendId}`);
                         sendFriendRequest(friendId);
-                    });
+                    }));
                 }
 
                 const addUserAsFriendBtn = document.getElementById('addUserAsFriendBtn');
                 if (addUserAsFriendBtn) {
-                    addUserAsFriendBtn.addEventListener('click', () => {
+                    addUserAsFriendBtn.addEventListener('click', guardUIAction('user_add_friend_alt', () => {
                         logUI(`Add user as friend (alt): ${friendId}`);
                         sendFriendRequest(friendId);
-                    });
+                    }));
                 }
             }
 
@@ -2313,16 +2339,16 @@ export async function loadFriendDetails(friendData, type) {
 
             const retryBtn = detailsContent.querySelector('.retry-details-btn');
             if (retryBtn) {
-                retryBtn.addEventListener('click', () => {
+                retryBtn.addEventListener('click', guardUIAction('details_retry', () => {
                     loadFriendDetails(friendData, type);
-                });
+                }));
             }
         }
 
     }, null);
-}
+});
 
-export function showFriendRequestProfile(requestData) {
+export const showFriendRequestProfile = guardUIAction('show_request_profile', function(requestData) {
     return ErrorHandler.createBoundary('showFriendRequestProfile', () => {
         if (!requestData) return;
 
@@ -2469,50 +2495,50 @@ export function showFriendRequestProfile(requestData) {
 
         const mutualFriendsLink = profileModal.querySelector('.mutual-friends-link');
         if (mutualFriendsLink) {
-            mutualFriendsLink.addEventListener('click', () => {
+            mutualFriendsLink.addEventListener('click', guardUIAction('profile_mutual_friends', () => {
                 logUI(`Mutual friends from request profile: ${userId}`);
                 showMutualFriends(userId, displayName);
                 document.body.removeChild(profileModal);
-            });
+            }));
         }
 
         if (isIncoming) {
             const declineBtn = profileModal.querySelector('.decline-profile-btn');
             if (declineBtn) {
-                declineBtn.addEventListener('click', () => {
+                declineBtn.addEventListener('click', guardUIAction('profile_decline_request', () => {
                     logUI(`Decline request: ${requestData.id}`);
                     declineFriendRequest(requestData);
                     document.body.removeChild(profileModal);
-                });
+                }));
             }
 
             const acceptBtn = profileModal.querySelector('.accept-profile-btn');
             if (acceptBtn) {
-                acceptBtn.addEventListener('click', () => {
+                acceptBtn.addEventListener('click', guardUIAction('profile_accept_request', () => {
                     logUI(`Accept request: ${requestData.id}`);
                     acceptFriendRequestOnline(requestData.id, userId);
                     document.body.removeChild(profileModal);
-                });
+                }));
             }
         } else {
             const cancelBtn = profileModal.querySelector('.cancel-profile-btn');
             if (cancelBtn) {
-                cancelBtn.addEventListener('click', () => {
+                cancelBtn.addEventListener('click', guardUIAction('profile_cancel_request', () => {
                     logUI(`Cancel request: ${requestData.id}`);
                     cancelFriendRequest(requestData);
                     document.body.removeChild(profileModal);
-                });
+                }));
             }
         }
 
     }, null);
-}
+});
 
 // =============================================
-// [11] FRIEND OPTIONS AND MANAGEMENT FUNCTIONS
+// [11] FRIEND OPTIONS AND MANAGEMENT FUNCTIONS - UPDATED WITH GUARDS
 // =============================================
 
-export function showFriendOptions(friendData) {
+export const showFriendOptions = guardUIAction('show_friend_options', function(friendData) {
     return ErrorHandler.createBoundary('showFriendOptions', () => {
         if (!friendData || !friendData.id) return;
 
@@ -2604,75 +2630,75 @@ export function showFriendOptions(friendData) {
 
         const changeCategoryBtn = optionsModal.querySelector('#changeCategoryBtn');
         if (changeCategoryBtn) {
-            changeCategoryBtn.addEventListener('click', () => {
+            changeCategoryBtn.addEventListener('click', guardUIAction('options_change_category', () => {
                 closeModal();
                 logUI(`Change category for: ${friendId}`);
                 showChangeCategoryModal(friendData);
-            });
+            }));
         }
 
         const togglePinBtn = optionsModal.querySelector('#togglePinBtn');
         if (togglePinBtn) {
-            togglePinBtn.addEventListener('click', async () => {
+            togglePinBtn.addEventListener('click', guardUIAction('options_toggle_pin', async () => {
                 closeModal();
                 logUI(`Toggle pin for: ${friendId}`);
                 await togglePinFriend(friendData);
-            });
+            }));
         }
 
         const toggleMuteBtn = optionsModal.querySelector('#toggleMuteBtn');
         if (toggleMuteBtn) {
-            toggleMuteBtn.addEventListener('click', async () => {
+            toggleMuteBtn.addEventListener('click', guardUIAction('options_toggle_mute', async () => {
                 closeModal();
                 logUI(`Toggle mute for: ${friendId}`);
                 await toggleMuteFriend(friendData);
-            });
+            }));
         }
 
         const viewChatHistoryBtn = optionsModal.querySelector('#viewChatHistoryBtn');
         if (viewChatHistoryBtn) {
-            viewChatHistoryBtn.addEventListener('click', () => {
+            viewChatHistoryBtn.addEventListener('click', guardUIAction('options_chat_history', () => {
                 closeModal();
                 logUI(`View chat history: ${friendId}`);
                 navigateToChat(friendId, displayName);
-            });
+            }));
         }
 
         const viewCallHistoryBtn = optionsModal.querySelector('#viewCallHistoryBtn');
         if (viewCallHistoryBtn) {
-            viewCallHistoryBtn.addEventListener('click', () => {
+            viewCallHistoryBtn.addEventListener('click', guardUIAction('options_call_history', () => {
                 closeModal();
                 logUI(`View call history: ${friendId}`);
                 navigateToCall(friendId, displayName);
-            });
+            }));
         }
 
         const removeFriendBtn = optionsModal.querySelector('#removeFriendBtn');
         if (removeFriendBtn) {
-            removeFriendBtn.addEventListener('click', async () => {
+            removeFriendBtn.addEventListener('click', guardUIAction('options_remove_friend', async () => {
                 if (confirm(`Are you sure you want to remove ${displayName} from your friends?`)) {
                     closeModal();
                     logUI(`Remove friend: ${friendId}`);
                     await removeFriend(friendData);
                 }
-            });
+            }));
         }
 
         const blockUserBtn = optionsModal.querySelector('#blockUserBtn');
         if (blockUserBtn) {
-            blockUserBtn.addEventListener('click', async () => {
+            blockUserBtn.addEventListener('click', guardUIAction('options_block_user', async () => {
                 if (confirm(`Are you sure you want to block ${displayName}? They will not be able to contact you.`)) {
                     closeModal();
                     logUI(`Block user: ${friendId}`);
                     await blockUser(friendData);
                 }
-            });
+            }));
         }
 
     }, null);
-}
+});
 
-export function showChangeCategoryModal(friendData) {
+export const showChangeCategoryModal = guardUIAction('show_change_category', function(friendData) {
     return ErrorHandler.createBoundary('showChangeCategoryModal', () => {
         if (!friendData || !friendData.id) return;
 
@@ -2732,7 +2758,7 @@ export function showChangeCategoryModal(friendData) {
 
         const saveBtn = modal.querySelector('#saveCategoryBtn');
         if (saveBtn) {
-            saveBtn.addEventListener('click', async () => {
+            saveBtn.addEventListener('click', guardUIAction('category_save', async () => {
                 const newCategorySelect = modal.querySelector('#newCategorySelect');
                 const newCategory = newCategorySelect ? newCategorySelect.value : 'friend';
 
@@ -2751,17 +2777,17 @@ export function showChangeCategoryModal(friendData) {
                 }
 
                 closeModal();
-            });
+            }));
         }
 
     }, null);
-}
+});
 
 // =============================================
-// [12] START CHAT MODAL FUNCTIONS
+// [12] START CHAT MODAL FUNCTIONS - UPDATED WITH GUARDS
 // =============================================
 
-export function showStartChatModal() {
+export const showStartChatModal = guardUIAction('show_start_chat', function() {
     return ErrorHandler.createBoundary('showStartChatModal', () => {
         if (!domElements.startChatModal) return;
 
@@ -2779,7 +2805,7 @@ export function showStartChatModal() {
         populateChatFriendsList();
 
     }, null);
-}
+});
 
 function populateChatFriendsList() {
     return ErrorHandler.createBoundary('populateChatFriendsList', () => {
@@ -2873,7 +2899,7 @@ function populateChatFriendsList() {
                 </div>
             `;
 
-            friendItem.addEventListener('click', () => {
+            friendItem.addEventListener('click', guardUIAction('select_chat_friend', () => {
                 logUI(`Chat friend selected: ${friend.id}`);
                 document.querySelectorAll('#chatFriendsList .friend-item').forEach(item => {
                     item.classList.remove('selected');
@@ -2884,7 +2910,7 @@ function populateChatFriendsList() {
 
                 const confirmBtn = document.getElementById('confirmStartChatBtn');
                 if (confirmBtn) confirmBtn.disabled = false;
-            });
+            }));
 
             fragment.appendChild(friendItem);
         });
@@ -2914,10 +2940,10 @@ function searchChatFriends(searchTerm) {
 }
 
 // =============================================
-// [13] FILTERING AND SEARCH FUNCTIONS
+// [13] FILTERING AND SEARCH FUNCTIONS - UPDATED WITH GUARDS
 // =============================================
 
-export function filterFriendsByCategory(category) {
+export const filterFriendsByCategory = guardUIAction('filter_by_category', function(category) {
     return ErrorHandler.createBoundary('filterFriendsByCategory', () => {
         currentCategoryFilter = category;
         updateCurrentSection();
@@ -2931,20 +2957,20 @@ export function filterFriendsByCategory(category) {
             activeBtn.classList.add('active');
         }
     }, null);
-}
+});
 
-export function searchFriendsLegacy(searchTerm) {
+export const searchFriendsLegacy = guardUIAction('search_friends', function(searchTerm) {
     return ErrorHandler.createBoundary('searchFriends', () => {
         currentSearchTerm = searchTerm ? searchTerm.toLowerCase().trim() : '';
         updateCurrentSection();
     }, null);
-}
+});
 
 // =============================================
-// [14] ACTION HANDLERS
+// [14] ACTION HANDLERS - UPDATED WITH GUARDS
 // =============================================
 
-export function handleFriendAction(action, friendData, type, button) {
+export const handleFriendAction = guardUIAction('handle_friend_action', function(action, friendData, type, button) {
     return ErrorHandler.createBoundary('handleFriendAction', () => {
         const userId = button?.dataset?.userId || friendData?.id;
         const userName = button?.dataset?.userName || friendData?.displayName || 'User';
@@ -2968,9 +2994,9 @@ export function handleFriendAction(action, friendData, type, button) {
                 logUI(`Unknown action: ${action}`);
         }
     }, null);
-}
+});
 
-export function handleRequestAction(action, requestData, button) {
+export const handleRequestAction = guardUIAction('handle_request_action', function(action, requestData, button) {
     return ErrorHandler.createBoundary('handleRequestAction', () => {
         logUI(`Handling request action: ${action} for ${requestData.id}`);
 
@@ -2991,9 +3017,9 @@ export function handleRequestAction(action, requestData, button) {
                 logUI(`Unknown request action: ${action}`);
         }
     }, null);
-}
+});
 
-async function handleSendFriendRequest() {
+const handleSendFriendRequest = guardUIAction('send_friend_request', async function() {
     const activeTab = document.querySelector('.add-friend-tab.active');
     if (!activeTab) return;
 
@@ -3040,7 +3066,7 @@ async function handleSendFriendRequest() {
             if (noteInput) noteInput.value = '';
         }
     }
-}
+});
 
 function updateFriendPresence(userId, online, lastSeen) {
     [friends, pinnedFriends, mutedFriends, temporaryFriends].forEach(arr => {
@@ -3111,7 +3137,7 @@ function setupRetryButtons() {
 }
 
 // =============================================
-// [17] EVENT BINDING FUNCTION - FIXED
+// [17] EVENT BINDING FUNCTION - UPDATED WITH GUARDS
 // =============================================
 
 function bindAllEvents() {
@@ -3123,7 +3149,7 @@ function bindAllEvents() {
         domElements.addFriendBtn.parentNode.replaceChild(newBtn, domElements.addFriendBtn);
         domElements.addFriendBtn = newBtn;
         
-        domElements.addFriendBtn.addEventListener('click', function(e) {
+        domElements.addFriendBtn.addEventListener('click', guardUIAction('add_friend_btn', function(e) {
             e.preventDefault();
             e.stopPropagation();
             logUI('Add friend button clicked');
@@ -3138,16 +3164,16 @@ function bindAllEvents() {
                     if (methodsContent) methodsContent.classList.add('active');
                 }
             }
-        });
+        }));
         
         if (typeof $ !== 'undefined') {
-            $('#addFriendBtn').off('click').on('click', function(e) {
+            $('#addFriendBtn').off('click').on('click', guardUIAction('add_friend_jquery', function(e) {
                 e.preventDefault();
                 logUI('Add friend button clicked (jQuery)');
                 if (domElements.addFriendModal) {
                     domElements.addFriendModal.classList.add('active');
                 }
-            });
+            }));
         }
     } else {
         logUI('Add friend button not found!');
@@ -3197,12 +3223,12 @@ function bindAllEvents() {
 
     // Start New Chat button
     if (domElements.startNewChatBtn) {
-        domElements.startNewChatBtn.addEventListener('click', function(e) {
+        domElements.startNewChatBtn.addEventListener('click', guardUIAction('start_new_chat', function(e) {
             e.preventDefault();
             e.stopPropagation();
             logUI('Start new chat clicked');
             showStartChatModal();
-        });
+        }));
     }
 
     // Close Start Chat modal
@@ -3228,7 +3254,7 @@ function bindAllEvents() {
 
     // Sync Contacts button
     if (domElements.syncContactsBtn) {
-        domElements.syncContactsBtn.addEventListener('click', async function(e) {
+        domElements.syncContactsBtn.addEventListener('click', guardUIAction('sync_contacts', async function(e) {
             e.preventDefault();
             e.stopPropagation();
             logUI('Sync contacts clicked');
@@ -3251,7 +3277,7 @@ function bindAllEvents() {
                 btn.innerHTML = originalHtml;
                 btn.disabled = false;
             }
-        });
+        }));
     }
 
     // Scan QR button - FIXED
@@ -3260,7 +3286,7 @@ function bindAllEvents() {
         domElements.scanQRBtn.parentNode.replaceChild(newScanBtn, domElements.scanQRBtn);
         domElements.scanQRBtn = newScanBtn;
         
-        domElements.scanQRBtn.addEventListener('click', function(e) {
+        domElements.scanQRBtn.addEventListener('click', guardUIAction('scan_qr', function(e) {
             e.preventDefault();
             e.stopPropagation();
             logUI('Scan QR clicked');
@@ -3287,7 +3313,7 @@ function bindAllEvents() {
                     }, 200);
                 }
             }
-        });
+        }));
     }
 
     // Scan QR modal button - FIXED
@@ -3296,7 +3322,7 @@ function bindAllEvents() {
         domElements.scanQRBtnModal.parentNode.replaceChild(newScanModalBtn, domElements.scanQRBtnModal);
         domElements.scanQRBtnModal = newScanModalBtn;
         
-        domElements.scanQRBtnModal.addEventListener('click', function(e) {
+        domElements.scanQRBtnModal.addEventListener('click', guardUIAction('scan_qr_modal', function(e) {
             e.preventDefault();
             e.stopPropagation();
             logUI('Scan QR modal clicked');
@@ -3314,7 +3340,7 @@ function bindAllEvents() {
                     showNotification('Camera scanner not ready', 'error');
                 }
             }
-        });
+        }));
     }
 
     // Close camera button - FIXED
@@ -3338,25 +3364,25 @@ function bindAllEvents() {
 
     // Toggle camera button
     if (domElements.toggleCameraBtn) {
-        domElements.toggleCameraBtn.addEventListener('click', function(e) {
+        domElements.toggleCameraBtn.addEventListener('click', guardUIAction('toggle_camera', function(e) {
             e.preventDefault();
             e.stopPropagation();
             toggleCamera();
-        });
+        }));
     }
 
     // Toggle flash button
     if (domElements.toggleFlashBtn) {
-        domElements.toggleFlashBtn.addEventListener('click', function(e) {
+        domElements.toggleFlashBtn.addEventListener('click', guardUIAction('toggle_flash', function(e) {
             e.preventDefault();
             e.stopPropagation();
             toggleFlash();
-        });
+        }));
     }
 
     // Discover button
     if (domElements.discoverBtn) {
-        domElements.discoverBtn.addEventListener('click', function(e) {
+        domElements.discoverBtn.addEventListener('click', guardUIAction('discover', function(e) {
             e.preventDefault();
             e.stopPropagation();
             logUI('Discover clicked');
@@ -3374,7 +3400,7 @@ function bindAllEvents() {
                     setTimeout(renderAllUsersList, 50);
                 }
             }
-        });
+        }));
     }
 
     // Send Friend Request button - FIXED
@@ -3383,17 +3409,17 @@ function bindAllEvents() {
         domElements.sendFriendRequestBtn.parentNode.replaceChild(newSendBtn, domElements.sendFriendRequestBtn);
         domElements.sendFriendRequestBtn = newSendBtn;
         
-        domElements.sendFriendRequestBtn.addEventListener('click', function(e) {
+        domElements.sendFriendRequestBtn.addEventListener('click', guardUIAction('send_friend_request_btn', function(e) {
             e.preventDefault();
             e.stopPropagation();
             logUI('Send friend request clicked');
             handleSendFriendRequest();
-        });
+        }));
     }
 
     // Accept Request button
     if (domElements.acceptRequestBtn) {
-        domElements.acceptRequestBtn.addEventListener('click', async function(e) {
+        domElements.acceptRequestBtn.addEventListener('click', guardUIAction('accept_request', async function(e) {
             e.preventDefault();
             e.stopPropagation();
             const userId = this.dataset.userId;
@@ -3414,7 +3440,7 @@ function bindAllEvents() {
                     domElements.friendRequestModal.classList.remove('active');
                 }
             }
-        });
+        }));
     }
 
     // Decline Request button
@@ -3441,7 +3467,7 @@ function bindAllEvents() {
 
     // Confirm Start Chat button
     if (domElements.confirmStartChatBtn) {
-        domElements.confirmStartChatBtn.addEventListener('click', function(e) {
+        domElements.confirmStartChatBtn.addEventListener('click', guardUIAction('confirm_start_chat', function(e) {
             e.preventDefault();
             e.stopPropagation();
             if (window.selectedChatFriend) {
@@ -3453,12 +3479,12 @@ function bindAllEvents() {
                 }
                 window.selectedChatFriend = null;
             }
-        });
+        }));
     }
 
     // Redirect to Login button
     if (domElements.redirectToLoginBtn) {
-        domElements.redirectToLoginBtn.addEventListener('click', function(e) {
+        domElements.redirectToLoginBtn.addEventListener('click', guardUIAction('redirect_login', function(e) {
             e.preventDefault();
             e.stopPropagation();
             if (ParentCoordinator?.state?.parentDetected) {
@@ -3470,7 +3496,7 @@ function bindAllEvents() {
             } else {
                 window.location.href = '/index.html';
             }
-        });
+        }));
     }
 
     // Retry Auth button
@@ -3501,7 +3527,7 @@ function bindAllEvents() {
             return;
         }
 
-        tab.addEventListener('click', function(e) {
+        tab.addEventListener('click', guardUIAction(`tab_${tabId}`, function(e) {
             e.preventDefault();
             e.stopPropagation();
             logUI(`Tab clicked: ${tabId}`);
@@ -3517,32 +3543,32 @@ function bindAllEvents() {
                 section.classList.add('active');
                 updateCurrentSection();
             }
-        });
+        }));
     });
 
     // Category filter buttons
     document.querySelectorAll('.category-filter-btn').forEach(btn => {
-        btn.addEventListener('click', function(e) {
+        btn.addEventListener('click', guardUIAction(`filter_${btn.dataset.category}`, function(e) {
             e.preventDefault();
             e.stopPropagation();
             const category = this.dataset.category;
             logUI(`Category filter clicked: ${category}`);
             filterFriendsByCategory(category);
-        });
+        }));
     });
 
     // Search input
     if (domElements.friendSearch) {
-        domElements.friendSearch.addEventListener('input', debounce(function() {
+        domElements.friendSearch.addEventListener('input', debounce(guardUIAction('search_input', function() {
             logUI(`Search input: ${this.value}`);
             searchFriendsLegacy(this.value);
-        }, 300));
+        }), 300));
     }
 
     if (domElements.allUsersSearch) {
-        domElements.allUsersSearch.addEventListener('input', debounce(function() {
+        domElements.allUsersSearch.addEventListener('input', debounce(guardUIAction('search_users', function() {
             renderAllUsersList();
-        }, 300));
+        }), 300));
     }
 
     if (domElements.searchChatUser) {
@@ -3553,7 +3579,7 @@ function bindAllEvents() {
 
     // Add Friend tabs
     document.querySelectorAll('.add-friend-tab').forEach(tab => {
-        tab.addEventListener('click', function(e) {
+        tab.addEventListener('click', guardUIAction(`add_tab_${tab.dataset.tab}`, function(e) {
             e.preventDefault();
             e.stopPropagation();
             const tabName = this.dataset.tab;
@@ -3578,12 +3604,12 @@ function bindAllEvents() {
                     }
                 }
             }
-        });
+        }));
     });
 
     // Method items
     document.querySelectorAll('.method-item').forEach(item => {
-        item.addEventListener('click', function(e) {
+        item.addEventListener('click', guardUIAction(`method_${item.dataset.method}`, function(e) {
             e.preventDefault();
             e.stopPropagation();
             const method = this.dataset.method;
@@ -3603,7 +3629,7 @@ function bindAllEvents() {
                     setTimeout(generateUniqueQRCode, 100);
                 }
             }
-        });
+        }));
     });
 
     logUI('Event binding complete');
@@ -3691,11 +3717,16 @@ setTimeout(() => {
 window.addEventListener('friendCoreReady', () => {
     logUI('Friend core ready, re-binding events');
     bindAllEvents();
+    
+    // Dispatch lifecycle event
+    window.dispatchEvent(new CustomEvent('lifecycleChanged', {
+        detail: { toState: LIFECYCLE_STATES.ACTIVE }
+    }));
 });
 
 // =============================================
 // END OF UI MODULE
-// Version: 2.6.0
+// Version: 2.7.0
 // ✅ FIXED: All imports from friend-core.js
 // ✅ FIXED: All click handlers working
 // ✅ FIXED: QR code scanning
@@ -3703,4 +3734,8 @@ window.addEventListener('friendCoreReady', () => {
 // ✅ FIXED: Camera modal
 // ✅ ADDED: Lifecycle state guards in all render functions
 // ✅ ADDED: Passive UI until ACTIVE state
+// ✅ ADDED: isUIActive() guard for all interactive elements
+// ✅ ADDED: guardUIAction wrapper for all event handlers
+// ✅ ADDED: LifecycleChanged event for state transitions
+// ✅ ADDED: LIFECYCLE_STATES import and usage
 // =============================================

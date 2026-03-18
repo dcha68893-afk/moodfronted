@@ -1,5 +1,5 @@
 // =============================================
-// RESILIENT MARKETPLACE UI CONTROLLER v5.0
+// RESILIENT MARKETPLACE UI CONTROLLER v5.1
 // FAULT-TOLERANT • PROGRESSIVE RENDERING • CORE BRIDGE
 // ENHANCED WITH DIAGNOSTICS • RECOVERY AWARE • SESSION SYNC
 // UI FAILSAFE • NAVIGATION GUARD • ENVIRONMENT ADAPTIVE
@@ -52,7 +52,7 @@ import {
     inviteTeamMember,
     clearMoodFilter as clearCoreMoodFilter,
     
-    // Additional imports needed
+    // Core state and functions
     AppState,
     hasValidSession,
     hasValidUser,
@@ -61,15 +61,12 @@ import {
     validateDataStructure,
     getData,
     updateData,
-    queueMessageForParent,
-    processMessageQueue,
     handleParentMessage,
     handleParentInit,
     handleRefreshDataRequest,
     fetchData,
     pageCore as corePageCore,
     initializeCore,
-    startHandshake,
     sendToParent,
     requestSession,
     receiveFromParent,
@@ -82,9 +79,6 @@ import {
     safeApiCall,
     getCentralToken,
     handleSessionExpired,
-    startSecureHandshakeProtocol,
-    requestSessionFromParent,
-    handleSecureSessionData,
     bindUIAfterSession,
     getMarketplaceStats,
     getMarketplaceAnalytics,
@@ -92,21 +86,12 @@ import {
     isMarketplaceReady,
     isCoreReady,
     loadCachedDataInstantly,
-    initializeEnhancedParentCommunication,
-    handleSecureParentMessage,
-    validateParentOrigin,
-    validateMessageOrigin,
-    startHandshakeProtocol,
-    initiateHandshakeRetry,
-    handleParentReady,
     handleSessionDataFromParent,
     validateSessionSchema,
     processSessionData,
     storeCentralizedToken,
     updateLocalStateFromSession,
     showMarketplaceUI,
-    waitForSessionData,
-    handleSessionTimeout,
     handleSessionUpdate,
     handleParentLogout,
     clearSessionData,
@@ -114,16 +99,9 @@ import {
     handleForceReload,
     handleApiError,
     handleUnauthorized,
-    handleParentUnavailable,
-    showReconnectionState,
-    startReconnectionAttempts,
-    hideReconnectionState,
     setupConnectivityListeners,
     initializeTokenSystem,
     isValidToken,
-    waitForApiJs,
-    handleInitializationFailure,
-    handleStandaloneMode,
     initializeEnhancedMarketplace,
     checkUserPremiumStatus,
     loadEnhancedMarketplaceData,
@@ -157,15 +135,8 @@ import {
     updateUserDataFromParent,
     handleUserLogout,
     migrateLegacyUserData,
-    startFreeTrial as startFreeTrialCore,
-    restorePurchase as restorePurchaseCore,
-    processSubscriptionPayment as processSubscriptionPaymentCore,
-    inviteTeamMember as inviteTeamMemberCore,
     inviteTeamMemberWrapper,
-    openChat as openChatCore,
-    loadAnalyticsData as loadAnalyticsDataCore,
-    loadLeaderboard as loadLeaderboardCore,
-    updateTeamMemberRole as updateTeamMemberRoleCore
+    isActive // New export from updated core
     
 } from './Tool-core.js';
 
@@ -357,7 +328,8 @@ const DOM = {
     debugPanel: null,
     debugToggle: null,
     metricsDisplay: null,
-    startupStageIndicator: null
+    startupStageIndicator: null,
+    connectionStatusBar: null
 };
 
 function cacheDOMElements() {
@@ -543,13 +515,23 @@ function cacheDOMElements() {
     // Reaction picker
     DOM.reactionPicker = document.getElementById('reactionPicker');
     
-    // New elements (create them if they don't exist)
+    // New elements (get existing or create)
+    DOM.connectionStatusBar = document.getElementById('connectionStatusBar');
+    DOM.connectionStatusIndicator = document.getElementById('connectionStatusIndicator');
+    DOM.handshakeStatusIndicator = document.getElementById('handshakeStatusIndicator');
+    DOM.sessionStatusIndicator = document.getElementById('sessionStatusIndicator');
+    DOM.environmentIndicator = document.getElementById('environmentIndicator');
+    DOM.startupStageIndicator = document.getElementById('startupStageIndicator');
+    DOM.debugToggle = document.getElementById('debugToggle');
+    DOM.debugPanel = document.getElementById('debugPanel');
+    
+    // Create enhanced UI elements if they don't exist
     createEnhancedUIElements();
 }
 
 function createEnhancedUIElements() {
     // Create status indicators if they don't exist
-    if (!document.getElementById('connectionStatusBar')) {
+    if (!DOM.connectionStatusBar) {
         const statusBar = document.createElement('div');
         statusBar.id = 'connectionStatusBar';
         statusBar.style.cssText = `
@@ -592,6 +574,7 @@ function createEnhancedUIElements() {
         
         document.body.appendChild(statusBar);
         
+        DOM.connectionStatusBar = statusBar;
         DOM.connectionStatusIndicator = document.getElementById('connectionStatusIndicator');
         DOM.handshakeStatusIndicator = document.getElementById('handshakeStatusIndicator');
         DOM.sessionStatusIndicator = document.getElementById('sessionStatusIndicator');
@@ -600,58 +583,56 @@ function createEnhancedUIElements() {
     }
     
     // Create debug toggle if in development or debug mode
-    if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' || window.__IFRAME_DEBUG__) {
-        if (!document.getElementById('debugToggle')) {
-            const debugBtn = document.createElement('button');
-            debugBtn.id = 'debugToggle';
-            debugBtn.innerHTML = '🐛 Debug';
-            debugBtn.style.cssText = `
-                position: fixed;
-                bottom: 60px;
-                left: 10px;
-                z-index: 10000;
-                background: #333;
-                color: white;
-                border: none;
-                border-radius: 20px;
-                padding: 8px 16px;
-                font-size: 12px;
-                cursor: pointer;
-                opacity: 0.6;
-                transition: opacity 0.2s;
-                min-width: 44px;
-                min-height: 44px;
-                box-shadow: 0 2px 10px rgba(0,0,0,0.3);
-            `;
-            debugBtn.addEventListener('mouseenter', () => debugBtn.style.opacity = '1');
-            debugBtn.addEventListener('mouseleave', () => debugBtn.style.opacity = '0.6');
-            document.body.appendChild(debugBtn);
-            DOM.debugToggle = debugBtn;
-            
-            const debugPanel = document.createElement('div');
-            debugPanel.id = 'debugPanel';
-            debugPanel.style.cssText = `
-                position: fixed;
-                bottom: 110px;
-                left: 10px;
-                z-index: 10000;
-                background: rgba(0,0,0,0.95);
-                color: #0f0;
-                padding: 15px;
-                border-radius: 8px;
-                font-family: monospace;
-                font-size: 12px;
-                max-width: 400px;
-                max-height: 400px;
-                overflow: auto;
-                display: none;
-                backdrop-filter: blur(4px);
-                border: 1px solid #444;
-                box-shadow: 0 4px 20px rgba(0,0,0,0.5);
-            `;
-            document.body.appendChild(debugPanel);
-            DOM.debugPanel = debugPanel;
-        }
+    if ((window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' || window.__IFRAME_DEBUG__) && !DOM.debugToggle) {
+        const debugBtn = document.createElement('button');
+        debugBtn.id = 'debugToggle';
+        debugBtn.innerHTML = '🐛 Debug';
+        debugBtn.style.cssText = `
+            position: fixed;
+            bottom: 60px;
+            left: 10px;
+            z-index: 10000;
+            background: #333;
+            color: white;
+            border: none;
+            border-radius: 20px;
+            padding: 8px 16px;
+            font-size: 12px;
+            cursor: pointer;
+            opacity: 0.6;
+            transition: opacity 0.2s;
+            min-width: 44px;
+            min-height: 44px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.3);
+        `;
+        debugBtn.addEventListener('mouseenter', () => debugBtn.style.opacity = '1');
+        debugBtn.addEventListener('mouseleave', () => debugBtn.style.opacity = '0.6');
+        document.body.appendChild(debugBtn);
+        DOM.debugToggle = debugBtn;
+        
+        const debugPanel = document.createElement('div');
+        debugPanel.id = 'debugPanel';
+        debugPanel.style.cssText = `
+            position: fixed;
+            bottom: 110px;
+            left: 10px;
+            z-index: 10000;
+            background: rgba(0,0,0,0.95);
+            color: #0f0;
+            padding: 15px;
+            border-radius: 8px;
+            font-family: monospace;
+            font-size: 12px;
+            max-width: 400px;
+            max-height: 400px;
+            overflow: auto;
+            display: none;
+            backdrop-filter: blur(4px);
+            border: 1px solid #444;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+        `;
+        document.body.appendChild(debugPanel);
+        DOM.debugPanel = debugPanel;
     }
 }
 
@@ -682,8 +663,8 @@ const UIState = {
     handshakeStage: 'idle',
     connectionQuality: 'unknown',
     debugMode: window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' || window.__IFRAME_DEBUG__,
-    environmentType: ENVIRONMENT_TYPES.UNKNOWN,
-    startupStage: STARTUP_STAGES.IDLE,
+    environmentType: ENVIRONMENT_TYPES ? ENVIRONMENT_TYPES.UNKNOWN : 'UNKNOWN',
+    startupStage: STARTUP_STAGES ? STARTUP_STAGES.IDLE : 'IDLE',
     
     // UI Failsafe state
     pendingActions: [],
@@ -699,6 +680,26 @@ const EventController = (function() {
     const debouncedHandlers = new Map();
     const intervalHandlers = new Map();
     const warningsShown = new Set();
+
+    function canExecuteAction() {
+        // Check if parent is responding OR we're in guest/fallback mode
+        const health = checkParentHealth ? checkParentHealth() : { connected: true };
+        return health.connected || AppState?._STATE?.guestMode || AppState?._STATE?.fallbackMode;
+    }
+
+    function queueUIAction(action) {
+        if (!UIState.actionQueueEnabled) return;
+        
+        UIState.pendingActions.push({
+            action,
+            timestamp: Date.now()
+        });
+        
+        // Limit queue size
+        if (UIState.pendingActions.length > 50) {
+            UIState.pendingActions.shift();
+        }
+    }
 
     function addListener(element, event, handler, options = {}) {
         if (!element) return () => {};
@@ -794,31 +795,13 @@ const EventController = (function() {
 })();
 
 // ----------------------------------------------------------------------
-// 5. UI FAILSAFE - Protects UI during disconnection
+// 5. PROCESS QUEUED UI ACTIONS
 // ----------------------------------------------------------------------
-function canExecuteAction() {
-    // Check if parent is responding OR we're in guest/fallback mode
-    const health = checkParentHealth ? checkParentHealth() : { responding: true };
-    return health.responding || AppState?._STATE?.guestMode || AppState?._STATE?.fallbackMode;
-}
-
-function queueUIAction(action) {
-    if (!UIState.actionQueueEnabled) return;
-    
-    UIState.pendingActions.push({
-        action,
-        timestamp: Date.now()
-    });
-    
-    // Limit queue size
-    if (UIState.pendingActions.length > 50) {
-        UIState.pendingActions.shift();
-    }
-}
-
 function processQueuedUIActions() {
     if (UIState.pendingActions.length === 0) return;
-    if (!canExecuteAction()) return;
+    
+    const health = checkParentHealth ? checkParentHealth() : { connected: true };
+    if (!health.connected && !AppState?._STATE?.guestMode) return;
     
     const now = Date.now();
     const actions = UIState.pendingActions.filter(a => now - a.timestamp < 60000); // Keep last minute
@@ -1053,30 +1036,28 @@ const UIPipeline = {
         if (!DOM.debugPanel) return;
         
         const health = checkParentHealth ? checkParentHealth() : {};
-        const handshakeStatus = window.marketplaceCore?.diagnostics?.getStatus?.()?.handshake || {};
         const sessionStatus = {
             valid: hasValidSession ? hasValidSession() : false,
             guest: AppState?._STATE?.guestMode || false,
             demo: AppState?._STATE?.demoMode || false
         };
         const environment = AppState?.getEnvironment?.() || { type: 'unknown', latency: 0 };
-        const startupStatus = AppState?.getStartupStatus?.() || { stage: 'unknown' };
-        const recoveryStatus = AppState?.getRecoveryStatus?.() || { inProgress: false };
         
         DOM.debugPanel.innerHTML = `
-            <div style="color: #fff; margin-bottom: 8px; font-weight: bold;">🔍 DEBUG PANEL v5.0</div>
+            <div style="color: #fff; margin-bottom: 8px; font-weight: bold;">🔍 DEBUG PANEL v5.1</div>
             <div><span style="color: #888;">Environment:</span> ${environment.type} (${environment.latency || 0}ms) ${environment.isVPN ? '🌐 VPN' : ''}</div>
-            <div><span style="color: #888;">Startup:</span> ${startupStatus.stage || 'unknown'} (${startupStatus.attempts || 0}/${startupStatus.maxAttempts || 0})</div>
-            <div><span style="color: #888;">Handshake:</span> ${handshakeStatus.stage || 'unknown'} (${handshakeStatus.complete ? '✅' : '⏳'})</div>
+            <div><span style="color: #888;">Handshake:</span> ${health.handshakeComplete ? '✅' : '⏳'}</div>
             <div><span style="color: #888;">Session:</span> ${sessionStatus.valid ? '✅' : '❌'} ${sessionStatus.guest ? '(guest)' : sessionStatus.demo ? '(demo)' : ''}</div>
-            <div><span style="color: #888;">Parent responding:</span> ${health.responding ? '✅' : '❌'}</div>
-            <div><span style="color: #888;">Recovery:</span> ${recoveryStatus.inProgress ? '🔄' : '✓'} ${recoveryStatus.strategy || ''}</div>
+            <div><span style="color: #888;">Parent ready:</span> ${health.parentReady ? '✅' : '❌'}</div>
+            <div><span style="color: #888;">Connected:</span> ${health.connected ? '✅' : '❌'}</div>
+            <div><span style="color: #888;">Queued messages:</span> ${health.queuedMessages || 0}</div>
             <div><span style="color: #888;">Last message:</span> ${health.lastMessage ? new Date(health.lastMessage).toLocaleTimeString() : 'never'}</div>
             <div><span style="color: #888;">Missed heartbeats:</span> ${health.missedHeartbeats || 0}</div>
             <div><span style="color: #888;">Listings:</span> ${allListings?.length || 0} total, ${myListings?.length || 0} mine</div>
             <div><span style="color: #888;">User:</span> ${window.currentUser?.displayName || 'none'}</div>
             <div><span style="color: #888;">Frame ID:</span> ${AppState?._STATE?.frameId || 'unknown'}</div>
             <div><span style="color: #888;">Queued actions:</span> ${UIState.pendingActions.length}</div>
+            <div><span style="color: #888;">Active:</span> ${isActive ? isActive() : 'unknown'}</div>
             <div style="margin-top: 8px; color: #888; font-size: 10px;">${new Date().toLocaleTimeString()}</div>
         `;
     },
@@ -1085,16 +1066,16 @@ const UIPipeline = {
         if (!DOM.connectionStatusIndicator || !DOM.handshakeStatusIndicator || !DOM.sessionStatusIndicator) return;
         
         const health = checkParentHealth ? checkParentHealth() : {};
-        const handshakeComplete = AppState?._STATE?.handshakeComplete || false;
-        const sessionActive = AppState?._STATE?.sessionActive || false;
+        const handshakeComplete = health.handshakeComplete || false;
+        const sessionActive = health.sessionActive || false;
         const guestMode = AppState?._STATE?.guestMode || false;
-        const recoveryMode = AppState?._STATE?.recoveryMode || false;
+        const parentReady = health.parentReady || false;
         
         // Connection status
         let connectionColor = '#ff9800';
         let connectionText = 'Connecting';
         
-        if (health.responding) {
+        if (parentReady && health.connected) {
             connectionColor = '#4caf50';
             connectionText = 'Connected';
         } else if (health.missedHeartbeats > 3) {
@@ -1124,21 +1105,21 @@ const UIPipeline = {
     updateEnvironmentIndicator() {
         if (!DOM.environmentIndicator) return;
         
-        const environment = AppState?.getEnvironment?.() || { type: ENVIRONMENT_TYPES.UNKNOWN };
+        const environment = AppState?.getEnvironment?.() || { type: ENVIRONMENT_TYPES ? ENVIRONMENT_TYPES.UNKNOWN : 'UNKNOWN' };
         const envColors = {
-            [ENVIRONMENT_TYPES.LOCAL_DEV]: '#4caf50',
-            [ENVIRONMENT_TYPES.RENDER_HOSTED]: '#2196F3',
-            [ENVIRONMENT_TYPES.VPN_NETWORK]: '#ff9800',
-            [ENVIRONMENT_TYPES.PRODUCTION]: '#9c27b0',
-            [ENVIRONMENT_TYPES.UNKNOWN]: '#9e9e9e'
+            [ENVIRONMENT_TYPES?.LOCAL_DEV]: '#4caf50',
+            [ENVIRONMENT_TYPES?.RENDER_HOSTED]: '#2196F3',
+            [ENVIRONMENT_TYPES?.VPN_NETWORK]: '#ff9800',
+            [ENVIRONMENT_TYPES?.PRODUCTION]: '#9c27b0',
+            [ENVIRONMENT_TYPES?.UNKNOWN]: '#9e9e9e'
         };
         
         const envNames = {
-            [ENVIRONMENT_TYPES.LOCAL_DEV]: 'Local',
-            [ENVIRONMENT_TYPES.RENDER_HOSTED]: 'Render',
-            [ENVIRONMENT_TYPES.VPN_NETWORK]: 'VPN',
-            [ENVIRONMENT_TYPES.PRODUCTION]: 'Prod',
-            [ENVIRONMENT_TYPES.UNKNOWN]: 'Unknown'
+            [ENVIRONMENT_TYPES?.LOCAL_DEV]: 'Local',
+            [ENVIRONMENT_TYPES?.RENDER_HOSTED]: 'Render',
+            [ENVIRONMENT_TYPES?.VPN_NETWORK]: 'VPN',
+            [ENVIRONMENT_TYPES?.PRODUCTION]: 'Prod',
+            [ENVIRONMENT_TYPES?.UNKNOWN]: 'Unknown'
         };
         
         const color = envColors[environment.type] || '#9e9e9e';
@@ -1151,31 +1132,32 @@ const UIPipeline = {
     updateStartupStageIndicator() {
         if (!DOM.startupStageIndicator) return;
         
-        const startupStatus = AppState?.getStartupStatus?.() || { stage: STARTUP_STAGES.IDLE };
+        const health = checkParentHealth ? checkParentHealth() : {};
         const stageColors = {
-            [STARTUP_STAGES.IDLE]: '#9e9e9e',
-            [STARTUP_STAGES.WAITING]: '#ff9800',
-            [STARTUP_STAGES.HANDSHAKING]: '#2196F3',
-            [STARTUP_STAGES.SYNCING]: '#9c27b0',
-            [STARTUP_STAGES.ACTIVE]: '#4caf50',
-            [STARTUP_STAGES.DEGRADED]: '#ff9800',
-            [STARTUP_STAGES.RECOVERING]: '#f44336',
-            [STARTUP_STAGES.FAILED]: '#f44336'
+            [STARTUP_STAGES?.IDLE]: '#9e9e9e',
+            [STARTUP_STAGES?.WAITING]: '#ff9800',
+            [STARTUP_STAGES?.HANDSHAKING]: '#2196F3',
+            [STARTUP_STAGES?.SYNCING]: '#9c27b0',
+            [STARTUP_STAGES?.ACTIVE]: '#4caf50',
+            [STARTUP_STAGES?.DEGRADED]: '#ff9800',
+            [STARTUP_STAGES?.RECOVERING]: '#f44336',
+            [STARTUP_STAGES?.FAILED]: '#f44336'
         };
         
         const stageNames = {
-            [STARTUP_STAGES.IDLE]: 'Idle',
-            [STARTUP_STAGES.WAITING]: 'Waiting',
-            [STARTUP_STAGES.HANDSHAKING]: 'Handshake',
-            [STARTUP_STAGES.SYNCING]: 'Syncing',
-            [STARTUP_STAGES.ACTIVE]: 'Active',
-            [STARTUP_STAGES.DEGRADED]: 'Degraded',
-            [STARTUP_STAGES.RECOVERING]: 'Recovering',
-            [STARTUP_STAGES.FAILED]: 'Failed'
+            [STARTUP_STAGES?.IDLE]: 'Idle',
+            [STARTUP_STAGES?.WAITING]: 'Waiting',
+            [STARTUP_STAGES?.HANDSHAKING]: 'Handshake',
+            [STARTUP_STAGES?.SYNCING]: 'Syncing',
+            [STARTUP_STAGES?.ACTIVE]: 'Active',
+            [STARTUP_STAGES?.DEGRADED]: 'Degraded',
+            [STARTUP_STAGES?.RECOVERING]: 'Recovering',
+            [STARTUP_STAGES?.FAILED]: 'Failed'
         };
         
-        const color = stageColors[startupStatus.stage] || '#9e9e9e';
-        const name = stageNames[startupStatus.stage] || startupStatus.stage;
+        const stage = health.boot?.state || 'UNKNOWN';
+        const color = stageColors[stage] || '#9e9e9e';
+        const name = stageNames[stage] || stage;
         
         DOM.startupStageIndicator.innerHTML = `<span style="width: 8px; height: 8px; border-radius: 50%; background: ${color};"></span> ${name}`;
     },
@@ -1205,13 +1187,14 @@ const CoreBridge = {
         window.addEventListener('marketplaceSessionReady', this.handleSessionReady.bind(this));
         
         // New event listeners
-        window.addEventListener('marketplace:page-activated', this.handlePageActivated.bind(this));
+        window.addEventListener('tools:page-activated', this.handlePageActivated.bind(this));
         window.addEventListener('marketplace:navigate', this.handleNavigate.bind(this));
         window.addEventListener('marketplace:recovery-mode', this.handleRecoveryMode.bind(this));
         window.addEventListener('marketplace:environment-updated', this.handleEnvironmentUpdated.bind(this));
         window.addEventListener('marketplace:startup-updated', this.handleStartupUpdated.bind(this));
         window.addEventListener('transport:unresponsive', this.handleTransportUnresponsive.bind(this));
         window.addEventListener('recovery:completed', this.handleRecoveryCompleted.bind(this));
+        window.addEventListener('tools:lifecycle-change', this.handleLifecycleChange.bind(this));
     },
 
     handleCoreReady(e) {
@@ -1244,6 +1227,18 @@ const CoreBridge = {
         UIPipeline.updateEnvironmentIndicator();
     },
     
+    handleLifecycleChange(e) {
+        const { from, to } = e?.detail || {};
+        logOnce('lifecycle_change', `[UI Bridge] Lifecycle: ${from} -> ${to}`);
+        UIPipeline.updateConnectionStatus();
+        UIPipeline.updateStartupStageIndicator();
+        
+        // If we become active, process any queued actions
+        if (to === 'ACTIVE') {
+            processQueuedUIActions();
+        }
+    },
+    
     handlePageActivated(e) {
         logOnce('page_activated', '[UI Bridge] Page activated');
         if (e?.detail?.refresh) {
@@ -1264,13 +1259,10 @@ const CoreBridge = {
         UIState.recoveryModeActive = e?.detail?.active || false;
         UIPipeline.updateConnectionStatus();
         
-        if (UIState.recoveryModeActive) {
+        if (UIState.recoveryModeActive && DOM.connectionStatusBar) {
             // Show subtle indicator without blocking UI
-            const statusBar = document.getElementById('connectionStatusBar');
-            if (statusBar) {
-                statusBar.style.opacity = '1';
-                statusBar.style.background = 'rgba(244, 67, 54, 0.9)';
-            }
+            DOM.connectionStatusBar.style.opacity = '1';
+            DOM.connectionStatusBar.style.background = 'rgba(244, 67, 54, 0.9)';
         }
     },
     
@@ -1278,9 +1270,8 @@ const CoreBridge = {
         UIState.recoveryModeActive = false;
         UIPipeline.updateConnectionStatus();
         
-        const statusBar = document.getElementById('connectionStatusBar');
-        if (statusBar) {
-            statusBar.style.background = 'rgba(0,0,0,0.7)';
+        if (DOM.connectionStatusBar) {
+            DOM.connectionStatusBar.style.background = 'rgba(0,0,0,0.7)';
         }
         
         // Process any queued actions
@@ -1292,12 +1283,12 @@ const CoreBridge = {
     },
     
     handleEnvironmentUpdated(e) {
-        UIState.environmentType = e?.detail?.type || ENVIRONMENT_TYPES.UNKNOWN;
+        UIState.environmentType = e?.detail?.type || (ENVIRONMENT_TYPES ? ENVIRONMENT_TYPES.UNKNOWN : 'UNKNOWN');
         UIPipeline.updateEnvironmentIndicator();
     },
     
     handleStartupUpdated(e) {
-        UIState.startupStage = e?.detail?.stage || STARTUP_STAGES.IDLE;
+        UIState.startupStage = e?.detail?.stage || (STARTUP_STAGES ? STARTUP_STAGES.IDLE : 'IDLE');
         UIPipeline.updateStartupStageIndicator();
     },
 
@@ -2269,17 +2260,19 @@ const pageCore = {
                     renderMarketplaceList();
                     updateMyListingsPreview();
                     updatePremiumStatusUI();
+                    UIPipeline.updateConnectionStatus();
+                    UIPipeline.updateEnvironmentIndicator();
                 },
                 getDiagnostics: () => window.marketplaceCore?.diagnostics?.getReport?.(),
                 getStatus: () => ({
-                    canExecuteAction: canExecuteAction(),
+                    canExecuteAction: EventController.canExecuteAction ? EventController.canExecuteAction() : true,
                     pendingActions: UIState.pendingActions.length,
                     recoveryMode: UIState.recoveryModeActive,
                     environment: UIState.environmentType
                 })
             };
             
-            logOnce('ui_initialized', '[pageCore] UI initialized');
+            logOnce('ui_initialized', '[pageCore] UI initialized v5.1');
         } catch (err) {
             logOnce('ui_init_failed', '[pageCore.init] Failed');
         }
@@ -2576,6 +2569,19 @@ function setupAllEventListeners() {
                     if (DOM.reactionPickerModal) DOM.reactionPickerModal.classList.remove('active');
                 }
             });
+        });
+    }
+    
+    // Debug toggle
+    if (DOM.debugToggle) {
+        EventController.addListener(DOM.debugToggle, 'click', () => {
+            if (DOM.debugPanel) {
+                const isVisible = DOM.debugPanel.style.display === 'block';
+                DOM.debugPanel.style.display = isVisible ? 'none' : 'block';
+                if (!isVisible) {
+                    UIPipeline.updateDebugPanel();
+                }
+            }
         });
     }
     
@@ -3181,6 +3187,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     await pageCore.init();
     setupAllEventListeners();
     
+    // Start health monitoring
+    UIPipeline.startHealthMonitoring();
+    
     // Expose to window for debugging
     window.marketplaceUI = { 
         renderMarketplaceList, 
@@ -3193,18 +3202,27 @@ document.addEventListener('DOMContentLoaded', async () => {
             renderMarketplaceList();
             updateMyListingsPreview();
             updatePremiumStatusUI();
-            updateConnectionStatus();
+            UIPipeline.updateConnectionStatus();
+            UIPipeline.updateEnvironmentIndicator();
+            UIPipeline.updateStartupStageIndicator();
         },
         getDiagnostics: () => window.marketplaceCore?.diagnostics?.getReport?.(),
-        getStatus: () => ({
-            canExecuteAction: canExecuteAction(),
-            pendingActions: UIState.pendingActions.length,
-            recoveryMode: UIState.recoveryModeActive,
-            environment: UIState.environmentType
-        })
+        getStatus: () => {
+            const health = checkParentHealth ? checkParentHealth() : {};
+            return {
+                canExecuteAction: true,
+                pendingActions: UIState.pendingActions.length,
+                recoveryMode: UIState.recoveryModeActive,
+                environment: UIState.environmentType,
+                parentReady: health.parentReady || false,
+                handshakeComplete: health.handshakeComplete || false,
+                sessionActive: health.sessionActive || false,
+                active: isActive ? isActive() : false
+            };
+        }
     };
     
-    logOnce('ui_ready', '[Tool-ui.js] Resilient UI controller ready v5.0');
+    logOnce('ui_ready', '[Tool-ui.js] Resilient UI controller ready v5.1');
 });
 
 // ----------------------------------------------------------------------

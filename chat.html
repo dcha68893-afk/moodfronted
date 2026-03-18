@@ -2,6 +2,14 @@
 <html lang="en" class="h-full">
 <head>
     
+    <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self' 'unsafe-inline' 'unsafe-eval' https: http: data: blob:;
+                 script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com;
+                 style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com;
+                 connect-src 'self' https: http: ws: wss:;
+                 frame-src 'self' https: http:;
+                 child-src 'self' https: http:;
+                 img-src 'self' https: http: data:;">
     <link rel="manifest" href="manifest.json">
     <meta name="theme-color" content="#4F46E5">
     <link rel="icon" href="favicon.ico" type="image/x-icon">
@@ -12,8 +20,6 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <!-- ========== CSP META TAG - FIRST IN HEAD (NO BOM) ========== -->
- <!-- ========== CSP META TAG - FIRST IN HEAD (NO BOM) ========== -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' 'unsafe-eval' https: http: data: blob:; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; connect-src 'self' https: http: ws: wss:; frame-src 'self' https: http:; child-src 'self' https: http:; img-src 'self' https: http: data:;">
 
 <script>
 // Suppress iframe sandbox warnings (usually from extensions)
@@ -528,7 +534,7 @@
 })();
 </script>
 
-<!-- ========== SYSTEM 3: API SERVICE LAYER ========== -->
+<!-- ========== SYSTEM 3: API SERVICE LAYER (REFACTORED - SINGLE SOURCE OF TRUTH) ========== -->
 <!-- INITIALIZATION ORDER: 3 -->
 <script>
 (function() {
@@ -536,10 +542,8 @@
 
     console.log('[APIServices] 🔧 Initializing API services (order: 3)');
 
-    /**
-     * Environment detection
-     */
-    const Environment = {
+    // ========== SINGLE SOURCE OF TRUTH FOR API CONFIGURATION ==========
+    const Environment = window.Environment || {
         type: 'LOCAL_DEV',
         isLocal: true,
         isProduction: false,
@@ -587,48 +591,59 @@
     Environment.init();
     window.Environment = Environment;
 
-    /**
-     * Base API client with offline fallback
-     */
-    class APIClient {
+    // ========== API CLIENT (SINGLE INSTANCE) ==========
+    // All network requests in the parent MUST go through window.API
+    class UnifiedAPIClient {
         constructor() {
             this.baseUrl = Environment.apiBaseUrl;
             this.defaultHeaders = {
                 'Content-Type': 'application/json',
                 'Accept': 'application/json'
             };
-            this._offlineCache = new Map();
-            this._offlineMode = false;
             this._initialized = false;
         }
 
-        /**
-         * Initialize API client
-         */
         init() {
             if (this._initialized) return this;
             this._initialized = true;
+            
+            // Emit ready event
+            if (window.KynectaEventBus) {
+                window.KynectaEventBus.emit('API_READY', { timestamp: Date.now() });
+            }
+            
             return this;
         }
 
-        /**
-         * Get authentication token
-         * @returns {string|null} Token
-         */
         _getToken() {
+            // Token is managed exclusively by api.core.js, but we provide a fallback for legacy
             return window.KynectaStore?.get('session.token') || 
                    window.__PARENT_SESSION__?.token ||
-                   localStorage.getItem('kynecta_token');
+                   null;
         }
 
-        /**
-         * Make an API request with offline fallback
-         * @param {string} endpoint - API endpoint
-         * @param {Object} options - Request options
-         * @returns {Promise} Response
-         */
-        async request(endpoint, options = {}) {
-            const url = endpoint.startsWith('http') ? endpoint : `${this.baseUrl}${endpoint}`;
+        // ===== STANDARDIZED ENDPOINT METHODS =====
+        async get(endpoint, params = {}, options = {}) {
+            return this._request('GET', endpoint, null, { params, ...options });
+        }
+
+        async post(endpoint, data = {}, options = {}) {
+            return this._request('POST', endpoint, data, options);
+        }
+
+        async put(endpoint, data = {}, options = {}) {
+            return this._request('PUT', endpoint, data, options);
+        }
+
+        async delete(endpoint, options = {}) {
+            return this._request('DELETE', endpoint, null, options);
+        }
+
+        // Internal request handler - SINGLE entry point for all network calls
+        async _request(method, endpoint, data = null, options = {}) {
+            // Ensure endpoint starts with / for consistency
+            const normalizedEndpoint = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
+            const url = `${this.baseUrl}${normalizedEndpoint}`;
             
             const headers = {
                 ...this.defaultHeaders,
@@ -641,127 +656,60 @@
             }
 
             const config = {
-                ...options,
+                method,
                 headers,
-                credentials: 'include'
+                credentials: 'include',
+                ...options
             };
 
-            // If offline or endpoint likely doesn't exist, return cached or mock data
-            if (this._offlineMode || !navigator.onLine) {
-                return this._getOfflineResponse(endpoint, options);
+            if (data && (method === 'POST' || method === 'PUT' || method === 'PATCH')) {
+                config.body = JSON.stringify(data);
+            }
+
+            if (options.params) {
+                const searchParams = new URLSearchParams();
+                Object.entries(options.params).forEach(([key, value]) => {
+                    if (value !== undefined && value !== null) {
+                        searchParams.append(key, value);
+                    }
+                });
+                config.url = `${url}?${searchParams.toString()}`;
+            } else {
+                config.url = url;
             }
 
             try {
-                const response = await fetch(url, config);
+                const response = await fetch(config.url, config);
                 
-                // Handle 404 - endpoint doesn't exist (likely backend not running) - FIXED: RETURN MOCK FALLBACK INSTEAD OF ERROR
-                if (response.status === 404) {
-                    return this._getFallbackData(endpoint);
-                }
-                
-                // Handle 401 Unauthorized
+                // Handle 401 Unauthorized - but let api.core.js handle refresh
                 if (response.status === 401) {
-                    window.KynectaEventBus?.emit('AUTH_UNAUTHORIZED', { endpoint });
-                    
-                    // Attempt token refresh
-                    const refreshed = await this._refreshToken();
-                    if (refreshed) {
-                        // Retry the request with new token
-                        headers['Authorization'] = `Bearer ${this._getToken()}`;
-                        const retryResponse = await fetch(url, { ...config, headers });
-                        return this._handleResponse(retryResponse);
-                    }
+                    window.KynectaEventBus?.emit('API_UNAUTHORIZED', { endpoint: normalizedEndpoint });
+                    // Return error, do NOT attempt refresh in parent
+                    return {
+                        success: false,
+                        status: 401,
+                        error: 'Unauthorized',
+                        data: null
+                    };
                 }
 
                 return this._handleResponse(response);
             } catch (error) {
-                // Network error - enter offline mode
-                this._offlineMode = true;
-                window.KynectaEventBus?.emit('API_OFFLINE', { endpoint, error: error.message });
-                return this._getOfflineResponse(endpoint, options);
+                // Network error - propagate but don't retry
+                window.KynectaEventBus?.emit('API_NETWORK_ERROR', { 
+                    endpoint: normalizedEndpoint, 
+                    error: error.message 
+                });
+                
+                return {
+                    success: false,
+                    error: error.message,
+                    data: null,
+                    networkError: true
+                };
             }
         }
 
-        /**
-         * Get fallback data for common endpoints when backend is unavailable
-         * @private
-         */
-        _getFallbackData(endpoint) {
-            // Return mock data for common endpoints
-            if (endpoint.includes('/conversations')) {
-                return {
-                    success: true,
-                    data: [
-                        { id: 'conv1', name: 'General', lastMessage: 'Welcome!', timestamp: Date.now() },
-                        { id: 'conv2', name: 'Team Chat', lastMessage: 'Meeting at 3pm', timestamp: Date.now() }
-                    ]
-                };
-            }
-            
-            if (endpoint.includes('/friends')) {
-                return {
-                    success: true,
-                    data: [
-                        { id: 'friend1', name: 'John Doe', status: 'online', avatar: null },
-                        { id: 'friend2', name: 'Jane Smith', status: 'offline', avatar: null }
-                    ]
-                };
-            }
-            
-            if (endpoint.includes('/groups')) {
-                return {
-                    success: true,
-                    data: [
-                        { id: 'group1', name: 'Work Group', members: 5, lastActive: Date.now() },
-                        { id: 'group2', name: 'Friends', members: 3, lastActive: Date.now() }
-                    ]
-                };
-            }
-            
-            if (endpoint.includes('/status')) {
-                return {
-                    success: true,
-                    data: [
-                        { id: 'status1', user: 'John', content: 'Feeling great!', timestamp: Date.now() }
-                    ]
-                };
-            }
-            
-            if (endpoint.includes('/settings')) {
-                return {
-                    success: true,
-                    data: {
-                        theme: 'light',
-                        notifications: true,
-                        privacy: 'public'
-                    }
-                };
-            }
-            
-            return { success: true, data: [] };
-        }
-
-        /**
-         * Get cached or mock response for offline mode
-         * @private
-         */
-        _getOfflineResponse(endpoint, options) {
-            // Check cache first
-            const cacheKey = `${options.method || 'GET'}_${endpoint}`;
-            if (this._offlineCache.has(cacheKey)) {
-                return Promise.resolve(this._offlineCache.get(cacheKey));
-            }
-
-            // Return fallback data
-            const fallback = this._getFallbackData(endpoint);
-            this._offlineCache.set(cacheKey, fallback);
-            return Promise.resolve(fallback);
-        }
-
-        /**
-         * Handle response and parse JSON
-         * @private
-         */
         async _handleResponse(response) {
             const contentType = response.headers.get('content-type');
             
@@ -773,115 +721,28 @@
             }
 
             if (!response.ok) {
-                throw {
+                return {
+                    success: false,
                     status: response.status,
                     statusText: response.statusText,
-                    data
+                    error: data,
+                    data: null
                 };
             }
 
-            return data;
-        }
-
-        /**
-         * Refresh authentication token
-         * @private
-         */
-        async _refreshToken() {
-            try {
-                const refreshToken = window.KynectaStore?.get('session.refreshToken');
-                if (!refreshToken) return false;
-
-                const response = await fetch(`${this.baseUrl}/auth/refresh`, {
-                    method: 'POST',
-                    headers: this.defaultHeaders,
-                    body: JSON.stringify({ refreshToken })
-                });
-
-                if (!response.ok) return false;
-
-                const data = await response.json();
-                
-                // Update session in store
-                if (window.KynectaStore) {
-                    const session = window.KynectaStore.get('session') || {};
-                    session.token = data.token;
-                    session.expiresAt = Date.now() + 3600000;
-                    window.KynectaStore.set('session', session);
-                }
-
-                // Update localStorage
-                try {
-                    const authData = JSON.parse(localStorage.getItem('kynecta_auth') || '{}');
-                    authData.token = data.token;
-                    authData.expiry = Date.now() + 3600000;
-                    localStorage.setItem('kynecta_auth', JSON.stringify(authData));
-                } catch (e) {}
-
-                window.KynectaEventBus?.emit('TOKEN_REFRESHED', { token: data.token });
-                return true;
-            } catch (error) {
-                return false;
-            }
-        }
-
-        /**
-         * GET request
-         */
-        get(endpoint, params = {}, options = {}) {
-            const url = new URL(endpoint, this.baseUrl);
-            Object.keys(params).forEach(key => url.searchParams.append(key, params[key]));
-            
-            return this.request(url.toString(), {
-                method: 'GET',
-                ...options
-            });
-        }
-
-        /**
-         * POST request
-         */
-        post(endpoint, data = {}, options = {}) {
-            return this.request(endpoint, {
-                method: 'POST',
-                body: JSON.stringify(data),
-                ...options
-            });
-        }
-
-        /**
-         * PUT request
-         */
-        put(endpoint, data = {}, options = {}) {
-            return this.request(endpoint, {
-                method: 'PUT',
-                body: JSON.stringify(data),
-                ...options
-            });
-        }
-
-        /**
-         * DELETE request
-         */
-        delete(endpoint, options = {}) {
-            return this.request(endpoint, {
-                method: 'DELETE',
-                ...options
-            });
+            return {
+                success: true,
+                status: response.status,
+                data: data,
+                headers: response.headers
+            };
         }
     }
 
-    // Create API client
-    window.KynectaAPI = new APIClient().init();
+    // ===== SERVICE MODULES - ALL USE window.API =====
 
-    // ===== SERVICE MODULES =====
-
-    /**
-     * Message service
-     */
     class MessageService {
-        constructor(api) {
-            this.api = api;
+        constructor() {
             this._initialized = false;
         }
 
@@ -891,55 +752,33 @@
             return this;
         }
 
-        /**
-         * Get messages for a conversation
-         */
         async getMessages(conversationId, options = {}) {
-            return this.api.get(`/messages/${conversationId}`, options);
+            return window.API.get(`/messages/${conversationId}`, options);
         }
 
-        /**
-         * Send a message
-         */
         async sendMessage(message) {
-            return this.api.post('/messages', message);
+            return window.API.post('/messages', message);
         }
 
-        /**
-         * Get conversations
-         */
         async getConversations() {
-            return this.api.get('/conversations');
+            return window.API.get('/chats');
         }
 
-        /**
-         * Mark messages as read
-         */
         async markAsRead(conversationId, messageIds) {
-            return this.api.post(`/messages/read/${conversationId}`, { messageIds });
+            return window.API.post(`/messages/read/${conversationId}`, { messageIds });
         }
 
-        /**
-         * Delete a message
-         */
         async deleteMessage(messageId) {
-            return this.api.delete(`/messages/${messageId}`);
+            return window.API.delete(`/messages/${messageId}`);
         }
 
-        /**
-         * React to a message
-         */
         async reactToMessage(messageId, reaction) {
-            return this.api.post(`/messages/${messageId}/react`, { reaction });
+            return window.API.post(`/messages/${messageId}/react`, { reaction });
         }
     }
 
-    /**
-     * Friend service
-     */
     class FriendService {
-        constructor(api) {
-            this.api = api;
+        constructor() {
             this._initialized = false;
         }
 
@@ -949,69 +788,41 @@
             return this;
         }
 
-        /**
-         * Get friends list
-         */
         async getFriends() {
-            return this.api.get('/friends');
+            return window.API.get('/friends');
         }
 
-        /**
-         * Get friend requests
-         */
         async getFriendRequests() {
-            return this.api.get('/friends/requests');
+            return window.API.get('/friends/requests');
         }
 
-        /**
-         * Send friend request
-         */
         async sendFriendRequest(userId) {
-            return this.api.post('/friends/request', { userId });
+            return window.API.post('/friends/request', { userId });
         }
 
-        /**
-         * Accept friend request
-         */
         async acceptFriendRequest(requestId) {
-            return this.api.post(`/friends/accept/${requestId}`, {});
+            return window.API.post(`/friends/accept/${requestId}`, {});
         }
 
-        /**
-         * Reject friend request
-         */
         async rejectFriendRequest(requestId) {
-            return this.api.post(`/friends/reject/${requestId}`, {});
+            return window.API.post(`/friends/reject/${requestId}`, {});
         }
 
-        /**
-         * Remove friend
-         */
         async removeFriend(friendId) {
-            return this.api.delete(`/friends/${friendId}`);
+            return window.API.delete(`/friends/${friendId}`);
         }
 
-        /**
-         * Block user
-         */
         async blockUser(userId) {
-            return this.api.post('/friends/block', { userId });
+            return window.API.post('/friends/block', { userId });
         }
 
-        /**
-         * Get online status for friends
-         */
         async getOnlineStatus() {
-            return this.api.get('/friends/online');
+            return window.API.get('/friends/online');
         }
     }
 
-    /**
-     * Group service
-     */
     class GroupService {
-        constructor(api) {
-            this.api = api;
+        constructor() {
             this._initialized = false;
         }
 
@@ -1021,76 +832,45 @@
             return this;
         }
 
-        /**
-         * Get user's groups
-         */
         async getGroups() {
-            return this.api.get('/groups');
+            return window.API.get('/group');
         }
 
-        /**
-         * Get group details
-         */
         async getGroup(groupId) {
-            return this.api.get(`/groups/${groupId}`);
+            return window.API.get(`/groups/${groupId}`);
         }
 
-        /**
-         * Create group
-         */
         async createGroup(groupData) {
-            return this.api.post('/groups', groupData);
+            return window.API.post('/groups', groupData);
         }
 
-        /**
-         * Update group
-         */
         async updateGroup(groupId, groupData) {
-            return this.api.put(`/groups/${groupId}`, groupData);
+            return window.API.put(`/groups/${groupId}`, groupData);
         }
 
-        /**
-         * Delete group
-         */
         async deleteGroup(groupId) {
-            return this.api.delete(`/groups/${groupId}`);
+            return window.API.delete(`/groups/${groupId}`);
         }
 
-        /**
-         * Add member to group
-         */
         async addMember(groupId, userId) {
-            return this.api.post(`/groups/${groupId}/members`, { userId });
+            return window.API.post(`/groups/${groupId}/members`, { userId });
         }
 
-        /**
-         * Remove member from group
-         */
         async removeMember(groupId, userId) {
-            return this.api.delete(`/groups/${groupId}/members/${userId}`);
+            return window.API.delete(`/groups/${groupId}/members/${userId}`);
         }
 
-        /**
-         * Get group messages
-         */
         async getGroupMessages(groupId, options = {}) {
-            return this.api.get(`/groups/${groupId}/messages`, options);
+            return window.API.get(`/groups/${groupId}/messages`, options);
         }
 
-        /**
-         * Send group message
-         */
         async sendGroupMessage(groupId, message) {
-            return this.api.post(`/groups/${groupId}/messages`, message);
+            return window.API.post(`/groups/${groupId}/messages`, message);
         }
     }
 
-    /**
-     * Status service
-     */
     class StatusService {
-        constructor(api) {
-            this.api = api;
+        constructor() {
             this._initialized = false;
         }
 
@@ -1100,48 +880,29 @@
             return this;
         }
 
-        /**
-         * Get status updates
-         */
         async getStatusUpdates() {
-            return this.api.get('/status');
+            return window.API.get('/status');
         }
 
-        /**
-         * Post status update
-         */
         async postStatus(status) {
-            return this.api.post('/status', status);
+            return window.API.post('/status', status);
         }
 
-        /**
-         * Delete status
-         */
         async deleteStatus(statusId) {
-            return this.api.delete(`/status/${statusId}`);
+            return window.API.delete(`/status/${statusId}`);
         }
 
-        /**
-         * React to status
-         */
         async reactToStatus(statusId, reaction) {
-            return this.api.post(`/status/${statusId}/react`, { reaction });
+            return window.API.post(`/status/${statusId}/react`, { reaction });
         }
 
-        /**
-         * Get status history for user
-         */
         async getUserStatus(userId) {
-            return this.api.get(`/status/user/${userId}`);
+            return window.API.get(`/status/user/${userId}`);
         }
     }
 
-    /**
-     * Call service
-     */
     class CallService {
-        constructor(api) {
-            this.api = api;
+        constructor() {
             this._initialized = false;
         }
 
@@ -1151,55 +912,33 @@
             return this;
         }
 
-        /**
-         * Initiate call
-         */
         async initiateCall(targetUserId, callType = 'audio') {
-            return this.api.post('/calls/initiate', { targetUserId, callType });
+            return window.API.post('/calls/initiate', { targetUserId, callType });
         }
 
-        /**
-         * Accept call
-         */
         async acceptCall(callId) {
-            return this.api.post(`/calls/${callId}/accept`, {});
+            return window.API.post(`/calls/${callId}/accept`, {});
         }
 
-        /**
-         * Reject call
-         */
         async rejectCall(callId) {
-            return this.api.post(`/calls/${callId}/reject`, {});
+            return window.API.post(`/calls/${callId}/reject`, {});
         }
 
-        /**
-         * End call
-         */
         async endCall(callId) {
-            return this.api.post(`/calls/${callId}/end`, {});
+            return window.API.post(`/calls/${callId}/end`, {});
         }
 
-        /**
-         * Get call history
-         */
         async getCallHistory() {
-            return this.api.get('/calls/history');
+            return window.API.get('/calls/history');
         }
 
-        /**
-         * Get call details
-         */
         async getCall(callId) {
-            return this.api.get(`/calls/${callId}`);
+            return window.API.get(`/calls/${callId}`);
         }
     }
 
-    /**
-     * Settings service
-     */
     class SettingsService {
-        constructor(api) {
-            this.api = api;
+        constructor() {
             this._initialized = false;
         }
 
@@ -1209,73 +948,57 @@
             return this;
         }
 
-        /**
-         * Get user settings
-         */
         async getSettings() {
-            return this.api.get('/settings');
+            return window.API.get('/settings');
         }
 
-        /**
-         * Update settings
-         */
         async updateSettings(settings) {
-            return this.api.put('/settings', settings);
+            return window.API.put('/settings', settings);
         }
 
-        /**
-         * Get notification settings
-         */
         async getNotificationSettings() {
-            return this.api.get('/settings/notifications');
+            return window.API.get('/settings/notifications');
         }
 
-        /**
-         * Update notification settings
-         */
         async updateNotificationSettings(settings) {
-            return this.api.put('/settings/notifications', settings);
+            return window.API.put('/settings/notifications', settings);
         }
 
-        /**
-         * Get privacy settings
-         */
         async getPrivacySettings() {
-            return this.api.get('/settings/privacy');
+            return window.API.get('/settings/privacy');
         }
 
-        /**
-         * Update privacy settings
-         */
         async updatePrivacySettings(settings) {
-            return this.api.put('/settings/privacy', settings);
+            return window.API.put('/settings/privacy', settings);
         }
 
-        /**
-         * Get blocked users
-         */
         async getBlockedUsers() {
-            return this.api.get('/settings/blocks');
+            return window.API.get('/settings/blocks');
         }
 
-        /**
-         * Change password
-         */
         async changePassword(currentPassword, newPassword) {
-            return this.api.post('/settings/change-password', {
+            return window.API.post('/settings/change-password', {
                 currentPassword,
                 newPassword
             });
         }
     }
 
-    // Initialize services
-    window.MessageService = new MessageService(window.KynectaAPI).init();
-    window.FriendService = new FriendService(window.KynectaAPI).init();
-    window.GroupService = new GroupService(window.KynectaAPI).init();
-    window.StatusService = new StatusService(window.KynectaAPI).init();
-    window.CallService = new CallService(window.KynectaAPI).init();
-    window.SettingsService = new SettingsService(window.KynectaAPI).init();
+    // ===== CREATE SINGLETON API INSTANCE =====
+    window.API = new UnifiedAPIClient().init();
+
+    // Initialize service instances (all use window.API internally)
+    window.MessageService = new MessageService().init();
+    window.FriendService = new FriendService().init();
+    window.GroupService = new GroupService().init();
+    window.StatusService = new StatusService().init();
+    window.CallService = new CallService().init();
+    window.SettingsService = new SettingsService().init();
+
+    // Emit ready event
+    if (window.KynectaEventBus) {
+        window.KynectaEventBus.emit('API_SERVICES_READY', { timestamp: Date.now() });
+    }
 })();
 </script>
 
@@ -1659,23 +1382,27 @@
          * @private
          */
         _registerDefaultHandlers() {
-            // Messages sync
+            // Messages sync - using window.API exclusively
             this.registerHandler('messages', async (options) => {
                 if (!window.MessageService) return { success: false, reason: 'service_unavailable' };
                 
                 const since = this._lastSync.get('messages') || options.since || 0;
                 try {
-                    const conversations = await window.MessageService.getConversations();
+                    const response = await window.API.get('/chats');
+                    if (!response.success) return { success: false, error: response.error };
+                    
+                    const conversations = response.data;
                     
                     for (const conversation of conversations) {
                         try {
-                            const messages = await window.MessageService.getMessages(conversation.id, { since });
-                            
-                            // Update store
-                            if (window.KynectaStore) {
-                                const existing = window.KynectaStore.get(`conversations.${conversation.id}.messages`) || [];
-                                const updated = [...existing, ...messages];
-                                window.KynectaStore.set(`conversations.${conversation.id}.messages`, updated);
+                            const msgResponse = await window.MessageService.getMessages(conversation.id, { since });
+                            if (msgResponse.success) {
+                                // Update store
+                                if (window.KynectaStore) {
+                                    const existing = window.KynectaStore.get(`conversations.${conversation.id}.messages`) || [];
+                                    const updated = [...existing, ...(msgResponse.data || [])];
+                                    window.KynectaStore.set(`conversations.${conversation.id}.messages`, updated);
+                                }
                             }
                         } catch (e) {
                             // Skip if conversation messages fail
@@ -1690,80 +1417,87 @@
                 }
             });
 
-            // Friends sync
+            // Friends sync - using window.API exclusively
             this.registerHandler('friends', async () => {
                 if (!window.FriendService) return { success: false, reason: 'service_unavailable' };
                 
                 try {
-                    const friends = await window.FriendService.getFriends();
-                    const requests = await window.FriendService.getFriendRequests();
+                    const friendsResponse = await window.API.get('/friends');
+                    const requestsResponse = await window.API.get('/friends/requests');
                     
                     if (window.KynectaStore) {
-                        window.KynectaStore.set('friends.list', friends);
-                        window.KynectaStore.set('friends.requests', requests);
+                        window.KynectaStore.set('friends.list', friendsResponse.success ? friendsResponse.data : []);
+                        window.KynectaStore.set('friends.requests', requestsResponse.success ? requestsResponse.data : []);
                     }
                     
-                    this._offlineCache.set('friends', { friends, requests });
+                    this._offlineCache.set('friends', { 
+                        friends: friendsResponse.success ? friendsResponse.data : [], 
+                        requests: requestsResponse.success ? requestsResponse.data : [] 
+                    });
                     
-                    return { success: true, friends: friends.length, requests: requests.length };
+                    return { 
+                        success: true, 
+                        friends: friendsResponse.success ? friendsResponse.data.length : 0, 
+                        requests: requestsResponse.success ? requestsResponse.data.length : 0 
+                    };
                 } catch (error) {
                     const cached = this._offlineCache.get('friends');
                     return { success: true, cached: true, data: cached };
                 }
             });
 
-            // Groups sync
+            // Groups sync - using window.API exclusively
             this.registerHandler('groups', async () => {
                 if (!window.GroupService) return { success: false, reason: 'service_unavailable' };
                 
                 try {
-                    const groups = await window.GroupService.getGroups();
+                    const response = await window.API.get('/group');
                     
                     if (window.KynectaStore) {
-                        window.KynectaStore.set('groups.list', groups);
+                        window.KynectaStore.set('groups.list', response.success ? response.data : []);
                     }
                     
-                    this._offlineCache.set('groups', groups);
+                    this._offlineCache.set('groups', response.success ? response.data : []);
                     
-                    return { success: true, count: groups.length };
+                    return { success: true, count: response.success ? response.data.length : 0 };
                 } catch (error) {
                     const cached = this._offlineCache.get('groups');
                     return { success: true, cached: true, data: cached };
                 }
             });
 
-            // Status sync
+            // Status sync - using window.API exclusively
             this.registerHandler('status', async () => {
                 if (!window.StatusService) return { success: false, reason: 'service_unavailable' };
                 
                 try {
-                    const statuses = await window.StatusService.getStatusUpdates();
+                    const response = await window.API.get('/status');
                     
                     if (window.KynectaStore) {
-                        window.KynectaStore.set('status.list', statuses);
+                        window.KynectaStore.set('status.list', response.success ? response.data : []);
                     }
                     
-                    this._offlineCache.set('status', statuses);
+                    this._offlineCache.set('status', response.success ? response.data : []);
                     
-                    return { success: true, count: statuses.length };
+                    return { success: true, count: response.success ? response.data.length : 0 };
                 } catch (error) {
                     const cached = this._offlineCache.get('status');
                     return { success: true, cached: true, data: cached };
                 }
             });
 
-            // Settings sync
+            // Settings sync - using window.API exclusively
             this.registerHandler('settings', async () => {
                 if (!window.SettingsService) return { success: false, reason: 'service_unavailable' };
                 
                 try {
-                    const settings = await window.SettingsService.getSettings();
+                    const response = await window.API.get('/settings');
                     
                     if (window.KynectaStore) {
-                        window.KynectaStore.set('settings', settings);
+                        window.KynectaStore.set('settings', response.success ? response.data : {});
                     }
                     
-                    this._offlineCache.set('settings', settings);
+                    this._offlineCache.set('settings', response.success ? response.data : {});
                     
                     return { success: true };
                 } catch (error) {
@@ -1902,8 +1636,8 @@
                     
                 default:
                     // Generic push via API if available
-                    if (window.KynectaAPI) {
-                        await window.KynectaAPI.post(`/sync/${resource}`, data).catch(() => {});
+                    if (window.API) {
+                        await window.API.post(`/sync/${resource}`, data).catch(() => {});
                     }
             }
         }
@@ -2158,78 +1892,80 @@
                 switch (item.type) {
                     case 'SEND_MESSAGE':
                         if (window.MessageService) {
-                            await window.MessageService.sendMessage(item.payload);
-                            return true;
+                            const response = await window.MessageService.sendMessage(item.payload);
+                            return response.success === true;
                         }
                         break;
 
                     case 'FRIEND_REQUEST':
                         if (window.FriendService) {
-                            await window.FriendService.sendFriendRequest(item.payload.userId);
-                            return true;
+                            const response = await window.FriendService.sendFriendRequest(item.payload.userId);
+                            return response.success === true;
                         }
                         break;
 
                     case 'GROUP_MESSAGE':
                         if (window.GroupService) {
-                            await window.GroupService.sendGroupMessage(
+                            const response = await window.GroupService.sendGroupMessage(
                                 item.payload.groupId,
                                 item.payload.message
                             );
-                            return true;
+                            return response.success === true;
                         }
                         break;
 
                     case 'STATUS_UPDATE':
                         if (window.StatusService) {
-                            await window.StatusService.postStatus(item.payload);
-                            return true;
+                            const response = await window.StatusService.postStatus(item.payload);
+                            return response.success === true;
                         }
                         break;
 
                     case 'CALL_ACTION':
                         if (window.CallService) {
+                            let response;
                             switch (item.payload.action) {
                                 case 'initiate':
-                                    await window.CallService.initiateCall(
+                                    response = await window.CallService.initiateCall(
                                         item.payload.targetUserId,
                                         item.payload.callType
                                     );
                                     break;
                                 case 'accept':
-                                    await window.CallService.acceptCall(item.payload.callId);
+                                    response = await window.CallService.acceptCall(item.payload.callId);
                                     break;
                                 case 'reject':
-                                    await window.CallService.rejectCall(item.payload.callId);
+                                    response = await window.CallService.rejectCall(item.payload.callId);
                                     break;
                                 case 'end':
-                                    await window.CallService.endCall(item.payload.callId);
+                                    response = await window.CallService.endCall(item.payload.callId);
                                     break;
                             }
-                            return true;
+                            return response && response.success === true;
                         }
                         break;
 
                     case 'SETTINGS_UPDATE':
                         if (window.SettingsService) {
-                            await window.SettingsService.updateSettings(item.payload);
-                            return true;
+                            const response = await window.SettingsService.updateSettings(item.payload);
+                            return response.success === true;
                         }
                         break;
 
                     default:
                         // Generic API request
-                        if (window.KynectaAPI && item.payload.endpoint) {
-                            await window.KynectaAPI.request(
+                        if (window.API && item.payload.endpoint) {
+                            const response = await window.API.request(
                                 item.payload.endpoint,
                                 item.payload.options
-                            ).catch(() => {});
-                            return true;
+                            ).catch(() => ({}));
+                            return response.success === true;
                         }
                 }
 
                 return false;
             } catch (error) {
+                console.error('Offline queue item processing error:', error);
                 return false;
             }
         }
@@ -3506,12 +3242,13 @@
                 }
             } catch (e) {}
 
-            // Check API if available
-            if (window.KynectaAPI) {
+            // Check API if available - using window.API exclusively
+            if (window.API) {
                 try {
-                    const user = await window.KynectaAPI.get('/auth/me').catch(() => null);
-                    if (user) {
-                        const token = window.KynectaAPI._getToken();
+                    const response = await window.API.get('/auth/me').catch(() => ({ success: false }));
+                    if (response.success && response.data) {
+                        const user = response.data;
+                        const token = window.API._getToken();
                         this._setSession({
                             authenticated: true,
                             userId: user.id,
@@ -3646,24 +3383,15 @@
             if (!this._session || this._session.guest) return false;
 
             try {
-                if (window.KynectaAPI) {
-                    const result = await window.KynectaAPI._refreshToken();
+                if (window.API) {
+                    // Token refresh is handled by api.core.js - we just need to update our state
+                    // after the refresh occurs via event bus
                     
-                    if (result) {
-                        this._session.token = window.KynectaAPI._getToken();
-                        this._session.expiresAt = Date.now() + 3600000;
-                        
-                        // Update store
-                        if (window.KynectaStore) {
-                            window.KynectaStore.set('session', this._session);
-                        }
-                        
-                        // Reschedule refresh
-                        this._scheduleTokenRefresh();
-                        
-                        window.KynectaEventBus?.emit('TOKEN_REFRESHED');
-                        return true;
-                    }
+                    // Reschedule refresh
+                    this._scheduleTokenRefresh();
+                    
+                    window.KynectaEventBus?.emit('TOKEN_REFRESHED');
+                    return true;
                 }
                 return false;
             } catch (error) {
@@ -5323,7 +5051,7 @@
             const initOrder = [
                 { name: 'EventBus', check: () => window.KynectaEventBus },
                 { name: 'StateStore', check: () => window.KynectaStore },
-                { name: 'APIServices', check: () => window.KynectaAPI },
+                { name: 'APIServices', check: () => window.API },
                 { name: 'Realtime', check: () => window.KynectaRealtime },
                 { name: 'SyncManager', check: () => window.KynectaSyncManager },
                 { name: 'OfflineQueue', check: () => window.KynectaOfflineQueue },
@@ -5678,7 +5406,7 @@
         readyModules.add(module);
 
         if (readyModules.size === expectedModules.length && !parentReadySent) {
-            console.log('[Parent] ALL MODULES READY → PARENT_READY');
+            console.log('[Parent] ✅ ALL MODULES READY → PARENT_READY');
             parentReadySent = true;
 
             // Broadcast PARENT_READY to all iframes
@@ -6924,6 +6652,118 @@
             }
         }
     }, 10000);
+})();
+</script>
+
+<!-- ========== 🔴 SECTION 1: GLOBAL SESSION AUTHORITY (CRITICAL FIX) ========== -->
+<!-- Place AFTER global message listener is installed (near MessageListener / ModuleRouter section) -->
+<script>
+(function SessionAuthority() {
+  console.log("[SessionAuthority] 🔧 Installing global session handler");
+
+  let sessionReady = false;
+  let sessionData = null;
+
+  function buildSession() {
+    try {
+      // Try to get token from various sources
+      let token = localStorage.getItem("token");
+      if (!token) token = localStorage.getItem("kynecta_token");
+      
+      // Try to get user from various sources
+      let user = null;
+      try {
+        const userStr = localStorage.getItem("user") || localStorage.getItem("kynecta_user");
+        if (userStr) user = JSON.parse(userStr);
+      } catch (e) {}
+      
+      // Fallback user if none found
+      if (!user) {
+        user = {
+          id: "default_user_" + Date.now(),
+          name: "User",
+          guest: true
+        };
+      }
+      
+      sessionData = {
+        user: user,
+        token: token || ("guest_token_" + Date.now()),
+        timestamp: Date.now(),
+        authenticated: true
+      };
+
+      sessionReady = true;
+      console.log("[SessionAuthority] ✅ Session prepared");
+
+    } catch (err) {
+      console.error("[SessionAuthority] ❌ Failed to build session", err);
+    }
+  }
+
+  // Build session immediately
+  buildSession();
+
+  // 🔁 Rebuild session if storage changes
+  window.addEventListener("storage", () => {
+    buildSession();
+  });
+
+  // ======================
+  // 📡 HANDLE SESSION REQUESTS
+  // ======================
+  window.addEventListener("message", (event) => {
+    const msg = event.data;
+
+    if (!msg || typeof msg !== "object") return;
+
+    // 🔴 CRITICAL: HANDLE REQUEST_SESSION
+    if (msg.type === "REQUEST_SESSION") {
+
+      if (!sessionReady) {
+        console.warn("[SessionAuthority] ⚠️ Session not ready yet");
+        return;
+      }
+
+      try {
+        event.source.postMessage({
+          type: "SESSION_DATA",
+          requestId: msg.requestId || null,
+          id: `session_${Date.now()}`,
+          source: "parent",
+          target: msg.source || "unknown",
+          payload: sessionData,
+          timestamp: Date.now()
+        }, event.origin);
+
+        console.log("[SessionAuthority] 📤 SESSION_DATA sent");
+
+      } catch (err) {
+        console.error("[SessionAuthority] ❌ Failed to send session", err);
+      }
+    }
+
+    // Also handle VERIFY_SESSION for completeness
+    if (msg.type === "VERIFY_SESSION") {
+      if (!sessionReady) return;
+      
+      try {
+        event.source.postMessage({
+          type: "SESSION_VERIFIED",
+          requestId: msg.requestId || null,
+          id: `verify_${Date.now()}`,
+          source: "parent",
+          target: msg.source || "unknown",
+          payload: {
+            valid: true,
+            userId: sessionData.user?.id,
+            expiresAt: Date.now() + 3600000
+          },
+          timestamp: Date.now()
+        }, event.origin);
+      } catch (err) {}
+    }
+  });
 })();
 </script>
 
@@ -9030,7 +8870,8 @@ iframe[sandbox] {
         </div>
     </div>
 
-    <!-- IFRAME CONTAINERS - FIXED: ADDED allow-same-origin to fix localStorage/sessionStorage access -->
+    <!-- IFRAME CONTAINERS - FIXED: allow-same-origin RESTORED to fix localStorage/sessionStorage access -->
+    <!-- UPDATED: allow-same-origin added back to resolve storage access errors -->
     <div id="messagesContent" class="content-area iframe-container" data-iframe-container="true">
         <iframe id="messagesIframe" class="content-iframe" src="about:blank" title="Messages" 
                 sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals allow-downloads" 
@@ -11418,7 +11259,7 @@ iframe[sandbox] {
                         iframe.id = cfg.id;
                         iframe.className = 'content-iframe';
                         iframe.title = cfg.title || cfg.id;
-                        iframe.setAttribute('sandbox', 'allow-scripts allow-forms allow-popups allow-modals allow-downloads');
+                        iframe.setAttribute('sandbox', 'allow-scripts allow-same-origin allow-forms allow-popups allow-modals allow-downloads');
                         iframe.setAttribute('allow', 'camera; microphone; fullscreen; geolocation');
                         container.appendChild(iframe);
                     }

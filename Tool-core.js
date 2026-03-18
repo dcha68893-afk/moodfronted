@@ -8,7 +8,7 @@
 // =============================================
 // MODULE IDENTIFIER - MUST MATCH PARENT EXPECTATIONS
 // =============================================
-const MODULE_NAME = 'tools';
+const MODULE_NAME = 'tools'; // EXACT match required
 const MODULE_VERSION = '8.0.5';
 const MODULE_CAPABILITIES = ['marketplace', 'storage', 'heartbeat', 'ui'];
 
@@ -61,6 +61,7 @@ const LIFECYCLE_STATE = {
 let currentLifecycleState = LIFECYCLE_STATE.BOOTING;
 let stateLock = false;
 let childReadySent = false;
+let parentReady = false; // CRITICAL: Gate for all operations
 let parentReadyResolve = null;
 let parentReadyReject = null;
 
@@ -103,8 +104,28 @@ function setLifecycleState(newState) {
 }
 
 function isActive() {
-    return currentLifecycleState === LIFECYCLE_STATE.ACTIVE;
+    return currentLifecycleState === LIFECYCLE_STATE.ACTIVE && parentReady === true;
 }
+
+// =============================================
+// MESSAGE QUEUE SYSTEM (REQUIRED)
+// =============================================
+
+const messageQueue = [];
+
+// =============================================
+// ID GENERATION (MANDATORY)
+// =============================================
+
+function generateMessageId() {
+    return `msg_${Math.random().toString(36).substring(2, 15)}_${Date.now()}`;
+}
+
+function generateRequestId() {
+    return `req_${Math.random().toString(36).substring(2, 15)}_${Date.now()}`;
+}
+
+let messageCounter = 0;
 
 // =============================================
 // STANDARDIZED MESSAGE SCHEMA (PARENT-ALIGNED)
@@ -113,19 +134,14 @@ function isActive() {
 function createMessage(type, payload = {}) {
     return {
         type: type,
-        source: MODULE_NAME,
-        target: 'parent',
-        messageId: generateMessageId(),
-        timestamp: Date.now(),
+        id: generateMessageId(),                    // REQUIRED
+        requestId: generateRequestId(),              // REQUIRED for request-response
+        source: MODULE_NAME,                          // EXACT module name
+        target: 'parent',                             // REQUIRED
+        timestamp: Date.now(),                         // REQUIRED
         payload: sanitizePayload(payload)
     };
 }
-
-function generateMessageId() {
-    return `${MODULE_NAME}_${Date.now()}_${Math.random().toString(36).substring(2, 10)}_${++messageCounter}`;
-}
-
-let messageCounter = 0;
 
 function sanitizePayload(payload) {
     if (!payload || typeof payload !== 'object') return {};
@@ -133,6 +149,54 @@ function sanitizePayload(payload) {
         return JSON.parse(JSON.stringify(payload));
     } catch {
         return {};
+    }
+}
+
+// =============================================
+// SAFE SEND WITH QUEUE (CRITICAL)
+// =============================================
+
+function sendMessage(message) {
+    if (!window.parent || window.parent === window) {
+        return { success: false, error: 'not_in_iframe' };
+    }
+
+    try {
+        window.parent.postMessage(message, '*');
+        moduleState.connectionMetrics.messagesSent++;
+        logOnce('send', message.type, { id: message.id, requestId: message.requestId });
+        return { success: true, messageId: message.id, requestId: message.requestId };
+    } catch (err) {
+        logError('sendMessage', err);
+        return { success: false, error: err.message };
+    }
+}
+
+function safeSend(type, payload = {}) {
+    // CRITICAL: Block all messages until parent ready
+    if (!parentReady) {
+        debugLog(`[Queue] Message ${type} queued - parent not ready`);
+        messageQueue.push({ type, payload, timestamp: Date.now() });
+        return { success: true, queued: true, messageId: null };
+    }
+
+    if (moduleState.shutdown) {
+        return { success: false, error: 'shutdown' };
+    }
+
+    const message = createMessage(type, payload);
+    return sendMessage(message);
+}
+
+function flushMessageQueue() {
+    if (!parentReady || messageQueue.length === 0) return;
+    
+    debugLog(`[Queue] Flushing ${messageQueue.length} messages`);
+    
+    while (messageQueue.length > 0) {
+        const queued = messageQueue.shift();
+        const message = createMessage(queued.type, queued.payload);
+        sendMessage(message);
     }
 }
 
@@ -166,15 +230,17 @@ function isDuplicateMessage(messageId) {
 function validateMessage(msg) {
     if (!msg || typeof msg !== 'object') return false;
     
+    // REQUIRED fields check
     const hasType = typeof msg.type === 'string' && msg.type.length > 0;
+    const hasId = typeof msg.id === 'string' && msg.id.length > 0;
+    const hasRequestId = typeof msg.requestId === 'string' && msg.requestId.length > 0;
     const hasSource = typeof msg.source === 'string' && msg.source.length > 0;
-    const hasTarget = typeof msg.target === 'string' && msg.target.length > 0;
-    const hasMessageId = typeof msg.messageId === 'string' && msg.messageId.length > 0;
+    const hasTarget = typeof msg.target === 'string' && msg.target === 'parent';
     const hasTimestamp = typeof msg.timestamp === 'number' && msg.timestamp > 0;
     const hasPayload = msg.payload !== undefined;
     const isFromParent = msg.source === 'parent';
     
-    return hasType && hasSource && hasTarget && hasMessageId && hasTimestamp && hasPayload && isFromParent;
+    return hasType && hasId && hasRequestId && hasSource && hasTarget && hasTimestamp && hasPayload && isFromParent;
 }
 
 // =============================================
@@ -344,7 +410,6 @@ export let handshakeComplete = false;
 export let sessionValid = false;
 export let isReady = false;
 export let isInitializing = false;
-export let messageQueue = [];
 export let dataCache = new Map();
 export let loadingMessageElement = null;
 
@@ -813,26 +878,9 @@ class ParentCommunicator {
         }
     }
 
-    generateMessageId() {
-        return `${MODULE_NAME}_${Date.now()}_${++this.messageCounter}_${Math.random().toString(36).substring(2, 10)}`;
-    }
-
+    // DEPRECATED: Use safeSend instead
     sendMessage(type, payload = {}) {
-        if (!window.parent || window.parent === window) {
-            return { success: false, error: 'not_in_iframe' };
-        }
-
-        const message = createMessage(type, payload);
-        
-        try {
-            window.parent.postMessage(message, '*');
-            moduleState.connectionMetrics.messagesSent++;
-            logOnce('send', type, { messageId: message.messageId });
-            return { success: true, messageId: message.messageId };
-        } catch (err) {
-            logError('ParentCommunicator.send', err);
-            return { success: false, error: err.message };
-        }
+        return safeSend(type, payload);
     }
 
     addMessageListener(handler) {
@@ -858,8 +906,8 @@ class ParentCommunicator {
             return;
         }
 
-        if (isDuplicateMessage(message.messageId)) {
-            debugLog(`Duplicate message ignored: ${message.messageId}`);
+        if (isDuplicateMessage(message.id)) {
+            debugLog(`Duplicate message ignored: ${message.id}`);
             return;
         }
 
@@ -1062,7 +1110,7 @@ class HeartbeatResponder {
         this.lastHeartbeat = Date.now();
         moduleState.health.lastHeartbeat = this.lastHeartbeat;
         
-        parentComm.sendMessage('HEARTBEAT_ACK', {
+        safeSend('HEARTBEAT_ACK', {
             timestamp: this.lastHeartbeat,
             module: MODULE_NAME,
             frameId: parentComm.frameId,
@@ -1152,7 +1200,8 @@ class DiagnosticsAgent {
                 handshakeComplete: handshakeComplete,
                 sessionActive: moduleState.sessionActive,
                 bootState: currentLifecycleState,
-                authority: moduleState.sessionAuthority
+                authority: moduleState.sessionAuthority,
+                parentReady: parentReady
             },
             environment: environmentDetector.getEnvironmentReport()
         };
@@ -1201,11 +1250,18 @@ class MessageHandler {
             moduleState.parentDetected = true;
             moduleState.handshakeState.parentReadyReceived = true;
             
+            // CRITICAL: Set parentReady flag and flush queue
+            parentReady = true;
+            setLifecycleState(LIFECYCLE_STATE.ACTIVE);
             parentReadyResolve();
+            flushMessageQueue();
+            
+            // Complete activation after queue flush
+            this.completeActivation();
         });
 
         this.registerHandler('REGISTERED', (message) => {
-            if (currentLifecycleState !== LIFECYCLE_STATE.WAIT_PARENT) {
+            if (currentLifecycleState !== LIFECYCLE_STATE.WAIT_PARENT && currentLifecycleState !== LIFECYCLE_STATE.ACTIVE) {
                 debugLog(`REGISTERED received in wrong state: ${currentLifecycleState}`);
                 return;
             }
@@ -1214,15 +1270,13 @@ class MessageHandler {
             moduleState.handshakeState.registered = true;
             moduleState.handshakeState.registeredAck = true;
             
-            parentReadyPromise.then(() => {
-                setLifecycleState(LIFECYCLE_STATE.ACTIVE);
-                this.completeActivation();
-            });
+            // Parent ready already handled by PARENT_READY
         });
 
         this.registerHandler('SESSION_DATA', (message) => {
             if (!isActive() && currentLifecycleState !== LIFECYCLE_STATE.ACTIVE) {
                 debugLog('SESSION_DATA received before active');
+                // Still process but warn
             }
             
             if (message.payload) {
@@ -1239,7 +1293,7 @@ class MessageHandler {
             
             moduleState.handshakeState.sessionActive = true;
             
-            parentComm.sendMessage('SESSION_ACK', {
+            safeSend('SESSION_ACK', {
                 module: MODULE_NAME,
                 frameId: parentComm.frameId,
                 timestamp: Date.now()
@@ -1272,7 +1326,7 @@ class MessageHandler {
 
         this.registerHandler('ACK', (message) => {
             moduleState.connectionMetrics.acksReceived++;
-            debugLog('ACK received', message.messageId);
+            debugLog('ACK received', message.id);
         });
 
         this.registerHandler('CAPABILITIES', (message) => {
@@ -1309,14 +1363,14 @@ class MessageHandler {
         });
 
         this.registerHandler('PING', (message) => {
-            parentComm.sendMessage('PONG', { echo: message.payload });
+            safeSend('PONG', { echo: message.payload });
         });
     }
 
     sendRegistration() {
         logOnce('send', 'REGISTER_MODULE');
         
-        parentComm.sendMessage('REGISTER_MODULE', {
+        safeSend('REGISTER_MODULE', {
             module: MODULE_NAME,
             version: MODULE_VERSION,
             frameId: parentComm.frameId,
@@ -1326,7 +1380,7 @@ class MessageHandler {
     }
 
     sendCapabilitiesResponse(message) {
-        parentComm.sendMessage('CAPABILITIES_ACK', {
+        safeSend('CAPABILITIES_ACK', {
             module: MODULE_NAME,
             capabilities: MODULE_CAPABILITIES,
             version: MODULE_VERSION,
@@ -1378,11 +1432,12 @@ class MessageHandler {
                 timestamp: Date.now(),
                 sessionActive: moduleState.sessionActive,
                 environment: environmentDetector.environment,
-                bootState: currentLifecycleState
+                bootState: currentLifecycleState,
+                parentReady: parentReady
             }
         }));
         
-        parentComm.sendMessage('UI_READY', {
+        safeSend('UI_READY', {
             module: MODULE_NAME,
             frameId: parentComm.frameId,
             timestamp: Date.now(),
@@ -1514,7 +1569,8 @@ class SecurityValidator {
 
     validateMessageStructure(message) {
         if (!message || typeof message !== 'object') return false;
-        return !!(message.id && message.action && message.source && message.timestamp);
+        // Updated to match required schema
+        return !!(message.id && message.type && message.source && message.timestamp && message.payload !== undefined);
     }
 
     getOriginReport() {
@@ -1580,7 +1636,7 @@ class GlobalErrorHandler {
         
         if (window.parent && window.parent !== window) {
             try {
-                parentComm.sendMessage('ERROR', {
+                safeSend('ERROR', {
                     error: error?.message || 'Unknown error',
                     stack: error?.stack,
                     module: MODULE_NAME,
@@ -1830,7 +1886,7 @@ class UIBridge {
             return;
         }
         
-        parentComm.sendMessage('UI_ACTION', {
+        safeSend('UI_ACTION', {
             action,
             data,
             module: MODULE_NAME,
@@ -2124,12 +2180,12 @@ class MarketplaceCoreImpl {
                 return;
             }
             
-            const messageId = `${type}_${Date.now()}_${Math.random().toString(36).substring(2, 10)}`;
+            const requestId = generateRequestId();
             
             const responseHandler = (event) => {
                 if (!validateMessage(event.data)) return;
                 if (event.data.type === type + '_RESPONSE' && 
-                    event.data.payload?.requestId === messageId) {
+                    event.data.requestId === requestId) {
                     window.removeEventListener('message', responseHandler);
                     resolve(event.data.payload.data);
                 }
@@ -2137,8 +2193,8 @@ class MarketplaceCoreImpl {
             
             window.addEventListener('message', responseHandler);
             
-            parentComm.sendMessage(type, {
-                requestId: messageId,
+            safeSend(type, {
+                requestId: requestId,
                 ...payload
             });
         });
@@ -2348,7 +2404,7 @@ class MarketplaceCoreImpl {
         if (!listing) throw new Error('Listing not found');
 
         try {
-            parentComm.sendMessage('CONTACT_SELLER', {
+            safeSend('CONTACT_SELLER', {
                 listingId,
                 sellerId: listing.sellerId,
                 listingTitle: listing.title,
@@ -2371,7 +2427,7 @@ class MarketplaceCoreImpl {
             if (l.id === listingId) l.views = (l.views || 0) + 1;
             return l;
         });
-        parentComm.sendMessage('TRACK_VIEW', { listingId, timestamp: Date.now() });
+        safeSend('TRACK_VIEW', { listingId, timestamp: Date.now() });
     }
 
     setFilter(key, value) {
@@ -2686,10 +2742,10 @@ const marketplace = new MarketplaceCoreImpl();
 
 export async function sendToParent(type, payload = {}) {
     if (moduleState.shutdown) return { success: false, error: 'shutdown' };
-    if (!isActive()) return { success: false, error: 'not_active' };
     
-    const result = parentComm.sendMessage(type, payload);
-    if (result.success) {
+    // CRITICAL: Use safeSend which handles queuing
+    const result = safeSend(type, payload);
+    if (result.success && !result.queued) {
         logOnce('send', type);
     }
     return result;
@@ -2700,6 +2756,7 @@ export async function sendToParent(type, payload = {}) {
 // =============================================
 
 function sendChildReady() {
+    // CRITICAL: Only send when in READY state
     if (currentLifecycleState !== LIFECYCLE_STATE.READY) {
         logOnce('warn', 'BLOCKED: CHILD_READY sent before READY state');
         return;
@@ -2709,7 +2766,8 @@ function sendChildReady() {
 
     childReadySent = true;
 
-    parentComm.sendMessage('CHILD_READY', {
+    // Use safeSend which will queue if parent not ready (but we should be in READY state)
+    safeSend('CHILD_READY', {
         module: MODULE_NAME,
         version: MODULE_VERSION,
         frameId: parentComm.frameId,
@@ -2729,7 +2787,8 @@ function initializeModule() {
         setLifecycleState(LIFECYCLE_STATE.INITIALIZING);
         
         window.addEventListener('message', (event) => {
-            parentComm.handleIncomingMessage(event);
+            // PERFORMANCE FIX: Move heavy logic out of message listener
+            setTimeout(() => parentComm.handleIncomingMessage(event), 0);
         });
         
         diagnostics.start();
@@ -2742,6 +2801,7 @@ function initializeModule() {
             logOnce('info', 'Not in iframe, running standalone');
             setLifecycleState(LIFECYCLE_STATE.READY);
             setLifecycleState(LIFECYCLE_STATE.WAIT_PARENT);
+            parentReady = true; // Standalone mode
             parentReadyResolve();
             setLifecycleState(LIFECYCLE_STATE.ACTIVE);
             moduleState.ready = true;
@@ -2750,6 +2810,7 @@ function initializeModule() {
             window.__MODULE_READY__ = true;
             stateLock = false;
             messageHandler.completeActivation();
+            flushMessageQueue(); // Flush any queued messages
             return;
         }
         
@@ -2827,7 +2888,8 @@ initializeCore = async function(options = {}) {
                 sessionActive: moduleState.sessionActive,
                 handshakeComplete: moduleState.handshakeComplete,
                 environment: environmentDetector.environment,
-                bootState: currentLifecycleState
+                bootState: currentLifecycleState,
+                parentReady: parentReady
             }
         }));
 
@@ -2855,6 +2917,13 @@ requestSession = async function(force = false) {
         return true;
     }
 
+    // CRITICAL: Only request session after parent ready
+    if (parentReady && !moduleState.sessionActive && !moduleState.sessionState.requested) {
+        moduleState.sessionState.requested = true;
+        safeSend('REQUEST_SESSION', { force });
+        return true;
+    }
+
     return false;
 };
 
@@ -2879,6 +2948,7 @@ shutdownCore = function() {
     directAPILoaded = false;
     isBootstrapped = false;
     isAuthReady = false;
+    parentReady = false;
 
     heartbeatResponder.stop();
     parentComm.cleanup();
@@ -2892,7 +2962,8 @@ shutdownCore = function() {
     safeStorage.remove(LOCAL_STORAGE_KEYS.STARTUP_STATE);
     safeStorage.sessionRemove('core_session_cache');
 
-    messageQueue = [];
+    // Clear queues
+    messageQueue.length = 0;
     dataCache.clear();
 
     window.__MODULE_READY__ = false;
@@ -2906,7 +2977,10 @@ syncWithParent = async function() {
     if (moduleState.shutdown || !moduleState.parentDetected) return false;
     if (!isActive()) return false;
     
-    return false;
+    // Implement sync if needed
+    safeSend('SYNC_REQUEST', { timestamp: Date.now() });
+    
+    return true;
 };
 
 checkParentHealth = function() {
@@ -2916,6 +2990,8 @@ checkParentHealth = function() {
         handshakeComplete: moduleState.handshakeComplete,
         sessionActive: moduleState.sessionActive,
         inIframe: moduleState.parentDetected,
+        parentReady: parentReady,
+        queuedMessages: messageQueue.length,
         connectionMetrics: moduleState.connectionMetrics,
         sessionStatus: sessionClient.getState(),
         environment: environmentDetector.getEnvironmentReport(),
@@ -3091,12 +3167,12 @@ export function handleParentInit(payload) {
 export function handleRefreshDataRequest(payload) {
     try {
         if (!isReady && !moduleState.ready) {
-            sendToParent('ERROR', { message: 'Cannot refresh data: core not ready' });
+            safeSend('ERROR', { message: 'Cannot refresh data: core not ready' });
             return;
         }
         
         if (!isActive()) {
-            sendToParent('ERROR', { message: 'Cannot refresh data: module not active' });
+            safeSend('ERROR', { message: 'Cannot refresh data: module not active' });
             return;
         }
         
@@ -3112,7 +3188,7 @@ export function handleRefreshDataRequest(payload) {
         
         setTimeout(() => {
             showStatusMessage('Data refreshed successfully', 'success');
-            sendToParent('DATA_REFRESHED', { dataTypes, timestamp: Date.now() });
+            safeSend('DATA_REFRESHED', { dataTypes, timestamp: Date.now() });
         }, 1000);
     } catch {}
 }
@@ -3161,7 +3237,7 @@ export const pageCore = {
             isReady = true;
             isInitializing = false;
             
-            sendToParent('UI_READY', {
+            safeSend('UI_READY', {
                 iframeId: parentComm.frameId,
                 status: 'success',
                 timestamp: Date.now(),
@@ -3173,7 +3249,7 @@ export const pageCore = {
         } catch (error) {
             isInitializing = false;
             logError('pageCore.init', error);
-            sendToParent('ERROR', {
+            safeSend('ERROR', {
                 iframeId: parentComm.frameId,
                 message: error.message,
                 timestamp: Date.now()
@@ -3372,7 +3448,7 @@ export function handleSessionDataFromParent(sessionDataFromParent) {
         }
         
         if (!validateSessionSchema(sessionDataFromParent)) {
-            sendToParent('AUTH_ERROR', {
+            safeSend('AUTH_ERROR', {
                 error: 'INVALID_SESSION_SCHEMA',
                 received: Object.keys(sessionDataFromParent || {})
             });
@@ -3387,14 +3463,14 @@ export function handleSessionDataFromParent(sessionDataFromParent) {
         sessionClient.acceptParentSession(sessionDataFromParent);
         updateLocalStateFromSession(sessionData);
         
-        sendToParent('SESSION_CONFIRMED', {
+        safeSend('SESSION_CONFIRMED', {
             id: parentComm.frameId,
             userId: sessionData.userId,
             timestamp: Date.now(),
             handshakeComplete: true
         });
         
-        sendToParent('UI_READY', {
+        safeSend('UI_READY', {
             id: parentComm.frameId,
             component: 'marketplace',
             timestamp: Date.now()
@@ -3402,7 +3478,7 @@ export function handleSessionDataFromParent(sessionDataFromParent) {
         
         bindUIAfterSession();
     } catch (error) {
-        sendToParent('AUTH_ERROR', {
+        safeSend('AUTH_ERROR', {
             error: 'SESSION_PROCESSING_FAILED',
             message: error.message
         });
@@ -3597,7 +3673,7 @@ export async function secureApiCall(method, endpoint, data = null, options = {})
     
     if (!hasValidSession()) {
         if (method !== 'GET' || endpoint.includes('/auth/')) {
-            sendToParent('NEED_REFRESH', {
+            safeSend('NEED_REFRESH', {
                 reason: 'api_call_without_session',
                 endpoint: endpoint,
                 method: method
@@ -3626,7 +3702,7 @@ export async function secureApiCall(method, endpoint, data = null, options = {})
 
 export async function handleApiError(error, method, endpoint) {
     try {
-        sendToParent('AUTH_ERROR', {
+        safeSend('AUTH_ERROR', {
             error: 'API_CALL_FAILED',
             endpoint: endpoint,
             method: method,
@@ -3644,7 +3720,7 @@ export async function handleApiError(error, method, endpoint) {
 
 export async function handleUnauthorized() {
     try {
-        sendToParent('AUTH_ERROR', {
+        safeSend('AUTH_ERROR', {
             error: 'UNAUTHORIZED_API_CALL',
             timestamp: Date.now()
         });
@@ -3688,7 +3764,7 @@ export function getCentralToken() {
 export function setupConnectivityListeners() {
     try {
         window.addEventListener('online', () => {
-            sendToParent('PING', { type: 'connectivity_check' });
+            safeSend('PING', { type: 'connectivity_check' });
             syncOfflineMarketplaceData();
         });
         window.addEventListener('offline', () => {
@@ -4862,7 +4938,7 @@ export function handleSessionExpired() {
 export function requestParentUserData() {
     try {
         if (!isActive()) return;
-        sendToParent('REQUEST_USER_DATA', {
+        safeSend('REQUEST_USER_DATA', {
             fields: ['id', 'displayName', 'email', 'photoURL', 'isPremium', 'subscription', 'trustLevel']
         });
     } catch {
@@ -4895,7 +4971,7 @@ export async function fetchUserDataDirectly() {
             parentDataLoaded = false;
             dataFetchInProgress = false;
             processUserData(response.user, 'api');
-            sendToParent('USER_DATA_LOADED', { source: 'direct_api', userId: response.user.id });
+            safeSend('USER_DATA_LOADED', { source: 'direct_api', userId: response.user.id });
         } else {
             throw new Error('Invalid response from user profile API');
         }
@@ -5113,7 +5189,8 @@ export const AppState = {
     getEnvironment: () => environmentDetector?.environment,
     getBootState: () => ({
         state: currentLifecycleState,
-        sessionAuthority: moduleState.sessionAuthority
+        sessionAuthority: moduleState.sessionAuthority,
+        parentReady: parentReady
     }),
     marketplace
 };
@@ -5182,7 +5259,8 @@ if (typeof window !== 'undefined') {
                     connection: heartbeatResponder?.getStatus(),
                     environment: environmentDetector?.environment,
                     boot: {
-                        state: currentLifecycleState
+                        state: currentLifecycleState,
+                        parentReady: parentReady
                     }
                 }),
                 enableDebug: () => diagnostics?.enableDebug(),
@@ -5275,7 +5353,7 @@ export async function inviteTeamMemberWrapper(email, role = 'member') {
 export async function openChat(userId, userName) {
     try {
         if (!isActive()) return false;
-        sendToParent('OPEN_CHAT', { userId, userName, timestamp: Date.now() });
+        safeSend('OPEN_CHAT', { userId, userName, timestamp: Date.now() });
         return true;
     } catch {
         return false;

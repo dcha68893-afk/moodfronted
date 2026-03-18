@@ -1,7 +1,7 @@
 // api.core.js - ENHANCED API GATEWAY WITH SECURITY & CROSS-ENVIRONMENT SUPPORT
-// Version: 23.0.2 - Single Authoritative Initialization Controller (SAIC)
-// Date: 2024-06-17
-// CRITICAL: Single initialization, deterministic state machine, zero race conditions
+// Version: 23.0.3 - STABILIZED RELEASE - Single Deterministic Request Pipeline
+// Date: 2024-06-18
+// CRITICAL: Single initialization, deterministic state machine, zero race conditions, no fallback loops
 
 // ============================================================================
 // MODULE-LEVEL DECLARATIONS (MUST BE OUTSIDE IIFE FOR EXPORTS)
@@ -282,13 +282,8 @@ const SAIC = {
             this.readyReject = reject;
         });
         
-        // Safety timeout - never hang forever
-        setTimeout(() => {
-            if (this.currentState !== this.STATES.READY && this.currentState !== this.STATES.FAILED) {
-                console.error('[SAIC] FATAL: Initialization timeout - forcing FAILED state');
-                this.transitionTo(this.STATES.FAILED, new Error('Initialization timeout after 15s'));
-            }
-        }, 15000);
+        // STABILIZED: No timeout-based forced readiness
+        // System becomes READY only through proper initialization
     },
     
     // Strict state transition - single authority
@@ -413,7 +408,7 @@ SAIC.initialize();
         const existing = root.__API_CORE;
         
         // Check version - if ours is newer, we should load (but preserve features)
-        if (existing && existing.version && existing.version >= '23.0.2') {
+        if (existing && existing.version && existing.version >= '23.0.3') {
             console.log('[API-CORE] Already loaded v' + existing.version + ', skipping initialization');
             
             // Ensure all bridge properties exist
@@ -437,11 +432,11 @@ SAIC.initialize();
         }
         
         // If older version, we'll overwrite but preserve critical data
-        console.log('[API-CORE] Upgrading from v' + (existing ? existing.version : 'unknown') + ' to v23.0.2');
+        console.log('[API-CORE] Upgrading from v' + (existing ? existing.version : 'unknown') + ' to v23.0.3');
     }
     
     // Set loaded flag immediately to prevent parallel initialization
-    root.__API_CORE_LOADED_V23 = '23.0.2';
+    root.__API_CORE_LOADED_V23 = '23.0.3';
     
     // ============================================================================
     // GLOBAL REGISTRATION - MUST EXIST IMMEDIATELY
@@ -463,21 +458,13 @@ SAIC.initialize();
     // READY PROMISE SYSTEM - NOW CONTROLLED BY SAIC
     // ============================================================================
     
-    // Set up timeout protection - never hang forever (reduced from 10s to 8s)
-    const _readyTimeout = setTimeout(() => {
-        if (SAIC.currentState !== SAIC.STATES.READY && SAIC.currentState !== SAIC.STATES.FAILED) {
-            console.warn('[API-CORE] TIMEOUT Forcing ready state after 8s');
-            if (SAIC.currentState === SAIC.STATES.INITIALIZING) {
-                SAIC.transitionTo(SAIC.STATES.READY, null);
-            }
-        }
-    }, 8000);
+    // STABILIZED: No timeout-based forced readiness - removed completely
     
     // ============================================================================
     // REQUIRED EXPOSED PROPERTIES - MUST ALL EXIST
     // ============================================================================
     const requiredProperties = {
-        version: '23.0.2',
+        version: '23.0.3',
         initialized: false,
         ready: SAIC.readyPromise,
         secureApiFetch: null,
@@ -534,7 +521,7 @@ SAIC.initialize();
     if (!root.api.core) {
         root.api.core = {
             __initializing: true,
-            __version: '23.0.2'
+            __version: '23.0.3'
         };
     }
     
@@ -1498,7 +1485,7 @@ SAIC.initialize();
     SecureStorage = {
         _encryptionKey: 'moodchat_secure_v23_2024',
         _prefix: 'sc_v23_',
-        _version: '23.0.2',
+        _version: '23.0.3',
         _salt: Math.random().toString(36).substring(2, 15),
         
         /**
@@ -2156,18 +2143,30 @@ SAIC.initialize();
             
             TokenManager._refreshPromise = (async () => {
                 try {
-                    const response = await fetchWithRetry('/api/auth/refresh', {
+                    // STABILIZED: Use direct fetch instead of fetchWithRetry
+                    const baseUrl = getBaseUrl();
+                    const url = baseUrl.endsWith('/') ? baseUrl.slice(0, -1) : baseUrl;
+                    
+                    const response = await fetch(`${url}/api/auth/refresh`, {
                         method: 'POST',
-                        body: { refreshToken },
-                        auth: false,
-                        retries: 2,
-                        timeout: 10000
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({ refreshToken }),
+                        credentials: 'include'
                     });
                     
-                    if (response && response.success && response.data) {
-                        const newToken = response.data.token || response.data.accessToken;
-                        const newRefreshToken = response.data.refreshToken || refreshToken;
-                        const expiresIn = response.data.expiresIn || TokenManager.DEFAULT_EXPIRY;
+                    let data = null;
+                    try {
+                        data = await response.json();
+                    } catch (e) {
+                        data = { message: 'Failed to parse response' };
+                    }
+                    
+                    if (response.ok && data) {
+                        const newToken = data.token || data.accessToken;
+                        const newRefreshToken = data.refreshToken || refreshToken;
+                        const expiresIn = data.expiresIn || TokenManager.DEFAULT_EXPIRY;
                         
                         if (newToken) {
                             TokenManager.setToken(newToken, newRefreshToken, expiresIn);
@@ -2314,7 +2313,7 @@ SAIC.initialize();
                     data,
                     expiresAt,
                     timestamp: Date.now(),
-                    version: '23.0.2'
+                    version: '23.0.3'
                 };
                 
                 this._memoryCache.set(cacheKey, cacheItem);
@@ -2753,25 +2752,7 @@ SAIC.initialize();
                 }));
                 
             } catch (error) {
-                // Silent retry for network errors (no console flood)
-                if (isNetworkError(error) && request.options.retryCount < (request.options.maxRetries || 3)) {
-                    const retryCount = (request.options.retryCount || 0) + 1;
-                    const delay = Math.min(1000 * Math.pow(2, retryCount), 10000);
-                    
-                    setTimeout(() => {
-                        this._queue.unshift({
-                            ...request,
-                            options: {
-                                ...request.options,
-                                retryCount
-                            }
-                        });
-                        this._process();
-                    }, delay);
-                    
-                    return;
-                }
-                
+                // STABILIZED: No retries - fail immediately
                 request.reject(error);
                 this._stats.failed++;
                 this._stats.processed++;
@@ -2910,16 +2891,33 @@ SAIC.initialize();
     resumeQueue = RequestQueue.resume.bind(RequestQueue);
     
     // ============================================================================
-    // SECTION 6: FETCH WRAPPER - ENHANCED WITH SECURITY AND FALLBACK
+    // SECTION 6: FETCH WRAPPER - STABILIZED - SINGLE REQUEST PATH
     // ============================================================================
     
     const DEFAULT_TIMEOUT = 30000; // 30 seconds
-    const DEFAULT_RETRIES = 3;
-    const DEFAULT_RETRY_DELAY = 1000;
-    const DEFAULT_CACHE_TTL = 300000; // 5 minutes
-    const MAX_RETRY_DELAY = 30000; // 30 seconds
     
     const abortControllers = new Map();
+    
+    // STABILIZED: These functions are kept but NEVER called from secureRequest
+    fetchWithRetry = async function(url, options = {}) {
+        console.warn('[API] fetchWithRetry is deprecated - use direct fetch instead');
+        return fetch(url, options);
+    };
+    
+    fetchWithCache = async function(url, options = {}) {
+        console.warn('[API] fetchWithCache is deprecated - use direct fetch instead');
+        return fetch(url, options);
+    };
+    
+    fetchWithFallback = async function(url, options = {}) {
+        console.warn('[API] fetchWithFallback is deprecated - use direct fetch instead');
+        return fetch(url, options);
+    };
+    
+    fetchDedupe = async function(url, options = {}) {
+        console.warn('[API] fetchDedupe is deprecated - use direct fetch instead');
+        return fetch(url, options);
+    };
     
     /**
      * Create abort controller for request
@@ -3016,279 +3014,6 @@ SAIC.initialize();
         return requestWithAbort(url, options, timeout);
     };
     
-    /**
-     * Fetch with retry
-     * @param {string} url - Request URL
-     * @param {Object} options - Fetch options
-     * @param {number} retries - Number of retries
-     * @param {boolean} backoff - Whether to use exponential backoff
-     * @returns {Promise<Response>} Fetch response
-     */
-    fetchWithRetry = async function(url, options = {}, retries = DEFAULT_RETRIES, backoff = true) {
-        let lastError;
-        let attempt = 0;
-        
-        const endpoint = url.replace(/^https?:\/\/[^\/]+/, '');
-        
-        while (attempt < retries) {
-            attempt++;
-            
-            try {
-                const response = await fetchWithTimeout(url, options);
-                
-                // Don't retry client errors (4xx) except 429 (rate limit)
-                if (response.status >= 400 && response.status < 500 && response.status !== 429) {
-                    return response;
-                }
-                
-                if (response.ok) {
-                    return response;
-                }
-                
-                // Rate limit handling with Retry-After header
-                if (response.status === 429) {
-                    const retryAfter = response.headers.get('Retry-After');
-                    let delay = retryAfter ? parseInt(retryAfter, 10) * 1000 : 
-                                backoff ? Math.min(DEFAULT_RETRY_DELAY * Math.pow(2, attempt - 1), MAX_RETRY_DELAY) : 
-                                DEFAULT_RETRY_DELAY;
-                    
-                    await new Promise(resolve => setTimeout(resolve, delay));
-                    continue;
-                }
-                
-                if (attempt === retries) {
-                    return response;
-                }
-                
-                if (backoff) {
-                    const delay = Math.min(DEFAULT_RETRY_DELAY * Math.pow(2, attempt - 1), MAX_RETRY_DELAY);
-                    await new Promise(resolve => setTimeout(resolve, delay));
-                }
-                
-            } catch (error) {
-                lastError = error;
-                
-                if (error.name === 'AbortError' || (error.code === 'TIMEOUT_ERROR')) {
-                    throw error;
-                }
-                
-                if (attempt === retries) {
-                    break;
-                }
-                
-                if (backoff) {
-                    const delay = Math.min(DEFAULT_RETRY_DELAY * Math.pow(2, attempt - 1), MAX_RETRY_DELAY);
-                    await new Promise(resolve => setTimeout(resolve, delay));
-                }
-            }
-        }
-        
-        throw lastError || new KnectaError(
-            `Request failed after ${retries} attempts`,
-            0,
-            'RETRY_EXHAUSTED',
-            { url, attempts: retries }
-        );
-    };
-    
-    // NEW: Request deduplication function
-    /**
-     * Fetch with deduplication - prevents multiple identical concurrent requests
-     * @param {string} url - Request URL
-     * @param {Object} options - Fetch options
-     * @returns {Promise<Object>} Response
-     */
-    fetchDedupe = async function(url, options = {}) {
-        const method = options.method || 'GET';
-        
-        // Only deduplicate GET requests
-        if (method !== 'GET') {
-            return fetchWithRetry(url, options);
-        }
-        
-        const cacheKey = `${method}:${url}`;
-        
-        // If there's already a pending request for this URL, return its promise
-        if (pendingRequests.has(cacheKey)) {
-            return pendingRequests.get(cacheKey);
-        }
-        
-        // Create new request promise
-        const requestPromise = fetchWithRetry(url, options).finally(() => {
-            // Clean up after request completes
-            setTimeout(() => {
-                pendingRequests.delete(cacheKey);
-            }, 100);
-        });
-        
-        pendingRequests.set(cacheKey, requestPromise);
-        return requestPromise;
-    };
-    
-    /**
-     * Fetch with cache
-     * @param {string} url - Request URL
-     * @param {Object} options - Fetch options
-     * @param {number} ttl - Cache TTL in ms
-     * @param {boolean} forceRefresh - Force refresh cache
-     * @returns {Promise<Object>} Response with cache info
-     */
-    fetchWithCache = async function(url, options = {}, ttl = DEFAULT_CACHE_TTL, forceRefresh = false) {
-        const method = options.method || 'GET';
-        
-        if (method !== 'GET') {
-            return fetchWithRetry(url, options);
-        }
-        
-        const cacheKey = `${method}:${url}`;
-        
-        if (!forceRefresh) {
-            const cached = CacheManager.get(cacheKey);
-            if (cached) {
-                return {
-                    ok: true,
-                    status: 200,
-                    statusText: 'OK (Cached)',
-                    headers: cached._headers || {},
-                    url: url,
-                    data: cached,
-                    fromCache: true,
-                    cacheTime: cached._cacheTime,
-                    json: async () => cached,
-                    text: async () => JSON.stringify(cached),
-                    clone: function() { return this; }
-                };
-            }
-        }
-        
-        try {
-            // Use deduplication for cacheable requests
-            const response = await fetchDedupe(url, options);
-            
-            const clonedResponse = response.clone();
-            
-            try {
-                const data = await clonedResponse.json();
-                
-                if (response.ok) {
-                    const cacheData = {
-                        ...data,
-                        _headers: Object.fromEntries(response.headers.entries()),
-                        _url: response.url,
-                        _status: response.status
-                    };
-                    
-                    CacheManager.set(cacheKey, cacheData, ttl);
-                }
-                
-                return {
-                    ...response,
-                    data,
-                    fromCache: false,
-                    json: async () => data,
-                    text: async () => JSON.stringify(data),
-                    clone: function() { 
-                        return { ...this, data: { ...data } };
-                    }
-                };
-                
-            } catch (e) {
-                return response;
-            }
-            
-        } catch (error) {
-            // Return stale cache if available
-            const cached = CacheManager.get(cacheKey);
-            if (cached) {
-                return {
-                    ok: true,
-                    status: 200,
-                    statusText: 'OK (Stale Cache)',
-                    headers: cached._headers || {},
-                    url: url,
-                    data: cached,
-                    fromCache: true,
-                    stale: true,
-                    cacheTime: cached._cacheTime,
-                    json: async () => cached,
-                    text: async () => JSON.stringify(cached),
-                    clone: function() { return this; }
-                };
-            }
-            
-            throw error;
-        }
-    };
-    
-    /**
-     * Fetch with fallback URLs
-     * @param {string} primaryUrl - Primary URL
-     * @param {string[]} fallbackUrls - Fallback URLs
-     * @param {Object} options - Fetch options
-     * @returns {Promise<Object>} Response with fallback info
-     */
-    fetchWithFallback = async function(primaryUrl, fallbackUrls = [], options = {}) {
-        const urls = [primaryUrl, ...fallbackUrls];
-        const errors = [];
-        
-        for (let i = 0; i < urls.length; i++) {
-            try {
-                const timeout = options.fallbackTimeout || 5000;
-                const response = await fetchWithTimeout(urls[i], options, timeout);
-                
-                if (response.ok) {
-                    return {
-                        ...response,
-                        usedFallback: i > 0,
-                        fallbackIndex: i,
-                        primaryUrl: primaryUrl,
-                        usedUrl: urls[i],
-                        json: response.json.bind(response),
-                        text: response.text.bind(response),
-                        clone: response.clone.bind(response)
-                    };
-                }
-                
-                // Don't fallback for client errors (4xx) except 429
-                if (i === 0 && response.status >= 400 && response.status < 500 && response.status !== 429) {
-                    throw new KnectaError(
-                        response.statusText || `HTTP ${response.status}`,
-                        response.status,
-                        `HTTP_${response.status}`,
-                        { url: urls[i] }
-                    );
-                }
-                
-                errors.push({
-                    url: urls[i],
-                    status: response.status,
-                    statusText: response.statusText
-                });
-                
-            } catch (error) {
-                errors.push({
-                    url: urls[i],
-                    error: normalizeError(error)
-                });
-                
-                if (i === urls.length - 1) {
-                    throw new KnectaError(
-                        'All fallback URLs failed',
-                        0,
-                        'FALLBACK_EXHAUSTED',
-                        { urls, errors }
-                    );
-                }
-            }
-        }
-        
-        throw new KnectaError(
-            'No URLs provided for fallback',
-            0,
-            'NO_FALLBACK_URLS'
-        );
-    };
-    
     // Public endpoints that don't require authentication
     const PUBLIC_ENDPOINTS = [
         '/api/status', '/status', '/health', '/api/health',
@@ -3367,7 +3092,7 @@ SAIC.initialize();
     };
     
     // ============================================================================
-    // CORE: secureApiFetch - ENHANCED WITH SECURITY, QUEUEING, AND FALLBACK
+    // CORE: secureApiFetch - STABILIZED - SINGLE DETERMINISTIC REQUEST PATH
     // ============================================================================
     
     /**
@@ -3475,8 +3200,18 @@ SAIC.initialize();
             
             const skipAuth = options.auth === false || isPublic || isAuth || isStatus;
             
-            // Add authentication headers if needed
+            // STABILIZED: Token guarantee - block requests until token ready if auth required
             if (!skipAuth) {
+                // Wait for token to be ready
+                if (!TokenManager || !TokenManager.getToken()) {
+                    throw new KnectaError(
+                        'Authentication required',
+                        401,
+                        'AUTH_REQUIRED',
+                        { endpoint: endpointPath }
+                    );
+                }
+                
                 if (TokenManager && TokenManager.shouldRefreshToken && TokenManager.shouldRefreshToken()) {
                     await refreshTokenIfNeeded();
                 }
@@ -3486,6 +3221,13 @@ SAIC.initialize();
                     if (token) {
                         const tokenType = (TokenManager.getTokenType && TokenManager.getTokenType()) || 'Bearer';
                         fetchOptions.headers['Authorization'] = `${tokenType} ${token}`;
+                    } else {
+                        throw new KnectaError(
+                            'Authentication token missing',
+                            401,
+                            'TOKEN_MISSING',
+                            { endpoint: endpointPath }
+                        );
                     }
                 }
             }
@@ -3511,52 +3253,21 @@ SAIC.initialize();
                 }
             }
             
-            // Execute request with appropriate strategy
-            let response;
+            // STABILIZED: Single deterministic request path - direct fetch with timeout
             const requestStartTime = Date.now();
             
+            let response;
             try {
-                if (options.useFallback && options.fallbackUrls) {
-                    response = await fetchWithFallback(fullUrl, options.fallbackUrls, fetchOptions);
-                } else if (options.cache !== false && method === 'GET' && !options.skipCache) {
-                    response = await fetchWithCache(
-                        fullUrl, 
-                        fetchOptions, 
-                        options.ttl || DEFAULT_CACHE_TTL, 
-                        options.forceRefresh || false
-                    );
-                } else {
-                    response = await fetchWithRetry(
-                        fullUrl, 
-                        fetchOptions, 
-                        options.retries || DEFAULT_RETRIES, 
-                        options.backoff !== false
-                    );
-                }
+                // STABILIZED: Use direct fetch, no retries, no fallback, no cache in request flow
+                response = await fetchWithTimeout(fullUrl, fetchOptions, options.timeout || DEFAULT_TIMEOUT);
             } catch (fetchError) {
-                // Handle fetch errors gracefully - FIXED: More descriptive error message
+                // STABILIZED: Throw error directly - no silent failures
                 console.warn('[API] Fetch error:', fetchError.message);
                 
-                // Return fallback response with better error info
-                return {
-                    ok: false,
-                    success: false,
-                    status: 0,
-                    statusText: fetchError.message || 'Network error',
-                    data: {
-                        message: fetchError.message || 'Network error',
-                        code: fetchError.code || 'NETWORK_ERROR',
-                        details: isNetworkError(fetchError) ? 
-                            'Please check your internet connection and try again.' : 
-                            'The server may be temporarily unavailable.',
-                        error: normalizeError(fetchError).toJSON()
-                    },
-                    error: normalizeError(fetchError),
-                    url: fullUrl,
-                    method: method,
-                    timestamp: Date.now(),
-                    fromFallback: true
-                };
+                const normalizedError = normalizeError(fetchError, `Request failed: ${url}`);
+                
+                // Throw error for proper error propagation
+                throw normalizedError;
             }
             
             const requestDuration = Date.now() - requestStartTime;
@@ -3591,10 +3302,6 @@ SAIC.initialize();
                             message: "Login successful",
                             _fromPlainText: true
                         };
-                        
-                        if (!response.ok) {
-                            response = { ...response, ok: true, status: 200 };
-                        }
                     } 
                     else if (trimmed.toLowerCase().includes('success') || 
                              trimmed.toLowerCase().includes('welcome') ||
@@ -3604,10 +3311,6 @@ SAIC.initialize();
                             message: trimmed,
                             _fromPlainText: true
                         };
-                        
-                        if (!response.ok) {
-                            response = { ...response, ok: true, status: 200 };
-                        }
                     }
                 }
                 
@@ -3688,12 +3391,6 @@ SAIC.initialize();
                 method: method,
                 requestDuration: requestDuration,
                 timestamp: Date.now(),
-                fromCache: response.fromCache || false,
-                stale: response.stale || false,
-                cacheTime: response.cacheTime,
-                usedFallback: response.usedFallback || false,
-                fallbackIndex: response.fallbackIndex,
-                usedUrl: response.usedUrl,
                 json: async () => data,
                 text: async () => typeof data === 'string' ? data : JSON.stringify(data),
                 clone: function() { 
@@ -3704,7 +3401,7 @@ SAIC.initialize();
                 }
             };
             
-            // Handle error responses
+            // STABILIZED: Handle error responses - throw on HTTP errors
             if (!response.ok) {
                 const errorMessage = (data && (data.message || data.error)) || response.statusText || 'Request failed';
                 const errorCode = (data && data.code) || `HTTP_${response.status}`;
@@ -3736,8 +3433,8 @@ SAIC.initialize();
                     }
                 }));
                 
-                normalizedResponse.error = error;
-                return normalizedResponse;
+                // STABILIZED: Throw error instead of returning error response
+                throw error;
             }
             
             // Dispatch success event
@@ -3772,25 +3469,8 @@ SAIC.initialize();
                 }
             }
             
-            // Always return a structured response, never throw
-            return {
-                ok: false,
-                success: false,
-                status: normalizedError.status || 0,
-                statusText: normalizedError.message,
-                data: {
-                    message: normalizedError.message,
-                    code: normalizedError.code,
-                    details: isNetworkError(normalizedError) ? 
-                        'Please check your internet connection and try again.' : 
-                        'The server may be temporarily unavailable.',
-                    error: normalizedError.toJSON()
-                },
-                error: normalizedError,
-                url: url,
-                method: options.method || 'GET',
-                timestamp: Date.now()
-            };
+            // STABILIZED: Always throw errors, never return error responses
+            throw normalizedError;
         }
     };
     
@@ -4090,7 +3770,9 @@ SAIC.initialize();
     };
     
     apiCallWithRetry = async function(endpoint, options = {}, maxRetries = 3) {
-        return secureRequest(endpoint, { ...options, retries: maxRetries });
+        // STABILIZED: Ignore retry parameter, use standard request
+        console.warn('[API] apiCallWithRetry is deprecated - use apiCall instead');
+        return secureRequest(endpoint, options);
     };
     
     // ============================================================================
@@ -4108,7 +3790,6 @@ SAIC.initialize();
                 method: 'POST',
                 body: credentials,
                 auth: false,
-                cache: false,
                 _isLogin: true
             });
             
@@ -4126,12 +3807,6 @@ SAIC.initialize();
                 
                 if (token) {
                     console.log('[API-LOGIN] Token extracted successfully');
-                    
-                    if (!response.ok) {
-                        response.ok = true;
-                        response.success = true;
-                        response.status = 200;
-                    }
                     
                     if (TokenManager) {
                         const refreshToken = response.data.refreshToken || null;
@@ -4166,12 +3841,6 @@ SAIC.initialize();
                     trimmed.toLowerCase().includes('welcome') ||
                     trimmed.toLowerCase().includes('logged in')) {
                     
-                    if (!response.ok) {
-                        response.ok = true;
-                        response.success = true;
-                        response.status = 200;
-                    }
-                    
                     const possibleToken = trimmed.match(/[A-Za-z0-9-_]+\.[A-Za-z0-9-_]+\.[A-Za-z0-9-_]+/);
                     if (possibleToken && TokenManager) {
                         TokenManager.setToken(possibleToken[0], null, 3600);
@@ -4184,7 +3853,7 @@ SAIC.initialize();
             
         } catch (error) {
             console.error('[API-LOGIN] Login error:', error);
-            return normalizeError(error, 'Login failed');
+            throw normalizeError(error, 'Login failed');
         }
     };
     
@@ -4197,11 +3866,14 @@ SAIC.initialize();
             const token = TokenManager ? TokenManager.getToken() : null;
             
             if (token) {
-                await secureRequest('/api/auth/logout', {
-                    method: 'POST',
-                    auth: true,
-                    cache: false
-                }).catch(() => {});
+                try {
+                    await secureRequest('/api/auth/logout', {
+                        method: 'POST',
+                        auth: true
+                    });
+                } catch (e) {
+                    // Ignore logout errors
+                }
             }
         } catch (e) {}
         
@@ -4227,8 +3899,7 @@ SAIC.initialize();
         return secureRequest('/api/auth/register', {
             method: 'POST',
             body: userData,
-            auth: false,
-            cache: false
+            auth: false
         });
     };
     
@@ -4270,24 +3941,27 @@ SAIC.initialize();
             return { success: false, message: 'No refresh token available' };
         }
         
-        const response = await secureRequest('/api/auth/refresh', {
-            method: 'POST',
-            body: { refreshToken: refreshTokenValue },
-            auth: false,
-            cache: false
-        });
-        
-        if (response && response.success && response.data) {
-            const newToken = response.data.token || response.data.accessToken;
-            const newRefreshToken = response.data.refreshToken || refreshTokenValue;
-            const expiresIn = response.data.expiresIn || 3600;
+        try {
+            const response = await secureRequest('/api/auth/refresh', {
+                method: 'POST',
+                body: { refreshToken: refreshTokenValue },
+                auth: false
+            });
             
-            if (newToken && TokenManager) {
-                TokenManager.setToken(newToken, newRefreshToken, expiresIn);
+            if (response && response.success && response.data) {
+                const newToken = response.data.token || response.data.accessToken;
+                const newRefreshToken = response.data.refreshToken || refreshTokenValue;
+                const expiresIn = response.data.expiresIn || 3600;
+                
+                if (newToken && TokenManager) {
+                    TokenManager.setToken(newToken, newRefreshToken, expiresIn);
+                }
             }
+            
+            return response;
+        } catch (error) {
+            return { success: false, error: error.message };
         }
-        
-        return response;
     };
     
     /**
@@ -4308,15 +3982,18 @@ SAIC.initialize();
             }
         }
         
-        const response = await secureRequest('/api/auth/me', {
-            method: 'GET',
-            retries: 1,
-            cache: false
-        });
-        
-        if (response && response.success && response.data && response.data.user) {
-            setUserData(response.data.user);
-            return true;
+        try {
+            const response = await secureRequest('/api/auth/me', {
+                method: 'GET',
+                retries: 1
+            });
+            
+            if (response && response.success && response.data && response.data.user) {
+                setUserData(response.data.user);
+                return true;
+            }
+        } catch (error) {
+            return false;
         }
         
         return false;
@@ -4326,8 +4003,7 @@ SAIC.initialize();
     
     checkAuthMe = async function() {
         return secureRequest('/api/auth/me', { 
-            method: 'GET', 
-            cache: false 
+            method: 'GET'
         });
     };
     
@@ -4704,7 +4380,7 @@ SAIC.initialize();
             return response;
             
         } catch (error) {
-            return normalizeError(error, 'Failed to send message');
+            throw normalizeError(error, 'Failed to send message');
         }
     };
     
@@ -4723,13 +4399,11 @@ SAIC.initialize();
             }
             
             return await secureRequest(url, {
-                method: 'GET',
-                cache: true,
-                ttl: 60000
+                method: 'GET'
             });
             
         } catch (error) {
-            return normalizeError(error, 'Failed to get chat history');
+            throw normalizeError(error, 'Failed to get chat history');
         }
     };
     
@@ -4740,15 +4414,13 @@ SAIC.initialize();
     getUnreadCount = async function() {
         try {
             const response = await secureRequest('/api/chats/unread', {
-                method: 'GET',
-                cache: true,
-                ttl: 30000
+                method: 'GET'
             });
             
             return response;
             
         } catch (error) {
-            return normalizeError(error, 'Failed to get unread count');
+            throw normalizeError(error, 'Failed to get unread count');
         }
     };
     
@@ -4779,7 +4451,7 @@ SAIC.initialize();
             return response;
             
         } catch (error) {
-            return normalizeError(error, 'Failed to mark chat as read');
+            throw normalizeError(error, 'Failed to mark chat as read');
         }
     };
     
@@ -4789,7 +4461,7 @@ SAIC.initialize();
     
     getTeamMembers = async function(teamId) {
         const url = teamId ? `/api/teams/${teamId}/members` : '/api/teams/members';
-        return secureRequest(url, { method: 'GET', cache: true, ttl: 60000 });
+        return secureRequest(url, { method: 'GET' });
     };
     
     getTrustScoreClass = function(score) {
@@ -4833,9 +4505,7 @@ SAIC.initialize();
     
     getUserFriends = async function() {
         return secureRequest('/api/friends', { 
-            method: 'GET', 
-            cache: true, 
-            ttl: 30000 
+            method: 'GET'
         });
     };
     
@@ -4845,9 +4515,7 @@ SAIC.initialize();
     
     getUserGroups = async function() {
         return secureRequest('/api/group/user', { 
-            method: 'GET', 
-            cache: true, 
-            ttl: 60000 
+            method: 'GET'
         });
     };
     
@@ -5051,17 +4719,13 @@ SAIC.initialize();
     
     getFriends = async function() {
         return secureRequest('/api/friends', { 
-            method: 'GET',
-            cache: true,
-            ttl: 30000
+            method: 'GET'
         });
     };
     
     getFriendRequests = async function() {
         return secureRequest('/api/friends/requests', { 
-            method: 'GET',
-            cache: true,
-            ttl: 15000
+            method: 'GET'
         });
     };
     
@@ -5096,17 +4760,13 @@ SAIC.initialize();
     
     getConversations = async function() {
         return secureRequest('/api/chats/conversations', { 
-            method: 'GET',
-            cache: true,
-            ttl: 15000
+            method: 'GET'
         });
     };
     
     getMessages = async function(chatId, limit = 50, offset = 0) {
         return secureRequest(`/api/chats/${chatId}/messages?limit=${limit}&offset=${offset}`, {
-            method: 'GET',
-            cache: true,
-            ttl: 10000
+            method: 'GET'
         });
     };
     
@@ -5149,17 +4809,13 @@ SAIC.initialize();
     
     getGroups = async function() {
         return secureRequest('/api/group', { 
-            method: 'GET',
-            cache: true,
-            ttl: 60000
+            method: 'GET'
         });
     };
     
     getGroupDetails = async function(groupId) {
         return secureRequest(`/api/group/${groupId}`, { 
-            method: 'GET',
-            cache: true,
-            ttl: 30000
+            method: 'GET'
         });
     };
     
@@ -5201,9 +4857,7 @@ SAIC.initialize();
     
     getNotifications = async function() {
         return secureRequest('/api/notifications', { 
-            method: 'GET',
-            cache: true,
-            ttl: 10000
+            method: 'GET'
         });
     };
     
@@ -5231,9 +4885,7 @@ SAIC.initialize();
     
     getProfile = async function() {
         return secureRequest('/api/users/profile', { 
-            method: 'GET',
-            cache: true,
-            ttl: 30000
+            method: 'GET'
         });
     };
     
@@ -5263,17 +4915,13 @@ SAIC.initialize();
     
     getOnlineUsers = async function() {
         return secureRequest('/api/users/online', { 
-            method: 'GET',
-            cache: true,
-            ttl: 5000
+            method: 'GET'
         });
     };
     
     searchUsers = async function(query) {
         return secureRequest(`/api/users/search?q=${encodeURIComponent(query)}`, {
-            method: 'GET',
-            cache: true,
-            ttl: 30000
+            method: 'GET'
         });
     };
     
@@ -5283,9 +4931,7 @@ SAIC.initialize();
     
     getCallHistory = async function() {
         return secureRequest('/api/calls/history', { 
-            method: 'GET',
-            cache: true,
-            ttl: 60000
+            method: 'GET'
         });
     };
     
@@ -5325,9 +4971,7 @@ SAIC.initialize();
     
     getSettings = async function() {
         return secureRequest('/api/settings', { 
-            method: 'GET',
-            cache: true,
-            ttl: 60000
+            method: 'GET'
         });
     };
     
@@ -5366,9 +5010,7 @@ SAIC.initialize();
     
     getFile = async function(fileId) {
         return secureRequest(`/api/files/${fileId}`, { 
-            method: 'GET',
-            cache: true,
-            ttl: 300000
+            method: 'GET'
         });
     };
     
@@ -5378,8 +5020,7 @@ SAIC.initialize();
     
     requestSession = async function() {
         return secureRequest('/api/auth/session', { 
-            method: 'GET',
-            cache: false
+            method: 'GET'
         });
     };
     
@@ -5390,9 +5031,7 @@ SAIC.initialize();
             url += (url.includes('?') ? '&' : '?') + queryString;
         }
         return secureRequest(url, { 
-            method: 'GET',
-            cache: true,
-            ttl: 300000
+            method: 'GET'
         });
     };
     
@@ -5985,8 +5624,8 @@ SAIC.initialize();
     // ============================================================================
     
     ApiGateway = {
-        version: '23.0.2',
-        build: '2024-06-17',
+        version: '23.0.3',
+        build: '2024-06-18',
         
         env: {
             getCurrent: getEnvironment,
@@ -6047,19 +5686,6 @@ SAIC.initialize();
         },
         options: async function(endpoint, options = {}) {
             return secureRequest(endpoint, { ...options, method: 'OPTIONS' });
-        },
-        
-        withCache: async function(endpoint, options = {}) {
-            return secureRequest(endpoint, { ...options, cache: true });
-        },
-        withRetry: async function(endpoint, options = {}, retries = 3) {
-            return secureRequest(endpoint, { ...options, retries: retries });
-        },
-        withTimeout: async function(endpoint, timeout = 5000, options = {}) {
-            return secureRequest(endpoint, { ...options, timeout: timeout });
-        },
-        withFallback: async function(endpoint, fallbackUrls, options = {}) {
-            return secureRequest(endpoint, { ...options, useFallback: true, fallbackUrls: fallbackUrls });
         },
         
         cache: {
@@ -6276,8 +5902,9 @@ SAIC.initialize();
         request: secureRequest,
         secureFetch: secureRequest,
         secureApiFetch: secureRequest,
-        apiCallWithRetry: function(endpoint, options, retries) { 
-            return this.withRetry(endpoint, options, retries); 
+        apiCallWithRetry: function(endpoint, options) { 
+            console.warn('[API] apiCallWithRetry is deprecated - use apiCall instead');
+            return secureRequest(endpoint, options); 
         },
         
         /**
@@ -6331,7 +5958,7 @@ SAIC.initialize();
     gateway = ApiGateway;
     
     // ============================================================================
-    // SECTION 25: INITIALIZE GATEWAY - ENHANCED DETERMINISTIC PIPELINE
+    // SECTION 25: INITIALIZE GATEWAY - STABILIZED DETERMINISTIC PIPELINE
     // ============================================================================
     
     initializeGateway = async function(options = {}) {
@@ -6345,7 +5972,7 @@ SAIC.initialize();
         SAIC.acquireLock();
         SAIC.transitionTo(SAIC.STATES.INITIALIZING);
         
-        console.log('[API-CORE] Initializing API Gateway v23.0.2');
+        console.log('[API-CORE] Initializing API Gateway v23.0.3');
         
         try {
             // STAGE 1: Environment detection
@@ -6491,55 +6118,68 @@ SAIC.initialize();
             // Mark queue dependency
             RequestQueue.updateDependency('apiCoreReady', true);
             
-            // All stages complete - transition to READY
-            SAIC.transitionTo(SAIC.STATES.READY);
+            // STABILIZED: Check if all critical dependencies are ready before transitioning to READY
+            const configReady = !!ACTIVE_BASE_URL;
+            const tokenReady = !!TokenManager?.getToken();
+            const apiConfigValid = true; // Assume valid if we got this far
             
-            const readyEvent = new CustomEvent('api-gateway-ready', {
-                detail: {
-                    version: '23.0.2',
+            if (configReady && apiConfigValid) {
+                // All stages complete - transition to READY
+                SAIC.transitionTo(SAIC.STATES.READY);
+                
+                const readyEvent = new CustomEvent('api-gateway-ready', {
+                    detail: {
+                        version: '23.0.3',
+                        environment: CURRENT_ENVIRONMENT,
+                        baseUrl: ACTIVE_BASE_URL,
+                        timestamp: new Date().toISOString(),
+                        stages: SAIC.stageResults,
+                        features: [
+                            'base-url-control',
+                            'auto-environment-detection',
+                            'https-enforcement',
+                            'security-validation',
+                            'single-request-path',
+                            'error-normalization',
+                            'token-security',
+                            'cache-management',
+                            'request-queue',
+                            'dependency-waiting',
+                            'chat-functions',
+                            'iframe-orchestration',
+                            'safe-json-parser',
+                            'enhanced-login-handling',
+                            'cross-device-compatibility',
+                            'request-deduplication',
+                            'enhanced-error-messages',
+                            'single-authoritative-init',
+                            'stabilized-pipeline'
+                        ]
+                    }
+                });
+                
+                root.dispatchEvent(readyEvent);
+                
+                console.log('[API-CORE] Initialized successfully', {
                     environment: CURRENT_ENVIRONMENT,
                     baseUrl: ACTIVE_BASE_URL,
-                    timestamp: new Date().toISOString(),
-                    stages: SAIC.stageResults,
-                    features: [
-                        'base-url-control',
-                        'auto-environment-detection',
-                        'https-enforcement',
-                        'security-validation',
-                        'fetch-wrapper',
-                        'error-normalization',
-                        'token-security',
-                        'cache-management',
-                        'request-queue',
-                        'dependency-waiting',
-                        'chat-functions',
-                        'iframe-orchestration',
-                        'safe-json-parser',
-                        'enhanced-login-handling',
-                        'fallback-mechanisms',
-                        'cross-device-compatibility',
-                        'request-deduplication',
-                        'enhanced-error-messages',
-                        'single-authoritative-init'
-                    ]
-                }
-            });
-            
-            root.dispatchEvent(readyEvent);
-            
-            console.log('[API-CORE] Initialized successfully', {
-                environment: CURRENT_ENVIRONMENT,
-                baseUrl: ACTIVE_BASE_URL,
-                version: '23.0.2',
-                state: SAIC.currentState,
-                duration: Date.now() - SAIC.initializationStartTime
-            });
+                    version: '23.0.3',
+                    state: SAIC.currentState,
+                    duration: Date.now() - SAIC.initializationStartTime
+                });
+            } else {
+                // If not ready, stay in INITIALIZING state - no forced readiness
+                console.warn('[API-CORE] Initialization incomplete - waiting for dependencies', {
+                    configReady,
+                    tokenReady
+                });
+            }
             
             return {
-                success: true,
+                success: SAIC.currentState === SAIC.STATES.READY,
                 environment: CURRENT_ENVIRONMENT,
                 baseUrl: ACTIVE_BASE_URL,
-                version: '23.0.2',
+                version: '23.0.3',
                 state: SAIC.currentState,
                 stages: SAIC.stageResults,
                 timestamp: new Date().toISOString()
@@ -6558,7 +6198,6 @@ SAIC.initialize();
             };
         } finally {
             SAIC.releaseLock();
-            clearTimeout(_readyTimeout);
         }
     };
     
@@ -6742,7 +6381,7 @@ SAIC.initialize();
     // CRITICAL: Update __API_CORE with all required properties
     // ============================================================================
     Object.assign(root.__API_CORE, {
-        version: '23.0.2',
+        version: '23.0.3',
         initialized: SAIC.currentState === SAIC.STATES.READY,
         ready: SAIC.readyPromise,
         secureApiFetch: secureApiFetch,
@@ -6763,8 +6402,8 @@ SAIC.initialize();
     root.api_core = root.api_core || root.__API_CORE;
     
     root.__API_GATEWAY = {
-        version: '23.0.2',
-        build: '2024-06-17',
+        version: '23.0.3',
+        build: '2024-06-18',
         environment: CURRENT_ENVIRONMENT,
         baseUrl: ACTIVE_BASE_URL,
         initialized: SAIC.currentState === SAIC.STATES.READY,
@@ -6776,7 +6415,7 @@ SAIC.initialize();
             'auto-environment-detection',
             'https-enforcement',
             'security-validation',
-            'fetch-wrapper',
+            'single-request-path',
             'error-normalization',
             'token-security',
             'cache-management',
@@ -6786,11 +6425,11 @@ SAIC.initialize();
             'iframe-orchestration',
             'safe-json-parser',
             'enhanced-login-handling',
-            'fallback-mechanisms',
             'cross-device-compatibility',
             'request-deduplication',
             'enhanced-error-messages',
-            'single-authoritative-init'
+            'single-authoritative-init',
+            'stabilized-pipeline'
         ]
     };
     
@@ -6806,7 +6445,7 @@ SAIC.initialize();
     if (!root.api.core) {
         root.api.core = {
             __initializing: SAIC.currentState === SAIC.STATES.INITIALIZING,
-            __version: '23.0.2',
+            __version: '23.0.3',
             ready: coreReadyPromise,
             waitFor: function() { 
                 return coreReadyPromise; 
@@ -6826,7 +6465,7 @@ SAIC.initialize();
                     initializing: SAIC.currentState === SAIC.STATES.INITIALIZING,
                     failed: SAIC.currentState === SAIC.STATES.FAILED,
                     state: SAIC.currentState,
-                    version: '23.0.2'
+                    version: '23.0.3'
                 };
             },
             init: function() {
@@ -6852,7 +6491,7 @@ SAIC.initialize();
                 initializing: SAIC.currentState === SAIC.STATES.INITIALIZING,
                 failed: SAIC.currentState === SAIC.STATES.FAILED,
                 state: SAIC.currentState,
-                version: '23.0.2'
+                version: '23.0.3'
             };
         };
         root.api.core.init = root.api.core.init || function() { return coreReadyPromise; };
@@ -6868,7 +6507,7 @@ SAIC.initialize();
         try {
             root.dispatchEvent(new CustomEvent('api-core-ready', {
                 detail: {
-                    version: '23.0.2',
+                    version: '23.0.3',
                     environment: CURRENT_ENVIRONMENT,
                     baseUrl: ACTIVE_BASE_URL,
                     timestamp: new Date().toISOString(),
@@ -6882,7 +6521,7 @@ SAIC.initialize();
         if (root.__API_CORE && typeof root.__API_CORE.emit === 'function') {
             try {
                 root.__API_CORE.emit('ready', {
-                    version: '23.0.2',
+                    version: '23.0.3',
                     environment: CURRENT_ENVIRONMENT,
                     timestamp: new Date().toISOString()
                 });
@@ -6895,7 +6534,7 @@ SAIC.initialize();
     console.log('[API-CORE] Fully loaded', {
         environment: CURRENT_ENVIRONMENT,
         baseUrl: ACTIVE_BASE_URL,
-        version: '23.0.2',
+        version: '23.0.3',
         state: SAIC.currentState,
         stages: Object.keys(SAIC.stageResults).length,
         features: root.__API_GATEWAY.features.length

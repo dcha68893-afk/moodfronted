@@ -1,6 +1,6 @@
 // =============================================
 // STATUS SYSTEM - RESILIENT UI CONTROLLER
-// ENHANCED VERSION v6.1 - COMPLETELY FIXED
+// ENHANCED VERSION v6.2 - PROTOCOL-COMPLIANT INTEGRATION
 // ALL BUTTONS WORKING, NO DUPLICATE HANDLERS
 // =============================================
 
@@ -140,7 +140,18 @@ import {
     // Setter functions for constants
     setCurrentIntentFilter,
     setCurrentMoodFilter,
-    setCurrentCategoryFilter
+    setCurrentCategoryFilter,
+    
+    // ===== NEW PROTOCOL-COMPLIANT EXPORTS =====
+    parentReady,
+    messageQueue,
+    flushQueue,
+    sendMessage,
+    safeSend,
+    handleParentMessage,
+    onParentReady,
+    genId,
+    genReqId
 } from './status-core.js';
 
 // =============================================
@@ -1627,7 +1638,6 @@ const UIStateManager = {
                 if (typeof setCurrentIntentFilter === 'function') {
                     setCurrentIntentFilter(filters.currentIntentFilter);
                 } else {
-                    // This should not happen as we import the setter
                     console.warn('setCurrentIntentFilter not available');
                 }
             }
@@ -2501,7 +2511,7 @@ function showStatusViewer(statusData) {
                 if (ring) ring.classList.add('viewed');
             }
             
-            // Track view in core
+            // Track view in core - now uses safeSend internally
             if (typeof trackStatusView === 'function') {
                 trackStatusView(statusData.id).catch(() => {});
             }
@@ -5597,4 +5607,4 @@ if (typeof window !== 'undefined') {
     }
 }
 
-UILogger.info('StatusUI', 'Resilient UI controller initialized successfully v6.1');
+UILogger.info('StatusUI', 'Resilient UI controller initialized successfully v6.2 - Protocol-compliant');

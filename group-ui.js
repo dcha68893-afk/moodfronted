@@ -2,8 +2,8 @@
 // GROUPS UI FUNCTIONS - RESILIENT UI CONTROLLER
 // COMPLETE PRODUCTION-READY IMPLEMENTATION
 // HIGHLY SECURE - XSS PROTECTED, CSP COMPLIANT
-// VERSION: 3.4.0 - UPDATED TO MATCH CORE EXPORTS
-// ENHANCED: Silent loading, No overlay UI, Preserved all functionality
+// VERSION: 3.5.0 - UPDATED TO MATCH PROTOCOL-COMPLIANT CORE
+// ENHANCED: Silent loading, No overlay UI, Parent-ready aware
 // =============================================
 
 // =============================================
@@ -61,10 +61,19 @@ const DIAGNOSTICS = {
 };
 
 // =============================================
-// IMPORT VERIFICATION - UPDATED TO MATCH CORE EXPORTS
+// IMPORT VERIFICATION - UPDATED TO MATCH PROTOCOL-COMPLIANT CORE
 // =============================================
 
 import {
+    // Core modules - NEW: Added for protocol compliance
+    LifecycleState,
+    ParentMessaging,
+    SafeStorage,
+    GroupCore,
+    
+    // Protocol flags - NEW: Added for parent-ready awareness
+    // These are accessed via the core, but we'll track them locally
+    
     // State variables
     currentUser,
     userData,
@@ -127,9 +136,6 @@ import {
     tokenReadyReject,
     tokenQueue,
     isProcessingTokenQueue,
-
-    // Parent connection - UPDATED: Removed deprecated exports
-    // Using LifecycleState and ParentMessaging instead
     
     // Token management
     initializeTokenSystem,
@@ -269,6 +275,22 @@ import {
     processPendingOfflineActions,
     updateCreateGroupPostingRulesUI
 } from './group-core.js';
+
+// =============================================
+// PROTOCOL COMPLIANCE TRACKING - NEW
+// =============================================
+
+// Track parent-ready and session state from core
+let _parentReady = false;
+let _sessionReceived = false;
+
+// Subscribe to lifecycle changes if available
+if (LifecycleState && typeof LifecycleState.subscribe === 'function') {
+    LifecycleState.subscribe((newState) => {
+        _parentReady = newState === LifecycleState.STATES.ACTIVE;
+        _sessionReceived = LifecycleState.hasSession ? LifecycleState.hasSession() : false;
+    });
+}
 
 // =============================================
 // UI STATE MANAGEMENT - ENHANCED SECURITY
@@ -3049,5 +3071,6 @@ if (typeof document !== 'undefined') {
 // COMPLETE UI MODULE - ALL FEATURES IMPLEMENTED
 // HIGHLY SECURE - XSS PROTECTED, CSP COMPLIANT
 // SILENT LOADING - NO OVERLAYS, NO CONSOLE NOISE
+// PROTOCOL-COMPLIANT - PARENT-READY AWARE
 // NO DUPLICATES, NO ERRORS, FULLY PRODUCTION READY
 // =============================================
