@@ -1,14 +1,10 @@
 // =============================================
-// MESSAGES-UI.js - HARDENED PRODUCTION UI ENGINE v3.5.1
-// SECURE PARENT-IFRAME UI LAYER
-// ENHANCED: Deterministic handshake-aligned lifecycle management
-// ENHANCED: Passive UI until ACTIVE state
-// ENHANCED: No duplicate message rendering
-// ENHANCED: Strict WAIT_PARENT state handling
+// MESSAGES-UI.js - HARDENED PRODUCTION UI ENGINE v3.6.0
+// DETERMINISTIC PARENT-CONTROLLED UI LAYER
+// STRICT LIFECYCLE ALIGNMENT WITH CORE v7.6.0
+// PASSIVE UI UNTIL ACTIVE STATE - NO AUTONOMOUS ACTIONS
+// WAIT_PARENT DEAD STOP ENFORCEMENT
 // UI FAILURE RESILIENCE - NEVER BLOCKS RENDERING
-// FIXED: Protocol compliance with messages-core v7.5.19
-// FIXED: Lifecycle state synchronization
-// FIXED: Parent ready event integration
 // =============================================
 
 (function() {
@@ -17,12 +13,12 @@
     // =============================================
     // CONSTANTS & CONFIGURATION
     // =============================================
-    const VERSION = '3.5.1';
+    const VERSION = '3.6.0';
     const APP_NAME = 'kynecta-messages-ui';
     const SOURCE_CHILD = 'CHILD';
     const FRAME_ID = 'messagesIframe';
     
-    // Lifecycle states (aligned with core - DETERMINISTIC)
+    // Lifecycle states (aligned with core v7.6.0 - DETERMINISTIC)
     const LIFECYCLE_STATES = {
         BOOT: 'BOOT',
         INITIALIZING: 'INITIALIZING',
@@ -357,7 +353,7 @@
                      window.messagesCore.isReady());
         },
 
-        // DETERMINISTIC: Safe check if parent is ready (only when WAIT_PARENT -> ACTIVE)
+        // DETERMINISTIC: Safe check if parent is ready (only when ACTIVE)
         isParentReady() {
             return !!(window.messagesCore && 
                      window.messagesCore.getState && 
@@ -376,6 +372,12 @@
         canPerformUIAction() {
             const state = this.getLifecycleState();
             return state === LIFECYCLE_STATES.ACTIVE;
+        },
+        
+        // DETERMINISTIC: Check if UI is in WAIT_PARENT (dead stop)
+        isInWaitParent() {
+            const state = this.getLifecycleState();
+            return state === LIFECYCLE_STATES.WAIT_PARENT;
         }
     }.init();
 
@@ -419,22 +421,6 @@
             this._checkParentReady();
             this._checkLifecycleState();
             
-            if (window.messagesCore && window.messagesCore.StartupGovernor) {
-                window.messagesCore.StartupGovernor.subscribe((data) => {
-                    this.state.startupState = data.newState;
-                    this._notifyListeners('startupState', data.newState);
-                    
-                    if (data.newState === 'ACTIVE') {
-                        this._updateConnectionUI(true, 'excellent');
-                    } else if (data.newState === 'DEGRADED') {
-                        this._updateConnectionUI(true, 'poor');
-                    } else if (data.newState === 'RECOVERING') {
-                        this.state.recoveryMode = true;
-                        this._notifyListeners('recoveryMode', true);
-                    }
-                });
-            }
-            
             return this;
         },
 
@@ -465,16 +451,15 @@
             UIFailsafe.safeSetStyle(statusEl, 'display', 'flex');
             
             const lifecycleMessages = {
-                'BOOT': { text: 'Initializing...', icon: 'fa-cog fa-spin', color: '#ff9800' },
-                'INITIALIZING': { text: 'Loading module...', icon: 'fa-cog fa-spin', color: '#ff9800' },
-                'READY': { text: 'Ready, waiting for parent...', icon: 'fa-handshake', color: '#ff9800' },
-                'WAIT_PARENT': { text: 'Establishing connection...', icon: 'fa-sync-alt fa-spin', color: '#2196f3' },
-                'ACTIVE': { text: 'Connected', icon: 'fa-check-circle', color: '#4caf50' }
+                'BOOT': { text: 'Initializing...', icon: 'fa-cog fa-spin', color: '#ff9800', action: false },
+                'INITIALIZING': { text: 'Loading module...', icon: 'fa-cog fa-spin', color: '#ff9800', action: false },
+                'READY': { text: 'Ready, waiting for parent...', icon: 'fa-handshake', color: '#ff9800', action: false },
+                'WAIT_PARENT': { text: 'Establishing connection...', icon: 'fa-sync-alt fa-spin', color: '#2196f3', action: false },
+                'ACTIVE': { text: 'Connected', icon: 'fa-check-circle', color: '#4caf50', action: true }
             };
             
-            const info = lifecycleMessages[lifecycleState] || { text: 'Connecting...', icon: 'fa-cog fa-spin', color: '#ff9800' };
+            const info = lifecycleMessages[lifecycleState] || { text: 'Connecting...', icon: 'fa-cog fa-spin', color: '#ff9800', action: false };
             
-            // Log lifecycle state change for debugging
             console.log(`[messagesUI] Lifecycle: ${lifecycleState}`);
             
             UIFailsafe.safeSetHTML(statusEl, `
@@ -482,13 +467,87 @@
                 <span>${info.text}</span>
             `);
             
+            // Update UI interaction based on lifecycle state
+            this._updateUIInteractionState(info.action);
+            
             // Update connection status based on lifecycle
             if (lifecycleState === 'ACTIVE') {
                 this._updateConnectionUI(true, 'excellent');
             } else if (lifecycleState === 'WAIT_PARENT') {
                 this._updateConnectionUI(false, 'unknown');
+                this._showWaitParentState();
             } else {
                 this._updateConnectionUI(false, 'unknown');
+            }
+        },
+        
+        // DETERMINISTIC: Update UI interaction state (disable when not ACTIVE)
+        _updateUIInteractionState(isActive) {
+            const messageInput = UIFailsafe.safeGetElement('messageInput');
+            const sendButton = UIFailsafe.safeGetElement('sendButton');
+            const attachBtn = UIFailsafe.safeGetElement('attachBtn');
+            const emojiBtn = UIFailsafe.safeGetElement('emojiBtn');
+            const formatBtn = UIFailsafe.safeGetElement('formatBtn');
+            const voiceCallBtn = UIFailsafe.safeGetElement('voiceCallBtn');
+            const videoCallBtn = UIFailsafe.safeGetElement('videoCallBtn');
+            const chatOptionsBtn = UIFailsafe.safeGetElement('chatOptionsBtn');
+            const multiSendToggle = UIFailsafe.safeGetElement('multiSendToggleBtn');
+            
+            if (!isActive) {
+                // Disable all interactive elements
+                if (messageInput) UIFailsafe.safeSetProperty(messageInput, 'disabled', true);
+                if (sendButton) UIFailsafe.safeSetProperty(sendButton, 'disabled', true);
+                if (attachBtn) UIFailsafe.safeSetProperty(attachBtn, 'disabled', true);
+                if (emojiBtn) UIFailsafe.safeSetProperty(emojiBtn, 'disabled', true);
+                if (formatBtn) UIFailsafe.safeSetProperty(formatBtn, 'disabled', true);
+                if (voiceCallBtn) UIFailsafe.safeSetProperty(voiceCallBtn, 'disabled', true);
+                if (videoCallBtn) UIFailsafe.safeSetProperty(videoCallBtn, 'disabled', true);
+                if (chatOptionsBtn) UIFailsafe.safeSetProperty(chatOptionsBtn, 'disabled', true);
+                if (multiSendToggle) UIFailsafe.safeSetProperty(multiSendToggle, 'disabled', true);
+                
+                // Add disabled class for styling
+                if (messageInput) UIFailsafe.safeAddClass(messageInput, 'ui-disabled');
+            } else {
+                // Enable interactive elements
+                if (messageInput) UIFailsafe.safeSetProperty(messageInput, 'disabled', false);
+                if (sendButton) UIFailsafe.safeSetProperty(sendButton, 'disabled', false);
+                if (attachBtn) UIFailsafe.safeSetProperty(attachBtn, 'disabled', false);
+                if (emojiBtn) UIFailsafe.safeSetProperty(emojiBtn, 'disabled', false);
+                if (formatBtn) UIFailsafe.safeSetProperty(formatBtn, 'disabled', false);
+                if (voiceCallBtn) UIFailsafe.safeSetProperty(voiceCallBtn, 'disabled', false);
+                if (videoCallBtn) UIFailsafe.safeSetProperty(videoCallBtn, 'disabled', false);
+                if (chatOptionsBtn) UIFailsafe.safeSetProperty(chatOptionsBtn, 'disabled', false);
+                if (multiSendToggle) UIFailsafe.safeSetProperty(multiSendToggle, 'disabled', false);
+                
+                // Remove disabled class
+                if (messageInput) UIFailsafe.safeRemoveClass(messageInput, 'ui-disabled');
+            }
+        },
+        
+        // DETERMINISTIC: Show WAIT_PARENT state in UI
+        _showWaitParentState() {
+            const messagesContainer = UIFailsafe.safeGetElement('messagesContainer');
+            if (messagesContainer && (!messagesContainer.children.length || messagesContainer.querySelector('.wait-parent-state') === null)) {
+                UIFailsafe.safeSetHTML(messagesContainer, `
+                    <div class="wait-parent-state">
+                        <div class="wait-parent-spinner"></div>
+                        <i class="fas fa-handshake" style="font-size: 48px; color: var(--primary-color); margin-bottom: 16px;"></i>
+                        <div class="wait-parent-title">Establishing Connection</div>
+                        <div class="wait-parent-message">Waiting for parent application to establish secure connection...</div>
+                        <div class="wait-parent-submessage">This should only take a moment</div>
+                    </div>
+                `);
+            }
+            
+            const chatsList = UIFailsafe.safeGetElement('chatsList');
+            if (chatsList && (!chatsList.children.length || chatsList.querySelector('.wait-parent-state') === null)) {
+                UIFailsafe.safeSetHTML(chatsList, `
+                    <div class="wait-parent-state">
+                        <i class="fas fa-spinner fa-pulse" style="font-size: 32px; color: var(--primary-color); margin-bottom: 16px;"></i>
+                        <div class="wait-parent-title">Connecting...</div>
+                        <div class="wait-parent-message">Please wait while connection is established</div>
+                    </div>
+                `);
             }
         },
 
@@ -504,23 +563,36 @@
         },
 
         _setupEventListeners() {
-            window.addEventListener('coreReady', (e) => {
+            // DETERMINISTIC: Listen for messagesLifecycleChange from core
+            window.addEventListener('messagesLifecycleChange', (e) => {
                 UIFailsafe.queueAction(() => {
-                    this._applyTheme();
-                    this._applyFontSize();
-                    this._updateHandshakeStatus(e.detail.handshake);
-                    this._updateSessionStatus(e.detail.authenticated);
-                    this._checkLifecycleState();
+                    const newState = e.detail.state;
+                    this.state.lifecycleState = newState;
+                    this._notifyListeners('lifecycleState', newState);
+                    this._updateLifecycleUI(newState);
+                    
+                    if (newState === LIFECYCLE_STATES.ACTIVE) {
+                        this.state.parentReady = true;
+                        this._notifyListeners('parentReady', true);
+                        this._updateConnectionUI(true, 'excellent');
+                        this._initializeActiveUI();
+                    } else if (newState === LIFECYCLE_STATES.WAIT_PARENT) {
+                        this.state.parentReady = false;
+                        this._notifyListeners('parentReady', false);
+                        this._updateConnectionUI(false, 'unknown');
+                    } else if (newState === LIFECYCLE_STATES.READY) {
+                        this.state.parentReady = false;
+                        this._notifyListeners('parentReady', false);
+                    }
                 });
             });
 
             window.addEventListener('sessionUpdated', (e) => {
                 UIFailsafe.queueAction(() => {
-                    if (e.detail.session?.user) {
-                        this._updateUserUI(e.detail.session.user);
+                    if (e.detail.user) {
+                        this._updateUserUI(e.detail.user);
                     }
-                    this._updateSessionStatus(e.detail.session?.authenticated || false);
-                    this.state.sessionStatus = e.detail.session?.authenticated ? 'authenticated' : 'anonymous';
+                    this.state.sessionStatus = e.detail.authenticated ? 'authenticated' : 'anonymous';
                     this._notifyListeners('sessionStatus', this.state.sessionStatus);
                 });
             });
@@ -535,49 +607,11 @@
                 });
             });
 
-            // DETERMINISTIC: Listen for messagesLifecycleChange from core
-            window.addEventListener('messagesLifecycleChange', (e) => {
-                UIFailsafe.queueAction(() => {
-                    const newState = e.detail.state;
-                    this.state.lifecycleState = newState;
-                    this._notifyListeners('lifecycleState', newState);
-                    this._updateLifecycleUI(newState);
-                    
-                    if (newState === LIFECYCLE_STATES.ACTIVE) {
-                        this.state.parentReady = true;
-                        this._notifyListeners('parentReady', true);
-                        this._updateConnectionUI(true, 'excellent');
-                    } else if (newState === LIFECYCLE_STATES.WAIT_PARENT) {
-                        this.state.parentReady = false;
-                        this._notifyListeners('parentReady', false);
-                        this._updateConnectionUI(false, 'unknown');
-                    }
-                });
-            });
-
             window.addEventListener('handshakeCompleted', (e) => {
                 UIFailsafe.queueAction(() => {
                     this._updateHandshakeStatus(e.detail);
                     this.state.handshakeStatus = e.detail.state?.toLowerCase() || 'completed';
                     this._notifyListeners('handshakeStatus', this.state.handshakeStatus);
-                });
-            });
-
-            window.addEventListener('recoveryStarted', (e) => {
-                UIFailsafe.queueAction(() => {
-                    this.state.recoveryMode = true;
-                    this._notifyListeners('recoveryMode', true);
-                    this._showRecoveryUI(e.detail);
-                });
-            });
-
-            window.addEventListener('recoveryStatus', (e) => {
-                UIFailsafe.queueAction(() => {
-                    if (e.detail.reset || e.detail.recovered) {
-                        this.state.recoveryMode = false;
-                        this._notifyListeners('recoveryMode', false);
-                        this._hideRecoveryUI();
-                    }
                 });
             });
 
@@ -612,41 +646,47 @@
                     this._showOfflineUI();
                 });
             });
-            
-            window.addEventListener('startupStateChanged', (e) => {
-                UIFailsafe.queueAction(() => {
-                    this.state.startupState = e.detail.newState;
-                    this._notifyListeners('startupState', e.detail.newState);
-                });
-            });
         },
 
         _startPeriodicSync() {
             setInterval(() => {
-                if (window.messagesCore && window.messagesCore.getConnectionHealth) {
-                    const health = window.messagesCore.getConnectionHealth();
-                    UIFailsafe.queueAction(() => {
-                        this._updateConnectionUI(health.parentReady, health.connectionQuality);
-                        this._updateHandshakeStatus(health.handshake);
-                        this._updateSessionStatus(health.sessionValid);
-                        if (health.parentReady) {
-                            this.state.parentReady = true;
-                            this._notifyListeners('parentReady', true);
-                        }
-                        // Update lifecycle state
-                        const lifecycleState = UIFailsafe.getLifecycleState();
-                        if (lifecycleState !== this.state.lifecycleState) {
-                            this.state.lifecycleState = lifecycleState;
-                            this._notifyListeners('lifecycleState', lifecycleState);
-                            this._updateLifecycleUI(lifecycleState);
-                        }
-                    });
-                } else if (UIFailsafe.isParentReady()) {
-                    // Fallback check
-                    this.state.parentReady = true;
-                    this._notifyListeners('parentReady', true);
-                }
+                UIFailsafe.queueAction(() => {
+                    // Only sync lifecycle state periodically
+                    const lifecycleState = UIFailsafe.getLifecycleState();
+                    if (lifecycleState !== this.state.lifecycleState) {
+                        this.state.lifecycleState = lifecycleState;
+                        this._notifyListeners('lifecycleState', lifecycleState);
+                        this._updateLifecycleUI(lifecycleState);
+                    }
+                    
+                    if (UIFailsafe.isParentReady() && !this.state.parentReady) {
+                        this.state.parentReady = true;
+                        this._notifyListeners('parentReady', true);
+                    }
+                });
             }, 10000);
+        },
+        
+        // DETERMINISTIC: Initialize UI when ACTIVE
+        _initializeActiveUI() {
+            // Trigger initial data load
+            if (window.messagesCore && window.messagesCore.fetchConversations) {
+                window.messagesCore.fetchConversations();
+            }
+            
+            // Load user data
+            if (window.messagesCore && window.messagesCore.getCurrentUser) {
+                const user = window.messagesCore.getCurrentUser();
+                if (user) {
+                    this._updateUserUI(user);
+                }
+            }
+            
+            // Remove WAIT_PARENT overlay if present
+            const waitParentState = UIFailsafe.safeQuerySelector('.wait-parent-state');
+            if (waitParentState) {
+                waitParentState.remove();
+            }
         },
 
         setState(key, value) {
@@ -815,7 +855,6 @@
             if (!statusEl) return;
             
             if (!handshakeInfo) {
-                // Show lifecycle state instead
                 this._updateLifecycleUI(this.state.lifecycleState);
                 return;
             }
@@ -838,66 +877,6 @@
                     <span>Handshake pending</span>
                 `);
             }
-        },
-
-        _updateSessionStatus(authenticated) {
-            const statusEl = UIFailsafe.safeGetElement('sessionStatus');
-            if (!statusEl) return;
-            
-            if (authenticated) {
-                UIFailsafe.safeSetHTML(statusEl, `
-                    <i class="fas fa-check-circle" style="color: #4caf50;"></i>
-                    <span>Session active</span>
-                `);
-                UIFailsafe.safeSetStyle(statusEl, 'display', 'flex');
-            } else {
-                UIFailsafe.safeSetHTML(statusEl, `
-                    <i class="fas fa-clock" style="color: #ff9800;"></i>
-                    <span>Session pending</span>
-                `);
-                UIFailsafe.safeSetStyle(statusEl, 'display', 'flex');
-            }
-        },
-
-        _showRecoveryUI(data) {
-            const overlay = UIFailsafe.safeGetElement('reconnectOverlay');
-            const messageEl = UIFailsafe.safeGetElement('reconnectMessage');
-            
-            if (overlay) {
-                UIFailsafe.safeSetStyle(overlay, 'display', 'flex');
-                if (data.reloading) {
-                    if (messageEl) UIFailsafe.safeSetText(messageEl, 'Connection lost. Reloading...');
-                } else {
-                    if (messageEl) UIFailsafe.safeSetText(messageEl, `Reconnecting (attempt ${data.attempt || 1})...`);
-                }
-            }
-            
-            const recoveryIndicator = UIFailsafe.safeGetElement('recoveryIndicator');
-            if (recoveryIndicator) {
-                UIFailsafe.safeSetStyle(recoveryIndicator, 'display', 'flex');
-                const span = recoveryIndicator.querySelector('span');
-                if (span) {
-                    UIFailsafe.safeSetText(span, data.reloading ? 'Reloading...' : `Recovering (${data.attempt || 1})`);
-                }
-            }
-            
-            const messageInput = UIFailsafe.safeGetElement('messageInput');
-            const sendButton = UIFailsafe.safeGetElement('sendButton');
-            if (messageInput) UIFailsafe.safeSetProperty(messageInput, 'disabled', true);
-            if (sendButton) UIFailsafe.safeSetProperty(sendButton, 'disabled', true);
-        },
-
-        _hideRecoveryUI() {
-            const overlay = UIFailsafe.safeGetElement('reconnectOverlay');
-            if (overlay) UIFailsafe.safeSetStyle(overlay, 'display', 'none');
-            
-            const recoveryIndicator = UIFailsafe.safeGetElement('recoveryIndicator');
-            if (recoveryIndicator) UIFailsafe.safeSetStyle(recoveryIndicator, 'display', 'none');
-            
-            const messageInput = UIFailsafe.safeGetElement('messageInput');
-            const sendButton = UIFailsafe.safeGetElement('sendButton');
-            if (messageInput) UIFailsafe.safeSetProperty(messageInput, 'disabled', false);
-            if (sendButton) UIFailsafe.safeSetProperty(sendButton, 'disabled', false);
         },
 
         _showOfflineUI() {
@@ -1006,24 +985,10 @@
                 });
             });
 
-            window.addEventListener('recoveryStarted', (e) => {
-                UIFailsafe.queueAction(() => {
-                    this.showReconnectState(e.detail.reloading ? 'Reloading...' : 'Reconnecting...');
-                });
-            });
-
-            window.addEventListener('recoveryStatus', (e) => {
-                UIFailsafe.queueAction(() => {
-                    if (e.detail.reset || e.detail.recovered) {
-                        this.hideReconnectState();
-                    }
-                });
-            });
-
             window.addEventListener('sessionUpdated', (e) => {
                 UIFailsafe.queueAction(() => {
-                    if (e.detail.session?.user) {
-                        this._updateUserAvatar(e.detail.session.user);
+                    if (e.detail.user) {
+                        this._updateUserAvatar(e.detail.user);
                     }
                 });
             });
@@ -1085,25 +1050,6 @@
             const groupedMessages = this._groupMessagesByDate(messages);
             this._renderMessageBatches(container, groupedMessages, currentUser);
             this.scrollToBottom(container);
-            
-            UIFailsafe.safeProcessMessageElements(container, (messageEl) => {
-                if (messageEl && messageEl.dataset) {
-                    const messageId = UIFailsafe.safeGetDataset(messageEl, 'messageId');
-                    if (messageId) {
-                        const bubble = messageEl.querySelector('.message-bubble');
-                        if (bubble) {
-                            bubble.addEventListener('dblclick', (e) => {
-                                e.stopPropagation();
-                                const message = messages.find(m => m.id === messageId);
-                                if (message && window.messagesCore && UIFailsafe.canPerformUIAction()) {
-                                    window.messagesCore.setReplyToMessage(message);
-                                    document.getElementById('messageInput')?.focus();
-                                }
-                            });
-                        }
-                    }
-                }
-            });
         },
 
         _renderMessageBatches(container, groupedMessages, currentUser) {
@@ -1261,7 +1207,6 @@
             
             const reactions = this._renderReactions(message.reactions);
             const duration = message.duration ? this._formatDuration(message.duration) : '';
-            const audioId = `audio-${message.id}-${Date.now()}`;
             const time = window.messagesCore?.formatTime ? 
                 window.messagesCore.formatTime(message.timestamp) : 
                 new Date(message.timestamp).toLocaleTimeString();
@@ -1272,7 +1217,7 @@
                 <div class="message ${isSent ? 'sent' : 'received'}" data-message-id="${message.id}" data-message-type="audio" data-status="${status}">
                     <div class="message-bubble" onclick="window.messagesCore?.showMessageActions(${safeMessage}, event.clientX, event.clientY)">
                         <div class="message-audio">
-                            <button class="audio-play-btn" id="play-${audioId}" onclick="this.classList.toggle('playing'); window.messagesCore?.playAudio('${message.id}', '${message.content}', ${message.duration || 0})">
+                            <button class="audio-play-btn" onclick="this.classList.toggle('playing'); window.messagesCore?.playAudio('${message.id}', '${message.content}', ${message.duration || 0})">
                                 <i class="fas fa-play"></i>
                             </button>
                             <div class="audio-waveform" id="waveform-${message.id}"></div>
@@ -1499,71 +1444,6 @@
             `;
         },
 
-        _addMessageEventListeners() {
-            const messageBubbles = UIFailsafe.safeQuerySelectorAll('.message-bubble');
-            UIFailsafe.safeForEach(messageBubbles, (el) => {
-                el.addEventListener('dblclick', (e) => {
-                    e.stopPropagation();
-                    if (!UIFailsafe.canPerformUIAction()) {
-                        this.showNotification('Please wait while connection is established...');
-                        return;
-                    }
-                    const messageEl = e.currentTarget.closest('.message');
-                    if (messageEl && messageEl.dataset) {
-                        const messageId = UIFailsafe.safeGetDataset(messageEl, 'messageId');
-                        if (messageId && window.messagesCore) {
-                            const message = window.messagesCore.messages?.find(m => m.id === messageId);
-                            if (message) {
-                                window.messagesCore.setReplyToMessage(message);
-                                document.getElementById('messageInput')?.focus();
-                            }
-                        }
-                    }
-                });
-            });
-
-            const reactionElements = UIFailsafe.safeQuerySelectorAll('.message-reactions .reaction');
-            UIFailsafe.safeForEach(reactionElements, (el) => {
-                el.addEventListener('click', (e) => {
-                    e.stopPropagation();
-                    if (!UIFailsafe.canPerformUIAction()) {
-                        this.showNotification('Please wait while connection is established...');
-                        return;
-                    }
-                    const messageEl = e.currentTarget.closest('.message');
-                    if (messageEl && messageEl.dataset) {
-                        const messageId = UIFailsafe.safeGetDataset(messageEl, 'messageId');
-                        const emoji = e.currentTarget.textContent.charAt(0);
-                        if (messageId && window.messagesCore) {
-                            window.messagesCore.addReaction(messageId, emoji, true);
-                        }
-                    }
-                });
-            });
-
-            const failedMessages = UIFailsafe.safeQuerySelectorAll('.message-failed .message-bubble');
-            UIFailsafe.safeForEach(failedMessages, (el) => {
-                el.addEventListener('click', (e) => {
-                    if (!UIFailsafe.canPerformUIAction()) {
-                        this.showNotification('Please wait while connection is established...');
-                        return;
-                    }
-                    if (e.target.closest('.message-status') && window.messagesCore) {
-                        const messageEl = e.currentTarget.closest('.message');
-                        if (messageEl && messageEl.dataset) {
-                            const messageId = UIFailsafe.safeGetDataset(messageEl, 'messageId');
-                            if (messageId) {
-                                const message = window.messagesCore.messages?.find(m => m.id === messageId);
-                                if (message) {
-                                    window.messagesCore.sendMessage(message.content, message.type, message);
-                                }
-                            }
-                        }
-                    }
-                });
-            });
-        },
-
         // =========================================
         // CHATS LIST RENDERING (WITH DETERMINISTIC LIFECYCLE CHECK)
         // =========================================
@@ -1745,26 +1625,6 @@
                 }
                 if (indicatorEl) avatarEl.appendChild(indicatorEl);
             }
-
-            const voiceBtn = UIFailsafe.safeGetElement('voiceCallBtn');
-            const videoBtn = UIFailsafe.safeGetElement('videoCallBtn');
-            const quality = UIStateManager.getState('connectionQuality');
-            const lifecycleState = UIStateManager.getState('lifecycleState');
-            
-            if (voiceBtn && videoBtn) {
-                const isActive = lifecycleState === LIFECYCLE_STATES.ACTIVE;
-                if (!isActive || quality === 'poor' || quality === 'dead') {
-                    UIFailsafe.safeSetStyle(voiceBtn, 'opacity', '0.5');
-                    UIFailsafe.safeSetStyle(videoBtn, 'opacity', '0.5');
-                    UIFailsafe.safeSetAttribute(voiceBtn, 'title', !isActive ? 'Waiting for connection...' : 'Call unavailable (poor connection)');
-                    UIFailsafe.safeSetAttribute(videoBtn, 'title', !isActive ? 'Waiting for connection...' : 'Video unavailable (poor connection)');
-                } else {
-                    UIFailsafe.safeSetStyle(voiceBtn, 'opacity', '1');
-                    UIFailsafe.safeSetStyle(videoBtn, 'opacity', '1');
-                    UIFailsafe.safeSetAttribute(voiceBtn, 'title', 'Voice Call');
-                    UIFailsafe.safeSetAttribute(videoBtn, 'title', 'Video Call');
-                }
-            }
         },
 
         _updateUserAvatar(user) {
@@ -1814,11 +1674,11 @@
             const deleteItem = menu.querySelector('[data-action="delete"]');
             
             if (editItem) {
-                UIFailsafe.safeSetStyle(editItem, 'display', message.senderId === window.messagesCore?.currentUser?.id ? 'flex' : 'none');
+                UIFailsafe.safeSetStyle(editItem, 'display', message.senderId === window.messagesCore?.getCurrentUser()?.id ? 'flex' : 'none');
             }
             
             if (deleteItem) {
-                UIFailsafe.safeSetStyle(deleteItem, 'display', message.senderId === window.messagesCore?.currentUser?.id ? 'flex' : 'flex');
+                UIFailsafe.safeSetStyle(deleteItem, 'display', message.senderId === window.messagesCore?.getCurrentUser()?.id ? 'flex' : 'flex');
             }
 
             UIStateManager.setState('messageActionsVisible', true);
@@ -2021,29 +1881,6 @@
                     UIFailsafe.safeSetStyle(notification, 'display', 'none');
                 }, 3000);
             }
-        },
-
-        showReconnectState(message) {
-            const overlay = UIFailsafe.safeGetElement('reconnectOverlay');
-            const messageEl = UIFailsafe.safeGetElement('reconnectMessage');
-            
-            if (overlay) UIFailsafe.safeSetStyle(overlay, 'display', 'flex');
-            if (messageEl) UIFailsafe.safeSetText(messageEl, message || 'Connection lost');
-            
-            const input = UIFailsafe.safeGetElement('messageInput');
-            const sendBtn = UIFailsafe.safeGetElement('sendButton');
-            if (input) UIFailsafe.safeSetProperty(input, 'disabled', true);
-            if (sendBtn) UIFailsafe.safeSetProperty(sendBtn, 'disabled', true);
-        },
-
-        hideReconnectState() {
-            const overlay = UIFailsafe.safeGetElement('reconnectOverlay');
-            if (overlay) UIFailsafe.safeSetStyle(overlay, 'display', 'none');
-            
-            const input = UIFailsafe.safeGetElement('messageInput');
-            const sendBtn = UIFailsafe.safeGetElement('sendButton');
-            if (input) UIFailsafe.safeSetProperty(input, 'disabled', false);
-            if (sendBtn) UIFailsafe.safeSetProperty(sendBtn, 'disabled', false);
         },
 
         scrollToBottom(container) {
@@ -2829,8 +2666,8 @@
                         window.messagesCore.checkOfflineQueue();
                     }
                     
-                    if (window.messagesCore?.loadChats) {
-                        window.messagesCore.loadChats();
+                    if (window.messagesCore?.fetchConversations) {
+                        window.messagesCore.fetchConversations();
                     }
                 });
             });
@@ -3379,18 +3216,23 @@
     }.init();
 
     // =============================================
-    // UI INITIALIZATION (SILENT - NO BLOCKING)
+    // UI INITIALIZATION (PASSIVE UNTIL ACTIVE)
     // =============================================
     function initializeUI() {
         _ensureStatusIndicators();
         _removeLoadingOverlays();
+        
+        // Show WAIT_PARENT state initially
+        UIStateManager._showWaitParentState();
 
         const checkCore = setInterval(() => {
-            if (window.messagesCore && window.messagesCore.isReady?.()) {
+            const lifecycleState = UIFailsafe.getLifecycleState();
+            if (lifecycleState === LIFECYCLE_STATES.ACTIVE) {
                 clearInterval(checkCore);
                 
                 setTimeout(() => {
                     UIFailsafe.queueAction(() => {
+                        // Initialize UI features only when ACTIVE
                         if (window.messagesCore?.initEmojiPicker) {
                             window.messagesCore.initEmojiPicker();
                         }
@@ -3423,36 +3265,24 @@
                             window.messagesCore.startBackgroundSync();
                         }
 
-                        const userFromUrl = window.messagesCore?.getUserFromURL?.();
-                        if (userFromUrl) {
-                            window.messagesCore.openChatPanel(
-                                userFromUrl.userId,
-                                userFromUrl.username,
-                                userFromUrl.userAvatar
-                            );
-                        }
-
                         if (window.messagesCore) {
                             window.messagesCore.renderChatsList();
                             window.messagesCore.renderContactsList();
                         }
-
-                        // DETERMINISTIC: Check parent ready status
-                        if (UIFailsafe.isParentReady()) {
-                            UIStateManager.setState('parentReady', true);
-                        }
                         
-                        // DETERMINISTIC: Update lifecycle state
-                        const lifecycleState = UIFailsafe.getLifecycleState();
-                        UIStateManager.setState('lifecycleState', lifecycleState);
+                        UIStateManager._initializeActiveUI();
                     });
                 }, 0);
+            } else if (lifecycleState === LIFECYCLE_STATES.WAIT_PARENT) {
+                // Ensure WAIT_PARENT UI is shown
+                UIStateManager._showWaitParentState();
             }
         }, 100);
 
         setTimeout(() => {
             clearInterval(checkCore);
-            if (!window.messagesCore?.isReady?.()) {
+            const lifecycleState = UIFailsafe.getLifecycleState();
+            if (lifecycleState !== LIFECYCLE_STATES.ACTIVE) {
                 _updateFallbackUI();
             }
         }, 10000);
@@ -3506,16 +3336,6 @@
                 UIFailsafe.safeSetStyle(el, 'opacity', '0.5');
             }
         });
-        
-        const chatsList = UIFailsafe.safeGetElement('chatsList');
-        if (chatsList && chatsList.children.length === 0) {
-            UIFailsafe.safeSetHTML(chatsList, `
-                <div class="empty-state subtle">
-                    <i class="fas fa-comments empty-icon" style="opacity: 0.3;"></i>
-                    <div class="empty-title" style="font-size: 14px;">Loading chats...</div>
-                </div>
-            `);
-        }
     }
 
     function _updateFallbackUI() {
@@ -3525,10 +3345,8 @@
                 <div class="empty-state">
                     <i class="fas fa-exclamation-triangle empty-icon"></i>
                     <div class="empty-title">Connection issue</div>
-                    <div class="empty-message">Working to reconnect...</div>
-                    <button class="retry-btn subtle" onclick="window.messagesCore?.retryConnection()">
-                        <i class="fas fa-sync-alt"></i> Retry
-                    </button>
+                    <div class="empty-message">Waiting for parent application...</div>
+                    <div class="empty-submessage">This should resolve automatically</div>
                 </div>
             `);
         }
@@ -3566,8 +3384,6 @@
         getFullUIState: () => UIStateManager.getFullState(),
         
         showNotification: UIRenderer.showNotification.bind(UIRenderer),
-        showReconnectState: UIRenderer.showReconnectState.bind(UIRenderer),
-        hideReconnectState: UIRenderer.hideReconnectState.bind(UIRenderer),
         
         renderMultiSendChats: UIRenderer.renderMultiSendChats.bind(UIRenderer),
         updateSelectedCount: UIRenderer.updateSelectedCount.bind(UIRenderer),

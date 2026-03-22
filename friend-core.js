@@ -299,10 +299,23 @@ function applySession(session) {
         return;
     }
 
+    console.log(`[${MODULE_NAME}] applySession called with:`, {
+        hasToken: !!session.token,
+        tokenPrefix: session.token ? session.token.substring(0, 20) + '...' : 'none',
+        hasUser: !!session.user,
+        userId: session.user?.id
+    });
+
     __session.token = session.token || null;
     __session.user = session.user || null;
     __session.expiresAt = session.expiresAt || null;
     __session.ready = !!(session.token && session.user);
+
+    console.log(`[${MODULE_NAME}] __session after apply:`, {
+        token: __session.token ? __session.token.substring(0, 20) + '...' : 'none',
+        user: __session.user?.id,
+        ready: __session.ready
+    });
 
     if (__session.user) {
         currentUser = __session.user;
@@ -1349,22 +1362,50 @@ const TokenPromise = {
 // =============================================
 
 async function authorizedFetch(url, options = {}) {
+    console.log(`[authorizedFetch] Called with URL: ${url}`);
+    console.log(`[authorizedFetch] __session.token:`, __session.token ? __session.token.substring(0, 20) + '...' : 'none');
+    console.log(`[authorizedFetch] __session.ready:`, __session.ready);
+    
     if (!assertActive('authorizedFetch')) {
         return { success: false, error: 'Module not active', statusCode: 503 };
     }
     
     if (!__session.ready || !__session.token) {
-        Logger.warn('authorizedFetch', 'Blocked API call - session not ready', { url });
+        console.warn('authorizedFetch', 'Blocked API call - session not ready', { url, sessionReady: __session.ready, hasToken: !!__session.token });
         
-        if (currentState === LIFECYCLE_STATES.ACTIVE && parentReadyReceived) {
-            SessionManager.requestSession();
+        // Try to get token from localStorage as fallback
+        const localToken = localStorage.getItem('moodchat_token');
+        if (localToken) {
+            console.log('[authorizedFetch] Found token in localStorage, updating session');
+            __session.token = localToken;
+            __session.ready = true;
+        } else {
+            if (currentState === LIFECYCLE_STATES.ACTIVE && parentReadyReceived) {
+                SessionManager.requestSession();
+            }
+            return { success: false, error: 'Session not ready', statusCode: 401 };
         }
-        
-        return { success: false, error: 'Session not ready', statusCode: 401 };
     }
     
+    // Build full URL
+    let fullUrl = url;
+    if (!url.startsWith('http://') && !url.startsWith('https://')) {
+        let baseUrl = 'http://localhost:4000';
+        
+        if (window.api && window.api.core && typeof window.api.core.getBaseUrl === 'function') {
+            baseUrl = window.api.core.getBaseUrl();
+        }
+        
+        baseUrl = baseUrl.replace(/\/$/, '');
+        const cleanUrl = url.startsWith('/') ? url : '/' + url;
+        fullUrl = baseUrl + cleanUrl;
+    }
+    
+    console.log(`[authorizedFetch] Making request to: ${fullUrl}`);
+    console.log(`[authorizedFetch] Using token: ${__session.token.substring(0, 20)}...`);
+    
     try {
-        const response = await fetch(url, {
+        const response = await fetch(fullUrl, {
             ...options,
             headers: {
                 ...(options.headers || {}),
@@ -1373,11 +1414,12 @@ async function authorizedFetch(url, options = {}) {
             }
         });
         
+        console.log(`[authorizedFetch] Response status: ${response.status}`);
+        
         if (response.status === 401) {
             Logger.warn('authorizedFetch', 'Session expired - requesting new session');
             __session.ready = false;
             __session.token = null;
-            __session.user = null;
             
             if (currentState === LIFECYCLE_STATES.ACTIVE && parentReadyReceived) {
                 SessionManager.requestSession();
@@ -1390,7 +1432,7 @@ async function authorizedFetch(url, options = {}) {
         return { success: response.ok, data, statusCode: response.status };
         
     } catch (error) {
-        Logger.error('authorizedFetch', 'Fetch failed', error, { url });
+        Logger.error('authorizedFetch', 'Fetch failed', error, { url: fullUrl });
         return { success: false, error: error.message, statusCode: 500 };
     }
 }
@@ -1398,7 +1440,6 @@ async function authorizedFetch(url, options = {}) {
 // =============================================
 // [API GATEWAY]
 // =============================================
-
 const APIGateway = {
     _pendingRequests: new Map(),
     _requestCounter: 0,
@@ -1408,8 +1449,26 @@ const APIGateway = {
             return { success: false, error: 'Module not active', statusCode: 503 };
         }
         
+        // Build full URL
+        let fullUrl = endpoint;
+        if (!endpoint.startsWith('http://') && !endpoint.startsWith('https://')) {
+            let baseUrl = null;
+            
+            if (window.api && window.api.core && typeof window.api.core.getBaseUrl === 'function') {
+                baseUrl = window.api.core.getBaseUrl();
+            } else if (typeof getBaseUrl === 'function') {
+                baseUrl = getBaseUrl();
+            } else {
+                baseUrl = 'http://localhost:4000';
+            }
+            
+            baseUrl = baseUrl.replace(/\/$/, '');
+            const cleanEndpoint = endpoint.startsWith('/') ? endpoint : '/' + endpoint;
+            fullUrl = baseUrl + cleanEndpoint;
+        }
+        
         if (options.requireAuth !== false) {
-            return await authorizedFetch(endpoint, {
+            return await authorizedFetch(fullUrl, {
                 method: options.method || 'GET',
                 headers: options.headers || {},
                 body: options.body ? JSON.stringify(options.body) : undefined
@@ -1417,7 +1476,7 @@ const APIGateway = {
         }
         
         try {
-            const response = await fetch(endpoint, {
+            const response = await fetch(fullUrl, {
                 method: options.method || 'GET',
                 headers: {
                     'Content-Type': 'application/json',
@@ -1430,7 +1489,7 @@ const APIGateway = {
             return { success: response.ok, data, statusCode: response.status };
             
         } catch (error) {
-            Logger.error('APIGateway', 'Public request failed', error, { endpoint });
+            Logger.error('APIGateway', 'Public request failed', error, { endpoint: fullUrl });
             return { success: false, error: error.message, statusCode: 500 };
         }
     },

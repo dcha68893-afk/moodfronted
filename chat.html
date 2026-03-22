@@ -1,4 +1,6 @@
-﻿﻿<!DOCTYPE html>
+﻿﻿[file name]: chat.html
+[file content begin]
+﻿<!DOCTYPE html>
 <html lang="en" class="h-full">
 <head>
     <link rel="manifest" href="manifest.json">
@@ -40,12 +42,10 @@
 </script>
 
 <!-- ========== SECTION 1: EARLY SESSION BOOTSTRAP (SYNCHRONOUS) ========== -->
-<!-- THIS MUST RUN BEFORE ANYTHING ELSE - NO API CALLS, NO ASYNC -->
 <script>
 (function() {
     'use strict';
     
-    // ==================== SECTION 1.1: SYNCHRONOUS SESSION LOAD ====================
     window.__PARENT_SESSION__ = {
         session: null,
         token: null,
@@ -56,37 +56,104 @@
         loaded: false
     };
     
-    try {
-        // Use unified auth storage format from api.core.js
+    // Function to load session from any storage location
+    function loadSessionFromStorage() {
+        // Try all possible storage keys
+        const storageKeys = [
+            'kynecta_auth',
+            'moodchat_token',      // ← Added from index.html
+            'moodchat_user',       // ← Added from index.html
+            'token',
+            'accessToken',
+            'USER_TOKEN'
+        ];
+        
+        // Try unified auth first
         const authData = localStorage.getItem('kynecta_auth');
         if (authData) {
-            const parsed = JSON.parse(authData);
-            if (parsed && parsed.token) {
-                const expiresAt = parsed.expiry || parsed.expiresAt || 0;
-                
-                window.__PARENT_SESSION__.session = {
-                    authenticated: true,
-                    userId: parsed.userId || parsed.user?.id,
-                    token: parsed.token,
-                    user: parsed.user,
-                    expiresAt: expiresAt,
-                    timestamp: parsed.timestamp || Date.now()
+            try {
+                const parsed = JSON.parse(authData);
+                if (parsed && parsed.token) {
+                    return {
+                        token: parsed.token,
+                        userId: parsed.userId || parsed.user?.id,
+                        user: parsed.user,
+                        expiry: parsed.expiry || parsed.expiresAt,
+                        fromCache: true
+                    };
+                }
+            } catch (e) {}
+        }
+        
+        // Try moodchat_token (from index.html)
+        const moodchatToken = localStorage.getItem('moodchat_token');
+        const moodchatUser = localStorage.getItem('moodchat_user');
+        if (moodchatToken && moodchatUser) {
+            try {
+                const user = JSON.parse(moodchatUser);
+                return {
+                    token: moodchatToken,
+                    userId: user.id,
+                    user: user,
+                    expiry: Date.now() + 3600000,
+                    fromCache: true
                 };
-                window.__PARENT_SESSION__.token = parsed.token;
-                window.__PARENT_SESSION__.userId = parsed.userId || parsed.user?.id;
-                window.__PARENT_SESSION__.authenticated = true;
-                window.__PARENT_SESSION__.expiresAt = expiresAt;
-                window.__PARENT_SESSION__.fromCache = true;
+            } catch (e) {}
+        }
+        
+        // Try other token keys
+        for (const key of storageKeys) {
+            const token = localStorage.getItem(key);
+            if (token && token !== 'undefined' && token !== 'null') {
+                return {
+                    token: token,
+                    userId: 'user',
+                    user: null,
+                    expiry: Date.now() + 3600000,
+                    fromCache: true
+                };
             }
         }
-    } catch (e) {}
+        
+        return null;
+    }
+    
+    try {
+        const session = loadSessionFromStorage();
+        if (session && session.token) {
+            const expiresAt = session.expiry || Date.now() + 3600000;
+            
+            window.__PARENT_SESSION__.session = {
+                authenticated: true,
+                userId: session.userId,
+                token: session.token,
+                user: session.user,
+                expiresAt: expiresAt,
+                timestamp: Date.now()
+            };
+            window.__PARENT_SESSION__.token = session.token;
+            window.__PARENT_SESSION__.userId = session.userId;
+            window.__PARENT_SESSION__.authenticated = true;
+            window.__PARENT_SESSION__.expiresAt = expiresAt;
+            window.__PARENT_SESSION__.fromCache = session.fromCache || false;
+            
+            console.log('[Parent] ✅ Session loaded from storage:', {
+                userId: session.userId,
+                tokenPresent: !!session.token,
+                userPresent: !!session.user
+            });
+        } else {
+            console.log('[Parent] No session found in storage');
+        }
+    } catch (e) {
+        console.error('[Parent] Error loading session:', e);
+    }
     
     window.__PARENT_SESSION__.loaded = true;
     
-    // ==================== CENTRALIZED TOKEN ACCESS ====================
-    // SINGLE SOURCE OF TRUTH for token access
+    // Centralized token access
     window.__getAuthToken = function() {
-        // Priority 1: API core's token if available
+        // Priority 1: API core's token
         if (window.API?.getUserToken) {
             const apiToken = window.API.getUserToken();
             if (apiToken) return apiToken;
@@ -97,14 +164,14 @@
             return window.__PARENT_SESSION__.token;
         }
         
-        // Priority 3: Unified auth storage
-        try {
-            const authData = localStorage.getItem('kynecta_auth');
-            if (authData) {
-                const parsed = JSON.parse(authData);
-                if (parsed?.token) return parsed.token;
-            }
-        } catch (e) {}
+        // Priority 3: Check all storage locations
+        const token = localStorage.getItem('moodchat_token') ||
+                      localStorage.getItem('kynecta_token') ||
+                      localStorage.getItem('token');
+        
+        if (token && token !== 'undefined' && token !== 'null') {
+            return token;
+        }
         
         return null;
     };
@@ -116,21 +183,13 @@
     
     window.__syncTokenToApi = function(token) {
         if (!token) return false;
-        
         if (window.API?.setUserToken) {
             window.API.setUserToken(token);
         }
-        
-        if (window.RequestQueue?.updateDependency) {
-            window.RequestQueue.updateDependency('tokenReady', true);
-        }
-        
-        // Update token in parent session
         if (window.__PARENT_SESSION__) {
             window.__PARENT_SESSION__.token = token;
             window.__PARENT_SESSION__.authenticated = true;
         }
-        
         return true;
     };
     
@@ -145,423 +204,310 @@
     window.__isParentAuthenticated = function() {
         return !!window.__getAuthToken();
     };
-})();
-</script>
-
-<!-- ========== [PATCH] GLOBAL AUTH GUARDS AND SINGLETON PROTECTION ========== -->
-<!-- This MUST run early to prevent duplicate initialization and infinite loops -->
-<script>
-(function() {
-    'use strict';
     
-    // [PATCH] Session initialization guard - prevents multiple initializations
-    if (!window.__SESSION_INITIALIZED__) {
-        window.__SESSION_INITIALIZED__ = false;
-    }
-    
-    // [PATCH] Sync halt guard - prevents infinite 401 loops
-    if (!window.__SYNC_HALTED__) {
-        window.__SYNC_HALTED__ = false;
-    }
-    
-    // [PATCH] Session propagation guard - prevents duplicate session broadcasts
-    if (!window.__SESSION_PROPAGATED__) {
-        window.__SESSION_PROPAGATED__ = false;
-    }
-    
-    // [PATCH] Global message listener guard - ENFORCE SINGLE LISTENER
-    if (!window.__GLOBAL_MESSAGE_LISTENER__) {
-        window.__GLOBAL_MESSAGE_LISTENER__ = false;
-    }
-    
-    // [PATCH] CHILD_READY sent guard
-    if (!window.__CHILD_READY_SENT__) {
-        window.__CHILD_READY_SENT__ = false;
-    }
-    
-    // [PATCH] Sync running guard - prevents concurrent sync operations
-    if (!window.__SYNC_RUNNING__) {
-        window.__SYNC_RUNNING__ = false;
-    }
-    
-    // [PATCH] Token ready state - critical for API calls
-    if (!window.__TOKEN_READY__) {
-        window.__TOKEN_READY__ = false;
-    }
-    
-    // [PATCH] App state - controls UI initialization
-    if (!window.__APP_STATE__) {
-        window.__APP_STATE__ = 'BOOTING'; // BOOTING → INITIALIZING → ACTIVE
-    }
-    
-    // [PATCH] Trusted origins for secure communication (DO NOT use '*')
-    window.__TRUSTED_ORIGINS__ = [
-        window.location.origin,
-        'http://localhost:5500',
-        'http://127.0.0.1:5500',
-        'null'
-    ];
-    
-    // [PATCH] Helper to validate origins securely
-    window.__isTrustedOrigin__ = function(origin) {
-        if (!origin) return false;
-        if (origin === 'null') return true; // Allow file:// and data: URIs
-        return window.__TRUSTED_ORIGINS__.includes(origin);
-    };
-    
-    // [PATCH] Helper to safely propagate session (called only once)
-    window.__propagateSessionToIframes__ = function() {
-        // Guard: only propagate once
-        if (window.__SESSION_PROPAGATED__) return;
-        
-        const token = window.__getAuthToken();
-        if (!token) return;
-        
-        // Get all iframes
-        const iframes = document.querySelectorAll('iframe');
-        if (!iframes.length) return;
-        
-        // Send to each iframe
-        iframes.forEach(iframe => {
-            if (!iframe.contentWindow) return;
-            
-            try {
-                iframe.contentWindow.postMessage({
-                    type: 'SESSION_DATA',
-                    token: token,
-                    userId: window.__PARENT_SESSION__?.userId || null,
-                    timestamp: Date.now(),
-                    _patch: true
-                }, '*'); // '*' is safe here because we're broadcasting session data only
-            } catch (e) {}
-        });
-        
-        window.__SESSION_PROPAGATED__ = true;
-    };
-    
-    // [PATCH] Helper to reset sync halted state (call on successful auth)
-    window.__resetSyncHalted__ = function() {
-        window.__SYNC_HALTED__ = false;
-    };
-    
-    // [PATCH] Safe CHILD_READY sender - prevents duplicate emissions
-    window.__safeSendChildReady__ = function(sendFn) {
-        if (window.__CHILD_READY_SENT__) return false;
-        if (!window.__PARENT_READY_STATE__ || window.__PARENT_READY_STATE__ !== 'READY') return false;
-        
+    // Global session function
+    window.__getSafeSessionData = function() {
         try {
-            sendFn();
-            window.__CHILD_READY_SENT__ = true;
-            return true;
+            const session = loadSessionFromStorage();
+            if (session && session.token) {
+                return {
+                    authenticated: true,
+                    userId: session.userId,
+                    token: session.token,
+                    user: session.user,
+                    expiresAt: session.expiry || Date.now() + 3600000
+                };
+            }
+            return { authenticated: false, userId: 'guest', token: null, user: null };
         } catch (e) {
-            return false;
+            return { authenticated: false, userId: 'guest', token: null, user: null };
         }
     };
     
-    // [PATCH] Wait for system ready before UI initialization
-    window.__waitForSystemReady = function() {
-        return new Promise((resolve) => {
-            const checkInterval = setInterval(() => {
-                if (window.__APP_STATE__ === 'ACTIVE' && window.__getAuthToken()) {
-                    clearInterval(checkInterval);
-                    resolve();
-                }
-            }, 50);
-            
-            // Timeout after 10 seconds - proceed anyway but log warning
-            setTimeout(() => {
-                clearInterval(checkInterval);
-                resolve();
-            }, 10000);
-        });
-    };
+    window.__broadcastSessionToModules = function() {
+    const sessionData = window.__getSafeSessionData();
+    const iframes = document.querySelectorAll('iframe');
+    console.log('[Parent] Broadcasting session to', iframes.length, 'iframes');
+    console.log('[Parent] Session data being sent:', {
+        authenticated: sessionData.authenticated,
+        tokenPresent: !!sessionData.token,
+        tokenPrefix: sessionData.token ? sessionData.token.substring(0, 20) + '...' : 'none',
+        userId: sessionData.userId
+    });
     
-    // [PATCH] Safe API call guard - blocks calls without valid token
-    window.__safeApiCall = async function(apiCall) {
-        const token = window.__getAuthToken();
-        
-        if (!token) {
-            return null;
+    iframes.forEach(iframe => {
+        if (iframe.contentWindow) {
+            iframe.contentWindow.postMessage({
+                type: 'SESSION_DATA',
+                id: `session_broadcast_${Date.now()}`,
+                source: 'parent',
+                target: '*',
+                payload: {
+                    authenticated: sessionData.authenticated,
+                    userId: sessionData.userId,
+                    token: sessionData.token,
+                    user: sessionData.user,
+                    expiresAt: sessionData.expiresAt
+                },
+                timestamp: Date.now()
+            }, '*');
         }
-        
-        try {
-            return await apiCall();
-        } catch (error) {
-            return null;
-        }
-    };
+    });
+};
+    
 })();
 </script>
 
-<!-- ========== [UPGRADED] DETERMINISTIC MODULE ORCHESTRATION LAYER ========== -->
-<!-- Each module is an independent state machine - NO GLOBAL BLOCKING -->
+<!-- ========== [FIXED] SINGLE GLOBAL MESSAGE LISTENER ========== -->
 <script>
 (function() {
     'use strict';
-    
-    // ========== MODULE STATE MACHINE DEFINITIONS ==========
-    const MODULE_STATES = {
-        BOOT: 'BOOT',
-        INITIALIZING: 'INITIALIZING',
-        READY: 'READY',
-        WAIT_PARENT: 'WAIT_PARENT',
-        ACTIVE: 'ACTIVE'
-    };
-    
-    // Valid module IDs (from HTML structure)
-    const VALID_MODULE_IDS = [
-        'messagesIframe', 'statusIframe', 'groupIframe',
-        'friendsIframe', 'callsIframe', 'settingsIframe', 'toolsIframe'
-    ];
-    
-    // Module name mapping
-    const MODULE_NAME_MAP = {
-        'messagesIframe': 'messages',
-        'statusIframe': 'status',
-        'groupIframe': 'groups',
-        'friendsIframe': 'friends',
-        'callsIframe': 'calls',
-        'settingsIframe': 'settings',
-        'toolsIframe': 'tools'
-    };
-    
-    // ========== STATE TRANSITION VALIDATION ==========
-    // Define valid state transitions for deterministic lifecycle
-    const VALID_TRANSITIONS = {
-        [MODULE_STATES.BOOT]: [MODULE_STATES.INITIALIZING],
-        [MODULE_STATES.INITIALIZING]: [MODULE_STATES.READY],
-        [MODULE_STATES.READY]: [MODULE_STATES.WAIT_PARENT],
-        [MODULE_STATES.WAIT_PARENT]: [MODULE_STATES.ACTIVE],
-        [MODULE_STATES.ACTIVE]: [] // Terminal state
-    };
-    
-    function isValidTransition(currentState, nextState) {
-        if (currentState === nextState) return true; // No change is valid
-        const allowed = VALID_TRANSITIONS[currentState] || [];
-        return allowed.includes(nextState);
-    }
-    
-    // ========== MODULE REGISTRY - INDEPENDENT STATE PER MODULE ==========
-    const ModuleRegistry = new Map();
-    
-    // Track parent ready sent per module - ENFORCE SINGLE PARENT_READY
-    const parentReadySentTracker = new Map();
-    
-    // Processed message IDs for deduplication (global to prevent any cross-module duplicates)
+
+    // Track processed message IDs to prevent duplicates
     const processedMessageIds = new Set();
     const MAX_PROCESSED_IDS = 2000;
-    
-    // ========== HELPER FUNCTIONS ==========
-    function generateMessageId() {
-        return `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}_${Math.floor(Math.random() * 10000)}`;
-    }
-    
+
     function isDuplicateMessageId(messageId) {
         if (!messageId) return false;
         if (processedMessageIds.has(messageId)) {
-            console.log(`[Parent] Duplicate message ignored: ${messageId}`);
             return true;
         }
-        
-        // Add to processed set and maintain size
         processedMessageIds.add(messageId);
         if (processedMessageIds.size > MAX_PROCESSED_IDS) {
-            // Remove oldest entries (first 200)
-            const toRemove = Array.from(processedMessageIds).slice(0, 200);
+            const toRemove = Array.from(processedMessageIds).slice(0, 500);
             toRemove.forEach(id => processedMessageIds.delete(id));
         }
+        return false;
+    }
+
+  function getSafeSessionData() {
+        try {
+            // First check localStorage for auth data (this is where your login stores it)
+            const authData = localStorage.getItem('kynecta_auth');
+            if (authData) {
+                const parsed = JSON.parse(authData);
+                if (parsed && parsed.token && parsed.user) {
+                    console.log('[Parent] Found session in localStorage:', parsed.user.name);
+                    return {
+                        authenticated: true,
+                        userId: parsed.userId || parsed.user.id,
+                        token: parsed.token,
+                        user: parsed.user,
+                        expiresAt: parsed.expiry || Date.now() + 3600000
+                    };
+                }
+            }
+            
+            // Fallback: check kynecta_user and kynecta_token separately
+            const userData = localStorage.getItem('kynecta_user');
+            const token = localStorage.getItem('kynecta_token');
+            if (userData && token) {
+                const user = JSON.parse(userData);
+                console.log('[Parent] Found session from separate storage:', user.name);
+                return {
+                    authenticated: true,
+                    userId: user.id,
+                    token: token,
+                    user: user,
+                    expiresAt: Date.now() + 3600000
+                };
+            }
+            
+            // Try API core token
+            const apiToken = window.__getAuthToken ? window.__getAuthToken() : null;
+            if (apiToken) {
+                console.log('[Parent] Found token from API core');
+                return {
+                    authenticated: true,
+                    userId: window.__PARENT_SESSION__?.userId || 'user',
+                    token: apiToken,
+                    user: window.__PARENT_SESSION__?.user || { id: 'user', name: 'User' },
+                    expiresAt: window.__PARENT_SESSION__?.expiresAt || Date.now() + 3600000
+                };
+            }
+            
+            // No session
+            console.log('[Parent] No session found');
+            return { authenticated: false, userId: 'guest', token: null, user: null };
+        } catch (e) {
+            console.error('[Parent] Error reading session:', e);
+            return { authenticated: false, userId: 'guest', token: null, user: null };
+        }
+    }
+
+    // Map iframe ID to module name
+    function getModuleNameFromIframeId(iframeId) {
+        const map = {
+            'messagesIframe': 'messages',
+            'statusIframe': 'status',
+            'groupIframe': 'groups',
+            'friendsIframe': 'friends',
+            'callsIframe': 'calls',
+            'settingsIframe': 'settings',
+            'toolsIframe': 'tools'
+        };
+        return map[iframeId] || null;
+    }
+
+    // Map module name to iframe ID
+    function getIframeIdFromModuleName(moduleName) {
+        const map = {
+            'messages': 'messagesIframe',
+            'status': 'statusIframe',
+            'groups': 'groupIframe',
+            'friends': 'friendsIframe',
+            'calls': 'callsIframe',
+            'settings': 'settingsIframe',
+            'tools': 'toolsIframe'
+        };
+        return map[moduleName] || null;
+    }
+
+    // Global map for iframe window references - use WeakMap for better garbage collection
+    window.__iframeWindowMap = new WeakMap();
+
+    // CRITICAL: Register iframe windows
+    function registerIframeWindow(iframeId, iframeWindow) {
+        if (iframeWindow && iframeWindow !== window) {
+            window.__iframeWindowMap.set(iframeWindow, iframeId);
+            console.log(`[Parent] ✅ Registered ${iframeId}`);
+        }
+    }
+
+    // Get iframe ID from source window
+    function getIframeIdFromSource(source) {
+        // METHOD 1: Check WeakMap
+        if (window.__iframeWindowMap && window.__iframeWindowMap.has(source)) {
+            const id = window.__iframeWindowMap.get(source);
+            return id;
+        }
         
+        // METHOD 2: Direct DOM comparison
+        const iframeIds = ['messagesIframe', 'statusIframe', 'groupIframe', 'friendsIframe', 'callsIframe', 'settingsIframe', 'toolsIframe'];
+        for (const id of iframeIds) {
+            const iframe = document.getElementById(id);
+            if (iframe && iframe.contentWindow === source) {
+                // Cache for future lookups
+                if (window.__iframeWindowMap) {
+                    window.__iframeWindowMap.set(source, id);
+                }
+                return id;
+            }
+        }
+        
+        return null;
+    }
+
+    // Setup iframe registration
+    function setupIframeRegistration() {
+        const iframeIds = ['messagesIframe', 'statusIframe', 'groupIframe', 'friendsIframe', 'callsIframe', 'settingsIframe', 'toolsIframe'];
+        
+        for (const id of iframeIds) {
+            const iframe = document.getElementById(id);
+            if (iframe) {
+                // Register if already loaded
+                if (iframe.contentWindow && iframe.contentWindow !== window) {
+                    registerIframeWindow(id, iframe.contentWindow);
+                }
+                
+                // Register on load
+                iframe.addEventListener('load', function() {
+                    if (this.contentWindow && this.contentWindow !== window) {
+                        registerIframeWindow(id, this.contentWindow);
+                    }
+                });
+            }
+        }
+    }
+
+    // Run registration
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', setupIframeRegistration);
+        setTimeout(setupIframeRegistration, 0);
+    } else {
+        setupIframeRegistration();
+    }
+
+    // Module registry for CHILD_READY tracking
+    const moduleRegistry = new Map();
+
+    function getOrCreateModuleEntry(iframeId, moduleName) {
+        if (moduleRegistry.has(iframeId)) {
+            return moduleRegistry.get(iframeId);
+        }
+        const entry = {
+            iframeId: iframeId,
+            moduleName: moduleName,
+            childReadyReceived: false,
+            parentReadySent: false,
+            sourceWindow: null,
+            origin: null
+        };
+        moduleRegistry.set(iframeId, entry);
+        return entry;
+    }
+
+    // Track parent ready state
+    let parentIsReady = false;
+
+// In the sendParentReadyToModule function, we need to check if the module is 'status' 
+// and send a compatible message format
+
+function sendParentReadyToModule(iframeId) {
+    const entry = moduleRegistry.get(iframeId);
+    if (!entry) {
+        console.log(`[Parent] No entry for ${iframeId}`);
         return false;
     }
     
-    function validateOrigin(origin) {
-        // Trusted origins include current origin and null (file://)
-        const trustedOrigins = [window.location.origin, 'null'];
-        
-        // Dynamic trust for iframe origins we know
-        for (const moduleId of VALID_MODULE_IDS) {
-            const frame = document.getElementById(moduleId);
-            if (frame && frame.src) {
-                try {
-                    const frameOrigin = new URL(frame.src, window.location.href).origin;
-                    if (frameOrigin === origin) return true;
-                } catch (e) {}
-            }
-        }
-        
-        return trustedOrigins.includes(origin);
+    if (entry.parentReadySent) {
+        return false;
     }
     
-    function getModuleIdFromSource(source) {
-        for (const moduleId of VALID_MODULE_IDS) {
-            const iframe = document.getElementById(moduleId);
-            if (iframe && iframe.contentWindow === source) {
-                return moduleId;
-            }
-        }
-        return null;
+    const iframe = document.getElementById(iframeId);
+    if (!iframe || !iframe.contentWindow) {
+        console.log(`[Parent] Iframe ${iframeId} not ready, will retry`);
+        setTimeout(() => sendParentReadyToModule(iframeId), 100);
+        return false;
     }
     
-    function getModuleName(moduleId) {
-        return MODULE_NAME_MAP[moduleId] || moduleId.replace('Iframe', '');
-    }
+    let targetOrigin = '*';
+    try {
+        if (iframe.src && iframe.src !== 'about:blank') {
+            const url = new URL(iframe.src, window.location.href);
+            targetOrigin = url.origin;
+        }
+    } catch (e) {}
     
-    function getOrCreateModuleEntry(moduleId) {
-        if (ModuleRegistry.has(moduleId)) {
-            return ModuleRegistry.get(moduleId);
-        }
-        
-        const moduleName = getModuleName(moduleId);
-        const entry = {
-            moduleId: moduleId,
-            moduleName: moduleName,
-            state: MODULE_STATES.BOOT,
-            childReadyReceived: false,
-            parentReadySent: false,
-            handshakeCompleted: false,
-            messageQueue: [],
-            lastSeen: Date.now(),
-            registeredAt: null,
-            activatedAt: null
-        };
-        
-        ModuleRegistry.set(moduleId, entry);
-        // Initialize parent ready tracker
-        if (!parentReadySentTracker.has(moduleId)) {
-            parentReadySentTracker.set(moduleId, false);
-        }
-        console.log(`[Parent] Module ${moduleName} → registry created (BOOT)`);
-        return entry;
-    }
+    const sessionData = getSafeSessionData();
     
-    function updateModuleState(moduleId, newState) {
-        const module = ModuleRegistry.get(moduleId);
-        if (!module) return false;
-        
-        const oldState = module.state;
-        
-        // Enforce deterministic state transitions
-        if (!isValidTransition(oldState, newState) && oldState !== newState) {
-            console.warn(`[Parent] Module ${module.moduleName} invalid transition blocked: ${oldState} → ${newState}`);
-            return false;
-        }
-        
-        module.state = newState;
-        module.lastSeen = Date.now();
-        
-        if (newState === MODULE_STATES.ACTIVE) {
-            module.activatedAt = Date.now();
-            module.handshakeCompleted = true;
-            // Flush message queue when becoming active
-            flushMessageQueue(moduleId);
-            console.log(`[Parent] Module ${module.moduleName} → ACTIVE (activated at ${module.activatedAt})`);
-            
-            // Emit event via EventBus if available
-            if (window.KynectaEventBus) {
-                window.KynectaEventBus.emit('module:activated', { module: module.moduleName, moduleId });
-            }
-        }
-        
-        console.log(`[Parent] Module ${module.moduleName} state: ${oldState} → ${newState}`);
-        return true;
-    }
+    // Different modules expect different PARENT_READY formats
+    // For status module, we need a simpler format
+    let parentReadyMessage;
     
-    function enqueueMessage(moduleId, message) {
-        const module = ModuleRegistry.get(moduleId);
-        if (!module) return false;
-        
-        if (!module.messageQueue) {
-            module.messageQueue = [];
-        }
-        
-        // Limit queue size
-        if (module.messageQueue.length >= 100) {
-            module.messageQueue.shift();
-        }
-        
-        module.messageQueue.push({
-            message,
-            timestamp: Date.now(),
-            attempts: 0
-        });
-        
-        console.log(`[Parent] Module ${module.moduleName} → message queued (${module.messageQueue.length} total)`);
-        return true;
-    }
-    
-    function flushMessageQueue(moduleId) {
-        const module = ModuleRegistry.get(moduleId);
-        if (!module || !module.messageQueue || module.messageQueue.length === 0) return 0;
-        
-        const iframe = document.getElementById(moduleId);
-        if (!iframe || !iframe.contentWindow) return 0;
-        
-        let processed = 0;
-        const remaining = [];
-        
-        for (const item of module.messageQueue) {
-            try {
-                // Get target origin
-                let targetOrigin = '*';
-                try {
-                    const iframeSrc = iframe.src;
-                    if (iframeSrc && iframeSrc !== 'about:blank') {
-                        const url = new URL(iframeSrc, window.location.href);
-                        targetOrigin = url.origin;
-                    }
-                } catch (e) {}
-                
-                iframe.contentWindow.postMessage(item.message, targetOrigin);
-                processed++;
-            } catch (e) {
-                item.attempts++;
-                if (item.attempts < 3) {
-                    remaining.push(item);
-                }
-            }
-        }
-        
-        module.messageQueue = remaining;
-        
-        if (processed > 0) {
-            console.log(`[Parent] Module ${module.moduleName} → flushed ${processed} queued messages`);
-        }
-        
-        return processed;
-    }
-    
-    // ========== SEND PARENT_READY TO SPECIFIC MODULE (ONCE PER MODULE - ENFORCED) ==========
-    function sendParentReadyToModule(moduleId, targetWindow, origin) {
-        const module = ModuleRegistry.get(moduleId);
-        if (!module) return false;
-        
-        // CRITICAL: Guard against duplicate PARENT_READY - ENFORCE SINGLE PER MODULE
-        if (parentReadySentTracker.get(moduleId) === true || module.parentReadySent === true) {
-            console.log(`[Parent] Module ${module.moduleName} → PARENT_READY already sent, skipping duplicate`);
-            return false;
-        }
-        
-        // Get session data
-        const sessionData = (() => {
-            try {
-                const token = window.__getAuthToken();
-                return {
-                    authenticated: !!token,
-                    userId: window.__PARENT_SESSION__?.userId || 'guest',
-                    token: token || null,
-                    expiresAt: window.__PARENT_SESSION__?.expiresAt || Date.now() + 3600000
-                };
-            } catch (e) {
-                return { authenticated: false, userId: 'guest', token: null };
-            }
-        })();
-        
-        const readyMessage = {
+    if (entry.moduleName === 'status') {
+        // Status module expects a simpler format
+        parentReadyMessage = {
             type: 'PARENT_READY',
-            id: generateMessageId(),
+            id: `parent_ready_${Date.now()}_${entry.moduleName}`,
             source: 'parent',
-            target: module.moduleName,
-            frameId: moduleId,
+            target: entry.moduleName,
+                    module: entry.moduleName,  // Include module field
+
+            timestamp: Date.now(),
+            payload: {
+                ready: true,
+                timestamp: Date.now()
+            }
+        };
+    } else {
+        // Other modules expect the full format
+        parentReadyMessage = {
+            type: 'PARENT_READY',
+            id: `parent_ready_${Date.now()}_${entry.moduleName}`,
+            source: 'parent',
+            target: entry.moduleName,
+            module: entry.moduleName,
             timestamp: Date.now(),
             payload: {
                 protocol: 'KYN-8.0',
@@ -570,491 +516,617 @@
                 message: 'Module handshake complete'
             }
         };
+    }
+    
+    try {
+        console.log(`[Parent] Sending PARENT_READY to ${iframeId} (${entry.moduleName})`);
+        iframe.contentWindow.postMessage(parentReadyMessage, targetOrigin);
+        entry.parentReadySent = true;
         
-        try {
-            let targetOrigin = origin || '*';
-            // If origin is not provided, try to extract from iframe
-            if (!origin || origin === '*') {
-                const iframe = document.getElementById(moduleId);
-                if (iframe && iframe.src && iframe.src !== 'about:blank') {
-                    try {
-                        const url = new URL(iframe.src, window.location.href);
-                        targetOrigin = url.origin;
-                    } catch (e) {}
+        // Send session data if authenticated (for non-status modules)
+        if (sessionData.authenticated && entry.moduleName !== 'status') {
+            setTimeout(() => {
+                if (iframe.contentWindow) {
+                    iframe.contentWindow.postMessage({
+                        type: 'SESSION_DATA',
+                        id: `session_${Date.now()}_${entry.moduleName}`,
+                        source: 'parent',
+                        target: entry.moduleName,
+                        module: entry.moduleName,
+                        payload: {
+                            session: sessionData,
+                            token: sessionData.token,
+                            user: sessionData.userId ? { id: sessionData.userId, name: sessionData.userId } : null,
+                            authenticated: sessionData.authenticated
+                        },
+                        timestamp: Date.now()
+                    }, targetOrigin);
                 }
-            }
-            
-            targetWindow.postMessage(readyMessage, targetOrigin);
-            
-            // Mark as sent in both trackers
-            parentReadySentTracker.set(moduleId, true);
-            module.parentReadySent = true;
-            
-            console.log(`[Parent] Module ${module.moduleName} → PARENT_READY sent (first and only)`);
-            
-            // Send session data if authenticated (separate message for compatibility)
-            if (sessionData.authenticated) {
-                setTimeout(() => {
-                    try {
-                        targetWindow.postMessage({
-                            type: 'SESSION_DATA',
-                            id: generateMessageId(),
-                            source: 'parent',
-                            target: module.moduleName,
-                            payload: sessionData,
-                            timestamp: Date.now()
-                        }, targetOrigin);
-                        console.log(`[Parent] Module ${module.moduleName} → SESSION_DATA sent`);
-                    } catch (e) {}
-                }, 10);
-            }
-            
-            // Update state to ACTIVE if we were waiting
-            if (module.state === MODULE_STATES.WAIT_PARENT) {
-                updateModuleState(moduleId, MODULE_STATES.ACTIVE);
-            } else if (module.state === MODULE_STATES.READY) {
-                updateModuleState(moduleId, MODULE_STATES.WAIT_PARENT);
-                updateModuleState(moduleId, MODULE_STATES.ACTIVE);
-            }
-            
-            return true;
-        } catch (e) {
-            module.parentReadySent = false;
-            parentReadySentTracker.set(moduleId, false);
-            console.error(`[Parent] Module ${module.moduleName} → PARENT_READY send failed:`, e);
-            return false;
-        }
-    }
-    
-    // ========== HANDLE CHILD_READY FROM MODULE (INDEPENDENT PER MODULE) ==========
-    function handleChildReady(moduleId, sourceWindow, origin) {
-        // Get or create module entry
-        const module = getOrCreateModuleEntry(moduleId);
-        
-        // CRITICAL: Guard against duplicate CHILD_READY processing - but allow controlled re-sync
-        if (module.childReadyReceived === true) {
-            console.log(`[Parent] Module ${module.moduleName} → duplicate CHILD_READY detected, allowing controlled re-sync`);
-            // Still send PARENT_READY if module is not active
-            if (module.state !== MODULE_STATES.ACTIVE && !parentReadySentTracker.get(moduleId)) {
-                console.log(`[Parent] Module ${module.moduleName} → sending PARENT_READY on duplicate (recovery)`);
-                sendParentReadyToModule(moduleId, sourceWindow, origin);
-            }
-            return true;
-        }
-        
-        // Mark child ready
-        module.childReadyReceived = true;
-        module.lastSeen = Date.now();
-        module.registeredAt = Date.now();
-        
-        console.log(`[Parent] Module ${module.moduleName} → CHILD_READY received`);
-        
-        // Update state deterministically: BOOT → INITIALIZING → READY → WAIT_PARENT
-        if (module.state === MODULE_STATES.BOOT) {
-            updateModuleState(moduleId, MODULE_STATES.INITIALIZING);
-            updateModuleState(moduleId, MODULE_STATES.READY);
-        } else if (module.state === MODULE_STATES.INITIALIZING) {
-            updateModuleState(moduleId, MODULE_STATES.READY);
-        }
-        
-        // Update to WAIT_PARENT after receiving child ready
-        if (module.state === MODULE_STATES.READY) {
-            updateModuleState(moduleId, MODULE_STATES.WAIT_PARENT);
-        }
-        
-        // IMMEDIATELY send PARENT_READY response - NO WAITING FOR OTHER MODULES
-        sendParentReadyToModule(moduleId, sourceWindow, origin);
-        
-        // Update module registry if available
-        if (window.KynectaModuleRegistry) {
-            window.KynectaModuleRegistry.register(module.moduleName, sourceWindow, {
-                handshakeComplete: true,
-                registeredAt: Date.now()
-            });
-        }
-        
-        // Emit event
-        if (window.KynectaEventBus) {
-            window.KynectaEventBus.emit('module:handshake_complete', {
-                module: module.moduleName,
-                moduleId: moduleId,
-                timestamp: Date.now()
-            });
+            }, 50);
         }
         
         return true;
+    } catch (e) {
+        console.error(`[Parent] Error sending to ${iframeId}:`, e);
+        entry.parentReadySent = false;
+        return false;
     }
-    
-    // ========== HANDLE HANDSHAKE_REQUEST ==========
-    function handleHandshakeRequest(moduleId, sourceWindow, origin, data) {
-        const module = getOrCreateModuleEntry(moduleId);
-        const moduleName = data.payload?.module || data.module || module.moduleName;
-        
-        // Guard against duplicate processing but allow controlled re-sync
-        if (module.childReadyReceived) {
-            // Already handled, just send ACK
-            const ackMessage = {
-                type: 'HANDSHAKE_ACK',
-                id: generateMessageId(),
-                source: 'parent',
-                target: moduleName,
-                timestamp: Date.now(),
-                payload: {
-                    success: true,
-                    module: moduleName,
-                    timestamp: Date.now(),
-                    cached: true
-                }
-            };
-            
-            try {
-                let targetOrigin = origin;
-                sourceWindow.postMessage(ackMessage, targetOrigin);
-            } catch (e) {}
-            
-            // Also send PARENT_READY if not sent yet
-            if (!parentReadySentTracker.get(moduleId) && module.state !== MODULE_STATES.ACTIVE) {
-                sendParentReadyToModule(moduleId, sourceWindow, origin);
-            }
-            return true;
-        }
-        
-        // Mark child ready and proceed
-        module.childReadyReceived = true;
-        module.lastSeen = Date.now();
-        module.registeredAt = Date.now();
-        
-        console.log(`[Parent] Module ${moduleName} → HANDSHAKE_REQUEST received`);
-        
-        // Send ACK
-        const ackMessage = {
-            type: 'HANDSHAKE_ACK',
-            id: generateMessageId(),
-            source: 'parent',
-            target: moduleName,
-            timestamp: Date.now(),
-            payload: {
-                success: true,
-                module: moduleName,
-                timestamp: Date.now()
-            }
-        };
-        
-        try {
-            sourceWindow.postMessage(ackMessage, origin);
-        } catch (e) {}
-        
-        // Update state deterministically
-        if (module.state === MODULE_STATES.BOOT) {
-            updateModuleState(moduleId, MODULE_STATES.INITIALIZING);
-            updateModuleState(moduleId, MODULE_STATES.READY);
-        }
-        updateModuleState(moduleId, MODULE_STATES.WAIT_PARENT);
-        
-        // Send PARENT_READY
-        sendParentReadyToModule(moduleId, sourceWindow, origin);
-        
-        return true;
-    }
-    
-    // ========== HANDLE SESSION REQUESTS ==========
-    function handleSessionRequest(moduleId, sourceWindow, origin, data) {
-        const module = getOrCreateModuleEntry(moduleId);
-        
-        const sessionData = (() => {
-            try {
-                const token = window.__getAuthToken();
-                return {
-                    authenticated: !!token,
-                    userId: window.__PARENT_SESSION__?.userId || 'guest',
-                    token: token || null,
-                    expiresAt: window.__PARENT_SESSION__?.expiresAt || Date.now() + 3600000
-                };
-            } catch (e) {
-                return { authenticated: false, userId: 'guest', token: null };
-            }
-        })();
-        
-        const response = {
-            type: 'SESSION_RESPONSE',
-            id: generateMessageId(),
-            source: 'parent',
-            target: module.moduleName,
-            timestamp: Date.now(),
-            payload: sessionData
-        };
-        
-        try {
-            sourceWindow.postMessage(response, origin);
-            console.log(`[Parent] Module ${module.moduleName} → SESSION_RESPONSE sent`);
-        } catch (e) {}
-        
-        // Also send ACK if expected
-        if (data && data.expectAck) {
-            try {
-                sourceWindow.postMessage({
-                    type: 'ACK',
-                    id: `ack_${data.id || Date.now()}`,
-                    source: 'parent',
-                    target: module.moduleName,
-                    payload: { success: true },
-                    timestamp: Date.now()
-                }, origin);
-            } catch (e) {}
-        }
-        
-        return true;
-    }
-    
-    // ========== HANDLE VERIFY_SESSION ==========
-    function handleVerifySession(moduleId, sourceWindow, origin, data) {
-        const sessionData = (() => {
-            try {
-                const token = window.__getAuthToken();
-                return {
-                    valid: !!token,
-                    userId: window.__PARENT_SESSION__?.userId || 'guest',
-                    token: token ? 'present' : null
-                };
-            } catch (e) {
-                return { valid: false, userId: 'guest', token: null };
-            }
-        })();
-        
-        const response = {
-            type: 'VERIFY_RESPONSE',
-            id: generateMessageId(),
-            source: 'parent',
-            target: data.target || '*',
-            timestamp: Date.now(),
-            payload: sessionData
-        };
-        
-        try {
-            sourceWindow.postMessage(response, origin);
-        } catch (e) {}
-        
-        return true;
-    }
-    
-    // ========== HANDLE HEARTBEAT ==========
-    function handleHeartbeat(moduleId, sourceWindow, origin, data) {
-        const module = getOrCreateModuleEntry(moduleId);
-        module.lastSeen = Date.now();
-        
-        // Update module registry if available
-        if (window.KynectaModuleRegistry) {
-            window.KynectaModuleRegistry.heartbeat(module.moduleName);
-        }
-        
-        const response = {
-            type: 'HEARTBEAT_ACK',
-            id: generateMessageId(),
-            source: 'parent',
-            target: module.moduleName,
-            timestamp: Date.now(),
-            payload: { timestamp: Date.now() }
-        };
-        
-        try {
-            sourceWindow.postMessage(response, origin);
-        } catch (e) {}
-        
-        return true;
-    }
-    
-    // ========== HANDLE PING ==========
-    function handlePing(moduleId, sourceWindow, origin, data) {
-        const response = {
-            type: 'PONG',
-            id: generateMessageId(),
-            source: 'parent',
-            target: data.source || '*',
-            timestamp: Date.now(),
-            payload: { timestamp: Date.now(), echo: data.payload }
-        };
-        
-        try {
-            sourceWindow.postMessage(response, origin);
-        } catch (e) {}
-        
-        return true;
-    }
-    
-    // ========== UNIFIED MESSAGE HANDLER ==========
-    function handleModuleMessage(event) {
-        // Validate origin
-        if (!validateOrigin(event.origin)) {
-            return;
-        }
-        
-        // Validate message structure
-        if (!event.data || typeof event.data !== 'object') {
-            return;
-        }
+}
+
+    // Main message handler
+    function handleMessage(event) {
+        if (!event.data || typeof event.data !== 'object') return;
         
         const data = event.data;
         
-        // Duplicate protection
         const messageId = data.id || data.messageId || data.requestId;
         if (isDuplicateMessageId(messageId)) {
             return;
         }
         
-        // Identify source module
-        const sourceModuleId = getModuleIdFromSource(event.source);
-        if (!sourceModuleId) {
-            // Unknown source - could be from a different origin, ignore
+        // Identify source iframe
+        let iframeId = getIframeIdFromSource(event.source);
+        
+        // If still null, try to infer from module name
+        if (!iframeId && data.module) {
+            iframeId = getIframeIdFromModuleName(data.module);
+            if (iframeId) {
+                // Register this mapping
+                registerIframeWindow(iframeId, event.source);
+                console.log(`[Parent] Inferred ${iframeId} from module: ${data.module}`);
+            }
+        }
+        
+        // If still null, try to infer from source field
+        if (!iframeId && data.source && data.source !== 'parent') {
+            iframeId = getIframeIdFromModuleName(data.source);
+            if (iframeId) {
+                registerIframeWindow(iframeId, event.source);
+                console.log(`[Parent] Inferred ${iframeId} from source: ${data.source}`);
+            }
+        }
+        
+        // Handle CHILD_READY
+        if (data.type === 'CHILD_READY') {
+            let moduleName = data.module || data.payload?.module;
+            
+            // If we have an iframeId, get module name from it
+            if (!moduleName && iframeId) {
+                moduleName = getModuleNameFromIframeId(iframeId);
+            }
+            
+            // If we still don't have module name, try to infer from source
+            if (!moduleName && data.source && data.source !== 'parent') {
+                moduleName = data.source;
+            }
+            
+            console.log(`[Parent] CHILD_READY - iframeId: ${iframeId}, moduleName: ${moduleName}`);
+            
+            if (iframeId && moduleName) {
+                const entry = getOrCreateModuleEntry(iframeId, moduleName);
+                entry.sourceWindow = event.source;
+                entry.origin = event.origin;
+                
+                if (!entry.childReadyReceived) {
+                    entry.childReadyReceived = true;
+                    console.log(`[Parent] ✅ Recorded CHILD_READY for ${iframeId} (${moduleName})`);
+                    
+                    // Send PARENT_READY immediately if parent is ready
+                    if (parentIsReady && !entry.parentReadySent) {
+                        sendParentReadyToModule(iframeId);
+                    }
+                } else {
+                    console.log(`[Parent] CHILD_READY already received for ${iframeId}`);
+                    if (parentIsReady && !entry.parentReadySent) {
+                        sendParentReadyToModule(iframeId);
+                    }
+                }
+            } else {
+                console.warn(`[Parent] Cannot process CHILD_READY - missing iframeId or moduleName`);
+            }
             return;
         }
         
-        const messageType = data.type;
+        // Handle VERIFY_SESSION
+        if (data.type === 'VERIFY_SESSION') {
+            const sessionData = getSafeSessionData();
+            try {
+                event.source.postMessage({
+                    type: 'VERIFY_RESPONSE',
+                    id: `verify_resp_${messageId || Date.now()}`,
+                    source: 'parent',
+                    target: data.source || data.target || '*',
+                    payload: {
+                        valid: sessionData.authenticated,
+                        userId: sessionData.userId,
+                        token: sessionData.token ? 'present' : null
+                    },
+                    timestamp: Date.now()
+                }, event.origin);
+            } catch (e) {}
+            return;
+        }
         
-        // Route message based on type
-        switch (messageType) {
-            case 'CHILD_READY':
-                handleChildReady(sourceModuleId, event.source, event.origin);
-                break;
-                
-            case 'HANDSHAKE_REQUEST':
-                handleHandshakeRequest(sourceModuleId, event.source, event.origin, data);
-                break;
-                
-            case 'REQUEST_SESSION':
-                handleSessionRequest(sourceModuleId, event.source, event.origin, data);
-                break;
-                
-            case 'VERIFY_SESSION':
-                handleVerifySession(sourceModuleId, event.source, event.origin, data);
-                break;
-                
-            case 'HEARTBEAT':
-                handleHeartbeat(sourceModuleId, event.source, event.origin, data);
-                break;
-                
-            case 'PING':
-                handlePing(sourceModuleId, event.source, event.origin, data);
-                break;
-                
-            default:
-                // For other messages, queue if module not active
-                const module = ModuleRegistry.get(sourceModuleId);
-                if (module && module.state !== MODULE_STATES.ACTIVE) {
-                    enqueueMessage(sourceModuleId, data);
+        // Handle REQUEST_SESSION
+        if (data.type === 'REQUEST_SESSION') {
+            const sessionData = getSafeSessionData();
+            try {
+                event.source.postMessage({
+                    type: 'SESSION_RESPONSE',
+                    id: `session_resp_${messageId || Date.now()}`,
+                    source: 'parent',
+                    target: data.source || data.target || '*',
+                    payload: sessionData,
+                    timestamp: Date.now()
+                }, event.origin);
+            } catch (e) {}
+            return;
+        }
+        
+        // Handle PING
+        if (data.type === 'PING') {
+            try {
+                event.source.postMessage({
+                    type: 'PONG',
+                    id: `pong_${messageId || Date.now()}`,
+                    source: 'parent',
+                    target: data.source || '*',
+                    payload: { timestamp: Date.now(), echo: data.payload },
+                    timestamp: Date.now()
+                }, event.origin);
+            } catch (e) {}
+            return;
+        }
+        
+        // Handle HEARTBEAT
+        if (data.type === 'HEARTBEAT') {
+            if (iframeId) {
+                const moduleName = getModuleNameFromIframeId(iframeId);
+                if (moduleName && window.KynectaModuleRegistry) {
+                    window.KynectaModuleRegistry.heartbeat(moduleName);
                 }
-                // Let other systems handle if needed
-                if (window.KynectaMessageRouter) {
-                    window.KynectaMessageRouter.route(data, event.source, event.origin);
-                }
-                break;
+            }
+            try {
+                event.source.postMessage({
+                    type: 'HEARTBEAT_ACK',
+                    id: `hb_ack_${messageId || Date.now()}`,
+                    source: 'parent',
+                    target: data.target || '*',
+                    payload: { timestamp: Date.now() },
+                    timestamp: Date.now()
+                }, event.origin);
+            } catch (e) {}
+            return;
         }
     }
     
-    // ========== INITIALIZATION ==========
-    function initModuleOrchestration() {
-        // Initialize all modules in BOOT state
-        for (const moduleId of VALID_MODULE_IDS) {
-            const iframe = document.getElementById(moduleId);
-            if (iframe) {
-                getOrCreateModuleEntry(moduleId);
-                
-                // Monitor iframe load events
-                iframe.addEventListener('load', () => {
-                    const module = ModuleRegistry.get(moduleId);
-                    if (module) {
-                        module.lastSeen = Date.now();
-                        console.log(`[Parent] Module ${module.moduleName} → iframe loaded`);
-                    }
-                });
-                
-                iframe.addEventListener('error', () => {
-                    console.warn(`[Parent] Module ${getModuleName(moduleId)} → iframe load error`);
-                });
+    // Mark parent as ready after a delay
+    setTimeout(function() {
+        parentIsReady = true;
+        console.log('[Parent] Marked as READY');
+        
+        // Send PARENT_READY to all modules that have sent CHILD_READY
+        for (const [iframeId, entry] of moduleRegistry.entries()) {
+            if (entry.childReadyReceived && !entry.parentReadySent) {
+                console.log(`[Parent] Sending pending PARENT_READY to ${iframeId}`);
+                sendParentReadyToModule(iframeId);
             }
         }
+    }, 2000);
+    
+    // Remove existing listeners and add ours
+    window.removeEventListener('message', handleMessage);
+    window.addEventListener('message', handleMessage);
+    
+    window.__GLOBAL_MESSAGE_LISTENER__ = true;
+})();
+</script>
+
+
+<!-- ========== [FIXED] DETERMINISTIC MODULE ORCHESTRATION LAYER ========== -->
+<!-- ENFORCES EXACTLY-ONCE HANDSHAKE WITH PERSISTENT MODULE REGISTRY -->
+<script>
+(function() {
+    'use strict';
+    
+    // ========== VALID MODULE DEFINITIONS ==========
+    const VALID_MODULES = {
+        'messagesIframe': { name: 'messages', container: 'messagesContent', src: 'message.html', critical: true },
+        'statusIframe': { name: 'status', container: 'statusContent', src: 'status.html', critical: false },
+        'groupIframe': { name: 'groups', container: 'groupContent', src: 'group.html', critical: false },
+        'friendsIframe': { name: 'friends', container: 'friendsContent', src: 'friend.html', critical: false },
+        'callsIframe': { name: 'calls', container: 'callsContent', src: 'calls.html', critical: false },
+        'settingsIframe': { name: 'settings', container: 'settingsContent', src: 'settings.html', critical: false },
+        'toolsIframe': { name: 'tools', container: 'toolsContent', src: 'Tools.html', critical: false }
+    };
+    
+    // ========== MODULE STATE MACHINE ==========
+    const MODULE_STATES = {
+        BOOT: 'BOOT',
+        CHILD_READY_RECEIVED: 'CHILD_READY_RECEIVED',
+        PARENT_READY_SENT: 'PARENT_READY_SENT',
+        ACTIVE: 'ACTIVE'
+    };
+    
+    // ========== PERSISTENT MODULE REGISTRY ==========
+    const moduleRegistry = new Map();
+    
+    // Track parent readiness state
+    let parentIsReady = false;
+    let parentReadyTimestamp = 0;
+    
+    // Track which modules have sent CHILD_READY
+    let modulesWithChildReady = new Set();
+    
+    // ========== HELPER FUNCTIONS ==========
+    function getModuleNameFromIframeId(iframeId) {
+        return VALID_MODULES[iframeId]?.name || null;
+    }
+    
+    function getModuleConfig(iframeId) {
+        return VALID_MODULES[iframeId] || null;
+    }
+    
+    function getOrCreateModuleEntry(iframeId) {
+        if (moduleRegistry.has(iframeId)) {
+            return moduleRegistry.get(iframeId);
+        }
         
-        // Add message listener - ENFORCE SINGLE LISTENER
-        window.removeEventListener('message', handleModuleMessage);
-        window.addEventListener('message', handleModuleMessage);
+        const config = getModuleConfig(iframeId);
+        if (!config) return null;
         
-        // Expose registry for debugging
-        window.__ModuleOrchestration = {
-            getState: (moduleId) => {
-                const module = ModuleRegistry.get(moduleId);
-                return module ? {
-                    state: module.state,
-                    childReady: module.childReadyReceived,
-                    parentReadySent: parentReadySentTracker.get(moduleId),
-                    queueSize: module.messageQueue ? module.messageQueue.length : 0,
-                    lastSeen: module.lastSeen
-                } : null;
-            },
-            getStats: () => {
-                const stats = {};
-                for (const [moduleId, module] of ModuleRegistry.entries()) {
-                    stats[module.moduleName] = {
-                        state: module.state,
-                        childReady: module.childReadyReceived,
-                        parentReadySent: parentReadySentTracker.get(moduleId),
-                        queueSize: module.messageQueue ? module.messageQueue.length : 0
-                    };
-                }
-                return stats;
-            },
-            isActive: (moduleId) => {
-                const module = ModuleRegistry.get(moduleId);
-                return module ? module.state === MODULE_STATES.ACTIVE : false;
-            },
-            sendToModule: (moduleId, message) => {
-                const module = ModuleRegistry.get(moduleId);
-                if (!module) return false;
-                
-                const iframe = document.getElementById(moduleId);
-                if (!iframe || !iframe.contentWindow) return false;
-                
-                if (module.state === MODULE_STATES.ACTIVE) {
-                    try {
-                        let targetOrigin = '*';
-                        try {
-                            const iframeSrc = iframe.src;
-                            if (iframeSrc && iframeSrc !== 'about:blank') {
-                                const url = new URL(iframeSrc, window.location.href);
-                                targetOrigin = url.origin;
-                            }
-                        } catch (e) {}
-                        iframe.contentWindow.postMessage(message, targetOrigin);
-                        return true;
-                    } catch (e) {
-                        return false;
-                    }
-                } else {
-                    return enqueueMessage(moduleId, message);
-                }
-            }
+        const entry = {
+            iframeId: iframeId,
+            moduleName: config.name,
+            state: MODULE_STATES.BOOT,
+            childReadyReceived: false,
+            childReadyTimestamp: 0,
+            parentReadySent: false,
+            parentReadyTimestamp: 0,
+            sourceWindow: null,
+            origin: null,
+            handshakeComplete: false,
+            activeTimestamp: 0,
+            registrationAttempts: 0,
+            iframeLoaded: false,
+            iframeLoadTimestamp: 0,
+            parentReadyAttempts: 0
         };
         
-        console.log('[Parent] Module orchestration layer initialized (deterministic, independent per module)');
+        moduleRegistry.set(iframeId, entry);
+        return entry;
+    }
+    
+    function updateModuleState(iframeId, newState, metadata = {}) {
+        const entry = moduleRegistry.get(iframeId);
+        if (!entry) return false;
         
-        // Emit orchestration ready event
-        if (window.KynectaEventBus) {
-            window.KynectaEventBus.emit('orchestration:ready', {
-                timestamp: Date.now(),
-                modules: Array.from(ModuleRegistry.keys())
-            });
+        entry.state = newState;
+        
+        if (metadata.timestamp) {
+            if (newState === MODULE_STATES.CHILD_READY_RECEIVED) {
+                entry.childReadyTimestamp = metadata.timestamp;
+            } else if (newState === MODULE_STATES.PARENT_READY_SENT) {
+                entry.parentReadyTimestamp = metadata.timestamp;
+            } else if (newState === MODULE_STATES.ACTIVE) {
+                entry.activeTimestamp = metadata.timestamp;
+                entry.handshakeComplete = true;
+            }
         }
         
-        // Mark parent as ready globally
+        return true;
+    }
+
+    function sendParentReadyToModule(iframeId) {
+    const entry = moduleRegistry.get(iframeId);
+    if (!entry) return false;
+    
+    if (entry.parentReadySent) return false;
+    
+    const iframe = document.getElementById(iframeId);
+    if (!iframe || !iframe.contentWindow) {
+        setTimeout(() => sendParentReadyToModule(iframeId), 100);
+        return false;
+    }
+    
+    let targetOrigin = '*';
+    try {
+        if (iframe.src && iframe.src !== 'about:blank') {
+            const url = new URL(iframe.src, window.location.href);
+            targetOrigin = url.origin;
+        }
+    } catch (e) {}
+    
+    // Use the global session function
+    const sessionData = window.__getSafeSessionData ? window.__getSafeSessionData() : { authenticated: false };
+    
+    const parentReadyMessage = {
+        type: 'PARENT_READY',
+        id: `parent_ready_${Date.now()}_${entry.moduleName}`,
+        source: 'parent',
+        target: entry.moduleName,
+        module: entry.moduleName,
+        timestamp: Date.now(),
+        payload: {
+            protocol: 'KYN-8.0',
+            state: 'READY',
+            session: {
+                authenticated: sessionData.authenticated,
+                userId: sessionData.userId,
+                token: sessionData.token,
+                user: sessionData.user,
+                expiresAt: sessionData.expiresAt
+            },
+            message: 'Module handshake complete'
+        }
+    };
+    
+    try {
+        console.log(`[Parent] Sending PARENT_READY to ${iframeId} (${entry.moduleName})`);
+        console.log(`[Parent] Session status: ${sessionData.authenticated ? '✅ Authenticated' : '❌ Guest'}`);
+        iframe.contentWindow.postMessage(parentReadyMessage, targetOrigin);
+        entry.parentReadySent = true;
+        
+        // Also send explicit SESSION_DATA message
+        setTimeout(() => {
+            if (iframe.contentWindow) {
+                iframe.contentWindow.postMessage({
+                    type: 'SESSION_DATA',
+                    id: `session_${Date.now()}_${entry.moduleName}`,
+                    source: 'parent',
+                    target: entry.moduleName,
+                    module: entry.moduleName,
+                    payload: {
+                        authenticated: sessionData.authenticated,
+                        userId: sessionData.userId,
+                        token: sessionData.token,
+                        user: sessionData.user,
+                        expiresAt: sessionData.expiresAt
+                    },
+                    timestamp: Date.now()
+                }, targetOrigin);
+            }
+        }, 50);
+        
+        return true;
+    } catch (e) {
+        console.error(`[Parent] Error sending to ${iframeId}:`, e);
+        entry.parentReadySent = false;
+        return false;
+    }
+}
+
+    function handleChildReady(iframeId, sourceWindow, origin, messageData) {
+        if (!iframeId) {
+            console.warn('[Parent] handleChildReady called without iframeId');
+            return false;
+        }
+        
+        let entry = moduleRegistry.get(iframeId);
+        if (!entry) {
+            entry = getOrCreateModuleEntry(iframeId);
+            if (!entry) {
+                return false;
+            }
+        }
+        
+        entry.sourceWindow = sourceWindow;
+        entry.origin = origin;
+        
+        const moduleNameFromMessage = messageData.module || messageData.payload?.module;
+        if (moduleNameFromMessage && moduleNameFromMessage !== entry.moduleName) {
+            console.log(`[Parent] CHILD_READY received from ${iframeId} with module: ${moduleNameFromMessage}`);
+            entry.moduleName = moduleNameFromMessage;
+        }
+        
+        if (entry.childReadyReceived) {
+            console.log(`[Parent] CHILD_READY already received for ${iframeId}`);
+            // If we already sent PARENT_READY, we're good; if not, send it now
+            if (!entry.parentReadySent && parentIsReady) {
+                console.log(`[Parent] Parent ready, sending PARENT_READY to ${iframeId}`);
+                sendParentReadyToModule(iframeId);
+            }
+            return true;
+        }
+        
+        entry.childReadyReceived = true;
+        entry.childReadyTimestamp = Date.now();
+        updateModuleState(iframeId, MODULE_STATES.CHILD_READY_RECEIVED, { timestamp: Date.now() });
+        
+        // Track that this module is ready
+        modulesWithChildReady.add(iframeId);
+        
+        console.log(`[Parent] ✅ CHILD_READY recorded for ${iframeId} (module: ${entry.moduleName})`);
+        
+        // Send PARENT_READY immediately if parent is ready
+        if (parentIsReady && !entry.parentReadySent) {
+            console.log(`[Parent] Parent ready, sending PARENT_READY to ${iframeId}`);
+            sendParentReadyToModule(iframeId);
+        }
+        
+        return true;
+    }
+
+    function markParentReadyAndBroadcast() {
+        if (parentIsReady) {
+            console.log('[Parent] Already marked as ready');
+            return;
+        }
+        
+        console.log('[Parent] 🎯 Marking parent as READY');
+        parentIsReady = true;
+        parentReadyTimestamp = Date.now();
+        
+        // Mark global state
         window.__PARENT_READY_STATE__ = 'READY';
         window.__APP_STATE__ = 'ACTIVE';
+        
+        // Dispatch event for modules to detect
+        window.dispatchEvent(new CustomEvent('parentReady', {
+            detail: { ready: true, timestamp: Date.now() }
+        }));
+        
+        // Send PARENT_READY to any modules that have already sent CHILD_READY
+        console.log(`[Parent] Checking ${modulesWithChildReady.size} modules that have sent CHILD_READY`);
+        
+        for (const iframeId of modulesWithChildReady) {
+            const entry = moduleRegistry.get(iframeId);
+            if (entry && !entry.parentReadySent) {
+                console.log(`[Parent] Sending PARENT_READY to ${iframeId} (already ready)`);
+                sendParentReadyToModule(iframeId);
+            }
+        }
+        
+        // Emit event
+        if (window.KynectaEventBus) {
+            window.KynectaEventBus.emit('PARENT_READY_BROADCAST', {
+                timestamp: parentReadyTimestamp,
+                modules: Array.from(modulesWithChildReady)
+            });
+        }
     }
+
+    function initOrchestration() {
+        console.log('[Parent] 🚀 Starting orchestration');
+        
+        // Initialize module registry entries for all iframes
+        for (const iframeId of Object.keys(VALID_MODULES)) {
+            const iframe = document.getElementById(iframeId);
+            if (iframe) {
+                getOrCreateModuleEntry(iframeId);
+                
+                // Track iframe load
+                iframe.addEventListener('load', () => {
+                    console.log('[Parent] Iframe loaded:', iframeId);
+                    const entry = moduleRegistry.get(iframeId);
+                    if (entry) {
+                        entry.iframeLoaded = true;
+                        entry.iframeLoadTimestamp = Date.now();
+                    }
+                });
+            }
+        }
+        
+        // Mark parent as ready after a short delay (allows modules to initialize)
+        setTimeout(() => {
+            console.log('[Parent] Parent ready timeout reached, marking as READY');
+            markParentReadyAndBroadcast();
+        }, 2000);
+        
+        // Also check when DOM is fully loaded
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', () => {
+                console.log('[Parent] DOMContentLoaded');
+                setTimeout(() => {
+                    if (!parentIsReady) {
+                        console.log('[Parent] DOMContentLoaded: marking parent ready');
+                        markParentReadyAndBroadcast();
+                    }
+                }, 500);
+            });
+        } else {
+            console.log('[Parent] DOM already loaded');
+            setTimeout(() => {
+                if (!parentIsReady) {
+                    console.log('[Parent] DOM loaded: marking parent ready');
+                    markParentReadyAndBroadcast();
+                }
+            }, 500);
+        }
+        
+        // Expose debug API
+        window.__ModuleOrchestration = {
+            getState: (iframeId) => {
+                const entry = moduleRegistry.get(iframeId);
+                return entry ? {
+                    state: entry.state,
+                    childReadyReceived: entry.childReadyReceived,
+                    parentReadySent: entry.parentReadySent,
+                    handshakeComplete: entry.handshakeComplete,
+                    childReadyTimestamp: entry.childReadyTimestamp,
+                    parentReadyTimestamp: entry.parentReadyTimestamp,
+                    activeTimestamp: entry.activeTimestamp,
+                    parentReadyAttempts: entry.parentReadyAttempts
+                } : null;
+            },
+            getAllStates: () => {
+                const states = {};
+                for (const [iframeId, entry] of moduleRegistry.entries()) {
+                    states[iframeId] = {
+                        moduleName: entry.moduleName,
+                        state: entry.state,
+                        childReadyReceived: entry.childReadyReceived,
+                        parentReadySent: entry.parentReadySent,
+                        handshakeComplete: entry.handshakeComplete,
+                        parentReadyAttempts: entry.parentReadyAttempts
+                    };
+                }
+                return states;
+            },
+            isParentReady: () => parentIsReady,
+            markParentReady: markParentReadyAndBroadcast,
+            forceParentReady: () => {
+                console.log('[Parent] Manual force parent ready');
+                markParentReadyAndBroadcast();
+            },
+            getModulesWithChildReady: () => Array.from(modulesWithChildReady),
+            // Expose registry for message listener
+            _getRegistry: () => moduleRegistry,
+            _getIframeByWindow: (win) => {
+                for (const [iframeId, entry] of moduleRegistry.entries()) {
+                    if (entry.sourceWindow === win) {
+                        return iframeId;
+                    }
+                }
+                return null;
+            },
+            handleChildReady: handleChildReady
+        };
+        
+        console.log('[Parent] Orchestration initialized');
+    }
+    
+    // Add manual trigger to window for debugging
+    window.forceParentReady = function() {
+        console.log('[Parent] Manual force parent ready from console');
+        if (window.__ModuleOrchestration && window.__ModuleOrchestration.forceParentReady) {
+            window.__ModuleOrchestration.forceParentReady();
+        } else {
+            markParentReadyAndBroadcast();
+        }
+    };
     
     // Initialize after DOM is ready
     if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', initModuleOrchestration);
+        document.addEventListener('DOMContentLoaded', initOrchestration);
     } else {
-        initModuleOrchestration();
+        initOrchestration();
     }
+
+   
+        // Listen for storage changes (when login happens)
+    window.addEventListener('storage', function(event) {
+        if (event.key === 'kynecta_auth' || event.key === 'kynecta_token' || event.key === 'kynecta_user') {
+            console.log('[Parent] Session storage changed, broadcasting to modules');
+            if (window.__broadcastSessionToModules) {
+                window.__broadcastSessionToModules();
+            }
+        }
+    });
     
+    // Check for existing session on load
+    setTimeout(function() {
+        if (window.__getSafeSessionData) {
+            const sessionData = window.__getSafeSessionData();
+            if (sessionData.authenticated) {
+                console.log('[Parent] Existing session found on load, broadcasting');
+                if (window.__broadcastSessionToModules) {
+                    window.__broadcastSessionToModules();
+                }
+            }
+        }
+    }, 1000);
+
 })();
 </script>
 
@@ -6114,332 +6186,9 @@
 })();
 </script>
 
-<!-- ========== SYSTEM 16: SINGLE GLOBAL MESSAGE LISTENER (UNIFIED HANDLER) ========== -->
-<!-- THE ONLY MESSAGE LISTENER IN THE ENTIRE APPLICATION - ENFORCED -->
-<script>
-(function() {
-    'use strict';
 
-    // Remove any existing listeners (safety) - ENFORCE SINGLE LISTENER
-    const existingListeners = window._messageListeners || [];
-    existingListeners.forEach(listener => {
-        window.removeEventListener('message', listener);
-    });
 
-    // Track activated modules to ensure idempotent handshake responses
-    const activatedModules = new WeakSet();
-
-    // Function to get safe session data
-    function getSafeSessionData() {
-        try {
-            const token = window.__getAuthToken();
-            const userData = localStorage.getItem('kynecta_user');
-            const userId = window.__PARENT_SESSION__?.userId || 
-                           (userData ? JSON.parse(userData)?.id : null) || 
-                           'guest';
-            
-            return {
-                authenticated: !!token,
-                userId: userId,
-                token: token || null,
-                expiresAt: window.__PARENT_SESSION__?.expiresAt || Date.now() + 3600000
-            };
-        } catch (e) {
-            return { authenticated: false, userId: 'guest', token: null };
-        }
-    }
-
-    /**
-     * UNIFIED MESSAGE HANDLER - SINGLE SOURCE OF TRUTH
-     * Responds to CHILD_READY IMMEDIATELY per module - NO GLOBAL WAIT
-     */
-    function handleMessage(event) {
-        // Relax origin validation during handshake phase - controlled approach
-        // Allow any origin during initial handshake to prevent deadlock, but still validate structure
-        if (!event.data || typeof event.data !== 'object') return;
-
-        const data = event.data;
-        
-        // Skip if already processed
-        if (data._processedBy) return;
-
-        // Handle CHILD_READY messages - IMMEDIATE RESPONSE (NO WAITING)
-        if (data.type === 'CHILD_READY') {
-            // Allow controlled re-sync - don't block duplicates, just warn
-            if (activatedModules.has(event.source)) {
-                console.log(`[Parent] CHILD_READY from module already activated, allowing controlled re-sync`);
-                // Still respond with PARENT_READY for recovery
-            }
-            
-            // Mark this module as activated
-            activatedModules.add(event.source);
-            
-            // Extract module name from message or identify from source
-            const moduleName = data.module || 
-                               (() => {
-                                   const iframeIds = ['messagesIframe', 'statusIframe', 'groupIframe', 'friendsIframe', 'callsIframe', 'settingsIframe', 'toolsIframe'];
-                                   for (const id of iframeIds) {
-                                       const iframe = document.getElementById(id);
-                                       if (iframe && iframe.contentWindow === event.source) {
-                                           return id.replace('Iframe', '');
-                                       }
-                                   }
-                                   return 'unknown';
-                               })();
-            
-            console.log(`[Parent] Module ${moduleName} → CHILD_READY received, sending PARENT_READY immediately`);
-            
-            // Send PARENT_READY response IMMEDIATELY - NO DEPENDENCY ON OTHER MODULES
-            try {
-                const sessionData = getSafeSessionData();
-                
-                event.source.postMessage({
-                    type: 'PARENT_READY',
-                    id: `parent_ready_${Date.now()}_${moduleName}`,
-                    source: 'parent',
-                    target: moduleName,
-                    timestamp: Date.now(),
-                    payload: {
-                        protocol: 'KYN-8.0',
-                        state: 'READY',
-                        session: sessionData,
-                        message: 'Module handshake complete'
-                    }
-                }, '*');
-                
-                console.log(`[Parent] Module ${moduleName} → PARENT_READY sent`);
-                
-                // Also send session data if authenticated
-                if (sessionData.authenticated) {
-                    setTimeout(() => {
-                        try {
-                            event.source.postMessage({
-                                type: 'SESSION_DATA',
-                                id: `session_${Date.now()}_${moduleName}`,
-                                source: 'parent',
-                                target: moduleName,
-                                payload: sessionData,
-                                timestamp: Date.now()
-                            }, '*');
-                            console.log(`[Parent] Module ${moduleName} → SESSION_DATA sent`);
-                        } catch (e) {}
-                    }, 10);
-                }
-            } catch (e) {
-                console.error(`[Parent] Failed to send PARENT_READY to module ${moduleName}:`, e);
-            }
-            
-            // Emit event for tracking
-            window.KynectaEventBus?.emit('HANDSHAKE_COMPLETED', { module: moduleName });
-            return;
-        }
-        
-        // Handle VERIFY_SESSION - immediate response
-        if (data.type === 'VERIFY_SESSION') {
-            const sessionData = getSafeSessionData();
-            const messageId = data.id || data.messageId || data.requestId;
-            
-            try {
-                event.source.postMessage({
-                    type: 'VERIFY_RESPONSE',
-                    id: `verify_resp_${messageId || Date.now()}`,
-                    source: 'parent',
-                    target: data.source || data.target || '*',
-                    payload: {
-                        valid: sessionData.authenticated,
-                        userId: sessionData.userId,
-                        token: sessionData.token ? 'present' : null
-                    },
-                    timestamp: Date.now()
-                }, '*');
-            } catch (e) {}
-            return;
-        }
-        
-        // Handle REQUEST_SESSION - immediate response
-        if (data.type === 'REQUEST_SESSION') {
-            const sessionData = getSafeSessionData();
-            const messageId = data.id || data.messageId || data.requestId;
-            
-            try {
-                event.source.postMessage({
-                    type: 'SESSION_RESPONSE',
-                    id: `session_resp_${messageId || Date.now()}`,
-                    source: 'parent',
-                    target: data.source || data.target || '*',
-                    payload: sessionData,
-                    timestamp: Date.now()
-                }, '*');
-            } catch (e) {}
-            return;
-        }
-        
-        // Handle HANDSHAKE_REQUEST - immediate response (maintains backward compatibility)
-        if (data.type === 'HANDSHAKE_REQUEST') {
-            // Allow controlled re-sync
-            if (activatedModules.has(event.source)) {
-                console.log(`[Parent] HANDSHAKE_REQUEST from already activated module, still sending ACK`);
-            }
-            activatedModules.add(event.source);
-            
-            const moduleName = data.payload?.module || data.module || 'unknown';
-            console.log(`[Parent] Module ${moduleName} → HANDSHAKE_REQUEST received, sending ACK`);
-            
-            try {
-                event.source.postMessage({
-                    type: 'HANDSHAKE_ACK',
-                    id: `hs_ack_${data.id || Date.now()}`,
-                    source: 'parent',
-                    target: moduleName,
-                    payload: {
-                        success: true,
-                        module: moduleName,
-                        timestamp: Date.now()
-                    },
-                    timestamp: Date.now()
-                }, '*');
-                
-                // Also send PARENT_READY for consistency
-                const sessionData = getSafeSessionData();
-                event.source.postMessage({
-                    type: 'PARENT_READY',
-                    id: `parent_ready_${Date.now()}_${moduleName}`,
-                    source: 'parent',
-                    target: moduleName,
-                    timestamp: Date.now(),
-                    payload: {
-                        protocol: 'KYN-8.0',
-                        state: 'READY',
-                        session: sessionData
-                    }
-                }, '*');
-                
-                console.log(`[Parent] Module ${moduleName} → HANDSHAKE_ACK and PARENT_READY sent`);
-            } catch (e) {}
-            return;
-        }
-        
-        // Handle PING - immediate response
-        if (data.type === 'PING') {
-            try {
-                event.source.postMessage({
-                    type: 'PONG',
-                    id: `pong_${data.id || Date.now()}`,
-                    source: 'parent',
-                    target: data.source || '*',
-                    payload: { timestamp: Date.now(), echo: data.payload },
-                    timestamp: Date.now()
-                }, '*');
-            } catch (e) {}
-            return;
-        }
-        
-        // Handle HEARTBEAT - update registry and respond
-        if (data.type === 'HEARTBEAT') {
-            const sourceModule = (() => {
-                const iframeIds = ['messagesIframe', 'statusIframe', 'groupIframe', 'friendsIframe', 'callsIframe', 'settingsIframe', 'toolsIframe'];
-                for (const id of iframeIds) {
-                    const iframe = document.getElementById(id);
-                    if (iframe && iframe.contentWindow === event.source) {
-                        return id.replace('Iframe', '');
-                    }
-                }
-                return null;
-            })();
-            
-            if (sourceModule) {
-                window.KynectaModuleRegistry?.heartbeat(sourceModule);
-            }
-            
-            try {
-                event.source.postMessage({
-                    type: 'HEARTBEAT_ACK',
-                    id: `hb_ack_${data.id || Date.now()}`,
-                    source: 'parent',
-                    target: sourceModule || '*',
-                    payload: { timestamp: Date.now() },
-                    timestamp: Date.now()
-                }, '*');
-            } catch (e) {}
-            return;
-        }
-        
-        // Route other messages to the message router if available
-        if (window.KynectaMessageRouter) {
-            window.KynectaMessageRouter.route(data, event.source, event.origin);
-        }
-    }
-
-    // Add single unified message listener - ENFORCE SINGLE LISTENER
-    window.removeEventListener('message', handleMessage);
-    window.addEventListener('message', handleMessage);
-    window._messageListeners = [handleMessage];
-    window.__GLOBAL_MESSAGE_LISTENER__ = true;
-    
-    // Mark parent as ready immediately (no waiting for modules)
-    window.__PARENT_READY_STATE__ = 'READY';
-    window.__APP_STATE__ = 'ACTIVE';
-    
-    // Expose helper for debugging
-    window.__getHandshakeStatus = function() {
-        return {
-            activatedCount: activatedModules.size,
-            parentReady: true,
-            timestamp: Date.now()
-        };
-    };
-})();
-</script>
-
-<!-- ========== SYSTEM 17: PARENT READY DISPATCHER (FOR LATE REGISTRANTS) ========== -->
-<script>
-(function() {
-    'use strict';
-
-    // Listen for module registrations and send PARENT_READY if not already sent
-    window.KynectaEventBus?.on('MODULE_REGISTERED', (data) => {
-        if (!data.module || !data.success) return;
-
-        // Parent is always ready - send PARENT_READY to this specific module
-        const module = window.KynectaModuleRegistry?.get(data.module);
-        if (module?.windowRef) {
-            setTimeout(() => {
-                try {
-                    const sessionData = (() => {
-                        try {
-                            const token = window.__getAuthToken();
-                            return {
-                                authenticated: !!token,
-                                userId: window.__PARENT_SESSION__?.userId || 'guest',
-                                token: token
-                            };
-                        } catch (e) {
-                            return { authenticated: false };
-                        }
-                    })();
-                    
-                    module.windowRef.postMessage({
-                        type: 'PARENT_READY',
-                        id: `parent_ready_late_${Date.now()}_${data.module}`,
-                        source: 'parent',
-                        target: data.module,
-                        timestamp: Date.now(),
-                        payload: {
-                            protocol: 'KYN-8.0',
-                            state: 'READY',
-                            session: sessionData
-                        }
-                    }, '*');
-                    
-                    console.log(`[Parent] Late PARENT_READY sent to module ${data.module}`);
-                } catch (e) {}
-            }, 10);
-        }
-    });
-})();
-</script>
-
-<!-- ========== SYSTEM 18: INITIALIZE IFRAMES AFTER PARENT READY ========== -->
+<!-- ========== IFRAME INITIALIZATION ========== -->
 <script>
 (function() {
     'use strict';
@@ -6455,7 +6204,7 @@
         { id: 'toolsIframe', src: 'Tools.html', critical: false }
     ];
 
-    // Initialize iframes immediately (no waiting for parent ready barrier)
+    // Initialize iframes
     function initializeIframes() {
         IFRAME_CONFIG.forEach(config => {
             const iframe = document.getElementById(config.id);
@@ -6477,23 +6226,64 @@
 })();
 </script>
 
-<!-- ========== SYSTEM 19: SESSION PROPAGATION ========== -->
+<!-- ========== SESSION PROPAGATION ========== -->
 <script>
 (function() {
     'use strict';
 
-    // Propagate session to all iframes when session becomes available
+    // Propagate session to all iframes and sync to api.core
     function propagateSession() {
-        const token = window.__getAuthToken();
+        // Try to get token from multiple sources
+        let token = window.__getAuthToken();
+        
+        if (!token) {
+            // Also try moodchat_token directly
+            token = localStorage.getItem('moodchat_token');
+        }
+        
         if (!token) return;
+        
+        // CRITICAL: Sync token to api.core
+        if (window.api && window.api.core) {
+            if (typeof window.api.core.setUserToken === 'function') {
+                window.api.core.setUserToken(token);
+                console.log('[Parent] Token synced to api.core');
+            }
+            // Also try direct assignment
+            if (window.api.core.tokenManager && typeof window.api.core.tokenManager.setToken === 'function') {
+                window.api.core.tokenManager.setToken(token);
+            }
+        }
+        
+        // Also set global token for direct access
+        window.__userToken = token;
+        window.__accessToken = token;
+        
+        // Try to get user data
+        let user = null;
+        try {
+            const userData = localStorage.getItem('moodchat_user');
+            if (userData) {
+                user = JSON.parse(userData);
+            } else {
+                // Try kynecta_auth
+                const authData = localStorage.getItem('kynecta_auth');
+                if (authData) {
+                    const parsed = JSON.parse(authData);
+                    user = parsed.user;
+                }
+            }
+        } catch (e) {}
         
         const sessionData = {
             authenticated: true,
-            userId: window.__PARENT_SESSION__?.userId || 'unknown',
+            userId: user?.id || window.__PARENT_SESSION__?.userId || 'user',
             token: token,
+            user: user,
             expiresAt: window.__PARENT_SESSION__?.expiresAt || Date.now() + 3600000
         };
         
+        // Broadcast to all iframes
         const iframes = document.querySelectorAll('iframe');
         iframes.forEach(iframe => {
             if (!iframe.contentWindow) return;
@@ -6510,15 +6300,15 @@
         });
         
         window.__SESSION_PROPAGATED__ = true;
-        console.log('[Parent] Session propagated to all iframes');
+        console.log('[Parent] Session propagated to modules and api.core');
     }
 
     // Propagate immediately if authenticated
-    if (window.__isAuthenticated()) {
+    if (window.__isAuthenticated() || localStorage.getItem('moodchat_token')) {
         setTimeout(propagateSession, 500);
     }
     
-    // Listen for auth success to propagate
+    // Listen for auth success
     window.KynectaEventBus?.on('AUTH_SUCCESS', function() {
         setTimeout(propagateSession, 100);
     });
@@ -6527,12 +6317,17 @@
     window.addEventListener('load', function() {
         setTimeout(propagateSession, 500);
     });
+    
+    // Listen for storage changes
+    window.addEventListener('storage', function(event) {
+        if (event.key === 'moodchat_token' || event.key === 'moodchat_user') {
+            console.log('[Parent] Storage changed, propagating session');
+            setTimeout(propagateSession, 100);
+        }
+    });
 })();
 </script>
 
-<!-- ========== THE REMAINDER OF THE FILE (ORIGINAL STYLES, UI, SCRIPTS) - ALL PRESERVED ========== -->
-<!-- All original styles, UI elements, and scripts from the original file remain unchanged below -->
-<!-- This includes: ALL CSS styles, HTML structure, navigation elements, modals, video conference components, etc. -->
 <!-- They are preserved exactly as in the original file to maintain all existing functionality. -->
 
     <title>Kynecta - Advanced Mood-Based Chat</title>
@@ -11454,3 +11249,4 @@ const SessionCoordinator = {
 
 </body>
 </html>
+[file content end]
