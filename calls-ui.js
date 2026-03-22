@@ -1,9 +1,9 @@
 // calls-ui.js
-// ==================== RESILIENT UI CONTROLLER - PROTOCOL COMPLIANT ====================
-// Version: 3.4.4 - PROTOCOL COMPLIANT: Event-driven, parent-controlled, no timeouts
+// ==================== RESILIENT UI CONTROLLER - DETERMINISTIC LIFECYCLE ====================
+// Version: 4.2.0 - Updated to integrate with calls-core v8.2.2 deterministic lifecycle
 // Purpose: Fault-tolerant, responsive UI layer for calls iframe
-// Dependencies: calls-core.js v7.2.3
-// =============================================================================
+// Dependencies: calls-core.js v8.2.2
+// =======================================================================================
 
 (function() {
     'use strict';
@@ -17,6 +17,7 @@
     }
     window[MODULE_INIT_FLAG] = true;
 
+    // Session cache - memory only, no localStorage persistence
     window.__CHILD_SESSION__ = window.__CHILD_SESSION__ || {
         token: null,
         userId: null,
@@ -27,25 +28,22 @@
     window.__IFRAME_DEBUG__ = window.__IFRAME_DEBUG__ || false;
     const DEBUG = window.__IFRAME_DEBUG__;
 
-    // ==================== CORE READY STATE ====================
-    let coreReady = false;
+    // ==================== CORE REFERENCE ====================
     let coreInstance = null;
+    let coreReady = false;
     let coreInitializationStartTime = Date.now();
-    let coreReadyPromiseResolve = null;
-    let coreReadyPromise = new Promise((resolve) => {
-        coreReadyPromiseResolve = resolve;
-    });
 
     // ==================== LIFECYCLE STATE TRACKING ====================
+    // These are now synced from core events, not set by UI
     let parentReady = false;
     let sessionReady = false;
     let handshakeComplete = false;
     let fallbackModeActive = false;
     let inPassiveMode = false;
+    let coreLifecycleState = 'BOOT';
     
-    // CRITICAL: Don't set timeouts - trust core to emit events
-    let coreCheckAttempts = 0;
-    const MAX_CORE_CHECK_ATTEMPTS = 20; // For polling fallback only
+    // No polling - rely on core events
+    // No coreCheckAttempts or MAX_CORE_CHECK_ATTEMPTS
 
     // ==================== ERROR CACHE FOR ONCE LOGGING ====================
     const _onceErrors = new Map();
@@ -72,6 +70,33 @@
         }
     }
 
+    // ==================== CORE STATE ASSERTION HELPER ====================
+    function assertCoreActive(actionName) {
+        if (!coreInstance) {
+            logOnce('warn', `Cannot perform ${actionName} - core not available`);
+            return false;
+        }
+        
+        // Use core's assertActive if available
+        if (coreInstance.assertActive && typeof coreInstance.assertActive === 'function') {
+            return coreInstance.assertActive(actionName);
+        }
+        
+        // Fallback to checking core's lifecycle state
+        if (coreInstance.getLifecycleState) {
+            const state = coreInstance.getLifecycleState();
+            coreLifecycleState = state;
+            if (state !== 'ACTIVE') {
+                logOnce('warn', `Cannot perform ${actionName} - core not ACTIVE (current: ${state})`);
+                return false;
+            }
+            return true;
+        }
+        
+        // Last resort fallback
+        return coreReady && parentReady && sessionReady;
+    }
+
     // ==================== PARENT CONNECTION WRAPPER ====================
     function sendToParent(type, payload = {}) {
         try {
@@ -84,20 +109,20 @@
             }
             
             if (window.parent && window.parent !== window) {
-                if (window.callCore && window.callCore.sendAction) {
-                    window.callCore.sendAction(type, payload);
+                if (coreInstance && coreInstance.sendAction) {
+                    coreInstance.sendAction(type, payload);
                     return true;
                 }
                 
-                if (window.callCore && window.callCore.sendToParent) {
-                    window.callCore.sendToParent(type, payload, { requireAck: false })
+                if (coreInstance && coreInstance.sendToParent) {
+                    coreInstance.sendToParent(type, payload, { requireAck: false })
                         .catch(() => {});
                     return true;
                 }
                 
-                // Use modern message format
+                // Use modern message format as fallback
                 const message = {
-                    protocol: 'KYN-8.0',
+                    protocol: 'KYN-8.2',
                     type: type,
                     source: CURRENT_MODULE_NAME,
                     target: 'parent',
@@ -106,9 +131,9 @@
                         'msg-' + Date.now() + '-' + Math.random().toString(36).substring(2, 9),
                     timestamp: Date.now(),
                     payload: payload || {},
-                    version: '7.1.0'
+                    version: '4.2.0'
                 };
-                window.parent.postMessage(message, window.location.origin);
+                window.parent.postMessage(message, '*');
                 return true;
             }
         } catch (e) {
@@ -119,13 +144,76 @@
         return false;
     }
 
+    // ==================== SESSION VALIDATION ====================
+    function isSessionValid() {
+        // Check core first
+        if (coreInstance && coreInstance.isAuthenticated) {
+            return coreInstance.isAuthenticated();
+        }
+        
+        if (coreInstance && coreInstance.getSessionStatus) {
+            return coreInstance.getSessionStatus() === 'valid';
+        }
+        
+        if (coreInstance && coreInstance.getSession) {
+            const session = coreInstance.getSession();
+            if (session && session.token) {
+                return true;
+            }
+        }
+        
+        // Fallback to memory cache
+        return !!(window.__CHILD_SESSION__ && 
+                 window.__CHILD_SESSION__.token && 
+                 window.__CHILD_SESSION__.token.length > 10 &&
+                 (!window.__CHILD_SESSION__.expires || 
+                  window.__CHILD_SESSION__.expires > Date.now()));
+    }
+
+    // ==================== ACTION PERMISSION CHECK ====================
+    function canPerformAction(actionName) {
+        if (inPassiveMode) {
+            showNotification('Waiting for parent connection...', 'info');
+            return false;
+        }
+        
+        if (fallbackModeActive) {
+            showNotification('Limited connectivity - Please retry later', 'warning');
+            return false;
+        }
+        
+        // Use core's assertActive if available
+        if (coreInstance && coreInstance.assertActive) {
+            if (!coreInstance.assertActive(actionName)) {
+                showNotification('Call system initializing...', 'info');
+                return false;
+            }
+        } else if (!coreReady) {
+            showNotification('Call system initializing...', 'info');
+            return false;
+        }
+        
+        // For actions that require authentication
+        const authRequiredActions = [
+            'startCall', 'answerCall', 'sendReaction', 
+            'setMood', 'setIntention', 'saveNotes'
+        ];
+        
+        if (authRequiredActions.includes(actionName) && !isSessionValid()) {
+            showNotification('Please log in to use this feature', 'warning');
+            return false;
+        }
+        
+        return true;
+    }
+
     // ==================== EVENT-DRIVEN CORE READINESS ====================
     function setupCoreReadyListener() {
         if (DEBUG) {
             logOnce('info', 'Setting up core ready listeners');
         }
 
-        // CRITICAL: Listen for core ready events - no timeouts
+        // Listen for core ready events - no timeouts
         window.addEventListener('CALLS_CORE_READY', function(event) {
             if (DEBUG) {
                 logOnce('success', 'Received CALLS_CORE_READY event', event.detail);
@@ -158,53 +246,36 @@
             handleCoreReady(window.callCore || window.CallsCore || window.callsCore);
         });
 
-        const messageHandler = function(event) {
-            if (!event.data) return;
-            
-            const data = event.data;
-            
-            if (data.type === 'CALLS_CORE_READY') {
+        // Also listen for lifecycle state changes from core
+        window.addEventListener('module_state_change', function(event) {
+            const detail = event.detail;
+            if (detail && detail.module === 'calls') {
+                coreLifecycleState = detail.to;
                 if (DEBUG) {
-                    logOnce('success', 'Received CALLS_CORE_READY via message event');
+                    logOnce('info', `Core lifecycle state changed: ${detail.from} → ${detail.to}`, detail.reason);
                 }
-                handleCoreReady(window.callCore || window.CallsCore || window.callsCore);
+                
+                // Update UI state based on core lifecycle
+                if (detail.to === 'ACTIVE') {
+                    coreReady = true;
+                    parentReady = true;
+                    handshakeComplete = true;
+                    RenderingPipeline.updateSyncIndicator();
+                } else if (detail.to === 'WAIT_PARENT') {
+                    RenderingPipeline.updateSyncIndicator();
+                } else if (detail.to === 'ERROR') {
+                    fallbackModeActive = true;
+                    RenderingPipeline.updateSyncIndicator();
+                }
             }
-            
-            if (data.type === 'MODULE_READY' && (data.module === 'calls' || !data.module)) {
-                if (DEBUG) {
-                    logOnce('success', 'Received MODULE_READY via message event');
-                }
-                handleCoreReady(window.callCore || window.CallsCore || window.callsCore);
-            }
-        };
-        
-        window.addEventListener('message', messageHandler);
-        
-        // Polling as last resort with limited attempts, but events should fire first
-        const checkInterval = setInterval(() => {
-            coreCheckAttempts++;
-            
-            if (window.callCore && typeof window.callCore.isCoreReady === 'function' && window.callCore.isCoreReady()) {
-                clearInterval(checkInterval);
-                handleCoreReady(window.callCore);
-            } else if (window.callCore && window.callCore.getState && window.callCore.getState().coreReady) {
-                clearInterval(checkInterval);
-                handleCoreReady(window.callCore);
-            } else if (window.callCore && window.callCore.getLifecycleState) {
-                const state = window.callCore.getLifecycleState();
-                if (state === 'ACTIVE') {
-                    clearInterval(checkInterval);
-                    handleCoreReady(window.callCore);
-                }
-            } else if (coreCheckAttempts >= MAX_CORE_CHECK_ATTEMPTS) {
-                // Don't time out - just stop polling and rely on events
-                if (DEBUG) {
-                    logOnce('info', 'Core polling stopped, waiting for events');
-                }
-                clearInterval(checkInterval);
-            }
-        }, 500); // Poll less frequently
-        
+        });
+
+        // Listen for parent ready from core
+        window.addEventListener('parent_ready', function() {
+            parentReady = true;
+            RenderingPipeline.updateSyncIndicator();
+        });
+
         if (DEBUG) {
             logOnce('info', 'Core ready listeners established');
         }
@@ -234,6 +305,22 @@
                 handshakeComplete = state.registered && state.sessionReceived;
                 fallbackModeActive = state.degraded || false;
                 inPassiveMode = state.inPassiveMode || false;
+                coreLifecycleState = state.lifecycleState || coreInstance.getLifecycleState?.() || 'UNKNOWN';
+                
+                // Update session cache from core
+                if (state.session && state.session.token) {
+                    window.__CHILD_SESSION__.token = state.session.token;
+                    window.__CHILD_SESSION__.userId = state.session.userId;
+                    window.__CHILD_SESSION__.expires = state.session.expiresAt;
+                }
+            }
+            
+            if (coreInstance.getLifecycleState) {
+                const lifecycleState = coreInstance.getLifecycleState();
+                coreLifecycleState = lifecycleState;
+                if (lifecycleState === 'ACTIVE') {
+                    parentReady = true;
+                }
             }
             
             if (coreInstance.isInPassiveMode) {
@@ -244,11 +331,21 @@
             if (coreInstance.getParentReady) {
                 parentReady = coreInstance.getParentReady();
             }
-        }
-        
-        if (coreReadyPromiseResolve) {
-            coreReadyPromiseResolve(true);
-            coreReadyPromiseResolve = null;
+            
+            // Get session status
+            if (coreInstance.isAuthenticated) {
+                sessionReady = coreInstance.isAuthenticated();
+            }
+            
+            // Get session directly
+            if (coreInstance.getSession) {
+                const session = coreInstance.getSession();
+                if (session && session.token) {
+                    window.__CHILD_SESSION__.token = session.token;
+                    window.__CHILD_SESSION__.userId = session.userId;
+                    window.__CHILD_SESSION__.expires = session.expiresAt;
+                }
+            }
         }
         
         performFullInitialization();
@@ -256,6 +353,36 @@
 
     function detectExistingCore() {
         if (window.callCore) {
+            // Check if core is in ACTIVE state
+            if (window.callCore.getLifecycleState && window.callCore.getLifecycleState() === 'ACTIVE') {
+                if (DEBUG) {
+                    logOnce('success', 'callCore is in ACTIVE state');
+                }
+                coreReady = true;
+                coreInstance = window.callCore;
+                coreLifecycleState = 'ACTIVE';
+                
+                // Check passive mode
+                if (window.callCore.isInPassiveMode) {
+                    inPassiveMode = window.callCore.isInPassiveMode();
+                } else if (window.callCore.getState) {
+                    const state = window.callCore.getState();
+                    inPassiveMode = state.inPassiveMode || false;
+                    parentReady = state.parentReady || false;
+                    sessionReady = state.sessionStatus === 'valid';
+                    
+                    // Update session cache
+                    if (state.session && state.session.token) {
+                        window.__CHILD_SESSION__.token = state.session.token;
+                        window.__CHILD_SESSION__.userId = state.session.userId;
+                        window.__CHILD_SESSION__.expires = state.session.expiresAt;
+                    }
+                }
+                
+                return true;
+            }
+            
+            // Check if core reports ready
             if (window.callCore.isCoreReady && typeof window.callCore.isCoreReady === 'function') {
                 if (window.callCore.isCoreReady()) {
                     if (DEBUG) {
@@ -264,7 +391,6 @@
                     coreReady = true;
                     coreInstance = window.callCore;
                     
-                    // Check passive mode
                     if (window.callCore.isInPassiveMode) {
                         inPassiveMode = window.callCore.isInPassiveMode();
                     } else if (window.callCore.getState) {
@@ -272,12 +398,23 @@
                         inPassiveMode = state.inPassiveMode || false;
                         parentReady = state.parentReady || false;
                         sessionReady = state.sessionStatus === 'valid';
+                        
+                        if (state.session && state.session.token) {
+                            window.__CHILD_SESSION__.token = state.session.token;
+                            window.__CHILD_SESSION__.userId = state.session.userId;
+                            window.__CHILD_SESSION__.expires = state.session.expiresAt;
+                        }
+                    }
+                    
+                    if (window.callCore.getLifecycleState) {
+                        coreLifecycleState = window.callCore.getLifecycleState();
                     }
                     
                     return true;
                 }
             }
             
+            // Check session status
             if (window.callCore.getSessionStatus && window.callCore.getSessionStatus() === 'valid') {
                 if (DEBUG) {
                     logOnce('success', 'callCore session status is valid');
@@ -291,6 +428,18 @@
                 
                 if (window.callCore.getParentReady) {
                     parentReady = window.callCore.getParentReady();
+                }
+                
+                // Update session cache
+                const session = window.callCore.getSession();
+                if (session && session.token) {
+                    window.__CHILD_SESSION__.token = session.token;
+                    window.__CHILD_SESSION__.userId = session.userId;
+                    window.__CHILD_SESSION__.expires = session.expiresAt;
+                }
+                
+                if (window.callCore.getLifecycleState) {
+                    coreLifecycleState = window.callCore.getLifecycleState();
                 }
                 
                 return true;
@@ -307,20 +456,40 @@
                     inPassiveMode = state.inPassiveMode || false;
                     parentReady = state.parentReady || false;
                     sessionReady = state.sessionStatus === 'valid';
+                    coreLifecycleState = state.lifecycleState || 'UNKNOWN';
+                    
+                    // Update session cache
+                    if (state.session && state.session.token) {
+                        window.__CHILD_SESSION__.token = state.session.token;
+                        window.__CHILD_SESSION__.userId = state.session.userId;
+                        window.__CHILD_SESSION__.expires = state.session.expiresAt;
+                    }
+                    
                     return true;
                 }
             }
             
             if (window.callCore.getLifecycleState) {
                 const lifecycleState = window.callCore.getLifecycleState();
-                if (lifecycleState === 'ACTIVE' || lifecycleState === 'SYNCED') {
+                coreLifecycleState = lifecycleState;
+                if (lifecycleState === 'ACTIVE' || lifecycleState === 'WAIT_PARENT') {
                     if (DEBUG) {
                         logOnce('success', `callCore lifecycle state: ${lifecycleState}`);
                     }
-                    coreReady = true;
+                    coreReady = lifecycleState === 'ACTIVE';
                     coreInstance = window.callCore;
-                    inPassiveMode = lifecycleState === 'PASSIVE_WAITING';
-                    parentReady = window.callCore.getParentReady ? window.callCore.getParentReady() : false;
+                    
+                    // Try to get session
+                    if (window.callCore.getSession) {
+                        const session = window.callCore.getSession();
+                        if (session && session.token) {
+                            window.__CHILD_SESSION__.token = session.token;
+                            window.__CHILD_SESSION__.userId = session.userId;
+                            window.__CHILD_SESSION__.expires = session.expiresAt;
+                            sessionReady = true;
+                        }
+                    }
+                    
                     return true;
                 }
             }
@@ -343,17 +512,7 @@
                 logOnce('info', 'Waiting for core to become ready via events');
             }
             
-            if (coreReadyPromise && !coreReady) {
-                coreReadyPromise.then(() => {
-                    if (DEBUG) {
-                        logOnce('success', 'Core ready via shared promise');
-                    }
-                    resolve(true);
-                });
-                
-                return;
-            }
-            
+            // Set up one-time event listeners
             const readyHandler = function() {
                 window.removeEventListener('CALLS_CORE_READY', readyHandler);
                 window.removeEventListener('MODULE_READY', moduleHandler);
@@ -372,9 +531,20 @@
                         const state = coreInstance.getState();
                         inPassiveMode = state.inPassiveMode || false;
                         parentReady = state.parentReady || false;
+                        coreLifecycleState = state.lifecycleState || 'UNKNOWN';
+                        
+                        // Update session cache
+                        if (state.session && state.session.token) {
+                            window.__CHILD_SESSION__.token = state.session.token;
+                            window.__CHILD_SESSION__.userId = state.session.userId;
+                            window.__CHILD_SESSION__.expires = state.session.expiresAt;
+                        }
                     }
                     if (coreInstance.isInPassiveMode) {
                         inPassiveMode = coreInstance.isInPassiveMode();
+                    }
+                    if (coreInstance.getLifecycleState) {
+                        coreLifecycleState = coreInstance.getLifecycleState();
                     }
                 }
                 
@@ -400,9 +570,20 @@
                             const state = coreInstance.getState();
                             inPassiveMode = state.inPassiveMode || false;
                             parentReady = state.parentReady || false;
+                            coreLifecycleState = state.lifecycleState || 'UNKNOWN';
+                            
+                            // Update session cache
+                            if (state.session && state.session.token) {
+                                window.__CHILD_SESSION__.token = state.session.token;
+                                window.__CHILD_SESSION__.userId = state.session.userId;
+                                window.__CHILD_SESSION__.expires = state.session.expiresAt;
+                            }
                         }
                         if (coreInstance.isInPassiveMode) {
                             inPassiveMode = coreInstance.isInPassiveMode();
+                        }
+                        if (coreInstance.getLifecycleState) {
+                            coreLifecycleState = coreInstance.getLifecycleState();
                         }
                     }
                     
@@ -429,9 +610,20 @@
                             const state = coreInstance.getState();
                             inPassiveMode = state.inPassiveMode || false;
                             parentReady = state.parentReady || false;
+                            coreLifecycleState = state.lifecycleState || 'UNKNOWN';
+                            
+                            // Update session cache
+                            if (state.session && state.session.token) {
+                                window.__CHILD_SESSION__.token = state.session.token;
+                                window.__CHILD_SESSION__.userId = state.session.userId;
+                                window.__CHILD_SESSION__.expires = state.session.expiresAt;
+                            }
                         }
                         if (coreInstance.isInPassiveMode) {
                             inPassiveMode = coreInstance.isInPassiveMode();
+                        }
+                        if (coreInstance.getLifecycleState) {
+                            coreLifecycleState = coreInstance.getLifecycleState();
                         }
                     }
                     
@@ -457,9 +649,20 @@
                         const state = coreInstance.getState();
                         inPassiveMode = state.inPassiveMode || false;
                         parentReady = state.parentReady || false;
+                        coreLifecycleState = state.lifecycleState || 'UNKNOWN';
+                        
+                        // Update session cache
+                        if (state.session && state.session.token) {
+                            window.__CHILD_SESSION__.token = state.session.token;
+                            window.__CHILD_SESSION__.userId = state.session.userId;
+                            window.__CHILD_SESSION__.expires = state.session.expiresAt;
+                        }
                     }
                     if (coreInstance.isInPassiveMode) {
                         inPassiveMode = coreInstance.isInPassiveMode();
+                    }
+                    if (coreInstance.getLifecycleState) {
+                        coreLifecycleState = coreInstance.getLifecycleState();
                     }
                 }
                 
@@ -471,7 +674,7 @@
             window.addEventListener('core.ready', coreReadyHandler);
             window.addEventListener('calls-ready', callsReadyHandler);
             
-            // CRITICAL: No timeout - just wait for events
+            // No timeout - just wait for events
         });
     }
 
@@ -940,8 +1143,15 @@
                     sessionReady,
                     handshakeComplete,
                     inPassiveMode,
-                    coreReady
-                }
+                    coreReady,
+                    coreLifecycleState
+                },
+                session: {
+                    valid: isSessionValid(),
+                    hasToken: !!(window.__CHILD_SESSION__ && window.__CHILD_SESSION__.token)
+                },
+                coreAvailable: !!coreInstance,
+                coreLifecycle: coreLifecycleState
             };
         },
         
@@ -1195,7 +1405,14 @@
             }
         },
         
+        // Storage methods - warn but allow for non-auth data
         safeLocalStorageGet: function(key, fallback = null) {
+            // Warn about auth tokens
+            if (key === 'token' || key.includes('token') || key.includes('auth') || key === 'session') {
+                logOnce('warn', `Attempted to read '${key}' from localStorage - use session cache instead`);
+                return fallback;
+            }
+            
             try {
                 const value = localStorage.getItem(key);
                 return value !== null ? value : fallback;
@@ -1208,6 +1425,12 @@
         },
         
         safeLocalStorageSet: function(key, value) {
+            // Block auth tokens
+            if (key === 'token' || key.includes('token') || key.includes('auth') || key === 'session') {
+                logOnce('warn', `Blocked storing '${key}' in localStorage - use session cache only`);
+                return false;
+            }
+            
             try {
                 localStorage.setItem(key, String(value));
                 return true;
@@ -1220,6 +1443,12 @@
         },
         
         safeSessionStorageGet: function(key, fallback = null) {
+            // Warn about auth tokens
+            if (key === 'token' || key.includes('token') || key.includes('auth') || key === 'session') {
+                logOnce('warn', `Attempted to read '${key}' from sessionStorage - use session cache instead`);
+                return fallback;
+            }
+            
             try {
                 const value = sessionStorage.getItem(key);
                 return value !== null ? value : fallback;
@@ -1232,6 +1461,12 @@
         },
         
         safeSessionStorageSet: function(key, value) {
+            // Block auth tokens
+            if (key === 'token' || key.includes('token') || key.includes('auth') || key === 'session') {
+                logOnce('warn', `Blocked storing '${key}' in sessionStorage - use session cache only`);
+                return false;
+            }
+            
             try {
                 sessionStorage.setItem(key, String(value));
                 return true;
@@ -1323,11 +1558,11 @@
         pollResults: [],
         
         sharedNotes: [],
-        privateNotes: {},
+        privateNotes: {}, // Memory only, not persisted to localStorage
         
         relationshipData: null,
         
-        // Handshake tracking - removed timeouts
+        // No polling intervals - rely on core events
         handshakeCheckInterval: null
     };
 
@@ -1437,11 +1672,21 @@
                 return;
             }
             
-            if (!parentReady) {
+            // Show core lifecycle state
+            if (coreLifecycleState === 'BOOT' || coreLifecycleState === 'INITIALIZING') {
+                elements.syncIndicator.innerHTML = '<i class="fas fa-cog fa-spin"></i><span>Booting...</span>';
+                elements.syncIndicator.className = 'sync-indicator booting';
+            } else if (coreLifecycleState === 'READY') {
+                elements.syncIndicator.innerHTML = '<i class="fas fa-hand-peace"></i><span>Ready</span>';
+                elements.syncIndicator.className = 'sync-indicator ready';
+            } else if (coreLifecycleState === 'WAIT_PARENT') {
+                elements.syncIndicator.innerHTML = '<i class="fas fa-handshake"></i><span>Connecting...</span>';
+                elements.syncIndicator.className = 'sync-indicator connecting';
+            } else if (!parentReady) {
                 elements.syncIndicator.innerHTML = '<i class="fas fa-handshake"></i><span>Connecting...</span>';
                 elements.syncIndicator.className = 'sync-indicator connecting';
             } else if (!sessionReady) {
-                elements.syncIndicator.innerHTML = '<i class="fas fa-sync-alt"></i><span>Syncing...</span>';
+                elements.syncIndicator.innerHTML = '<i class="fas fa-sync-alt fa-spin"></i><span>Syncing...</span>';
                 elements.syncIndicator.className = 'sync-indicator syncing';
             } else {
                 elements.syncIndicator.innerHTML = '<i class="fas fa-check-circle"></i><span>Ready</span>';
@@ -1474,23 +1719,22 @@
         
         renderCachedContacts: function() {
             try {
-                let cachedContacts = null;
-                
-                cachedContacts = SecuritySanitizer.safeLocalStorageGet('cachedContacts');
-                
-                if (cachedContacts && elements.contactsList) {
-                    const contacts = typeof cachedContacts === 'string' ? 
-                        SecuritySanitizer.safeJSONParse(cachedContacts, []) : cachedContacts;
-                    if (Array.isArray(contacts) && contacts.length > 0) {
-                        this.renderContactsList(contacts);
-                        if (DEBUG) {
-                            logOnce('info', 'Rendered cached contacts', { count: contacts.length });
-                        }
+                // Don't use localStorage for contacts - rely on parent or core
+                if (coreInstance && coreInstance.getState) {
+                    const state = coreInstance.getState();
+                    if (state && state.contacts) {
+                        this.renderContactsList(state.contacts);
+                        return;
                     }
+                }
+                
+                // If we have AppState with contacts, use that
+                if (window.AppState && window.AppState.contacts && Array.isArray(window.AppState.contacts)) {
+                    this.renderContactsList(window.AppState.contacts);
                 }
             } catch (error) {
                 if (DEBUG) {
-                    logOnce('warn', 'Failed to render cached contacts', error);
+                    logOnce('warn', 'Failed to render contacts', error);
                 }
             }
         },
@@ -1573,12 +1817,35 @@
                 
                 this.attachReactionEvents();
                 
+                // Load user preferences from core session, not localStorage
+                this.loadUserPreferences();
+                
                 UIState.renderStages.enhanced = true;
                 
                 UILogger.performance('progressiveEnhancement', performance.now() - startTime);
                 
                 return true;
             }, 'progressiveEnhancement', false);
+        },
+        
+        // Load preferences from core session, not localStorage
+        loadUserPreferences: function() {
+            if (coreInstance && coreInstance.getState) {
+                const state = coreInstance.getState();
+                if (state) {
+                    UIState.selectedMood = state.currentMood || 'neutral';
+                    UIState.selectedIntention = state.currentIntention || 'quick';
+                    UIState.currentFocusMode = state.currentFocusMode || false;
+                }
+            }
+            
+            // Apply focus mode if active
+            if (UIState.currentFocusMode && elements.appContainer) {
+                elements.appContainer.classList.add('focus-mode');
+            }
+            if (UIState.currentFocusMode && elements.focusModeBtn) {
+                elements.focusModeBtn.classList.add('active');
+            }
         },
         
         attachReactionEvents: function() {
@@ -1676,8 +1943,31 @@
                     handshakeComplete = state.registered && state.sessionReceived;
                     fallbackModeActive = state.degraded || false;
                     inPassiveMode = state.inPassiveMode || false;
+                    coreLifecycleState = state.lifecycleState || coreInstance.getLifecycleState?.() || 'UNKNOWN';
+                    
+                    // Update session cache
+                    if (state.session && state.session.token) {
+                        window.__CHILD_SESSION__.token = state.session.token;
+                        window.__CHILD_SESSION__.userId = state.session.userId;
+                        window.__CHILD_SESSION__.expires = state.session.expiresAt;
+                    }
+                    
+                    // Update UI preferences from core
+                    if (state.currentMood) UIState.selectedMood = state.currentMood;
+                    if (state.currentIntention) UIState.selectedIntention = state.currentIntention;
+                    if (state.currentFocusMode !== undefined) UIState.currentFocusMode = state.currentFocusMode;
+                    
                     RenderingPipeline.updateSyncIndicator();
                 }
+            }
+            
+            if (coreInstance.getLifecycleState) {
+                const lifecycleState = coreInstance.getLifecycleState();
+                coreLifecycleState = lifecycleState;
+                if (lifecycleState === 'ACTIVE') {
+                    parentReady = true;
+                }
+                RenderingPipeline.updateSyncIndicator();
             }
             
             if (coreInstance.isInPassiveMode) {
@@ -1687,6 +1977,17 @@
             
             if (coreInstance.getParentReady) {
                 parentReady = coreInstance.getParentReady();
+            }
+            
+            // Get session directly
+            if (coreInstance.getSession) {
+                const session = coreInstance.getSession();
+                if (session && session.token) {
+                    window.__CHILD_SESSION__.token = session.token;
+                    window.__CHILD_SESSION__.userId = session.userId;
+                    window.__CHILD_SESSION__.expires = session.expiresAt;
+                    sessionReady = true;
+                }
             }
         },
         
@@ -1699,6 +2000,20 @@
                 case 'session_update':
                 case 'session_valid':
                     sessionReady = true;
+                    if (data && data.token) {
+                        window.__CHILD_SESSION__.token = data.token;
+                        window.__CHILD_SESSION__.userId = data.userId;
+                        window.__CHILD_SESSION__.expires = data.expiresAt;
+                    }
+                    RenderingPipeline.updateSyncIndicator();
+                    break;
+                case 'session_updated':
+                    sessionReady = true;
+                    if (data && data.token) {
+                        window.__CHILD_SESSION__.token = data.token;
+                        window.__CHILD_SESSION__.userId = data.userId;
+                        window.__CHILD_SESSION__.expires = data.expiresAt;
+                    }
                     RenderingPipeline.updateSyncIndicator();
                     break;
                 case 'incoming_call':
@@ -1719,21 +2034,37 @@
                     this.handleLogout();
                     break;
                 case 'mood_updated':
-                    if (data && data.mood && elements.callMoodIndicator) {
-                        elements.callMoodIndicator.dataset.mood = data.mood;
+                    if (data && data.mood) {
+                        UIState.selectedMood = data.mood;
+                        if (elements.callMoodIndicator) {
+                            elements.callMoodIndicator.dataset.mood = data.mood;
+                        }
                     }
                     break;
                 case 'intention_updated':
-                    if (data && data.intention && elements.callIntentionIndicator) {
-                        elements.callIntentionIndicator.dataset.intention = data.intention;
+                    if (data && data.intention) {
+                        UIState.selectedIntention = data.intention;
+                        if (elements.callIntentionIndicator) {
+                            elements.callIntentionIndicator.dataset.intention = data.intention;
+                        }
                     }
                     break;
                 case 'focus_mode_toggled':
-                    if (data && data.enabled !== undefined && elements.focusModeBtn) {
-                        if (data.enabled) {
-                            elements.focusModeBtn.classList.add('active');
-                        } else {
-                            elements.focusModeBtn.classList.remove('active');
+                    if (data && data.enabled !== undefined) {
+                        UIState.currentFocusMode = data.enabled;
+                        if (elements.focusModeBtn) {
+                            if (data.enabled) {
+                                elements.focusModeBtn.classList.add('active');
+                            } else {
+                                elements.focusModeBtn.classList.remove('active');
+                            }
+                        }
+                        if (elements.appContainer) {
+                            if (data.enabled) {
+                                elements.appContainer.classList.add('focus-mode');
+                            } else {
+                                elements.appContainer.classList.remove('focus-mode');
+                            }
                         }
                     }
                     break;
@@ -1757,7 +2088,33 @@
                     break;
                 case 'session_sync':
                     sessionReady = true;
+                    if (data && data.token) {
+                        window.__CHILD_SESSION__.token = data.token;
+                        window.__CHILD_SESSION__.userId = data.userId;
+                        window.__CHILD_SESSION__.expires = data.expiresAt;
+                    }
                     RenderingPipeline.updateSyncIndicator();
+                    break;
+                case 'auth_error':
+                case 'unauthorized':
+                    this.handleAuthError();
+                    break;
+                case 'state':
+                    // Handle core state changes
+                    if (data && data.newState) {
+                        if (data.newState === 'ACTIVE') {
+                            parentReady = true;
+                            RenderingPipeline.updateSyncIndicator();
+                        }
+                        coreLifecycleState = data.newState;
+                        RenderingPipeline.updateSyncIndicator();
+                    }
+                    break;
+                case 'module_state_change':
+                    if (data && data.to) {
+                        coreLifecycleState = data.to;
+                        RenderingPipeline.updateSyncIndicator();
+                    }
                     break;
             }
         },
@@ -2073,6 +2430,21 @@
             showNotification('Logged out', 'info');
         },
         
+        // Handle auth errors
+        handleAuthError: function() {
+            if (DEBUG) {
+                logOnce('warn', 'Authentication error received');
+            }
+            
+            window.__CHILD_SESSION__.token = null;
+            window.__CHILD_SESSION__.userId = null;
+            window.__CHILD_SESSION__.expires = null;
+            sessionReady = false;
+            
+            showNotification('Session expired - please log in again', 'error');
+            RenderingPipeline.updateSyncIndicator();
+        },
+        
         startCallTimer: function() {
             if (!UIState.callStartTime) return;
             
@@ -2140,6 +2512,10 @@
                         this.handleSessionUpdate(data.payload || data);
                         RenderingPipeline.updateSyncIndicator();
                         break;
+                    case 'AUTH_ERROR':
+                    case 'UNAUTHORIZED':
+                        this.handleAuthError();
+                        break;
                 }
             };
             
@@ -2150,7 +2526,11 @@
         validateParentMessage: function(event) {
             if (!event || !event.data) return false;
             
-            // Check origin
+            // Check origin - relaxed during init
+            if (coreLifecycleState !== 'ACTIVE') {
+                return true;
+            }
+            
             if (event.origin !== window.location.origin && 
                 !event.origin.includes('localhost') && 
                 !event.origin.includes('127.0.0.1')) {
@@ -2931,30 +3311,7 @@
         },
         
         openNewCallModal: function() {
-            if (inPassiveMode) {
-                showNotification('Waiting for parent connection...', 'info');
-                return;
-            }
-            
-            if (fallbackModeActive) {
-                showNotification('Limited connectivity - Please retry later', 'warning');
-                return;
-            }
-            
-            if (!coreReady) {
-                showNotification('Call system initializing...', 'info');
-                return;
-            }
-            
-            if (!parentReady && !handshakeComplete) {
-                showNotification('Connecting to server...', 'info');
-                return;
-            }
-            
-            if (!window.AppState?.isOnline) {
-                showNotification('Cannot load contacts while offline', 'warning');
-                return;
-            }
+            if (!canPerformAction('openNewCallModal')) return;
             
             if (elements.newCallModal) {
                 elements.newCallModal.classList.add('active');
@@ -3060,25 +3417,7 @@
         },
         
         startCallGeneric: function(type) {
-            if (inPassiveMode) {
-                showNotification('Waiting for parent connection...', 'info');
-                return;
-            }
-            
-            if (fallbackModeActive) {
-                showNotification('Limited connectivity - Please retry later', 'warning');
-                return;
-            }
-            
-            if (!coreReady) {
-                showNotification('Call system initializing...', 'info');
-                return;
-            }
-            
-            if (!parentReady && !handshakeComplete) {
-                showNotification('Connecting to server...', 'info');
-                return;
-            }
+            if (!canPerformAction('startCall')) return;
             
             const selectedContacts = this.getSelectedContacts();
             
@@ -3101,36 +3440,46 @@
                         UILogger.error('Call failed', error);
                     });
             } else {
-                this.simulateCall(type, selectedContacts);
+                // Show error instead of simulating
+                showNotification('Call system not ready', 'error');
             }
             
             UIEventHandlers.closeNewCallModal();
         },
         
-        simulateCall: function(type, participants) {
-            requestMediaPermissionsFn(type)
-                .then(stream => {
-                    if (window.AppState) {
-                        window.AppState.localStream = stream;
-                        window.AppState.callType = type;
-                        window.AppState.callParticipants = participants;
-                        window.AppState.activeCallId = 'call-' + Date.now();
-                        window.AppState.isInCall = true;
-                    }
-                    
-                    UIState.localStream = stream;
-                    UIState.callType = type;
-                    UIState.callParticipants = participants;
-                    UIState.activeCallId = 'call-' + Date.now();
-                    
-                    this.showCallUI();
-                    this.startCallTimer();
-                    
-                    showNotification(`Started ${type} call with ${participants.length} participant(s)`, 'success');
-                })
-                .catch(error => {
-                    showNotification(`Failed to start call: ${error.message}`, 'error');
-                });
+        startGroupCall: function() {
+            if (!canPerformAction('startCall')) return;
+            
+            if (!UIState.groupCallOption) {
+                showNotification('Please select a group call option', 'warning');
+                return;
+            }
+            
+            const selectedContacts = this.getSelectedGroupContacts();
+            
+            if (selectedContacts.length === 0) {
+                showNotification('Please select at least one contact', 'warning');
+                return;
+            }
+            
+            if (coreInstance && coreInstance.startGroupCall) {
+                coreInstance.startGroupCall(selectedContacts, 'voice')
+                    .then(result => {
+                        if (result.success) {
+                            showNotification('Group call started', 'success');
+                        } else {
+                            showNotification(result.error || 'Failed to start group call', 'error');
+                        }
+                    })
+                    .catch(error => {
+                        showNotification('Failed to start group call', 'error');
+                        UILogger.error('Group call failed', error);
+                    });
+            } else {
+                showNotification('Group calls not available', 'warning');
+            }
+            
+            UIEventHandlers.closeNewCallModal();
         },
         
         showCallUI: function() {
@@ -3169,10 +3518,7 @@
         },
         
         toggleMute: function() {
-            if (inPassiveMode) {
-                showNotification('Waiting for parent connection...', 'info');
-                return;
-            }
+            if (!canPerformAction('toggleMute')) return;
             
             if (coreInstance && coreInstance.toggleMic) {
                 coreInstance.toggleMic();
@@ -3195,10 +3541,7 @@
         },
         
         toggleVideo: function() {
-            if (inPassiveMode) {
-                showNotification('Waiting for parent connection...', 'info');
-                return;
-            }
+            if (!canPerformAction('toggleVideo')) return;
             
             if (coreInstance && coreInstance.toggleCamera) {
                 coreInstance.toggleCamera();
@@ -3221,10 +3564,7 @@
         },
         
         toggleScreenShare: function() {
-            if (inPassiveMode) {
-                showNotification('Waiting for parent connection...', 'info');
-                return;
-            }
+            if (!canPerformAction('toggleScreenShare')) return;
             
             if (UIState.isScreenSharing) {
                 this.stopScreenShare();
@@ -3390,15 +3730,14 @@
         },
         
         setMood: function() {
+            if (!canPerformAction('setMood')) return;
+            
             const selectedOption = document.querySelector('.mood-option.selected');
             if (selectedOption) {
                 const newMood = selectedOption.dataset.mood;
                 UIState.selectedMood = newMood;
                 
-                try {
-                    localStorage.setItem('currentMood', newMood);
-                } catch (e) {}
-                
+                // Don't use localStorage - send to core
                 if (coreInstance && coreInstance.setMood) {
                     coreInstance.setMood(newMood);
                 }
@@ -3436,15 +3775,14 @@
         },
         
         setIntention: function() {
+            if (!canPerformAction('setIntention')) return;
+            
             const selectedOption = document.querySelector('.intention-option.selected');
             if (selectedOption) {
                 const newIntention = selectedOption.dataset.intention;
                 UIState.selectedIntention = newIntention;
                 
-                try {
-                    localStorage.setItem('currentIntention', newIntention);
-                } catch (e) {}
-                
+                // Don't use localStorage - send to core
                 if (coreInstance && coreInstance.setIntention) {
                     coreInstance.setIntention(newIntention);
                 }
@@ -3499,9 +3837,10 @@
                     elements.privateNotesSubtitle.textContent = 'Add private notes about this call (only visible to you)';
                 }
                 
-                const previousNotes = this.getPrivateNotes(lastContact.id);
+                // Get notes from memory, not localStorage
+                const previousNotes = UIState.privateNotes[lastContact.id]?.notes || '';
                 if (elements.privateNotesTextarea) {
-                    elements.privateNotesTextarea.value = previousNotes || '';
+                    elements.privateNotesTextarea.value = previousNotes;
                 }
                 
                 elements.privateNotesModal.classList.add('active');
@@ -3520,11 +3859,28 @@
         },
         
         savePrivateNotes: function() {
+            if (!canPerformAction('saveNotes')) return;
+            
             const notes = elements.privateNotesTextarea?.value.trim() || '';
             const lastContact = UIState.callParticipants?.[0];
             
             if (lastContact && notes) {
-                this.savePrivateNotesToStorage(lastContact.id, notes);
+                // Store in memory only, not localStorage
+                UIState.privateNotes[lastContact.id] = {
+                    notes: notes,
+                    timestamp: new Date().toISOString(),
+                    callId: UIState.activeCallId
+                };
+                
+                // Send to parent via core if available
+                if (coreInstance && coreInstance.saveNotes) {
+                    coreInstance.saveNotes({
+                        contactId: lastContact.id,
+                        notes: notes,
+                        callId: UIState.activeCallId
+                    });
+                }
+                
                 showNotification('Notes saved', 'success');
             }
             
@@ -3536,31 +3892,20 @@
         },
         
         savePrivateNotesToStorage: function(contactId, notes) {
-            try {
-                let allNotes = JSON.parse(localStorage.getItem('privateCallNotes') || '{}');
-                
-                allNotes[contactId] = {
-                    notes: notes,
-                    timestamp: new Date().toISOString(),
-                    callId: UIState.activeCallId
-                };
-                
-                localStorage.setItem('privateCallNotes', JSON.stringify(allNotes));
-                
-                UIState.privateNotes[contactId] = allNotes[contactId];
-            } catch (error) {
-                UILogger.error('Error saving private notes', error);
-            }
+            // Deprecated - use memory only
+            UIState.privateNotes[contactId] = {
+                notes: notes,
+                timestamp: new Date().toISOString(),
+                callId: UIState.activeCallId
+            };
+            
+            // Don't use localStorage
+            logOnce('warn', 'savePrivateNotesToStorage called - using memory only');
         },
         
         getPrivateNotes: function(contactId) {
-            try {
-                const allNotes = JSON.parse(localStorage.getItem('privateCallNotes') || '{}');
-                return allNotes[contactId] ? allNotes[contactId].notes : null;
-            } catch (error) {
-                UILogger.error('Error loading private notes', error);
-                return null;
-            }
+            // Get from memory, not localStorage
+            return UIState.privateNotes[contactId]?.notes || null;
         },
         
         showCallSummary: function() {
@@ -3638,10 +3983,7 @@
         },
         
         acceptIncomingCallGeneric: function(asVideo) {
-            if (inPassiveMode) {
-                showNotification('Waiting for parent connection...', 'info');
-                return;
-            }
+            if (!canPerformAction('answerCall')) return;
             
             if (elements.incomingCallModal.dataset.timer) {
                 clearInterval(parseInt(elements.incomingCallModal.dataset.timer));
@@ -3659,34 +4001,8 @@
             if (coreInstance && coreInstance.answerCall) {
                 coreInstance.answerCall(callType);
             } else {
-                const simulatedParticipant = {
-                    id: 'incoming-caller',
-                    name: callerName
-                };
-                
-                requestMediaPermissionsFn(callType)
-                    .then(stream => {
-                        UIState.localStream = stream;
-                        UIState.callType = callType;
-                        UIState.callParticipants = [simulatedParticipant];
-                        UIState.activeCallId = 'call-' + Date.now();
-                        
-                        if (window.AppState) {
-                            window.AppState.localStream = stream;
-                            window.AppState.callType = callType;
-                            window.AppState.callParticipants = [simulatedParticipant];
-                            window.AppState.activeCallId = UIState.activeCallId;
-                            window.AppState.isInCall = true;
-                        }
-                        
-                        this.showCallUI();
-                        this.startCallTimer();
-                        
-                        showNotification(`${callType} call started`, 'success');
-                    })
-                    .catch(error => {
-                        showNotification(`Failed to start call: ${error.message}`, 'error');
-                    });
+                // Don't simulate - show error
+                showNotification('Call system not ready', 'error');
             }
         },
         
@@ -3699,6 +4015,8 @@
         },
         
         generateCallLink: function(type) {
+            if (!canPerformAction('generateCallLink')) return;
+            
             const callId = 'call-' + Math.random().toString(36).substr(2, 9);
             const baseUrl = window.location.origin + window.location.pathname;
             const callUrl = `${baseUrl}?call=${callId}&type=${type}`;
@@ -3865,6 +4183,8 @@
         },
         
         sendReaction: function(e) {
+            if (!canPerformAction('sendReaction')) return;
+            
             if (!UIState.activeCallId) {
                 showNotification('Join a call to send reactions', 'info');
                 return;
@@ -4695,8 +5015,13 @@
                     sessionReady,
                     handshakeComplete,
                     inPassiveMode,
-                    coreReady
-                }
+                    coreReady,
+                    coreLifecycleState
+                },
+                session: {
+                    valid: isSessionValid()
+                },
+                coreLifecycle: coreLifecycleState
             });
         }
         
@@ -4875,10 +5200,26 @@
             handshakeComplete,
             fallbackModeActive,
             inPassiveMode,
-            coreReady
+            coreReady,
+            coreLifecycleState
         }),
+        // Added session validation helper
+        isSessionValid,
+        // Added core state assertion helper
+        assertCoreActive,
         getDiagnostics: () => UIDiagnostics.getReport(),
-        getUIState: () => ({ ...UIState })
+        getUIState: () => ({ ...UIState }),
+        // Added core reference
+        getCoreInstance: () => coreInstance,
+        // Added method to check if core is in ACTIVE state
+        isCoreActive: () => {
+            if (coreInstance && coreInstance.getLifecycleState) {
+                return coreInstance.getLifecycleState() === 'ACTIVE';
+            }
+            return coreReady && parentReady;
+        },
+        // Get core lifecycle state
+        getCoreLifecycleState: () => coreLifecycleState
     };
 
     // ==================== BOOTSTRAP ====================
@@ -4887,7 +5228,7 @@
     
     setupCoreReadyListener();
     
-    // Define handleContactClick to fix the bind error at line 5732
+    // Define handleContactClick to fix the bind error
     const handleContactClick = function(e) {
         if (e.target.closest('.contact-checkbox')) return;
         
@@ -4920,7 +5261,7 @@
         
         RenderingPipeline.skeleton();
         
-        // CRITICAL: No timeout - just wait for events
+        // No timeout - just wait for events
         waitForCoreReady().then((ready) => {
             if (ready) {
                 if (DEBUG) {
@@ -4928,7 +5269,7 @@
                 }
                 performFullInitialization();
             } else {
-                // This should never happen with the event-driven approach
+                // This should not happen with the event-driven approach
                 logOnce('error', 'Core ready promise resolved false - this should not happen');
                 // Keep showing skeleton UI
                 RenderingPipeline.initialRender().catch(() => {});

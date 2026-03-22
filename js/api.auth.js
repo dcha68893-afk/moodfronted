@@ -1,9 +1,9 @@
 // api.auth.js - Modular Authentication Service with IIFE Protection
-// Version: 21.1.5 - CRITICAL FIX: Force override login method registration
-// Date: 2024-01-08
-// 🔧 FIXED: Force override for critical methods (login, register, logout)
-// 🔧 FIXED: Login now works exactly like browser console test
-// 🔧 FIXED: Method registration priority for authentication functions
+// Version: 22.0.0 - CRITICAL FIX: Enhanced session persistence and token management
+// Date: 2024-01-09
+// 🔧 FIXED: Session persistence with kynecta_auth storage key
+// 🔧 FIXED: Token restoration on reload
+// 🔧 FIXED: Consistent session state management
 
 (function() {
     // ============================================================================
@@ -11,7 +11,7 @@
     // ============================================================================
     
     // CRITICAL: Ultimate singleton guard - prevents ANY possibility of multiple initialization
-    const VERSION = '21.1.5';
+    const VERSION = '22.0.0';
     const GUARD_KEY = '__API_AUTH_SINGLETON_GUARD__';
     
     // Check if we already have a fully initialized instance
@@ -40,13 +40,13 @@
     // ============================================================================
     
     // CRITICAL: Prevent duplicate loading with immediate detection
-    if (window._API_AUTH_V21_LOADED_ && window._API_AUTH_V21_LOADED_.initialized === true) {
-        console.warn('⚠️ [API-AUTH] api.auth.js v21.1.5 already fully initialized, skipping');
+    if (window._API_AUTH_V22_LOADED_ && window._API_AUTH_V22_LOADED_.initialized === true) {
+        console.warn('⚠️ [API-AUTH] api.auth.js v22.0.0 already fully initialized, skipping');
         return;
     }
     
     // Mark as loading with version-specific flag
-    window._API_AUTH_V21_LOADED_ = {
+    window._API_AUTH_V22_LOADED_ = {
         version: VERSION,
         timestamp: Date.now(),
         instanceId: Math.random().toString(36).substring(7),
@@ -64,14 +64,14 @@
             detail: {
                 timestamp: Date.now(),
                 version: VERSION,
-                instanceId: window._API_AUTH_V21_LOADED_.instanceId,
+                instanceId: window._API_AUTH_V22_LOADED_.instanceId,
                 stage: 'initializing',
                 guardActive: true
             }
         }));
     } catch (e) {}
     
-    console.log(`🔐 [API-AUTH] Initializing modular authentication service v${VERSION} (CRITICAL LOGIN FIX)`);
+    console.log(`🔐 [API-AUTH] Initializing modular authentication service v${VERSION} (CRITICAL SESSION PERSISTENCE FIX)`);
     
     // ============================================================================
     // IMMEDIATE PUBLIC API SHELL - WITH MINIMAL STUBS
@@ -167,7 +167,7 @@
                 detail: {
                     timestamp: _readinessState.readyTime,
                     version: VERSION,
-                    instanceId: window._API_AUTH_V21_LOADED_.instanceId,
+                    instanceId: window._API_AUTH_V22_LOADED_.instanceId,
                     initTime: _readinessState.readyTime - _readinessState.startTime
                 }
             }));
@@ -353,6 +353,8 @@
     // ============================================================================
     
     const CONFIG = {
+        // CRITICAL: Single source of truth for auth storage
+        AUTH_STORAGE_KEY: 'kynecta_auth',
         TOKEN_KEYS: ['USER_TOKEN', 'accessToken', 'moodchat_token', 'token'],
         USER_DATA_KEYS: ['USER_DATA', 'authUser', 'moodchat_auth_user', 'userData'],
         REFRESH_TOKEN_KEY: 'REFRESH_TOKEN',
@@ -530,6 +532,126 @@
         }
     }
     
+    // CRITICAL: Single source of truth for auth persistence
+    function _persistAuthData(token, user, refreshToken = null, expiresIn = null) {
+        try {
+            if (!token) {
+                console.warn('⚠️ [AUTH] Cannot persist auth data without token');
+                return false;
+            }
+            
+            const authData = {
+                token: token,
+                user: user || null,
+                refreshToken: refreshToken,
+                expiresIn: expiresIn,
+                timestamp: Date.now(),
+                version: VERSION
+            };
+            
+            const serialized = JSON.stringify(authData);
+            const success = _safeStorageSet(CONFIG.AUTH_STORAGE_KEY, serialized);
+            
+            if (success) {
+                console.log('✅ [AUTH] Auth data persisted to localStorage under key:', CONFIG.AUTH_STORAGE_KEY);
+                
+                // Also store in legacy locations for backward compatibility
+                try {
+                    for (const key of CONFIG.TOKEN_KEYS) {
+                        _safeStorageSet(key, token);
+                    }
+                    if (user) {
+                        _safeStorageSet('USER_DATA', JSON.stringify(user));
+                    }
+                    if (refreshToken) {
+                        _safeStorageSet(CONFIG.REFRESH_TOKEN_KEY, refreshToken);
+                    }
+                    if (expiresIn) {
+                        _safeStorageSet(CONFIG.TOKEN_EXPIRY_KEY, (Date.now() + expiresIn).toString());
+                    }
+                } catch (legacyError) {
+                    console.warn('⚠️ [AUTH] Legacy storage failed:', legacyError);
+                }
+                
+                // Dispatch storage event for cross-tab sync
+                try {
+                    window.dispatchEvent(new StorageEvent('storage', {
+                        key: CONFIG.AUTH_STORAGE_KEY,
+                        newValue: serialized,
+                        oldValue: null,
+                        storageArea: localStorage
+                    }));
+                } catch (e) {}
+                
+                return true;
+            }
+            
+            console.error('❌ [AUTH] Failed to persist auth data');
+            return false;
+        } catch (error) {
+            console.error('❌ [AUTH] Error persisting auth data:', error);
+            return false;
+        }
+    }
+    
+    function _loadPersistedAuthData() {
+        try {
+            const stored = _safeStorageGet(CONFIG.AUTH_STORAGE_KEY);
+            if (!stored) {
+                console.log('🔍 [AUTH] No persisted auth data found');
+                return null;
+            }
+            
+            const authData = JSON.parse(stored);
+            
+            // Validate structure
+            if (!authData.token || typeof authData.token !== 'string') {
+                console.warn('⚠️ [AUTH] Invalid persisted auth data structure, clearing');
+                _clearPersistedAuthData();
+                return null;
+            }
+            
+            // Check expiry if present
+            if (authData.expiresIn && authData.timestamp) {
+                const expiryTime = authData.timestamp + authData.expiresIn;
+                if (Date.now() > expiryTime) {
+                    console.log('🔍 [AUTH] Persisted auth data expired, clearing');
+                    _clearPersistedAuthData();
+                    return null;
+                }
+            }
+            
+            console.log('✅ [AUTH] Loaded persisted auth data');
+            return authData;
+        } catch (error) {
+            console.warn('⚠️ [AUTH] Failed to parse persisted auth data:', error);
+            _clearPersistedAuthData();
+            return null;
+        }
+    }
+    
+    function _clearPersistedAuthData() {
+        try {
+            _safeStorageRemove(CONFIG.AUTH_STORAGE_KEY);
+            
+            // Clear legacy keys
+            for (const key of CONFIG.TOKEN_KEYS) {
+                _safeStorageRemove(key);
+            }
+            for (const key of CONFIG.USER_DATA_KEYS) {
+                _safeStorageRemove(key);
+            }
+            _safeStorageRemove(CONFIG.REFRESH_TOKEN_KEY);
+            _safeStorageRemove(CONFIG.TOKEN_EXPIRY_KEY);
+            
+            console.log('✅ [AUTH] Cleared persisted auth data');
+            return true;
+        } catch (error) {
+            console.error('❌ [AUTH] Error clearing persisted auth data:', error);
+            return false;
+        }
+    }
+    
     function _isOnline() {
         if (Date.now() - _moduleState.lastNetworkCheck < 5000 && _moduleState.offlineMode !== undefined) {
             return !_moduleState.offlineMode;
@@ -633,7 +755,7 @@
             timestamp: Date.now(),
             source: 'api.auth.js',
             version: VERSION,
-            instanceId: window._API_AUTH_V21_LOADED_.instanceId
+            instanceId: window._API_AUTH_V22_LOADED_.instanceId
         };
         
         _eventListeners[eventName].forEach(listener => {
@@ -846,7 +968,7 @@
             
             if (!Object.getOwnPropertyDescriptor(authObject, 'instanceId')) {
                 Object.defineProperty(authObject, 'instanceId', {
-                    value: window._API_AUTH_V21_LOADED_.instanceId,
+                    value: window._API_AUTH_V22_LOADED_.instanceId,
                     writable: false,
                     configurable: false,
                     enumerable: true
@@ -1020,7 +1142,7 @@
     }
     
     // ============================================================================
-    // PRIVATE TOKEN REGISTRATION SYSTEM
+    // PRIVATE TOKEN REGISTRATION SYSTEM - ENHANCED FOR RELIABLE TOKEN PROPAGATION
     // ============================================================================
     
     function _registerTokenWithCoreSystem(token) {
@@ -1029,41 +1151,94 @@
         
         try {
             if (!_isValid(token)) {
+                console.warn('⚠️ [AUTH] Cannot register invalid token with core system');
                 return false;
             }
             
+            console.log('🔐 [AUTH] Registering token with core systems...');
+            
+            // Method 1: api.core.setAccessToken
             if (window.api && window.api.core && typeof window.api.core.setAccessToken === 'function') {
-                window.api.core.setAccessToken(token);
-                registered = true;
-                methodUsed = 'api.core.setAccessToken';
+                try {
+                    window.api.core.setAccessToken(token);
+                    registered = true;
+                    methodUsed = 'api.core.setAccessToken';
+                    console.log('✅ [AUTH] Token registered via api.core.setAccessToken');
+                } catch (error) {
+                    console.warn('⚠️ [AUTH] Failed to register via api.core.setAccessToken:', error);
+                }
             }
-            else if (window.api && window.api.core && typeof window.api.core.setToken === 'function') {
-                window.api.core.setToken(token);
-                registered = true;
-                methodUsed = 'api.core.setToken';
+            
+            // Method 2: api.core.setToken
+            if (window.api && window.api.core && typeof window.api.core.setToken === 'function') {
+                try {
+                    window.api.core.setToken(token);
+                    registered = true;
+                    methodUsed = 'api.core.setToken';
+                    console.log('✅ [AUTH] Token registered via api.core.setToken');
+                } catch (error) {
+                    console.warn('⚠️ [AUTH] Failed to register via api.core.setToken:', error);
+                }
             }
-            else if (window.api && window.api.core && window.api.core.tokenManager && 
-                     typeof window.api.core.tokenManager.initialize === 'function') {
-                window.api.core.tokenManager.initialize(token);
-                registered = true;
-                methodUsed = 'api.core.tokenManager.initialize';
+            
+            // Method 3: api.core.tokenManager.initialize
+            if (window.api && window.api.core && window.api.core.tokenManager) {
+                if (typeof window.api.core.tokenManager.initialize === 'function') {
+                    try {
+                        window.api.core.tokenManager.initialize(token);
+                        registered = true;
+                        methodUsed = 'api.core.tokenManager.initialize';
+                        console.log('✅ [AUTH] Token registered via api.core.tokenManager.initialize');
+                    } catch (error) {
+                        console.warn('⚠️ [AUTH] Failed to register via api.core.tokenManager.initialize:', error);
+                    }
+                }
+                
+                // Method 4: api.core.tokenManager.setToken
+                if (typeof window.api.core.tokenManager.setToken === 'function') {
+                    try {
+                        window.api.core.tokenManager.setToken(token);
+                        registered = true;
+                        methodUsed = 'api.core.tokenManager.setToken';
+                        console.log('✅ [AUTH] Token registered via api.core.tokenManager.setToken');
+                    } catch (error) {
+                        console.warn('⚠️ [AUTH] Failed to register via api.core.tokenManager.setToken:', error);
+                    }
+                }
             }
-            else if (window.api && window.api.core && window.api.core.tokenManager && 
-                     typeof window.api.core.tokenManager.setToken === 'function') {
-                window.api.core.tokenManager.setToken(token);
-                registered = true;
-                methodUsed = 'api.core.tokenManager.setToken';
+            
+            // Method 5: __API_CORE.setUserToken
+            if (window.__API_CORE && typeof window.__API_CORE.setUserToken === 'function') {
+                try {
+                    window.__API_CORE.setUserToken(token);
+                    registered = true;
+                    methodUsed = '__API_CORE.setUserToken';
+                    console.log('✅ [AUTH] Token registered via __API_CORE.setUserToken');
+                } catch (error) {
+                    console.warn('⚠️ [AUTH] Failed to register via __API_CORE.setUserToken:', error);
+                }
             }
-            else if (window.__API_CORE && typeof window.__API_CORE.setUserToken === 'function') {
-                window.__API_CORE.setUserToken(token);
-                registered = true;
-                methodUsed = '__API_CORE.setUserToken';
+            
+            // Method 6: AppCore.tokenManager.setToken
+            if (window.AppCore && window.AppCore.tokenManager && typeof window.AppCore.tokenManager.setToken === 'function') {
+                try {
+                    window.AppCore.tokenManager.setToken(token);
+                    registered = true;
+                    methodUsed = 'AppCore.tokenManager.setToken';
+                    console.log('✅ [AUTH] Token registered via AppCore.tokenManager.setToken');
+                } catch (error) {
+                    console.warn('⚠️ [AUTH] Failed to register via AppCore.tokenManager.setToken:', error);
+                }
             }
-            else if (window.AppCore && window.AppCore.tokenManager && 
-                     typeof window.AppCore.tokenManager.setToken === 'function') {
-                window.AppCore.tokenManager.setToken(token);
-                registered = true;
-                methodUsed = 'AppCore.tokenManager.setToken';
+            
+            // Method 7: Direct window property for legacy systems
+            try {
+                window.__userToken = token;
+                window.__accessToken = token;
+                window.token = token;
+                console.log('✅ [AUTH] Token set on window properties');
+            } catch (error) {
+                console.warn('⚠️ [AUTH] Failed to set token on window properties:', error);
             }
             
             if (registered) {
@@ -1084,9 +1259,29 @@
                     }));
                     
                     _readinessState.tokenSystemReady = true;
+                    console.log(`✅ [AUTH] Token registered successfully via ${methodUsed}`);
+                } catch (error) {
+                    console.warn('⚠️ [AUTH] Failed to dispatch token events:', error);
+                }
+            } else {
+                console.warn('⚠️ [AUTH] Token could not be registered with any core system');
+                
+                // Even if no core system found, still dispatch events
+                try {
+                    window.dispatchEvent(new CustomEvent("api-auth-token-ready", {
+                        detail: {
+                            token: token,
+                            registered: false,
+                            warning: 'No core system found',
+                            timestamp: Date.now(),
+                            source: 'api.auth.js',
+                            version: VERSION
+                        }
+                    }));
                 } catch (error) {}
             }
         } catch (error) {
+            console.error('❌ [AUTH] Error registering token with core system:', error);
             try {
                 window.dispatchEvent(new CustomEvent("api-auth-token-ready", {
                     detail: {
@@ -1508,18 +1703,95 @@
     }
     
     // ============================================================================
-    // PRIVATE TOKEN MANAGEMENT
+    // PRIVATE TOKEN MANAGEMENT - ENHANCED TOKEN EXTRACTION
     // ============================================================================
+    
+    /**
+     * Extract token from various response formats
+     */
+    function _extractTokenFromResponse(response) {
+        console.log('🔍 [AUTH] Extracting token from response:', response);
+        
+        if (!response) {
+            console.warn('⚠️ [AUTH] Cannot extract token from empty response');
+            return null;
+        }
+        
+        // Direct token field
+        if (response.token && typeof response.token === 'string') {
+            console.log('✅ [AUTH] Token found in response.token');
+            return response.token;
+        }
+        
+        // accessToken field
+        if (response.accessToken && typeof response.accessToken === 'string') {
+            console.log('✅ [AUTH] Token found in response.accessToken');
+            return response.accessToken;
+        }
+        
+        // jwt field
+        if (response.jwt && typeof response.jwt === 'string') {
+            console.log('✅ [AUTH] Token found in response.jwt');
+            return response.jwt;
+        }
+        
+        // data.token pattern
+        if (response.data && response.data.token && typeof response.data.token === 'string') {
+            console.log('✅ [AUTH] Token found in response.data.token');
+            return response.data.token;
+        }
+        
+        // data.accessToken pattern
+        if (response.data && response.data.accessToken && typeof response.data.accessToken === 'string') {
+            console.log('✅ [AUTH] Token found in response.data.accessToken');
+            return response.data.accessToken;
+        }
+        
+        // data.jwt pattern
+        if (response.data && response.data.jwt && typeof response.data.jwt === 'string') {
+            console.log('✅ [AUTH] Token found in response.data.jwt');
+            return response.data.jwt;
+        }
+        
+        // result.token pattern
+        if (response.result && response.result.token && typeof response.result.token === 'string') {
+            console.log('✅ [AUTH] Token found in response.result.token');
+            return response.result.token;
+        }
+        
+        // Any string field that looks like a token
+        for (const key in response) {
+            if (typeof response[key] === 'string' && 
+                (response[key].length > 20 || response[key].includes('.')) &&
+                (key.includes('token') || key.includes('jwt') || key.includes('access'))) {
+                console.log(`✅ [AUTH] Token found in response.${key}`);
+                return response[key];
+            }
+        }
+        
+        console.warn('⚠️ [AUTH] No token found in response');
+        return null;
+    }
     
     function getUserToken() {
         try {
+            // Try core system first
             if (window.__API_CORE && typeof window.__API_CORE.getUserToken === 'function') {
                 const coreToken = window.__API_CORE.getUserToken();
                 if (_isValid(coreToken)) {
+                    console.log('✅ [AUTH] Token retrieved from core system');
                     return coreToken;
                 }
             }
             
+            // CRITICAL: Try unified storage key first
+            const unifiedAuth = _loadPersistedAuthData();
+            if (unifiedAuth && unifiedAuth.token) {
+                console.log('✅ [AUTH] Token retrieved from unified storage');
+                return unifiedAuth.token;
+            }
+            
+            // Try localStorage legacy keys
             for (const key of CONFIG.TOKEN_KEYS) {
                 const token = _safeStorageGet(key);
                 if (_isValid(token)) {
@@ -1530,16 +1802,20 @@
                     
                     const expiry = _safeStorageGet(CONFIG.TOKEN_EXPIRY_KEY);
                     if (expiry && Date.now() > parseInt(expiry, 10)) {
+                        console.log('⚠️ [AUTH] Token expired, clearing');
                         clearUserToken();
                         return null;
                     }
                     
+                    console.log(`✅ [AUTH] Token retrieved from localStorage key: ${key}`);
                     return token;
                 }
             }
             
+            console.log('⚠️ [AUTH] No token found in any location');
             return null;
         } catch (error) {
+            console.error('❌ [AUTH] Error getting user token:', error);
             return null;
         }
     }
@@ -1553,6 +1829,7 @@
         
         for (const pattern of suspiciousPatterns) {
             if (token.toLowerCase().includes(pattern)) {
+                console.warn(`⚠️ [AUTH] Token contains suspicious pattern: ${pattern}`);
                 return false;
             }
         }
@@ -1563,47 +1840,94 @@
     function setUserToken(token, expiryMs = CONFIG.DEFAULT_TOKEN_EXPIRY) {
         try {
             if (!_validateTokenSafety(token)) {
+                console.error('❌ [AUTH] Token failed safety validation');
                 return false;
             }
             
+            console.log('🔐 [AUTH] Setting user token...');
+            
+            // Register with core systems FIRST
             _registerTokenWithCoreSystem(token);
             
+            // Store in multiple locations for compatibility
+            let storedSuccessfully = false;
+            
+            // Store in core system if available
             if (window.__API_CORE && typeof window.__API_CORE.setUserToken === 'function') {
                 try {
                     window.__API_CORE.setUserToken(token);
-                } catch (error) {}
+                    console.log('✅ [AUTH] Token set in __API_CORE');
+                } catch (error) {
+                    console.warn('⚠️ [AUTH] Failed to set token in __API_CORE:', error);
+                }
             }
             
-            let storedSuccessfully = false;
+            // Store in localStorage with all possible keys
             for (const key of CONFIG.TOKEN_KEYS) {
                 if (_safeStorageSet(key, token)) {
                     storedSuccessfully = true;
+                    console.log(`✅ [AUTH] Token stored in localStorage with key: ${key}`);
                 }
             }
             
             if (!storedSuccessfully) {
-                throw new Error('Failed to store token');
+                console.error('❌ [AUTH] Failed to store token in localStorage');
+                return false;
             }
             
+            // Set expiry
             if (expiryMs && !isNaN(expiryMs)) {
                 const expiryTime = Date.now() + expiryMs;
                 _safeStorageSet(CONFIG.TOKEN_EXPIRY_KEY, expiryTime.toString());
+                console.log(`✅ [AUTH] Token expiry set to: ${new Date(expiryTime).toISOString()}`);
             }
             
+            // Dispatch events to notify other modules
+            try {
+                window.dispatchEvent(new CustomEvent('token-stored', {
+                    detail: {
+                        timestamp: Date.now(),
+                        source: 'api.auth.js',
+                        tokenPresent: true
+                    }
+                }));
+                
+                window.dispatchEvent(new CustomEvent('auth:token:updated', {
+                    detail: {
+                        token: token,
+                        timestamp: Date.now()
+                    }
+                }));
+            } catch (error) {
+                console.warn('⚠️ [AUTH] Failed to dispatch token events:', error);
+            }
+            
+            console.log('✅ [AUTH] Token successfully stored and registered');
             return true;
         } catch (error) {
+            console.error('❌ [AUTH] Error setting user token:', error);
             return false;
         }
     }
     
     function clearUserToken() {
         try {
+            console.log('🔐 [AUTH] Clearing user token...');
+            
+            // Clear from core systems
             if (window.__API_CORE && typeof window.__API_CORE.clearAllAuthData === 'function') {
                 try {
                     window.__API_CORE.clearAllAuthData();
-                } catch (error) {}
+                    console.log('✅ [AUTH] Cleared token from __API_CORE');
+                } catch (error) {
+                    console.warn('⚠️ [AUTH] Failed to clear token from __API_CORE:', error);
+                }
             }
             
+            // Clear unified storage
+            _clearPersistedAuthData();
+            
+            // Clear from localStorage legacy keys
             for (const key of CONFIG.TOKEN_KEYS) {
                 _safeStorageRemove(key);
             }
@@ -1611,8 +1935,17 @@
             _safeStorageRemove(CONFIG.TOKEN_EXPIRY_KEY);
             _safeStorageRemove(CONFIG.REFRESH_TOKEN_KEY);
             
+            // Clear window properties
+            try {
+                window.__userToken = null;
+                window.__accessToken = null;
+                window.token = null;
+            } catch (error) {}
+            
+            console.log('✅ [AUTH] Token cleared successfully');
             return true;
         } catch (error) {
+            console.error('❌ [AUTH] Error clearing user token:', error);
             return false;
         }
     }
@@ -1695,7 +2028,9 @@
         _moduleState.refreshAttempts++;
         
         try {
-            const refreshTokenValue = _safeStorageGet(CONFIG.REFRESH_TOKEN_KEY);
+            const unifiedAuth = _loadPersistedAuthData();
+            const refreshTokenValue = unifiedAuth?.refreshToken || _safeStorageGet(CONFIG.REFRESH_TOKEN_KEY);
+            
             if (!refreshTokenValue) {
                 throw new Error('No refresh token available');
             }
@@ -1716,6 +2051,10 @@
             
             if (response.success && response.data?.accessToken) {
                 const expiresIn = response.data.expiresIn || CONFIG.DEFAULT_TOKEN_EXPIRY;
+                
+                // Update unified storage
+                const user = unifiedAuth?.user || null;
+                _persistAuthData(response.data.accessToken, user, response.data.refreshToken, expiresIn);
                 setUserToken(response.data.accessToken, expiresIn);
                 
                 if (response.data.refreshToken) {
@@ -1741,6 +2080,7 @@
             }
         } catch (error) {
             clearUserToken();
+            _clearPersistedAuthData();
             _safeStorageRemove(CONFIG.REFRESH_TOKEN_KEY);
             
             _emitEvent('token-expired', {
@@ -1797,7 +2137,7 @@
                 if (response.success) {
                     return true;
                 } else if (response.status === 401) {
-                    const hasRefreshToken = !!_safeStorageGet(CONFIG.REFRESH_TOKEN_KEY);
+                    const hasRefreshToken = !!_loadPersistedAuthData()?.refreshToken || !!_safeStorageGet(CONFIG.REFRESH_TOKEN_KEY);
                     if (hasRefreshToken) {
                         const refreshed = await refreshToken();
                         return refreshed;
@@ -1836,7 +2176,8 @@
             return false;
         }
         
-        const isTokenChange = CONFIG.TOKEN_KEYS.includes(event.key) ||
+        const isTokenChange = event.key === CONFIG.AUTH_STORAGE_KEY ||
+                             CONFIG.TOKEN_KEYS.includes(event.key) ||
                              event.key === CONFIG.TOKEN_EXPIRY_KEY ||
                              event.key === CONFIG.REFRESH_TOKEN_KEY;
         
@@ -1867,6 +2208,35 @@
             window.addEventListener('storage', (event) => {
                 if (!_validateCrossTabMessage(event)) {
                     return;
+                }
+                
+                // Handle unified auth storage changes
+                if (event.key === CONFIG.AUTH_STORAGE_KEY) {
+                    if (!event.newValue) {
+                        _emitEvent('cross-tab-logout', {
+                            source: 'storage-event',
+                            key: event.key
+                        });
+                        _performLogout(false);
+                    } else {
+                        try {
+                            const authData = JSON.parse(event.newValue);
+                            if (authData.token) {
+                                console.log('🔄 [AUTH] Cross-tab auth data detected');
+                                setUserToken(authData.token);
+                                if (authData.user) {
+                                    window.currentUser = authData.user;
+                                }
+                                window.dispatchEvent(new CustomEvent('auth-tab-sync', {
+                                    detail: {
+                                        action: 'sync',
+                                        timestamp: Date.now(),
+                                        key: event.key
+                                    }
+                                }));
+                            }
+                        } catch (e) {}
+                    }
                 }
                 
                 if (!event.newValue && event.oldValue && CONFIG.TOKEN_KEYS.includes(event.key)) {
@@ -1915,10 +2285,11 @@
         
         _moduleState.crossTabHeartbeatInterval = _setSafeInterval(() => {
             try {
+                const unifiedAuth = _loadPersistedAuthData();
                 const authState = {
-                    hasToken: !!getUserToken(),
+                    hasToken: !!unifiedAuth?.token || !!getUserToken(),
                     timestamp: Date.now(),
-                    tabId: window._API_AUTH_V21_LOADED_.instanceId
+                    tabId: window._API_AUTH_V22_LOADED_.instanceId
                 };
                 
                 _safeStorageSet(CONFIG.CROSS_TAB_SYNC_KEY, JSON.stringify(authState));
@@ -2049,7 +2420,8 @@
             console.log('🔐 [AUTH] Initializing iframe synchronization');
             
             const sendAuthState = () => {
-                const token = getUserToken();
+                const unifiedAuth = _loadPersistedAuthData();
+                const token = unifiedAuth?.token || getUserToken();
                 const authState = {
                     type: 'AUTH_SYNC',
                     payload: {
@@ -2173,6 +2545,7 @@
     function _performLogout(notifyUI = true) {
         try {
             clearUserToken();
+            _clearPersistedAuthData();
             _safeStorageRemove(CONFIG.REFRESH_TOKEN_KEY);
             
             CONFIG.USER_DATA_KEYS.forEach(key => {
@@ -2219,14 +2592,14 @@
     }
     
     // ============================================================================
-    // CRITICAL FIX: PUBLIC API FUNCTIONS - LOGIN WORKS EXACTLY LIKE BROWSER TEST
+    // CRITICAL FIX: PUBLIC API FUNCTIONS - ENHANCED TOKEN EXTRACTION
     // ============================================================================
     
     /**
-     * PUBLIC: Login with credentials - CRITICAL FIX - Works exactly like browser console test
+     * PUBLIC: Login with credentials - ENHANCED TOKEN EXTRACTION
      */
     async function login(...args) {
-        console.log('🔐 [AUTH] Login attempt - USING DIRECT FETCH LIKE BROWSER TEST');
+        console.log('🔐 [AUTH] Login attempt - ENHANCED TOKEN EXTRACTION');
         
         const operation = 'login';
         
@@ -2303,35 +2676,78 @@
                 const data = await response.json();
                 console.log('🔐 [AUTH] Login successful response:', data);
                 
-                if (data.accessToken || data.token) {
-                    const token = data.accessToken || data.token;
-                    const expiresIn = data.expiresIn || CONFIG.DEFAULT_TOKEN_EXPIRY;
+                // ========== CRITICAL FIX: ENHANCED TOKEN EXTRACTION ==========
+                const token = _extractTokenFromResponse(data);
+                
+                if (token) {
+                    const expiresIn = data.expiresIn || data.data?.expiresIn || CONFIG.DEFAULT_TOKEN_EXPIRY;
                     
-                    // Store tokens
-                    setUserToken(token, expiresIn);
+                    console.log('✅ [AUTH] Token extracted successfully:', token.substring(0, 20) + '...');
                     
-                    if (data.refreshToken) {
-                        _safeStorageSet(CONFIG.REFRESH_TOKEN_KEY, data.refreshToken);
+                    // Extract user data from various possible locations
+                    let user = data.user || data.data?.user || data.data;
+                    
+                    // If user is still not found but we have a token, create minimal user
+                    if (!user && token) {
+                        console.warn('⚠️ [AUTH] No user data in response, creating minimal user from identifier');
+                        user = {
+                            email: normalized.identifier.includes('@') ? normalized.identifier : null,
+                            username: normalized.identifier.includes('@') ? normalized.identifier.split('@')[0] : normalized.identifier,
+                            id: 'user_' + Date.now()
+                        };
                     }
                     
-                    // Store user data
-                    if (data.user) {
-                        const userData = JSON.stringify(data.user);
+                    const refreshToken = data.refreshToken || data.data?.refreshToken || null;
+                    
+                    // CRITICAL: Persist auth data to unified storage
+                    const persisted = _persistAuthData(token, user, refreshToken, expiresIn);
+                    
+                    if (!persisted) {
+                        console.error('❌ [AUTH] Failed to persist auth data');
+                        return {
+                            success: false,
+                            error: 'Failed to store authentication data',
+                            code: 'STORAGE_ERROR',
+                            status: 500,
+                            message: 'Authentication succeeded but data could not be stored'
+                        };
+                    }
+                    
+                    // Store tokens with enhanced method
+                    const tokenStored = setUserToken(token, expiresIn);
+                    
+                    if (!tokenStored) {
+                        console.error('❌ [AUTH] Failed to store token');
+                        return {
+                            success: false,
+                            error: 'Failed to store authentication token',
+                            code: 'TOKEN_STORAGE_ERROR',
+                            status: 500,
+                            message: 'Authentication succeeded but token could not be stored'
+                        };
+                    }
+                    
+                    if (refreshToken) {
+                        _safeStorageSet(CONFIG.REFRESH_TOKEN_KEY, refreshToken);
+                        console.log('✅ [AUTH] Refresh token stored');
+                    }
+                    
+                    // Store user data in legacy locations
+                    if (user) {
+                        const userData = JSON.stringify(user);
                         _safeStorageSet('USER_DATA', userData);
-                        window.currentUser = data.user;
-                    } else if (data.data && data.data.user) {
-                        const userData = JSON.stringify(data.data.user);
-                        _safeStorageSet('USER_DATA', userData);
-                        window.currentUser = data.data.user;
+                        window.currentUser = user;
+                        console.log('✅ [AUTH] User data stored');
                     }
                     
                     // Initialize synchronization
                     _initCrossTabSync();
                     _initIframeSync();
                     
-                    // Dispatch login event
+                    // Dispatch login event with token
                     _emitEvent('login', {
-                        user: data.user || (data.data && data.data.user),
+                        user: user,
+                        token: token,
                         timestamp: new Date().toISOString(),
                         payloadType: args.length > 1 ? 'legacy-args' : 'object',
                         backendPayload: payload
@@ -2340,20 +2756,41 @@
                     try {
                         window.dispatchEvent(new CustomEvent('user-logged-in', {
                             detail: {
-                                user: data.user || (data.data && data.data.user),
+                                user: user,
+                                token: token,
                                 timestamp: new Date().toISOString(),
                                 source: 'api.auth.js',
                                 version: VERSION,
                                 payloadType: args.length > 1 ? 'legacy-args' : 'object'
                             }
                         }));
-                    } catch (error) {}
+                        
+                        // Dispatch token-ready event for other modules
+                        window.dispatchEvent(new CustomEvent('auth:token:ready', {
+                            detail: {
+                                token: token,
+                                timestamp: Date.now()
+                            }
+                        }));
+                        
+                        // Dispatch session-ready event for sync manager
+                        window.dispatchEvent(new CustomEvent('session:ready', {
+                            detail: {
+                                token: token,
+                                user: user,
+                                timestamp: Date.now()
+                            }
+                        }));
+                    } catch (error) {
+                        console.warn('⚠️ [AUTH] Failed to dispatch login events:', error);
+                    }
                     
-                    console.log('✅ [AUTH] Login successful with direct fetch');
+                    console.log('✅ [AUTH] Login successful with token storage');
                     
+                    // Return success with token and user
                     return {
                         success: true,
-                        user: data.user || (data.data && data.data.user),
+                        user: user,
                         token: token,
                         expiresIn: expiresIn,
                         message: 'Login successful',
@@ -2361,12 +2798,13 @@
                         identifierUsed: normalized.identifier
                     };
                 } else {
+                    console.error('❌ [AUTH] No token found in response:', data);
                     return {
                         success: false,
-                        error: data.message || 'Login failed - no token received',
-                        code: 'LOGIN_FAILED',
+                        error: 'Login failed - no token received from server',
+                        code: 'NO_TOKEN',
                         status: response.status,
-                        message: data.message || 'Login failed',
+                        message: 'Authentication succeeded but no token was provided',
                         payload: payload,
                         data: data
                     };
@@ -2457,16 +2895,21 @@
             
             if (response.success && response.data?.accessToken) {
                 const expiresIn = response.data.expiresIn || CONFIG.DEFAULT_TOKEN_EXPIRY;
+                const user = response.data.user;
+                const refreshToken = response.data.refreshToken || null;
+                
+                // CRITICAL: Persist auth data to unified storage
+                _persistAuthData(response.data.accessToken, user, refreshToken, expiresIn);
                 setUserToken(response.data.accessToken, expiresIn);
                 
-                if (response.data.refreshToken) {
-                    _safeStorageSet(CONFIG.REFRESH_TOKEN_KEY, response.data.refreshToken);
+                if (refreshToken) {
+                    _safeStorageSet(CONFIG.REFRESH_TOKEN_KEY, refreshToken);
                 }
                 
-                if (response.data.user) {
-                    const userData = JSON.stringify(response.data.user);
+                if (user) {
+                    const userData = JSON.stringify(user);
                     _safeStorageSet('USER_DATA', userData);
-                    window.currentUser = response.data.user;
+                    window.currentUser = user;
                 }
                 
                 _initCrossTabSync();
@@ -2486,6 +2929,14 @@
                             source: 'api.auth.js',
                             version: VERSION,
                             payloadType: args.length > 1 ? 'legacy-args' : 'object'
+                        }
+                    }));
+                    
+                    window.dispatchEvent(new CustomEvent('session:ready', {
+                        detail: {
+                            token: response.data.accessToken,
+                            user: response.data.user,
+                            timestamp: Date.now()
                         }
                     }));
                 } catch (error) {}
@@ -2753,7 +3204,10 @@
                 };
             }
             
-            const token = getUserToken();
+            // Try unified storage first
+            const unifiedAuth = _loadPersistedAuthData();
+            let token = unifiedAuth?.token || getUserToken();
+            
             if (!token) {
                 return {
                     success: false,
@@ -2763,20 +3217,37 @@
                 };
             }
             
-            const expiry = _safeStorageGet(CONFIG.TOKEN_EXPIRY_KEY);
-            if (expiry && Date.now() > parseInt(expiry, 10)) {
-                clearUserToken();
-                return {
-                    success: false,
-                    error: 'Token expired',
-                    code: 'TOKEN_EXPIRED',
-                    message: 'Your session has expired'
-                };
+            // Check expiry if available
+            if (unifiedAuth?.expiresIn && unifiedAuth?.timestamp) {
+                const expiryTime = unifiedAuth.timestamp + unifiedAuth.expiresIn;
+                if (Date.now() > expiryTime) {
+                    console.log('⚠️ [AUTH] Stored token expired');
+                    clearUserToken();
+                    _clearPersistedAuthData();
+                    return {
+                        success: false,
+                        error: 'Token expired',
+                        code: 'TOKEN_EXPIRED',
+                        message: 'Your session has expired'
+                    };
+                }
+            } else {
+                const expiry = _safeStorageGet(CONFIG.TOKEN_EXPIRY_KEY);
+                if (expiry && Date.now() > parseInt(expiry, 10)) {
+                    clearUserToken();
+                    return {
+                        success: false,
+                        error: 'Token expired',
+                        code: 'TOKEN_EXPIRED',
+                        message: 'Your session has expired'
+                    };
+                }
             }
             
             const isValid = await validateSession();
             if (!isValid) {
                 clearUserToken();
+                _clearPersistedAuthData();
                 return {
                     success: false,
                     error: 'Session validation failed',
@@ -2785,29 +3256,50 @@
                 };
             }
             
-            const userData = await getCurrentUser();
-            if (!userData) {
-                return {
-                    success: true,
-                    user: null,
-                    token: getUserToken(),
-                    message: 'Auto-login successful (no user data)'
-                };
+            // Restore user from unified storage or legacy storage
+            let user = unifiedAuth?.user || null;
+            if (!user) {
+                for (const key of CONFIG.USER_DATA_KEYS) {
+                    const userDataStr = _safeStorageGet(key);
+                    if (userDataStr) {
+                        try {
+                            user = JSON.parse(userDataStr);
+                            if (user) break;
+                        } catch (e) {}
+                    }
+                }
+            }
+            
+            if (user) {
+                window.currentUser = user;
             }
             
             _initCrossTabSync();
             _initIframeSync();
             
+            // Dispatch session ready event for sync manager
+            try {
+                window.dispatchEvent(new CustomEvent('session:ready', {
+                    detail: {
+                        token: token,
+                        user: user,
+                        timestamp: Date.now(),
+                        source: 'autoLogin'
+                    }
+                }));
+            } catch (error) {}
+            
             return {
                 success: true,
-                user: userData,
-                token: getUserToken(),
+                user: user,
+                token: token,
                 message: 'Auto-login successful'
             };
         } catch (error) {
             _safeLogError('AUTO-LOGIN', 'Auto-login error', { error: error.message }, false, operation);
             
             clearUserToken();
+            _clearPersistedAuthData();
             
             return {
                 success: false,
@@ -2825,6 +3317,13 @@
         try {
             if (window.currentUser && typeof window.currentUser === 'object') {
                 return window.currentUser;
+            }
+            
+            // Try unified storage first
+            const unifiedAuth = _loadPersistedAuthData();
+            if (unifiedAuth?.user) {
+                window.currentUser = unifiedAuth.user;
+                return unifiedAuth.user;
             }
             
             for (const key of CONFIG.USER_DATA_KEYS) {
@@ -2859,6 +3358,14 @@
                         const userData = JSON.stringify(response.data);
                         _safeStorageSet('USER_DATA', userData);
                         window.currentUser = response.data;
+                        
+                        // Update unified storage
+                        const unified = _loadPersistedAuthData();
+                        if (unified) {
+                            unified.user = response.data;
+                            _persistAuthData(unified.token, response.data, unified.refreshToken, unified.expiresIn);
+                        }
+                        
                         return response.data;
                     }
                 }
@@ -2902,7 +3409,8 @@
      * PUBLIC: Get authentication state with details
      */
     async function getAuthState() {
-        const token = getUserToken();
+        const unifiedAuth = _loadPersistedAuthData();
+        const token = unifiedAuth?.token || getUserToken();
         const user = await getCurrentUser();
         const isValid = token ? await isAuthenticated() : false;
         
@@ -2912,7 +3420,7 @@
             hasUserData: !!user,
             user: user,
             offline: !_isOnline(),
-            tokenExpiry: _safeStorageGet(CONFIG.TOKEN_EXPIRY_KEY),
+            tokenExpiry: unifiedAuth?.expiresIn ? (unifiedAuth.timestamp + unifiedAuth.expiresIn) : _safeStorageGet(CONFIG.TOKEN_EXPIRY_KEY),
             lifecycleState: _moduleState.lifecycleState,
             initialized: _moduleState.initialized,
             bootstrapComplete: _moduleState.bootstrapComplete,
@@ -2972,6 +3480,7 @@
         _moduleState.sessionExpirationHandled = true;
         
         clearUserToken();
+        _clearPersistedAuthData();
         
         if (window.self !== window.top) {
             try {
@@ -3006,7 +3515,7 @@
         
         _readinessState.initStarted = true;
         _moduleState.initializationStarted = true;
-        window._API_AUTH_V21_LOADED_.initStarted = true;
+        window._API_AUTH_V22_LOADED_.initStarted = true;
         
         console.log(`🔐 [API-AUTH] Initializing authentication module v${VERSION}...`);
         
@@ -3020,14 +3529,26 @@
             
             const expiryCheckInterval = _setSafeInterval(() => {
                 try {
-                    const expiry = _safeStorageGet(CONFIG.TOKEN_EXPIRY_KEY);
-                    if (expiry) {
-                        const timeUntilExpiry = parseInt(expiry, 10) - Date.now();
+                    const unifiedAuth = _loadPersistedAuthData();
+                    if (unifiedAuth?.expiresIn && unifiedAuth?.timestamp) {
+                        const expiryTime = unifiedAuth.timestamp + unifiedAuth.expiresIn;
+                        const timeUntilExpiry = expiryTime - Date.now();
                         
                         if (timeUntilExpiry < CONFIG.TOKEN_REFRESH_BUFFER && timeUntilExpiry > 0) {
                             refreshToken().catch(error => {});
                         } else if (timeUntilExpiry <= 0) {
                             _handleSessionExpiration();
+                        }
+                    } else {
+                        const expiry = _safeStorageGet(CONFIG.TOKEN_EXPIRY_KEY);
+                        if (expiry) {
+                            const timeUntilExpiry = parseInt(expiry, 10) - Date.now();
+                            
+                            if (timeUntilExpiry < CONFIG.TOKEN_REFRESH_BUFFER && timeUntilExpiry > 0) {
+                                refreshToken().catch(error => {});
+                            } else if (timeUntilExpiry <= 0) {
+                                _handleSessionExpiration();
+                            }
                         }
                     }
                 } catch (error) {}
@@ -3038,22 +3559,32 @@
             
             document.addEventListener('visibilitychange', () => {
                 if (!document.hidden && _isOnline()) {
-                    const expiry = _safeStorageGet(CONFIG.TOKEN_EXPIRY_KEY);
-                    if (expiry && Date.now() > parseInt(expiry, 10) - 300000) {
-                        refreshToken().catch(() => {});
+                    const unifiedAuth = _loadPersistedAuthData();
+                    if (unifiedAuth?.expiresIn && unifiedAuth?.timestamp) {
+                        const expiryTime = unifiedAuth.timestamp + unifiedAuth.expiresIn;
+                        if (Date.now() > expiryTime - 300000) {
+                            refreshToken().catch(() => {});
+                        }
+                    } else {
+                        const expiry = _safeStorageGet(CONFIG.TOKEN_EXPIRY_KEY);
+                        if (expiry && Date.now() > parseInt(expiry, 10) - 300000) {
+                            refreshToken().catch(() => {});
+                        }
                     }
                 }
             });
             
             _moduleState.initialized = true;
             _readinessState.initCompleted = true;
-            window._API_AUTH_V21_LOADED_.initialized = true;
+            window._API_AUTH_V22_LOADED_.initialized = true;
             _moduleState.lifecycleState = 'initialized';
             _emitEvent('initialized', { timestamp: Date.now() });
             
             console.log('✅ [API-AUTH] Authentication module initialized');
             
-            const token = getUserToken();
+            // Attempt auto-login if token exists
+            const unifiedAuth = _loadPersistedAuthData();
+            const token = unifiedAuth?.token || getUserToken();
             if (token) {
                 _setSafeTimeout(async () => {
                     try {
@@ -3115,6 +3646,10 @@
             
             // Utility
             getVersion: () => VERSION,
+            
+            // Storage utilities
+            getPersistedAuth: _loadPersistedAuthData,
+            clearPersistedAuth: _clearPersistedAuthData,
             
             // Configuration
             setEndpointPrefix: (prefix) => {
@@ -3185,11 +3720,12 @@
         
         // Fire ready event with enhanced details
         _setSafeTimeout(() => {
+            const unifiedAuth = _loadPersistedAuthData();
             const authState = {
-                hasToken: !!getUserToken(),
+                hasToken: !!unifiedAuth?.token || !!getUserToken(),
                 version: VERSION,
                 timestamp: Date.now(),
-                instanceId: window._API_AUTH_V21_LOADED_.instanceId,
+                instanceId: window._API_AUTH_V22_LOADED_.instanceId,
                 crossTabSync: _moduleState.crossTabSyncInitialized,
                 iframeSync: _moduleState.iframeSyncInitialized,
                 initialized: _moduleState.initialized,
@@ -3220,7 +3756,7 @@
                 }));
             } catch (error) {}
             
-            console.log(`✅ api.auth.js v${VERSION} initialized with login fix and force override`, authState);
+            console.log(`✅ api.auth.js v${VERSION} initialized with session persistence fix`, authState);
         }, 100);
         
         return window.api.auth;
@@ -3312,7 +3848,7 @@
     (async function _immediateBootstrap() {
         try {
             console.log('🚀 [AUTH] Immediate bootstrap started');
-            window._API_AUTH_V21_LOADED_.loadingStage = 'bootstrap_started';
+            window._API_AUTH_V22_LOADED_.loadingStage = 'bootstrap_started';
             
             _setupGlobalErrorHandler();
             
@@ -3322,7 +3858,8 @@
             
             await _setupPublicAPI();
             
-            const token = getUserToken();
+            const unifiedAuth = _loadPersistedAuthData();
+            const token = unifiedAuth?.token || getUserToken();
             if (token && !window.currentUser) {
                 _setSafeTimeout(async () => {
                     try {
@@ -3354,12 +3891,12 @@
                 }
             }, 60000);
             
-            window._API_AUTH_V21_LOADED_.loadingStage = 'bootstrap_complete';
+            window._API_AUTH_V22_LOADED_.loadingStage = 'bootstrap_complete';
             console.log('🚀 [AUTH] Immediate bootstrap completed successfully');
             
         } catch (error) {
             _safeLogError('BOOTSTRAP', 'Immediate bootstrap failed', { error: error.message }, true);
-            window._API_AUTH_V21_LOADED_.loadingStage = 'bootstrap_failed';
+            window._API_AUTH_V22_LOADED_.loadingStage = 'bootstrap_failed';
             _moduleState.lifecycleState = 'error';
             _readinessState.initFailed = true;
             _readinessState.initError = error;
@@ -3388,4 +3925,4 @@
     
 })(); // End of IIFE
 
-console.log('✅ [API-AUTH] Modular authentication service v21.1.5 loaded with login fix and force override (IIFE Protected)');
+console.log('✅ [API-AUTH] Modular authentication service v22.0.0 loaded with session persistence fix (IIFE Protected)');

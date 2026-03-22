@@ -1,16 +1,378 @@
 // =============================================
-// TOOLS MODULE v8.0.5
-// PARENT-ALIGNED COMMUNICATION LAYER
-// DETERMINISTIC STATE MACHINE
-// PROTOCOL: KYN-8.0 (STRICT)
+// TOOLS-CORE.JS - COMPLETE PRODUCTION MODULE
+// =============================================
+// Version: 10.2.0 - DETERMINISTIC HANDSHAKE PROTOCOL (STRICT)
 // =============================================
 
 // =============================================
 // MODULE IDENTIFIER - MUST MATCH PARENT EXPECTATIONS
 // =============================================
 const MODULE_NAME = 'tools'; // EXACT match required
-const MODULE_VERSION = '8.0.5';
+const MODULE_VERSION = '10.2.0'; // UPDATED VERSION
 const MODULE_CAPABILITIES = ['marketplace', 'storage', 'heartbeat', 'ui'];
+
+// =============================================
+// LIFECYCLE STATE MACHINE (SINGLE SOURCE OF TRUTH - STRICT)
+// =============================================
+
+const LIFECYCLE_STATE = {
+    BOOT: 'BOOT',
+    INITIALIZING: 'INITIALIZING',
+    READY: 'READY',
+    WAIT_PARENT: 'WAIT_PARENT',
+    ACTIVE: 'ACTIVE'
+};
+
+let currentState = LIFECYCLE_STATE.BOOT;
+let childReadySent = false;
+let parentReadyReceived = false;
+let initializationLock = false;
+let activationComplete = false;
+
+// State transition validation matrix - STRICT
+const VALID_TRANSITIONS = {
+    [LIFECYCLE_STATE.BOOT]: [LIFECYCLE_STATE.INITIALIZING],
+    [LIFECYCLE_STATE.INITIALIZING]: [LIFECYCLE_STATE.READY],
+    [LIFECYCLE_STATE.READY]: [LIFECYCLE_STATE.WAIT_PARENT],
+    [LIFECYCLE_STATE.WAIT_PARENT]: [LIFECYCLE_STATE.ACTIVE],
+    [LIFECYCLE_STATE.ACTIVE]: []
+};
+
+function transitionTo(nextState, reason = '') {
+    if (currentState === nextState) {
+        console.log(`[Tools][Lifecycle] Already in ${nextState} - ignoring transition request`);
+        return true;
+    }
+    
+    if (!VALID_TRANSITIONS[currentState]?.includes(nextState)) {
+        console.error(`[Tools][Lifecycle] INVALID TRANSITION: ${currentState} → ${nextState}`, reason);
+        return false;
+    }
+    
+    const fromState = currentState;
+    console.log(`[Tools][Lifecycle] ${fromState} → ${nextState}`, reason);
+    currentState = nextState;
+    moduleState.bootState = nextState;
+    
+    window.dispatchEvent(new CustomEvent('tools:lifecycle-change', { 
+        detail: { from: fromState, to: nextState, reason }
+    }));
+    
+    // Trigger state-specific handlers
+    if (nextState === LIFECYCLE_STATE.ACTIVE && !activationComplete) {
+        onModuleActive();
+        activationComplete = true;
+    }
+    
+    return true;
+}
+
+function assertActive(actionName) {
+    if (currentState !== LIFECYCLE_STATE.ACTIVE) {
+        console.warn(`[Tools][Lifecycle] Blocked action "${actionName}" — not ACTIVE (current: ${currentState})`);
+        return false;
+    }
+    return true;
+}
+
+function isActive() {
+    return currentState === LIFECYCLE_STATE.ACTIVE && parentReadyReceived === true;
+}
+
+// =============================================
+// STORAGE PROXY - SANDBOX-COMPLIANT (NO DIRECT STORAGE)
+// =============================================
+
+const StorageProxy = {
+    pendingRequests: new Map(),
+    requestCounter: 0,
+
+    get(key, defaultValue = null) {
+        return new Promise((resolve) => {
+            const requestId = `storage_get_${++this.requestCounter}_${Date.now()}`;
+            
+            const handler = (event) => {
+                if (event.data?.type === 'STORAGE_RESULT' && 
+                    event.data.requestId === requestId &&
+                    event.data.key === key) {
+                    window.removeEventListener('message', handler);
+                    resolve(event.data.value !== undefined ? event.data.value : defaultValue);
+                }
+            };
+            
+            window.addEventListener('message', handler);
+            
+            parent.postMessage({
+                type: 'STORAGE_GET',
+                key,
+                requestId,
+                module: MODULE_NAME,
+                timestamp: Date.now()
+            }, '*');
+            
+            // Timeout fallback
+            setTimeout(() => {
+                window.removeEventListener('message', handler);
+                resolve(defaultValue);
+            }, 5000);
+        });
+    },
+
+    set(key, value) {
+        parent.postMessage({
+            type: 'STORAGE_SET',
+            key,
+            value,
+            module: MODULE_NAME,
+            timestamp: Date.now()
+        }, '*');
+        
+        return true;
+    },
+
+    remove(key) {
+        parent.postMessage({
+            type: 'STORAGE_REMOVE',
+            key,
+            module: MODULE_NAME,
+            timestamp: Date.now()
+        }, '*');
+        
+        return true;
+    },
+
+    clear() {
+        parent.postMessage({
+            type: 'STORAGE_CLEAR',
+            module: MODULE_NAME,
+            timestamp: Date.now()
+        }, '*');
+    },
+
+    sessionGet(key, defaultValue = null) {
+        return new Promise((resolve) => {
+            const requestId = `session_get_${++this.requestCounter}_${Date.now()}`;
+            
+            const handler = (event) => {
+                if (event.data?.type === 'SESSION_STORAGE_RESULT' && 
+                    event.data.requestId === requestId &&
+                    event.data.key === key) {
+                    window.removeEventListener('message', handler);
+                    resolve(event.data.value !== undefined ? event.data.value : defaultValue);
+                }
+            };
+            
+            window.addEventListener('message', handler);
+            
+            parent.postMessage({
+                type: 'SESSION_STORAGE_GET',
+                key,
+                requestId,
+                module: MODULE_NAME,
+                timestamp: Date.now()
+            }, '*');
+            
+            setTimeout(() => {
+                window.removeEventListener('message', handler);
+                resolve(defaultValue);
+            }, 5000);
+        });
+    },
+
+    sessionSet(key, value) {
+        parent.postMessage({
+            type: 'SESSION_STORAGE_SET',
+            key,
+            value,
+            module: MODULE_NAME,
+            timestamp: Date.now()
+        }, '*');
+        
+        return true;
+    },
+
+    sessionRemove(key) {
+        parent.postMessage({
+            type: 'SESSION_STORAGE_REMOVE',
+            key,
+            module: MODULE_NAME,
+            timestamp: Date.now()
+        }, '*');
+        
+        return true;
+    }
+};
+
+// =============================================
+// SESSION CLIENT - PARENT-AUTHORITATIVE
+// =============================================
+
+const SessionClient = {
+    session: null,
+    sessionPromise: null,
+    sessionResolvers: [],
+    pendingRequests: new Map(),
+    
+    requestSession() {
+        if (this.sessionPromise) return this.sessionPromise;
+        
+        // Only request if active
+        if (!isActive()) {
+            console.warn('[Tools][Session] Cannot request session - module not active');
+            return Promise.reject(new Error('Module not active'));
+        }
+        
+        this.sessionPromise = new Promise((resolve, reject) => {
+            const timeout = setTimeout(() => {
+                reject(new Error('Session request timeout'));
+            }, 10000);
+            
+            const requestId = `session_req_${Date.now()}_${Math.random()}`;
+            this.pendingRequests.set(requestId, { resolve, reject, timeout });
+            
+            parent.postMessage({
+                type: 'REQUEST_SESSION',
+                requestId,
+                module: MODULE_NAME,
+                timestamp: Date.now()
+            }, '*');
+        });
+        
+        return this.sessionPromise;
+    },
+    
+    handleSessionData(sessionData, requestId = null) {
+        if (requestId && this.pendingRequests.has(requestId)) {
+            const { resolve, timeout } = this.pendingRequests.get(requestId);
+            clearTimeout(timeout);
+            this.pendingRequests.delete(requestId);
+            resolve(sessionData);
+        }
+        
+        this.session = sessionData;
+        
+        // Notify all waiting resolvers
+        this.sessionResolvers.forEach(resolver => resolver(sessionData));
+        this.sessionResolvers = [];
+        
+        window.dispatchEvent(new CustomEvent('session:updated', { 
+            detail: sessionData 
+        }));
+        
+        return true;
+    },
+    
+    getSession() {
+        return this.session;
+    },
+    
+    getToken() {
+        return this.session?.userToken || this.session?.token;
+    },
+    
+    getUser() {
+        return this.session ? {
+            id: this.session.userId || this.session.user_id || this.session.id,
+            displayName: this.session.displayName || this.session.name,
+            email: this.session.email,
+            photoURL: this.session.photoURL || this.session.avatar,
+            isPremium: !!this.session.isPremium,
+            trustLevel: this.session.trustLevel || 'new'
+        } : null;
+    },
+    
+    isReady() {
+        return !!this.session && !!this.getToken();
+    },
+    
+    isValid() {
+        if (!this.isReady()) return false;
+        if (this.session.expiresAt) {
+            try {
+                return new Date(this.session.expiresAt) > new Date();
+            } catch {
+                return true;
+            }
+        }
+        return true;
+    },
+    
+    clear() {
+        this.session = null;
+        this.sessionPromise = null;
+        this.pendingRequests.clear();
+        
+        parent.postMessage({
+            type: 'SESSION_CLEAR',
+            module: MODULE_NAME,
+            timestamp: Date.now()
+        }, '*');
+    },
+    
+    onSession(callback) {
+        if (this.session) {
+            callback(this.session);
+            return () => {};
+        }
+        
+        this.sessionResolvers.push(callback);
+        return () => {
+            const index = this.sessionResolvers.indexOf(callback);
+            if (index !== -1) this.sessionResolvers.splice(index, 1);
+        };
+    }
+};
+
+// =============================================
+// MESSAGE DEDUPLICATION (ENHANCED - STRICT)
+// =============================================
+
+const MessageGuard = {
+    seen: new Set(),
+    processed: new Set(),
+    maxSize: 1000,
+    
+    isDuplicate(id) {
+        if (!id) return false;
+        if (this.seen.has(id)) return true;
+        
+        this.seen.add(id);
+        
+        // Maintain size limit
+        if (this.seen.size > this.maxSize) {
+            const iterator = this.seen.values();
+            const toDelete = Math.floor(this.seen.size / 2);
+            for (let i = 0; i < toDelete; i++) {
+                this.seen.delete(iterator.next().value);
+            }
+        }
+        
+        return false;
+    },
+    
+    isProcessed(id) {
+        if (!id) return false;
+        return this.processed.has(id);
+    },
+    
+    markProcessed(id) {
+        if (!id) return;
+        this.processed.add(id);
+        
+        if (this.processed.size > this.maxSize) {
+            const iterator = this.processed.values();
+            const toDelete = Math.floor(this.processed.size / 2);
+            for (let i = 0; i < toDelete; i++) {
+                this.processed.delete(iterator.next().value);
+            }
+        }
+    },
+    
+    clear() {
+        this.seen.clear();
+        this.processed.clear();
+    }
+};
 
 // =============================================
 // SILENT LOGGING SYSTEM (PRESERVED)
@@ -47,68 +409,7 @@ function debugLog(...args) {
 }
 
 // =============================================
-// STRICT LIFECYCLE STATE MACHINE (PARENT-ALIGNED)
-// =============================================
-
-const LIFECYCLE_STATE = {
-    BOOTING: 'BOOTING',
-    INITIALIZING: 'INITIALIZING',
-    READY: 'READY',
-    WAIT_PARENT: 'WAIT_PARENT',
-    ACTIVE: 'ACTIVE'
-};
-
-let currentLifecycleState = LIFECYCLE_STATE.BOOTING;
-let stateLock = false;
-let childReadySent = false;
-let parentReady = false; // CRITICAL: Gate for all operations
-let parentReadyResolve = null;
-let parentReadyReject = null;
-
-const parentReadyPromise = new Promise((resolve, reject) => {
-    parentReadyResolve = resolve;
-    parentReadyReject = reject;
-});
-
-// State transition validation
-const VALID_TRANSITIONS = {
-    [LIFECYCLE_STATE.BOOTING]: [LIFECYCLE_STATE.INITIALIZING],
-    [LIFECYCLE_STATE.INITIALIZING]: [LIFECYCLE_STATE.READY],
-    [LIFECYCLE_STATE.READY]: [LIFECYCLE_STATE.WAIT_PARENT],
-    [LIFECYCLE_STATE.WAIT_PARENT]: [LIFECYCLE_STATE.ACTIVE],
-    [LIFECYCLE_STATE.ACTIVE]: [LIFECYCLE_STATE.ACTIVE]
-};
-
-function setLifecycleState(newState) {
-    if (stateLock && newState !== LIFECYCLE_STATE.ACTIVE) {
-        debugLog('[Lifecycle] Locked, ignoring', newState);
-        return false;
-    }
-    
-    if (newState === currentLifecycleState) return true;
-    
-    if (!VALID_TRANSITIONS[currentLifecycleState]?.includes(newState)) {
-        logOnce('warn', `Invalid state transition: ${currentLifecycleState} -> ${newState}`);
-        return false;
-    }
-    
-    debugLog(`[Lifecycle] ${currentLifecycleState} -> ${newState}`);
-    currentLifecycleState = newState;
-    moduleState.bootState = newState;
-    
-    window.dispatchEvent(new CustomEvent('tools:lifecycle-change', { 
-        detail: { from: currentLifecycleState, to: newState }
-    }));
-    
-    return true;
-}
-
-function isActive() {
-    return currentLifecycleState === LIFECYCLE_STATE.ACTIVE && parentReady === true;
-}
-
-// =============================================
-// MESSAGE QUEUE SYSTEM (REQUIRED)
+// MESSAGE QUEUE SYSTEM (STRICT - PRE-ACTIVE ONLY)
 // =============================================
 
 const messageQueue = [];
@@ -125,8 +426,6 @@ function generateRequestId() {
     return `req_${Math.random().toString(36).substring(2, 15)}_${Date.now()}`;
 }
 
-let messageCounter = 0;
-
 // =============================================
 // STANDARDIZED MESSAGE SCHEMA (PARENT-ALIGNED)
 // =============================================
@@ -134,11 +433,11 @@ let messageCounter = 0;
 function createMessage(type, payload = {}) {
     return {
         type: type,
-        id: generateMessageId(),                    // REQUIRED
-        requestId: generateRequestId(),              // REQUIRED for request-response
-        source: MODULE_NAME,                          // EXACT module name
-        target: 'parent',                             // REQUIRED
-        timestamp: Date.now(),                         // REQUIRED
+        id: generateMessageId(),
+        requestId: generateRequestId(),
+        source: MODULE_NAME,
+        target: 'parent',
+        timestamp: Date.now(),
         payload: sanitizePayload(payload)
     };
 }
@@ -153,7 +452,7 @@ function sanitizePayload(payload) {
 }
 
 // =============================================
-// SAFE SEND WITH QUEUE (CRITICAL)
+// SAFE SEND WITH QUEUE (STRICT - NO SEND BEFORE ACTIVE)
 // =============================================
 
 function sendMessage(message) {
@@ -173,8 +472,12 @@ function sendMessage(message) {
 }
 
 function safeSend(type, payload = {}) {
-    // CRITICAL: Block all messages until parent ready
-    if (!parentReady) {
+    // STRICT RULE: Only CHILD_READY allowed before ACTIVE
+    if (!parentReadyReceived && type !== 'CHILD_READY') {
+        if (currentState === LIFECYCLE_STATE.WAIT_PARENT) {
+            console.warn(`[Tools][Queue] Message ${type} blocked - in WAIT_PARENT state (only CHILD_READY allowed)`);
+            return { success: false, error: 'wait_parent_blocked', queued: false };
+        }
         debugLog(`[Queue] Message ${type} queued - parent not ready`);
         messageQueue.push({ type, payload, timestamp: Date.now() });
         return { success: true, queued: true, messageId: null };
@@ -189,9 +492,9 @@ function safeSend(type, payload = {}) {
 }
 
 function flushMessageQueue() {
-    if (!parentReady || messageQueue.length === 0) return;
+    if (!parentReadyReceived || messageQueue.length === 0) return;
     
-    debugLog(`[Queue] Flushing ${messageQueue.length} messages`);
+    console.log(`[Tools][Queue] Flushing ${messageQueue.length} queued messages`);
     
     while (messageQueue.length > 0) {
         const queued = messageQueue.shift();
@@ -201,51 +504,33 @@ function flushMessageQueue() {
 }
 
 // =============================================
-// DUPLICATE MESSAGE PROTECTION
-// =============================================
-
-const processedMessages = new Set();
-const MAX_PROCESSED_MESSAGES = 1000;
-
-function isDuplicateMessage(messageId) {
-    if (!messageId) return false;
-    if (processedMessages.has(messageId)) return true;
-    
-    processedMessages.add(messageId);
-    
-    if (processedMessages.size > MAX_PROCESSED_MESSAGES) {
-        const iterator = processedMessages.values();
-        for (let i = 0; i < 100; i++) {
-            processedMessages.delete(iterator.next().value);
-        }
-    }
-    
-    return false;
-}
-
-// =============================================
 // MESSAGE VALIDATION (STRICT SCHEMA)
 // =============================================
 
 function validateMessage(msg) {
     if (!msg || typeof msg !== 'object') return false;
     
-    // REQUIRED fields check
+    // Relax validation for handshake messages only
+    if (msg.type === 'PARENT_READY' || msg.type === 'CHILD_READY') {
+        return typeof msg.type === 'string' && msg.type.length > 0;
+    }
+    
     const hasType = typeof msg.type === 'string' && msg.type.length > 0;
     const hasId = typeof msg.id === 'string' && msg.id.length > 0;
     const hasRequestId = typeof msg.requestId === 'string' && msg.requestId.length > 0;
     const hasSource = typeof msg.source === 'string' && msg.source.length > 0;
-    const hasTarget = typeof msg.target === 'string' && msg.target === 'parent';
     const hasTimestamp = typeof msg.timestamp === 'number' && msg.timestamp > 0;
     const hasPayload = msg.payload !== undefined;
     const isFromParent = msg.source === 'parent';
     
-    return hasType && hasId && hasRequestId && hasSource && hasTarget && hasTimestamp && hasPayload && isFromParent;
+    return hasType && hasId && hasRequestId && hasSource && hasTimestamp && hasPayload && isFromParent;
 }
 
 // =============================================
-// ORIGIN VALIDATION
+// ORIGIN VALIDATION (RELAXED DURING HANDSHAKE)
 // =============================================
+
+let expectedParentOrigin = null;
 
 const ALLOWED_ORIGINS = [
     window.location.origin,
@@ -260,6 +545,11 @@ const ALLOWED_ORIGINS = [
 ];
 
 function isValidOrigin(origin) {
+    // Relax origin validation during handshake
+    if (currentState !== LIFECYCLE_STATE.ACTIVE) {
+        return true;
+    }
+    
     if (!origin || origin === 'null' || origin === 'null') return true;
     
     if (ALLOWED_ORIGINS.includes(origin)) return true;
@@ -273,6 +563,19 @@ function isValidOrigin(origin) {
     }
     
     return false;
+}
+
+function isMessageFromParent(event) {
+    if (!expectedParentOrigin && event.source === window.parent) {
+        expectedParentOrigin = event.origin;
+    }
+    
+    if (expectedParentOrigin && event.origin !== expectedParentOrigin) {
+        debugLog(`[Security] Origin mismatch: expected ${expectedParentOrigin}, got ${event.origin}`);
+        return false;
+    }
+    
+    return event.source === window.parent && isValidOrigin(event.origin);
 }
 
 // =============================================
@@ -295,14 +598,14 @@ const moduleState = {
     sessionCache: null,
     
     frameId: null,
-    protocolVersion: 'KYN-8.0',
+    protocolVersion: 'KYN-10.2',
     connectionMetrics: {
         messagesSent: 0,
         messagesReceived: 0,
         acksReceived: 0
     },
     
-    bootState: LIFECYCLE_STATE.BOOTING,
+    bootState: LIFECYCLE_STATE.BOOT,
     sessionAuthority: 'unknown',
     
     environment: {
@@ -341,24 +644,6 @@ const moduleState = {
 };
 
 const CONFIG = {
-    ORIGIN_WHITELIST: (() => {
-        try {
-            return [
-                window.location.origin,
-                'http://127.0.0.1:5500',
-                'http://localhost:5500',
-                'http://localhost:3000',
-                'http://127.0.0.1:3000',
-                'https://*.onrender.com',
-                'http://*.onrender.com',
-                'https://moodchat-fy56.onrender.com',
-                'https://moodfronted.onrender.com',
-                'null'
-            ];
-        } catch {
-            return ['*'];
-        }
-    })(),
     TIMEOUTS: {
         HANDSHAKE: 3000,
         SESSION: 5000,
@@ -591,7 +876,17 @@ export const PARENT_MESSAGE_TYPES = {
     REGISTERED: 'REGISTERED',
     SESSION_ACTIVE: 'SESSION_ACTIVE',
     
-    MODULE_HEARTBEAT: 'MODULE_HEARTBEAT'
+    MODULE_HEARTBEAT: 'MODULE_HEARTBEAT',
+    
+    STORAGE_GET: 'STORAGE_GET',
+    STORAGE_SET: 'STORAGE_SET',
+    STORAGE_REMOVE: 'STORAGE_REMOVE',
+    STORAGE_CLEAR: 'STORAGE_CLEAR',
+    STORAGE_RESULT: 'STORAGE_RESULT',
+    SESSION_STORAGE_GET: 'SESSION_STORAGE_GET',
+    SESSION_STORAGE_SET: 'SESSION_STORAGE_SET',
+    SESSION_STORAGE_REMOVE: 'SESSION_STORAGE_REMOVE',
+    SESSION_STORAGE_RESULT: 'SESSION_STORAGE_RESULT'
 };
 
 export const DATA_TYPES = {
@@ -627,40 +922,24 @@ export const STARTUP_STAGES = {
 };
 
 // =============================================
-// MODULE 0 - SAFE STORAGE LAYER (PRESERVED)
+// MODULE 0 - SAFE STORAGE LAYER (UPDATED TO USE PROXY)
 // =============================================
 
 class SafeStorage {
     constructor() {
         this.memoryStorage = new Map();
-        this.storageAvailable = this.checkStorageAvailability('localStorage');
-        this.sessionAvailable = this.checkStorageAvailability('sessionStorage');
         this.warningsShown = new Set();
-        logOnce('ready', 'SafeStorage initialized');
+        logOnce('ready', 'SafeStorage initialized (proxy-based)');
     }
 
-    checkStorageAvailability(type) {
+    async get(key, defaultValue = null) {
         try {
-            const storage = type === 'localStorage' ? localStorage : sessionStorage;
-            const test = '__storage_test__';
-            storage.setItem(test, test);
-            storage.removeItem(test);
-            return true;
-        } catch (e) {
-            return false;
-        }
-    }
-
-    get(key, defaultValue = null) {
-        try {
-            if (this.storageAvailable) {
-                const value = localStorage.getItem(key);
-                if (value !== null) {
-                    try {
-                        return JSON.parse(value);
-                    } catch {
-                        return value;
-                    }
+            const value = await StorageProxy.get(key);
+            if (value !== null && value !== undefined) {
+                try {
+                    return JSON.parse(value);
+                } catch {
+                    return value;
                 }
             }
             if (this.memoryStorage.has(key)) {
@@ -675,15 +954,8 @@ class SafeStorage {
     set(key, value) {
         try {
             const serialized = typeof value === 'string' ? value : JSON.stringify(value);
-            if (this.storageAvailable) {
-                try {
-                    localStorage.setItem(key, serialized);
-                } catch (e) {
-                    this.memoryStorage.set(key, value);
-                }
-            } else {
-                this.memoryStorage.set(key, value);
-            }
+            StorageProxy.set(key, serialized);
+            this.memoryStorage.set(key, value);
             return true;
         } catch (e) {
             return false;
@@ -692,9 +964,7 @@ class SafeStorage {
 
     remove(key) {
         try {
-            if (this.storageAvailable) {
-                localStorage.removeItem(key);
-            }
+            StorageProxy.remove(key);
             this.memoryStorage.delete(key);
             return true;
         } catch (e) {
@@ -702,16 +972,14 @@ class SafeStorage {
         }
     }
 
-    sessionGet(key, defaultValue = null) {
+    async sessionGet(key, defaultValue = null) {
         try {
-            if (this.sessionAvailable) {
-                const value = sessionStorage.getItem(key);
-                if (value !== null) {
-                    try {
-                        return JSON.parse(value);
-                    } catch {
-                        return value;
-                    }
+            const value = await StorageProxy.sessionGet(key);
+            if (value !== null && value !== undefined) {
+                try {
+                    return JSON.parse(value);
+                } catch {
+                    return value;
                 }
             }
             return this.memoryStorage.get(`session_${key}`) || defaultValue;
@@ -723,15 +991,8 @@ class SafeStorage {
     sessionSet(key, value) {
         try {
             const serialized = typeof value === 'string' ? value : JSON.stringify(value);
-            if (this.sessionAvailable) {
-                try {
-                    sessionStorage.setItem(key, serialized);
-                } catch (e) {
-                    this.memoryStorage.set(`session_${key}`, value);
-                }
-            } else {
-                this.memoryStorage.set(`session_${key}`, value);
-            }
+            StorageProxy.sessionSet(key, serialized);
+            this.memoryStorage.set(`session_${key}`, value);
             return true;
         } catch (e) {
             return false;
@@ -740,9 +1001,7 @@ class SafeStorage {
 
     sessionRemove(key) {
         try {
-            if (this.sessionAvailable) {
-                sessionStorage.removeItem(key);
-            }
+            StorageProxy.sessionRemove(key);
             this.memoryStorage.delete(`session_${key}`);
             return true;
         } catch (e) {
@@ -751,6 +1010,7 @@ class SafeStorage {
     }
 
     clear() {
+        StorageProxy.clear();
         this.memoryStorage.clear();
     }
 }
@@ -867,7 +1127,10 @@ class ParentCommunicator {
 
     generateFrameId() {
         try {
-            let stored = safeStorage.get(LOCAL_STORAGE_KEYS.FRAME_ID);
+            let stored = null;
+            safeStorage.get(LOCAL_STORAGE_KEYS.FRAME_ID).then(val => {
+                if (val) stored = val;
+            });
             if (!stored) {
                 stored = `${MODULE_NAME}_${Date.now()}_${Math.random().toString(36).substring(2, 10)}`;
                 safeStorage.set(LOCAL_STORAGE_KEYS.FRAME_ID, stored);
@@ -878,7 +1141,6 @@ class ParentCommunicator {
         }
     }
 
-    // DEPRECATED: Use safeSend instead
     sendMessage(type, payload = {}) {
         return safeSend(type, payload);
     }
@@ -892,26 +1154,35 @@ class ParentCommunicator {
     }
 
     handleIncomingMessage(event) {
-        if (!isValidOrigin(event.origin)) {
-            debugLog(`Rejected message from origin: ${event.origin}`);
+        if (!isMessageFromParent(event)) {
+            debugLog(`[Security] Rejected message from origin: ${event.origin}`);
             return;
         }
 
-        if (event.source !== window.parent) return;
-
         const message = event.data;
+
+        // Check for duplicate processing
+        if (message.id && MessageGuard.isProcessed(message.id)) {
+            debugLog(`Duplicate message already processed: ${message.id}`);
+            return;
+        }
 
         if (!validateMessage(message)) {
             debugLog('Invalid message schema', message);
             return;
         }
 
-        if (isDuplicateMessage(message.id)) {
+        if (MessageGuard.isDuplicate(message.id)) {
             debugLog(`Duplicate message ignored: ${message.id}`);
             return;
         }
 
         moduleState.connectionMetrics.messagesReceived++;
+
+        // Mark as processed
+        if (message.id) {
+            MessageGuard.markProcessed(message.id);
+        }
 
         this.messageListeners.forEach(handler => {
             try {
@@ -930,13 +1201,12 @@ class ParentCommunicator {
 const parentComm = new ParentCommunicator();
 
 // =============================================
-// MODULE 3 - SESSION CLIENT (PRESERVED)
+// MODULE 3 - SESSION CLIENT (UPDATED - NO STORAGE)
 // =============================================
 
-class SessionClient {
+class SessionClientWrapper {
     constructor() {
         this.currentSession = null;
-        this.sessionCache = null;
         this.listeners = new Set();
         this.sessionState = {
             requested: false,
@@ -944,34 +1214,6 @@ class SessionClient {
             expiresAt: null,
             lastSync: 0
         };
-        this.loadFromCache();
-    }
-
-    loadFromCache() {
-        try {
-            const cached = safeStorage.sessionGet('core_session_cache');
-            if (cached) {
-                if (cached.expiresAt && new Date(cached.expiresAt) > new Date()) {
-                    this.sessionCache = cached;
-                    this.currentSession = cached;
-                    moduleState.sessionCache = cached;
-                    moduleState.lastValidSession = cached;
-                } else {
-                    safeStorage.sessionRemove('core_session_cache');
-                }
-            }
-        } catch {}
-    }
-
-    saveToCache(session) {
-        try {
-            if (session && session.userToken) {
-                safeStorage.sessionSet('core_session_cache', { ...session, cachedAt: Date.now() });
-                this.sessionCache = session;
-                moduleState.sessionCache = session;
-                moduleState.lastValidSession = session;
-            }
-        } catch {}
     }
 
     acceptParentSession(sessionData) {
@@ -999,7 +1241,6 @@ class SessionClient {
             moduleState.sessionActive = true;
             moduleState.sessionAuthority = 'parent';
 
-            this.saveToCache(this.currentSession);
             this.notifyListeners('session:updated', this.currentSession);
             this.sessionState.received = true;
 
@@ -1038,11 +1279,11 @@ class SessionClient {
     }
 
     getSession() {
-        return this.currentSession || this.sessionCache || null;
+        return this.currentSession;
     }
 
     isValid() {
-        const session = this.currentSession || this.sessionCache;
+        const session = this.currentSession;
         if (!session) return false;
         if (session.expiresAt) {
             try {
@@ -1059,7 +1300,6 @@ class SessionClient {
         this.sessionState = { requested: false, received: false, expiresAt: null, lastSync: 0 };
         moduleState.sessionActive = false;
         moduleState.sessionAuthority = 'unknown';
-        safeStorage.sessionRemove('core_session_cache');
         this.notifyListeners('session:cleared', null);
     }
 
@@ -1082,7 +1322,7 @@ class SessionClient {
     }
 }
 
-const sessionClient = new SessionClient();
+const sessionClient = new SessionClientWrapper();
 
 // =============================================
 // MODULE 4 - HEARTBEAT RESPONDER (PASSIVE)
@@ -1114,7 +1354,7 @@ class HeartbeatResponder {
             timestamp: this.lastHeartbeat,
             module: MODULE_NAME,
             frameId: parentComm.frameId,
-            state: currentLifecycleState
+            state: currentState
         });
         
         logOnce('receive', 'Heartbeat acknowledged');
@@ -1199,9 +1439,10 @@ class DiagnosticsAgent {
                 ready: moduleState.ready,
                 handshakeComplete: handshakeComplete,
                 sessionActive: moduleState.sessionActive,
-                bootState: currentLifecycleState,
+                bootState: currentState,
                 authority: moduleState.sessionAuthority,
-                parentReady: parentReady
+                parentReady: parentReadyReceived,
+                sessionReady: SessionClient.isReady ? SessionClient.isReady() : false
             },
             environment: environmentDetector.getEnvironmentReport()
         };
@@ -1230,53 +1471,47 @@ class DiagnosticsAgent {
 const diagnostics = new DiagnosticsAgent();
 
 // =============================================
-// MODULE 6 - MESSAGE HANDLER (REFACTORED FOR PARENT PROTOCOL)
+// MODULE 6 - MESSAGE HANDLER (REFACTORED FOR DETERMINISTIC HANDSHAKE - STRICT)
 // =============================================
 
 class MessageHandler {
     constructor() {
         this.handlers = new Map();
+        this.sessionRequestRetryCount = 0;
+        this.maxSessionRetries = 3;
+        this.parentReadyTimeout = null;
         this.registerCoreHandlers();
     }
 
     registerCoreHandlers() {
+        // DETERMINISTIC HANDSHAKE: PARENT_READY handler - STRICT
         this.registerHandler('PARENT_READY', (message) => {
-            if (currentLifecycleState !== LIFECYCLE_STATE.WAIT_PARENT) {
-                debugLog(`PARENT_READY received in wrong state: ${currentLifecycleState}`);
+            // Ignore if already received
+            if (parentReadyReceived) {
+                console.log('[Tools][Lifecycle] PARENT_READY already received — ignoring duplicate');
                 return;
             }
-            
-            logOnce('receive', 'PARENT_READY received');
-            moduleState.parentDetected = true;
-            moduleState.handshakeState.parentReadyReceived = true;
-            
-            // CRITICAL: Set parentReady flag and flush queue
-            parentReady = true;
-            setLifecycleState(LIFECYCLE_STATE.ACTIVE);
-            parentReadyResolve();
-            flushMessageQueue();
-            
-            // Complete activation after queue flush
-            this.completeActivation();
+
+            // STRICT: Only accept in WAIT_PARENT state
+            if (currentState !== LIFECYCLE_STATE.WAIT_PARENT) {
+                console.warn(`[Tools][Lifecycle] PARENT_READY received in invalid state: ${currentState} — ignoring`);
+                return;
+            }
+
+            this.handleParentReady(message);
         });
 
         this.registerHandler('REGISTERED', (message) => {
-            if (currentLifecycleState !== LIFECYCLE_STATE.WAIT_PARENT && currentLifecycleState !== LIFECYCLE_STATE.ACTIVE) {
-                debugLog(`REGISTERED received in wrong state: ${currentLifecycleState}`);
-                return;
-            }
+            if (!this.isValidStateForMessage('REGISTERED', [LIFECYCLE_STATE.WAIT_PARENT, LIFECYCLE_STATE.ACTIVE])) return;
             
             logOnce('receive', 'REGISTERED received');
             moduleState.handshakeState.registered = true;
             moduleState.handshakeState.registeredAck = true;
-            
-            // Parent ready already handled by PARENT_READY
         });
 
         this.registerHandler('SESSION_DATA', (message) => {
-            if (!isActive() && currentLifecycleState !== LIFECYCLE_STATE.ACTIVE) {
-                debugLog('SESSION_DATA received before active');
-                // Still process but warn
+            if (!isActive() && currentState !== LIFECYCLE_STATE.ACTIVE) {
+                debugLog('SESSION_DATA received before active - still processing');
             }
             
             if (message.payload) {
@@ -1334,37 +1569,83 @@ class MessageHandler {
         });
 
         this.registerHandler('UI_ACTION', (message) => {
+            if (!assertActive('UI_ACTION')) return;
             if (marketplace && message.payload && isActive()) {
                 marketplace.handleUIAction(message.payload);
             }
         });
 
         this.registerHandler('LISTING_CREATED', (message) => {
+            if (!assertActive('LISTING_CREATED')) return;
             if (marketplace && message.payload && isActive()) {
                 marketplace.handleListingCreated(message.payload);
             }
         });
 
         this.registerHandler('LISTING_UPDATED', (message) => {
+            if (!assertActive('LISTING_UPDATED')) return;
             if (marketplace && message.payload && isActive()) {
                 marketplace.handleListingUpdated(message.payload);
             }
         });
 
         this.registerHandler('LISTING_DELETED', (message) => {
+            if (!assertActive('LISTING_DELETED')) return;
             if (marketplace && message.payload && isActive()) {
                 marketplace.handleListingDeleted(message.payload);
             }
         });
 
         this.registerHandler('PAGE_ACTIVATED', (message) => {
+            if (!assertActive('PAGE_ACTIVATED')) return;
             logOnce('receive', 'PAGE_ACTIVATED');
             window.dispatchEvent(new CustomEvent('tools:page-activated'));
         });
 
         this.registerHandler('PING', (message) => {
+            if (!assertActive('PING')) return;
             safeSend('PONG', { echo: message.payload });
         });
+
+        // Storage response handlers
+        this.registerHandler('STORAGE_RESULT', (message) => {
+            debugLog('STORAGE_RESULT received', message.payload);
+        });
+
+        this.registerHandler('SESSION_STORAGE_RESULT', (message) => {
+            debugLog('SESSION_STORAGE_RESULT received', message.payload);
+        });
+    }
+
+    handleParentReady(message) {
+        parentReadyReceived = true;
+        moduleState.parentDetected = true;
+        moduleState.handshakeState.parentReadyReceived = true;
+
+        // Clear any pending timeout
+        if (this.parentReadyTimeout) {
+            clearTimeout(this.parentReadyTimeout);
+            this.parentReadyTimeout = null;
+        }
+
+        // Apply session data if present
+        if (message.payload && message.payload.session) {
+            this.handleSessionData(message.payload.session);
+        }
+
+        // STRICT: Transition only once from WAIT_PARENT
+        transitionTo(LIFECYCLE_STATE.ACTIVE, 'parent_ready_received');
+
+        // Flush queued messages
+        flushMessageQueue();
+        
+        // Complete activation is handled in transitionTo
+    }
+
+    isValidStateForMessage(messageType, allowedStates) {
+        if (allowedStates.includes(currentState)) return true;
+        debugLog(`[MessageHandler] ${messageType} received in wrong state: ${currentState}`);
+        return false;
     }
 
     sendRegistration() {
@@ -1432,8 +1713,8 @@ class MessageHandler {
                 timestamp: Date.now(),
                 sessionActive: moduleState.sessionActive,
                 environment: environmentDetector.environment,
-                bootState: currentLifecycleState,
-                parentReady: parentReady
+                bootState: currentState,
+                parentReady: parentReadyReceived
             }
         }));
         
@@ -1474,6 +1755,10 @@ class MessageHandler {
 
     cleanup() {
         this.handlers.clear();
+        if (this.parentReadyTimeout) {
+            clearTimeout(this.parentReadyTimeout);
+            this.parentReadyTimeout = null;
+        }
     }
 }
 
@@ -1493,15 +1778,33 @@ class SecurityValidator {
     }
 
     initializeTrustedOrigins() {
-        CONFIG.ORIGIN_WHITELIST.forEach(origin => {
+        // Use whitelist from CONFIG
+        const originWhitelist = [
+            window.location.origin,
+            'http://127.0.0.1:5500',
+            'http://localhost:5500',
+            'http://localhost:3000',
+            'http://127.0.0.1:3000',
+            'https://*.onrender.com',
+            'http://*.onrender.com',
+            'https://moodchat-fy56.onrender.com',
+            'https://moodfronted.onrender.com',
+            'null'
+        ];
+        
+        originWhitelist.forEach(origin => {
             if (origin !== '*') this.trustedOrigins.add(origin);
         });
+        
         try {
             this.trustedOrigins.add(window.location.origin);
             if (window.parent && window.parent !== window) {
-                this.trustedOrigins.add(window.parent.location.origin);
+                try {
+                    this.trustedOrigins.add(window.parent.location.origin);
+                } catch {}
             }
         } catch {}
+        
         this.updateTrustMode();
     }
 
@@ -1518,6 +1821,11 @@ class SecurityValidator {
     }
 
     isOriginTrusted(origin) {
+        // Relax during handshake
+        if (currentState !== LIFECYCLE_STATE.ACTIVE) {
+            return true;
+        }
+        
         if (!origin) return false;
         if (origin === 'null') return true;
         if (this.trustedOrigins.has(origin)) return true;
@@ -1569,7 +1877,6 @@ class SecurityValidator {
 
     validateMessageStructure(message) {
         if (!message || typeof message !== 'object') return false;
-        // Updated to match required schema
         return !!(message.id && message.type && message.source && message.timestamp && message.payload !== undefined);
     }
 
@@ -1776,24 +2083,29 @@ class UIBridge {
 
     bindMarketplaceEvents() {
         this.registerEvent('createListingBtn', 'click', () => {
+            if (!assertActive('createListingBtn click')) return;
             this.dispatchUIAction('show_create_listing_modal');
         });
         
         this.registerEvent('refreshListingsBtn', 'click', () => {
+            if (!assertActive('refreshListingsBtn click')) return;
             this.dispatchUIAction('refresh_listings');
         });
         
         this.registerEvent('savedItemsBtn', 'click', () => {
+            if (!assertActive('savedItemsBtn click')) return;
             this.dispatchUIAction('show_saved_items');
         });
         
         this.registerEvent('myListingsBtn', 'click', () => {
+            if (!assertActive('myListingsBtn click')) return;
             this.dispatchUIAction('show_my_listings');
         });
     }
 
     bindUserActionEvents() {
         this.registerEvent('contactSellerBtn', 'click', (e) => {
+            if (!assertActive('contactSellerBtn click')) return;
             const listingId = e.target.dataset.listingId;
             if (listingId) {
                 this.dispatchUIAction('contact_seller', { listingId });
@@ -1801,6 +2113,7 @@ class UIBridge {
         });
         
         this.registerEvent('saveListingBtn', 'click', (e) => {
+            if (!assertActive('saveListingBtn click')) return;
             const listingId = e.target.dataset.listingId;
             if (listingId) {
                 this.dispatchUIAction('toggle_save', { listingId });
@@ -1808,6 +2121,7 @@ class UIBridge {
         });
         
         this.registerEvent('shareListingBtn', 'click', (e) => {
+            if (!assertActive('shareListingBtn click')) return;
             const listingId = e.target.dataset.listingId;
             if (listingId) {
                 this.dispatchUIAction('share_listing', { listingId });
@@ -1817,14 +2131,17 @@ class UIBridge {
 
     bindFilterEvents() {
         this.registerEvent('searchInput', 'input', (e) => {
+            if (!assertActive('searchInput input')) return;
             this.dispatchUIAction('filter_search', { value: e.target.value });
         });
         
         this.registerEvent('categoryFilter', 'change', (e) => {
+            if (!assertActive('categoryFilter change')) return;
             this.dispatchUIAction('filter_category', { value: e.target.value });
         });
         
         this.registerEvent('priceRange', 'change', (e) => {
+            if (!assertActive('priceRange change')) return;
             this.dispatchUIAction('filter_price', { 
                 min: document.getElementById('minPrice')?.value,
                 max: document.getElementById('maxPrice')?.value
@@ -1832,21 +2149,25 @@ class UIBridge {
         });
         
         this.registerEvent('sortSelect', 'change', (e) => {
+            if (!assertActive('sortSelect change')) return;
             this.dispatchUIAction('filter_sort', { value: e.target.value });
         });
         
         this.registerEvent('resetFiltersBtn', 'click', () => {
+            if (!assertActive('resetFiltersBtn click')) return;
             this.dispatchUIAction('reset_filters');
         });
     }
 
     bindListingEvents() {
         this.registerEvent('listingForm', 'submit', (e) => {
+            if (!assertActive('listingForm submit')) return;
             e.preventDefault();
             this.dispatchUIAction('submit_listing_form', this.getFormData('listingForm'));
         });
         
         this.registerEvent('deleteListingBtn', 'click', (e) => {
+            if (!assertActive('deleteListingBtn click')) return;
             const listingId = e.target.dataset.listingId;
             if (listingId && confirm('Are you sure you want to delete this listing?')) {
                 this.dispatchUIAction('delete_listing', { listingId });
@@ -1854,6 +2175,7 @@ class UIBridge {
         });
         
         this.registerEvent('editListingBtn', 'click', (e) => {
+            if (!assertActive('editListingBtn click')) return;
             const listingId = e.target.dataset.listingId;
             if (listingId) {
                 this.dispatchUIAction('edit_listing', { listingId });
@@ -1861,6 +2183,7 @@ class UIBridge {
         });
         
         this.registerEvent('loadMoreBtn', 'click', () => {
+            if (!assertActive('loadMoreBtn click')) return;
             this.dispatchUIAction('load_more_listings');
         });
     }
@@ -1881,10 +2204,7 @@ class UIBridge {
     }
 
     dispatchUIAction(action, data = {}) {
-        if (!isActive()) {
-            debugLog(`UI action ${action} dispatched before active`);
-            return;
-        }
+        if (!assertActive(`UI action ${action}`)) return;
         
         safeSend('UI_ACTION', {
             action,
@@ -1925,7 +2245,7 @@ class UIBridge {
 const uiBridge = new UIBridge();
 
 // =============================================
-// MARKETPLACE CORE IMPLEMENTATION (PRESERVED)
+// MARKETPLACE CORE IMPLEMENTATION (PRESERVED - UPDATED STORAGE)
 // =============================================
 
 class MarketplaceCoreImpl {
@@ -1962,6 +2282,7 @@ class MarketplaceCoreImpl {
         try {
             this.syncChannel = new BroadcastChannel('marketplace_sync');
             this.syncChannel.onmessage = (event) => {
+                if (!assertActive('syncChannel message')) return;
                 if (event.data && event.data.type && isActive()) {
                     this.handleSyncMessage(event.data);
                 }
@@ -1970,16 +2291,33 @@ class MarketplaceCoreImpl {
     }
 
     setupEventListeners() {
-        window.addEventListener('storage', (e) => {
-            if (e.key && e.key.startsWith('marketplace_') && isActive()) {
+        // Storage events are not available in sandbox, using proxy instead
+        // Window event for cache updates
+        window.addEventListener('storageProxy:updated', (e) => {
+            if (!assertActive('storage event')) return;
+            if (e.detail && e.detail.key && e.detail.key.startsWith('marketplace_') && isActive()) {
                 this.loadFromCache();
-                this.notifyUI('storageUpdated', { key: e.key });
+                this.notifyUI('storageUpdated', { key: e.detail.key });
             }
         });
     }
 
+    async loadFromCache() {
+        try {
+            const cachedListings = await safeStorage.get(LOCAL_STORAGE_KEYS.ALL_LISTINGS);
+            if (cachedListings) this.listings = this.sanitizeListings(cachedListings);
+            const cachedMyListings = await safeStorage.get(LOCAL_STORAGE_KEYS.MY_LISTINGS);
+            if (cachedMyListings) this.myListings = this.sanitizeListings(cachedMyListings);
+            const cachedSaved = await safeStorage.get(LOCAL_STORAGE_KEYS.SAVED_ITEMS);
+            if (cachedSaved) this.savedListings = this.sanitizeListings(cachedSaved);
+        } catch (error) {
+            logError('loadFromCache', error);
+        }
+    }
+
     handleUIAction(payload) {
-        if (!payload || !payload.action || !isActive()) return;
+        if (!assertActive('handleUIAction')) return;
+        if (!payload || !payload.action) return;
         
         switch (payload.action) {
             case 'refresh_listings':
@@ -2037,6 +2375,7 @@ class MarketplaceCoreImpl {
     }
 
     handleSyncMessage(data) {
+        if (!assertActive('handleSyncMessage')) return;
         if (!isActive()) return;
         
         switch (data.type) {
@@ -2058,7 +2397,7 @@ class MarketplaceCoreImpl {
     }
 
     handleListingCreated(listing) {
-        if (!isActive()) return;
+        if (!assertActive('handleListingCreated')) return;
         
         const exists = this.listings.some(l => l.id === listing.id);
         if (!exists) {
@@ -2073,7 +2412,7 @@ class MarketplaceCoreImpl {
     }
 
     handleListingUpdated(updated) {
-        if (!isActive()) return;
+        if (!assertActive('handleListingUpdated')) return;
         
         this.listings = this.listings.map(l => l.id === updated.id ? { ...l, ...updated } : l);
         this.myListings = this.myListings.map(l => l.id === updated.id ? { ...l, ...updated } : l);
@@ -2085,7 +2424,7 @@ class MarketplaceCoreImpl {
     }
 
     handleListingDeleted(deleted) {
-        if (!isActive()) return;
+        if (!assertActive('handleListingDeleted')) return;
         
         this.listings = this.listings.filter(l => l.id !== deleted.id);
         this.myListings = this.myListings.filter(l => l.id !== deleted.id);
@@ -2097,7 +2436,7 @@ class MarketplaceCoreImpl {
     }
 
     handleSaveToggled(listingId, userId, saved) {
-        if (!isActive()) return;
+        if (!assertActive('handleSaveToggled')) return;
         
         this.listings = this.listings.map(l => {
             if (l.id === listingId) {
@@ -2122,10 +2461,8 @@ class MarketplaceCoreImpl {
         if (this.initialized || !isActive()) return;
         
         try {
-            this.currentUser = sessionClient.getSession();
-            if (this.currentUser) {
-                safeStorage.set(LOCAL_STORAGE_KEYS.USER, this.currentUser);
-            }
+            const user = sessionClient.getUser ? sessionClient.getUser() : null;
+            this.currentUser = user;
             
             await this.loadListings();
             
@@ -2142,7 +2479,7 @@ class MarketplaceCoreImpl {
     }
 
     async loadListings() {
-        if (!isActive()) return;
+        if (!assertActive('loadListings')) return;
         
         this.loading = true;
         this.notifyUI('loading', true);
@@ -2160,7 +2497,7 @@ class MarketplaceCoreImpl {
             }
         } catch (error) {
             logError('loadListings', error);
-            const cached = safeStorage.get(LOCAL_STORAGE_KEYS.ALL_LISTINGS);
+            const cached = await safeStorage.get(LOCAL_STORAGE_KEYS.ALL_LISTINGS);
             if (cached) {
                 this.listings = this.sanitizeListings(cached);
             } else {
@@ -2175,14 +2512,20 @@ class MarketplaceCoreImpl {
 
     sendWithResponse(type, payload = {}) {
         return new Promise((resolve, reject) => {
-            if (!isActive()) {
+            if (!assertActive('sendWithResponse')) {
                 reject(new Error('Module not active'));
+                return;
+            }
+            
+            if (!sessionClient.isReady ? sessionClient.isReady() : false) {
+                reject(new Error('Session not ready'));
                 return;
             }
             
             const requestId = generateRequestId();
             
             const responseHandler = (event) => {
+                if (!isMessageFromParent(event)) return;
                 if (!validateMessage(event.data)) return;
                 if (event.data.type === type + '_RESPONSE' && 
                     event.data.requestId === requestId) {
@@ -2195,28 +2538,37 @@ class MarketplaceCoreImpl {
             
             safeSend(type, {
                 requestId: requestId,
-                ...payload
+                ...payload,
+                _auth: {
+                    hasSession: sessionClient.isReady ? sessionClient.isReady() : false
+                }
             });
+            
+            setTimeout(() => {
+                window.removeEventListener('message', responseHandler);
+                reject(new Error('Request timeout'));
+            }, 10000);
         });
     }
 
     loadMyListings() {
-        if (!this.currentUser || !isActive()) return;
+        if (!assertActive('loadMyListings')) return;
+        if (!this.currentUser) return;
         this.myListings = this.listings.filter(l => l.sellerId === this.currentUser.id);
         safeStorage.set(LOCAL_STORAGE_KEYS.MY_LISTINGS, this.myListings);
     }
 
-    loadSavedListings() {
-        if (!isActive()) return;
-        const cached = safeStorage.get(LOCAL_STORAGE_KEYS.SAVED_ITEMS);
+    async loadSavedListings() {
+        if (!assertActive('loadSavedListings')) return;
+        const cached = await safeStorage.get(LOCAL_STORAGE_KEYS.SAVED_ITEMS);
         if (cached) {
             this.savedListings = this.sanitizeListings(cached);
         }
     }
 
     async createListing(listingData) {
-        if (!isActive()) throw new Error('Module not active');
-        if (!this.currentUser) throw new Error('User not authenticated');
+        if (!assertActive('createListing')) throw new Error('Module not active');
+        if (!sessionClient.isReady ? sessionClient.isReady() : false) throw new Error('User not authenticated');
 
         if (!listingData.title || !listingData.description) {
             throw new Error('Title and description are required');
@@ -2224,13 +2576,16 @@ class MarketplaceCoreImpl {
 
         const sanitized = this.sanitizeListingData(listingData);
         
+        const user = sessionClient.getUser ? sessionClient.getUser() : null;
+        const userId = user?.id;
+        
         const listing = {
             id: `listing_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-            sellerId: this.currentUser.id,
+            sellerId: userId,
             seller: {
-                id: this.currentUser.id,
-                name: this.currentUser.displayName || this.currentUser.name,
-                photoURL: this.currentUser.photoURL
+                id: userId,
+                name: user?.displayName || user?.name,
+                photoURL: user?.photoURL
             },
             title: this.escapeHtml(sanitized.title),
             description: this.escapeHtml(sanitized.description),
@@ -2268,12 +2623,14 @@ class MarketplaceCoreImpl {
     }
 
     async updateListing(listingId, updates) {
-        if (!isActive()) throw new Error('Module not active');
-        if (!this.currentUser) throw new Error('User not authenticated');
+        if (!assertActive('updateListing')) throw new Error('Module not active');
+        if (!sessionClient.isReady ? sessionClient.isReady() : false) throw new Error('User not authenticated');
 
         const listing = this.listings.find(l => l.id === listingId);
         if (!listing) throw new Error('Listing not found');
-        if (listing.sellerId !== this.currentUser.id) throw new Error('You can only edit your own listings');
+        
+        const user = sessionClient.getUser ? sessionClient.getUser() : null;
+        if (listing.sellerId !== user?.id) throw new Error('You can only edit your own listings');
 
         const sanitized = {};
         if (updates.title) sanitized.title = this.escapeHtml(updates.title);
@@ -2313,12 +2670,14 @@ class MarketplaceCoreImpl {
     }
 
     async deleteListing(listingId) {
-        if (!isActive()) throw new Error('Module not active');
-        if (!this.currentUser) throw new Error('User not authenticated');
+        if (!assertActive('deleteListing')) throw new Error('Module not active');
+        if (!sessionClient.isReady ? sessionClient.isReady() : false) throw new Error('User not authenticated');
         
         const listing = this.listings.find(l => l.id === listingId);
         if (!listing) throw new Error('Listing not found');
-        if (listing.sellerId !== this.currentUser.id) throw new Error('You can only delete your own listings');
+        
+        const user = sessionClient.getUser ? sessionClient.getUser() : null;
+        if (listing.sellerId !== user?.id) throw new Error('You can only delete your own listings');
 
         try {
             const result = await this.sendWithResponse('DELETE_LISTING', { id: listingId });
@@ -2345,14 +2704,15 @@ class MarketplaceCoreImpl {
     }
 
     async toggleSave(listingId) {
-        if (!isActive()) throw new Error('Module not active');
-        if (!this.currentUser) throw new Error('User not authenticated');
+        if (!assertActive('toggleSave')) throw new Error('Module not active');
+        if (!sessionClient.isReady ? sessionClient.isReady() : false) throw new Error('User not authenticated');
 
         const listing = this.listings.find(l => l.id === listingId);
         if (!listing) throw new Error('Listing not found');
 
         const isSaved = this.savedListings.some(l => l.id === listingId);
-        const userId = this.currentUser.id;
+        const user = sessionClient.getUser ? sessionClient.getUser() : null;
+        const userId = user?.id;
 
         try {
             const result = await this.sendWithResponse('TOGGLE_SAVE', {
@@ -2397,8 +2757,8 @@ class MarketplaceCoreImpl {
     }
 
     async contactSeller(listingId, message = '') {
-        if (!isActive()) throw new Error('Module not active');
-        if (!this.currentUser) throw new Error('User not authenticated');
+        if (!assertActive('contactSeller')) throw new Error('Module not active');
+        if (!sessionClient.isReady ? sessionClient.isReady() : false) throw new Error('User not authenticated');
 
         const listing = this.listings.find(l => l.id === listingId);
         if (!listing) throw new Error('Listing not found');
@@ -2421,7 +2781,7 @@ class MarketplaceCoreImpl {
     }
 
     async trackView(listingId) {
-        if (!isActive()) return;
+        if (!assertActive('trackView')) return;
         if (!listingId) return;
         this.listings = this.listings.map(l => {
             if (l.id === listingId) l.views = (l.views || 0) + 1;
@@ -2431,7 +2791,7 @@ class MarketplaceCoreImpl {
     }
 
     setFilter(key, value) {
-        if (!isActive()) return;
+        if (!assertActive('setFilter')) return;
         this.filters[key] = value;
         this.pagination.page = 1;
         this.notifyUI('filtersChanged', this.filters);
@@ -2439,7 +2799,7 @@ class MarketplaceCoreImpl {
     }
 
     resetFilters() {
-        if (!isActive()) return;
+        if (!assertActive('resetFilters')) return;
         this.filters = { search: '', category: '', minPrice: null, maxPrice: null, available: null, sort: 'newest' };
         this.pagination.page = 1;
         this.notifyUI('filtersChanged', this.filters);
@@ -2447,7 +2807,7 @@ class MarketplaceCoreImpl {
     }
 
     getFilteredListings() {
-        if (!isActive()) return [];
+        if (!assertActive('getFilteredListings')) return [];
         
         let filtered = this.listings.filter(l => l.available !== false);
         
@@ -2504,7 +2864,7 @@ class MarketplaceCoreImpl {
     }
 
     loadMore() {
-        if (!isActive()) return false;
+        if (!assertActive('loadMore')) return false;
         if (!this.pagination.hasMore || this.loading) return false;
         this.pagination.page++;
         this.notifyUI('listingsUpdated', this.getFilteredListings());
@@ -2589,26 +2949,13 @@ class MarketplaceCoreImpl {
         return '';
     }
 
-    loadFromCache() {
-        try {
-            const cachedListings = safeStorage.get(LOCAL_STORAGE_KEYS.ALL_LISTINGS);
-            if (cachedListings) this.listings = this.sanitizeListings(cachedListings);
-            const cachedMyListings = safeStorage.get(LOCAL_STORAGE_KEYS.MY_LISTINGS);
-            if (cachedMyListings) this.myListings = this.sanitizeListings(cachedMyListings);
-            const cachedSaved = safeStorage.get(LOCAL_STORAGE_KEYS.SAVED_ITEMS);
-            if (cachedSaved) this.savedListings = this.sanitizeListings(cachedSaved);
-            const cachedUser = safeStorage.get(LOCAL_STORAGE_KEYS.USER);
-            if (cachedUser) this.currentUser = cachedUser;
-        } catch (error) {
-            logError('loadFromCache', error);
-        }
-    }
-
     queueOfflineListing(listing) {
-        if (!isActive()) return;
-        const queue = safeStorage.get('offlineQueue') || [];
-        queue.push({ listing, timestamp: Date.now(), attempts: 0 });
-        safeStorage.set('offlineQueue', queue);
+        if (!assertActive('queueOfflineListing')) return;
+        safeStorage.get('offlineQueue').then(queue => {
+            const q = queue || [];
+            q.push({ listing, timestamp: Date.now(), attempts: 0 });
+            safeStorage.set('offlineQueue', q);
+        });
     }
 
     generateSampleData() {
@@ -2661,46 +3008,46 @@ class MarketplaceCoreImpl {
     }
 
     getListings() {
-        if (!isActive()) return [];
+        if (!assertActive('getListings')) return [];
         return this.getFilteredListings();
     }
 
     getMyListings() {
-        if (!isActive()) return [];
+        if (!assertActive('getMyListings')) return [];
         if (!this.currentUser) return [];
         return this.myListings;
     }
 
     getSavedListings() {
-        if (!isActive()) return [];
+        if (!assertActive('getSavedListings')) return [];
         return this.savedListings;
     }
 
     getListing(id) {
-        if (!isActive()) return null;
+        if (!assertActive('getListing')) return null;
         return this.listings.find(l => l.id === id);
     }
 
     isOwner(listingId) {
-        if (!isActive()) return false;
+        if (!assertActive('isOwner')) return false;
         if (!this.currentUser) return false;
         const listing = this.getListing(listingId);
         return listing ? listing.sellerId === this.currentUser.id : false;
     }
 
     isSaved(listingId) {
-        if (!isActive()) return false;
+        if (!assertActive('isSaved')) return false;
         return this.savedListings.some(l => l.id === listingId);
     }
 
     getCategories() {
-        if (!isActive()) return [];
+        if (!assertActive('getCategories')) return [];
         const categories = new Set(this.listings.map(l => l.category).filter(Boolean));
         return Array.from(categories);
     }
 
     getStats() {
-        if (!isActive()) return { total: 0, myListings: 0, saved: 0, active: 0 };
+        if (!assertActive('getStats')) return { total: 0, myListings: 0, saved: 0, active: 0 };
         return {
             total: this.listings.length,
             myListings: this.myListings.length,
@@ -2737,13 +3084,89 @@ class MarketplaceCoreImpl {
 const marketplace = new MarketplaceCoreImpl();
 
 // =============================================
+// CRITICAL FIX: AUTHORIZED FETCH FUNCTION (UPDATED)
+// =============================================
+
+function authorizedFetch(url, options = {}) {
+    return new Promise((resolve, reject) => {
+        const token = sessionClient.getToken ? sessionClient.getToken() : null;
+        if (!token) {
+            const error = new Error('No authentication token');
+            error.code = 'NO_TOKEN';
+            logOnce('error', 'Authorized fetch blocked: no token');
+            reject(error);
+            return;
+        }
+
+        const headers = {
+            ...(options.headers || {}),
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': options.headers?.['Content-Type'] || 'application/json'
+        };
+
+        fetch(url, {
+            ...options,
+            headers,
+            credentials: 'include'
+        })
+        .then(async response => {
+            if (response.status === 401) {
+                logOnce('warn', 'Received 401 Unauthorized - requesting new session');
+                
+                safeSend('REQUEST_SESSION', { reason: '401_unauthorized' });
+                
+                const error = new Error('Unauthorized');
+                error.status = 401;
+                error.code = 'UNAUTHORIZED';
+                reject(error);
+                return;
+            }
+            
+            if (!response.ok) {
+                const error = new Error(`HTTP error ${response.status}`);
+                error.status = response.status;
+                error.code = 'HTTP_ERROR';
+                
+                try {
+                    const errorData = await response.json();
+                    error.details = errorData;
+                } catch {
+                    // Ignore parsing errors
+                }
+                
+                reject(error);
+                return;
+            }
+            
+            try {
+                const data = await response.json();
+                resolve(data);
+            } catch (parseError) {
+                const error = new Error('Invalid JSON response');
+                error.code = 'INVALID_JSON';
+                error.originalError = parseError;
+                reject(error);
+            }
+        })
+        .catch(error => {
+            logOnce('error', `Fetch failed: ${error.message}`);
+            error.code = error.code || 'FETCH_FAILED';
+            reject(error);
+        });
+    });
+}
+
+// =============================================
 // UNIFIED SEND FUNCTION (USING STANDARDIZED SCHEMA)
 // =============================================
 
 export async function sendToParent(type, payload = {}) {
     if (moduleState.shutdown) return { success: false, error: 'shutdown' };
     
-    // CRITICAL: Use safeSend which handles queuing
+    if (!assertActive(`sendToParent: ${type}`)) {
+        return { success: false, error: 'not_active', queued: false };
+    }
+    
     const result = safeSend(type, payload);
     if (result.success && !result.queued) {
         logOnce('send', type);
@@ -2752,46 +3175,107 @@ export async function sendToParent(type, payload = {}) {
 }
 
 // =============================================
-// MODULE INITIALIZATION (STRICT LIFECYCLE)
+// EXACTLY-ONCE CHILD_READY SENDING (DETERMINISTIC - STRICT)
 // =============================================
 
 function sendChildReady() {
-    // CRITICAL: Only send when in READY state
-    if (currentLifecycleState !== LIFECYCLE_STATE.READY) {
-        logOnce('warn', 'BLOCKED: CHILD_READY sent before READY state');
+    // STRICT: Prevent multiple sends
+    if (childReadySent) {
+        console.warn('[Tools][Lifecycle] CHILD_READY already sent — skipping');
         return;
     }
 
-    if (childReadySent) return;
+    // STRICT: Only send in READY state
+    if (currentState !== LIFECYCLE_STATE.READY) {
+        console.warn(`[Tools][Lifecycle] Cannot send CHILD_READY — invalid state: ${currentState}`);
+        return;
+    }
 
     childReadySent = true;
+    moduleState.handshakeState.childReadySent = true;
 
-    // Use safeSend which will queue if parent not ready (but we should be in READY state)
-    safeSend('CHILD_READY', {
+    parent.postMessage({
+        type: 'CHILD_READY',
         module: MODULE_NAME,
         version: MODULE_VERSION,
         frameId: parentComm.frameId,
-        timestamp: Date.now()
-    });
+        timestamp: Date.now(),
+        id: generateMessageId()
+    }, '*');
 
     logOnce('send', 'CHILD_READY sent');
+    transitionTo(LIFECYCLE_STATE.WAIT_PARENT, 'child_ready_sent');
 }
 
+// =============================================
+// NO HAND SHAKE RETRY SYSTEM - REMOVED (STRICT)
+// =============================================
+// The previous setInterval-based retry system has been COMPLETELY REMOVED.
+// The module now strictly waits in WAIT_PARENT state until PARENT_READY is received.
+// This is the correct deterministic behavior.
+
+// =============================================
+// MODULE ACTIVATION HOOK
+// =============================================
+
+function onModuleActive() {
+    console.log('[Tools][Lifecycle] Module ACTIVE - all systems go');
+
+    // SAFE ZONE:
+    // - API calls allowed
+    // - UI can initialize
+    // - Sync loops can start
+    
+    moduleState.ready = true;
+    moduleState.initialized = true;
+    isReady = true;
+    
+    heartbeatResponder.start();
+    
+    // Initialize marketplace if session is ready
+    if (sessionClient.isReady ? sessionClient.isReady() : false) {
+        marketplace.initialize().catch(() => {});
+    }
+    
+    window.dispatchEvent(new CustomEvent('tools:active', {
+        detail: {
+            timestamp: Date.now(),
+            sessionActive: moduleState.sessionActive
+        }
+    }));
+}
+
+// =============================================
+// MODULE INITIALIZATION (DETERMINISTIC LIFECYCLE - STRICT)
+// =============================================
+
 function initializeModule() {
-    if (stateLock) return;
-    stateLock = true;
+    // Prevent double initialization
+    if (initializationLock) {
+        console.warn('[Tools][Lifecycle] Module already initializing - skipping');
+        return;
+    }
+    
+    initializationLock = true;
+    
+    // Start initialization
+    if (!transitionTo(LIFECYCLE_STATE.INITIALIZING, 'module_start')) {
+        initializationLock = false;
+        return;
+    }
     
     try {
         logOnce('init', 'Tools module booting');
         
-        setLifecycleState(LIFECYCLE_STATE.INITIALIZING);
-        
+        // Setup message listener
         window.addEventListener('message', (event) => {
-            // PERFORMANCE FIX: Move heavy logic out of message listener
             setTimeout(() => parentComm.handleIncomingMessage(event), 0);
         });
         
+        // Start diagnostics
         diagnostics.start();
+        
+        // Initialize UI bridge
         uiBridge.initialize();
         
         const inIframe = (window.parent && window.parent !== window);
@@ -2799,38 +3283,51 @@ function initializeModule() {
         
         if (!inIframe) {
             logOnce('info', 'Not in iframe, running standalone');
-            setLifecycleState(LIFECYCLE_STATE.READY);
-            setLifecycleState(LIFECYCLE_STATE.WAIT_PARENT);
-            parentReady = true; // Standalone mode
-            parentReadyResolve();
-            setLifecycleState(LIFECYCLE_STATE.ACTIVE);
+            if (!transitionTo(LIFECYCLE_STATE.READY, 'standalone_mode')) {
+                initializationLock = false;
+                return;
+            }
+            childReadySent = true; // Mark as sent (no parent to send to)
+            if (!transitionTo(LIFECYCLE_STATE.WAIT_PARENT, 'standalone')) {
+                initializationLock = false;
+                return;
+            }
+            parentReadyReceived = true;
+            if (!transitionTo(LIFECYCLE_STATE.ACTIVE, 'standalone_active')) {
+                initializationLock = false;
+                return;
+            }
             moduleState.ready = true;
             moduleState.initialized = true;
             isReady = true;
             window.__MODULE_READY__ = true;
-            stateLock = false;
-            messageHandler.completeActivation();
-            flushMessageQueue(); // Flush any queued messages
+            flushMessageQueue();
+            onModuleActive();
+            initializationLock = false;
             return;
         }
         
-        setLifecycleState(LIFECYCLE_STATE.READY);
+        // Complete setup and move to READY
+        if (!transitionTo(LIFECYCLE_STATE.READY, 'setup_complete')) {
+            initializationLock = false;
+            return;
+        }
         
+        // Send CHILD_READY exactly once
         sendChildReady();
         
-        setLifecycleState(LIFECYCLE_STATE.WAIT_PARENT);
-        logOnce('info', 'Waiting for parent ready signal');
+        logOnce('info', 'Waiting for parent ready signal (WAIT_PARENT)');
         
-        stateLock = false;
+        // NO RETRY LOOP - Strict wait for PARENT_READY
         
     } catch (error) {
         logError('Module initialization', error);
-        stateLock = false;
+        initializationLock = false;
     }
 }
 
 // =============================================
-// EXPORTED CORE FUNCTIONS (PRESERVED)
+// EXPORTED CORE FUNCTIONS (PRESERVED WITH FIXES)
 // =============================================
 
 export let initializeCore;
@@ -2854,14 +3351,30 @@ initializeCore = async function(options = {}) {
 
         initializeModule();
 
-        await parentReadyPromise;
+        // Wait for ACTIVE state (NO timeout fallback - strict wait)
+        const checkActive = () => {
+            return new Promise((resolve) => {
+                if (currentState === LIFECYCLE_STATE.ACTIVE) {
+                    resolve();
+                } else {
+                    const checkInterval = setInterval(() => {
+                        if (currentState === LIFECYCLE_STATE.ACTIVE) {
+                            clearInterval(checkInterval);
+                            resolve();
+                        }
+                    }, 50);
+                }
+            });
+        };
+        
+        await checkActive();
 
         moduleState.ready = isActive();
         isReady = moduleState.ready;
         isInitializing = false;
         isBootstrapped = true;
         handshakeComplete = moduleState.handshakeComplete;
-        sessionValid = sessionClient.isValid();
+        sessionValid = sessionClient.isReady ? sessionClient.isReady() : false;
         sessionData = sessionClient.getSession();
 
         if (sessionData && !sessionData.isGuest && !sessionData.isDemo) {
@@ -2888,8 +3401,8 @@ initializeCore = async function(options = {}) {
                 sessionActive: moduleState.sessionActive,
                 handshakeComplete: moduleState.handshakeComplete,
                 environment: environmentDetector.environment,
-                bootState: currentLifecycleState,
-                parentReady: parentReady
+                bootState: currentState,
+                parentReady: parentReadyReceived
             }
         }));
 
@@ -2911,16 +3424,22 @@ initializeCore = async function(options = {}) {
 
 requestSession = async function(force = false) {
     if (moduleState.shutdown) return false;
-    if (!isActive()) return false;
     
-    if (moduleState.sessionActive) {
+    if (!assertActive('requestSession')) return false;
+    
+    if (moduleState.sessionActive && !force) {
         return true;
     }
 
-    // CRITICAL: Only request session after parent ready
-    if (parentReady && !moduleState.sessionActive && !moduleState.sessionState.requested) {
+    if (messageHandler.sessionRequestRetryCount >= messageHandler.maxSessionRetries) {
+        logOnce('error', 'Max session request retries reached');
+        return false;
+    }
+
+    if (parentReadyReceived && (!moduleState.sessionActive || force) && !moduleState.sessionState.requested) {
         moduleState.sessionState.requested = true;
-        safeSend('REQUEST_SESSION', { force });
+        messageHandler.sessionRequestRetryCount++;
+        safeSend('REQUEST_SESSION', { force, retry: messageHandler.sessionRequestRetryCount });
         return true;
     }
 
@@ -2948,7 +3467,10 @@ shutdownCore = function() {
     directAPILoaded = false;
     isBootstrapped = false;
     isAuthReady = false;
-    parentReady = false;
+    parentReadyReceived = false;
+    childReadySent = false;
+    initializationLock = false;
+    activationComplete = false;
 
     heartbeatResponder.stop();
     parentComm.cleanup();
@@ -2960,11 +3482,11 @@ shutdownCore = function() {
     safeStorage.remove(LOCAL_STORAGE_KEYS.HANDSHAKE_STATE);
     safeStorage.remove(LOCAL_STORAGE_KEYS.ENVIRONMENT_CACHE);
     safeStorage.remove(LOCAL_STORAGE_KEYS.STARTUP_STATE);
-    safeStorage.sessionRemove('core_session_cache');
 
-    // Clear queues
     messageQueue.length = 0;
     dataCache.clear();
+    
+    sessionClient.clear();
 
     window.__MODULE_READY__ = false;
     window.__MODULE_SESSION_ACTIVE__ = false;
@@ -2975,9 +3497,9 @@ shutdownCore = function() {
 
 syncWithParent = async function() {
     if (moduleState.shutdown || !moduleState.parentDetected) return false;
-    if (!isActive()) return false;
     
-    // Implement sync if needed
+    if (!assertActive('syncWithParent')) return false;
+    
     safeSend('SYNC_REQUEST', { timestamp: Date.now() });
     
     return true;
@@ -2990,18 +3512,29 @@ checkParentHealth = function() {
         handshakeComplete: moduleState.handshakeComplete,
         sessionActive: moduleState.sessionActive,
         inIframe: moduleState.parentDetected,
-        parentReady: parentReady,
+        parentReady: parentReadyReceived,
         queuedMessages: messageQueue.length,
         connectionMetrics: moduleState.connectionMetrics,
         sessionStatus: sessionClient.getState(),
         environment: environmentDetector.getEnvironmentReport(),
         diagnostics: diagnostics.getReport(),
         boot: {
-            state: currentLifecycleState,
+            state: currentState,
             sessionAuthority: moduleState.sessionAuthority
         },
         heartbeat: heartbeatResponder.getStatus(),
-        moduleState: currentLifecycleState
+        moduleState: currentState,
+        lifecycle: {
+            state: currentState,
+            childReadySent,
+            parentReadyReceived,
+            initializationLock
+        },
+        memorySession: {
+            ready: sessionClient.isReady ? sessionClient.isReady() : false,
+            hasToken: !!sessionClient.getToken ? sessionClient.getToken() : false,
+            hasUser: !!sessionClient.getUser ? sessionClient.getUser() : false
+        }
     };
 };
 
@@ -3018,12 +3551,12 @@ export function safeGetElement(id) {
 }
 
 export function hasValidSession() {
-    return sessionClient.isValid();
+    return sessionClient.isReady ? sessionClient.isReady() : false;
 }
 
 export function hasValidUser() {
-    const session = sessionClient.getSession();
-    return !!(session && (session.userId || session.id));
+    const user = sessionClient.getUser ? sessionClient.getUser() : null;
+    return !!(user && user.id);
 }
 
 export function showStatusMessage(message, type = 'info') {
@@ -3093,9 +3626,9 @@ export function getData(dataType) {
             case DATA_TYPES.CHAT_HISTORY: return [];
             case DATA_TYPES.NOTIFICATIONS: return [];
             case DATA_TYPES.SETTINGS:
-                const session = sessionClient.getSession();
+                const user = sessionClient.getUser ? sessionClient.getUser() : null;
                 return {
-                    id: session?.userId || window.currentUser?.id || 'unknown',
+                    id: user?.id || window.currentUser?.id || 'unknown',
                     updatedAt: new Date().toISOString(),
                     ...(window.currentUser?.settings || {})
                 };
@@ -3195,7 +3728,7 @@ export function handleRefreshDataRequest(payload) {
 
 export async function fetchData(dataType) {
     try {
-        if (!hasValidSession()) throw new Error('No valid session for API call');
+        if (!sessionClient.isReady ? sessionClient.isReady() : false) throw new Error('No valid session for API call');
         if (!isActive()) throw new Error('Module not active');
         
         let endpoint;
@@ -3208,9 +3741,10 @@ export async function fetchData(dataType) {
             default: throw new Error(`Unknown data type: ${dataType}`);
         }
         
-        const response = await secureApiCall('GET', endpoint);
+        const response = await authorizedFetch(endpoint, { method: 'GET' });
         return response;
     } catch (error) {
+        logError('fetchData', error);
         throw error;
     }
 }
@@ -3237,12 +3771,14 @@ export const pageCore = {
             isReady = true;
             isInitializing = false;
             
-            safeSend('UI_READY', {
-                iframeId: parentComm.frameId,
-                status: 'success',
-                timestamp: Date.now(),
-                bootState: currentLifecycleState
-            });
+            if (isActive()) {
+                safeSend('UI_READY', {
+                    iframeId: parentComm.frameId,
+                    status: 'success',
+                    timestamp: Date.now(),
+                    bootState: currentState
+                });
+            }
             
             showStatusMessage('Marketplace loaded successfully', 'success');
             logOnce('success', 'pageCore initialization complete');
@@ -3268,7 +3804,7 @@ export const pageCore = {
             if (window.parent && window.parent !== window) {
                 await new Promise((resolve) => {
                     const checkSession = () => {
-                        if (sessionData || moduleState.sessionActive) {
+                        if (sessionData || moduleState.sessionActive || (sessionClient.isReady ? sessionClient.isReady() : false)) {
                             resolve();
                         } else {
                             setTimeout(checkSession, 100);
@@ -3276,16 +3812,6 @@ export const pageCore = {
                     };
                     setTimeout(checkSession, 100);
                 });
-            }
-            
-            if (!sessionData && !moduleState.sessionActive) {
-                const cachedUser = safeStorage.get(LOCAL_STORAGE_KEYS.USER);
-                if (cachedUser) {
-                    try {
-                        window.currentUser = cachedUser;
-                        window.userData = cachedUser;
-                    } catch {}
-                }
             }
         } catch {}
     },
@@ -3311,7 +3837,7 @@ export const pageCore = {
     
     loadUserFriends: async () => {
         try {
-            if (hasValidSession() && isActive()) {
+            if ((sessionClient.isReady ? sessionClient.isReady() : false) && isActive()) {
                 const friends = await getUserFriends();
                 if (friends && Array.isArray(friends)) {
                     userFriends = friends;
@@ -3320,7 +3846,7 @@ export const pageCore = {
                 }
             }
         } catch {
-            const cachedFriends = safeStorage.get(LOCAL_STORAGE_KEYS.USER_FRIENDS);
+            const cachedFriends = await safeStorage.get(LOCAL_STORAGE_KEYS.USER_FRIENDS);
             if (cachedFriends) {
                 try {
                     userFriends = cachedFriends;
@@ -3332,7 +3858,7 @@ export const pageCore = {
     
     loadUserGroups: async () => {
         try {
-            if (hasValidSession() && isActive()) {
+            if ((sessionClient.isReady ? sessionClient.isReady() : false) && isActive()) {
                 const groups = await getUserGroups();
                 if (groups && Array.isArray(groups)) {
                     userGroups = groups;
@@ -3341,7 +3867,7 @@ export const pageCore = {
                 }
             }
         } catch {
-            const cachedGroups = safeStorage.get(LOCAL_STORAGE_KEYS.USER_GROUPS);
+            const cachedGroups = await safeStorage.get(LOCAL_STORAGE_KEYS.USER_GROUPS);
             if (cachedGroups) {
                 try {
                     userGroups = cachedGroups;
@@ -3353,15 +3879,15 @@ export const pageCore = {
     
     loadListings: async () => {
         try {
-            if (hasValidSession() && isActive()) {
-                const response = await secureApiCall('GET', '/api/marketplace/listings');
+            if ((sessionClient.isReady ? sessionClient.isReady() : false) && isActive()) {
+                const response = await authorizedFetch('/api/marketplace/listings', { method: 'GET' });
                 if (response && response.listings) {
                     allListings = response.listings;
                     safeStorage.set(LOCAL_STORAGE_KEYS.ALL_LISTINGS, allListings);
                 }
             }
         } catch {
-            const allListingsData = safeStorage.get(LOCAL_STORAGE_KEYS.ALL_LISTINGS);
+            const allListingsData = await safeStorage.get(LOCAL_STORAGE_KEYS.ALL_LISTINGS);
             if (allListingsData) {
                 try {
                     allListings = allListingsData;
@@ -3372,7 +3898,7 @@ export const pageCore = {
     
     loadTeamMembers: async () => {
         try {
-            if (hasValidSession() && userSubscription && (userSubscription.plan === 'business' || userSubscription.plan === 'team') && isActive()) {
+            if ((sessionClient.isReady ? sessionClient.isReady() : false) && userSubscription && (userSubscription.plan === 'business' || userSubscription.plan === 'team') && isActive()) {
                 const members = await getTeamMembers();
                 if (members && Array.isArray(members)) {
                     teamMembers = members;
@@ -3384,8 +3910,8 @@ export const pageCore = {
     
     loadLeaderboard: async () => {
         try {
-            if (hasValidSession() && isActive()) {
-                const response = await secureApiCall('GET', '/api/marketplace/leaderboard');
+            if ((sessionClient.isReady ? sessionClient.isReady() : false) && isActive()) {
+                const response = await authorizedFetch('/api/marketplace/leaderboard', { method: 'GET' });
                 if (response && response.leaderboard) {
                     leaderboardData = response.leaderboard;
                     safeStorage.set(LOCAL_STORAGE_KEYS.LEADERBOARD, JSON.stringify(leaderboardData));
@@ -3396,7 +3922,7 @@ export const pageCore = {
     
     loadAnalyticsData: async () => {
         try {
-            if (hasValidSession() && isUserPremium() && isActive()) {
+            if ((sessionClient.isReady ? sessionClient.isReady() : false) && isUserPremium() && isActive()) {
                 const analytics = await getAnalyticsData();
                 if (analytics) {
                     analyticsData = analytics;
@@ -3408,8 +3934,8 @@ export const pageCore = {
     
     loadPremiumFeatures: async () => {
         try {
-            if (hasValidSession() && isActive()) {
-                const response = await secureApiCall('GET', '/api/premium/features');
+            if ((sessionClient.isReady ? sessionClient.isReady() : false) && isActive()) {
+                const response = await authorizedFetch('/api/premium/features', { method: 'GET' });
                 if (response && response.features) {
                     premiumFeatures = response.features;
                     safeStorage.set(LOCAL_STORAGE_KEYS.PREMIUM_FEATURES, JSON.stringify(premiumFeatures));
@@ -3436,7 +3962,7 @@ export async function initializeMarketplaceCore() {
 }
 
 // =============================================
-// SESSION HANDLING FUNCTIONS (PRESERVED)
+// SESSION HANDLING FUNCTIONS (PRESERVED WITH FIXES)
 // =============================================
 
 export function handleSessionDataFromParent(sessionDataFromParent) {
@@ -3528,10 +4054,6 @@ export function processSessionData(sessionDataFromParent) {
         window.currentUser = userDataFromSession;
         window.userData = userDataFromSession;
         
-        if (sessionDataFromParent.userToken || sessionDataFromParent.token) {
-            storeCentralizedToken(sessionDataFromParent.userToken || sessionDataFromParent.token);
-        }
-        
         parentDataLoaded = true;
         dataFetchInProgress = false;
     } catch {}
@@ -3540,7 +4062,6 @@ export function processSessionData(sessionDataFromParent) {
 export function storeCentralizedToken(token) {
     try {
         if (!token || typeof token !== 'string' || token.length < 5) return;
-        safeStorage.set('USER_TOKEN', token);
     } catch {}
 }
 
@@ -3596,8 +4117,7 @@ export function handleSessionUpdate(updatedData) {
             window.currentUser = { ...window.currentUser, ...updatedData };
             window.userData = { ...window.userData, ...updatedData };
             if (updatedData.displayName || updatedData.photoURL || updatedData.isPremium) {
-                safeStorage.set(LOCAL_STORAGE_KEYS.USER, window.currentUser);
-                safeStorage.set(LOCAL_STORAGE_KEYS.USER_PROFILE, window.userData);
+                // Removed localStorage set
             }
             if (updatedData.subscription) userSubscription = updatedData.subscription;
         }
@@ -3622,18 +4142,14 @@ export function clearSessionData() {
         sessionValid = false;
         moduleState.sessionActive = false;
         
-        safeStorage.remove('USER_TOKEN');
-        safeStorage.remove(LOCAL_STORAGE_KEYS.USER);
-        safeStorage.remove(LOCAL_STORAGE_KEYS.USER_PROFILE);
         safeStorage.remove(LOCAL_STORAGE_KEYS.USER_SUBSCRIPTION);
-        safeStorage.sessionRemove('core_session_cache');
         
         parentDataLoaded = false;
         directAPILoaded = false;
         
         isReady = moduleState.ready;
         isInitializing = false;
-        messageQueue = [];
+        messageQueue.length = 0;
         dataCache.clear();
         
         sessionClient.clear();
@@ -3657,21 +4173,21 @@ export function handleForceReload() {
 }
 
 // =============================================
-// API CALL FUNCTIONS (PRESERVED)
+// API CALL FUNCTIONS (PRESERVED WITH FIXES)
 // =============================================
 
 export async function secureApiCall(method, endpoint, data = null, options = {}) {
     if (!isActive()) {
         if (endpoint.includes('/marketplace/listings') && method === 'GET') {
             try {
-                const cached = safeStorage.get(LOCAL_STORAGE_KEYS.ALL_LISTINGS);
+                const cached = await safeStorage.get(LOCAL_STORAGE_KEYS.ALL_LISTINGS);
                 if (cached) return { listings: cached };
             } catch {}
         }
         return null;
     }
     
-    if (!hasValidSession()) {
+    if (!(sessionClient.isReady ? sessionClient.isReady() : false)) {
         if (method !== 'GET' || endpoint.includes('/auth/')) {
             safeSend('NEED_REFRESH', {
                 reason: 'api_call_without_session',
@@ -3681,7 +4197,7 @@ export async function secureApiCall(method, endpoint, data = null, options = {})
         }
         if (endpoint.includes('/marketplace/listings') && method === 'GET') {
             try {
-                const cached = safeStorage.get(LOCAL_STORAGE_KEYS.ALL_LISTINGS);
+                const cached = await safeStorage.get(LOCAL_STORAGE_KEYS.ALL_LISTINGS);
                 if (cached) return { listings: cached };
             } catch {}
         }
@@ -3693,7 +4209,13 @@ export async function secureApiCall(method, endpoint, data = null, options = {})
     }
     
     try {
-        const response = await callApi(method, endpoint, data);
+        const response = await authorizedFetch(endpoint, {
+            method,
+            body: data ? JSON.stringify(data) : undefined,
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        });
         return response;
     } catch (error) {
         return handleApiError(error, method, endpoint);
@@ -3724,7 +4246,7 @@ export async function handleUnauthorized() {
             error: 'UNAUTHORIZED_API_CALL',
             timestamp: Date.now()
         });
-        safeStorage.remove('USER_TOKEN');
+        sessionClient.clear();
         showNotification('Session expired. Please log in again.', 'error');
         return null;
     } catch {
@@ -3742,19 +4264,12 @@ export async function safeApiCall(method, endpoint, data = null) {
 
 export function getCentralToken() {
     try {
+        const token = sessionClient.getToken ? sessionClient.getToken() : null;
+        if (token) return token;
+        
         const session = sessionClient.getSession();
         if (session && session.userToken) return session.userToken;
-        if (typeof getUserToken === 'function') {
-            try {
-                const token = getUserToken();
-                if (token) return token;
-            } catch {}
-        }
-        const legacyTokens = ['accessToken', 'moodchat_token', 'authToken', 'knecta_auth_token', 'USER_TOKEN'];
-        for (const tokenKey of legacyTokens) {
-            const legacyToken = safeStorage.get(tokenKey);
-            if (legacyToken) return legacyToken;
-        }
+        
         return null;
     } catch {
         return null;
@@ -3764,8 +4279,10 @@ export function getCentralToken() {
 export function setupConnectivityListeners() {
     try {
         window.addEventListener('online', () => {
-            safeSend('PING', { type: 'connectivity_check' });
-            syncOfflineMarketplaceData();
+            if (isActive()) {
+                safeSend('PING', { type: 'connectivity_check' });
+                syncOfflineMarketplaceData();
+            }
         });
         window.addEventListener('offline', () => {
             showNotification('Working offline - changes will sync when back online', 'info');
@@ -3778,17 +4295,13 @@ export function initializeTokenSystem() {
     
     tokenInitializationPromise = new Promise(async (resolve, reject) => {
         try {
-            if (!hasValidSession()) {
+            if (!(sessionClient.isReady ? sessionClient.isReady() : false)) {
                 throw new Error('No session data available for token initialization');
             }
             
             const session = sessionClient.getSession();
             if (!session || !session.userToken) {
                 throw new Error('Invalid token in session data');
-            }
-            
-            if (session && session.userToken && isValidToken(session.userToken)) {
-                storeCentralizedToken(session.userToken);
             }
             
             isAuthReady = true;
@@ -3814,13 +4327,13 @@ export async function bootstrapIframe() {
     if (isBootstrapped || moduleState.initialized) return;
     
     try {
-        if (!sessionData && !moduleState.sessionActive) await new Promise(resolve => setTimeout(resolve, 1000));
+        if (!sessionData && !moduleState.sessionActive && !(sessionClient.isReady ? sessionClient.isReady() : false)) await new Promise(resolve => setTimeout(resolve, 1000));
         if (tokenInitializationPromise) {
             try { await tokenInitializationPromise; } catch {}
         }
         loadCachedDataInstantly();
-        if (hasValidSession() && isActive()) {
-            try { await secureApiCall('GET', '/api/auth/verify'); } catch {}
+        if ((sessionClient.isReady ? sessionClient.isReady() : false) && isActive()) {
+            try { await authorizedFetch('/api/auth/verify', { method: 'GET' }); } catch {}
         }
         isBootstrapped = true;
     } catch {
@@ -3828,68 +4341,54 @@ export async function bootstrapIframe() {
     }
 }
 
-export function loadCachedDataInstantly() {
+export async function loadCachedDataInstantly() {
     try {
-        const cachedUser = safeStorage.get(LOCAL_STORAGE_KEYS.USER);
-        if (cachedUser) {
-            try {
-                if (cachedUser.displayName || cachedUser.photoURL) {
-                    if (!window.currentUser) window.currentUser = {};
-                    if (!window.userData) window.userData = {};
-                    window.currentUser.displayName = cachedUser.displayName || window.currentUser.displayName;
-                    window.currentUser.photoURL = cachedUser.photoURL || window.currentUser.photoURL;
-                    window.userData.displayName = cachedUser.displayName || window.userData.displayName;
-                    window.userData.photoURL = cachedUser.photoURL || window.userData.photoURL;
-                }
-            } catch {}
-        }
-        
-        const cachedMyListings = safeStorage.get(LOCAL_STORAGE_KEYS.MY_LISTINGS);
+        const cachedMyListings = await safeStorage.get(LOCAL_STORAGE_KEYS.MY_LISTINGS);
         if (cachedMyListings) {
             try { myListings = cachedMyListings; } catch {}
         }
         
-        const cachedAllListings = safeStorage.get(LOCAL_STORAGE_KEYS.ALL_LISTINGS);
+        const cachedAllListings = await safeStorage.get(LOCAL_STORAGE_KEYS.ALL_LISTINGS);
         if (cachedAllListings) {
             try { allListings = cachedAllListings; } catch {}
         }
         
-        const cachedSaved = safeStorage.get(LOCAL_STORAGE_KEYS.SAVED_ITEMS);
+        const cachedSaved = await safeStorage.get(LOCAL_STORAGE_KEYS.SAVED_ITEMS);
         if (cachedSaved) {
             try { savedItems = cachedSaved; } catch {}
         }
         
-        const cachedNotes = safeStorage.get(LOCAL_STORAGE_KEYS.PRIVATE_NOTES);
+        const cachedNotes = await safeStorage.get(LOCAL_STORAGE_KEYS.PRIVATE_NOTES);
         if (cachedNotes) {
             try { privateNotes = cachedNotes; } catch {}
         }
         
-        const cachedDrafts = safeStorage.get(LOCAL_STORAGE_KEYS.OFFLINE_DRAFTS);
+        const cachedDrafts = await safeStorage.get(LOCAL_STORAGE_KEYS.OFFLINE_DRAFTS);
         if (cachedDrafts) {
             try { offlineDrafts = cachedDrafts; } catch {}
         }
         
-        const cachedTrust = safeStorage.get(LOCAL_STORAGE_KEYS.TRUST_STATS);
+        const cachedTrust = await safeStorage.get(LOCAL_STORAGE_KEYS.TRUST_STATS);
         if (cachedTrust) {
             try { trustStats = cachedTrust; } catch {}
         }
         
-        const cachedGroups = safeStorage.get(LOCAL_STORAGE_KEYS.USER_GROUPS);
+        const cachedGroups = await safeStorage.get(LOCAL_STORAGE_KEYS.USER_GROUPS);
         if (cachedGroups) {
             try { userGroups = cachedGroups; } catch {}
         }
         
-        const cachedFriends = safeStorage.get(LOCAL_STORAGE_KEYS.USER_FRIENDS);
+        const cachedFriends = await safeStorage.get(LOCAL_STORAGE_KEYS.USER_FRIENDS);
         if (cachedFriends) {
             try { userFriends = cachedFriends; } catch {}
         }
         
-        const cachedSubscription = safeStorage.get(LOCAL_STORAGE_KEYS.USER_SUBSCRIPTION);
+        const cachedSubscription = await safeStorage.get(LOCAL_STORAGE_KEYS.USER_SUBSCRIPTION);
         if (cachedSubscription) {
             try { userSubscription = cachedSubscription; } catch {}
         }
         
-        const cachedTeam = safeStorage.get(LOCAL_STORAGE_KEYS.TEAM_MEMBERS);
+        const cachedTeam = await safeStorage.get(LOCAL_STORAGE_KEYS.TEAM_MEMBERS);
         if (cachedTeam) {
             try { teamMembers = cachedTeam; } catch {}
         }
@@ -3910,7 +4409,7 @@ export async function checkUserPremiumStatus() {
     try {
         if (!isActive()) return;
         
-        const localSubscription = safeStorage.get(LOCAL_STORAGE_KEYS.USER_SUBSCRIPTION);
+        const localSubscription = await safeStorage.get(LOCAL_STORAGE_KEYS.USER_SUBSCRIPTION);
         if (localSubscription) {
             try {
                 userSubscription = localSubscription;
@@ -3994,8 +4493,8 @@ export function updateAvailableListingsCount() {
 
 export function isUserPremium() {
     try {
-        const session = sessionClient.getSession();
-        if (session && session.isPremium) return true;
+        const user = sessionClient.getUser ? sessionClient.getUser() : null;
+        if (user && user.isPremium) return true;
         return userSubscription && userSubscription.status === 'active';
     } catch {
         return false;
@@ -4005,8 +4504,8 @@ export function isUserPremium() {
 export function isListingVisibleToUser(listing) {
     try {
         if (!listing) return false;
-        const session = sessionClient.getSession();
-        const currentUserId = session?.userId || window.currentUser?.id || window.currentUser?._id;
+        const user = sessionClient.getUser ? sessionClient.getUser() : null;
+        const currentUserId = user?.id || window.currentUser?.id || window.currentUser?._id;
         if (!currentUserId) return false;
         if (listing.userId === currentUserId) return true;
         if (listing.visibility === TRUST_CIRCLES.FRIENDS) {
@@ -4088,16 +4587,16 @@ export async function createPremiumServiceListing(title, description, premiumOpt
         if (!hasValidUser()) throw new Error('User not authenticated');
         if (!isActive()) throw new Error('Module not active');
         
-        const session = sessionClient.getSession();
-        const userId = session?.userId || window.currentUser?.id || window.currentUser?._id;
-        const user = session || window.userData || { displayName: 'User' };
+        const user = sessionClient.getUser ? sessionClient.getUser() : null;
+        const userId = user?.id;
+        const userObj = user || { displayName: 'User' };
         
         const listingId = 'listing_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
         
         const listing = {
             id: listingId,
             userId: userId,
-            user: user,
+            user: userObj,
             type: LISTING_TYPES.SERVICE,
             title: title,
             description: description,
@@ -4129,7 +4628,7 @@ export async function createPremiumServiceListing(title, description, premiumOpt
         myListings.unshift(listing);
         safeStorage.set(LOCAL_STORAGE_KEYS.MY_LISTINGS, myListings);
         
-        const premiumListings = safeStorage.get(LOCAL_STORAGE_KEYS.PREMIUM_LISTINGS) || [];
+        const premiumListings = await safeStorage.get(LOCAL_STORAGE_KEYS.PREMIUM_LISTINGS) || [];
         premiumListings.unshift(listing);
         safeStorage.set(LOCAL_STORAGE_KEYS.PREMIUM_LISTINGS, premiumListings);
         
@@ -4157,16 +4656,16 @@ export async function createPremiumDigitalListing(title, description, fileData, 
         if (!hasValidUser()) throw new Error('User not authenticated');
         if (!isActive()) throw new Error('Module not active');
         
-        const session = sessionClient.getSession();
-        const userId = session?.userId || window.currentUser?.id || window.currentUser?._id;
-        const user = session || window.userData || { displayName: 'User' };
+        const user = sessionClient.getUser ? sessionClient.getUser() : null;
+        const userId = user?.id;
+        const userObj = user || { displayName: 'User' };
         
         const listingId = 'listing_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
         
         const listing = {
             id: listingId,
             userId: userId,
-            user: user,
+            user: userObj,
             type: LISTING_TYPES.DIGITAL,
             title: title,
             description: description,
@@ -4203,7 +4702,7 @@ export async function createPremiumDigitalListing(title, description, fileData, 
         myListings.unshift(listing);
         safeStorage.set(LOCAL_STORAGE_KEYS.MY_LISTINGS, myListings);
         
-        const premiumListings = safeStorage.get(LOCAL_STORAGE_KEYS.PREMIUM_LISTINGS) || [];
+        const premiumListings = await safeStorage.get(LOCAL_STORAGE_KEYS.PREMIUM_LISTINGS) || [];
         premiumListings.unshift(listing);
         safeStorage.set(LOCAL_STORAGE_KEYS.PREMIUM_LISTINGS, premiumListings);
         
@@ -4229,7 +4728,7 @@ export async function createPremiumDigitalListing(title, description, fileData, 
 export async function processFeaturedListing(listing) {
     try {
         if (!isActive()) return;
-        const spotlightListings = safeStorage.get(LOCAL_STORAGE_KEYS.SPOTLIGHT_LISTINGS) || [];
+        const spotlightListings = await safeStorage.get(LOCAL_STORAGE_KEYS.SPOTLIGHT_LISTINGS) || [];
         spotlightListings.unshift(listing);
         safeStorage.set(LOCAL_STORAGE_KEYS.SPOTLIGHT_LISTINGS, spotlightListings);
         await safeApiCall('POST', '/api/marketplace/spotlight', { listingId: listing.id });
@@ -4538,9 +5037,11 @@ export function checkDarkMode() {
 
 export function queueForSync(data, type) {
     try {
-        const syncQueue = safeStorage.get(LOCAL_STORAGE_KEYS.SYNC_QUEUE) || [];
-        syncQueue.push({ type: 'marketplace_' + type, data, timestamp: Date.now(), retryCount: 0 });
-        safeStorage.set(LOCAL_STORAGE_KEYS.SYNC_QUEUE, syncQueue);
+        safeStorage.get(LOCAL_STORAGE_KEYS.SYNC_QUEUE).then(syncQueue => {
+            const queue = syncQueue || [];
+            queue.push({ type: 'marketplace_' + type, data, timestamp: Date.now(), retryCount: 0 });
+            safeStorage.set(LOCAL_STORAGE_KEYS.SYNC_QUEUE, queue);
+        });
     } catch {}
 }
 
@@ -4574,16 +5075,16 @@ export function createServiceListing(title, description, options = {}) {
         if (!hasValidUser()) throw new Error('User not authenticated');
         if (!isActive()) throw new Error('Module not active');
         
-        const session = sessionClient.getSession();
-        const userId = session?.userId || window.currentUser?.id || window.currentUser?._id;
-        const user = session || window.userData || { displayName: 'User' };
+        const user = sessionClient.getUser ? sessionClient.getUser() : null;
+        const userId = user?.id;
+        const userObj = user || { displayName: 'User' };
         
         const listingId = 'listing_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
         
         const listing = {
             id: listingId,
             userId: userId,
-            user: user,
+            user: userObj,
             type: LISTING_TYPES.SERVICE,
             title: title,
             description: description,
@@ -4628,16 +5129,16 @@ export function createDigitalListing(title, description, fileData, options = {})
         if (!hasValidUser()) throw new Error('User not authenticated');
         if (!isActive()) throw new Error('Module not active');
         
-        const session = sessionClient.getSession();
-        const userId = session?.userId || window.currentUser?.id || window.currentUser?._id;
-        const user = session || window.userData || { displayName: 'User' };
+        const user = sessionClient.getUser ? sessionClient.getUser() : null;
+        const userId = user?.id;
+        const userObj = user || { displayName: 'User' };
         
         const listingId = 'listing_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
         
         const listing = {
             id: listingId,
             userId: userId,
-            user: user,
+            user: userObj,
             type: LISTING_TYPES.DIGITAL,
             title: title,
             description: description,
@@ -4691,8 +5192,8 @@ export async function downloadDigitalFile(listingId, fileUrl, fileName) {
         const listing = allListings.find(l => l.id === listingId) || myListings.find(l => l.id === listingId);
         if (!listing) throw new Error('Listing not found');
         
-        const session = sessionClient.getSession();
-        const currentUserId = session?.userId || window.currentUser?.id;
+        const user = sessionClient.getUser ? sessionClient.getUser() : null;
+        const currentUserId = user?.id;
         
         if (listing.userId !== currentUserId && !isListingVisibleToUser(listing)) {
             throw new Error('You do not have permission to download this file');
@@ -4816,7 +5317,7 @@ export async function syncOfflineMarketplaceData() {
     try {
         if (!isActive()) return;
         
-        const syncQueue = safeStorage.get(LOCAL_STORAGE_KEYS.SYNC_QUEUE) || [];
+        const syncQueue = await safeStorage.get(LOCAL_STORAGE_KEYS.SYNC_QUEUE) || [];
         const marketplaceItems = syncQueue.filter(item => item.type.startsWith('marketplace_'));
         if (marketplaceItems.length === 0) return;
         
@@ -4925,7 +5426,7 @@ export function startBackgroundJobs() {
 
 export function handleSessionExpired() {
     try {
-        safeStorage.remove('USER_TOKEN');
+        sessionClient.clear();
         showNotification('Your session has expired. Please log in again.', 'error');
         if (typeof refreshToken === 'function') {
             refreshToken().catch(() => handleParentLogout());
@@ -4953,18 +5454,10 @@ export async function fetchUserDataDirectly() {
     try {
         const token = getCentralToken();
         if (!token) {
-            const cachedUser = safeStorage.get(LOCAL_STORAGE_KEYS.USER);
-            if (cachedUser) {
-                try {
-                    processUserData(cachedUser, 'cache');
-                    dataFetchInProgress = false;
-                    return;
-                } catch {}
-            }
             throw new Error('No authentication token available');
         }
         
-        const response = await secureApiCall('GET', '/api/user/profile');
+        const response = await authorizedFetch('/api/user/profile', { method: 'GET' });
         
         if (response && response.user) {
             directAPILoaded = true;
@@ -4978,14 +5471,7 @@ export async function fetchUserDataDirectly() {
     } catch {
         dataFetchInProgress = false;
         if (window.parent !== window && !parentDataLoaded) {} else {
-            const cachedUser = safeStorage.get(LOCAL_STORAGE_KEYS.USER);
-            if (cachedUser) {
-                try {
-                    processUserData(cachedUser, 'cache_fallback');
-                } catch {}
-            } else {
-                showNotification('Unable to load user profile. Some features may be limited.', 'warning');
-            }
+            // Removed localStorage fallback
         }
     }
 }
@@ -4994,8 +5480,6 @@ export function processUserData(userDataFromSource, source) {
     try {
         window.currentUser = userDataFromSource;
         window.userData = userDataFromSource;
-        safeStorage.set(LOCAL_STORAGE_KEYS.USER, window.currentUser);
-        safeStorage.set(LOCAL_STORAGE_KEYS.USER_PROFILE, window.userData);
         
         const sessionData = {
             userId: userDataFromSource.id || userDataFromSource.userId,
@@ -5037,8 +5521,6 @@ export function updateUserDataFromParent(updatedData) {
         } else {
             window.userData = updatedData;
         }
-        safeStorage.set(LOCAL_STORAGE_KEYS.USER, window.currentUser);
-        safeStorage.set(LOCAL_STORAGE_KEYS.USER_PROFILE, window.userData);
         if (updatedData.subscription) userSubscription = updatedData.subscription;
         
         const sessionUpdate = {
@@ -5059,8 +5541,6 @@ export function handleUserLogout() {
         window.currentUser = null;
         window.userData = null;
         userSubscription = null;
-        safeStorage.remove(LOCAL_STORAGE_KEYS.USER);
-        safeStorage.remove(LOCAL_STORAGE_KEYS.USER_PROFILE);
         safeStorage.remove(LOCAL_STORAGE_KEYS.USER_SUBSCRIPTION);
         sessionClient.clear();
         showNotification('You have been logged out.', 'warning');
@@ -5097,7 +5577,7 @@ export function getMarketplaceUser() {
 
 export function isMarketplaceReady() {
     try {
-        return isBootstrapped && (hasValidSession() || window.currentUser) && isActive();
+        return isBootstrapped && ((sessionClient.isReady ? sessionClient.isReady() : false) || window.currentUser) && isActive();
     } catch {
         return false;
     }
@@ -5121,7 +5601,7 @@ export function migrateLegacyUserData(data) {
         
         const sessionData = {
             userId: data.id || data.userId || data.user_id,
-            userToken: data.token || data.userToken || safeStorage.get('USER_TOKEN'),
+            userToken: data.token || data.userToken || getCentralToken(),
             displayName: data.displayName || data.name,
             email: data.email,
             photoURL: data.photoURL || data.avatar,
@@ -5181,16 +5661,16 @@ export const AppState = {
     sessionValid,
     _STATE: { ...moduleState },
     getSession: () => sessionClient.getSession(),
-    hasValidSession: () => sessionClient.isValid(),
+    hasValidSession: () => sessionClient.isReady ? sessionClient.isReady() : false,
     isUserPremium,
     isMarketplaceReady,
     getDiagnostics: () => diagnostics?.getReport(),
     getConnectionStatus: () => heartbeatResponder?.getStatus(),
     getEnvironment: () => environmentDetector?.environment,
     getBootState: () => ({
-        state: currentLifecycleState,
+        state: currentState,
         sessionAuthority: moduleState.sessionAuthority,
-        parentReady: parentReady
+        parentReady: parentReadyReceived
     }),
     marketplace
 };
@@ -5259,8 +5739,8 @@ if (typeof window !== 'undefined') {
                     connection: heartbeatResponder?.getStatus(),
                     environment: environmentDetector?.environment,
                     boot: {
-                        state: currentLifecycleState,
-                        parentReady: parentReady
+                        state: currentState,
+                        parentReady: parentReadyReceived
                     }
                 }),
                 enableDebug: () => diagnostics?.enableDebug(),
@@ -5272,7 +5752,22 @@ if (typeof window !== 'undefined') {
             environmentDetector,
             heartbeatResponder,
             __MODULE_READY__: () => window.__MODULE_READY__,
-            __MODULE_SESSION_ACTIVE__: () => window.__MODULE_SESSION_ACTIVE__
+            __MODULE_SESSION_ACTIVE__: () => window.__MODULE_SESSION_ACTIVE__,
+            authorizedFetch: authorizedFetch,
+            sessionStore: {
+                isReady: () => sessionClient.isReady ? sessionClient.isReady() : false,
+                getUser: () => sessionClient.getUser ? sessionClient.getUser() : null,
+                hasToken: () => !!sessionClient.getToken ? sessionClient.getToken() : false
+            },
+            lifecycle: {
+                getState: () => currentState,
+                isActive: () => isActive(),
+                childReadySent: () => childReadySent,
+                parentReadyReceived: () => parentReadyReceived,
+                transitions: VALID_TRANSITIONS
+            },
+            storageProxy: StorageProxy,
+            messageGuard: MessageGuard
         };
         
         window.pageCore = pageCore;
@@ -5295,6 +5790,9 @@ if (typeof window !== 'undefined') {
         window.getCategories = () => marketplace.getCategories();
         window.on = (event, cb) => marketplace.on(event, cb);
         window.off = (event, cb) => marketplace.off(event, cb);
+        
+        window.authorizedFetch = authorizedFetch;
+        window.StorageProxy = StorageProxy;
     } catch {}
 }
 
@@ -5362,7 +5860,7 @@ export async function openChat(userId, userName) {
 
 export async function loadAnalyticsData() {
     try {
-        if (hasValidSession() && isUserPremium() && isActive()) {
+        if ((sessionClient.isReady ? sessionClient.isReady() : false) && isUserPremium() && isActive()) {
             const analytics = await getAnalyticsData();
             if (analytics) {
                 analyticsData = analytics;
@@ -5378,8 +5876,8 @@ export async function loadAnalyticsData() {
 
 export async function loadLeaderboard() {
     try {
-        if (hasValidSession() && isActive()) {
-            const response = await secureApiCall('GET', '/api/marketplace/leaderboard');
+        if ((sessionClient.isReady ? sessionClient.isReady() : false) && isActive()) {
+            const response = await authorizedFetch('/api/marketplace/leaderboard', { method: 'GET' });
             if (response && response.leaderboard) {
                 leaderboardData = response.leaderboard;
                 safeStorage.set(LOCAL_STORAGE_KEYS.LEADERBOARD, JSON.stringify(leaderboardData));
@@ -5394,7 +5892,7 @@ export async function loadLeaderboard() {
 
 export async function updateTeamMemberRole(changes) {
     try {
-        if (!hasValidSession() || (!userSubscription || (userSubscription.plan !== 'business' && userSubscription.plan !== 'team'))) {
+        if (!(sessionClient.isReady ? sessionClient.isReady() : false) || (!userSubscription || (userSubscription.plan !== 'business' && userSubscription.plan !== 'team'))) {
             throw new Error('Team features require a business or team subscription');
         }
         if (!isActive()) throw new Error('Module not active');
@@ -5411,9 +5909,5 @@ export async function updateTeamMemberRole(changes) {
         return false;
     }
 }
-
-// =============================================
-// CONSOLE OUTPUT MATCHES FRIENDS MODULE
-// =============================================
 
 export default marketplace;

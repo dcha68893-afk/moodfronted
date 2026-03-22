@@ -2,8 +2,9 @@
 // GROUPS UI FUNCTIONS - RESILIENT UI CONTROLLER
 // COMPLETE PRODUCTION-READY IMPLEMENTATION
 // HIGHLY SECURE - XSS PROTECTED, CSP COMPLIANT
-// VERSION: 3.5.0 - UPDATED TO MATCH PROTOCOL-COMPLIANT CORE
-// ENHANCED: Silent loading, No overlay UI, Parent-ready aware
+// VERSION: 4.0.0 - UPDATED TO MATCH PROTOCOL-COMPLIANT CORE
+// ENHANCED: Protocol-aware lifecycle, Parent-ready synchronization
+// STRICT: No retry loops, deterministic state, duplicate prevention
 // =============================================
 
 // =============================================
@@ -61,18 +62,15 @@ const DIAGNOSTICS = {
 };
 
 // =============================================
-// IMPORT VERIFICATION - UPDATED TO MATCH PROTOCOL-COMPLIANT CORE
+// IMPORT VERIFICATION - FIXED EXPORTS MATCHING CORE
 // =============================================
 
 import {
-    // Core modules - NEW: Added for protocol compliance
+    // Core modules - Protocol compliant
     LifecycleState,
     ParentMessaging,
     SafeStorage,
     GroupCore,
-    
-    // Protocol flags - NEW: Added for parent-ready awareness
-    // These are accessed via the core, but we'll track them locally
     
     // State variables
     currentUser,
@@ -124,31 +122,23 @@ import {
     // Local storage keys
     LOCAL_STORAGE_KEYS,
 
-    // Flags and state
-    isPageInitialized,
-    authReady,
-    authCheckComplete,
-    backgroundSyncRunning,
-    syncIntervalId,
-    apiInitialized,
-    tokenReadyPromise,
-    tokenReadyResolve,
-    tokenReadyReject,
-    tokenQueue,
-    isProcessingTokenQueue,
+    // Flags and state - THESE ARE MODULE-LEVEL VARIABLES, NOT EXPORTS
+    // We access them via the core module's internal state
     
     // Token management
-    initializeTokenSystem,
-    waitForTokenReady,
+    getCurrentUser,
+    getCurrentUserLocal,
     getUnifiedToken,
     saveUnifiedToken,
-    getCurrentUser,
+    initializeTokenSystem,
+    waitForTokenReady,
 
     // API functions
     queueApiCall,
     processTokenQueue,
     secureApiCall,
     safeApiCall,
+    authorizedFetch,
 
     // Main initialization
     initGroupPage,
@@ -190,6 +180,7 @@ import {
     addSystemMessage,
     saveMessageToCache,
     sendGroupMessage,
+    sendGroupMessageOnline,
     toggleSilentMode,
     toggleAnonymousMode,
     reactToMessage,
@@ -277,19 +268,87 @@ import {
 } from './group-core.js';
 
 // =============================================
-// PROTOCOL COMPLIANCE TRACKING - NEW
+// PROTOCOL COMPLIANCE TRACKING - STRICT
 // =============================================
 
 // Track parent-ready and session state from core
-let _parentReady = false;
-let _sessionReceived = false;
+// Access these via LifecycleState since they're not exported directly
+let _protocolReady = false;
+let _parentReadyReceived = false;
+let _activationComplete = false;
+let _sessionReady = false;
+let _uiInitializationStarted = false;
 
-// Subscribe to lifecycle changes if available
+// Subscribe to lifecycle changes from core
 if (LifecycleState && typeof LifecycleState.subscribe === 'function') {
-    LifecycleState.subscribe((newState) => {
-        _parentReady = newState === LifecycleState.STATES.ACTIVE;
-        _sessionReceived = LifecycleState.hasSession ? LifecycleState.hasSession() : false;
+    LifecycleState.subscribe((newState, oldState) => {
+        // STRICT: Only mark ready when ACTIVE state is reached
+        _protocolReady = newState === LifecycleState.STATES.ACTIVE;
+        
+        if (newState === LifecycleState.STATES.ACTIVE && !_activationComplete) {
+            _activationComplete = true;
+            _parentReadyReceived = true;
+            onProtocolActivation();
+        }
     });
+}
+
+// Check if session is ready via GroupCore
+function checkSessionReady() {
+    return GroupCore && GroupCore.isReady ? GroupCore.isReady() : false;
+}
+
+// Function called when protocol activates module
+function onProtocolActivation() {
+    // Protocol is ACTIVE - UI can fully initialize
+    _sessionReady = checkSessionReady();
+    
+    // Trigger any pending UI operations
+    if (_UI_STATE.isInitialized) {
+        refreshUIData();
+    } else {
+        // Complete UI initialization if not yet done
+        completeUIInitialization();
+    }
+}
+
+// Check if UI operations are allowed (STRICT: only when ACTIVE)
+function isUIOperationAllowed() {
+    return _protocolReady && _parentReadyReceived;
+}
+
+// Refresh UI data when protocol becomes active
+function refreshUIData() {
+    if (typeof updateGroupCounts === 'function') {
+        updateGroupCounts();
+    }
+    if (typeof updateCurrentSection === 'function') {
+        updateCurrentSection();
+    }
+    if (typeof updateUserUI === 'function') {
+        updateUserUI();
+    }
+    if (typeof startBackgroundSync === 'function') {
+        startBackgroundSync();
+    }
+}
+
+// Complete UI initialization after protocol activation
+function completeUIInitialization() {
+    if (_UI_STATE.initialRenderComplete) {
+        refreshUIData();
+    } else {
+        // Complete the render pipeline
+        if (_UI_STATE.skeletonRendered) {
+            initialRenderFromCache();
+            _UI_STATE.initialRenderComplete = true;
+            progressiveEnhancement();
+            _UI_STATE.progressiveEnhancementComplete = true;
+            setupLiveUpdates();
+            _UI_STATE.liveUpdateEnabled = true;
+            refreshUIData();
+        }
+    }
 }
 
 // =============================================
@@ -321,6 +380,8 @@ const _UI_STATE = {
     progressiveEnhancementComplete: false,
     liveUpdateEnabled: false,
     securityNonce: SECURITY_CONFIG.CSP_NONCE,
+    pendingDataRefresh: false,
+    waitingForProtocol: true,
     
     // Silent loading - no overlays
     loadingOverlaysHidden: true
@@ -1371,27 +1432,36 @@ export function renderPipeline() {
             renderSkeletonUI();
         });
         
-        // Stage 2: Initial Render from Cache
-        measureRenderTime('initialRender', () => {
-            initialRenderFromCache();
-        });
-        _UI_STATE.initialRenderComplete = true;
+        // Stage 2: Initial Render from Cache (if protocol ready)
+        if (_protocolReady && _parentReadyReceived) {
+            measureRenderTime('initialRender', () => {
+                initialRenderFromCache();
+            });
+            _UI_STATE.initialRenderComplete = true;
+            _UI_STATE.waitingForProtocol = false;
+        } else {
+            // Store that we need to render after protocol activation
+            _UI_STATE.pendingDataRefresh = true;
+        }
         
-        // Stage 3: Progressive Enhancement
-        measureRenderTime('progressiveEnhancement', () => {
-            progressiveEnhancement();
-        });
-        _UI_STATE.progressiveEnhancementComplete = true;
-        
-        // Stage 4: Live Update Setup
-        measureRenderTime('liveUpdate', () => {
-            setupLiveUpdates();
-        });
-        _UI_STATE.liveUpdateEnabled = true;
+        // Stage 3: Progressive Enhancement (delay until protocol ready)
+        if (_protocolReady && _parentReadyReceived) {
+            measureRenderTime('progressiveEnhancement', () => {
+                progressiveEnhancement();
+            });
+            _UI_STATE.progressiveEnhancementComplete = true;
+            
+            // Stage 4: Live Update Setup
+            measureRenderTime('liveUpdate', () => {
+                setupLiveUpdates();
+            });
+            _UI_STATE.liveUpdateEnabled = true;
+        }
         
         document.dispatchEvent(new CustomEvent('uiRenderComplete', {
             detail: {
-                timestamp: Date.now()
+                timestamp: Date.now(),
+                protocolReady: _protocolReady
             }
         }));
         
@@ -1448,18 +1518,16 @@ export function progressiveEnhancement() {
             setupEventListeners();
             setupResponsiveBehavior();
             
-            if (authReady) {
-                if (typeof startBackgroundSync === 'function') {
-                    startBackgroundSync();
+            if (typeof startBackgroundSync === 'function') {
+                startBackgroundSync();
+            }
+            
+            if ((!groups || groups.length === 0) || (!groupInvites || groupInvites.length === 0)) {
+                if (typeof syncGroupsFromServer === 'function') {
+                    syncGroupsFromServer().catch(() => {});
                 }
-                
-                if ((!groups || groups.length === 0) || (!groupInvites || groupInvites.length === 0)) {
-                    if (typeof syncGroupsFromServer === 'function') {
-                        syncGroupsFromServer().catch(() => {});
-                    }
-                    if (typeof syncGroupInvitesFromServer === 'function') {
-                        syncGroupInvitesFromServer().catch(() => {});
-                    }
+                if (typeof syncGroupInvitesFromServer === 'function') {
+                    syncGroupInvitesFromServer().catch(() => {});
                 }
             }
             
@@ -1478,7 +1546,7 @@ export function setupLiveUpdates() {
     registerMessageHandlers();
     
     const syncTimer = setInterval(() => {
-        if (authReady) {
+        if (_protocolReady && _parentReadyReceived) {
             if (typeof backgroundSyncWithServer === 'function') {
                 backgroundSyncWithServer().catch(() => {});
             }
@@ -2945,6 +3013,9 @@ export function initGroupUI() {
         return;
     }
     
+    if (_uiInitializationStarted) return;
+    _uiInitializationStarted = true;
+    
     try {
         // Hide all loading overlays first
         hideAllLoadingOverlays();
@@ -2960,7 +3031,8 @@ export function initGroupUI() {
                 timestamp: Date.now(),
                 isMobile: _UI_STATE.isMobile,
                 isTablet: _UI_STATE.isTablet,
-                isDesktop: _UI_STATE.isDesktop
+                isDesktop: _UI_STATE.isDesktop,
+                protocolReady: _protocolReady
             }
         }));
         
@@ -2974,13 +3046,13 @@ export function initGroupUI() {
  */
 export function registerUICoreEvents() {
     document.addEventListener('coreDataUpdated', () => {
-        if (_UI_STATE.initialRenderComplete) {
+        if (_UI_STATE.initialRenderComplete && _protocolReady) {
             renderGroupsListSecure();
         }
     });
     
     document.addEventListener('groupsCoreReady', (e) => {
-        if (e.detail?.sessionValid) {
+        if (e.detail?.sessionValid && _protocolReady) {
             progressiveEnhancement();
         }
     });
@@ -3003,6 +3075,11 @@ export function cleanupUISession() {
     _UI_STATE.initialRenderComplete = false;
     _UI_STATE.progressiveEnhancementComplete = false;
     _UI_STATE.liveUpdateEnabled = false;
+    _UI_STATE.waitingForProtocol = true;
+    _protocolReady = false;
+    _parentReadyReceived = false;
+    _activationComplete = false;
+    _uiInitializationStarted = false;
 }
 
 // =============================================
@@ -3045,6 +3122,13 @@ if (typeof window !== 'undefined') {
     secureExpose('manageRoles', manageRoles);
     secureExpose('createEvent', createEvent);
     secureExpose('createPoll', createPoll);
+    secureExpose('getUIState', () => ({
+        isInitialized: _UI_STATE.isInitialized,
+        protocolReady: _protocolReady,
+        parentReady: _parentReadyReceived,
+        activeSection: _UI_STATE.activeSection,
+        isMobile: _UI_STATE.isMobile
+    }));
 }
 
 // =============================================

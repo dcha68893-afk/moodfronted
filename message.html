@@ -27,6 +27,28 @@
         originalWarn.apply(console, arguments);
     };
 })();
+
+// Add lifecycle state listener for UI feedback
+(function() {
+    window.addEventListener('messagesLifecycleChange', function(e) {
+        const tokenStatus = document.getElementById('tokenStatus');
+        if (tokenStatus) {
+            if (e.detail.state === 'ACTIVE') {
+                tokenStatus.textContent = '🟢 Connected';
+                tokenStatus.className = 'token-status ready';
+            } else if (e.detail.state === 'WAITING_FOR_PARENT') {
+                tokenStatus.textContent = '🟡 Waiting for parent...';
+                tokenStatus.className = 'token-status pending';
+            } else if (e.detail.state === 'READY') {
+                tokenStatus.textContent = '🟡 Ready, waiting for parent...';
+                tokenStatus.className = 'token-status pending';
+            } else {
+                tokenStatus.textContent = '🔴 Connecting...';
+                tokenStatus.className = 'token-status pending';
+            }
+        }
+    });
+})();
 </script>
     <link rel="manifest" href="../manifest.json">
     <meta name="theme-color" content="#0084ff">
@@ -36,7 +58,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Chat | Knecta Chat</title>
     
-    
     <!-- Font Awesome -->
     <link rel="stylesheet" href="/css/vendor/font-awesome.min.css">
 <link rel="stylesheet" href="/css/vendor/pickr-nano.min.css">
@@ -44,13 +65,12 @@
 <link rel="stylesheet" href="/css/vendor/spectrum.min.css">
 <link rel="stylesheet" href="/css/vendor/video-js.min.css">
     
-   
     <!-- Load CSS -->
     <link rel="stylesheet" href="messages.css">
 
     <style>
         /* =============================================
-           ENHANCED UI STYLES - v3.4.0
+           ENHANCED UI STYLES - v3.5.0
            SILENT BACKGROUND - NO VISIBLE LOADING
         ============================================= */
         
@@ -692,6 +712,23 @@
             background: rgba(0, 132, 255, 0.05);
         }
         
+        /* Syncing indicator */
+        .syncing-indicator {
+            position: fixed;
+            bottom: 10px;
+            left: 10px;
+            background: rgba(0, 132, 255, 0.9);
+            color: white;
+            padding: 4px 10px;
+            border-radius: 16px;
+            font-size: 11px;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            z-index: 1000;
+            backdrop-filter: blur(10px);
+        }
+        
         /* Mobile optimizations */
         @media (max-width: 768px) {
             .auth-status-indicator {
@@ -707,6 +744,12 @@
             .token-status {
                 bottom: 5px;
                 right: 5px;
+                font-size: 9px;
+            }
+            
+            .syncing-indicator {
+                bottom: 5px;
+                left: 5px;
                 font-size: 9px;
             }
         }
@@ -765,6 +808,115 @@
         .initial-loading, .splash-screen, .loading-overlay {
             display: none !important;
         }
+        
+        /* Reply indicator */
+        .reply-indicator {
+            background: rgba(0, 132, 255, 0.1);
+            border-left: 3px solid #0084ff;
+            padding: 4px 8px;
+            margin-bottom: 8px;
+            font-size: 12px;
+            color: #0084ff;
+            border-radius: 4px;
+        }
+        
+        .reply-indicator i {
+            margin-right: 4px;
+        }
+        
+        /* Edited indicator */
+        .edited-indicator {
+            font-size: 10px;
+            color: #999;
+            margin-left: 4px;
+        }
+        
+        /* Message status icons */
+        .message-status i {
+            font-size: 12px;
+            margin-left: 4px;
+        }
+        
+        /* Message info modal */
+        .chat-info-actions {
+            display: flex;
+            justify-content: flex-end;
+            gap: 10px;
+            margin-top: 20px;
+            padding-top: 20px;
+            border-top: 1px solid var(--border-color, #eee);
+        }
+        
+        .chat-info-btn {
+            padding: 8px 16px;
+            border-radius: 8px;
+            border: none;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        
+        .chat-info-btn.primary {
+            background: #0084ff;
+            color: white;
+        }
+        
+        .chat-info-btn.primary:hover {
+            background: #0066cc;
+        }
+        
+        /* Report modal textarea */
+        .report-textarea {
+            width: 100%;
+            min-height: 100px;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            margin: 15px 0;
+            font-family: inherit;
+            resize: vertical;
+        }
+        
+        .report-actions {
+            display: flex;
+            justify-content: flex-end;
+            gap: 10px;
+        }
+        
+        /* Chat categories */
+        .chat-categories {
+            display: flex;
+            overflow-x: auto;
+            padding: 10px;
+            gap: 8px;
+            border-bottom: 1px solid rgba(0, 0, 0, 0.1);
+        }
+        
+        .category-tab {
+            padding: 6px 12px;
+            border-radius: 20px;
+            background: rgba(0, 0, 0, 0.05);
+            border: none;
+            cursor: pointer;
+            font-size: 13px;
+            white-space: nowrap;
+        }
+        
+        .category-tab.active {
+            background: #0084ff;
+            color: white;
+        }
+        
+        .category-tab .badge {
+            margin-left: 4px;
+            background: rgba(0, 0, 0, 0.1);
+            padding: 0 4px;
+            border-radius: 10px;
+            font-size: 10px;
+        }
+        
+        .category-tab.active .badge {
+            background: rgba(255, 255, 255, 0.2);
+        }
     </style>
     <link rel="stylesheet" href="/css/suppress-webgl.css">
 </head>
@@ -802,7 +954,7 @@
     </div>
     
     <!-- Token Status Indicator -->
-    <div class="token-status" id="tokenStatus">Parent: Connecting...</div>
+    <div class="token-status" id="tokenStatus">🔴 Connecting...</div>
     
     <!-- =============================================
          OVERLAYS
@@ -895,10 +1047,20 @@
     <div class="report-modal" id="reportModal">
         <div class="report-content">
             <div class="chat-name">Report Message</div>
-            <textarea class="report-textarea" id="reportText" placeholder="Please describe the issue..."></textarea>
+            <input type="hidden" id="reportMessageId" value="">
+            <select id="reportReason" class="report-textarea" style="height: auto;">
+                <option value="">Select a reason...</option>
+                <option value="spam">Spam or promotional content</option>
+                <option value="harassment">Harassment or bullying</option>
+                <option value="hate">Hate speech</option>
+                <option value="violence">Violent content</option>
+                <option value="nudity">Inappropriate content</option>
+                <option value="other">Other</option>
+            </select>
+            <textarea id="reportDetails" class="report-textarea" placeholder="Additional details (optional)..."></textarea>
             <div class="report-actions">
                 <button class="edit-btn cancel" id="cancelReportBtn">Cancel</button>
-                <button class="edit-btn save" id="submitReportBtn">Submit</button>
+                <button class="edit-btn save" id="submitReportBtn">Submit Report</button>
             </div>
         </div>
     </div>
@@ -927,7 +1089,8 @@
             <div class="attachment-preview" id="multiSendAttachmentPreview" style="display: none;">
                 <!-- Attachment preview for multi-send -->
             </div>
-            <div class="input-area" style="border-top: 1px solid var(--border-color);">
+            <input type="hidden" id="forwardMessageId" value="">
+            <div class="input-area" style="border-top: 1px solid var(--border-color, #eee);">
                 <textarea class="message-input" id="multiSendInput" placeholder="Type message to send..."></textarea>
                 <button class="send-button" id="multiSendBtn">
                     <i class="fas fa-paper-plane"></i>
@@ -1162,6 +1325,15 @@
                 </div>
                 
                 <div class="message-input-container">
+                    <!-- Reply indicator -->
+                    <div class="reply-indicator" id="replyIndicator" style="display: none;">
+                        <i class="fas fa-reply"></i>
+                        <span id="replyToText">Replying to message</span>
+                        <button class="input-action-btn" id="cancelReplyBtn" style="margin-left: auto;">
+                            <i class="fas fa-times"></i>
+                        </button>
+                    </div>
+                    
                     <!-- Attachment preview -->
                     <div class="attachment-preview" id="attachmentPreview" style="display: none;"></div>
                     
@@ -1210,7 +1382,7 @@
                 <button class="send-button" id="sendButton">
                     <i class="fas fa-paper-plane"></i>
                     <!-- Schedule badge -->
-                    <div class="scheduled-badge" id="scheduleBadge" style="display: none;">âŒš</div>
+                    <div class="scheduled-badge" id="scheduleBadge" style="display: none;">⏰</div>
                 </button>
             </div>
         </div>
@@ -1250,15 +1422,15 @@
         <!-- Silent reaction options -->
         <button class="action-item" data-action="react-like">
             <i class="fas fa-thumbs-up"></i>
-            ðŸ‘ React
+            👍 React
         </button>
         <button class="action-item" data-action="react-love">
             <i class="fas fa-heart"></i>
-            â¤ï¸ React
+            ❤️ React
         </button>
         <button class="action-item" data-action="react-laugh">
             <i class="fas fa-laugh"></i>
-            ðŸ˜‚ React
+            😂 React
         </button>
         <button class="action-item danger" data-action="delete">
             <i class="fas fa-trash"></i>
@@ -1295,7 +1467,7 @@
 
     
     <!-- Core scripts - loaded as modules -->
-         <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
     
     <!-- All vendor libraries (regular scripts, not modules) -->
     <script src="/js/vendor/qrcode.min.js"></script>
@@ -1321,9 +1493,37 @@
                 window.__IFRAME_DEBUG__ = true;
             }
             
+            // Check if core is ready and initialize UI
+            let coreCheckCount = 0;
+            const checkCoreInterval = setInterval(() => {
+                coreCheckCount++;
+                
+                if (window.messagesCore && window.messagesCore.isReady && window.messagesCore.isReady()) {
+                    clearInterval(checkCoreInterval);
+                    console.log('[Messages] Core ready, UI initialized');
+                    
+                    // Show token status as ready
+                    const tokenStatus = document.getElementById('tokenStatus');
+                    if (tokenStatus) {
+                        tokenStatus.textContent = '🟢 Connected';
+                        tokenStatus.className = 'token-status ready';
+                    }
+                } else if (coreCheckCount > 30) {
+                    clearInterval(checkCoreInterval);
+                    console.log('[Messages] Core not ready after 30 attempts');
+                    
+                    // Show fallback UI
+                    const tokenStatus = document.getElementById('tokenStatus');
+                    if (tokenStatus) {
+                        tokenStatus.textContent = '🔴 Connection issue';
+                        tokenStatus.className = 'token-status error';
+                    }
+                }
+            }, 1000);
+            
             // Silent background initialization - no console noise
             setTimeout(() => {
-                if (!window.messagesCore || !window.messagesCore.isCoreReady?.()) {
+                if (!window.messagesCore || !window.messagesCore.isReady || !window.messagesCore.isReady()) {
                     const chatsList = document.getElementById('chatsList');
                     if (chatsList && chatsList.children.length === 0) {
                         chatsList.innerHTML = `
@@ -1338,7 +1538,7 @@
             
             // 10 second timeout - show retry option (still subtle)
             setTimeout(() => {
-                if (!window.messagesCore || !window.messagesCore.isCoreReady?.()) {
+                if (!window.messagesCore || !window.messagesCore.isReady || !window.messagesCore.isReady()) {
                     const chatsList = document.getElementById('chatsList');
                     if (chatsList && chatsList.children.length === 0) {
                         chatsList.innerHTML = `
@@ -1354,11 +1554,34 @@
                     }
                 }
             }, 10000);
+            
+            // Add retry connection function for the reconnect button
+            window.retryConnection = function() {
+                if (window.messagesCore && window.messagesCore.retryConnection) {
+                    window.messagesCore.retryConnection();
+                } else {
+                    location.reload();
+                }
+            };
+            
+            // Add helper for report submission
+            window.submitReport = function() {
+                const messageId = document.getElementById('reportMessageId')?.value;
+                const reason = document.getElementById('reportReason')?.value;
+                const details = document.getElementById('reportDetails')?.value;
+                
+                if (!messageId) {
+                    console.warn('No message ID for report');
+                    return false;
+                }
+                
+                if (window.messagesCore && window.messagesCore.reportMessage) {
+                    window.messagesCore.reportMessage(messageId, { reason, details });
+                    return true;
+                }
+                return false;
+            };
         })();
     </script>
 </body>
 </html>
-
-
-
-

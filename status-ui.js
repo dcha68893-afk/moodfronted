@@ -1,7 +1,8 @@
 // =============================================
 // STATUS SYSTEM - RESILIENT UI CONTROLLER
-// ENHANCED VERSION v6.2 - PROTOCOL-COMPLIANT INTEGRATION
+// ENHANCED VERSION v7.0 - LIFECYCLE-COMPLIANT INTEGRATION
 // ALL BUTTONS WORKING, NO DUPLICATE HANDLERS
+// DETERMINISTIC HANDSHAKE READY - NO RETRIES
 // =============================================
 
 import {
@@ -142,7 +143,11 @@ import {
     setCurrentMoodFilter,
     setCurrentCategoryFilter,
     
-    // ===== NEW PROTOCOL-COMPLIANT EXPORTS =====
+    // ===== LIFECYCLE-COMPLIANT EXPORTS =====
+    LifecycleState,
+    isInState,
+    assertActive,
+    getLifecycleState,
     parentReady,
     messageQueue,
     flushQueue,
@@ -151,7 +156,10 @@ import {
     handleParentMessage,
     onParentReady,
     genId,
-    genReqId
+    genReqId,
+    
+    // NO HANDSHAKE RETRY - removed as per protocol
+    // startHandshakeRetry - REMOVED
 } from './status-core.js';
 
 // =============================================
@@ -167,6 +175,7 @@ const UILogger = {
     lastLogTime: 0,
     logThrottle: 1000,
     messageCache: new Set(),
+    lifecycleState: null,
 
     enableDiagnostics() {
         this.diagnostics = true;
@@ -250,13 +259,19 @@ const UILogger = {
         return 0;
     },
 
+    updateLifecycleState(state) {
+        this.lifecycleState = state;
+        this.debug('Lifecycle', `UI aware of state: ${state}`);
+    },
+
     getDiagnostics() {
         return {
             logs: this.logs.slice(0, 20),
             warnings: Array.from(this.warnings),
             errors: Array.from(this.errors),
             renderCount: this.renderTimings.size,
-            diagnostics: this.diagnostics
+            diagnostics: this.diagnostics,
+            lifecycleState: this.lifecycleState
         };
     }
 };
@@ -286,12 +301,150 @@ const UIFailsafe = {
         'notification', 'errorUI'
     ]),
     _handlersBound: new Map(), // Track which elements have handlers by ID
+    _lifecycleCheckInterval: null,
     
     initialize() {
         this._setupGlobalErrorHandler();
         this._setupMutationObserver();
         this._setupNetworkListeners();
+        this._setupLifecycleCheck();
         UILogger.info('UIFailsafe', 'Initialized');
+    },
+    
+    _setupLifecycleCheck() {
+        // Check lifecycle state periodically to enable/disable UI accordingly
+        this._lifecycleCheckInterval = setInterval(() => {
+            try {
+                const lifecycle = getLifecycleState ? getLifecycleState() : null;
+                if (lifecycle) {
+                    UILogger.updateLifecycleState(lifecycle.current);
+                    
+                    // Enable UI when ACTIVE
+                    if (lifecycle.current === LifecycleState.ACTIVE) {
+                        this._enableUI();
+                    } else if (lifecycle.current === LifecycleState.WAIT_PARENT) {
+                        this._showWaitingState();
+                    } else if (lifecycle.current === LifecycleState.BOOT || lifecycle.current === LifecycleState.INITIALIZING) {
+                        this._showBootingState();
+                    }
+                }
+            } catch (e) {
+                // Silent fail
+            }
+        }, 1000);
+    },
+    
+    _enableUI() {
+        // Enable all protected UI elements
+        this.disabledButtons.clear();
+        
+        const protectedElements = [
+            'createStatusBtn', 'viewMyStatusBtn', 'editMyStatusBtn',
+            'viewHighlightsBtn', 'createHighlightBtn', 'viewTimelineBtn',
+            'viewStatsBtn', 'viewDraftsBtn', 'viewScheduledBtn',
+            'myStatusPreview', 'postStatusBtn', 'saveDraftBtn', 'scheduleStatusBtn',
+            'shareStatusBtn', 'saveStatusBtn', 'reportStatusBtn'
+        ];
+        
+        protectedElements.forEach(id => {
+            const el = document.getElementById(id);
+            if (el) {
+                el.disabled = false;
+                el.style.opacity = '1';
+                el.style.pointerEvents = 'auto';
+                el.removeAttribute('aria-disabled');
+            }
+        });
+        
+        // Hide any waiting overlay
+        const waitingOverlay = document.getElementById('handshakeWaitingOverlay');
+        if (waitingOverlay) waitingOverlay.remove();
+        
+        UILogger.info('UIFailsafe', 'UI enabled (ACTIVE state)');
+    },
+    
+    _showWaitingState() {
+        // Show waiting indicator if not already shown and not already active
+        if (document.getElementById('handshakeWaitingOverlay')) return;
+        
+        const overlay = document.createElement('div');
+        overlay.id = 'handshakeWaitingOverlay';
+        overlay.style.cssText = `
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0,0,0,0.7);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 10000;
+            backdrop-filter: blur(4px);
+        `;
+        overlay.innerHTML = `
+            <div style="background: var(--card-bg, white); padding: 24px; border-radius: 16px; text-align: center; max-width: 300px;">
+                <i class="fas fa-circle-notch fa-spin" style="font-size: 48px; color: var(--primary-color); margin-bottom: 16px;"></i>
+                <h3 style="margin: 0 0 8px 0;">Connecting...</h3>
+                <p style="margin: 0; color: var(--text-secondary);">Waiting for parent application</p>
+                <button class="action-btn secondary" onclick="window.statusUI?.retryHandshake()" style="margin-top: 16px;">
+                    <i class="fas fa-redo"></i> Retry
+                </button>
+            </div>
+        `;
+        document.body.appendChild(overlay);
+        
+        UILogger.info('UIFailsafe', 'Showing waiting state');
+    },
+    
+    _showBootingState() {
+        // Show booting indicator
+        if (document.getElementById('handshakeBootingOverlay')) return;
+        
+        const overlay = document.createElement('div');
+        overlay.id = 'handshakeBootingOverlay';
+        overlay.style.cssText = `
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: var(--bg-primary, #f5f5f5);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 10000;
+        `;
+        overlay.innerHTML = `
+            <div style="text-align: center;">
+                <i class="fas fa-comment-dots" style="font-size: 64px; color: var(--primary-color); margin-bottom: 16px; animation: pulse 1.5s infinite;"></i>
+                <h2 style="margin: 0 0 8px 0;">Status System</h2>
+                <p style="margin: 0; color: var(--text-secondary);">Initializing...</p>
+            </div>
+        `;
+        
+        // Add pulse animation if not exists
+        if (!document.getElementById('pulseAnimation')) {
+            const style = document.createElement('style');
+            style.id = 'pulseAnimation';
+            style.textContent = `
+                @keyframes pulse {
+                    0%, 100% { opacity: 1; transform: scale(1); }
+                    50% { opacity: 0.6; transform: scale(0.95); }
+                }
+            `;
+            document.head.appendChild(style);
+        }
+        
+        document.body.appendChild(overlay);
+        
+        // Remove after 3 seconds or when state changes
+        setTimeout(() => {
+            const overlayEl = document.getElementById('handshakeBootingOverlay');
+            if (overlayEl && getLifecycleState && getLifecycleState().current !== LifecycleState.ACTIVE) {
+                overlayEl.remove();
+            }
+        }, 3000);
     },
     
     _setupGlobalErrorHandler() {
@@ -487,6 +640,14 @@ const UIFailsafe = {
                 return null;
             }
             
+            // Check if module is ACTIVE before allowing actions
+            const lifecycle = getLifecycleState ? getLifecycleState() : null;
+            if (lifecycle && lifecycle.current !== LifecycleState.ACTIVE) {
+                UILogger.warn('UIFailsafe', `Action blocked: ${actionName} - not ACTIVE`);
+                showNotification('Please wait, connecting...', 'info');
+                return null;
+            }
+            
             return new Promise((resolve, reject) => {
                 this.actionQueue.push({ 
                     fn: actionFn, 
@@ -586,6 +747,16 @@ const UIFailsafe = {
         this.disabledButtons.clear();
         this.actionQueue = [];
         this._handlersBound.clear();
+    },
+    
+    cleanup() {
+        if (this._lifecycleCheckInterval) {
+            clearInterval(this._lifecycleCheckInterval);
+            this._lifecycleCheckInterval = null;
+        }
+        if (this.mutationObserver) {
+            this.mutationObserver.disconnect();
+        }
     }
 };
 
@@ -728,10 +899,10 @@ class UIErrorBoundary {
                 <div class="handshake-spinner">
                     <i class="fas fa-circle-notch fa-spin"></i>
                 </div>
-                <p>Connecting...</p>
+                <p>Connecting to parent application...</p>
                 <div class="handshake-retry">
                     <button class="action-btn secondary" onclick="window.statusUI?.retryHandshake()">
-                        <i class="fas fa-redo"></i> Retry
+                        <i class="fas fa-redo"></i> Retry Connection
                     </button>
                 </div>
             </div>
@@ -889,9 +1060,9 @@ const UIRenderPipeline = {
     renderQueue: new Set(),
     rafId: null,
     handshakeStatus: 'waiting',
-    handshakeRetryCount: 0,
     renderCount: 0,
     maxRenderAttempts: 3,
+    lifecycleState: null,
 
     async execute(containerId, renderFn, fallbackId = null) {
         UILogger.startRender(containerId);
@@ -1067,6 +1238,23 @@ const UIRenderPipeline = {
 
     updateHandshakeStatus(status) {
         this.handshakeStatus = status;
+        UILogger.debug('Render', `Handshake status: ${status}`);
+    },
+    
+    updateLifecycleState(state) {
+        this.lifecycleState = state;
+        UILogger.updateLifecycleState(state);
+        UILogger.debug('Render', `Lifecycle state: ${state}`);
+        
+        // Update UI based on lifecycle state
+        if (state === LifecycleState.ACTIVE) {
+            // Remove any waiting overlays
+            const waitingOverlay = document.getElementById('handshakeWaitingOverlay');
+            if (waitingOverlay) waitingOverlay.remove();
+            
+            // Enable protected UI
+            enableProtectedUI();
+        }
     }
 };
 
@@ -1109,6 +1297,10 @@ const UIBridge = {
         this.validators.set('navigation', (data) => {
             return data && data.path;
         });
+        
+        this.validators.set('lifecycle', (data) => {
+            return data && data.state && Object.values(LifecycleState).includes(data.state);
+        });
     },
 
     setupCoreSubscriptions() {
@@ -1141,6 +1333,7 @@ const UIBridge = {
         document.addEventListener('governorStateChange', (e) => {
             if (e.detail.newState === 'ACTIVE') {
                 UIRenderPipeline.updateHandshakeStatus('connected');
+                UIRenderPipeline.updateLifecycleState(LifecycleState.ACTIVE);
             } else if (e.detail.newState === 'DEGRADED') {
                 UIRenderPipeline.updateHandshakeStatus('failed');
             } else if (e.detail.newState === 'RECOVERING') {
@@ -1176,6 +1369,18 @@ const UIBridge = {
         document.addEventListener('statusExpired', (e) => {
             this.handleCoreEvent('statusExpired', e.detail);
         });
+        
+        // Listen for lifecycle events from core
+        document.addEventListener('moduleActive', (e) => {
+            this.handleCoreEvent('lifecycle', { state: LifecycleState.ACTIVE, detail: e.detail });
+            UIRenderPipeline.updateLifecycleState(LifecycleState.ACTIVE);
+            enableProtectedUI();
+        });
+        
+        // Listen for parent ready from core
+        if (typeof onParentReady === 'function') {
+            // Parent ready will trigger through the existing flow
+        }
     },
 
     handleCoreEvent(type, data) {
@@ -2511,7 +2716,7 @@ function showStatusViewer(statusData) {
                 if (ring) ring.classList.add('viewed');
             }
             
-            // Track view in core - now uses safeSend internally
+            // Track view in core - will be gated by lifecycle
             if (typeof trackStatusView === 'function') {
                 trackStatusView(statusData.id).catch(() => {});
             }
@@ -2994,6 +3199,8 @@ function handleCreateStatusClick() {
         showNotification('Please sign in to create a status', 'error');
         return;
     }
+    
+    // Check if module is ACTIVE - actions will be gated by core anyway
     const modal = UIElements.createStatusModal;
     if (modal) {
         modal.classList.add('active');
@@ -3204,24 +3411,30 @@ function enableOfflineMode() {
 function retryHandshake() {
     UILogger.info('Handshake', 'Manually retrying handshake');
     
-    if (typeof IframeHandshakeAuthority !== 'undefined') {
-        IframeHandshakeAuthority.execute({ maxRetries: 5 })
-            .then(() => {
-                showNotification('Connected', 'success');
-                enableProtectedUI();
-            })
-            .catch(() => {
-                showNotification('Failed to connect', 'error');
-            });
-    } else if (typeof window.statusCore?.startHandshake === 'function') {
-        window.statusCore.startHandshake({ retries: 5 })
-            .then(() => {
-                showNotification('Connected', 'success');
-                enableProtectedUI();
-            })
-            .catch(() => {
-                showNotification('Failed to connect', 'error');
-            });
+    // Remove waiting overlay if exists
+    const waitingOverlay = document.getElementById('handshakeWaitingOverlay');
+    if (waitingOverlay) waitingOverlay.remove();
+    
+    showNotification('Attempting to connect...', 'info');
+    
+    // NO AUTOMATIC RETRY - just request session if not active
+    const lifecycle = getLifecycleState ? getLifecycleState() : null;
+    if (lifecycle && lifecycle.current === LifecycleState.WAIT_PARENT) {
+        // In WAIT_PARENT state - send CHILD_READY only if not sent
+        // This is handled by core's sendChildReady which has proper guards
+        if (typeof window.statusCore?.sendChildReady === 'function') {
+            window.statusCore.sendChildReady();
+        }
+        showNotification('Waiting for parent connection...', 'info');
+    } else if (lifecycle && lifecycle.current !== LifecycleState.ACTIVE) {
+        // Not yet active - let core handle it
+        if (typeof window.statusCore?.initializeModule === 'function') {
+            window.statusCore.initializeModule();
+        }
+        showNotification('Initializing connection...', 'info');
+    } else if (lifecycle && lifecycle.current === LifecycleState.ACTIVE) {
+        showNotification('Already connected', 'success');
+        enableProtectedUI();
     }
 }
 
@@ -5390,6 +5603,7 @@ function cleanupUI() {
     UIBridge.clearSubscriptions();
     UIStateManager.clear();
     UIFailsafe.resetAll();
+    UIFailsafe.cleanup();
     
     if (typeof UIFailsafe.mutationObserver !== 'undefined') {
         UIFailsafe.mutationObserver.disconnect();
@@ -5501,6 +5715,22 @@ document.addEventListener('DOMContentLoaded', async function() {
             UIFailsafe._rebindAllHandlers();
         }, 500);
         
+        // Listen for lifecycle state changes
+        const updateLifecycle = () => {
+            const lifecycle = getLifecycleState ? getLifecycleState() : null;
+            if (lifecycle) {
+                UIRenderPipeline.updateLifecycleState(lifecycle.current);
+                
+                // Enable UI when ACTIVE
+                if (lifecycle.current === LifecycleState.ACTIVE) {
+                    enableProtectedUI();
+                }
+            }
+        };
+        
+        // Poll for lifecycle updates (since we don't have a direct event)
+        setInterval(updateLifecycle, 1000);
+        
     } catch (error) {
         UILogger.error('Init', 'Failed to initialize UI', error);
         
@@ -5563,7 +5793,12 @@ if (typeof window !== 'undefined') {
             renderStatusesList: renderStatusesListUI,
             cleanupUI,
             retryHandshake,
-            showDiagnosticOverlay
+            showDiagnosticOverlay,
+            // Add lifecycle-aware helpers
+            isActive: () => {
+                const lifecycle = getLifecycleState ? getLifecycleState() : null;
+                return lifecycle ? lifecycle.current === LifecycleState.ACTIVE : false;
+            }
         };
         
         // Also expose handler functions for direct onclick use
@@ -5607,4 +5842,4 @@ if (typeof window !== 'undefined') {
     }
 }
 
-UILogger.info('StatusUI', 'Resilient UI controller initialized successfully v6.2 - Protocol-compliant');
+UILogger.info('StatusUI', 'Resilient UI controller initialized successfully v7.0 - Lifecycle-compliant, no automatic handshake retries');

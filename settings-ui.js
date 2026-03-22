@@ -1,10 +1,7 @@
 // =============================================
-// SETTINGS UI - COMPLETE IMPLEMENTATION v6.3.1 (FIXED)
-// ENHANCED PARENT COMMUNICATION | FULL SECTION SUPPORT
-// INTEGRATED WITH CORE HARDENING | UI FAILSAFE
-// SILENT BACKGROUND OPERATIONS | MOBILE OPTIMIZED
-// API GATEWAY INTEGRATION | SECTION-BASED NAVIGATION
-// UPDATED FOR PARENT-CONTROLLED PROTOCOL COMPLIANCE
+// SETTINGS UI - COMPLETE IMPLEMENTATION v8.0.0
+// ALIGNED WITH DETERMINISTIC HANDSHAKE PROTOCOL
+// FULL SECTION SUPPORT | PARENT-CONTROLLED LIFECYCLE
 // =============================================
 
 import {
@@ -35,7 +32,6 @@ import {
     MAX_API_RETRIES,
     AUTH_CHECK_INTERVAL,
     TOKEN_CHECK_INTERVAL,
-    MAX_HANDSHAKE_ATTEMPTS,
     HANDSHAKE_RETRY_INTERVAL,
     
     // Defaults
@@ -88,13 +84,12 @@ import {
     clearMediaCache,
     onReady,
     isReady,
-    parentReady, // IMPORTANT: Added parentReady flag
+    parentReady,
     
     // Enhanced exports from hardened core
     getCoreDiagnostics,
     getHealthMetrics,
     forceRecovery,
-    handshakeState,
     connectionQuality,
     StartupGovernor,
     SessionClient,
@@ -115,7 +110,11 @@ import {
     ApiCore,
     safeGet,
     safeArray,
-    safeObject
+    safeObject,
+    
+    // Lifecycle state
+    LifecycleState,
+    currentState
 } from './settings-core.js';
 
 // =============================================
@@ -123,16 +122,19 @@ import {
 // =============================================
 (function() {
     if (window.__SETTINGS_UI_INITIALIZED__) {
-        console.log('[SettingsUI] Already initialized, skipping');
+        if (window.__SETTINGS_UI_DEBUG__) {
+            console.log('[SettingsUI] Already initialized, skipping');
+        }
         return;
     }
     window.__SETTINGS_UI_INITIALIZED__ = true;
+    window.__SETTINGS_UI_DEBUG__ = true;
 
-    // Force immediate check for core readiness
+    // Force immediate check for core readiness - ALIGNED WITH HANDSHAKE PROTOCOL
     const forceUICheck = () => {
-        if (window.__SETTINGS_READY__ || window.currentUser || window.__SETTINGS_SESSION_ACTIVE__) {
+        if (window.__SETTINGS_READY__ || window.currentUser || window.__SETTINGS_SESSION_ACTIVE__ || currentState === LifecycleState.ACTIVE) {
             console.log('[SettingsUI] Core already ready, forcing UI init');
-            setTimeout(() => initializeUI(), 100);
+            setTimeout(() => initializeUI(), 50);
         }
     };
     forceUICheck();
@@ -166,7 +168,9 @@ const SILENT_MODE = false;
 window.__IFRAME_DEBUG__ = true;
 
 function debugLog(...args) {
-    console.log('[SettingsUI]', ...args);
+    if (!SILENT_MODE) {
+        console.log('[SettingsUI]', ...args);
+    }
 }
 
 // =============================================
@@ -214,7 +218,7 @@ const UIErrorBoundary = {
         console.error(`[UI Error][${context}]`, error, args);
         
         if (DiagnosticsAgent) {
-            DiagnosticsAgent.error(error, `ui_${context}`);
+            DiagnosticsAgent.log('error', `ui_${context}: ${error.message}`);
         }
     },
     
@@ -324,7 +328,7 @@ function setupAndroidBackButton() {
 }
 
 // =============================================
-// UI INITIALIZATION
+// UI INITIALIZATION - ALIGNED WITH HANDSHAKE PROTOCOL
 // =============================================
 export async function initializeUI() {
     if (uiInitialized) return;
@@ -332,24 +336,20 @@ export async function initializeUI() {
     const wrappedInit = UIErrorBoundary.wrap(async function() {
         debugLog('Initializing UI components');
         
+        // Check if core is ready - STRICT: wait but with timeout
+        const coreReady = await waitForCore(5000);
+        
+        if (!coreReady) {
+            debugLog('Core not ready after timeout, showing fallback UI');
+            showFallbackUI();
+            // Continue with cached data if available
+        }
+        
         checkMobileView();
         
         window.addEventListener('resize', () => {
             checkMobileView();
         });
-        
-        const coreReady = await waitForCore(8000);
-        if (!coreReady) {
-            debugLog('Core not ready, showing loading state');
-            showLoadingState();
-            
-            setTimeout(() => {
-                if (!uiInitialized) {
-                    initializeUI();
-                }
-            }, 2000);
-            return;
-        }
         
         buildSettingsMenu();
         
@@ -387,11 +387,12 @@ export async function initializeUI() {
     await wrappedInit();
 }
 
-// Wait for core with timeout - FIXED VERSION
+// Wait for core with timeout - STRICT: ALIGNED WITH HANDSHAKE PROTOCOL
 function waitForCore(timeout = 5000) {
     return new Promise((resolve) => {
         // IMMEDIATE CHECK - don't wait if core is already ready
-        if (isReady || window.__SETTINGS_READY__ || window.currentUser || window.__SETTINGS_SESSION_ACTIVE__) {
+        if (isReady || window.__SETTINGS_READY__ || window.currentUser || 
+            window.__SETTINGS_SESSION_ACTIVE__ || currentState === LifecycleState.ACTIVE) {
             console.log('[SettingsUI] Core already ready, not waiting');
             resolve(true);
             return;
@@ -400,7 +401,8 @@ function waitForCore(timeout = 5000) {
         console.log('[SettingsUI] Waiting for core...');
         const timeoutId = setTimeout(() => {
             // Check one more time before timing out
-            if (window.currentUser || window.__SETTINGS_SESSION_ACTIVE__) {
+            if (window.currentUser || window.__SETTINGS_SESSION_ACTIVE__ || 
+                currentState === LifecycleState.ACTIVE) {
                 console.log('[SettingsUI] Core ready after timeout check');
                 resolve(true);
             } else {
@@ -414,6 +416,15 @@ function waitForCore(timeout = 5000) {
             console.log('[SettingsUI] Core ready event received');
             resolve(true);
         });
+        
+        // Also listen for parent ready
+        const parentReadyHandler = () => {
+            clearTimeout(timeoutId);
+            console.log('[SettingsUI] Parent ready - core is active');
+            resolve(true);
+            window.removeEventListener('parentReady', parentReadyHandler);
+        };
+        window.addEventListener('parentReady', parentReadyHandler);
     });
 }
 
@@ -426,6 +437,7 @@ function showLoadingState() {
         <div class="settings-section" style="text-align: center; padding: 50px;">
             <div class="section-header">
                 <h3><i class="fas fa-spinner fa-spin section-icon"></i> Loading Settings</h3>
+                <div class="section-description">Connecting to parent...</div>
             </div>
         </div>
     `;
@@ -445,7 +457,8 @@ function showFallbackUI() {
                 <div class="section-body">
                     <div style="text-align: center; padding: 20px;">
                         <p>Working in limited mode</p>
-                        <button class="action-btn primary" id="retryConnectionBtn" style="display: inline-flex;">Retry</button>
+                        <p style="font-size: 12px; color: var(--text-secondary);">Waiting for parent connection...</p>
+                        <button class="action-btn primary" id="retryConnectionBtn" style="display: inline-flex; margin-top: 15px;">Retry</button>
                     </div>
                 </div>
             </div>
@@ -458,6 +471,9 @@ function showFallbackUI() {
                 window.location.reload();
             });
         }
+    } else {
+        // Load profile section with cached data
+        loadProfileSection(contentContainer);
     }
 }
 
@@ -476,7 +492,7 @@ function setupUIVisibilityTracking() {
     });
 }
 
-// Register for core updates
+// Register for core updates - STRICT: ALIGNED WITH HANDSHAKE PROTOCOL
 function registerForCoreUpdates() {
     window.addEventListener('coreDataUpdated', (event) => {
         const { dataType, data } = event.detail;
@@ -508,16 +524,29 @@ function registerForCoreUpdates() {
     }
     
     if (SessionClient && SessionClient.on) {
-        SessionClient.on('session_updated', () => {
+        SessionClient.on('updated', () => {
             updateUserPreview();
             updateUserStatus();
         });
     }
     
-    // IMPORTANT: Listen for parentReady changes
-    window.addEventListener('parentReadyChanged', (event) => {
-        if (event.detail.ready) {
+    // STRICT: Listen for parentReady changes from core
+    window.addEventListener('parentReady', (event) => {
+        if (event.detail && event.detail.ready) {
             debugLog('Parent ready, refreshing UI if needed');
+            if (currentSection) {
+                loadSection(currentSection);
+            }
+        }
+    });
+    
+    // STRICT: Listen for lifecycle state changes
+    window.addEventListener('lifecycleStateChange', (event) => {
+        const { newState } = event.detail;
+        updateConnectionState(newState);
+        
+        if (newState === LifecycleState.ACTIVE) {
+            debugLog('Module ACTIVE, refreshing UI');
             if (currentSection) {
                 loadSection(currentSection);
             }
@@ -533,20 +562,29 @@ function updateConnectionState(state) {
     if (!statusIndicator || !statusText) return;
     
     switch(state) {
-        case 'ACTIVE':
+        case LifecycleState.ACTIVE:
             statusIndicator.style.backgroundColor = 'var(--success-color)';
             statusText.textContent = 'Online';
             break;
             
+        case LifecycleState.WAIT_PARENT:
+            statusIndicator.style.backgroundColor = 'var(--warning-color)';
+            statusText.textContent = 'Connecting...';
+            break;
+            
+        case LifecycleState.READY:
+            statusIndicator.style.backgroundColor = 'var(--info-color)';
+            statusText.textContent = 'Ready';
+            break;
+            
         case 'DEGRADED':
             statusIndicator.style.backgroundColor = 'var(--warning-color)';
-            statusText.textContent = 'Connected';
+            statusText.textContent = 'Limited';
             break;
             
         case 'RECOVERING':
-        case 'HANDSHAKING':
             statusIndicator.style.backgroundColor = 'var(--warning-color)';
-            statusText.textContent = 'Connecting...';
+            statusText.textContent = 'Reconnecting...';
             break;
             
         case 'FAILED':
@@ -566,7 +604,8 @@ function dispatchUIReady() {
         detail: {
             timestamp: Date.now(),
             currentSection,
-            authenticated: checkAuthenticationState()
+            authenticated: checkAuthenticationState(),
+            state: currentState
         }
     });
     window.dispatchEvent(event);
@@ -613,7 +652,7 @@ function setupNetworkAwareUI() {
     };
     
     if (ReliabilityEngine.on) {
-        ReliabilityEngine.on('degraded', updateForNetwork);
+        ReliabilityEngine.on('qualityChanged', updateForNetwork);
     }
 }
 
@@ -676,10 +715,11 @@ export function buildSettingsMenu() {
         }
         
         const hasAuth = checkAuthenticationState();
-        if (item.requiresAuth && !hasAuth) {
+        const isActive = currentState === LifecycleState.ACTIVE;
+        if ((item.requiresAuth && !hasAuth) || !isActive) {
             menuItem.style.opacity = '0.5';
             menuItem.style.pointerEvents = 'none';
-            menuItem.setAttribute('title', 'Sign in required');
+            menuItem.setAttribute('title', !isActive ? 'Waiting for connection...' : 'Sign in required');
         }
         
         menuItem.setAttribute('data-section', item.id);
@@ -697,14 +737,9 @@ export function buildSettingsMenu() {
             e.stopPropagation();
             
             try {
-                if (item.requiresAuth && !hasAuth) {
-                    const notification = document.getElementById('notification');
-                    const notificationText = document.getElementById('notificationText');
-                    if (notification && notificationText) {
-                        notificationText.textContent = 'Please sign in to access this section';
-                        notification.className = 'notification warning active';
-                        setTimeout(() => notification.classList.remove('active'), 3000);
-                    }
+                if ((item.requiresAuth && !hasAuth) || currentState !== LifecycleState.ACTIVE) {
+                    const msg = currentState !== LifecycleState.ACTIVE ? 'Waiting for connection...' : 'Please sign in to access this section';
+                    showNotification(msg, 'warning');
                     return;
                 }
                 
@@ -721,13 +756,7 @@ export function buildSettingsMenu() {
                 
             } catch (error) {
                 console.error('Error loading section:', error);
-                const notification = document.getElementById('notification');
-                const notificationText = document.getElementById('notificationText');
-                if (notification && notificationText) {
-                    notificationText.textContent = 'Error loading section';
-                    notification.className = 'notification error active';
-                    setTimeout(() => notification.classList.remove('active'), 3000);
-                }
+                showNotification('Error loading section', 'error');
             }
         });
         
@@ -768,28 +797,22 @@ function addConnectionStatusIndicator() {
     statusItem.style.borderTop = '1px solid var(--border-color)';
     statusItem.style.marginTop = '10px';
     
-    const governorState = StartupGovernor ? StartupGovernor.getState() : 'unknown';
-    
     let statusIcon = 'fa-circle';
     let statusColor = 'var(--warning-color)';
-    let statusText = governorState;
+    let statusText = 'Initializing...';
     
-    if (governorState === 'ACTIVE') {
+    if (currentState === LifecycleState.ACTIVE) {
         statusIcon = 'fa-check-circle';
         statusColor = 'var(--success-color)';
         statusText = 'Connected';
-    } else if (governorState === 'DEGRADED') {
-        statusIcon = 'fa-exclamation-triangle';
-        statusColor = 'var(--warning-color)';
-        statusText = 'Limited';
-    } else if (governorState === 'FAILED') {
-        statusIcon = 'fa-times-circle';
-        statusColor = 'var(--danger-color)';
-        statusText = 'Offline';
-    } else if (governorState === 'RECOVERING') {
+    } else if (currentState === LifecycleState.WAIT_PARENT) {
         statusIcon = 'fa-sync fa-spin';
         statusColor = 'var(--warning-color)';
-        statusText = 'Reconnecting';
+        statusText = 'Connecting...';
+    } else if (currentState === LifecycleState.READY) {
+        statusIcon = 'fa-circle';
+        statusColor = 'var(--info-color)';
+        statusText = 'Ready';
     }
     
     statusItem.innerHTML = `
@@ -803,7 +826,7 @@ function addConnectionStatusIndicator() {
 }
 
 // =============================================
-// LOAD SECTION - FIXED VERSION (NO CONST ASSIGNMENT)
+// LOAD SECTION - STRICT: ALIGNED WITH HANDSHAKE PROTOCOL
 // =============================================
 export async function loadSection(sectionId) {
     // Guard against concurrent loads
@@ -818,12 +841,9 @@ export async function loadSection(sectionId) {
     console.log('[SettingsUI] 📂 Loading section:', sectionId);
     
     try {
-        // Check authentication
-        if (!checkAuthenticationState() && sectionId !== 'profile') {
-            console.log('[SettingsUI] 🔒 Authentication required for', sectionId);
-            sectionLoadInProgress = false;
-            return;
-        }
+        // STRICT: Check if module is active for auth-required sections
+        const isActive = currentState === LifecycleState.ACTIVE;
+        const hasAuth = checkAuthenticationState();
         
         // Update global state
         currentSection = sectionId;
@@ -853,8 +873,7 @@ export async function loadSection(sectionId) {
         // Small delay for UI feedback
         await new Promise(resolve => setTimeout(resolve, 50));
         
-        // IMPORTANT: Use LET instead of CONST for anything that might be reassigned
-        // Changed from const to let for all variables that could be reassigned
+        // Load section based on ID
         let loadFunctionsMap = {
             'profile': loadProfileSection,
             'security': loadSecuritySection,
@@ -873,13 +892,10 @@ export async function loadSection(sectionId) {
             'danger': loadDangerSection
         };
         
-        // Get the appropriate load function
-        // Changed from const to let
         let sectionLoader = loadFunctionsMap[sectionId];
         
         if (sectionLoader) {
             try {
-                // Call the section-specific loader
                 await sectionLoader(contentContainer);
                 console.log('[SettingsUI] ✅ Successfully loaded section:', sectionId);
             } catch (sectionError) {
@@ -891,8 +907,6 @@ export async function loadSection(sectionId) {
                         </div>
                         <div class="section-body">
                             <p style="color: var(--danger-color); margin-bottom: 15px;">${sectionError.message || 'Unknown error'}</p>
-                            <p style="margin-bottom: 10px;">Stack trace:</p>
-                            <pre style="background: #f5f5f5; padding: 10px; border-radius: 5px; overflow: auto; font-size: 12px;">${sectionError.stack || 'No stack trace'}</pre>
                             <button class="action-btn primary" onclick="window.location.reload()">
                                 <i class="fas fa-redo"></i> Refresh
                             </button>
@@ -906,7 +920,6 @@ export async function loadSection(sectionId) {
         
         // Process queue if needed
         if (uiRenderQueue.length > 0) {
-            // Changed from const to let
             let nextQueuedSection = uiRenderQueue.shift();
             if (nextQueuedSection !== sectionId) {
                 setTimeout(() => loadSection(nextQueuedSection), 100);
@@ -925,8 +938,6 @@ export async function loadSection(sectionId) {
                     </div>
                     <div class="section-body">
                         <p style="color: var(--danger-color); margin-bottom: 15px;">${error.message || 'Unknown error'}</p>
-                        <p style="margin-bottom: 10px;">Stack trace:</p>
-                        <pre style="background: #f5f5f5; padding: 10px; border-radius: 5px; overflow: auto; font-size: 12px;">${error.stack || 'No stack trace'}</pre>
                         <button class="action-btn primary" onclick="window.location.reload()">
                             <i class="fas fa-redo"></i> Refresh
                         </button>
@@ -981,10 +992,19 @@ export function updateSaveButton() {
     if (!saveBtn) return;
     
     const hasAuth = checkAuthenticationState();
+    const isActive = currentState === LifecycleState.ACTIVE;
     
     if (!hasAuth && currentSection !== 'profile') {
         saveBtn.disabled = true;
         saveBtn.innerHTML = '<i class="fas fa-lock"></i> Sign In Required';
+        saveBtn.classList.remove('primary');
+        saveBtn.classList.add('secondary');
+        return;
+    }
+    
+    if (!isActive) {
+        saveBtn.disabled = true;
+        saveBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Connecting...';
         saveBtn.classList.remove('primary');
         saveBtn.classList.add('secondary');
         return;
@@ -1033,6 +1053,12 @@ export function setupEventListeners() {
     if (saveSectionBtn) {
         saveSectionBtn.addEventListener('click', async () => {
             if (!checkAuthenticationState()) {
+                showNotification('Please sign in to save settings', 'warning');
+                return;
+            }
+            
+            if (currentState !== LifecycleState.ACTIVE) {
+                showNotification('Waiting for connection...', 'warning');
                 return;
             }
             
@@ -1058,6 +1084,7 @@ export function setupEventListeners() {
     if (resetSectionBtn) {
         resetSectionBtn.addEventListener('click', () => {
             if (!checkAuthenticationState()) {
+                showNotification('Please sign in to reset settings', 'warning');
                 return;
             }
             
@@ -1099,6 +1126,7 @@ export function setupEventListeners() {
     if (terminateAllSessionsBtn) {
         terminateAllSessionsBtn.addEventListener('click', () => {
             if (!checkAuthenticationState()) {
+                showNotification('Please sign in to terminate sessions', 'warning');
                 return;
             }
             
@@ -1628,25 +1656,19 @@ export function updateUserStatus() {
     if (!statusIndicator || !statusText) return;
     
     const hasAuth = checkAuthenticationState();
-    const governorState = StartupGovernor ? StartupGovernor.getState() : 'unknown';
     
-    if (hasAuth) {
-        if (governorState === 'ACTIVE') {
-            statusIndicator.style.backgroundColor = 'var(--success-color)';
-            statusText.textContent = 'Online';
-        } else if (governorState === 'DEGRADED') {
-            statusIndicator.style.backgroundColor = 'var(--warning-color)';
-            statusText.textContent = 'Connected';
-        } else {
-            statusIndicator.style.backgroundColor = 'var(--warning-color)';
-            statusText.textContent = 'Connecting...';
-        }
+    if (hasAuth && currentState === LifecycleState.ACTIVE) {
+        statusIndicator.style.backgroundColor = 'var(--success-color)';
+        statusText.textContent = 'Online';
+    } else if (hasAuth && currentState === LifecycleState.WAIT_PARENT) {
+        statusIndicator.style.backgroundColor = 'var(--warning-color)';
+        statusText.textContent = 'Connecting...';
     } else if (parentSessionReceived || tokenReady) {
         statusIndicator.style.backgroundColor = 'var(--success-color)';
         statusText.textContent = 'Online';
     } else {
         statusIndicator.style.backgroundColor = 'var(--warning-color)';
-        statusText.textContent = handshakeState === 'pending' ? 'Connecting...' : 'Offline';
+        statusText.textContent = 'Connecting...';
     }
 }
 
@@ -1879,6 +1901,7 @@ function editMoodColorFallback(mood) {
 export function loadProfileSection(container) {
     debugLog('Loading profile section');
     const hasAuth = checkAuthenticationState();
+    const isActive = currentState === LifecycleState.ACTIVE;
     const settings = userSettings?.profile || DEFAULT_SETTINGS.profile;
     
     container.innerHTML = `
@@ -1892,7 +1915,7 @@ export function loadProfileSection(container) {
                         <div class="setting-label">Profile Photo</div>
                     </div>
                     <div class="setting-control">
-                        <button class="setting-button" id="changePhotoBtn" ${!hasAuth ? 'disabled' : ''}>
+                        <button class="setting-button" id="changePhotoBtn" ${!isActive ? 'disabled' : ''}>
                             <i class="fas fa-camera"></i> Change
                         </button>
                     </div>
@@ -1906,7 +1929,7 @@ export function loadProfileSection(container) {
                         <input type="text" class="setting-input" id="displayNameInput" 
                                value="${escapeHtml(settings.displayName || currentUser?.displayName || '')}" 
                                placeholder="Your name"
-                               ${!hasAuth ? 'disabled' : ''}>
+                               ${!isActive ? 'disabled' : ''}>
                     </div>
                 </div>
                 
@@ -1918,7 +1941,7 @@ export function loadProfileSection(container) {
                         <input type="text" class="setting-input" id="usernameInput" 
                                value="${escapeHtml(settings.username || currentUser?.username || '')}" 
                                placeholder="@username"
-                               ${!hasAuth ? 'disabled' : ''}>
+                               ${!isActive ? 'disabled' : ''}>
                     </div>
                 </div>
                 
@@ -1929,7 +1952,7 @@ export function loadProfileSection(container) {
                     <div class="setting-control">
                         <textarea class="setting-textarea" id="bioInput" 
                                   placeholder="About you..." 
-                                  ${!hasAuth ? 'disabled' : ''}>${escapeHtml(settings.bio || '')}</textarea>
+                                  ${!isActive ? 'disabled' : ''}>${escapeHtml(settings.bio || '')}</textarea>
                         <div class="input-hint"><span id="bioCounter">${(settings.bio || '').length}</span>/150</div>
                     </div>
                 </div>
@@ -1942,7 +1965,7 @@ export function loadProfileSection(container) {
                         <input type="email" class="setting-input" id="emailInput" 
                                value="${escapeHtml(settings.email || currentUser?.email || '')}" 
                                placeholder="email@example.com"
-                               ${!hasAuth ? 'disabled' : ''}>
+                               ${!isActive ? 'disabled' : ''}>
                     </div>
                 </div>
             </div>
@@ -1958,7 +1981,7 @@ export function loadProfileSection(container) {
                         <div class="setting-label">Profile Visibility</div>
                     </div>
                     <div class="setting-control">
-                        <select class="setting-dropdown" id="profileVisibilitySelect" ${!hasAuth ? 'disabled' : ''}>
+                        <select class="setting-dropdown" id="profileVisibilitySelect" ${!isActive ? 'disabled' : ''}>
                             <option value="everyone" ${settings.profileVisibility === 'everyone' ? 'selected' : ''}>Everyone</option>
                             <option value="friendsOnly" ${settings.profileVisibility === 'friendsOnly' ? 'selected' : ''}>Friends Only</option>
                             <option value="nobody" ${settings.profileVisibility === 'nobody' ? 'selected' : ''}>Nobody</option>
@@ -1972,7 +1995,7 @@ export function loadProfileSection(container) {
                     </div>
                     <div class="setting-control">
                         <label class="toggle-switch">
-                            <input type="checkbox" id="lastSeenToggle" ${settings.lastSeen ? 'checked' : ''} ${!hasAuth ? 'disabled' : ''}>
+                            <input type="checkbox" id="lastSeenToggle" ${settings.lastSeen ? 'checked' : ''} ${!isActive ? 'disabled' : ''}>
                             <span class="toggle-slider"></span>
                         </label>
                     </div>
@@ -2061,7 +2084,9 @@ function setupProfileEventListeners() {
 
 export function loadSecuritySection(container) {
     debugLog('Loading security section');
-    if (!checkAuthenticationState()) {
+    const isActive = currentState === LifecycleState.ACTIVE;
+    
+    if (!checkAuthenticationState() || !isActive) {
         container.innerHTML = getAuthRequiredHTML('security', 'Security');
         return;
     }
@@ -2197,7 +2222,9 @@ function setupSecurityEventListeners() {
 
 export function loadPrivacySection(container) {
     debugLog('Loading privacy section');
-    if (!checkAuthenticationState()) {
+    const isActive = currentState === LifecycleState.ACTIVE;
+    
+    if (!checkAuthenticationState() || !isActive) {
         container.innerHTML = getAuthRequiredHTML('privacy', 'Privacy');
         return;
     }
@@ -2350,7 +2377,9 @@ function setupPrivacyEventListeners() {
 
 export function loadChatSection(container) {
     debugLog('Loading chat section');
-    if (!checkAuthenticationState()) {
+    const isActive = currentState === LifecycleState.ACTIVE;
+    
+    if (!checkAuthenticationState() || !isActive) {
         container.innerHTML = getAuthRequiredHTML('chat', 'Chat');
         return;
     }
@@ -2443,7 +2472,9 @@ function setupChatEventListeners() {
 
 export function loadFriendsSection(container) {
     debugLog('Loading friends section');
-    if (!checkAuthenticationState()) {
+    const isActive = currentState === LifecycleState.ACTIVE;
+    
+    if (!checkAuthenticationState() || !isActive) {
         container.innerHTML = getAuthRequiredHTML('friends', 'Friends');
         return;
     }
@@ -2521,7 +2552,9 @@ function setupFriendsEventListeners() {
 
 export function loadGroupsSection(container) {
     debugLog('Loading groups section');
-    if (!checkAuthenticationState()) {
+    const isActive = currentState === LifecycleState.ACTIVE;
+    
+    if (!checkAuthenticationState() || !isActive) {
         container.innerHTML = getAuthRequiredHTML('groups', 'Groups');
         return;
     }
@@ -2599,7 +2632,9 @@ function setupGroupsEventListeners() {
 
 export function loadCallsSection(container) {
     debugLog('Loading calls section');
-    if (!checkAuthenticationState()) {
+    const isActive = currentState === LifecycleState.ACTIVE;
+    
+    if (!checkAuthenticationState() || !isActive) {
         container.innerHTML = getAuthRequiredHTML('calls', 'Calls');
         return;
     }
@@ -2692,7 +2727,9 @@ function setupCallsEventListeners() {
 
 export function loadStatusSection(container) {
     debugLog('Loading status section');
-    if (!checkAuthenticationState()) {
+    const isActive = currentState === LifecycleState.ACTIVE;
+    
+    if (!checkAuthenticationState() || !isActive) {
         container.innerHTML = getAuthRequiredHTML('status', 'Status');
         return;
     }
@@ -2758,7 +2795,9 @@ function setupStatusEventListeners() {
 
 export function loadNotificationsSection(container) {
     debugLog('Loading notifications section');
-    if (!checkAuthenticationState()) {
+    const isActive = currentState === LifecycleState.ACTIVE;
+    
+    if (!checkAuthenticationState() || !isActive) {
         container.innerHTML = getAuthRequiredHTML('notifications', 'Notifications');
         return;
     }
@@ -2836,7 +2875,9 @@ function setupNotificationsEventListeners() {
 
 export function loadAppearanceSection(container) {
     debugLog('Loading appearance section');
-    if (!checkAuthenticationState()) {
+    const isActive = currentState === LifecycleState.ACTIVE;
+    
+    if (!checkAuthenticationState() || !isActive) {
         container.innerHTML = getAuthRequiredHTML('appearance', 'Appearance');
         return;
     }
@@ -2961,7 +3002,9 @@ function setupAppearanceEventListeners() {
 
 export function loadStorageSection(container) {
     debugLog('Loading storage section');
-    if (!checkAuthenticationState()) {
+    const isActive = currentState === LifecycleState.ACTIVE;
+    
+    if (!checkAuthenticationState() || !isActive) {
         container.innerHTML = getAuthRequiredHTML('storage', 'Storage');
         return;
     }
@@ -3062,7 +3105,9 @@ function setupStorageEventListeners() {
 
 export function loadMoodSection(container) {
     debugLog('Loading mood section');
-    if (!checkAuthenticationState()) {
+    const isActive = currentState === LifecycleState.ACTIVE;
+    
+    if (!checkAuthenticationState() || !isActive) {
         container.innerHTML = getAuthRequiredHTML('mood', 'Mood');
         return;
     }
@@ -3174,7 +3219,9 @@ function setupMoodEventListeners() {
 
 export function loadAdvancedSection(container) {
     debugLog('Loading advanced section');
-    if (!checkAuthenticationState()) {
+    const isActive = currentState === LifecycleState.ACTIVE;
+    
+    if (!checkAuthenticationState() || !isActive) {
         container.innerHTML = getAuthRequiredHTML('advanced', 'Advanced');
         return;
     }
@@ -3260,7 +3307,9 @@ function setupAdvancedEventListeners() {
 
 export function loadBackupSection(container) {
     debugLog('Loading backup section');
-    if (!checkAuthenticationState()) {
+    const isActive = currentState === LifecycleState.ACTIVE;
+    
+    if (!checkAuthenticationState() || !isActive) {
         container.innerHTML = getAuthRequiredHTML('backup', 'Backup');
         return;
     }
@@ -3332,7 +3381,9 @@ function setupBackupEventListeners() {
 
 export function loadDangerSection(container) {
     debugLog('Loading danger section');
-    if (!checkAuthenticationState()) {
+    const isActive = currentState === LifecycleState.ACTIVE;
+    
+    if (!checkAuthenticationState() || !isActive) {
         container.innerHTML = getAuthRequiredHTML('danger', 'Danger Zone');
         return;
     }
@@ -3532,15 +3583,18 @@ export function showBlockedUsers() {
 
 // Helper for auth required HTML
 function getAuthRequiredHTML(section, title) {
+    const isActive = currentState === LifecycleState.ACTIVE;
+    const message = !isActive ? 'Connecting to parent...' : 'Please sign in to access these settings';
+    
     return `
         <div class="settings-section">
             <div class="section-header">
                 <h3><i class="fas fa-lock section-icon"></i> ${title}</h3>
-                <div class="section-description">Please sign in to access these settings</div>
+                <div class="section-description">${message}</div>
             </div>
             <div class="section-body" style="text-align: center; padding: 30px;">
-                <i class="fas fa-user-lock" style="font-size: 48px; color: var(--text-secondary); margin-bottom: 15px;"></i>
-                <p>Sign in required to view and modify these settings</p>
+                <i class="fas ${!isActive ? 'fa-sync fa-spin' : 'fa-user-lock'}" style="font-size: 48px; color: var(--text-secondary); margin-bottom: 15px;"></i>
+                <p>${message}</p>
             </div>
         </div>
     `;
@@ -3585,7 +3639,8 @@ window.__UI_DEBUG__ = {
         uiErrorCount,
         isMobileView,
         currentMobileSection,
-        parentReady // Expose parentReady for debugging
+        parentReady,
+        currentState
     }),
     reloadSection: () => {
         if (currentSection) loadSection(currentSection);
@@ -3594,7 +3649,7 @@ window.__UI_DEBUG__ = {
 };
 
 // =============================================
-// INITIALIZATION - FIXED VERSION
+// INITIALIZATION - STRICT: ALIGNED WITH HANDSHAKE PROTOCOL
 // =============================================
 document.addEventListener('DOMContentLoaded', async function() {
     try {
@@ -3602,15 +3657,16 @@ document.addEventListener('DOMContentLoaded', async function() {
         
         showLoadingState();
         
-        // Don't wait too long - check immediately
-        const coreReady = window.__SETTINGS_READY__ || window.currentUser || window.__SETTINGS_SESSION_ACTIVE__;
+        // Check immediate readiness
+        const coreReady = window.__SETTINGS_READY__ || window.currentUser || 
+                          window.__SETTINGS_SESSION_ACTIVE__ || currentState === LifecycleState.ACTIVE;
         
         if (coreReady) {
             console.log('[SettingsUI] Core already ready, initializing immediately');
             setTimeout(() => initializeUI(), 10);
         } else {
-            // Wait but with shorter timeout
-            const ready = await waitForCore(3000);
+            // Wait with timeout
+            const ready = await waitForCore(5000);
             if (ready) {
                 await UIErrorBoundary.wrap(initializeUI, 'dom_initialization')();
             } else {
@@ -3618,20 +3674,8 @@ document.addEventListener('DOMContentLoaded', async function() {
                 // Force load with cached data
                 const container = document.getElementById('settingsContentBody');
                 if (container) {
-                    container.innerHTML = `
-                        <div class="settings-section">
-                            <div class="section-header">
-                                <h3><i class="fas fa-user section-icon"></i> Profile</h3>
-                            </div>
-                            <div class="section-body">
-                                <div class="setting-item">
-                                    <div class="setting-info">
-                                        <div class="setting-label">Loading settings...</div>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    `;
+                    loadProfileSection(container);
+                    uiInitialized = true;
                 }
             }
         }
@@ -3644,35 +3688,42 @@ document.addEventListener('DOMContentLoaded', async function() {
     }
 });
 
-// Immediate fallback - don't wait 3 seconds
+// Immediate fallback - don't wait too long
 setTimeout(() => {
     if (!uiInitialized) {
         console.log('[SettingsUI] ⚠️ Immediate fallback: loading profile section');
         const container = document.getElementById('settingsContentBody');
         if (container && typeof loadProfileSection === 'function') {
             loadProfileSection(container);
-            uiInitialized = true; // Mark as initialized
+            uiInitialized = true;
         }
     }
-}, 500); // Reduced from 3000ms to 500ms
+}, 1000);
 
 // =============================================
 // ADDITIONAL PROTOCOL COMPLIANCE ENHANCEMENTS
 // =============================================
 
-// Listen for parent-ready events from core
-window.addEventListener('parentReadyChanged', (event) => {
-    if (event.detail.ready) {
+// STRICT: Listen for parent-ready events from core
+window.addEventListener('parentReady', (event) => {
+    if (event.detail && event.detail.ready) {
         debugLog('Parent ready - refreshing UI if needed');
         if (currentSection && uiInitialized) {
-            // Refresh current section with fresh data
             setTimeout(() => loadSection(currentSection), 100);
         }
     }
 });
 
-// Ensure all outbound messages use the core's safeSend mechanism
-// This is already handled by importing sendMessageToParent from core
+// STRICT: Listen for lifecycle state changes
+window.addEventListener('lifecycleStateChange', (event) => {
+    const { newState } = event.detail;
+    updateConnectionState(newState);
+    updateSaveButton();
+    
+    if (newState === LifecycleState.ACTIVE && currentSection) {
+        loadSection(currentSection);
+    }
+});
 
 // Add network quality indicator
 function updateNetworkQualityIndicator() {

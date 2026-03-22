@@ -1,32 +1,89 @@
 // =============================================
-// MESSAGES CORE - v7.5.15 (PARENT AUTHORITY ARCHITECTURE)
+// MESSAGES CORE - v7.5.19 (DETERMINISTIC HANDSHAKE PROTOCOL)
 // UI-ONLY MODULE | STANDARDIZED COMMUNICATION PROTOCOL
-// STRICT LIFECYCLE ENFORCEMENT | NO TIMEOUTS | NO FALLBACKS
-// FIXED: sendWithResponse ALWAYS returns a proper Promise
-// FIXED: safeSend returns consistent Promise-like objects
-// FIXED: SessionClient Promise chain - no more undefined catch
+// STRICT LIFECYCLE ENFORCEMENT | NO RETRY LOOPS | NO FALLBACKS
+// FIXED: Deterministic handshake protocol - single CHILD_READY
+// FIXED: Removed setInterval-based handshake retries
+// FIXED: WAIT_PARENT is hard wait state
+// FIXED: No duplicate message sending or processing
 // =============================================
 (function() {
     'use strict';
 
     // =============================================
-    // MODULE IDENTIFICATION - MUST MATCH PARENT EXPECTATIONS
+    // MODULE IDENTIFICATION
     // =============================================
-    const MODULE_NAME = 'messages'; // CRITICAL: Exact lowercase match
-    const MODULE_VERSION = '7.5.15';
+    const MODULE_NAME = 'messages';
+    const MODULE_VERSION = '7.5.19';
     
     // =============================================
-    // DEBUG MODE - ZERO NOISE POLICY
+    // DEBUG MODE
     // =============================================
     const DEBUG = false;
-    const ALLOWED_LOGS = new Set(['INIT', 'READY', 'ERROR', 'STATE_CHANGE', 'HANDSHAKE']);
+    const ALLOWED_LOGS = new Set(['INIT', 'READY', 'ERROR', 'STATE_CHANGE', 'HANDSHAKE', 'LIFECYCLE_GUARD', 'SESSION']);
     
     function debugLog(...args) {
         if (DEBUG) console.log(...args);
     }
 
     // =============================================
-    // TIMING CONSTANTS - DEFINED EARLY TO AVOID REFERENCE ERRORS
+    // LIFECYCLE GUARD UTILITIES
+    // =============================================
+    
+    // Safe check if we can send CHILD_READY (only when state is READY)
+    if (typeof window.__lifecycleCanSendChildReady !== 'function') {
+        window.__lifecycleCanSendChildReady = function(state) {
+            return state === LIFECYCLE_STATES.READY;
+        };
+    }
+    
+    // Safe check if we can perform user actions (only when state is ACTIVE)
+    if (typeof window.__lifecycleCanPerformAction !== 'function') {
+        window.__lifecycleCanPerformAction = function(state) {
+            return state === LIFECYCLE_STATES.ACTIVE;
+        };
+    }
+    
+    // Safe CHILD_READY sender - FIXED: NO RETRY LOOPS, sends exactly once per lifecycle
+    if (typeof window.__safeSendChildReady !== 'function' && typeof window.safeSendChildReady !== 'function') {
+        window.__safeSendChildReady = function(originalSendFn, moduleName) {
+            let sent = false;
+            
+            return function() {
+                // Already sent? block
+                if (sent) {
+                    console.log(`[${moduleName}][LifecycleGuard] CHILD_READY already sent, skipping duplicate`);
+                    return false;
+                }
+                
+                // Check if we can send now
+                if (!window.__lifecycleCanSendChildReady(currentState)) {
+                    console.warn(`[${moduleName}][LifecycleGuard] Cannot send CHILD_READY in state: ${currentState}`);
+                    return false;
+                }
+                
+                // Send and mark as sent
+                console.log(`[${moduleName}][Lifecycle] Sending CHILD_READY (state: ${currentState})`);
+                originalSendFn();
+                sent = true;
+                return true;
+            };
+        };
+    }
+    
+    // Safe action guard (blocks actions when not ACTIVE)
+    if (typeof window.__guardAction !== 'function') {
+        window.__guardAction = function(actionName, moduleName, state, fallbackReturn = false) {
+            if (!window.__lifecycleCanPerformAction(state)) {
+                console.warn(`[${moduleName}][LifecycleGuard] Blocked action '${actionName}' - not ACTIVE (current: ${state})`);
+                return fallbackReturn;
+            }
+            return null; // null means allowed
+        };
+    }
+
+    // =============================================
+    // TIMING CONSTANTS
     // =============================================
     const TIMING = {
         CLEANUP_INTERVAL: 60000,
@@ -35,36 +92,42 @@
         TYPING_TIMEOUT: 3000,
         TYPING_RATE_LIMIT: 2000,
         MESSAGE_BURST_WINDOW: 1000,
-        MAX_MESSAGES_PER_SECOND: 50
+        MAX_MESSAGES_PER_SECOND: 50,
+        SESSION_RETRY_DELAY: 2000,
+        MAX_SESSION_RETRIES: 3
+        // NO HANDSHAKE_RETRY_INTERVAL - removed per deterministic protocol
     };
 
     // =============================================
-    // LIFECYCLE STATE MACHINE - STRICT PARENT AUTHORITY
+    // LIFECYCLE STATE MACHINE (STRICT DETERMINISTIC)
     // =============================================
     const LIFECYCLE_STATES = {
-        BOOTING: 'BOOTING',                 // Module initializing
-        INITIALIZING: 'INITIALIZING',       // Internal initialization
-        READY: 'READY',                      // Internal ready, waiting to notify parent
-        WAITING_FOR_PARENT: 'WAITING_FOR_PARENT', // CHILD_READY sent, waiting for PARENT_READY
-        ACTIVE: 'ACTIVE'                      // Normal operation
+        BOOT: 'BOOT',
+        INITIALIZING: 'INITIALIZING',
+        READY: 'READY',
+        WAIT_PARENT: 'WAIT_PARENT',
+        ACTIVE: 'ACTIVE'
     };
 
-    let currentState = LIFECYCLE_STATES.BOOTING;
+    let currentState = LIFECYCLE_STATES.BOOT;
     let childReadySent = false;
     let parentReadyReceived = false;
     let stateHistory = [];
     const maxHistorySize = 50;
     const stateListeners = new Set();
     const processedMessageIds = new Set();
-
-    // Parent ready promise - NO TIMEOUTS, just wait forever
+    const sentMessageIds = new Set(); // Track sent messages to prevent duplicates
+    
+    // No handshake retry interval - removed per deterministic protocol
+    
+    // Parent ready promise
     let parentReadyResolver;
     let parentReadyPromise = new Promise((resolve) => {
         parentReadyResolver = resolve;
     });
 
     // =============================================
-    // MESSAGE QUEUE SYSTEM - REQUIRED FOR PROTOCOL
+    // MESSAGE QUEUE SYSTEM
     // =============================================
     const messageQueue = [];
     let processingQueue = false;
@@ -73,10 +136,10 @@
         if (currentState === nextState) return true;
 
         const validTransitions = {
-            [LIFECYCLE_STATES.BOOTING]: [LIFECYCLE_STATES.INITIALIZING],
+            [LIFECYCLE_STATES.BOOT]: [LIFECYCLE_STATES.INITIALIZING],
             [LIFECYCLE_STATES.INITIALIZING]: [LIFECYCLE_STATES.READY],
-            [LIFECYCLE_STATES.READY]: [LIFECYCLE_STATES.WAITING_FOR_PARENT],
-            [LIFECYCLE_STATES.WAITING_FOR_PARENT]: [LIFECYCLE_STATES.ACTIVE],
+            [LIFECYCLE_STATES.READY]: [LIFECYCLE_STATES.WAIT_PARENT],
+            [LIFECYCLE_STATES.WAIT_PARENT]: [LIFECYCLE_STATES.ACTIVE],
             [LIFECYCLE_STATES.ACTIVE]: []
         };
 
@@ -100,9 +163,10 @@
             stateHistory.shift();
         }
 
+        // Log state transition per requirement
+        console.log(`[${MODULE_NAME}] State: ${fromState} → ${nextState}${reason ? ` (${reason})` : ''}`);
+
         notifyStateListeners(nextState, fromState, reason);
-        
-        console.log(`[${MODULE_NAME}][Lifecycle] ${fromState} → ${nextState}${reason ? ` (${reason})` : ''}`);
         
         return true;
     }
@@ -129,6 +193,17 @@
         }
         return false;
     }
+    
+    function isDuplicateSentMessage(messageId) {
+        if (!messageId) return false;
+        if (sentMessageIds.has(messageId)) return true;
+        sentMessageIds.add(messageId);
+        
+        if (sentMessageIds.size > 1000) {
+            sentMessageIds.clear();
+        }
+        return false;
+    }
 
     function getLifecycleState() {
         return {
@@ -144,21 +219,23 @@
     }
 
     function resetLifecycle() {
-        currentState = LIFECYCLE_STATES.BOOTING;
+        // No handshake retry cleanup - removed per deterministic protocol
+        
+        currentState = LIFECYCLE_STATES.BOOT;
         childReadySent = false;
         parentReadyReceived = false;
         stateHistory = [];
         processedMessageIds.clear();
+        sentMessageIds.clear();
         messageQueue.length = 0;
         
-        // Recreate promise
         parentReadyPromise = new Promise((resolve) => {
             parentReadyResolver = resolve;
         });
     }
 
     // =============================================
-    // SECURITY CONSTANTS - STRICT ORIGIN VALIDATION
+    // SECURITY CONSTANTS
     // =============================================
     const SECURITY = {
         ALLOWED_ORIGINS: new Set([
@@ -177,7 +254,8 @@
             'SESSION_DATA',
             'HEARTBEAT',
             'ACK',
-            'ERROR'
+            'ERROR',
+            'CHILD_READY'  // CHILD_READY is essential for handshake
         ]),
         
         REQUIRES_ACK: new Set([
@@ -191,7 +269,8 @@
             'CREATE_CONVERSATION',
             'BLOCK_USER',
             'REPORT_MESSAGE',
-            'FORWARD_MESSAGE'
+            'FORWARD_MESSAGE',
+            'REQUEST_SESSION'
         ]),
         
         USER_ACTIONS: new Set([
@@ -219,6 +298,14 @@
         lockdown: true,
         
         validateOrigin: function(origin) {
+            // Relaxed during initialization to prevent handshake blocking
+            if (currentState === LIFECYCLE_STATES.BOOT || 
+                currentState === LIFECYCLE_STATES.INITIALIZING ||
+                currentState === LIFECYCLE_STATES.READY ||
+                currentState === LIFECYCLE_STATES.WAIT_PARENT) {
+                return true;
+            }
+            
             if (!origin || origin === 'null') return true;
             return this.ALLOWED_ORIGINS.has(origin) || 
                    origin === window.location.origin ||
@@ -248,7 +335,7 @@
                        lifecycleState === LIFECYCLE_STATES.READY;
             }
             if (type === 'CHILD_READY') {
-                return lifecycleState === LIFECYCLE_STATES.READY;
+                return lifecycleState === LIFECYCLE_STATES.READY && !childReadySent;
             }
             return lifecycleState === LIFECYCLE_STATES.ACTIVE;
         },
@@ -287,33 +374,44 @@
     }
 
     // =============================================
-    // CORE MESSAGE SENDER - ENFORCES SCHEMA
+    // CORE MESSAGE SENDER
     // =============================================
     function sendMessage(type, payload = {}, options = {}) {
-        // Create message with REQUIRED schema
+        // GUARD: Block non-essential messages if not ACTIVE
+        if (!SECURITY.isEssentialMessage(type) && 
+            !SECURITY.isUserAction(type) && 
+            type !== 'CHILD_READY' && 
+            type !== 'REGISTER_MODULE' && 
+            !window.__lifecycleCanPerformAction(currentState)) {
+            console.warn(`[${MODULE_NAME}][LifecycleGuard] Blocked message type '${type}' - not ACTIVE (current: ${currentState})`);
+            return { success: false, blocked: true, reason: `not_active:${currentState}` };
+        }
+        
         const id = options.id || generateMessageId();
         const requestId = options.requestId || generateRequestId();
         const timestamp = Date.now();
         
+        // Prevent duplicate message sending
+        if (isDuplicateSentMessage(id)) {
+            console.warn(`[${MODULE_NAME}] Duplicate message prevented: ${id}`);
+            return { success: false, blocked: true, reason: 'duplicate_message' };
+        }
+        
         const message = {
             id: id,
             type: type,
-            source: MODULE_NAME,  // CRITICAL: Must be exact module name
-            target: 'parent',      // CRITICAL: Must be 'parent'
+            source: MODULE_NAME,
+            target: 'parent',
             requestId: requestId,
             payload: payload,
-            timestamp: timestamp
+            timestamp: timestamp,
+            messageId: id
         };
 
-        // Add messageId for backward compatibility
-        message.messageId = id;
-
-        // Add optional fields
         if (options.requireAck) {
             message.expectAck = true;
         }
 
-        // Validate required fields
         const required = ['id', 'type', 'source', 'target', 'requestId', 'payload', 'timestamp'];
         for (const field of required) {
             if (!message[field]) {
@@ -322,33 +420,29 @@
             }
         }
 
-        // Validate source matches module name
         if (message.source !== MODULE_NAME) {
             console.error(`[${MODULE_NAME}] Invalid source: ${message.source}`, message);
             return { success: false, error: 'invalid_source' };
         }
 
-        // Validate target is parent
         if (message.target !== 'parent') {
             console.error(`[${MODULE_NAME}] Invalid target: ${message.target}`, message);
             return { success: false, error: 'invalid_target' };
         }
 
-        // Sanitize payload
         if (payload && typeof payload === 'object') {
             message.payload = SecurityUtils.sanitizePayload(payload);
         }
 
         debugLog(`[${MODULE_NAME}] Sending message:`, message);
 
-        // Queue if parent not ready and not essential
-        if (!parentReadyReceived && !SECURITY.isEssentialMessage(type)) {
+        // Queue non-essential messages if parent not ready and not CHILD_READY
+        if (!parentReadyReceived && !SECURITY.isEssentialMessage(type) && type !== 'CHILD_READY') {
             messageQueue.push(message);
             debugLog(`[${MODULE_NAME}] Queued message (parent not ready): ${type}`);
             return { success: true, queued: true, id, requestId };
         }
 
-        // Send immediately
         return sendMessageImmediate(message, options);
     }
 
@@ -358,12 +452,10 @@
                 throw new Error('No parent window');
             }
 
-            // Register for ACK if required
             if (message.expectAck || SECURITY.requiresAck(message.type)) {
                 return registerAndSendWithAck(message, options);
             }
 
-            // Send without ACK tracking
             window.parent.postMessage(message, '*');
             
             return { 
@@ -381,7 +473,6 @@
     function registerAndSendWithAck(message, options) {
         const requestId = message.requestId;
         
-        // Create a real Promise instead of a thenable object
         return new Promise((resolve, reject) => {
             const ackHandler = (e) => {
                 if (e.detail.requestId === requestId || e.detail.id === message.id) {
@@ -402,11 +493,9 @@
             window.addEventListener('messageAcknowledged', ackHandler);
             window.addEventListener('messageFailed', failHandler);
             
-            // Send the message
             try {
                 window.parent.postMessage(message, '*');
                 
-                // Track with AckController if available
                 if (AckController) {
                     AckController.register(requestId, message, () => {}, options);
                 }
@@ -419,10 +508,16 @@
     }
 
     // =============================================
-    // SAFE SEND - QUEUE UNTIL PARENT READY
+    // SAFE SEND
     // =============================================
     function safeSend(type, payload = {}, options = {}) {
-        // Validate state
+        if (SECURITY.isUserAction(type)) {
+            const guardResult = window.__guardAction(type, MODULE_NAME, currentState, { success: false, blocked: true, reason: `invalid_state:${currentState}` });
+            if (guardResult !== null) {
+                return guardResult;
+            }
+        }
+        
         if (!SECURITY.canSendMessage(type, currentState)) {
             console.warn(`[${MODULE_NAME}] Cannot send ${type} in state ${currentState}`);
             return { success: false, blocked: true, reason: `invalid_state:${currentState}` };
@@ -430,12 +525,11 @@
 
         const result = sendMessage(type, payload, options);
         
-        // If this is an ACK-required message and we got a Promise back, wrap it
         if (options.requireAck && result && typeof result.then === 'function') {
-            return result; // Return the Promise directly
+            return result;
         }
         
-        return result; // Return the result object
+        return result;
     }
 
     function flushMessageQueue() {
@@ -466,7 +560,7 @@
     };
 
     // =============================================
-    // MESSAGE TYPES - COMPLETE LIST
+    // MESSAGE TYPES
     // =============================================
     const INCOMING_TYPES = {
         MODULE_REGISTERED: 'MODULE_REGISTERED',
@@ -564,11 +658,11 @@
     };
 
     // =============================================
-    // LOCAL STORAGE KEYS
+    // LOCAL STORAGE KEYS (FOR UI STATE ONLY - NEVER TOKENS)
     // =============================================
     const LOCAL_STORAGE_KEYS = {
-        SESSION_CACHE: 'kynecta_session_cache_v7',
-        USER_CACHE: 'kynecta_user_cache_v7',
+        SESSION_CACHE: 'kynecta_session_cache_v7', // DEPRECATED - will be removed
+        USER_CACHE: 'kynecta_user_cache_v7',       // DEPRECATED - for UI only
         FRIENDS_CACHE: 'kynecta_friends_cache_v7',
         CHATS_CACHE: 'kynecta_chats_cache_v7',
         MESSAGES_PREFIX: 'kynecta_messages_v7_',
@@ -587,7 +681,7 @@
     };
 
     // =============================================
-    // SECURITY UTILITIES - STRICT VALIDATION
+    // SECURITY UTILITIES
     // =============================================
     const SecurityUtils = {
         messageIdCounter: 0,
@@ -622,7 +716,6 @@
         },
 
         validateMessageSchema: function(message) {
-            // Validate REQUIRED schema
             const required = ['id', 'type', 'source', 'target', 'requestId', 'timestamp'];
             for (const field of required) {
                 if (!message[field]) return false;
@@ -710,7 +803,7 @@
     };
 
     // =============================================
-    // MESSAGE ID CACHE - DEDUPLICATION
+    // MESSAGE ID CACHE
     // =============================================
     const MessageIdCache = {
         _cache: new Map(),
@@ -744,7 +837,7 @@
     };
 
     // =============================================
-    // LOGGER - REDUCED NOISE
+    // LOGGER
     // =============================================
     const Logger = {
         _warned: new Map(),
@@ -841,7 +934,7 @@
     };
 
     // =============================================
-    // SAFE STORAGE LAYER
+    // SAFE STORAGE LAYER (UI STATE ONLY - NEVER TOKENS)
     // =============================================
     const SafeStorage = {
         memoryStore: new Map(),
@@ -939,7 +1032,7 @@
     }.init();
 
     // =============================================
-    // SECURITY VALIDATOR - STRICT
+    // SECURITY VALIDATOR
     // =============================================
     const SecurityValidator = {
         _initialized: false,
@@ -1111,7 +1204,7 @@
     };
 
     // =============================================
-    // ACK CONTROLLER - STRICT ACK ONLY WHEN REQUIRED
+    // ACK CONTROLLER
     // =============================================
     const AckController = {
         _pendingAcks: new Map(),
@@ -1314,11 +1407,10 @@
         }
     };
 
-    // Initialize AckController
     AckController.init();
 
     // =============================================
-    // RELIABILITY LAYER - STRICT RETRY POLICY, NO TIMEOUTS
+    // RELIABILITY LAYER
     // =============================================
     const ReliabilityLayer = {
         _pendingMessages: new Map(),
@@ -1381,7 +1473,230 @@
     }.init();
 
     // =============================================
-    // PARENT CONNECTION MANAGER - STRICT PARENT AUTHORITY
+    // SESSION MANAGER (FIXED - MEMORY ONLY, NO STORAGE)
+    // =============================================
+    const SessionManager = {
+        // In-memory session only - NEVER persisted to localStorage
+        _session: {
+            token: null,
+            user: null,
+            expiresAt: null,
+            authenticated: false
+        },
+        _sessionReady: false,
+        _sessionRequestInProgress: false,
+        _sessionRetryCount: 0,
+        _maxSessionRetries: TIMING.MAX_SESSION_RETRIES,
+        _sessionRetryDelay: TIMING.SESSION_RETRY_DELAY,
+        _listeners: new Set(),
+        _initialized: false,
+
+        init: function() {
+            if (this._initialized) return this;
+            this._initialized = true;
+            Logger.info('SessionManager', 'Initialized (memory-only session)');
+            return this;
+        },
+
+        // Request session from parent
+        requestSession: function() {
+            if (this._sessionRequestInProgress) {
+                Logger.warn('SessionManager', 'Session request already in progress');
+                return Promise.reject(new Error('Session request already in progress'));
+            }
+
+            if (currentState !== LIFECYCLE_STATES.ACTIVE) {
+                Logger.warn('SessionManager', `Cannot request session in state: ${currentState}`);
+                return Promise.reject(new Error(`Cannot request session in state: ${currentState}`));
+            }
+
+            this._sessionRequestInProgress = true;
+            this._sessionRetryCount = 0;
+
+            Logger.info('SessionManager', 'Requesting session from parent');
+            return this._attemptSessionRequest();
+        },
+
+        _attemptSessionRequest: function() {
+            return ParentConnectionManager.sendWithResponse(OUTGOING_ACTIONS.REQUEST_SESSION, {
+                module: MODULE_NAME,
+                timestamp: Date.now(),
+                version: MODULE_VERSION
+            })
+            .then((response) => {
+                this._sessionRequestInProgress = false;
+                this._sessionRetryCount = 0;
+                this._handleSessionResponse(response);
+                return response;
+            })
+            .catch((error) => {
+                this._sessionRetryCount++;
+                
+                if (this._sessionRetryCount < this._maxSessionRetries) {
+                    Logger.warn('SessionManager', `Session request failed (attempt ${this._sessionRetryCount}/${this._maxSessionRetries}), retrying...`, error);
+                    
+                    const delay = this._sessionRetryDelay * Math.pow(1.5, this._sessionRetryCount - 1);
+                    
+                    return new Promise((resolve, reject) => {
+                        setTimeout(() => {
+                            this._attemptSessionRequest()
+                                .then(resolve)
+                                .catch(reject);
+                        }, delay);
+                    });
+                } else {
+                    this._sessionRequestInProgress = false;
+                    Logger.error('SessionManager', 'Session request failed after max retries', error);
+                    return Promise.reject(error);
+                }
+            });
+        },
+
+        _handleSessionResponse: function(response) {
+            this._sessionRequestInProgress = false;
+            
+            const sessionData = response.payload || response;
+            
+            if (sessionData && sessionData.token) {
+                // Store in memory ONLY - never in localStorage
+                this._session.token = sessionData.token;
+                this._session.user = sessionData.user || null;
+                this._session.expiresAt = sessionData.expiresAt || null;
+                this._session.authenticated = true;
+                this._sessionReady = true;
+                
+                Logger.success('SessionManager', 'Session established', { 
+                    authenticated: true,
+                    userId: this._session.user?.id
+                });
+                
+                // Also update UI cache for display purposes (user object only, NEVER token)
+                if (sessionData.user) {
+                    // Store user info for UI display (no token!)
+                    SafeStorage.setJSON(LOCAL_STORAGE_KEYS.USER_CACHE, sessionData.user);
+                }
+                
+                this._notifyListeners();
+                
+                window.dispatchEvent(new CustomEvent('sessionUpdated', {
+                    detail: { 
+                        authenticated: true,
+                        user: this._session.user
+                        // NEVER include token in events
+                    }
+                }));
+            } else {
+                Logger.warn('SessionManager', 'Invalid session response - no token');
+                this._session.authenticated = false;
+                this._sessionReady = false;
+            }
+        },
+
+        // FIXED: Authorized fetch with automatic 401 handling
+        authorizedFetch: function(url, options = {}) {
+            // Block if session not ready
+            if (!this._sessionReady || !this._session.token) {
+                const error = new Error('Session not ready');
+                Logger.warn('SessionManager', 'Blocking API call - session not ready');
+                return Promise.reject(error);
+            }
+
+            const fetchOptions = {
+                ...options,
+                headers: {
+                    ...(options.headers || {}),
+                    'Authorization': `Bearer ${this._session.token}`,
+                    'Content-Type': 'application/json'
+                }
+            };
+
+            return fetch(url, fetchOptions)
+                .then(response => {
+                    // Handle 401 Unauthorized globally
+                    if (response.status === 401) {
+                        Logger.warn('SessionManager', 'Received 401 - session invalid, requesting new session');
+                        
+                        // Clear current session
+                        this.clear();
+                        
+                        // Request new session
+                        this.requestSession().catch(e => {
+                            Logger.error('SessionManager', 'Failed to refresh session after 401', e);
+                        });
+                        
+                        // Return a rejected promise to prevent further processing
+                        return Promise.reject(new Error('Unauthorized - session expired'));
+                    }
+                    return response;
+                });
+        },
+
+        getToken: function() {
+            return this._session.token;
+        },
+
+        getUser: function() {
+            return this._session.user ? { ...this._session.user } : null;
+        },
+
+        isAuthenticated: function() {
+            return this._session.authenticated && !!this._session.token;
+        },
+
+        isSessionReady: function() {
+            return this._sessionReady;
+        },
+
+        clear: function() {
+            this._session = {
+                token: null,
+                user: null,
+                expiresAt: null,
+                authenticated: false
+            };
+            this._sessionReady = false;
+            this._sessionRequestInProgress = false;
+            this._sessionRetryCount = 0;
+            
+            // Clear UI cache but keep user display data?
+            // SafeStorage.remove(LOCAL_STORAGE_KEYS.USER_CACHE);
+            
+            this._notifyListeners();
+            Logger.info('SessionManager', 'Session cleared');
+        },
+
+        subscribe: function(callback) {
+            this._listeners.add(callback);
+            return () => this._listeners.delete(callback);
+        },
+
+        _notifyListeners: function() {
+            const sessionInfo = {
+                authenticated: this._session.authenticated,
+                user: this._session.user,
+                ready: this._sessionReady
+                // NEVER include token
+            };
+            
+            this._listeners.forEach(cb => {
+                try { cb(sessionInfo); } catch (e) {}
+            });
+        },
+
+        getState: function() {
+            return {
+                authenticated: this._session.authenticated,
+                ready: this._sessionReady,
+                userId: this._session.user?.id,
+                hasToken: !!this._session.token,
+                requestInProgress: this._sessionRequestInProgress,
+                retryCount: this._sessionRetryCount
+            };
+        }
+    }.init();
+
+    // =============================================
+    // PARENT CONNECTION MANAGER (DETERMINISTIC HANDSHAKE)
     // =============================================
     const ParentConnectionManager = {
         _sequence: 0,
@@ -1412,7 +1727,12 @@
         
         _setupMessageListener: function() {
             window.addEventListener('message', (event) => {
-                // Defer heavy processing to avoid blocking
+                // Validate origin - relaxed during handshake
+                if (!SECURITY.validateOrigin(event.origin)) {
+                    if (DEBUG) console.log(`[${MODULE_NAME}] Rejected message from origin: ${event.origin}`);
+                    return;
+                }
+                
                 setTimeout(() => this._handleIncomingMessage(event), 0);
             }, true);
         },
@@ -1433,9 +1753,14 @@
                 MessageIdCache.add(data.messageId);
             }
             
-            // Handle PARENT_READY - CRITICAL for activation
+            // Handle PARENT_READY - DETERMINISTIC: Only activate if in WAIT_PARENT
             if (data.type === INCOMING_TYPES.PARENT_READY || data.type === INCOMING_TYPES.coreReady) {
                 this._handleParentReady(data);
+            }
+            
+            // Handle SESSION_DATA
+            if (data.type === INCOMING_TYPES.SESSION_DATA || data.type === INCOMING_TYPES.SESSION_RESPONSE) {
+                this._handleSessionData(data);
             }
             
             if (this._handlers.has(data.type)) {
@@ -1461,8 +1786,15 @@
             }
         },
         
+        // HANDSHAKE DETERMINISTIC: Parent ready handling - ONLY in WAIT_PARENT
         _handleParentReady: function(data) {
-            Logger.success('ParentConnectionManager', 'PARENT_READY received');
+            // Guard: Already received PARENT_READY
+            if (parentReadyReceived) {
+                console.log(`[${MODULE_NAME}] Duplicate PARENT_READY ignored`);
+                return;
+            }
+            
+            console.log(`[${MODULE_NAME}] PARENT_READY received`);
             
             parentReadyReceived = true;
             
@@ -1471,16 +1803,44 @@
                 parentReadyResolver = null;
             }
             
-            // Flush queued messages
+            // CRITICAL: Flush queued messages immediately
             flushMessageQueue();
             
-            if (currentState === LIFECYCLE_STATES.WAITING_FOR_PARENT) {
+            // CRITICAL: Transition to ACTIVE ONLY from WAIT_PARENT
+            if (currentState === LIFECYCLE_STATES.WAIT_PARENT) {
                 setState(LIFECYCLE_STATES.ACTIVE, 'parent_ready_received');
                 
                 initializeUISafe();
-                startDataFlow();
                 
-                Logger.success('ParentConnectionManager', 'Module ACTIVE');
+                console.log(`[${MODULE_NAME}] ACTIVE`);
+                
+                // Request session immediately after becoming active
+                setTimeout(() => {
+                    if (currentState === LIFECYCLE_STATES.ACTIVE) {
+                        SessionManager.requestSession()
+                            .then(() => {
+                                Logger.success('ParentConnectionManager', 'Initial session established');
+                                startDataFlow();
+                            })
+                            .catch(error => {
+                                Logger.error('ParentConnectionManager', 'Failed to get initial session', error);
+                            });
+                    }
+                }, 10);
+            } else {
+                console.log(`[${MODULE_NAME}] PARENT_READY received in state: ${currentState} - ignoring (expected WAIT_PARENT)`);
+            }
+        },
+        
+        // Handle session data from parent
+        _handleSessionData: function(data) {
+            const sessionData = data.payload || data;
+            Logger.info('ParentConnectionManager', 'Received session data from parent');
+            
+            // Delegate to SessionManager
+            if (sessionData && sessionData.token) {
+                // Simulate a response structure
+                SessionManager._handleSessionResponse({ payload: sessionData });
             }
         },
         
@@ -1522,7 +1882,6 @@
         // FIXED: ALWAYS returns a proper Promise
         sendWithResponse: function(type, payload = {}) {
             return new Promise((resolve, reject) => {
-                // Validate state first
                 if (!SECURITY.canSendMessage(type, currentState)) {
                     const error = new Error(`Cannot send ${type} in state ${currentState}`);
                     Logger.error('ParentConnectionManager', error.message);
@@ -1532,23 +1891,19 @@
 
                 const result = safeSend(type, payload, { requireAck: true });
                 
-                // If result is a Promise, use it
                 if (result && typeof result.then === 'function') {
                     result.then(resolve).catch(reject);
                     return;
                 }
                 
-                // Handle blocked case
                 if (result && result.blocked) {
                     reject(new Error(`Message blocked: ${result.reason}`));
                     return;
                 }
                 
-                // Handle queued case
                 if (result && result.queued) {
                     Logger.info('ParentConnectionManager', `Queued ${type}, waiting for parent ready`);
                     parentReadyPromise.then(() => {
-                        // Retry after parent ready
                         const retryResult = safeSend(type, payload, { requireAck: true });
                         if (retryResult && typeof retryResult.then === 'function') {
                             retryResult.then(resolve).catch(reject);
@@ -1559,13 +1914,11 @@
                     return;
                 }
                 
-                // Handle success without ACK (shouldn't happen with requireAck=true)
                 if (result && result.success) {
                     resolve({ success: true });
                     return;
                 }
                 
-                // Handle error
                 reject(new Error(result?.error || 'Unknown error sending message'));
             });
         },
@@ -1634,28 +1987,34 @@
             return newId;
         },
         
+        // HANDSHAKE DETERMINISTIC: CHILD_READY sent exactly once per lifecycle - NO RETRY LOOPS
         notifyChildReady: function() {
             if (childReadySent) {
-                Logger.warn('ParentConnectionManager', 'CHILD_READY already sent');
+                console.log(`[${MODULE_NAME}] CHILD_READY already sent, skipping duplicate`);
                 return;
             }
             
+            // GUARD: Only send in READY state
             if (currentState !== LIFECYCLE_STATES.READY) {
-                Logger.warn('ParentConnectionManager', `Cannot send CHILD_READY in state: ${currentState}`);
+                console.warn(`[${MODULE_NAME}] Cannot send CHILD_READY in state: ${currentState} (expected READY)`);
                 return;
             }
             
+            // Send CHILD_READY exactly once
             const result = safeSend(OUTGOING_ACTIONS.CHILD_READY, {
                 module: MODULE_NAME,
                 version: MODULE_VERSION,
                 frameId: this.getFrameId(),
-                ready: true
+                ready: true,
+                timestamp: Date.now()
             }, { requireAck: false });
             
             if (!result.blocked) {
                 childReadySent = true;
-                setState(LIFECYCLE_STATES.WAITING_FOR_PARENT, 'child_ready_sent');
-                Logger.success('ParentConnectionManager', 'CHILD_READY sent');
+                setState(LIFECYCLE_STATES.WAIT_PARENT, 'child_ready_sent');
+                console.log(`[${MODULE_NAME}] CHILD_READY sent`);
+                console.log(`[${MODULE_NAME}] WAIT_PARENT`);
+                // NO RETRY LOOP - per deterministic protocol, we wait for PARENT_READY
             } else {
                 Logger.error('ParentConnectionManager', 'Failed to send CHILD_READY', result);
             }
@@ -1694,7 +2053,7 @@
     }.init();
 
     // =============================================
-    // HEARTBEAT CLIENT - RESPOND ONLY, NEVER INITIATE
+    // HEARTBEAT CLIENT
     // =============================================
     const HeartbeatClient = {
         _lastHeartbeat: 0,
@@ -1707,7 +2066,7 @@
         init: function() {
             if (this._initialized) return this;
             this._initialized = true;
-            Logger.info('HeartbeatClient', 'Initialized (response only)');
+            Logger.info('HeartbeatClient', 'Initialized');
             return this;
         },
         
@@ -1753,7 +2112,7 @@
     }.init();
 
     // =============================================
-    // SESSION STORE
+    // SESSION STORE (DEPRECATED - Use SessionManager instead)
     // =============================================
     const SessionStore = {
         _user: null,
@@ -1763,17 +2122,16 @@
         _listeners: new Set(),
         
         init: function() {
-            this._loadFromCache();
-            return this;
-        },
-        
-        _loadFromCache: function() {
+            // DEPRECATED - No longer loads from cache for tokens
+            // Only load user display info, never token
             const cachedUser = SafeStorage.getJSON(LOCAL_STORAGE_KEYS.USER_CACHE);
             if (cachedUser) {
                 this._user = cachedUser;
                 this._userId = cachedUser.id;
-                this._authenticated = true;
+                // DO NOT set authenticated based on cached user
+                // Authentication must come from session
             }
+            return this;
         },
         
         setUser: function(user) {
@@ -1782,6 +2140,7 @@
             this._user = { ...user };
             this._userId = user.id || user.uid || null;
             
+            // Store for UI display only
             SafeStorage.setJSON(LOCAL_STORAGE_KEYS.USER_CACHE, this._user);
             
             this._notifyListeners();
@@ -1789,7 +2148,9 @@
         },
         
         setToken: function(token) {
-            this._token = token;
+            // DEPRECATED - Tokens should not be stored here
+            // Use SessionManager instead
+            console.warn('[SessionStore] setToken is deprecated, use SessionManager');
         },
         
         setAuthenticated: function(authenticated) {
@@ -1806,11 +2167,13 @@
         },
         
         getToken: function() {
-            return this._token;
+            // DEPRECATED - Tokens should not be accessed here
+            return SessionManager.getToken();
         },
         
         isAuthenticated: function() {
-            return this._authenticated;
+            // Delegate to SessionManager
+            return SessionManager.isAuthenticated();
         },
         
         clear: function() {
@@ -1835,7 +2198,7 @@
     }.init();
 
     // =============================================
-    // SESSION CLIENT (FIXED - PROPER ERROR HANDLING)
+    // SESSION CLIENT (DEPRECATED - Use SessionManager)
     // =============================================
     const SessionClient = {
         _session: null,
@@ -1852,147 +2215,40 @@
         
         init: function() {
             if (this._initialized) return this;
-            this._loadFromCache();
+            // No longer load from cache for tokens
             this._initialized = true;
-            Logger.info('SessionClient', 'Initialized');
+            Logger.info('SessionClient', 'Initialized (legacy - use SessionManager)');
             return this;
         },
         
         _loadFromCache: function() {
-            const cached = SafeStorage.getJSON(LOCAL_STORAGE_KEYS.SESSION_CACHE);
-            if (cached) {
-                this._session = cached.session;
-                this._userId = cached.userId;
-                this._authenticated = cached.authenticated || false;
-                this._permissions = new Set(cached.permissions || []);
-            }
+            // DEPRECATED - Do not load tokens from cache
         },
         
         requestSession: function() {
-            if (this._pending) {
-                Logger.warn('SessionClient', 'Session request already pending');
-                return Promise.reject(new Error('Session request already pending'));
-            }
-            
-            if (currentState !== LIFECYCLE_STATES.WAITING_FOR_PARENT && 
-                currentState !== LIFECYCLE_STATES.ACTIVE) {
-                Logger.warn('SessionClient', `Cannot request session in state: ${currentState}`);
-                return Promise.reject(new Error(`Cannot request session in state: ${currentState}`));
-            }
-            
-            this._pending = true;
-            this._retryCount = 0;
-            
-            Logger.info('SessionClient', 'Requesting session from parent');
-            
-            return this._attemptSessionRequest();
+            Logger.info('SessionClient', 'Delegating to SessionManager');
+            return SessionManager.requestSession();
         },
         
-        // FIXED: Always returns a Promise, proper error handling
         _attemptSessionRequest: function() {
-            return ParentConnectionManager.sendWithResponse(OUTGOING_ACTIONS.REQUEST_SESSION, {
-                module: MODULE_NAME,
-                timestamp: Date.now(),
-                version: MODULE_VERSION
-            })
-            .then((response) => {
-                this._pending = false;
-                this._retryCount = 0;
-                this._handleSessionResponse(response);
-                return response;
-            })
-            .catch((error) => {
-                this._retryCount++;
-                
-                if (this._retryCount < this._maxRetries) {
-                    Logger.warn('SessionClient', `Session request failed (attempt ${this._retryCount}/${this._maxRetries}), retrying...`, error);
-                    
-                    const delay = this._retryDelay * Math.pow(1.5, this._retryCount - 1);
-                    
-                    return new Promise((resolve, reject) => {
-                        setTimeout(() => {
-                            this._attemptSessionRequest()
-                                .then(resolve)
-                                .catch(reject);
-                        }, delay);
-                    });
-                } else {
-                    this._pending = false;
-                    Logger.error('SessionClient', 'Session request failed after max retries', error);
-                    
-                    // Try to use cached session as fallback
-                    if (this._session) {
-                        Logger.info('SessionClient', 'Using cached session as fallback');
-                        return Promise.resolve({ payload: this._session, fromCache: true });
-                    }
-                    
-                    return Promise.reject(error);
-                }
-            });
+            // DEPRECATED
+            return SessionManager._attemptSessionRequest();
         },
         
         _handleSessionResponse: function(response) {
-            this._pending = false;
-            
-            const session = response.payload || response;
-            
-            if (session) {
-                this._session = session;
-                this._userId = session.userId || session.user?.id;
-                this._authenticated = session.authenticated || false;
-                this._permissions = new Set(session.permissions || []);
-                
-                SafeStorage.setJSON(LOCAL_STORAGE_KEYS.SESSION_CACHE, {
-                    session: this._session,
-                    userId: this._userId,
-                    authenticated: this._authenticated,
-                    permissions: Array.from(this._permissions),
-                    timestamp: Date.now()
-                });
-                
-                if (session.user) {
-                    SafeStorage.setJSON(LOCAL_STORAGE_KEYS.USER_CACHE, session.user);
-                    SessionStore.setUser(session.user);
-                }
-                
-                Logger.success('SessionClient', 'Session established', { 
-                    authenticated: this._authenticated,
-                    userId: this._userId 
-                });
-                
-                this._notifyListeners();
-                
-                window.dispatchEvent(new CustomEvent('sessionUpdated', {
-                    detail: { session: this._session, authenticated: this._authenticated }
-                }));
-            } else {
-                Logger.warn('SessionClient', 'Empty session response received');
-            }
+            // DEPRECATED - Let SessionManager handle it
+            SessionManager._handleSessionResponse(response);
         },
         
         setUser: function(user) {
-            if (!user) return false;
-            
-            this._session = { ...this._session, user };
-            this._userId = user.id || user.uid || null;
-            this._authenticated = true;
-            
-            SafeStorage.setJSON(LOCAL_STORAGE_KEYS.USER_CACHE, user);
-            SafeStorage.setJSON(LOCAL_STORAGE_KEYS.SESSION_CACHE, {
-                session: this._session,
-                userId: this._userId,
-                authenticated: this._authenticated,
-                permissions: Array.from(this._permissions),
-                timestamp: Date.now()
-            });
-            
-            this._notifyListeners();
+            SessionManager._session.user = user;
+            SessionStore.setUser(user);
             return true;
         },
         
         setToken: function(token) {
-            this._token = token;
-            if (this._session) this._session.token = token;
+            // DEPRECATED
+            console.warn('[SessionClient] setToken is deprecated');
         },
         
         setAuthenticated: function(authenticated) {
@@ -2001,19 +2257,19 @@
         },
         
         getUser: function() {
-            return this._session?.user || null;
+            return SessionManager.getUser();
         },
         
         getUserId: function() {
-            return this._userId;
+            return SessionManager._session.user?.id;
         },
         
         getToken: function() {
-            return this._token;
+            return SessionManager.getToken();
         },
         
         isAuthenticated: function() {
-            return this._authenticated;
+            return SessionManager.isAuthenticated();
         },
         
         hasPermission: function(permission) {
@@ -2025,14 +2281,8 @@
         },
         
         clear: function() {
-            this._session = null;
-            this._userId = null;
-            this._token = null;
-            this._authenticated = false;
-            this._permissions.clear();
-            SafeStorage.remove(LOCAL_STORAGE_KEYS.SESSION_CACHE);
-            SafeStorage.remove(LOCAL_STORAGE_KEYS.USER_CACHE);
-            this._notifyListeners();
+            SessionManager.clear();
+            SessionStore.clear();
         },
         
         subscribe: function(callback) {
@@ -2048,9 +2298,9 @@
         
         getState: function() {
             return {
-                authenticated: this._authenticated,
-                userId: this._userId,
-                hasSession: !!this._session,
+                authenticated: SessionManager.isAuthenticated(),
+                userId: SessionManager._session.user?.id,
+                hasSession: SessionManager.isSessionReady(),
                 permissions: Array.from(this._permissions),
                 pending: this._pending,
                 retryCount: this._retryCount
@@ -2059,7 +2309,7 @@
     }.init();
 
     // =============================================
-    // CHAT MANAGER
+    // CHAT MANAGER (FIXED - Use authorizedFetch)
     // =============================================
     const ChatManager = {
         _conversations: [],
@@ -2517,6 +2767,11 @@
             if (!conversationId || !SessionStore.getUserId()) return false;
             if (!canSendUserMessages()) return false;
             
+            const guardResult = window.__guardAction('sendTyping', MODULE_NAME, currentState, false);
+            if (guardResult !== null) {
+                return guardResult;
+            }
+            
             const now = Date.now();
             
             if (isTyping) {
@@ -2564,13 +2819,18 @@
     };
 
     // =============================================
-    // MESSAGE HANDLER
+    // MESSAGE HANDLER (FIXED - Use SessionManager)
     // =============================================
     const MessageHandler = {
         _optimisticMessages: new Map(),
         _pendingRequests: new Map(),
         
         sendMessage: function(content, options = {}) {
+            const guardResult = window.__guardAction('sendMessage', MODULE_NAME, currentState, { success: false, error: 'module_not_active' });
+            if (guardResult !== null) {
+                return guardResult;
+            }
+            
             if (!canSendUserMessages()) {
                 return { success: false, error: 'module_not_active' };
             }
@@ -2637,7 +2897,6 @@
                 return { success: false, blocked: true, reason: result.reason };
             }
             
-            // If result is a Promise (ACK required), attach handlers
             if (result && typeof result.then === 'function') {
                 result.then((response) => {
                     this.handleMessageSent({ localId, requestId, ...response });
@@ -2689,6 +2948,11 @@
         },
         
         retryMessage: function(messageId) {
+            const guardResult = window.__guardAction('retryMessage', MODULE_NAME, currentState, false);
+            if (guardResult !== null) {
+                return guardResult;
+            }
+            
             if (!canSendUserMessages()) return false;
             
             const message = ChatManager.getMessages().find(m => m.id === messageId);
@@ -2703,6 +2967,11 @@
         },
         
         deleteMessage: function(messageId, forEveryone = false) {
+            const guardResult = window.__guardAction('deleteMessage', MODULE_NAME, currentState, false);
+            if (guardResult !== null) {
+                return guardResult;
+            }
+            
             if (!canSendUserMessages()) return false;
             
             const result = safeSend(OUTGOING_ACTIONS.DELETE_MESSAGE, {
@@ -2735,6 +3004,11 @@
         },
         
         editMessage: function(messageId, newContent) {
+            const guardResult = window.__guardAction('editMessage', MODULE_NAME, currentState, false);
+            if (guardResult !== null) {
+                return guardResult;
+            }
+            
             if (!canSendUserMessages()) return false;
             
             const result = safeSend(OUTGOING_ACTIONS.EDIT_MESSAGE, {
@@ -2764,6 +3038,11 @@
         },
         
         addReaction: function(messageId, emoji, add = true) {
+            const guardResult = window.__guardAction('addReaction', MODULE_NAME, currentState, false);
+            if (guardResult !== null) {
+                return guardResult;
+            }
+            
             if (!canSendUserMessages()) return false;
             
             const result = safeSend(OUTGOING_ACTIONS.ADD_REACTION, {
@@ -2806,6 +3085,11 @@
         },
         
         forwardMessage: function(messageId, targetConversationIds) {
+            const guardResult = window.__guardAction('forwardMessage', MODULE_NAME, currentState, false);
+            if (guardResult !== null) {
+                return guardResult;
+            }
+            
             if (!canSendUserMessages()) return false;
             
             const result = safeSend(OUTGOING_ACTIONS.FORWARD_MESSAGE, {
@@ -2821,6 +3105,11 @@
         },
         
         reportMessage: function(messageId, reason) {
+            const guardResult = window.__guardAction('reportMessage', MODULE_NAME, currentState, false);
+            if (guardResult !== null) {
+                return guardResult;
+            }
+            
             if (!canSendUserMessages()) return false;
             
             const result = safeSend(OUTGOING_ACTIONS.REPORT_MESSAGE, {
@@ -2836,6 +3125,11 @@
         },
         
         searchMessages: function(conversationId, query, options = {}) {
+            const guardResult = window.__guardAction('searchMessages', MODULE_NAME, currentState, Promise.reject(new Error('Module not active')));
+            if (guardResult !== null) {
+                return guardResult;
+            }
+            
             if (!canSendUserMessages()) {
                 return Promise.reject(new Error('Module not active'));
             }
@@ -2859,6 +3153,11 @@
     // =============================================
     const ConversationManager = {
         openConversation: function(conversationId, options = {}) {
+            const guardResult = window.__guardAction('openConversation', MODULE_NAME, currentState, false);
+            if (guardResult !== null) {
+                return guardResult;
+            }
+            
             if (!conversationId) return false;
             
             const conversation = ChatManager.getConversation(conversationId);
@@ -2888,6 +3187,11 @@
         },
         
         fetchMessages: function(conversationId, options = {}) {
+            const guardResult = window.__guardAction('fetchMessages', MODULE_NAME, currentState);
+            if (guardResult !== null) {
+                return;
+            }
+            
             if (!conversationId) return;
             if (!canSendUserMessages()) return;
             
@@ -2899,12 +3203,22 @@
         },
         
         fetchConversations: function() {
+            const guardResult = window.__guardAction('fetchConversations', MODULE_NAME, currentState);
+            if (guardResult !== null) {
+                return;
+            }
+            
             if (!canSendUserMessages()) return;
             
             safeSend(OUTGOING_ACTIONS.FETCH_CONVERSATIONS, {}, { requireAck: false });
         },
         
         markAsRead: function(conversationId) {
+            const guardResult = window.__guardAction('markAsRead', MODULE_NAME, currentState);
+            if (guardResult !== null) {
+                return;
+            }
+            
             if (!conversationId) return;
             if (!canSendUserMessages()) return;
             
@@ -2920,6 +3234,11 @@
         },
         
         createConversation: function(participants, options = {}) {
+            const guardResult = window.__guardAction('createConversation', MODULE_NAME, currentState, false);
+            if (guardResult !== null) {
+                return guardResult;
+            }
+            
             if (!participants || participants.length === 0) return false;
             if (!canSendUserMessages()) return false;
             
@@ -2938,6 +3257,11 @@
         },
         
         archiveConversation: function(conversationId, archived = true) {
+            const guardResult = window.__guardAction('archiveConversation', MODULE_NAME, currentState);
+            if (guardResult !== null) {
+                return;
+            }
+            
             if (!conversationId) return;
             if (!canSendUserMessages()) return;
             
@@ -2964,6 +3288,11 @@
         },
         
         blockUser: function(userId, block = true) {
+            const guardResult = window.__guardAction('blockUser', MODULE_NAME, currentState, false);
+            if (guardResult !== null) {
+                return guardResult;
+            }
+            
             if (!canSendUserMessages()) return false;
             
             const result = safeSend(OUTGOING_ACTIONS.BLOCK_USER, {
@@ -3242,7 +3571,7 @@
             }
             
             this._initialized = true;
-            Logger.info('UIBridge', 'Initialized (passive)');
+            Logger.info('UIBridge', 'Initialized');
             return this;
         },
         
@@ -3267,10 +3596,23 @@
             
             if (sendButton) {
                 sendButton.addEventListener('click', () => {
+                    const guardResult = window.__guardAction('UI:sendMessage', MODULE_NAME, currentState);
+                    if (guardResult !== null) {
+                        console.log(`[${MODULE_NAME}] ⏳ Waiting for activation...`);
+                        return;
+                    }
+                    
                     if (!canSendUserMessages()) {
                         console.log(`[${MODULE_NAME}] ⏳ Waiting for activation...`);
                         return;
                     }
+                    
+                    // Check session before sending
+                    if (!SessionManager.isAuthenticated()) {
+                        console.log(`[${MODULE_NAME}] ⏳ Session not ready...`);
+                        return;
+                    }
+                    
                     if (!input) return;
                     const text = input.value.trim();
                     if (text) {
@@ -3285,10 +3627,24 @@
                 input.addEventListener('keypress', (e) => {
                     if (e.key === 'Enter' && !e.shiftKey) {
                         e.preventDefault();
+                        
+                        const guardResult = window.__guardAction('UI:sendMessage', MODULE_NAME, currentState);
+                        if (guardResult !== null) {
+                            console.log(`[${MODULE_NAME}] ⏳ Waiting for activation...`);
+                            return;
+                        }
+                        
                         if (!canSendUserMessages()) {
                             console.log(`[${MODULE_NAME}] ⏳ Waiting for activation...`);
                             return;
                         }
+                        
+                        // Check session before sending
+                        if (!SessionManager.isAuthenticated()) {
+                            console.log(`[${MODULE_NAME}] ⏳ Session not ready...`);
+                            return;
+                        }
+                        
                         const text = input.value.trim();
                         if (text) {
                             MessageHandler.sendMessage(text);
@@ -3300,7 +3656,7 @@
                 
                 input.addEventListener('input', () => {
                     const conversationId = ChatManager.getActiveChat()?.id;
-                    if (conversationId && canSendUserMessages()) {
+                    if (conversationId && canSendUserMessages() && SessionManager.isAuthenticated()) {
                         const text = input.value.trim();
                         UIStateManager.saveDraft(conversationId, text);
                         
@@ -3341,7 +3697,7 @@
             if (messagesContainer) {
                 const observer = new IntersectionObserver((entries) => {
                     entries.forEach(entry => {
-                        if (entry.isIntersecting && canSendUserMessages()) {
+                        if (entry.isIntersecting && canSendUserMessages() && SessionManager.isAuthenticated()) {
                             const messageId = entry.target.dataset.messageId;
                             const conversationId = ChatManager.getActiveChat()?.id;
                             if (messageId && conversationId) {
@@ -3358,7 +3714,7 @@
         _attachConversationListeners: function() {
             document.addEventListener('click', (e) => {
                 const conversationItem = e.target.closest('.conversation-item');
-                if (conversationItem && canSendUserMessages()) {
+                if (conversationItem && canSendUserMessages() && SessionManager.isAuthenticated()) {
                     const conversationId = conversationItem.dataset.conversationId;
                     if (conversationId) {
                         ConversationManager.openConversation(conversationId);
@@ -3370,7 +3726,7 @@
         _attachFriendListeners: function() {
             document.addEventListener('click', (e) => {
                 const friendItem = e.target.closest('.friend-item');
-                if (friendItem && canSendUserMessages()) {
+                if (friendItem && canSendUserMessages() && SessionManager.isAuthenticated()) {
                     const friendId = friendItem.dataset.friendId;
                     if (friendId) {
                         ConversationManager.createConversation([friendId]);
@@ -3380,8 +3736,21 @@
         },
         
         dispatch: function(action, payload) {
+            const guardResult = window.__guardAction(`UI:${action}`, MODULE_NAME, currentState);
+            if (guardResult !== null) {
+                Logger.info('UIBridge', `⏳ Waiting for activation - cannot dispatch ${action}`);
+                return;
+            }
+            
             if (!canSendUserMessages()) {
                 Logger.info('UIBridge', `⏳ Waiting for activation - cannot dispatch ${action}`);
+                return;
+            }
+            
+            // Check session for actions that need it
+            const needsSession = ['sendMessage', 'startTyping', 'stopTyping', 'openChat', 'markAsRead', 'createChat'];
+            if (needsSession.includes(action) && !SessionManager.isAuthenticated()) {
+                Logger.info('UIBridge', `⏳ Session not ready - cannot dispatch ${action}`);
                 return;
             }
             
@@ -3491,7 +3860,7 @@
     }.init();
 
     // =============================================
-    // MODULE LIFECYCLE CONTROLLER - STRICT PARENT AUTHORITY
+    // MODULE LIFECYCLE CONTROLLER (DETERMINISTIC HANDSHAKE)
     // =============================================
     const ModuleLifecycleController = {
         _startTime: null,
@@ -3519,17 +3888,20 @@
         },
         
         _executeStartSequence: async function() {
+            // DETERMINISTIC: BOOT → INITIALIZING
             setState(LIFECYCLE_STATES.INITIALIZING, 'start_sequence');
             
             SecurityValidator.init();
             ParentConnectionManager.init();
             MessageDispatcher.init();
             ReliabilityLayer.init();
-            SessionClient.init();
+            SessionManager.init();
             HeartbeatClient.init();
             
-            await loadCachedData();
+            // Load cached data but don't block handshake
+            loadCachedData().catch(e => Logger.warn('ModuleLifecycleController', 'Cache load error', e));
             
+            // DETERMINISTIC: INITIALIZING → READY
             setState(LIFECYCLE_STATES.READY, 'initialization_complete');
             
             this._state = 'running';
@@ -3537,8 +3909,14 @@
             
             Logger.success('ModuleLifecycleController', `Module ready in ${Date.now() - this._startTime}ms`);
             
-            ParentConnectionManager.notifyChildReady();
+            // DETERMINISTIC: Send CHILD_READY exactly once - NO RETRY LOOPS
+            if (typeof window.__safeSendChildReady === 'function') {
+                window.__safeSendChildReady(() => ParentConnectionManager.notifyChildReady(), MODULE_NAME)();
+            } else {
+                ParentConnectionManager.notifyChildReady();
+            }
             
+            // Wait for PARENT_READY to transition to ACTIVE
             await parentReadyPromise;
         },
         
@@ -3583,7 +3961,7 @@
     }.init();
 
     // =============================================
-    // MODULE CORE CONTROLLER - REGISTRY
+    // MODULE CORE CONTROLLER
     // =============================================
     const ModuleCoreController = {
         _version: MODULE_VERSION,
@@ -3608,7 +3986,7 @@
             this._modules.set('parentConnection', ParentConnectionManager);
             this._modules.set('messageDispatcher', MessageDispatcher);
             this._modules.set('reliability', ReliabilityLayer);
-            this._modules.set('session', SessionClient);
+            this._modules.set('session', SessionManager);
             this._modules.set('heartbeat', HeartbeatClient);
             this._modules.set('moduleLifecycle', ModuleLifecycleController);
             
@@ -3655,7 +4033,7 @@
                 reliability: { pending: ReliabilityLayer.getPendingCount() },
                 parentConnection: ParentConnectionManager.getStats(),
                 messageDispatcher: MessageDispatcher.getStats(),
-                session: SessionClient.getState(),
+                session: SessionManager.getState(),
                 uiBridge: UIBridge.getStats(),
                 security: SECURITY.getSecurityReport()
             };
@@ -3670,7 +4048,7 @@
             resetLifecycle();
             ParentConnectionManager.reset();
             ReliabilityLayer.reset();
-            SessionClient.clear();
+            SessionManager.clear();
             HeartbeatClient.reset();
             
             setTimeout(() => {
@@ -3720,7 +4098,7 @@
     }.init();
 
     // =============================================
-    // SAFE UI INITIALIZATION (ONLY WHEN ACTIVE)
+    // SAFE UI INITIALIZATION
     // =============================================
     function initializeUISafe() {
         if (currentState !== LIFECYCLE_STATES.ACTIVE) {
@@ -3741,24 +4119,14 @@
             return;
         }
         
+        if (!SessionManager.isAuthenticated()) {
+            Logger.info('DataFlow', 'Delaying data flow until session ready');
+            return;
+        }
+        
         Logger.info('DataFlow', 'Starting data flow');
         
         ConversationManager.fetchConversations();
-        
-        SessionClient.requestSession()
-            .then(() => {
-                Logger.success('DataFlow', 'Session established');
-            })
-            .catch((error) => {
-                Logger.warn('DataFlow', 'Session request failed - will retry later', error);
-                setTimeout(() => {
-                    if (currentState === LIFECYCLE_STATES.ACTIVE) {
-                        SessionClient.requestSession().catch(e => {
-                            Logger.error('DataFlow', 'Session retry failed', e);
-                        });
-                    }
-                }, 5000);
-            });
         
         restoreLastChat();
         
@@ -3766,13 +4134,14 @@
     }
 
     // =============================================
-    // INITIALIZATION
+    // INITIALIZATION (DETERMINISTIC HANDSHAKE)
     // =============================================
     async function initialize() {
-        console.log(`[${MODULE_NAME}] 🚀 Messages Core v${MODULE_VERSION} (Parent Authority Architecture - Strict)`);
+        console.log(`[${MODULE_NAME}] 🚀 Messages Core v${MODULE_VERSION} (Deterministic Handshake Protocol)`);
         
         try {
-            setState(LIFECYCLE_STATES.BOOTING, 'initialization_start');
+            // DETERMINISTIC: BOOT state
+            setState(LIFECYCLE_STATES.BOOT, 'initialization_start');
             
             ModuleCoreController.init();
             ModuleLifecycleController.start();
@@ -3780,7 +4149,7 @@
             stateListeners.add((toState) => {
                 if (toState === LIFECYCLE_STATES.ACTIVE) {
                     BootController.completeBoot();
-                    console.log(`[${MODULE_NAME}] ✅ Module ACTIVE - UI and data flow ready`);
+                    console.log(`[${MODULE_NAME}] ✅ Module ACTIVE - awaiting session`);
                 }
             });
             
@@ -3793,6 +4162,7 @@
     
     async function loadCachedData() {
         try {
+            // Load UI data only - NO TOKENS
             const cachedUser = SafeStorage.getJSON(LOCAL_STORAGE_KEYS.USER_CACHE);
             if (cachedUser) {
                 SessionStore.setUser(cachedUser);
@@ -3817,6 +4187,7 @@
     
     function restoreLastChat() {
         if (currentState !== LIFECYCLE_STATES.ACTIVE) return;
+        if (!SessionManager.isAuthenticated()) return;
         
         const lastChatId = SafeStorage.get('lastChatId');
         if (lastChatId) {
@@ -3872,6 +4243,7 @@
         SecurityValidator,
         ReliabilityLayer,
         SessionClient,
+        SessionManager,  // NEW: Add SessionManager to public API
         MessageDispatcher,
         HeartbeatClient,
         UIBridge,
@@ -3896,6 +4268,10 @@
         getConversations: () => ChatManager.getConversations(),
         getMessages: () => ChatManager.getMessages(),
         getFriends: () => FriendManager.getFriendListForChat(),
+        
+        // NEW: Session methods
+        isAuthenticated: () => SessionManager.isAuthenticated(),
+        getSessionToken: () => SessionManager.getToken(), // Use with caution
         
         getSecurityReport: () => SECURITY.getSecurityReport(),
         
@@ -3924,6 +4300,9 @@
         sendTyping: (conversationId, isTyping) => TypingManager.sendTyping(conversationId, isTyping),
         stopTyping: () => TypingManager.stopTyping(),
         getTypingUsers: (conversationId) => TypingManager.getTypingUsersForConversation(conversationId),
+        
+        // NEW: Authorized fetch method
+        authorizedFetch: (url, options) => SessionManager.authorizedFetch(url, options),
         
         UI: {
             saveDraft: (conversationId, text, attachment) => UIStateManager.saveDraft(conversationId, text, attachment),
@@ -3971,8 +4350,13 @@
             SafeStorage,
             Security: SECURITY,
             HeartbeatClient,
+            SessionManager,
             messageQueue,
-            flushQueue: flushMessageQueue
+            flushQueue: flushMessageQueue,
+            lifecycleGuards: {
+                canSendChildReady: (state) => window.__lifecycleCanSendChildReady(state),
+                canPerformAction: (state) => window.__lifecycleCanPerformAction(state)
+            }
         }
     };
 

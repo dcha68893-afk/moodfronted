@@ -1,7 +1,7 @@
 // =============================================
 // SETTINGS MODULE - COMMUNICATION INFRASTRUCTURE UPDATE
-// VERSION: 7.2.10 - STRICT PARENT-CONTROLLED LIFECYCLE + PROTOCOL COMPLIANCE
-// ALL ORIGINAL FEATURES PRESERVED - 10000+ LINES INTACT
+// VERSION: 8.0.0 - DETERMINISTIC HANDSHAKE
+// ALIGNED: Parent-controlled lifecycle with strict state machine
 // =============================================
 
 // =============================================
@@ -18,8 +18,8 @@
 // =============================================
 // MODULE IDENTITY & VERSION
 // =============================================
-const MODULE_NAME = 'settings'; // EXACT match - DO NOT CHANGE
-const MODULE_VERSION = '7.2.10';
+const MODULE_NAME = 'settings';
+const MODULE_VERSION = '8.0.0';
 const FRAME_ID = 'settings';
 let moduleId = `settings-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
 
@@ -32,40 +32,61 @@ let DEBUG_ENABLED = DEBUG;
 let CONSOLE_NOISE_SUPPRESSED = true;
 
 // =============================================
-// STRICT LIFECYCLE STATE MACHINE - PARENT CONTROLLED
+// STRICT LIFECYCLE STATE MACHINE - DETERMINISTIC HANDSHAKE
 // =============================================
 const LifecycleState = {
-    INITIALIZING: 'INITIALIZING', // Start here
-    READY: 'READY',                // After local init
-    WAIT_PARENT: 'WAIT_PARENT',    // After CHILD_READY sent
-    ACTIVE: 'ACTIVE'               // After PARENT_READY received
+    BOOT: 'BOOT',
+    INITIALIZING: 'INITIALIZING',
+    READY: 'READY',
+    WAIT_PARENT: 'WAIT_PARENT',
+    ACTIVE: 'ACTIVE'
 };
 
-let currentState = LifecycleState.INITIALIZING; // Start in INITIALIZING
+let currentState = LifecycleState.BOOT;
 let stateHistory = [];
 let isReady = false;
+let initializationLock = false;
+
+// Handshake tracking - STRICT ONCE RULE
+let childReadySent = false;
+let parentReadyReceived = false;
+let moduleRegistered = false;
+let registrationCompleted = false;
+
+// Message deduplication
+const processedMessages = new Set();
+const sentMessageIds = new Set();
+const MAX_PROCESSED_MESSAGES = 100;
+
+// Pre-active message queue
+let messageQueue = [];
+let queueFlushed = false;
 
 function setState(newState, reason = '') {
     if (currentState === newState) return false;
     
+    // STRICT VALID TRANSITIONS - NO BACKWARDS, NO SKIPS
     const validTransitions = {
+        [LifecycleState.BOOT]: [LifecycleState.INITIALIZING],
         [LifecycleState.INITIALIZING]: [LifecycleState.READY],
         [LifecycleState.READY]: [LifecycleState.WAIT_PARENT],
         [LifecycleState.WAIT_PARENT]: [LifecycleState.ACTIVE],
         [LifecycleState.ACTIVE]: []
     };
     
+    // HARD RULE: No invalid transitions
     if (!validTransitions[currentState]?.includes(newState)) {
-        console.warn(`[${MODULE_NAME}] Invalid transition: ${currentState} → ${newState}`);
+        if (DEBUG) {
+            console.warn(`[${MODULE_NAME}] ❌ Invalid transition blocked: ${currentState} → ${newState}`);
+        }
         return false;
     }
     
     const oldState = currentState;
     currentState = newState;
     
-    if (newState === LifecycleState.ACTIVE) {
-        console.log(`[${MODULE_NAME}] ✅ State: ${oldState} → ${newState}`);
-    }
+    // MANDATORY LOGGING
+    console.log(`[${MODULE_NAME}] 📍 State: ${oldState} → ${newState}${reason ? ` (${reason})` : ''}`);
     
     recordStateTransition(oldState, newState, reason);
     
@@ -73,6 +94,13 @@ function setState(newState, reason = '') {
     window.__SETTINGS_SESSION_ACTIVE__ = (newState === LifecycleState.ACTIVE);
     window.__SETTINGS_READY__ = (newState === LifecycleState.ACTIVE);
     isReady = (newState === LifecycleState.ACTIVE);
+    
+    try {
+        const event = new CustomEvent('lifecycleStateChange', {
+            detail: { oldState, newState, reason, timestamp: Date.now() }
+        });
+        window.dispatchEvent(event);
+    } catch (e) {}
     
     return true;
 }
@@ -84,23 +112,463 @@ function recordStateTransition(from, to, reason = '') {
         reason,
         timestamp: Date.now()
     });
-    if (stateHistory.length > 20) stateHistory.shift();
+    if (stateHistory.length > 50) stateHistory.shift();
 }
 
-// Registration flags
-let registrationCompleted = false;
+// =============================================
+// STRICT CHILD_READY - SENT EXACTLY ONCE
+// =============================================
+function sendChildReady() {
+    // HARD RULE: Only send when state is READY AND not already sent
+    if (childReadySent) {
+        if (DEBUG) {
+            console.log(`[${MODULE_NAME}] ⚠️ CHILD_READY already sent, ignoring duplicate`);
+        }
+        return false;
+    }
+    
+    if (currentState !== LifecycleState.READY) {
+        if (DEBUG) {
+            console.warn(`[${MODULE_NAME}] ❌ Cannot send CHILD_READY: state is ${currentState} (must be READY)`);
+        }
+        return false;
+    }
+    
+    childReadySent = true;
+    
+    const message = {
+        type: 'CHILD_READY',
+        module: MODULE_NAME,
+        version: MODULE_VERSION,
+        frameId: FRAME_ID,
+        messageId: generateMessageId(),
+        timestamp: Date.now(),
+        environment: window.__iframeEnvironment || 'unknown'
+    };
+    
+    try {
+        if (window.parent && window.parent !== window) {
+            window.parent.postMessage(message, '*');
+            console.log(`[${MODULE_NAME}] 📤 CHILD_READY sent (ONCE)`);
+            
+            // STRICT: Transition to WAIT_PARENT immediately after sending
+            setState(LifecycleState.WAIT_PARENT, 'child_ready_sent');
+            return true;
+        } else {
+            if (DEBUG) {
+                console.warn(`[${MODULE_NAME}] ⚠️ No parent window found for CHILD_READY`);
+            }
+            return false;
+        }
+    } catch (error) {
+        if (DEBUG) {
+            console.error(`[${MODULE_NAME}] ❌ Error sending CHILD_READY:`, error);
+        }
+        return false;
+    }
+}
+
+// =============================================
+// STRICT PARENT_READY HANDLER - ACTIVATION GATE
+// =============================================
+function handleParentReady(message) {
+    // HARD RULE: Only accept PARENT_READY in WAIT_PARENT state
+    if (currentState !== LifecycleState.WAIT_PARENT) {
+        if (DEBUG) {
+            console.log(`[${MODULE_NAME}] 📥 PARENT_READY ignored (state: ${currentState}, expected WAIT_PARENT)`);
+        }
+        return false;
+    }
+    
+    if (parentReadyReceived) {
+        if (DEBUG) {
+            console.log(`[${MODULE_NAME}] 📥 PARENT_READY ignored (already received)`);
+        }
+        return false;
+    }
+    
+    parentReadyReceived = true;
+    
+    const sessionData = message.session || message.payload?.session || message;
+    
+    console.log(`[${MODULE_NAME}] 📥 PARENT_READY received${sessionData ? ' with session' : ''}`);
+    
+    if (sessionData) {
+        applySession(sessionData);
+    }
+    
+    window.parentReady = true;
+    window.parentReadyReceived = true;
+    window.parentCommunicationReady = true;
+    
+    // STRICT: Transition to ACTIVE
+    setState(LifecycleState.ACTIVE, 'parent_ready_received');
+    
+    // Flush queued messages
+    flushQueue();
+    
+    onModuleActive();
+    
+    try {
+        const event = new CustomEvent('parentReady', {
+            detail: { session: sessionData, timestamp: Date.now() }
+        });
+        window.dispatchEvent(event);
+    } catch (e) {}
+    
+    return true;
+}
+
+function applySession(sessionData) {
+    if (!sessionData) return;
+    
+    const token = sessionData.token || sessionData.accessToken;
+    const user = sessionData.user || sessionData;
+    const expiry = sessionData.expiry || sessionData.expiresAt || (Date.now() + 3600000);
+    
+    if (token) {
+        window.session = window.session || {};
+        window.session.token = token;
+    }
+    
+    if (user) {
+        window.session = window.session || {};
+        window.session.user = typeof user === 'object' ? { ...user } : user;
+        window.currentUser = window.session.user;
+    }
+    
+    if (expiry) {
+        window.session = window.session || {};
+        window.session.expiresAt = expiry;
+    }
+    
+    window.parentSessionReceived = true;
+    window.sessionValidated = true;
+    window.__SETTINGS_SESSION_ACTIVE__ = true;
+    
+    if (DEBUG) {
+        console.log(`[${MODULE_NAME}] ✅ Session applied:`, user ? `user: ${user.name || user.id || 'unknown'}` : 'no user');
+    }
+}
+
+function flushQueue() {
+    if (queueFlushed) return;
+    queueFlushed = true;
+    
+    while (messageQueue.length) {
+        const msg = messageQueue.shift();
+        sendMessage(msg);
+    }
+    
+    if (DEBUG && messageQueue.length === 0) {
+        console.log(`[${MODULE_NAME}] 📬 Queue flushed`);
+    }
+}
+
+function onModuleActive() {
+    if (DEBUG) {
+        console.log(`[${MODULE_NAME}] 🎯 Module activated, starting post-activation tasks`);
+    }
+    
+    if (typeof requestSettingsLoad === 'function') {
+        requestSettingsLoad();
+    }
+    
+    if (typeof startBackgroundTasks === 'function') {
+        startBackgroundTasks();
+    }
+    
+    if (typeof initializeUI === 'function') {
+        initializeUI();
+    }
+    
+    if (typeof updateUserUI === 'function') {
+        updateUserUI();
+    }
+    
+    try {
+        const event = new CustomEvent('moduleActive', {
+            detail: { module: MODULE_NAME, timestamp: Date.now() }
+        });
+        window.dispatchEvent(event);
+    } catch (e) {}
+}
+
+function requestSettingsLoad() {
+    if (currentState !== LifecycleState.ACTIVE) return;
+    
+    try {
+        if (typeof MessageTransport !== 'undefined' && MessageTransport.send) {
+            MessageTransport.send('SETTINGS_LOAD_REQUEST', {});
+        } else if (typeof sendMessage === 'function') {
+            sendMessage({
+                type: 'SETTINGS_LOAD_REQUEST',
+                source: MODULE_NAME,
+                target: 'parent',
+                payload: {}
+            });
+        }
+    } catch (error) {
+        if (DEBUG) console.error('[settings-core] Error requesting settings:', error);
+    }
+}
+
+// =============================================
+// MESSAGE MANAGEMENT - NO DUPLICATES
+// =============================================
+function generateMessageId() {
+    return `msg_${Date.now()}_${Math.random().toString(36).substring(2, 10)}`;
+}
+
+function generateRequestId() {
+    return `req_${Date.now()}_${Math.random().toString(36).substring(2, 10)}`;
+}
+
+function isMessageDuplicate(messageId) {
+    if (!messageId) return false;
+    
+    if (processedMessages.has(messageId)) {
+        return true;
+    }
+    
+    processedMessages.add(messageId);
+    
+    if (processedMessages.size > MAX_PROCESSED_MESSAGES) {
+        const firstItem = processedMessages.values().next().value;
+        processedMessages.delete(firstItem);
+    }
+    
+    return false;
+}
+
+function isSentDuplicate(messageId) {
+    if (!messageId) return false;
+    if (sentMessageIds.has(messageId)) return true;
+    sentMessageIds.add(messageId);
+    
+    if (sentMessageIds.size > MAX_PROCESSED_MESSAGES) {
+        const firstItem = sentMessageIds.values().next().value;
+        sentMessageIds.delete(firstItem);
+    }
+    
+    return false;
+}
+
+// =============================================
+// SAFE SEND TO PARENT - QUEUE BEFORE ACTIVE
+// =============================================
+function sendMessage(message) {
+    // STRICT: No messages before ACTIVE (except CHILD_READY which is handled separately)
+    if (currentState !== LifecycleState.ACTIVE) {
+        if (DEBUG && message.type !== 'PING') {
+            console.log(`[${MODULE_NAME}] 📦 Queuing message (state: ${currentState})`);
+        }
+        messageQueue.push(message);
+        return true;
+    }
+    
+    try {
+        let canonicalMessage = message;
+        
+        if (!message.type || !message.source || !message.messageId) {
+            canonicalMessage = createCanonicalMessage(
+                message.type || 'UNKNOWN',
+                message.payload || message,
+                'parent'
+            );
+        }
+        
+        // STRICT: No duplicate message sending
+        if (canonicalMessage.messageId && isSentDuplicate(canonicalMessage.messageId)) {
+            if (DEBUG) {
+                console.log(`[${MODULE_NAME}] ⚠️ Duplicate message blocked: ${canonicalMessage.messageId}`);
+            }
+            return false;
+        }
+        
+        if (!canonicalMessage.type || !canonicalMessage.source || !canonicalMessage.messageId || !canonicalMessage.timestamp) {
+            return false;
+        }
+        
+        canonicalMessage.target = 'parent';
+        
+        if (window.parent && window.parent !== window) {
+            window.parent.postMessage(canonicalMessage, '*');
+            return true;
+        }
+        return false;
+    } catch (error) {
+        return false;
+    }
+}
+
+function safeSend(msg) {
+    if (currentState !== LifecycleState.ACTIVE) {
+        messageQueue.push(msg);
+        return true;
+    }
+    
+    return sendMessage(msg);
+}
+
+function createCanonicalMessage(type, payload = {}, target = 'parent') {
+    return {
+        type: type,
+        source: MODULE_NAME,
+        target: target,
+        messageId: generateMessageId(),
+        requestId: generateRequestId(),
+        timestamp: Date.now(),
+        payload: payload
+    };
+}
+
+// =============================================
+// SIMPLIFIED MESSAGE LISTENER WITH DEDUPLICATION
+// =============================================
+function setupMessageListener() {
+    window.addEventListener('message', (event) => {
+        const data = event.data;
+        
+        if (!data || typeof data !== 'object') return;
+        if (!data.type) return;
+        
+        // STRICT: Deduplicate incoming messages
+        if (data.messageId && isMessageDuplicate(data.messageId)) {
+            if (DEBUG) {
+                console.log(`[${MODULE_NAME}] 📥 Duplicate message ignored: ${data.type} (${data.messageId})`);
+            }
+            return;
+        }
+        
+        // Special handling for PARENT_READY - allowed in WAIT_PARENT state
+        if (data.type === 'PARENT_READY') {
+            handleParentReady(data);
+            return;
+        }
+        
+        // STRICT: Only process other messages in ACTIVE state
+        if (currentState !== LifecycleState.ACTIVE) {
+            if (DEBUG && data.type !== 'PING') {
+                console.log(`[${MODULE_NAME}] 📥 Ignoring ${data.type} (state: ${currentState})`);
+            }
+            return;
+        }
+        
+        routeMessage(data);
+    });
+}
+
+function routeMessage(message) {
+    const type = message.type;
+    
+    switch (type) {
+        case 'SESSION_DATA':
+            if (typeof handleSessionData === 'function') handleSessionData(message);
+            break;
+        case 'MODULE_REGISTERED':
+            if (typeof handleModuleRegistered === 'function') handleModuleRegistered(message);
+            break;
+        case 'SESSION_SYNC':
+            if (typeof handleSessionSync === 'function') handleSessionSync(message);
+            break;
+        case 'SESSION_UPDATE':
+            if (typeof handleSessionUpdate === 'function') handleSessionUpdate(message);
+            break;
+        case 'SESSION_INVALIDATED':
+            if (typeof handleSessionInvalidated === 'function') handleSessionInvalidated(message);
+            break;
+        case 'SETTINGS_LOAD_RESPONSE':
+            if (typeof handleSettingsLoadResponse === 'function') handleSettingsLoadResponse(message);
+            break;
+        case 'SETTINGS_UPDATED':
+            if (typeof handleSettingsUpdated === 'function') handleSettingsUpdated(message);
+            break;
+        case 'PROFILE_UPDATED':
+            if (typeof handleProfileUpdated === 'function') handleProfileUpdated(message);
+            break;
+        case 'PRIVACY_UPDATED':
+            if (typeof handlePrivacyUpdated === 'function') handlePrivacyUpdated(message);
+            break;
+        case 'NOTIFICATIONS_UPDATED':
+            if (typeof handleNotificationsUpdated === 'function') handleNotificationsUpdated(message);
+            break;
+        case 'LANGUAGE_CHANGED':
+            if (typeof handleLanguageChanged === 'function') handleLanguageChanged(message);
+            break;
+        case 'THEME_CHANGED':
+            if (typeof handleThemeChanged === 'function') handleThemeChanged(message);
+            break;
+        case 'ACCOUNT_LOGGED_OUT':
+            if (typeof handleAccountLoggedOut === 'function') handleAccountLoggedOut(message);
+            break;
+        case 'BLOCKED_USERS_UPDATED':
+            if (typeof handleBlockedUsersUpdated === 'function') handleBlockedUsersUpdated(message);
+            break;
+        case 'ACTIVE_SESSIONS_UPDATED':
+            if (typeof handleActiveSessionsUpdated === 'function') handleActiveSessionsUpdated(message);
+            break;
+        case 'USER_CONTACTS_UPDATED':
+            if (typeof handleUserContactsUpdated === 'function') handleUserContactsUpdated(message);
+            break;
+        case 'USER_GROUPS_UPDATED':
+            if (typeof handleUserGroupsUpdated === 'function') handleUserGroupsUpdated(message);
+            break;
+        case 'STORAGE_USAGE_UPDATED':
+            if (typeof handleStorageUsageUpdated === 'function') handleStorageUsageUpdated(message);
+            break;
+        case 'ERROR':
+            if (typeof handleErrorMessage === 'function') handleErrorMessage(message);
+            break;
+        case 'PING':
+            if (typeof handlePing === 'function') handlePing(message);
+            break;
+        case 'PONG':
+            if (typeof handlePong === 'function') handlePong(message);
+            break;
+    }
+}
+
+function handlePing(message) {
+    if (currentState === LifecycleState.ACTIVE) {
+        try {
+            const pongMessage = {
+                type: 'PONG',
+                source: MODULE_NAME,
+                target: 'parent',
+                messageId: generateMessageId(),
+                inResponseTo: message.messageId,
+                timestamp: Date.now()
+            };
+            
+            if (window.parent && window.parent !== window) {
+                window.parent.postMessage(pongMessage, '*');
+            }
+        } catch (e) {}
+    }
+}
+
+function handlePong(message) {
+    window.lastPongTime = Date.now();
+    if (typeof ReliabilityEngine !== 'undefined' && ReliabilityEngine.emit) {
+        ReliabilityEngine.emit('pong', { timestamp: Date.now() });
+    }
+}
+
+// =============================================
+// REGISTRATION FLAGS
+// =============================================
 let sessionSyncCompleted = false;
-let childReadySent = false;
 let registrationSent = false;
 
-// Parent ready flag - CRITICAL GATE
-let parentReady = false;
+window.parentReady = false;
 
-
-
-// Message tracking for deduplication
-const processedMessages = new Set();
-const MAX_PROCESSED_MESSAGES = 100;
+window.session = {
+    token: null,
+    user: null,
+    expiresAt: 0,
+    version: 0
+};
 
 // =============================================
 // EXPORTED STATE VARIABLES
@@ -125,19 +593,9 @@ let parentSessionReceived = false;
 let parentOrigin = null;
 let parentSessionData = null;
 let sessionValidated = false;
-let parentReadyReceived = false;
-let moduleRegistered = false;
 let connectionQuality = 'unknown';
 let lastPongTime = 0;
-let handshakeState = 'pending';
 
-// Parent ready promise
-let parentReadyResolve;
-const parentReadyPromise = new Promise(res => {
-    parentReadyResolve = res;
-});
-
-// Exposed flags for parent inspection
 window.__SETTINGS_STATE__ = currentState;
 window.__SETTINGS_SESSION_ACTIVE__ = false;
 window.__SETTINGS_READY__ = isReady;
@@ -148,8 +606,7 @@ window.__SETTINGS_READY__ = isReady;
 const MAX_API_RETRIES = 0;
 const AUTH_CHECK_INTERVAL = 30000;
 const TOKEN_CHECK_INTERVAL = 1000;
-const MAX_HANDSHAKE_ATTEMPTS = 1;
-const HANDSHAKE_RETRY_INTERVAL = 1000;
+const HANDSHAKE_RETRY_INTERVAL = 2000;
 const SESSION_SYNC_TIMEOUT = 5000;
 const HEARTBEAT_INTERVAL = 10000;
 const PING_INTERVAL = 15000;
@@ -160,38 +617,8 @@ const RECOVERY_MAX_BACKOFF = 30000;
 const VISIBILITY_THROTTLE_DELAY = 5000;
 const TOKEN_BINDING_NONCE_LENGTH = 16;
 
-// Timer tracking for cleanup
 const activeTimers = new Set();
 const activeIntervals = new Set();
-
-// =============================================
-// ID GENERATION FUNCTIONS - MANDATORY
-// =============================================
-function generateMessageId() {
-    return `msg_${Date.now()}_${Math.random().toString(36).substring(2, 10)}`;
-}
-
-function generateRequestId() {
-    return `req_${Date.now()}_${Math.random().toString(36).substring(2, 10)}`;
-}
-
-function isMessageDuplicate(messageId) {
-    if (!messageId) return false;
-    
-    if (processedMessages.has(messageId)) {
-        return true;
-    }
-    
-    processedMessages.add(messageId);
-    
-    // Limit size
-    if (processedMessages.size > MAX_PROCESSED_MESSAGES) {
-        const firstItem = processedMessages.values().next().value;
-        processedMessages.delete(firstItem);
-    }
-    
-    return false;
-}
 
 function safeSetTimeout(fn, delay) {
     const timer = setTimeout(() => {
@@ -233,7 +660,6 @@ const TrustedOrigins = {
             }
         } catch (e) {}
         
-        // Add Render domains
         this.addTrustedOrigin('https://moodchat-fy56.onrender.com');
         this.addTrustedOrigin('https://moodfronted.onrender.com');
     },
@@ -271,7 +697,6 @@ TrustedOrigins.init();
 function validateCanonicalMessage(msg) {
     if (!msg || typeof msg !== 'object') return false;
     
-    // Required fields in canonical format
     const required = ['type', 'source', 'target', 'messageId', 'timestamp', 'payload'];
     
     for (const field of required) {
@@ -280,92 +705,17 @@ function validateCanonicalMessage(msg) {
         }
     }
     
-    // Type validations
     if (typeof msg.type !== 'string') return false;
     if (typeof msg.source !== 'string') return false;
     if (typeof msg.target !== 'string') return false;
     if (typeof msg.messageId !== 'string') return false;
     if (typeof msg.timestamp !== 'number') return false;
     
-    // Target validation - MUST be 'parent' for outbound
     if (msg.target !== 'parent') {
         return false;
     }
     
     return true;
-}
-
-// =============================================
-// CREATE CANONICAL MESSAGE - ENFORCES SCHEMA
-// =============================================
-function createCanonicalMessage(type, payload = {}, target = 'parent') {
-    return {
-        type: type,
-        source: MODULE_NAME, // EXACT module name
-        target: target,      // MUST be 'parent'
-        messageId: generateMessageId(),
-        requestId: generateRequestId(), // Always include for request-response
-        timestamp: Date.now(),
-        payload: payload
-    };
-}
-
-// =============================================
-// SAFE SEND TO PARENT - WITH QUEUE AND GATING
-// =============================================
-function sendMessage(message) {
-    try {
-        // Ensure message follows canonical format
-        let canonicalMessage = message;
-        
-        // If message doesn't have required fields, convert it
-        if (!message.type || !message.source || !message.messageId) {
-            canonicalMessage = createCanonicalMessage(
-                message.type || 'UNKNOWN',
-                message.payload || message,
-                'parent'
-            );
-        }
-        
-        // Double-check required fields
-        if (!canonicalMessage.type || !canonicalMessage.source || !canonicalMessage.messageId || !canonicalMessage.timestamp) {
-            return false;
-        }
-        
-        // Ensure target is 'parent'
-        canonicalMessage.target = 'parent';
-        
-        // Send to parent
-        if (window.parent && window.parent !== window) {
-            window.parent.postMessage(canonicalMessage, '*');
-            return true;
-        }
-        return false;
-    } catch (error) {
-        return false;
-    }
-}
-
-// =============================================
-// SAFE SEND WITH QUEUE - GATED BY PARENT_READY
-// =============================================
-function safeSend(msg) {
-    // CRITICAL: Gate all messages by parentReady
-    if (!parentReady) {
-        messageQueue.push(msg);
-        return true;
-    }
-    
-    return sendMessage(msg);
-}
-
-// =============================================
-// FLUSH QUEUE - Called after PARENT_READY
-// =============================================
-function flushQueue() {
-    while (messageQueue.length) {
-        sendMessage(messageQueue.shift());
-    }
 }
 
 function throttledLog(level, message, data = null) {
@@ -405,7 +755,7 @@ function receiveLog(...args) { throttledLog('receive', args[0], args.slice(1)); 
 function initLog(...args) { throttledLog('init', args[0], args.slice(1)); }
 
 // =============================================
-// MESSAGE TRANSPORT - SINGLE SOURCE OF TRUTH
+// MESSAGE TRANSPORT
 // =============================================
 const MessageTransport = {
     _parentWindow: null,
@@ -448,7 +798,6 @@ const MessageTransport = {
         if (this._listenerAttached) return;
         
         window.addEventListener('message', (event) => {
-            // PERFORMANCE FIX: Move heavy logic out of listener
             setTimeout(() => this._handleIncoming(event), 0);
         });
         
@@ -457,145 +806,126 @@ const MessageTransport = {
     
     _handleIncoming(event) {
         try {
-            // Origin validation
-            if (!TrustedOrigins.isValid(event.origin)) {
+            if (parentOrigin && event.origin !== parentOrigin && currentState !== LifecycleState.WAIT_PARENT) {
                 return;
             }
             
             const message = event.data;
             
-            // Validate canonical schema
-            if (!validateCanonicalMessage(message)) {
+            if (message.type !== 'PARENT_READY' && !validateCanonicalMessage(message)) {
                 return;
             }
             
-            // Deduplicate by messageId
-            if (isMessageDuplicate(message.messageId)) {
+            if (message.messageId && isMessageDuplicate(message.messageId)) {
                 return;
             }
             
             receiveLog(message.type);
             
-            // Handle PARENT_READY - CRITICAL GATE
             if (message.type === 'PARENT_READY') {
                 handleParentReady(message);
                 return;
             }
             
-            // Only process other messages after PARENT_READY
-            if (!parentReady) {
+            if (!window.parentReady) {
                 return;
             }
             
-            // Handle MODULE_REGISTERED
             if (message.type === 'MODULE_REGISTERED') {
                 handleModuleRegistered(message);
                 return;
             }
             
-            // Handle SESSION_SYNC
             if (message.type === 'SESSION_SYNC') {
                 handleSessionSync(message);
                 return;
             }
             
-            // Handle SESSION_UPDATE
             if (message.type === 'SESSION_UPDATE') {
                 handleSessionUpdate(message);
                 return;
             }
             
-            // Handle SESSION_INVALIDATED
             if (message.type === 'SESSION_INVALIDATED') {
                 handleSessionInvalidated(message);
                 return;
             }
             
-            // Handle SETTINGS_LOAD_RESPONSE
             if (message.type === 'SETTINGS_LOAD_RESPONSE') {
                 handleSettingsLoadResponse(message);
                 return;
             }
             
-            // Handle SETTINGS_UPDATED
             if (message.type === 'SETTINGS_UPDATED') {
                 handleSettingsUpdated(message);
                 return;
             }
             
-            // Handle PROFILE_UPDATED
             if (message.type === 'PROFILE_UPDATED') {
                 handleProfileUpdated(message);
                 return;
             }
             
-            // Handle PRIVACY_UPDATED
             if (message.type === 'PRIVACY_UPDATED') {
                 handlePrivacyUpdated(message);
                 return;
             }
             
-            // Handle NOTIFICATIONS_UPDATED
             if (message.type === 'NOTIFICATIONS_UPDATED') {
                 handleNotificationsUpdated(message);
                 return;
             }
             
-            // Handle LANGUAGE_CHANGED
             if (message.type === 'LANGUAGE_CHANGED') {
                 handleLanguageChanged(message);
                 return;
             }
             
-            // Handle THEME_CHANGED
             if (message.type === 'THEME_CHANGED') {
                 handleThemeChanged(message);
                 return;
             }
             
-            // Handle ACCOUNT_LOGGED_OUT
             if (message.type === 'ACCOUNT_LOGGED_OUT') {
                 handleAccountLoggedOut(message);
                 return;
             }
             
-            // Handle BLOCKED_USERS_UPDATED
             if (message.type === 'BLOCKED_USERS_UPDATED') {
                 handleBlockedUsersUpdated(message);
                 return;
             }
             
-            // Handle ACTIVE_SESSIONS_UPDATED
             if (message.type === 'ACTIVE_SESSIONS_UPDATED') {
                 handleActiveSessionsUpdated(message);
                 return;
             }
             
-            // Handle USER_CONTACTS_UPDATED
             if (message.type === 'USER_CONTACTS_UPDATED') {
                 handleUserContactsUpdated(message);
                 return;
             }
             
-            // Handle USER_GROUPS_UPDATED
             if (message.type === 'USER_GROUPS_UPDATED') {
                 handleUserGroupsUpdated(message);
                 return;
             }
             
-            // Handle STORAGE_USAGE_UPDATED
             if (message.type === 'STORAGE_USAGE_UPDATED') {
                 handleStorageUsageUpdated(message);
                 return;
             }
             
-            // Handle ERROR
             if (message.type === 'ERROR') {
                 handleErrorMessage(message);
                 return;
             }
             
-            // Route to registered handlers
+            if (message.type === 'PING') {
+                handlePing(message);
+                return;
+            }
+            
             const handlers = this._messageHandlers.get(message.type) || [];
             handlers.forEach(handler => {
                 try {
@@ -614,7 +944,6 @@ const MessageTransport = {
                 return false;
             }
             
-            // Create canonical message
             const message = createCanonicalMessage(type, payload, 'parent');
             
             sendLog(`${type} - MessageId: ${message.messageId}`);
@@ -626,7 +955,6 @@ const MessageTransport = {
                 }
             }
             
-            // Use safeSend to gate by parentReady
             safeSend(message);
             
             return true;
@@ -674,60 +1002,47 @@ const MessageTransport = {
 MessageTransport.init();
 
 // =============================================
-// LIFECYCLE CONTROLLER - STRICT PARENT-CONTROLLED
+// LIFECYCLE CONTROLLER - STRICT STATE MACHINE
 // =============================================
 const LifecycleController = {
-    _parentReadyReceived: false,
+    _sessionRequestRetries: 0,
+    _maxSessionRetries: 3,
     
     init() {
         initLog('LifecycleController initializing');
         this._setupMessageHandlers();
         
-        // Start at INITIALIZING
-        setState(LifecycleState.INITIALIZING, 'starting');
-        
-        // Initialize core components
+        setState(LifecycleState.BOOT, 'starting');
         this._initializeComponents();
         
         successLog('LifecycleController initialized');
     },
     
     _initializeComponents() {
-        // Load from localStorage while initializing
         loadFromLocalStorage();
         
-        // After initialization, move to READY
-        if (currentState === LifecycleState.INITIALIZING) {
+        // STRICT: Only transition through allowed states
+        if (currentState === LifecycleState.BOOT) {
+            setState(LifecycleState.INITIALIZING, 'component_init');
             setState(LifecycleState.READY, 'initialization_complete');
+            
+            // STRICT: Send CHILD_READY exactly once from READY state
             this._sendChildReady();
         }
     },
     
     _sendChildReady() {
+        // STRICT: Only send if not already sent and state is READY
         if (childReadySent) return;
         if (currentState !== LifecycleState.READY) return;
         
-        childReadySent = true;
+        sendChildReady();
         
-        // Use safeSend for CHILD_READY (will queue if parent not ready)
-        // But CHILD_READY must be sent even if parent not ready yet
-        const message = createCanonicalMessage('CHILD_READY', {
-            module: MODULE_NAME,
-            version: MODULE_VERSION,
-            frameId: FRAME_ID,
-            environment: IframeEnvironment.getEnvironment()
-        }, 'parent');
-        
-        sendMessage(message); // Direct send - CHILD_READY bypasses queue
-        
-        setState(LifecycleState.WAIT_PARENT, 'child_ready_sent');
-        initLog('CHILD_READY sent');
+        initLog('CHILD_READY sent, waiting for PARENT_READY');
     },
     
     _setupMessageHandlers() {
-        MessageTransport.on('PARENT_READY', (message) => {
-            this._handleParentReady(message);
-        });
+        MessageTransport.on('PARENT_READY', (message) => {});
         
         MessageTransport.on('MODULE_REGISTERED', (message) => {
             this._handleModuleRegistered(message);
@@ -802,27 +1117,6 @@ const LifecycleController = {
         });
     },
     
-    _handleParentReady(message) {
-        if (currentState !== LifecycleState.WAIT_PARENT) return;
-        if (this._parentReadyReceived) return;
-        
-        this._parentReadyReceived = true;
-        parentReady = true; // CRITICAL: Set parentReady gate
-        parentReadyReceived = true;
-        parentCommunicationReady = true;
-        
-        receiveLog('PARENT_READY received');
-        parentReadyResolve();
-        
-        setState(LifecycleState.ACTIVE, 'parent_ready_received');
-        
-        // Flush any queued messages
-        flushQueue();
-        
-        // After activation, request settings
-        this._requestSettingsLoad();
-    },
-    
     _handleModuleRegistered(message) {
         if (currentState !== LifecycleState.WAIT_PARENT && currentState !== LifecycleState.ACTIVE) return;
         if (registrationCompleted) return;
@@ -840,10 +1134,11 @@ const LifecycleController = {
         if (!sessionData) return;
         
         const user = sessionData.user || sessionData;
+        const token = sessionData.token;
         const expiry = sessionData.expiry || sessionData.expiresAt || (Date.now() + 3600000);
         
-        updateSession(user, expiry);
-        parentSessionData = { user, token: null, expiry };
+        updateSession(user, token, expiry);
+        parentSessionData = { user, token, expiry };
         parentSessionReceived = true;
         sessionValidated = true;
         sessionSyncCompleted = true;
@@ -856,9 +1151,10 @@ const LifecycleController = {
         if (!sessionData) return;
         
         const user = sessionData.user || sessionData;
+        const token = sessionData.token;
         const expiry = sessionData.expiry || sessionData.expiresAt;
         
-        if (user) updateSession(user, expiry);
+        if (user || token) updateSession(user, token, expiry);
         
         updateUserUI();
     },
@@ -873,6 +1169,27 @@ const LifecycleController = {
             detail: { timestamp: Date.now() }
         });
         window.dispatchEvent(event);
+        
+        if (currentState === LifecycleState.ACTIVE) {
+            this._sessionRequestRetries = 0;
+            this._requestSession();
+        }
+    },
+    
+    _requestSession() {
+        if (currentState !== LifecycleState.ACTIVE) return;
+        if (window.session.token) return;
+        
+        this._sessionRequestRetries++;
+        if (this._sessionRequestRetries > this._maxSessionRetries) {
+            errorLog('Max session request retries reached');
+            return;
+        }
+        
+        MessageTransport.send('REQUEST_SESSION', {
+            module: MODULE_NAME,
+            requestId: generateRequestId()
+        });
     },
     
     _requestSettingsLoad() {
@@ -940,7 +1257,37 @@ const LifecycleController = {
 };
 
 // =============================================
-// API CORE GATEWAY - ROUTES THROUGH PARENT
+// SESSION DATA HANDLER
+// =============================================
+function handleSessionData(message) {
+    if (currentState !== LifecycleState.ACTIVE) return;
+    
+    const payload = message.payload || {};
+    const sessionData = payload.session || payload;
+    
+    if (sessionData.token) {
+        window.session.token = sessionData.token;
+        window.session.user = sessionData.user || null;
+        window.session.expiresAt = sessionData.expiresAt || (Date.now() + 3600000);
+        window.session.version = (window.session.version || 0) + 1;
+        
+        currentUser = window.session.user;
+        parentSessionReceived = true;
+        sessionValidated = true;
+        
+        receiveLog('SESSION_DATA received');
+        
+        LifecycleController._requestSettingsLoad();
+        
+        const event = new CustomEvent('sessionReady', {
+            detail: { timestamp: Date.now() }
+        });
+        window.dispatchEvent(event);
+    }
+}
+
+// =============================================
+// API CORE GATEWAY
 // =============================================
 const ApiCore = {
     _ready: false,
@@ -952,13 +1299,11 @@ const ApiCore = {
         this._readyPromise = new Promise((resolve) => {
             this._readyResolvers.push(resolve);
         });
-        
-        // No timeouts - wait for activation
         return this;
     },
     
     isReady() {
-        return this._ready && currentState === LifecycleState.ACTIVE;
+        return this._ready && currentState === LifecycleState.ACTIVE && !!window.session.token;
     },
     
     whenReady() {
@@ -966,8 +1311,25 @@ const ApiCore = {
     },
     
     async request(endpoint, options = {}) {
-        const requestId = `req_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+        if (currentState !== LifecycleState.ACTIVE) {
+            return {
+                success: false,
+                status: 'error',
+                message: 'Cannot perform action: not ACTIVE state',
+                data: null
+            };
+        }
         
+        if (!window.session.token) {
+            return {
+                success: false,
+                status: 'error',
+                message: 'Session not ready',
+                data: null
+            };
+        }
+        
+        const requestId = `req_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
         const method = options.method || 'GET';
         
         try {
@@ -976,11 +1338,12 @@ const ApiCore = {
                     endpoint: endpoint,
                     method: method,
                     data: options.body,
-                    headers: options.headers,
+                    headers: {
+                        ...(options.headers || {}),
+                        Authorization: `Bearer ${window.session.token}`
+                    },
                     requestId: requestId
                 });
-                
-                // No timeout - wait for response via message
             });
             
             return response;
@@ -997,20 +1360,43 @@ const ApiCore = {
     
     getDiagnostics() {
         return {
-            ready: this._ready
+            ready: this._ready,
+            hasToken: !!window.session.token
         };
     }
 }.init();
 
 // =============================================
-// SECURE API WRAPPER - ROUTES THROUGH PARENT
+// SECURE API WRAPPER
 // =============================================
 async function secureApiCall(endpoint, options = {}) {
+    if (currentState !== LifecycleState.ACTIVE) {
+        return {
+            success: false,
+            status: 'error',
+            message: 'Cannot perform action: not ACTIVE state',
+            data: null
+        };
+    }
+    
+    if (!window.session.token) {
+        return {
+            success: false,
+            status: 'error',
+            message: 'Session not ready',
+            data: null
+        };
+    }
+    
     try {
         const response = await MessageTransport.send('API_REQUEST', {
             endpoint: endpoint,
             method: options.method || 'GET',
             data: options.body,
+            headers: {
+                ...(options.headers || {}),
+                Authorization: `Bearer ${window.session.token}`
+            },
             options: options
         });
         
@@ -1024,6 +1410,24 @@ async function secureApiCall(endpoint, options = {}) {
             data: null
         };
     }
+}
+
+// =============================================
+// AUTHORIZED FETCH
+// =============================================
+function authorizedFetch(url, options = {}) {
+    if (!window.session || !window.session.token) {
+        throw new Error("Session not ready");
+    }
+    
+    return fetch(url, {
+        ...options,
+        headers: {
+            ...(options.headers || {}),
+            Authorization: `Bearer ${window.session.token}`,
+            "Content-Type": "application/json"
+        }
+    });
 }
 
 // =============================================
@@ -1191,6 +1595,7 @@ const IframeEnvironment = {
 };
 
 IframeEnvironment.detect();
+window.__iframeEnvironment = IframeEnvironment.getEnvironment();
 
 // =============================================
 // SAFE STORAGE LAYER
@@ -1578,7 +1983,7 @@ const CompatibilityBridge = {
 };
 
 // =============================================
-// ORIGIN ADAPTER (Updated to use TrustedOrigins)
+// ORIGIN ADAPTER
 // =============================================
 const OriginAdapter = {
     _trustedOrigins: new Set(),
@@ -1594,7 +1999,6 @@ const OriginAdapter = {
     init() {
         initLog('OriginAdapter initializing');
         
-        // Copy from TrustedOrigins
         TrustedOrigins._trusted.forEach(origin => {
             this._trustedOrigins.add(origin);
         });
@@ -1634,6 +2038,9 @@ const OriginAdapter = {
     },
     
     isTrusted(origin, options = {}) {
+        if (currentState === LifecycleState.WAIT_PARENT) {
+            return true;
+        }
         return TrustedOrigins.isValid(origin);
     },
     
@@ -1693,7 +2100,7 @@ const OriginAdapter = {
 OriginAdapter.init();
 
 // =============================================
-// STARTUP GOVERNOR (Simplified - No timeouts)
+// STARTUP GOVERNOR
 // =============================================
 const StartupGovernor = {
     _state: 'INIT',
@@ -1786,7 +2193,7 @@ const StartupGovernor = {
 };
 
 // =============================================
-// IFRAME TRANSPORT (Wrapper for MessageTransport)
+// IFRAME TRANSPORT
 // =============================================
 const IframeTransport = {
     _messageHandlers: new Map(),
@@ -1859,34 +2266,33 @@ const IframeTransport = {
 IframeTransport.init();
 
 // =============================================
-// SESSION STORAGE
+// SESSION STORAGE - MEMORY ONLY
 // =============================================
-let session = {
-    user: null,
-    expiresAt: 0,
-    version: 0
-};
-
-function updateSession(user, expiry, version) {
+function updateSession(user, token, expiry, version) {
+    if (token) {
+        window.session.token = token;
+    }
+    
     if (user) {
-        session.user = typeof user === 'object' ? { ...user } : user;
-        currentUser = session.user;
-        coreData.user = session.user;
+        window.session.user = typeof user === 'object' ? { ...user } : user;
+        currentUser = window.session.user;
+        coreData.user = window.session.user;
     }
     
     if (expiry) {
-        session.expiresAt = expiry;
+        window.session.expiresAt = expiry;
     }
     
     if (version !== undefined) {
-        session.version = version;
+        window.session.version = version;
     }
     
-    window.__SETTINGS_SESSION_ACTIVE__ = !!session.user;
+    window.__SETTINGS_SESSION_ACTIVE__ = !!window.session.user && !!window.session.token;
 }
 
 function clearSession() {
-    session = {
+    window.session = {
+        token: null,
         user: null,
         expiresAt: 0,
         version: 0
@@ -1897,7 +2303,7 @@ function clearSession() {
 }
 
 function isSessionValid() {
-    return !!session.user && session.expiresAt > Date.now();
+    return !!window.session.user && !!window.session.token && window.session.expiresAt > Date.now();
 }
 
 // =============================================
@@ -1965,7 +2371,7 @@ const SettingsStore = {
 };
 
 // =============================================
-// HEARTBEAT CLIENT - Only responds to parent
+// HEARTBEAT CLIENT
 // =============================================
 const HeartbeatClient = {
     _interval: null,
@@ -1976,7 +2382,6 @@ const HeartbeatClient = {
     _listeners: new Set(),
     
     start() {
-        // Heartbeat is parent-driven, we don't initiate
         this._running = true;
     },
     
@@ -2033,9 +2438,6 @@ const HeartbeatClient = {
     }
 };
 
-// =============================================
-// HEARTBEAT MANAGER (Alias for backward compatibility)
-// =============================================
 const HeartbeatManager = HeartbeatClient;
 
 // =============================================
@@ -2096,28 +2498,30 @@ const SessionClient = {
     
     updateSession(user, token, expiry) {
         if (user) {
-            session.user = typeof user === 'object' ? { ...user } : user;
-            currentUser = session.user;
-            coreData.user = session.user;
+            window.session.user = typeof user === 'object' ? { ...user } : user;
+            currentUser = window.session.user;
+            coreData.user = window.session.user;
         }
         
         if (token) {
+            window.session.token = token;
             this._sessionToken = token;
         }
         
         if (expiry) {
-            session.expiresAt = expiry;
+            window.session.expiresAt = expiry;
             this._sessionExpiry = expiry;
         }
         
-        session.version++;
-        this._sessionVersion = session.version;
+        window.session.version++;
+        this._sessionVersion = window.session.version;
         this._lastSync = Date.now();
         
         this.emit('updated', {
-            user: session.user,
-            expiry: session.expiresAt,
-            version: session.version
+            user: window.session.user,
+            token: !!window.session.token,
+            expiry: window.session.expiresAt,
+            version: window.session.version
         });
         
         return true;
@@ -2172,11 +2576,11 @@ const SessionClient = {
     },
     
     getSession() {
-        return session.user ? { ...session.user } : null;
+        return window.session.user ? { ...window.session.user } : null;
     },
     
     getToken() {
-        return this._sessionToken;
+        return window.session.token;
     },
     
     isValid() {
@@ -2192,7 +2596,8 @@ const SessionClient = {
     },
     
     clear() {
-        session = {
+        window.session = {
+            token: null,
             user: null,
             expiresAt: 0,
             version: 0
@@ -2207,10 +2612,10 @@ const SessionClient = {
     
     getDiagnostics() {
         return {
-            hasSession: !!session.user,
-            hasToken: !!this._sessionToken,
-            expiry: session.expiresAt,
-            version: session.version,
+            hasSession: !!window.session.user,
+            hasToken: !!window.session.token,
+            expiry: window.session.expiresAt,
+            version: window.session.version,
             lastSync: this._lastSync,
             refreshAttempts: this._refreshAttempts,
             isValid: isSessionValid(),
@@ -2227,7 +2632,7 @@ const SessionClient = {
 SessionClient.init();
 
 // =============================================
-// RELIABILITY ENGINE (Simplified)
+// RELIABILITY ENGINE
 // =============================================
 const ReliabilityEngine = {
     _quality: 'unknown',
@@ -2281,7 +2686,7 @@ const ReliabilityEngine = {
 ReliabilityEngine.init();
 
 // =============================================
-// RELIABILITY LAYER (Simplified)
+// RELIABILITY LAYER
 // =============================================
 const ReliabilityLayer = {
     _pendingMessages: new Map(),
@@ -2308,7 +2713,6 @@ const ReliabilityLayer = {
     },
     
     acknowledge(id) {
-        // Handled by MessageTransport
     },
     
     on(event, listener) {
@@ -2364,7 +2768,7 @@ const ReliabilityLayer = {
 ReliabilityLayer.init();
 
 // =============================================
-// MESSAGE DISPATCHER (Simplified)
+// MESSAGE DISPATCHER
 // =============================================
 const MessageDispatcher = {
     _handlers: new Map(),
@@ -2386,25 +2790,14 @@ const MessageDispatcher = {
     
     _setupSystemHandlers() {
         this.register('PARENT_READY', (message) => {
-            parentReady = true;
+            window.parentReady = true;
             parentReadyReceived = true;
             parentCommunicationReady = true;
-            
             console.log('[settings-core] 📥 PARENT_READY received');
         });
         
         this.register('SESSION_DATA', (message) => {
-            if (!message.payload && !message.session) return;
-            
-            const sessionData = message.payload || message.session;
-            const user = sessionData.user || sessionData;
-            const expiry = sessionData.expiry || sessionData.expiresAt || (Date.now() + 3600000);
-            
-            updateSession(user, expiry);
-            
-            parentSessionData = { user, token: null, expiry };
-            parentSessionReceived = true;
-            sessionValidated = true;
+            handleSessionData(message);
         });
         
         this.register('MODULE_REGISTERED', (message) => {
@@ -2469,7 +2862,7 @@ const MessageDispatcher = {
 MessageDispatcher.init();
 
 // =============================================
-// SECURITY VALIDATOR (Simplified)
+// SECURITY VALIDATOR
 // =============================================
 const SecurityValidator = {
     _trustedOrigins: new Set(),
@@ -2608,7 +3001,7 @@ const SecurityValidator = {
 SecurityValidator.init();
 
 // =============================================
-// PARENT CONNECTION MANAGER (Simplified)
+// PARENT CONNECTION MANAGER
 // =============================================
 const ParentConnectionManager = {
     _connectionState: 'disconnected',
@@ -2712,13 +3105,13 @@ const ParentConnectionManager = {
 ParentConnectionManager.init();
 
 // =============================================
-// HANDSHAKE MANAGER (Simplified)
+// HANDSHAKE MANAGER - NO RETRY LOOPS
 // =============================================
 const HandshakeManager = {
     _handshakeState: 'INITIAL',
     _handshakeId: null,
     _handshakeAttempts: 0,
-    _maxAttempts: 3,
+    _maxAttempts: 1,
     _backoffMs: 1000,
     _parentReady: false,
     _handshakeComplete: false,
@@ -2758,8 +3151,29 @@ const HandshakeManager = {
     },
     
     async startHandshake(options = {}) {
-        // Handshake is now managed by LifecycleController
-        return { success: true, cached: true };
+        if (this._handshakeComplete) {
+            return { success: true, cached: true };
+        }
+        
+        if (this._inProgress) {
+            return { success: false, inProgress: true };
+        }
+        
+        this._inProgress = true;
+        
+        try {
+            this.transition('WAITING_FOR_PARENT', 'handshake_started');
+            
+            await this._registerModule();
+            
+            this._handshakeComplete = true;
+            this.transition('ACTIVE', 'handshake_complete');
+            this._inProgress = false;
+            return { success: true };
+        } catch (error) {
+            this._inProgress = false;
+            return { success: false, error: error.message };
+        }
     },
     
     async _registerModule() {
@@ -2822,13 +3236,10 @@ const HandshakeManager = {
 
 HandshakeManager.init();
 
-// =============================================
-// IFRAME HANDSHAKE AUTHORITY (Alias for backward compatibility)
-// =============================================
 const IframeHandshakeAuthority = HandshakeManager;
 
 // =============================================
-// MODULE LIFECYCLE CONTROLLER (Simplified)
+// MODULE LIFECYCLE CONTROLLER
 // =============================================
 const ModuleLifecycleController = {
     _lifecycleState: 'stopped',
@@ -2937,7 +3348,7 @@ const ModuleLifecycleController = {
 ModuleLifecycleController.init();
 
 // =============================================
-// RECOVERY MANAGER (Simplified - No auto-recovery)
+// RECOVERY MANAGER
 // =============================================
 const RecoveryManager = {
     _attempts: 0,
@@ -2980,26 +3391,33 @@ const RecoveryManager = {
         
         this.registerStrategy('registration_failed', async () => {
             moduleRegistered = false;
-            
-            if (currentState !== LifecycleState.DEGRADED) {
-                setState(LifecycleState.WAIT_PARENT, 'recovery_retry');
-            }
-            
             return moduleRegistered;
         });
         
         this.registerStrategy('session_expired', async () => {
+            if (!window.session.token) return false;
+            
             const response = await MessageTransport.send('SESSION_REFRESH', {});
             
             if (response && response.payload && response.payload.session) {
                 updateSession(
                     response.payload.session.user,
+                    response.payload.session.token,
                     response.payload.session.expiry
                 );
                 return isSessionValid();
             }
             
             return false;
+        });
+        
+        this.registerStrategy('handshake_timeout', async () => {
+            if (parentReadyReceived) return true;
+            
+            sendChildReady();
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            
+            return parentReadyReceived;
         });
     },
     
@@ -3134,7 +3552,7 @@ const RecoveryManager = {
 RecoveryManager.init();
 
 // =============================================
-// NAVIGATION GUARD (Keep original)
+// NAVIGATION GUARD
 // =============================================
 const NavigationGuard = {
     _enabled: true,
@@ -3256,7 +3674,7 @@ const NavigationGuard = {
 NavigationGuard.init();
 
 // =============================================
-// UI FAILSAFE (Keep original - but only activates in ACTIVE state)
+// UI FAILSAFE
 // =============================================
 const UIFailsafe = {
     _enabled: true,
@@ -3451,7 +3869,7 @@ const UIFailsafe = {
 UIFailsafe.init();
 
 // =============================================
-// MULTI-MODULE COORDINATOR (Keep original)
+// MULTI-MODULE COORDINATOR
 // =============================================
 const MODULE_DISCOVERY = 'MODULE_DISCOVERY';
 const MODULE_PRESENCE = 'MODULE_PRESENCE';
@@ -3460,7 +3878,7 @@ const ORIGIN_BIND = 'ORIGIN_BIND';
 const MultiModuleCoordinator = {
     _modules: new Map(),
     _moduleId: `settings_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
-    _moduleType: MODULE_NAME, // Use exact module name
+    _moduleType: MODULE_NAME,
     _busListeners: new Map(),
     _sharedSession: null,
     _masterModule: false,
@@ -3610,7 +4028,7 @@ const MultiModuleCoordinator = {
     },
     
     getSharedSession() {
-        return session.user ? { user: session.user } : null;
+        return window.session.user ? { user: window.session.user } : null;
     },
     
     setSharedSession(sessionData) {
@@ -3653,117 +4071,117 @@ const UIBridge = {
     
     _setupDefaultListeners() {
         this.register('sendMessage', (data) => {
-            if (currentState !== LifecycleState.ACTIVE) return;
+            if (currentState !== LifecycleState.ACTIVE || !window.session.token) return;
             MessageTransport.send('SEND_MESSAGE', data);
         });
         
         this.register('updateProfile', (data) => {
-            if (currentState !== LifecycleState.ACTIVE) return;
+            if (currentState !== LifecycleState.ACTIVE || !window.session.token) return;
             updateSetting('profile', data.key, data.value).catch(() => {});
         });
         
         this.register('updatePrivacy', (data) => {
-            if (currentState !== LifecycleState.ACTIVE) return;
+            if (currentState !== LifecycleState.ACTIVE || !window.session.token) return;
             updateSetting('privacy', data.key, data.value).catch(() => {});
         });
         
         this.register('updateNotifications', (data) => {
-            if (currentState !== LifecycleState.ACTIVE) return;
+            if (currentState !== LifecycleState.ACTIVE || !window.session.token) return;
             updateSetting('notifications', data.key, data.value).catch(() => {});
         });
         
         this.register('updateAppearance', (data) => {
-            if (currentState !== LifecycleState.ACTIVE) return;
+            if (currentState !== LifecycleState.ACTIVE || !window.session.token) return;
             updateSetting('appearance', data.key, data.value).catch(() => {});
         });
         
         this.register('updateSecurity', (data) => {
-            if (currentState !== LifecycleState.ACTIVE) return;
+            if (currentState !== LifecycleState.ACTIVE || !window.session.token) return;
             updateSetting('security', data.key, data.value).catch(() => {});
         });
         
         this.register('updateChat', (data) => {
-            if (currentState !== LifecycleState.ACTIVE) return;
+            if (currentState !== LifecycleState.ACTIVE || !window.session.token) return;
             updateSetting('chat', data.key, data.value).catch(() => {});
         });
         
         this.register('updateFriends', (data) => {
-            if (currentState !== LifecycleState.ACTIVE) return;
+            if (currentState !== LifecycleState.ACTIVE || !window.session.token) return;
             updateSetting('friends', data.key, data.value).catch(() => {});
         });
         
         this.register('updateGroups', (data) => {
-            if (currentState !== LifecycleState.ACTIVE) return;
+            if (currentState !== LifecycleState.ACTIVE || !window.session.token) return;
             updateSetting('groups', data.key, data.value).catch(() => {});
         });
         
         this.register('updateCalls', (data) => {
-            if (currentState !== LifecycleState.ACTIVE) return;
+            if (currentState !== LifecycleState.ACTIVE || !window.session.token) return;
             updateSetting('calls', data.key, data.value).catch(() => {});
         });
         
         this.register('updateStatus', (data) => {
-            if (currentState !== LifecycleState.ACTIVE) return;
+            if (currentState !== LifecycleState.ACTIVE || !window.session.token) return;
             updateSetting('status', data.key, data.value).catch(() => {});
         });
         
         this.register('updateStorage', (data) => {
-            if (currentState !== LifecycleState.ACTIVE) return;
+            if (currentState !== LifecycleState.ACTIVE || !window.session.token) return;
             updateSetting('storage', data.key, data.value).catch(() => {});
         });
         
         this.register('updateMood', (data) => {
-            if (currentState !== LifecycleState.ACTIVE) return;
+            if (currentState !== LifecycleState.ACTIVE || !window.session.token) return;
             updateSetting('mood', data.key, data.value).catch(() => {});
         });
         
         this.register('updateAdvanced', (data) => {
-            if (currentState !== LifecycleState.ACTIVE) return;
+            if (currentState !== LifecycleState.ACTIVE || !window.session.token) return;
             updateSetting('advanced', data.key, data.value).catch(() => {});
         });
         
         this.register('updateBackup', (data) => {
-            if (currentState !== LifecycleState.ACTIVE) return;
+            if (currentState !== LifecycleState.ACTIVE || !window.session.token) return;
             updateSetting('backup', data.key, data.value).catch(() => {});
         });
         
         this.register('updateDanger', (data) => {
-            if (currentState !== LifecycleState.ACTIVE) return;
+            if (currentState !== LifecycleState.ACTIVE || !window.session.token) return;
             updateSetting('danger', data.key, data.value).catch(() => {});
         });
         
         this.register('logout', () => {
-            if (currentState !== LifecycleState.ACTIVE) return;
+            if (currentState !== LifecycleState.ACTIVE || !window.session.token) return;
             handleLogout().catch(() => {});
         });
         
         this.register('terminateSession', (data) => {
-            if (currentState !== LifecycleState.ACTIVE) return;
+            if (currentState !== LifecycleState.ACTIVE || !window.session.token) return;
             terminateSession(data.sessionId).catch(() => {});
         });
         
         this.register('terminateAllSessions', () => {
-            if (currentState !== LifecycleState.ACTIVE) return;
+            if (currentState !== LifecycleState.ACTIVE || !window.session.token) return;
             terminateAllSessions().catch(() => {});
         });
         
         this.register('unblockUser', (data) => {
-            if (currentState !== LifecycleState.ACTIVE) return;
+            if (currentState !== LifecycleState.ACTIVE || !window.session.token) return;
             unblockUser(data.userId).catch(() => {});
         });
         
         this.register('clearChatCache', () => {
-            if (currentState !== LifecycleState.ACTIVE) return;
+            if (currentState !== LifecycleState.ACTIVE || !window.session.token) return;
             clearChatCache().catch(() => {});
         });
         
         this.register('clearMediaCache', () => {
-            if (currentState !== LifecycleState.ACTIVE) return;
+            if (currentState !== LifecycleState.ACTIVE || !window.session.token) return;
             clearMediaCache().catch(() => {});
         });
         
         this.register('saveSettings', () => {
-            if (currentState !== LifecycleState.ACTIVE) return;
+            if (currentState !== LifecycleState.ACTIVE || !window.session.token) return;
             saveSettings().catch(() => {});
         });
     },
@@ -3802,7 +4220,7 @@ const UIBridge = {
         if (!element) return this;
         
         const handler = (domEvent) => {
-            if (currentState !== LifecycleState.ACTIVE) return;
+            if (currentState !== LifecycleState.ACTIVE || !window.session.token) return;
             const data = transform ? transform(domEvent) : { value: domEvent.target.value };
             this.trigger(bridgeEvent, data);
         };
@@ -3853,11 +4271,10 @@ const UIBridge = {
     }
 };
 
-// Initialize UIBridge immediately
 UIBridge.init();
 
 // =============================================
-// MODULE CORE CONTROLLER (Keep original)
+// MODULE CORE CONTROLLER
 // =============================================
 const ModuleCoreController = {
     _initialized: false,
@@ -4096,19 +4513,7 @@ const PARENT_MESSAGE_TYPES = {
 };
 
 // =============================================
-// MESSAGE QUEUE
-// =============================================
-const messageQueue = [];
-
-// =============================================
-// RECEIVE FROM PARENT
-// =============================================
-function receiveFromParent(messageType, handler) {
-    return MessageTransport.on(messageType, handler);
-}
-
-// =============================================
-// LOAD FROM LOCAL STORAGE (CACHE ONLY)
+// LOAD FROM LOCAL STORAGE
 // =============================================
 async function loadFromLocalStorage() {
     try {
@@ -4116,10 +4521,8 @@ async function loadFromLocalStorage() {
         if (cachedUser) {
             currentUser = cachedUser;
             coreData.user = cachedUser;
-            session.user = cachedUser;
-            session.expiresAt = Date.now() + 3600000;
-            session.version = 1;
-            console.log('[settings-core] ✅ Loaded cached user:', cachedUser.displayName);
+            window.session.user = cachedUser;
+            if (DEBUG) console.log('[settings-core] ✅ Loaded cached user:', cachedUser.displayName);
         }
         
         const savedSettings = SafeStorage.getJSON('user_settings', null);
@@ -4154,7 +4557,7 @@ async function loadFromLocalStorage() {
         calculateStorageUsage();
         return true;
     } catch (error) {
-        console.log('[settings-core] ⚠️ Error loading from localStorage:', error);
+        if (DEBUG) console.log('[settings-core] ⚠️ Error loading from localStorage:', error);
         userSettings = JSON.parse(JSON.stringify(DEFAULT_SETTINGS));
         coreData.settings = JSON.parse(JSON.stringify(DEFAULT_SETTINGS));
         
@@ -4293,6 +4696,7 @@ async function loadUserData() {
             if (user) {
                 currentUser = user;
                 coreData.user = user;
+                window.session.user = user;
                 SafeStorage.setJSON('current_user', currentUser);
                 updateUserUI();
             }
@@ -4772,11 +5176,33 @@ function initializeUI() {
 // SECURE FETCH WRAPPER
 // =============================================
 async function secureFetchWrapper(endpoint, method = 'GET', data = null, options = {}) {
+    if (currentState !== LifecycleState.ACTIVE) {
+        return {
+            success: false,
+            status: 'error',
+            message: 'Cannot perform action: not ACTIVE state',
+            data: null
+        };
+    }
+    
+    if (!window.session.token) {
+        return {
+            success: false,
+            status: 'error',
+            message: 'Session not ready',
+            data: null
+        };
+    }
+    
     try {
         const response = await MessageTransport.send('API_REQUEST', {
             endpoint: endpoint,
             method: method,
             data: data,
+            headers: {
+                ...(options.headers || {}),
+                Authorization: `Bearer ${window.session.token}`
+            },
             options: options
         });
         
@@ -4805,9 +5231,9 @@ async function safeLoadUserData() {
     }
     
     try {
-        if (session.user) {
-            currentUser = session.user;
-            coreData.user = session.user;
+        if (window.session.user) {
+            currentUser = window.session.user;
+            coreData.user = window.session.user;
             SafeStorage.setJSON('current_user', currentUser);
             return currentUser;
         }
@@ -4972,21 +5398,26 @@ function notifyParentAuthError() {
 }
 
 // =============================================
-// GET SECURE TOKEN - ALWAYS FROM PARENT
+// GET SECURE TOKEN
 // =============================================
 function getSecureToken() {
-    return null;
+    return window.session.token;
 }
 
 // =============================================
-// WAIT FOR TOKEN - ALWAYS FALSE
+// WAIT FOR TOKEN
 // =============================================
 async function waitForToken(timeout = 10000) {
+    const startTime = Date.now();
+    while (Date.now() - startTime < timeout) {
+        if (window.session.token) return true;
+        await new Promise(resolve => setTimeout(resolve, 100));
+    }
     return false;
 }
 
 // =============================================
-// START PASSIVE AUTH MONITORING - DISABLED
+// START PASSIVE AUTH MONITORING
 // =============================================
 function startPassiveAuthMonitoring() {}
 
@@ -5041,7 +5472,7 @@ function startParentHandshake(options = {}) {
 }
 
 // =============================================
-// SEND MESSAGE TO PARENT - ALIAS (UPDATED TO USE SAFESEND)
+// SEND MESSAGE TO PARENT
 // =============================================
 function sendMessageToParent(message) {
     return safeSend(message);
@@ -5055,7 +5486,7 @@ function resetUIForLogout() {
         clearSession();
         parentSessionReceived = false;
         sessionValidated = false;
-        parentReady = false;
+        window.parentReady = false;
         parentReadyReceived = false;
         parentCommunicationReady = false;
         
@@ -5217,22 +5648,22 @@ function setupBasicEventListeners() {
 }
 
 // =============================================
-// START TOKEN MONITORING - DISABLED
+// START TOKEN MONITORING
 // =============================================
 function startTokenMonitoring() {}
 
 // =============================================
-// CHECK TOKEN AVAILABILITY - DISABLED
+// CHECK TOKEN AVAILABILITY
 // =============================================
 function checkTokenAvailability() {}
 
 // =============================================
-// NOTIFY TOKEN READY - DISABLED
+// NOTIFY TOKEN READY
 // =============================================
 function notifyTokenReady() {}
 
 // =============================================
-// NOTIFY TOKEN LOST - DISABLED
+// NOTIFY TOKEN LOST
 // =============================================
 function notifyTokenLost() {}
 
@@ -5262,7 +5693,7 @@ function getCoreDiagnostics() {
 // FORCE RECOVERY
 // =============================================
 function forceRecovery() {
-    console.log('[settings-core] Forcing recovery');
+    if (DEBUG) console.log('[settings-core] Forcing recovery');
     RecoveryManager.attemptRecovery({ reason: 'manual', force: true });
 }
 
@@ -5319,8 +5750,8 @@ function shutdownCore() {
         
         currentState = LifecycleState.INITIALIZING;
         isReady = false;
-        initializationInProgress = false;
-        parentReady = false;
+        initializationLock = false;
+        window.parentReady = false;
         parentReadyReceived = false;
         parentCommunicationReady = false;
         parentSessionReceived = false;
@@ -5351,10 +5782,9 @@ function shutdownCore() {
 }
 
 // =============================================
-// INITIALIZE CORE - MAIN ENTRY POINT (UPDATED LIFECYCLE)
+// INITIALIZE CORE - MAIN ENTRY POINT
 // =============================================
 let initializationPromise = null;
-let initializationInProgress = false;
 let coreError = null;
 
 async function initializeCore(options = {}) {
@@ -5362,12 +5792,13 @@ async function initializeCore(options = {}) {
         return initializationPromise;
     }
     
-    if (currentState !== LifecycleState.INITIALIZING) {
+    if (currentState !== LifecycleState.BOOT && currentState !== LifecycleState.INITIALIZING) {
         return { success: true, state: currentState };
     }
     
     initializationPromise = (async () => {
-        initializationInProgress = true;
+        if (initializationLock) return { success: false, error: 'initialization_in_progress' };
+        initializationLock = true;
         coreError = null;
         
         const {
@@ -5379,23 +5810,18 @@ async function initializeCore(options = {}) {
         }
         
         try {
+            setupMessageListener();
+            
             await ModuleCoreController.start();
             
             await loadFromLocalStorage();
             
-            // Setup message handlers
             setupMessageHandlers();
             
-            // Start lifecycle controller (will move through INITIALIZING -> READY -> WAIT_PARENT)
             LifecycleController.init();
             
-            // Wait for parent ready via promise (no timeout)
-            await parentReadyPromise;
-            
-            initializationInProgress = false;
+            initializationLock = false;
             initializationPromise = null;
-            isReady = true;
-            executeReadyCallbacks();
             
             return { 
                 success: true, 
@@ -5405,7 +5831,7 @@ async function initializeCore(options = {}) {
             
         } catch (error) {
             coreError = error;
-            initializationInProgress = false;
+            initializationLock = false;
             initializationPromise = null;
             
             return {
@@ -5423,72 +5849,42 @@ async function initializeCore(options = {}) {
 // SETUP MESSAGE HANDLERS
 // =============================================
 function setupMessageHandlers() {
-    IframeTransport._messageHandlers.clear();
+    MessageTransport.on('MODULE_REGISTERED', handleModuleRegistered);
+    MessageTransport.on('PARENT_READY', handleParentReady);
+    MessageTransport.on('SESSION_DATA', handleSessionData);
+    MessageTransport.on('SESSION_ACTIVE', handleSessionActive);
+    MessageTransport.on('SESSION_RESPONSE', handleSessionResponse);
+    MessageTransport.on('SESSION_UPDATE', handleSessionUpdate);
+    MessageTransport.on('SESSION_NULL', handleSessionNull);
+    MessageTransport.on('SESSION_REFRESHED', handleSessionRefreshed);
+    MessageTransport.on('SESSION_INVALIDATED', handleSessionInvalidated);
+    MessageTransport.on('SETTINGS_LOAD_RESPONSE', handleSettingsLoadResponse);
+    MessageTransport.on('SETTINGS_UPDATE_CONFIRMED', handleSettingsUpdateConfirmed);
+    MessageTransport.on('SETTINGS_UPDATED', handleSettingsUpdatedBroadcast);
+    MessageTransport.on('ERROR', handleErrorMessage);
     
-    IframeTransport.on('MODULE_REGISTERED', handleModuleRegistered);
-    IframeTransport.on('PARENT_READY', handleParentReady);
-    IframeTransport.on('SESSION_ACTIVE', handleSessionActive);
-    IframeTransport.on('SESSION_RESPONSE', handleSessionResponse);
-    IframeTransport.on('SESSION_UPDATE', handleSessionUpdate);
-    IframeTransport.on('SESSION_NULL', handleSessionNull);
-    IframeTransport.on('SESSION_REFRESHED', handleSessionRefreshed);
-    IframeTransport.on('SESSION_INVALIDATED', handleSessionInvalidated);
-    IframeTransport.on('SETTINGS_LOAD_RESPONSE', handleSettingsLoadResponse);
-    IframeTransport.on('SETTINGS_UPDATE_CONFIRMED', handleSettingsUpdateConfirmed);
-    IframeTransport.on('SETTINGS_UPDATED', handleSettingsUpdatedBroadcast);
-    IframeTransport.on('ERROR', handleErrorMessage);
-    
-    IframeTransport.on('PROFILE_UPDATED', handleProfileUpdated);
-    IframeTransport.on('PRIVACY_UPDATED', handlePrivacyUpdated);
-    IframeTransport.on('NOTIFICATIONS_UPDATED', handleNotificationsUpdated);
-    IframeTransport.on('LANGUAGE_CHANGED', handleLanguageChanged);
-    IframeTransport.on('THEME_CHANGED', handleThemeChanged);
-    IframeTransport.on('ACCOUNT_LOGGED_OUT', handleAccountLoggedOut);
-    IframeTransport.on('BLOCKED_USERS_UPDATED', handleBlockedUsersUpdated);
-    IframeTransport.on('ACTIVE_SESSIONS_UPDATED', handleActiveSessionsUpdated);
-    IframeTransport.on('USER_CONTACTS_UPDATED', handleUserContactsUpdated);
-    IframeTransport.on('USER_GROUPS_UPDATED', handleUserGroupsUpdated);
-    IframeTransport.on('STORAGE_USAGE_UPDATED', handleStorageUsageUpdated);
+    MessageTransport.on('PROFILE_UPDATED', handleProfileUpdated);
+    MessageTransport.on('PRIVACY_UPDATED', handlePrivacyUpdated);
+    MessageTransport.on('NOTIFICATIONS_UPDATED', handleNotificationsUpdated);
+    MessageTransport.on('LANGUAGE_CHANGED', handleLanguageChanged);
+    MessageTransport.on('THEME_CHANGED', handleThemeChanged);
+    MessageTransport.on('ACCOUNT_LOGGED_OUT', handleAccountLoggedOut);
+    MessageTransport.on('BLOCKED_USERS_UPDATED', handleBlockedUsersUpdated);
+    MessageTransport.on('ACTIVE_SESSIONS_UPDATED', handleActiveSessionsUpdated);
+    MessageTransport.on('USER_CONTACTS_UPDATED', handleUserContactsUpdated);
+    MessageTransport.on('USER_GROUPS_UPDATED', handleUserGroupsUpdated);
+    MessageTransport.on('STORAGE_USAGE_UPDATED', handleStorageUsageUpdated);
 }
 
 // =============================================
-// MESSAGE HANDLERS (Keep original)
+// MESSAGE HANDLERS
 // =============================================
-function handleModuleRegistered(message) {
-    // Handled by LifecycleController
-}
-
-function handleParentReady(message) {
-    // Handled by LifecycleController
-}
-
-function handleSessionActive(message) {
-    // Handled by LifecycleController
-}
-
-function handleSessionResponse(message) {
-    // Handled by LifecycleController
-}
-
-function handleSessionUpdate(message) {
-    // Handled by LifecycleController
-}
-
-function handleSessionNull() {
-    // Handled by LifecycleController
-}
-
-function handleSessionRefreshed(message) {
-    // Handled by LifecycleController
-}
-
-function handleSessionInvalidated(message) {
-    // Handled by LifecycleController
-}
-
-function handleSettingsLoadResponse(message) {
-    // Handled by LifecycleController
-}
+function handleModuleRegistered(message) {}
+function handleSessionActive(message) {}
+function handleSessionResponse(message) {}
+function handleSessionNull() {}
+function handleSessionRefreshed(message) {}
+function handleSessionInvalidated(message) {}
 
 function handleSettingsUpdateConfirmed(message) {
     if (currentState === LifecycleState.ACTIVE && message.payload) {
@@ -5707,7 +6103,8 @@ const DiagnosticsAgent = {
             ...this._metrics,
             uptime: Date.now() - this._startTime,
             environment: IframeEnvironment.getEnvironment(),
-            compatibility: CompatibilityBridge.isEnabled()
+            compatibility: CompatibilityBridge.isEnabled(),
+            hasToken: !!window.session.token
         };
     },
     
@@ -5726,9 +6123,10 @@ const DiagnosticsAgent = {
             },
             session: {
                 valid: isSessionValid(),
-                user: session.user ? { id: session.user.id, name: session.user.name } : null,
-                expiresAt: session.expiresAt,
-                version: session.version
+                hasToken: !!window.session.token,
+                user: window.session.user ? { id: window.session.user.id, name: window.session.user.name } : null,
+                expiresAt: window.session.expiresAt,
+                version: window.session.version
             },
             heartbeat: HeartbeatClient.getDiagnostics(),
             origin: OriginAdapter.getDiagnostics(),
@@ -5762,7 +6160,7 @@ const DiagnosticsAgent = {
 };
 
 // =============================================
-// EXPORT DEFAULT_SETTINGS - ADD THIS LINE
+// EXPORT DEFAULT_SETTINGS
 // =============================================
 const DEFAULT_SETTINGS = {
     profile: {
@@ -5859,6 +6257,19 @@ const DEFAULT_SETTINGS = {
 };
 
 // =============================================
+// GET PARENT READY VALUE FUNCTION
+// =============================================
+function getParentReadyValue() {
+    return window.parentReady;
+}
+
+// Session reference - create a module-level variable
+const sessionWindow = window.session;
+
+// Parent ready reference for export
+const parentReadyFlag = window.parentReady;
+
+// =============================================
 // EXPORT ALL PUBLIC FUNCTIONS AND CONSTANTS
 // =============================================
 export {
@@ -5889,7 +6300,6 @@ export {
     MAX_API_RETRIES,
     AUTH_CHECK_INTERVAL,
     TOKEN_CHECK_INTERVAL,
-    MAX_HANDSHAKE_ATTEMPTS,
     HANDSHAKE_RETRY_INTERVAL,
     SESSION_SYNC_TIMEOUT,
     HEARTBEAT_INTERVAL,
@@ -5955,7 +6365,6 @@ export {
     getCoreDiagnostics,
     getHealthMetrics,
     forceRecovery,
-    handshakeState,
     connectionQuality,
     StartupGovernor,
     SessionClient,
@@ -5986,19 +6395,23 @@ export {
     LifecycleState,
     currentState,
     
+    // Session object - export the module-level variable
+    sessionWindow,
+    
     // Additional core functions
     setState,
     isSessionValid,
     updateSetting,
     handleLogout,
-     sendMessageToParent, // Alias for backward compatibility
+    sendMessageToParent,
     setSilentMode,
     shutdownCore,
     initializeCore,
+    authorizedFetch,
     
-    // NEW: Expose queue and parentReady for debugging
+    // Expose queue and parentReady for debugging
     messageQueue,
-    parentReady
+    parentReadyFlag as parentReady
 };
 
 // =============================================
@@ -6022,7 +6435,9 @@ document.addEventListener('DOMContentLoaded', function() {
         }).then(result => {
             if (result.success) {
                 if (result.state === LifecycleState.ACTIVE) {
-                    successLog('Core initialized');
+                    successLog('Core initialized and active');
+                } else {
+                    successLog(`Core initialized, state: ${result.state}`);
                 }
             } else {
                 errorLog('Core initialization failed:', result);
@@ -6047,13 +6462,14 @@ window.__getEnvironment = () => IframeEnvironment.getInfo();
 window.__getTransportStatus = () => IframeTransport.getDiagnostics();
 window.__getSessionStatus = () => ({
     valid: isSessionValid(),
-    user: session.user,
-    expiresAt: session.expiresAt,
-    version: session.version
+    hasToken: !!window.session.token,
+    user: window.session.user,
+    expiresAt: window.session.expiresAt,
+    version: window.session.version
 });
 window.__getLifecycleState = () => currentState;
 window.__getLifecycleHistory = () => stateHistory;
-window.__getParentReady = () => parentReady;
+window.__getParentReady = () => window.parentReady;
 window.__getMessageQueue = () => messageQueue.length;
 
 // =============================================
