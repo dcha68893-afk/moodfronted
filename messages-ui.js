@@ -453,19 +453,25 @@
             const lifecycleMessages = {
                 'BOOT': { text: 'Initializing...', icon: 'fa-cog fa-spin', color: '#ff9800', action: false },
                 'INITIALIZING': { text: 'Loading module...', icon: 'fa-cog fa-spin', color: '#ff9800', action: false },
-                'READY': { text: 'Ready, waiting for parent...', icon: 'fa-handshake', color: '#ff9800', action: false },
-                'WAIT_PARENT': { text: 'Establishing connection...', icon: 'fa-sync-alt fa-spin', color: '#2196f3', action: false },
+                'READY': { text: 'Ready...', icon: 'fa-circle', color: '#ff9800', action: false },
+                'WAIT_PARENT': { text: '', icon: '', color: 'transparent', action: false, hidden: true },
                 'ACTIVE': { text: 'Connected', icon: 'fa-check-circle', color: '#4caf50', action: true }
             };
             
-            const info = lifecycleMessages[lifecycleState] || { text: 'Connecting...', icon: 'fa-cog fa-spin', color: '#ff9800', action: false };
+            const info = lifecycleMessages[lifecycleState] || { text: '', icon: '', color: 'transparent', action: false, hidden: true };
+            
+            // For WAIT_PARENT, hide the status indicator completely
+            if (lifecycleState === 'WAIT_PARENT') {
+                UIFailsafe.safeSetStyle(statusEl, 'display', 'none');
+            } else {
+                UIFailsafe.safeSetStyle(statusEl, 'display', 'flex');
+                UIFailsafe.safeSetHTML(statusEl, `
+                    <i class="fas ${info.icon}" style="color: ${info.color};"></i>
+                    <span>${info.text}</span>
+                `);
+            }
             
             console.log(`[messagesUI] Lifecycle: ${lifecycleState}`);
-            
-            UIFailsafe.safeSetHTML(statusEl, `
-                <i class="fas ${info.icon}" style="color: ${info.color};"></i>
-                <span>${info.text}</span>
-            `);
             
             // Update UI interaction based on lifecycle state
             this._updateUIInteractionState(info.action);
@@ -475,7 +481,7 @@
                 this._updateConnectionUI(true, 'excellent');
             } else if (lifecycleState === 'WAIT_PARENT') {
                 this._updateConnectionUI(false, 'unknown');
-                this._showWaitParentState();
+                // Background connection only - no visual loading state
             } else {
                 this._updateConnectionUI(false, 'unknown');
             }
@@ -524,31 +530,20 @@
             }
         },
         
-        // DETERMINISTIC: Show WAIT_PARENT state in UI
+        // DETERMINISTIC: Show WAIT_PARENT state in UI (BACKGROUND ONLY - NO VISIBLE LOADING)
         _showWaitParentState() {
-            const messagesContainer = UIFailsafe.safeGetElement('messagesContainer');
-            if (messagesContainer && (!messagesContainer.children.length || messagesContainer.querySelector('.wait-parent-state') === null)) {
-                UIFailsafe.safeSetHTML(messagesContainer, `
-                    <div class="wait-parent-state">
-                        <div class="wait-parent-spinner"></div>
-                        <i class="fas fa-handshake" style="font-size: 48px; color: var(--primary-color); margin-bottom: 16px;"></i>
-                        <div class="wait-parent-title">Establishing Connection</div>
-                        <div class="wait-parent-message">Waiting for parent application to establish secure connection...</div>
-                        <div class="wait-parent-submessage">This should only take a moment</div>
-                    </div>
-                `);
-            }
+            // DO NOT SHOW VISIBLE LOADING STATE IN FOREGROUND
+            // Connection happens silently in background
+            // Remove any existing wait-parent-state elements if they exist
+            const waitParentElements = UIFailsafe.safeQuerySelectorAll('.wait-parent-state');
+            UIFailsafe.safeForEach(waitParentElements, (el) => {
+                if (el && el.remove) {
+                    el.remove();
+                }
+            });
             
-            const chatsList = UIFailsafe.safeGetElement('chatsList');
-            if (chatsList && (!chatsList.children.length || chatsList.querySelector('.wait-parent-state') === null)) {
-                UIFailsafe.safeSetHTML(chatsList, `
-                    <div class="wait-parent-state">
-                        <i class="fas fa-spinner fa-pulse" style="font-size: 32px; color: var(--primary-color); margin-bottom: 16px;"></i>
-                        <div class="wait-parent-title">Connecting...</div>
-                        <div class="wait-parent-message">Please wait while connection is established</div>
-                    </div>
-                `);
-            }
+            // Keep UI clean - no loading overlays or connection messages
+            // The user sees a clean interface while connection happens in background
         },
 
         _loadSavedState() {
@@ -580,6 +575,7 @@
                         this.state.parentReady = false;
                         this._notifyListeners('parentReady', false);
                         this._updateConnectionUI(false, 'unknown');
+                        // Background connection - no UI blocking
                     } else if (newState === LIFECYCLE_STATES.READY) {
                         this.state.parentReady = false;
                         this._notifyListeners('parentReady', false);
@@ -682,7 +678,7 @@
                 }
             }
             
-            // Remove WAIT_PARENT overlay if present
+            // Remove any leftover wait-parent-state elements if present
             const waitParentState = UIFailsafe.safeQuerySelector('.wait-parent-state');
             if (waitParentState) {
                 waitParentState.remove();
@@ -800,11 +796,13 @@
                 if (!ready) {
                     UIFailsafe.safeAddClass(tokenStatus, 'pending');
                     const lifecycleState = this.state.lifecycleState;
-                    let message = 'Connecting to parent...';
+                    let message = 'Connecting...';
                     if (lifecycleState === 'READY') {
-                        message = 'Ready, waiting for parent...';
+                        message = 'Ready...';
                     } else if (lifecycleState === 'WAIT_PARENT') {
-                        message = 'Establishing connection...';
+                        // No visible message for WAIT_PARENT - hide status
+                        UIFailsafe.safeSetStyle(tokenStatus, 'display', 'none');
+                        return;
                     }
                     UIFailsafe.safeSetText(tokenStatus, message);
                     UIFailsafe.safeSetStyle(tokenStatus, 'display', 'block');
@@ -867,10 +865,15 @@
                     <span>Handshake: ${handshakeInfo.version || 'legacy'} (${Math.round(handshakeInfo.duration)}ms)</span>
                 `);
             } else if (handshakeInfo.state === 'IN_PROGRESS') {
-                UIFailsafe.safeSetHTML(statusEl, `
-                    <div class="background-fetch-spinner"></div>
-                    <span>Handshake in progress...</span>
-                `);
+                // Hide in-progress handshake for WAIT_PARENT
+                if (this.state.lifecycleState === 'WAIT_PARENT') {
+                    UIFailsafe.safeSetStyle(statusEl, 'display', 'none');
+                } else {
+                    UIFailsafe.safeSetHTML(statusEl, `
+                        <div class="background-fetch-spinner"></div>
+                        <span>Handshake in progress...</span>
+                    `);
+                }
             } else {
                 UIFailsafe.safeSetHTML(statusEl, `
                     <i class="fas fa-handshake" style="color: #ff9800;"></i>
@@ -1008,9 +1011,10 @@
             if (lifecycleState === 'BOOT' || lifecycleState === 'INITIALIZING') {
                 message = 'Initializing module...';
             } else if (lifecycleState === 'READY') {
-                message = 'Waiting for connection...';
+                message = 'Ready...';
             } else if (lifecycleState === 'WAIT_PARENT') {
-                message = 'Establishing connection...';
+                // Return minimal content for WAIT_PARENT - no visible loading
+                return `<div class="passive-loading-state" data-lifecycle="${lifecycleState}" style="opacity:0; height:0; overflow:hidden;"></div>`;
             } else if (lifecycleState === 'ACTIVE') {
                 message = 'Ready';
             }
@@ -3222,8 +3226,8 @@
         _ensureStatusIndicators();
         _removeLoadingOverlays();
         
-        // Show WAIT_PARENT state initially
-        UIStateManager._showWaitParentState();
+        // No visible WAIT_PARENT state - connection happens in background
+        // UI remains clean until ACTIVE
 
         const checkCore = setInterval(() => {
             const lifecycleState = UIFailsafe.getLifecycleState();
@@ -3274,8 +3278,13 @@
                     });
                 }, 0);
             } else if (lifecycleState === LIFECYCLE_STATES.WAIT_PARENT) {
-                // Ensure WAIT_PARENT UI is shown
-                UIStateManager._showWaitParentState();
+                // Ensure no visible WAIT_PARENT UI is shown - background only
+                const waitParentElements = UIFailsafe.safeQuerySelectorAll('.wait-parent-state, .connecting-overlay, .connection-waiting');
+                UIFailsafe.safeForEach(waitParentElements, (el) => {
+                    if (el && el.remove) {
+                        el.remove();
+                    }
+                });
             }
         }, 100);
 
@@ -3336,6 +3345,14 @@
                 UIFailsafe.safeSetStyle(el, 'opacity', '0.5');
             }
         });
+        
+        // Remove any wait-parent-state elements
+        const waitParentElements = UIFailsafe.safeQuerySelectorAll('.wait-parent-state');
+        UIFailsafe.safeForEach(waitParentElements, (el) => {
+            if (el && el.remove) {
+                el.remove();
+            }
+        });
     }
 
     function _updateFallbackUI() {
@@ -3345,7 +3362,7 @@
                 <div class="empty-state">
                     <i class="fas fa-exclamation-triangle empty-icon"></i>
                     <div class="empty-title">Connection issue</div>
-                    <div class="empty-message">Waiting for parent application...</div>
+                    <div class="empty-message">Waiting for connection...</div>
                     <div class="empty-submessage">This should resolve automatically</div>
                 </div>
             `);

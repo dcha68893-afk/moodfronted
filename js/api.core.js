@@ -1,7 +1,8 @@
 // api.core.js - ENHANCED API GATEWAY WITH SECURITY & CROSS-ENVIRONMENT SUPPORT
-// Version: 23.0.8 - FIXED: Session persistence, token restoration on reload
+// Version: 23.0.9 - FIXED: Parent session synchronization, request gating, session normalization
 // Date: 2024-06-21
 // CRITICAL: Single token source, localStorage persistence, guaranteed auth headers
+// ENHANCED: Parent orchestration alignment with chat.html
 
 // ============================================================================
 // MODULE-LEVEL DECLARATIONS (MUST BE OUTSIDE IIFE FOR EXPORTS)
@@ -53,6 +54,29 @@ let isRateLimitError;
 // Token security - SINGLE SOURCE OF TRUTH
 let AUTH_TOKEN = null;
 let TOKEN_READY = false;
+
+// ============================================================================
+// [NEW] PARENT ORCHESTRATION STATE - ADDED FOR SESSION SYNCHRONIZATION
+// ============================================================================
+
+let PARENT_SESSION = null;
+let PARENT_READY = false;
+let SESSION_READY = false;
+let PENDING_REQUESTS = [];
+let IS_PROCESSING_PENDING = false;
+let SESSION_NORMALIZATION_ACTIVE = false;
+
+// Session normalization cache
+let NORMALIZED_USER_ID = null;
+let LAST_SESSION_UPDATE = null;
+let SESSION_UPDATE_COUNT = 0;
+
+// Parent message handlers registry
+let PARENT_MESSAGE_HANDLERS = new Map();
+
+// Request gate state
+let REQUEST_GATE_ACTIVE = false;
+let GATED_REQUESTS_QUEUE = [];
 
 let TokenManager;
 let SecureStorage;
@@ -263,6 +287,410 @@ let getChatHistory;
 let getUnreadCount;
 
 // ============================================================================
+// [NEW] PARENT ORCHESTRATION FUNCTIONS - ADDED FOR SESSION SYNCHRONIZATION
+// ============================================================================
+
+/**
+ * Normalize session data from parent
+ * Ensures consistent types (userId as string or number based on original format)
+ * @param {Object} sessionData - Raw session data from parent
+ * @returns {Object} Normalized session data
+ */
+function _normalizeParentSession(sessionData) {
+    if (!sessionData || typeof sessionData !== 'object') {
+        return null;
+    }
+    
+    const normalized = { ...sessionData };
+    
+    // Normalize userId - preserve original type but ensure consistency
+    if (normalized.userId !== undefined && normalized.userId !== null) {
+        const originalUserId = normalized.userId;
+        
+        // Store both string and number representations for compatibility
+        if (typeof originalUserId === 'number') {
+            normalized.userIdNumber = originalUserId;
+            normalized.userIdString = String(originalUserId);
+        } else if (typeof originalUserId === 'string') {
+            normalized.userIdString = originalUserId;
+            const parsed = parseInt(originalUserId, 10);
+            if (!isNaN(parsed)) {
+                normalized.userIdNumber = parsed;
+            }
+        }
+        
+        // Keep original for backward compatibility
+        normalized._originalUserId = originalUserId;
+    }
+    
+    // Normalize token
+    if (normalized.token && typeof normalized.token === 'string') {
+        normalized.token = normalized.token.trim();
+    }
+    
+    // Ensure authenticated flag
+    if (normalized.authenticated === undefined && normalized.token) {
+        normalized.authenticated = true;
+    }
+    
+    // Add metadata
+    normalized._normalized = true;
+    normalized._normalizedAt = Date.now();
+    normalized._normalizationVersion = '23.0.9';
+    
+    return normalized;
+}
+
+/**
+ * Update internal session from parent
+ * @param {Object} sessionData - Session data from parent
+ * @returns {boolean} Success status
+ */
+function _updateSessionFromParent(sessionData) {
+    try {
+        if (!sessionData || typeof sessionData !== 'object') {
+            console.warn('[PARENT-SYNC] Invalid session data received');
+            return false;
+        }
+        
+        // Normalize session
+        const normalized = _normalizeParentSession(sessionData);
+        if (!normalized) {
+            console.warn('[PARENT-SYNC] Failed to normalize session data');
+            return false;
+        }
+        
+        // Check if session actually changed
+        const sessionChanged = JSON.stringify(PARENT_SESSION) !== JSON.stringify(normalized);
+        
+        if (!sessionChanged && SESSION_READY) {
+            // No change, but ensure we're ready
+            if (!SESSION_READY) {
+                SESSION_READY = true;
+                _processGatedRequests();
+            }
+            return true;
+        }
+        
+        // Store previous session for logging
+        const previousSession = PARENT_SESSION;
+        
+        // Update session
+        PARENT_SESSION = normalized;
+        LAST_SESSION_UPDATE = Date.now();
+        SESSION_UPDATE_COUNT++;
+        
+        // Update token if present
+        if (normalized.token && typeof normalized.token === 'string') {
+            const tokenUpdated = setUserToken(normalized.token, true, 'parent.session');
+            
+            if (tokenUpdated) {
+                console.log('[PARENT-SYNC] ✅ Token updated from parent session');
+                
+                // Update TokenManager for consistency
+                if (TokenManager && typeof TokenManager._setTokenInternal === 'function') {
+                    TokenManager._setTokenInternal(normalized.token);
+                }
+            }
+        }
+        
+        // Update user data if present
+        if (normalized.user && typeof normalized.user === 'object') {
+            const userUpdated = setUserData(normalized.user, true);
+            if (userUpdated) {
+                console.log('[PARENT-SYNC] ✅ User data updated from parent session');
+            }
+        } else if (normalized.userId) {
+            // Create minimal user object from userId
+            const minimalUser = {
+                id: normalized.userIdNumber || normalized.userIdString || normalized.userId,
+                _fromParent: true,
+                _sessionUpdate: SESSION_UPDATE_COUNT
+            };
+            setUserData(minimalUser, true);
+        }
+        
+        // Update NORMALIZED_USER_ID for quick access
+        NORMALIZED_USER_ID = normalized.userIdNumber || normalized.userIdString || normalized.userId;
+        
+        // Mark session as ready
+        const wasReady = SESSION_READY;
+        SESSION_READY = true;
+        
+        // Update request queue dependencies
+        if (RequestQueue && typeof RequestQueue.updateDependency === 'function') {
+            RequestQueue.updateDependency('parentReady', PARENT_READY);
+            RequestQueue.updateDependency('sessionReady', SESSION_READY);
+        }
+        
+        // Update token readiness
+        TOKEN_READY = !!normalized.token;
+        
+        // Log session update
+        console.log(`[PARENT-SYNC] 📡 Session updated (v${SESSION_UPDATE_COUNT})`, {
+            hasToken: !!normalized.token,
+            hasUser: !!normalized.user,
+            userId: NORMALIZED_USER_ID,
+            wasReady,
+            isReady: SESSION_READY,
+            timestamp: new Date().toISOString()
+        });
+        
+        // Dispatch session update event
+        if (typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('parent-session-updated', {
+                detail: {
+                    session: normalized,
+                    updateCount: SESSION_UPDATE_COUNT,
+                    previous: previousSession ? {
+                        hasToken: !!previousSession.token,
+                        hasUser: !!previousSession.user
+                    } : null,
+                    timestamp: new Date().toISOString()
+                }
+            }));
+        }
+        
+        // Process any pending requests that were waiting for session
+        if (!wasReady && SESSION_READY) {
+            _processGatedRequests();
+        }
+        
+        return true;
+        
+    } catch (error) {
+        console.error('[PARENT-SYNC] Failed to update session:', error);
+        return false;
+    }
+}
+
+/**
+ * Gate requests until session is ready
+ * @param {Function} requestFn - Request function to execute when session ready
+ * @param {Object} options - Request options
+ * @returns {Promise} Promise that resolves when request can proceed
+ */
+function _gateRequest(requestFn, options = {}) {
+    return new Promise((resolve, reject) => {
+        // If session is ready and we have token (if auth required), execute immediately
+        const requiresAuth = options.auth !== false && !isPublicEndpoint(options.endpoint || '');
+        
+        if (SESSION_READY && (!requiresAuth || (AUTH_TOKEN && TOKEN_READY))) {
+            requestFn().then(resolve).catch(reject);
+            return;
+        }
+        
+        // Add to gated queue
+        const requestId = `gated_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        
+        GATED_REQUESTS_QUEUE.push({
+            id: requestId,
+            fn: requestFn,
+            resolve,
+            reject,
+            options,
+            requiresAuth,
+            createdAt: Date.now(),
+            endpoint: options.endpoint || 'unknown'
+        });
+        
+        // Log gated request
+        console.debug(`[REQUEST-GATE] Request gated (${requestId})`, {
+            endpoint: options.endpoint,
+            requiresAuth,
+            sessionReady: SESSION_READY,
+            hasToken: !!AUTH_TOKEN,
+            queueSize: GATED_REQUESTS_QUEUE.length
+        });
+        
+        // Set timeout to prevent infinite waiting
+        const timeout = setTimeout(() => {
+            const index = GATED_REQUESTS_QUEUE.findIndex(r => r.id === requestId);
+            if (index !== -1) {
+                GATED_REQUESTS_QUEUE.splice(index, 1);
+                reject(new KnectaError(
+                    `Request gated timeout after ${options.gateTimeout || 30000}ms`,
+                    408,
+                    'GATE_TIMEOUT',
+                    { endpoint: options.endpoint, requestId }
+                ));
+            }
+        }, options.gateTimeout || 30000);
+        
+        // Store timeout for cleanup
+        GATED_REQUESTS_QUEUE[GATED_REQUESTS_QUEUE.length - 1].timeout = timeout;
+    });
+}
+
+/**
+ * Process gated requests when session becomes ready
+ */
+function _processGatedRequests() {
+    if (IS_PROCESSING_PENDING || GATED_REQUESTS_QUEUE.length === 0) {
+        return;
+    }
+    
+    IS_PROCESSING_PENDING = true;
+    
+    console.log(`[REQUEST-GATE] Processing ${GATED_REQUESTS_QUEUE.length} gated requests`);
+    
+    // Process in order
+    const requestsToProcess = [...GATED_REQUESTS_QUEUE];
+    GATED_REQUESTS_QUEUE = [];
+    
+    requestsToProcess.forEach(request => {
+        // Clear timeout
+        if (request.timeout) {
+            clearTimeout(request.timeout);
+        }
+        
+        // Check if request can be executed now
+        const requiresAuth = request.requiresAuth;
+        
+        if (!requiresAuth || (AUTH_TOKEN && TOKEN_READY)) {
+            request.fn()
+                .then(request.resolve)
+                .catch(request.reject);
+        } else {
+            // Still can't execute - re-queue with delay
+            setTimeout(() => {
+                GATED_REQUESTS_QUEUE.push(request);
+                _processGatedRequests();
+            }, 100);
+        }
+    });
+    
+    IS_PROCESSING_PENDING = false;
+    
+    if (GATED_REQUESTS_QUEUE.length > 0) {
+        // Some requests still waiting
+        console.log(`[REQUEST-GATE] ${GATED_REQUESTS_QUEUE.length} requests still waiting`);
+    }
+}
+
+/**
+ * Initialize parent message listeners
+ */
+function _initParentMessageListeners() {
+    if (typeof window === 'undefined') return;
+    
+    // Listen for messages from parent
+    window.addEventListener('message', (event) => {
+        try {
+            const { type, data, source } = event.data || {};
+            
+            // Only process messages from parent (or trusted sources)
+            const isTrusted = source === 'parent' || 
+                             (event.source === window.parent && window.parent !== window) ||
+                             (event.origin === window.location.origin);
+            
+            if (!isTrusted && type !== 'PARENT_READY' && type !== 'SESSION_DATA') {
+                return;
+            }
+            
+            // Handle PARENT_READY message
+            if (type === 'PARENT_READY') {
+                PARENT_READY = true;
+                
+                console.log('[PARENT-SYNC] Parent ready signal received');
+                
+                // Update dependencies
+                if (RequestQueue && typeof RequestQueue.updateDependency === 'function') {
+                    RequestQueue.updateDependency('parentReady', true);
+                }
+                
+                // Dispatch event
+                window.dispatchEvent(new CustomEvent('parent-ready', {
+                    detail: {
+                        timestamp: new Date().toISOString(),
+                        data: data
+                    }
+                }));
+                
+                return;
+            }
+            
+            // Handle SESSION_DATA message
+            if (type === 'SESSION_DATA' || type === 'SESSION_UPDATE') {
+                const sessionData = data || event.data.session;
+                
+                if (sessionData) {
+                    console.log('[PARENT-SYNC] Session data received from parent');
+                    _updateSessionFromParent(sessionData);
+                }
+                
+                return;
+            }
+            
+            // Handle custom handlers
+            if (PARENT_MESSAGE_HANDLERS.has(type)) {
+                const handler = PARENT_MESSAGE_HANDLERS.get(type);
+                handler(event.data);
+            }
+            
+        } catch (error) {
+            console.error('[PARENT-SYNC] Message handler error:', error);
+        }
+    });
+    
+    // Also check if we're in an iframe and parent might already be ready
+    if (window !== window.parent) {
+        // Send READY message to parent
+        window.parent.postMessage({
+            type: 'CHILD_READY',
+            data: {
+                version: '23.0.9',
+                timestamp: new Date().toISOString(),
+                requiresSession: true
+            }
+        }, '*');
+        
+        // Request session from parent if we have a ready promise
+        setTimeout(() => {
+            if (!SESSION_READY && !PARENT_SESSION) {
+                window.parent.postMessage({
+                    type: 'REQUEST_SESSION',
+                    data: {
+                        version: '23.0.9',
+                        timestamp: new Date().toISOString()
+                    }
+                }, '*');
+            }
+        }, 100);
+    } else {
+        // Not in iframe - mark parent as ready (self-contained)
+        PARENT_READY = true;
+        SESSION_READY = true;
+        
+        // Try to restore session from storage
+        const storedToken = _getTokenFromStorage();
+        if (storedToken) {
+            PARENT_SESSION = {
+                token: storedToken,
+                authenticated: true,
+                userId: _getUserFromStorage()?.id || null,
+                user: _getUserFromStorage(),
+                _source: 'storage',
+                _normalized: true
+            };
+            SESSION_READY = true;
+            TOKEN_READY = true;
+        }
+    }
+}
+
+/**
+ * Register custom parent message handler
+ * @param {string} type - Message type
+ * @param {Function} handler - Handler function
+ * @returns {Function} Unregister function
+ */
+function _registerParentMessageHandler(type, handler) {
+    PARENT_MESSAGE_HANDLERS.set(type, handler);
+    return () => PARENT_MESSAGE_HANDLERS.delete(type);
+}
+
+// ============================================================================
 // [FIX] SINGLE TOKEN SOURCE - WITH SOURCE TRACKING AND PERSISTENCE
 // ============================================================================
 
@@ -343,7 +771,7 @@ function _saveAuthToStorage(token, user = null) {
             token: token,
             user: user || getCurrentUser() || null,
             timestamp: Date.now(),
-            version: '23.0.8'
+            version: '23.0.9'
         };
         
         localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(authData));
@@ -433,6 +861,21 @@ setUserToken = function(token, skipManager = false, source = 'unknown') {
             RequestQueue.updateDependency('tokenReady', true);
         }
         
+        // Update parent session if we're updating token
+        if (PARENT_SESSION && source !== 'parent.session') {
+            // Sync back to parent if this token came from elsewhere
+            if (window !== window.parent && window.parent && typeof window.parent.postMessage === 'function') {
+                window.parent.postMessage({
+                    type: 'TOKEN_UPDATE',
+                    data: {
+                        token: sanitizedToken,
+                        source: source,
+                        timestamp: new Date().toISOString()
+                    }
+                }, '*');
+            }
+        }
+        
         // Dispatch event
         if (typeof window !== 'undefined') {
             window.dispatchEvent(new CustomEvent('token-stored', {
@@ -454,6 +897,11 @@ setUserToken = function(token, skipManager = false, source = 'unknown') {
             _lastTokenSource = source;
         }
         
+        // Process any gated requests now that token is available
+        if (SESSION_READY && GATED_REQUESTS_QUEUE.length > 0) {
+            _processGatedRequests();
+        }
+        
         _isSettingToken = false;
         return true;
         
@@ -473,6 +921,14 @@ getUserToken = function(caller = 'unknown') {
     // If we have AUTH_TOKEN in memory, return it
     if (AUTH_TOKEN) {
         // console.log('[Auth Debug] Token from memory:', AUTH_TOKEN.substring(0, 10) + '...');
+        return AUTH_TOKEN;
+    }
+    
+    // Check parent session first (if available)
+    if (PARENT_SESSION && PARENT_SESSION.token && typeof PARENT_SESSION.token === 'string') {
+        AUTH_TOKEN = PARENT_SESSION.token;
+        TOKEN_READY = true;
+        // console.log('[Auth Debug] Token from parent session:', AUTH_TOKEN.substring(0, 10) + '...');
         return AUTH_TOKEN;
     }
     
@@ -524,6 +980,17 @@ clearUserToken = function(source = 'unknown') {
         // Update request queue dependency
         if (RequestQueue && typeof RequestQueue.updateDependency === 'function') {
             RequestQueue.updateDependency('tokenReady', false);
+        }
+        
+        // Notify parent if we're in iframe
+        if (window !== window.parent && window.parent && typeof window.parent.postMessage === 'function') {
+            window.parent.postMessage({
+                type: 'TOKEN_CLEARED',
+                data: {
+                    source: source,
+                    timestamp: new Date().toISOString()
+                }
+            }, '*');
         }
         
         // Dispatch event
@@ -628,20 +1095,33 @@ waitForToken = async function() {
 };
 
 /**
- * Guarded request with token wait
+ * Guarded request with token wait and session gating
  * @param {string} url - Request URL
  * @param {Object} options - Request options
  * @returns {Promise<Object>} Response
  */
 guardedRequest = async function(url, options = {}) {
-    // Wait for token if this endpoint requires auth
+    // Determine if this endpoint requires authentication
     const endpointPath = url.startsWith('http') ? new URL(url).pathname : url;
     const isPublic = isPublicEndpoint(endpointPath);
     const isAuth = isAuthEndpoint(endpointPath);
     const isStatus = isStatusEndpoint(endpointPath);
     
-    if (!(options.auth === false || isPublic || isAuth || isStatus)) {
+    const requiresAuth = !(options.auth === false || isPublic || isAuth || isStatus);
+    
+    // [NEW] Gate request until session is ready
+    if (requiresAuth && !SESSION_READY) {
+        return _gateRequest(() => guardedRequest(url, { ...options, _gated: true }), {
+            endpoint: endpointPath,
+            requiresAuth,
+            gateTimeout: options.timeout || 30000
+        });
+    }
+    
+    // Wait for token if required
+    if (requiresAuth) {
         await waitForToken();
+        ensureToken();
     }
     
     return secureApiFetch(url, options);
@@ -752,6 +1232,15 @@ secureApiFetch = async function(url, options = {}) {
         
         // [FIX] CRITICAL: Wait for token if required
         if (requiresAuth) {
+            // [NEW] Also ensure session is ready
+            if (!SESSION_READY && !options._gated) {
+                return _gateRequest(() => secureApiFetch(url, { ...options, _gated: true }), {
+                    endpoint: endpointPath,
+                    requiresAuth,
+                    gateTimeout: options.timeout || 30000
+                });
+            }
+            
             await waitForToken();
             ensureToken();
         }
@@ -1931,7 +2420,7 @@ isRateLimitError = function(error) {
 SecureStorage = {
     _encryptionKey: 'moodchat_secure_v23_2024',
     _prefix: 'sc_v23_',
-    _version: '23.0.8',
+    _version: '23.0.9',
     _salt: Math.random().toString(36).substring(2, 15),
     
     /**
@@ -2734,7 +3223,7 @@ CacheManager = {
                 data,
                 expiresAt,
                 timestamp: Date.now(),
-                version: '23.0.8'
+                version: '23.0.9'
             };
             
             this._memoryCache.set(cacheKey, cacheItem);
@@ -3035,7 +3524,9 @@ RequestQueue = {
         environment: false,
         bootstrap: false,
         tokenReady: false,
-        apiCoreReady: false
+        apiCoreReady: false,
+        parentReady: false,     // [NEW] Parent readiness dependency
+        sessionReady: false      // [NEW] Session readiness dependency
     },
     
     /**
@@ -3097,8 +3588,13 @@ RequestQueue = {
             return false;
         }
         
-        // Check if dependencies are satisfied
+        // [NEW] If requires auth, ensure parent ready or session ready
         if (request.requiresAuth) {
+            // Check session readiness
+            if (!this._dependencies.sessionReady && !SESSION_READY) {
+                return false;
+            }
+            
             const token = getUserToken('RequestQueue');
             if (!token) return false;
         }
@@ -3732,7 +4228,7 @@ SAIC.initialize();
         const existing = root.__API_CORE;
         
         // Check version - if ours is newer, we should load (but preserve features)
-        if (existing && existing.version && existing.version >= '23.0.8') {
+        if (existing && existing.version && existing.version >= '23.0.9') {
             console.log('[API-CORE] Already loaded v' + existing.version + ', skipping initialization');
             
             // Ensure all bridge properties exist
@@ -3756,11 +4252,11 @@ SAIC.initialize();
         }
         
         // If older version, we'll overwrite but preserve critical data
-        console.log('[API-CORE] Upgrading from v' + (existing ? existing.version : 'unknown') + ' to v23.0.8');
+        console.log('[API-CORE] Upgrading from v' + (existing ? existing.version : 'unknown') + ' to v23.0.9');
     }
     
     // Set loaded flag immediately to prevent parallel initialization
-    root.__API_CORE_LOADED_V23 = '23.0.8';
+    root.__API_CORE_LOADED_V23 = '23.0.9';
     
     // ============================================================================
     // GLOBAL REGISTRATION - MUST EXIST IMMEDIATELY
@@ -3790,7 +4286,7 @@ SAIC.initialize();
     // ============================================================================
     
     const requiredProperties = {
-        version: '23.0.8',
+        version: '23.0.9',
         initialized: false,
         ready: SAIC.readyPromise,
         secureApiFetch: null,
@@ -3847,7 +4343,7 @@ SAIC.initialize();
     if (!root.api.core) {
         root.api.core = {
             __initializing: true,
-            __version: '23.0.8'
+            __version: '23.0.9'
         };
     }
     
@@ -3881,6 +4377,12 @@ SAIC.initialize();
             version: root.__API_CORE.version,
             state: SAIC.currentState,
             stages: SAIC.stageResults,
+            parentSync: {
+                parentReady: PARENT_READY,
+                sessionReady: SESSION_READY,
+                hasSession: !!PARENT_SESSION,
+                sessionUpdateCount: SESSION_UPDATE_COUNT
+            },
             dependencies: {
                 request: typeof root.api.request !== 'undefined',
                 auth: typeof root.api.auth !== 'undefined',
@@ -3915,6 +4417,12 @@ SAIC.initialize();
         try {
             if (root.currentUser) {
                 return root.currentUser;
+            }
+            
+            // Try parent session first
+            if (PARENT_SESSION && PARENT_SESSION.user) {
+                root.currentUser = PARENT_SESSION.user;
+                return PARENT_SESSION.user;
             }
             
             // Try to get user from storage first
@@ -3979,6 +4487,17 @@ SAIC.initialize();
                 _saveAuthToStorage(currentToken, safeData);
             }
             
+            // Update parent session if we're in iframe
+            if (window !== window.parent && window.parent && typeof window.parent.postMessage === 'function') {
+                window.parent.postMessage({
+                    type: 'USER_UPDATE',
+                    data: {
+                        user: safeData,
+                        timestamp: new Date().toISOString()
+                    }
+                }, '*');
+            }
+            
             if (!skipLegacy) {
                 try {
                     localStorage.setItem('moodchat_auth_user', JSON.stringify(safeData));
@@ -4026,6 +4545,13 @@ SAIC.initialize();
             // Clear main auth storage
             _clearAuthFromStorage();
             
+            // Reset parent session if needed
+            if (source !== 'parent.clear') {
+                PARENT_SESSION = null;
+                SESSION_READY = false;
+                NORMALIZED_USER_ID = null;
+            }
+            
             const legacyKeys = [
                 'accessToken', 'moodchat_token', 'token', 'moodchat_auth_token',
                 'authToken', 'authUser', 'moodchat_auth_user', 'userData',
@@ -4061,6 +4587,11 @@ SAIC.initialize();
      * @returns {boolean} True if valid
      */
     isSessionValid = function() {
+        // Check parent session first
+        if (PARENT_SESSION && PARENT_SESSION.token && PARENT_SESSION.authenticated !== false) {
+            return true;
+        }
+        
         const token = getUserToken('isSessionValid');
         const user = getCurrentUser();
         
@@ -4081,6 +4612,20 @@ SAIC.initialize();
      * @returns {Object} Session data
      */
     getSession = function() {
+        // Return parent session if available
+        if (PARENT_SESSION) {
+            return {
+                ...PARENT_SESSION,
+                token: getUserToken('getSession'),
+                user: getCurrentUser(),
+                expires: TokenManager ? TokenManager.getTokenExpiry() : null,
+                created: TokenManager ? TokenManager.getTokenCreated() : null,
+                valid: isSessionValid(),
+                _fromParent: true,
+                timestamp: new Date().toISOString()
+            };
+        }
+        
         return {
             token: getUserToken('getSession'),
             user: getCurrentUser(),
@@ -4106,6 +4651,12 @@ SAIC.initialize();
             if (data.user) {
                 setUserData(data.user);
             }
+            
+            // Update parent session if this came from parent
+            if (data._fromParent) {
+                _updateSessionFromParent(data);
+            }
+            
             return true;
         } catch (error) {
             console.error('[SESSION] Set session data error:', error);
@@ -4221,6 +4772,23 @@ SAIC.initialize();
                         _saveAuthToStorage(token);
                     }
                     
+                    // Update parent session
+                    if (window !== window.parent && window.parent && typeof window.parent.postMessage === 'function') {
+                        window.parent.postMessage({
+                            type: 'SESSION_UPDATE',
+                            data: {
+                                token: token,
+                                user: user,
+                                authenticated: true,
+                                timestamp: new Date().toISOString()
+                            }
+                        }, '*');
+                    }
+                    
+                    // Mark session as ready
+                    SESSION_READY = true;
+                    RequestQueue.updateDependency('sessionReady', true);
+                    
                     root.dispatchEvent(new CustomEvent('user-logged-in', {
                         detail: {
                             user: user || { email: credentials.identifier || credentials.email },
@@ -4249,6 +4817,7 @@ SAIC.initialize();
                         setUserToken(possibleToken[0], true, 'login.plaintext');
                         RequestQueue.updateDependency('tokenReady', true);
                         _saveAuthToStorage(possibleToken[0]);
+                        SESSION_READY = true;
                     }
                 }
             }
@@ -4284,6 +4853,12 @@ SAIC.initialize();
         clearAllAuthData('logout');
         
         RequestQueue.updateDependency('tokenReady', false);
+        RequestQueue.updateDependency('sessionReady', false);
+        
+        // Reset session state
+        PARENT_SESSION = null;
+        SESSION_READY = false;
+        NORMALIZED_USER_ID = null;
         
         root.dispatchEvent(new CustomEvent('user-logged-out', {
             detail: { timestamp: new Date().toISOString() }
@@ -4461,6 +5036,10 @@ SAIC.initialize();
                 // No stored token, safe to clear
                 clearUserToken('handleUnauthorizedAccess');
                 
+                // Reset parent session
+                PARENT_SESSION = null;
+                SESSION_READY = false;
+                
                 // Emit event for EventBus listeners (non-blocking)
                 root.dispatchEvent(new CustomEvent('auth:unauthorized-handled', {
                     detail: {
@@ -4474,6 +5053,7 @@ SAIC.initialize();
                 localStorage.setItem('_auth_clearing_in_progress', 'true');
                 
                 RequestQueue.updateDependency('tokenReady', false);
+                RequestQueue.updateDependency('sessionReady', false);
                 
                 // Debounced redirect to login
                 if (!root.location.pathname.includes('/login') && 
@@ -4500,6 +5080,7 @@ SAIC.initialize();
                 // We have a stored token but memory token is invalid, try to restore
                 console.log('[API] Attempting to restore token from storage after 401');
                 setUserToken(storedToken, false, '401.restore');
+                SESSION_READY = true;
             }
         };
     })();
@@ -4525,6 +5106,12 @@ SAIC.initialize();
         }
         
         RequestQueue.updateDependency('tokenReady', !!token);
+        
+        // If we have a token, mark session as ready (but wait for parent if applicable)
+        if (token && !PARENT_SESSION) {
+            SESSION_READY = true;
+            RequestQueue.updateDependency('sessionReady', true);
+        }
         
         return { token, user };
     };
@@ -5782,7 +6369,10 @@ SAIC.initialize();
             isProcessing: ORCHESTRATION_STATE.isQueueProcessing,
             activeRequests: ORCHESTRATION_STATE.activeRequests.size,
             coreReady: SAIC.currentState === SAIC.STATES.READY,
-            iframesConnected: ORCHESTRATION_STATE.iframes.size
+            iframesConnected: ORCHESTRATION_STATE.iframes.size,
+            gatedRequests: GATED_REQUESTS_QUEUE.length,
+            parentReady: PARENT_READY,
+            sessionReady: SESSION_READY
         };
     };
     
@@ -5974,7 +6564,7 @@ SAIC.initialize();
     // ============================================================================
     
     ApiGateway = {
-        version: '23.0.8',
+        version: '23.0.9',
         build: '2024-06-21',
         
         env: {
@@ -6247,6 +6837,16 @@ SAIC.initialize();
         setToken: setUserToken,
         getToken: getUserToken,
         
+        // Parent orchestration API
+        parentSync: {
+            getSession: () => PARENT_SESSION,
+            isReady: () => SESSION_READY,
+            isParentReady: () => PARENT_READY,
+            getUpdateCount: () => SESSION_UPDATE_COUNT,
+            getNormalizedUserId: () => NORMALIZED_USER_ID,
+            registerHandler: _registerParentMessageHandler
+        },
+        
         /**
          * Get gateway status
          * @returns {Object} Status object
@@ -6278,11 +6878,19 @@ SAIC.initialize();
                         email: getCurrentUser()?.email
                     } : null
                 },
+                parentSync: {
+                    parentReady: PARENT_READY,
+                    sessionReady: SESSION_READY,
+                    hasSession: !!PARENT_SESSION,
+                    sessionUpdateCount: SESSION_UPDATE_COUNT,
+                    normalizedUserId: NORMALIZED_USER_ID
+                },
                 cache: {
                     size: CacheManager ? CacheManager._memoryCache.size : 0,
                     stats: CacheManager ? CacheManager.getStats() : {}
                 },
                 queue: RequestQueue ? RequestQueue.getStatus() : {},
+                gatedRequests: GATED_REQUESTS_QUEUE.length,
                 network: {
                     online: navigator.onLine,
                     backendReachable: root.AppNetwork ? root.AppNetwork.isBackendReachable : null,
@@ -6313,7 +6921,7 @@ SAIC.initialize();
         SAIC.acquireLock();
         SAIC.transitionTo(SAIC.STATES.INITIALIZING);
         
-        console.log('[API-CORE] Initializing API Gateway v23.0.8');
+        console.log('[API-CORE] Initializing API Gateway v23.0.9');
         
         try {
             // STAGE 1: Environment detection
@@ -6382,7 +6990,23 @@ SAIC.initialize();
                 SAIC.recordStage('token', true, { warning: 'Token system not available' });
             }
             
-            // STAGE 6: Dependency verification
+            // STAGE 6: Parent synchronization setup - NEW
+            SAIC.recordStage('parentSync', true);
+            
+            // Initialize parent message listeners
+            _initParentMessageListeners();
+            
+            // Update dependencies
+            RequestQueue.updateDependency('parentReady', PARENT_READY);
+            RequestQueue.updateDependency('sessionReady', SESSION_READY);
+            
+            SAIC.recordStage('parentSync', true, {
+                parentReady: PARENT_READY,
+                isIframe: window !== window.parent,
+                hasParent: !!(window.parent && window.parent !== window)
+            });
+            
+            // STAGE 7: Dependency verification
             SAIC.recordStage('dependencies', true);
             
             RequestQueue.updateDependency('bootstrap', true);
@@ -6390,10 +7014,11 @@ SAIC.initialize();
             SAIC.recordStage('dependencies', true, {
                 environment: true,
                 config: true,
-                tokenReady: !!getUserToken('init.stage6')
+                tokenReady: !!getUserToken('init.stage7'),
+                parentReady: PARENT_READY
             });
             
-            // STAGE 7: Security firewall setup
+            // STAGE 8: Security firewall setup
             SAIC.recordStage('security', true);
             
             // Security functions already defined
@@ -6402,7 +7027,7 @@ SAIC.initialize();
                 publicEndpoints: PUBLIC_ENDPOINTS.length
             });
             
-            // STAGE 8: Endpoint registry setup
+            // STAGE 9: Endpoint registry setup
             SAIC.recordStage('endpoint', true);
             
             // Endpoint functions already defined
@@ -6411,7 +7036,7 @@ SAIC.initialize();
                 authEndpoints: AUTH_ENDPOINTS.length
             });
             
-            // STAGE 9: Self-tests
+            // STAGE 10: Self-tests
             SAIC.recordStage('selftest', true);
             
             try {
@@ -6422,7 +7047,7 @@ SAIC.initialize();
                 // Non-fatal - continue
             }
             
-            // STAGE 10: AppNetwork setup
+            // STAGE 11: AppNetwork setup
             SAIC.recordStage('network', true);
             
             if (!root.AppNetwork) {
@@ -6467,20 +7092,28 @@ SAIC.initialize();
             
             // Check if all critical dependencies are ready before transitioning to READY
             const configReady = !!ACTIVE_BASE_URL;
-            const tokenReady = !!getUserToken('init.final');
             const apiConfigValid = true;
             
-            if (configReady && apiConfigValid) {
+            // For iframes, we wait for parent ready or session ready
+            const isInIframe = window !== window.parent;
+            const parentDepsMet = !isInIframe || PARENT_READY || SESSION_READY;
+            
+            if (configReady && apiConfigValid && parentDepsMet) {
                 // All stages complete - transition to READY
                 SAIC.transitionTo(SAIC.STATES.READY);
                 
                 const readyEvent = new CustomEvent('api-gateway-ready', {
                     detail: {
-                        version: '23.0.8',
+                        version: '23.0.9',
                         environment: CURRENT_ENVIRONMENT,
                         baseUrl: ACTIVE_BASE_URL,
                         timestamp: new Date().toISOString(),
                         stages: SAIC.stageResults,
+                        parentSync: {
+                            parentReady: PARENT_READY,
+                            sessionReady: SESSION_READY,
+                            hasSession: !!PARENT_SESSION
+                        },
                         features: [
                             'base-url-control',
                             'auto-environment-detection',
@@ -6507,7 +7140,10 @@ SAIC.initialize();
                             'token-source-tracking',
                             'session-persistence',
                             'token-restore-on-load',
-                            'selective-session-clear'
+                            'selective-session-clear',
+                            'parent-session-sync',
+                            'request-gating',
+                            'session-normalization'
                         ]
                     }
                 });
@@ -6517,16 +7153,22 @@ SAIC.initialize();
                 console.log('[API-CORE] ✅ Initialized successfully', {
                     environment: CURRENT_ENVIRONMENT,
                     baseUrl: ACTIVE_BASE_URL,
-                    version: '23.0.8',
+                    version: '23.0.9',
                     state: SAIC.currentState,
                     duration: Date.now() - SAIC.initializationStartTime,
-                    hasToken: !!getUserToken('init.success')
+                    hasToken: !!getUserToken('init.success'),
+                    parentReady: PARENT_READY,
+                    sessionReady: SESSION_READY,
+                    isIframe: window !== window.parent
                 });
             } else {
                 // If not ready, stay in INITIALIZING state
                 console.warn('[API-CORE] ⚠️ Initialization incomplete - waiting for dependencies', {
                     configReady,
-                    tokenReady
+                    parentDepsMet,
+                    isIframe: window !== window.parent,
+                    parentReady: PARENT_READY,
+                    sessionReady: SESSION_READY
                 });
             }
             
@@ -6534,9 +7176,14 @@ SAIC.initialize();
                 success: SAIC.currentState === SAIC.STATES.READY,
                 environment: CURRENT_ENVIRONMENT,
                 baseUrl: ACTIVE_BASE_URL,
-                version: '23.0.8',
+                version: '23.0.9',
                 state: SAIC.currentState,
                 stages: SAIC.stageResults,
+                parentSync: {
+                    parentReady: PARENT_READY,
+                    sessionReady: SESSION_READY,
+                    hasSession: !!PARENT_SESSION
+                },
                 timestamp: new Date().toISOString()
             };
             
@@ -6685,6 +7332,14 @@ SAIC.initialize();
             results.failed++;
         }
         
+        // Test 9: Parent synchronization - NEW
+        results.tests.push({ 
+            name: 'parent sync initialization', 
+            passed: typeof _initParentMessageListeners === 'function',
+            details: 'Parent message handlers initialized'
+        });
+        results.passed++;
+        
         return results;
     }
     
@@ -6735,7 +7390,7 @@ SAIC.initialize();
         setUserToken: setUserToken,
         getUserToken: getUserToken,
         clearToken: clearUserToken,
-        version: '23.0.8'
+        version: '23.0.9'
     };
     
     root.API_READY = SAIC.currentState === SAIC.STATES.READY;
@@ -6783,7 +7438,7 @@ SAIC.initialize();
     // ============================================================================
     
     Object.assign(root.__API_CORE, {
-        version: '23.0.8',
+        version: '23.0.9',
         initialized: SAIC.currentState === SAIC.STATES.READY,
         ready: SAIC.readyPromise,
         secureApiFetch: secureApiFetch,
@@ -6796,7 +7451,13 @@ SAIC.initialize();
         on: eventEmitter.on.bind(eventEmitter),
         emit: eventEmitter.emit.bind(eventEmitter),
         __bootstrapped: true,
-        getState: SAIC.getState
+        getState: SAIC.getState,
+        parentSync: {
+            parentReady: PARENT_READY,
+            sessionReady: SESSION_READY,
+            hasSession: !!PARENT_SESSION,
+            updateCount: SESSION_UPDATE_COUNT
+        }
     });
     
     // Ensure legacy bridges
@@ -6804,13 +7465,19 @@ SAIC.initialize();
     root.api_core = root.api_core || root.__API_CORE;
     
     root.__API_GATEWAY = {
-        version: '23.0.8',
+        version: '23.0.9',
         build: '2024-06-21',
         environment: CURRENT_ENVIRONMENT,
         baseUrl: ACTIVE_BASE_URL,
         initialized: SAIC.currentState === SAIC.STATES.READY,
         state: SAIC.currentState,
         stages: SAIC.stageResults,
+        parentSync: {
+            parentReady: PARENT_READY,
+            sessionReady: SESSION_READY,
+            hasSession: !!PARENT_SESSION,
+            updateCount: SESSION_UPDATE_COUNT
+        },
         timestamp: new Date().toISOString(),
         features: [
             'base-url-control',
@@ -6838,7 +7505,10 @@ SAIC.initialize();
             'token-source-tracking',
             'session-persistence',
             'token-restore-on-load',
-            'selective-session-clear'
+            'selective-session-clear',
+            'parent-session-sync',
+            'request-gating',
+            'session-normalization'
         ]
     };
     
@@ -6854,7 +7524,7 @@ SAIC.initialize();
     if (!root.api.core) {
         root.api.core = {
             __initializing: SAIC.currentState === SAIC.STATES.INITIALIZING,
-            __version: '23.0.8',
+            __version: '23.0.9',
             ready: coreReadyPromise,
             waitFor: function() { 
                 return coreReadyPromise; 
@@ -6874,7 +7544,11 @@ SAIC.initialize();
                     initializing: SAIC.currentState === SAIC.STATES.INITIALIZING,
                     failed: SAIC.currentState === SAIC.STATES.FAILED,
                     state: SAIC.currentState,
-                    version: '23.0.8'
+                    version: '23.0.9',
+                    parentSync: {
+                        parentReady: PARENT_READY,
+                        sessionReady: SESSION_READY
+                    }
                 };
             },
             init: function() {
@@ -6900,7 +7574,11 @@ SAIC.initialize();
                 initializing: SAIC.currentState === SAIC.STATES.INITIALIZING,
                 failed: SAIC.currentState === SAIC.STATES.FAILED,
                 state: SAIC.currentState,
-                version: '23.0.8'
+                version: '23.0.9',
+                parentSync: {
+                    parentReady: PARENT_READY,
+                    sessionReady: SESSION_READY
+                }
             };
         };
         root.api.core.init = root.api.core.init || function() { return coreReadyPromise; };
@@ -6916,10 +7594,14 @@ SAIC.initialize();
         try {
             root.dispatchEvent(new CustomEvent('api-core-ready', {
                 detail: {
-                    version: '23.0.8',
+                    version: '23.0.9',
                     environment: CURRENT_ENVIRONMENT,
                     baseUrl: ACTIVE_BASE_URL,
                     timestamp: new Date().toISOString(),
+                    parentSync: {
+                        parentReady: PARENT_READY,
+                        sessionReady: SESSION_READY
+                    },
                     features: root.__API_GATEWAY.features
                 }
             }));
@@ -6930,9 +7612,13 @@ SAIC.initialize();
         if (root.__API_CORE && typeof root.__API_CORE.emit === 'function') {
             try {
                 root.__API_CORE.emit('ready', {
-                    version: '23.0.8',
+                    version: '23.0.9',
                     environment: CURRENT_ENVIRONMENT,
-                    timestamp: new Date().toISOString()
+                    timestamp: new Date().toISOString(),
+                    parentSync: {
+                        parentReady: PARENT_READY,
+                        sessionReady: SESSION_READY
+                    }
                 });
             } catch (e) {
                 console.warn('[API-CORE] Failed to emit ready event:', e);
@@ -6943,9 +7629,14 @@ SAIC.initialize();
     console.log('[API-CORE] ✅ Fully loaded', {
         environment: CURRENT_ENVIRONMENT,
         baseUrl: ACTIVE_BASE_URL,
-        version: '23.0.8',
+        version: '23.0.9',
         state: SAIC.currentState,
         stages: Object.keys(SAIC.stageResults).length,
+        parentSync: {
+            parentReady: PARENT_READY,
+            sessionReady: SESSION_READY,
+            isIframe: window !== window.parent
+        },
         features: root.__API_GATEWAY.features.length,
         hasToken: !!getUserToken('final')
     });

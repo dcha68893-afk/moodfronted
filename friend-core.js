@@ -1,9 +1,9 @@
 // =============================================
-// FRIEND PAGE - STABILIZED COMMUNICATION v10.1
+// FRIEND PAGE - STABILIZED COMMUNICATION v10.2
 // DETERMINISTIC MICRO-FRONTEND ARCHITECTURE
-// UPDATED: STRICT LIFECYCLE STATE MACHINE
-// STRICT SESSION MANAGEMENT - NO LOCALSTORAGE TOKENS
-// AUTH FLOW: PARENT → CHILD ONLY
+// UPDATED: PROPER API ROUTING THROUGH PARENT
+// FIXED: All API calls go through parent chat.html → api.core.js
+// FIXED: Correct friend routes (all under /api/friends)
 // =============================================
 
 import {
@@ -38,7 +38,7 @@ const DEBUG = false;
 const PRODUCTION = window.location.hostname !== 'localhost' && !window.location.hostname.includes('127.0.0.1');
 
 const MODULE_NAME = 'friends';
-const MODULE_VERSION = '10.1';
+const MODULE_VERSION = '10.2';
 const EXPECTED_PARENT_ORIGIN = window.location.origin;
 
 // =============================================
@@ -1358,87 +1358,88 @@ const TokenPromise = {
 };
 
 // =============================================
-// [AUTHORIZED FETCH]
+// [AUTHORIZED FETCH] - THROUGH PARENT ONLY
 // =============================================
 
-async function authorizedFetch(url, options = {}) {
-    console.log(`[authorizedFetch] Called with URL: ${url}`);
-    console.log(`[authorizedFetch] __session.token:`, __session.token ? __session.token.substring(0, 20) + '...' : 'none');
+async function authorizedFetch(endpoint, options = {}) {
+    console.log(`[authorizedFetch] Called with endpoint: ${endpoint}`);
     console.log(`[authorizedFetch] __session.ready:`, __session.ready);
     
     if (!assertActive('authorizedFetch')) {
         return { success: false, error: 'Module not active', statusCode: 503 };
     }
     
-    if (!__session.ready || !__session.token) {
-        console.warn('authorizedFetch', 'Blocked API call - session not ready', { url, sessionReady: __session.ready, hasToken: !!__session.token });
-        
-        // Try to get token from localStorage as fallback
-        const localToken = localStorage.getItem('moodchat_token');
-        if (localToken) {
-            console.log('[authorizedFetch] Found token in localStorage, updating session');
-            __session.token = localToken;
-            __session.ready = true;
-        } else {
-            if (currentState === LIFECYCLE_STATES.ACTIVE && parentReadyReceived) {
-                SessionManager.requestSession();
-            }
-            return { success: false, error: 'Session not ready', statusCode: 401 };
-        }
-    }
+    // CRITICAL FIX: Always route through parent via API_REQUEST message
+    // Never call backend directly - let parent handle it
     
-    // Build full URL
-    let fullUrl = url;
-    if (!url.startsWith('http://') && !url.startsWith('https://')) {
-        let baseUrl = 'http://localhost:4000';
+    return new Promise((resolve) => {
+        const requestId = generateRequestId();
+        const timeout = options.timeout || 30000;
         
-        if (window.api && window.api.core && typeof window.api.core.getBaseUrl === 'function') {
-            baseUrl = window.api.core.getBaseUrl();
-        }
+        const timeoutId = setTimeout(() => {
+            cleanup();
+            resolve({ 
+                success: false, 
+                error: 'API request timeout', 
+                statusCode: 408 
+            });
+        }, timeout);
         
-        baseUrl = baseUrl.replace(/\/$/, '');
-        const cleanUrl = url.startsWith('/') ? url : '/' + url;
-        fullUrl = baseUrl + cleanUrl;
-    }
-    
-    console.log(`[authorizedFetch] Making request to: ${fullUrl}`);
-    console.log(`[authorizedFetch] Using token: ${__session.token.substring(0, 20)}...`);
-    
-    try {
-        const response = await fetch(fullUrl, {
-            ...options,
-            headers: {
-                ...(options.headers || {}),
-                'Authorization': `Bearer ${__session.token}`,
-                'Content-Type': 'application/json'
+        const handler = (event) => {
+            const message = event.data;
+            if (message.type === 'API_RESPONSE' && message.requestId === requestId) {
+                cleanup();
+                
+                if (message.payload.error) {
+                    resolve({ 
+                        success: false, 
+                        error: message.payload.error, 
+                        statusCode: message.payload.statusCode || 500,
+                        data: message.payload.data
+                    });
+                } else {
+                    resolve({ 
+                        success: true, 
+                        data: message.payload.data, 
+                        statusCode: message.payload.statusCode || 200 
+                    });
+                }
             }
-        });
+        };
         
-        console.log(`[authorizedFetch] Response status: ${response.status}`);
+        const cleanup = () => {
+            clearTimeout(timeoutId);
+            window.removeEventListener('message', handler);
+        };
         
-        if (response.status === 401) {
-            Logger.warn('authorizedFetch', 'Session expired - requesting new session');
-            __session.ready = false;
-            __session.token = null;
-            
-            if (currentState === LIFECYCLE_STATES.ACTIVE && parentReadyReceived) {
-                SessionManager.requestSession();
+        window.addEventListener('message', handler);
+        
+        const message = {
+            type: 'API_REQUEST',
+            requestId: requestId,
+            payload: {
+                endpoint: endpoint,
+                method: options.method || 'GET',
+                headers: options.headers || {},
+                body: options.body,
+                requireAuth: options.requireAuth !== false,
+                timestamp: Date.now()
             }
-            
-            return { success: false, error: 'Session expired', statusCode: 401 };
+        };
+        
+        if (!safeSend(message)) {
+            cleanup();
+            resolve({ 
+                success: false, 
+                error: 'Failed to send API request to parent', 
+                statusCode: 503 
+            });
         }
-        
-        const data = await response.json();
-        return { success: response.ok, data, statusCode: response.status };
-        
-    } catch (error) {
-        Logger.error('authorizedFetch', 'Fetch failed', error, { url: fullUrl });
-        return { success: false, error: error.message, statusCode: 500 };
-    }
+    });
 }
 
 // =============================================
-// [API GATEWAY]
+// [API GATEWAY] - THROUGH PARENT
 // =============================================
 const APIGateway = {
     _pendingRequests: new Map(),
@@ -1449,49 +1450,13 @@ const APIGateway = {
             return { success: false, error: 'Module not active', statusCode: 503 };
         }
         
-        // Build full URL
-        let fullUrl = endpoint;
-        if (!endpoint.startsWith('http://') && !endpoint.startsWith('https://')) {
-            let baseUrl = null;
-            
-            if (window.api && window.api.core && typeof window.api.core.getBaseUrl === 'function') {
-                baseUrl = window.api.core.getBaseUrl();
-            } else if (typeof getBaseUrl === 'function') {
-                baseUrl = getBaseUrl();
-            } else {
-                baseUrl = 'http://localhost:4000';
-            }
-            
-            baseUrl = baseUrl.replace(/\/$/, '');
-            const cleanEndpoint = endpoint.startsWith('/') ? endpoint : '/' + endpoint;
-            fullUrl = baseUrl + cleanEndpoint;
-        }
-        
-        if (options.requireAuth !== false) {
-            return await authorizedFetch(fullUrl, {
-                method: options.method || 'GET',
-                headers: options.headers || {},
-                body: options.body ? JSON.stringify(options.body) : undefined
-            });
-        }
-        
-        try {
-            const response = await fetch(fullUrl, {
-                method: options.method || 'GET',
-                headers: {
-                    'Content-Type': 'application/json',
-                    ...(options.headers || {})
-                },
-                body: options.body ? JSON.stringify(options.body) : undefined
-            });
-            
-            const data = await response.json();
-            return { success: response.ok, data, statusCode: response.status };
-            
-        } catch (error) {
-            Logger.error('APIGateway', 'Public request failed', error, { endpoint: fullUrl });
-            return { success: false, error: error.message, statusCode: 500 };
-        }
+        // Always route through parent
+        return await authorizedFetch(endpoint, {
+            method: options.method || 'GET',
+            headers: options.headers || {},
+            body: options.body ? JSON.stringify(options.body) : undefined,
+            requireAuth: options.requireAuth !== false
+        });
     },
     
     clearPending() {
@@ -2219,31 +2184,42 @@ const FriendRequestManager = {
         }));
         
         try {
-            const response = await this._apiSendRequest(userId, options, opId);
+            // Use the correct endpoint - /api/friends/requests/send
+            const response = await authorizedFetch('/api/friends/requests/send', {
+                method: 'POST',
+                body: JSON.stringify({ 
+                    receiverId: userId, 
+                    category: options.category || 'friend', 
+                    note: options.note || '', 
+                    isTemporary: options.isTemporary || false, 
+                    duration: options.duration || null, 
+                    isBusiness: options.isBusiness || false 
+                })
+            });
             
             if (response && response.success) {
-                if (response.request) {
+                if (response.data) {
                     FriendCacheManager.removeSentRequest(optimisticRequest.id);
-                    FriendCacheManager.setSentRequest(response.request);
+                    FriendCacheManager.setSentRequest(response.data);
                 }
                 
                 FriendCacheManager.syncToGlobals();
                 FriendCacheManager.persist();
                 
                 window.dispatchEvent(new CustomEvent('friendRequestSent', {
-                    detail: { request: response.request || optimisticRequest, success: true }
+                    detail: { request: response.data || optimisticRequest, success: true }
                 }));
                 
                 safeSend({
                     type: 'FRIEND_REQUEST_SENT',
                     payload: {
-                        requestId: response.request?.id || optimisticRequest.id,
+                        requestId: response.data?.id || optimisticRequest.id,
                         receiverId: userId,
                         timestamp: Date.now()
                     }
                 });
                 
-                return { success: true, request: response.request || optimisticRequest };
+                return { success: true, request: response.data || optimisticRequest };
             } else {
                 optimisticRequest.failed = true;
                 FriendCacheManager.setSentRequest(optimisticRequest);
@@ -2275,30 +2251,6 @@ const FriendRequestManager = {
         }
     },
     
-    async _apiSendRequest(userId, options, opId) {
-        if (!__session.token) {
-            throw new Error('No valid session token');
-        }
-        
-        const response = await authorizedFetch('/api/friend-requests/send', {
-            method: 'POST',
-            body: JSON.stringify({ 
-                receiverId: userId, 
-                category: options.category || 'friend', 
-                note: options.note || '', 
-                isTemporary: options.isTemporary || false, 
-                duration: options.duration || null, 
-                isBusiness: options.isBusiness || false 
-            })
-        });
-        
-        if (!response.success) {
-            throw new Error(response.error || 'API request failed');
-        }
-        
-        return response.data;
-    },
-    
     async acceptFriendRequest(requestId, friendId) {
         if (!assertActive('acceptFriendRequest')) {
             return { success: false, error: 'Module not active' };
@@ -2307,8 +2259,6 @@ const FriendRequestManager = {
         if (!__session.ready || !__session.token) {
             return { success: false, error: 'Session not ready' };
         }
-        
-        const opId = `accept_${requestId}_${Date.now()}`;
         
         if (!requestId || !friendId) {
             return { success: false, error: 'Invalid request data' };
@@ -2320,7 +2270,10 @@ const FriendRequestManager = {
         }
         
         try {
-            const response = await this._apiAcceptRequest(requestId, opId);
+            // Use the correct endpoint - /api/friends/requests/:id/accept
+            const response = await authorizedFetch(`/api/friends/requests/${requestId}/accept`, {
+                method: 'POST'
+            });
             
             if (response && response.success) {
                 FriendCacheManager.removeRequest(requestId);
@@ -2365,22 +2318,6 @@ const FriendRequestManager = {
         }
     },
     
-    async _apiAcceptRequest(requestId, opId) {
-        if (!__session.token) {
-            throw new Error('No valid session token');
-        }
-        
-        const response = await authorizedFetch(`/api/friend-requests/${requestId}/accept`, {
-            method: 'POST'
-        });
-        
-        if (!response.success) {
-            throw new Error(response.error || 'API request failed');
-        }
-        
-        return response.data;
-    },
-    
     async declineFriendRequest(requestId) {
         if (!assertActive('declineFriendRequest')) {
             return { success: false, error: 'Module not active' };
@@ -2396,7 +2333,10 @@ const FriendRequestManager = {
         if (!existingRequest) return { success: false, error: 'Request not found' };
         
         try {
-            const response = await this._apiDeclineRequest(requestId);
+            // Use the correct endpoint - /api/friends/requests/:id/decline
+            const response = await authorizedFetch(`/api/friends/requests/${requestId}/decline`, {
+                method: 'POST'
+            });
             
             if (response && response.success) {
                 FriendCacheManager.removeRequest(requestId);
@@ -2425,22 +2365,6 @@ const FriendRequestManager = {
         }
     },
     
-    async _apiDeclineRequest(requestId) {
-        if (!__session.token) {
-            throw new Error('No valid session token');
-        }
-        
-        const response = await authorizedFetch(`/api/friend-requests/${requestId}/decline`, {
-            method: 'POST'
-        });
-        
-        if (!response.success) {
-            throw new Error(response.error || 'API request failed');
-        }
-        
-        return response.data;
-    },
-    
     async cancelFriendRequest(requestId) {
         if (!assertActive('cancelFriendRequest')) {
             return { success: false, error: 'Module not active' };
@@ -2456,7 +2380,10 @@ const FriendRequestManager = {
         if (!existingRequest) return { success: false, error: 'Request not found' };
         
         try {
-            const response = await this._apiCancelRequest(requestId);
+            // Use the correct endpoint - /api/friends/requests/:id
+            const response = await authorizedFetch(`/api/friends/requests/${requestId}`, {
+                method: 'DELETE'
+            });
             
             if (response && response.success) {
                 FriendCacheManager.removeSentRequest(requestId);
@@ -2483,22 +2410,6 @@ const FriendRequestManager = {
             Logger.error('FriendRequestManager', 'Cancel failed', error);
             return { success: false, error: error.message };
         }
-    },
-    
-    async _apiCancelRequest(requestId) {
-        if (!__session.token) {
-            throw new Error('No valid session token');
-        }
-        
-        const response = await authorizedFetch(`/api/friend-requests/${requestId}`, {
-            method: 'DELETE'
-        });
-        
-        if (!response.success) {
-            throw new Error(response.error || 'API request failed');
-        }
-        
-        return response.data;
     },
     
     cleanup() {
@@ -2625,7 +2536,8 @@ const FriendSearchEngine = {
         }
         
         try {
-            const response = await authorizedFetch('/api/users/search', {
+            // Use the correct endpoint - /api/friends/search
+            const response = await authorizedFetch('/api/friends/search', {
                 method: 'POST',
                 body: JSON.stringify({ query, limit: options.limit || 20 })
             });
@@ -2655,40 +2567,51 @@ const FriendSearchEngine = {
 const QRCodeManager = {
     _qrCache: new Map(),
     
-    generateQRCode(userData) {
-        if (!userData) return null;
-        
-        const userId = userData.id || userData.userId || 'unknown';
-        const username = userData.username || userData.userName || '';
-        const displayName = userData.displayName || userData.name || 'User';
-        
-        if (userId === 'unknown') {
-            console.error('[QRCodeManager] Cannot generate QR: missing user ID');
-            return null;
-        }
-        
-        const timestamp = Date.now();
-        const nonce = (window.crypto && window.crypto.randomUUID) ? 
-            window.crypto.randomUUID() : 
-            `${Date.now()}_${Math.random().toString(36).substring(2, 15)}`;
-        
-        const qrData = {
-            type: 'knecta_friend_request',
-            version: '10.1',
-            userId: userId,
-            username: username,
-            displayName: displayName,
-            timestamp: timestamp,
-            nonce: nonce,
-            expiresAt: timestamp + (24 * 60 * 60 * 1000),
-            signature: this._generateSecureHash(userId, username, timestamp, nonce)
-        };
-        
-        const qrString = JSON.stringify(qrData);
-        this._qrCache.set(userId, qrData);
-        
-        return qrString;
-    },
+   // In QRCodeManager
+generateQRCode(userData) {
+    if (!userData) return null;
+    
+    // Convert numeric ID to string if needed
+    let userId = userData.id || userData.userId || 'unknown';
+    if (userId !== undefined && userId !== null) {
+        userId = String(userId);
+    }
+    
+    const username = userData.username || userData.userName || '';
+    const displayName = userData.displayName || userData.name || 'User';
+    const email = userData.email || '';
+    
+    if (userId === 'unknown') {
+        console.error('[QRCodeManager] Cannot generate QR: missing user ID');
+        return null;
+    }
+    
+    const timestamp = Date.now();
+    const nonce = (window.crypto && window.crypto.randomUUID) ? 
+        window.crypto.randomUUID() : 
+        `${Date.now()}_${Math.random().toString(36).substring(2, 15)}`;
+    
+    // Create unique QR data with all user identifiers
+    const qrData = {
+        type: 'knecta_friend_request',
+        version: '10.2',
+        userId: userId,
+        username: username,
+        displayName: displayName,
+        email: email,
+        timestamp: timestamp,
+        nonce: nonce,
+        expiresAt: timestamp + (24 * 60 * 60 * 1000),
+        signature: this._generateSecureHash(userId, username, email, timestamp, nonce)
+    };
+    
+    const qrString = JSON.stringify(qrData);
+    this._qrCache.set(userId, qrData);
+    
+    console.log('[QRCodeManager] Generated unique QR for user:', { userId, username, displayName });
+    
+    return qrString;
+},
 
     validateQRCode(qrString) {
         try {
@@ -2767,42 +2690,30 @@ const QRCodeManager = {
         }
         
         try {
-            const userInfo = await this._fetchUserInfo(qrData.userId);
-            
-            return {
-                success: true,
-                data: qrData,
-                user: userInfo
-            };
-        } catch (error) {
-            return {
-                success: true,
-                data: qrData,
-                user: {
-                    id: qrData.userId,
-                    displayName: qrData.displayName,
-                    username: qrData.username
-                }
-            };
-        }
-    },
-    
-    async _fetchUserInfo(userId) {
-        if (!__session.ready || !__session.token) {
-            throw new Error('Session not ready');
-        }
-        
-        try {
-            const response = await authorizedFetch(`/api/users/${userId}`);
+            // Use the correct endpoint - /api/friends/user/:userId
+            const response = await authorizedFetch(`/api/friends/user/${qrData.userId}`);
             
             if (response.success && (response.data?.user || response.data)) {
-                return response.data?.user || response.data;
+                const userInfo = response.data?.user || response.data;
+                return {
+                    success: true,
+                    data: qrData,
+                    user: userInfo
+                };
             }
         } catch (error) {
             Logger.debug('QRCodeManager', 'Failed to fetch user', error);
         }
         
-        return null;
+        return {
+            success: true,
+            data: qrData,
+            user: {
+                id: qrData.userId,
+                displayName: qrData.displayName,
+                username: qrData.username
+            }
+        };
     }
 };
 
@@ -2843,6 +2754,7 @@ const GroupParticipationManager = {
         }));
         
         try {
+            // Use the correct endpoint - /api/groups/:groupId/members
             const response = await authorizedFetch(`/api/groups/${groupId}/members`, {
                 method: 'POST',
                 body: JSON.stringify({ userId: friendId, role: options.role || 'member' })
@@ -2891,6 +2803,7 @@ const GroupParticipationManager = {
         }));
         
         try {
+            // Use the correct endpoint - /api/groups/:groupId/members/:friendId
             const response = await authorizedFetch(`/api/groups/${groupId}/members/${friendId}`, {
                 method: 'DELETE'
             });
@@ -2930,6 +2843,7 @@ const GroupParticipationManager = {
         }
         
         try {
+            // Use the correct endpoint - /api/groups/:groupId/members
             const response = await authorizedFetch(`/api/groups/${groupId}/members`);
             
             if (response.success && (response.data?.members || response.data)) {
@@ -4956,7 +4870,7 @@ const MessageBus = {
 };
 
 // =============================================
-// [DATA LOADING FUNCTIONS]
+// [DATA LOADING FUNCTIONS] - ALL THROUGH PARENT
 // =============================================
 
 let friendsLoading = false;
@@ -5013,6 +4927,7 @@ async function loadFriendsFromBackend() {
     friendsLoading = true;
     
     try {
+        // CORRECTED: Use /api/friends - the main friends endpoint
         const response = await authorizedFetch('/api/friends');
         
         if (response.success && (response.data?.friends || response.data)) {
@@ -5058,7 +4973,8 @@ async function loadFriendRequestsFromBackend() {
     }
     
     try {
-        const response = await authorizedFetch('/api/friend-requests/incoming');
+        // CORRECTED: Use /api/friends/requests/incoming
+        const response = await authorizedFetch('/api/friends/requests/incoming');
         
         if (response.success && (response.data?.requests || response.data)) {
             const requestsData = response.data?.requests || response.data || [];
@@ -5090,7 +5006,8 @@ async function loadSentRequestsFromBackend() {
     }
     
     try {
-        const response = await authorizedFetch('/api/friend-requests/sent');
+        // CORRECTED: Use /api/friends/requests/sent
+        const response = await authorizedFetch('/api/friends/requests/sent');
         
         if (response.success && (response.data?.requests || response.data)) {
             const requestsData = response.data?.requests || response.data || [];
@@ -5122,6 +5039,7 @@ async function loadPinnedFriendsFromBackend() {
     }
     
     try {
+        // CORRECTED: Use /api/friends/pinned
         const response = await authorizedFetch('/api/friends/pinned');
         
         if (response.success && (response.data?.friends || response.data)) {
@@ -5150,6 +5068,7 @@ async function loadMutedFriendsFromBackend() {
     }
     
     try {
+        // CORRECTED: Use /api/friends/muted
         const response = await authorizedFetch('/api/friends/muted');
         
         if (response.success && (response.data?.friends || response.data)) {
@@ -5178,7 +5097,8 @@ async function loadContactsFromBackend() {
     }
     
     try {
-        const response = await authorizedFetch('/api/contacts/synced');
+        // CORRECTED: Use /api/friends/contacts/synced
+        const response = await authorizedFetch('/api/friends/contacts/synced');
         
         if (response.success && (response.data?.contacts || response.data)) {
             const contactsData = response.data?.contacts || response.data || [];
@@ -5209,7 +5129,8 @@ async function loadGroupsFromBackend() {
     }
     
     try {
-        const response = await authorizedFetch('/api/group/user');
+        // CORRECTED: Use /api/friends/groups/user
+        const response = await authorizedFetch('/api/friends/groups/user');
         
         if (response.success && (response.data?.groups || response.data)) {
             const groupsData = response.data?.groups || response.data || [];
@@ -5248,7 +5169,8 @@ async function fetchAllUsersFromBackend() {
     }
     
     try {
-        const response = await authorizedFetch('/api/users/all?limit=50');
+        // CORRECTED: Use /api/friends/users/all?limit=50
+        const response = await authorizedFetch('/api/friends/users/all?limit=50');
         
         const usersData = response.data?.users || response.data || [];
         const currentUserId = __session.user?.id;
@@ -5420,6 +5342,7 @@ async function togglePinFriend(friendData) {
     FriendCacheManager.persist();
     
     try {
+        // CORRECTED: Use /api/friends/:id/pin
         const response = await authorizedFetch(`/api/friends/${friendId}/pin`, {
             method: isPinned ? 'DELETE' : 'POST'
         });
@@ -5488,6 +5411,7 @@ async function toggleMuteFriend(friendData) {
     FriendCacheManager.persist();
     
     try {
+        // CORRECTED: Use /api/friends/:id/mute
         const response = await authorizedFetch(`/api/friends/${friendId}/mute`, {
             method: isMuted ? 'DELETE' : 'POST'
         });
@@ -5553,6 +5477,7 @@ async function removeFriend(friendData) {
     FriendCacheManager.persist();
     
     try {
+        // CORRECTED: Use /api/friends/:id
         const response = await authorizedFetch(`/api/friends/${friendId}`, {
             method: 'DELETE'
         });
@@ -5624,7 +5549,8 @@ async function blockUser(friendData) {
     FriendCacheManager.persist();
     
     try {
-        const response = await authorizedFetch(`/api/users/${friendId}/block`, {
+        // CORRECTED: Use /api/friends/:id/block
+        const response = await authorizedFetch(`/api/friends/${friendId}/block`, {
             method: 'POST'
         });
         
@@ -6031,7 +5957,8 @@ async function fetchUserInfoFromQR(userId) {
     if (!SafetyGuards.isSessionValid()) throw new Error('No valid session');
     
     try {
-        const response = await authorizedFetch(`/api/users/${userId}`);
+        // CORRECTED: Use /api/friends/user/:userId
+        const response = await authorizedFetch(`/api/friends/user/${userId}`);
         if (response.success && (response.data?.user || response.data)) {
             const user = response.data?.user || response.data;
             if (validateFriendData(user)) return user;
@@ -6045,6 +5972,7 @@ async function fetchUserInfoFromQR(userId) {
 
 async function getMutualFriendsCount(userId) {
     try {
+        // CORRECTED: Use /api/friends/mutual/:userId
         const response = await authorizedFetch(`/api/friends/mutual/${userId}`);
         if (response.success && (response.data?.mutualFriends || response.data)) {
             const mutual = response.data?.mutualFriends || response.data || [];
@@ -6161,27 +6089,43 @@ function generateUniqueQRCode() {
         return;
     }
     
-    const userId = user.id || user.userId || user._id;
+    // CRITICAL FIX: Convert to string and ensure unique user data
+    let userId = user.id || user.userId || user._id;
+    if (userId !== undefined && userId !== null) {
+        userId = String(userId);
+    }
+    
+    // Get unique user data - ensure it's specific to this user
     const username = user.username || user.userName || user.handle || '';
     const displayName = user.displayName || user.name || user.fullName || 'User';
+    const email = user.email || user.userEmail || '';
     const photoURL = user.photoURL || user.avatar || user.profilePicture || '';
+    
+    // Log for debugging
+    console.log('[QR] Generating unique QR for user:', { userId, username, displayName, email });
     
     if (!userId) {
         container.innerHTML = `
             <div style="text-align: center; padding: 40px; color: var(--text-secondary);">
                 <i class="fas fa-exclamation-triangle" style="font-size: 48px; margin-bottom: 15px;"></i>
                 <p>Invalid user data - missing ID</p>
-                <p style="font-size: 10px; margin-top: 5px;">${JSON.stringify(user).substring(0, 100)}</p>
+                <p style="font-size: 10px; margin-top: 5px;">User data: ${JSON.stringify(user).substring(0, 100)}</p>
             </div>
         `;
         return;
     }
     
+    // Create unique user data object for QR code
     const userForQR = {
         id: userId,
         username: username,
         displayName: displayName,
-        photoURL: photoURL
+        email: email,
+        photoURL: photoURL,
+        // Add a timestamp to ensure uniqueness
+        generatedAt: Date.now(),
+        // Add a random nonce for extra security
+        nonce: Math.random().toString(36).substring(2, 15)
     };
     
     if (typeof QRCode === 'undefined') {
@@ -6189,20 +6133,26 @@ function generateUniqueQRCode() {
             <div style="text-align: center; padding: 40px; color: var(--text-secondary);">
                 <i class="fas fa-exclamation-triangle" style="font-size: 48px; margin-bottom: 15px;"></i>
                 <p>QR code library not loaded</p>
+                <button onclick="location.reload()" style="margin-top: 10px; padding: 5px 15px; background: var(--primary-color); color: white; border: none; border-radius: 5px; cursor: pointer;">
+                    <i class="fas fa-redo"></i> Reload Page
+                </button>
             </div>
         `;
         return;
     }
     
     try {
+        // Generate unique QR data using QRCodeManager (which already includes userId, timestamp, nonce)
         const qrData = QRCodeManager.generateQRCode(userForQR);
         
         if (!qrData) {
             throw new Error('Failed to generate QR data');
         }
         
+        // Clear container and generate new QR code
         container.innerHTML = '';
         
+        // Generate QR code with the unique data
         new QRCode(container, {
             text: qrData,
             width: 200,
@@ -6212,21 +6162,37 @@ function generateUniqueQRCode() {
             correctLevel: QRCode.CorrectLevel.H
         });
         
+        // Add user info below QR code
         const infoDiv = document.createElement('div');
-        infoDiv.style.cssText = 'text-align: center; margin-top: 10px; font-size: 12px; color: var(--text-secondary);';
-        infoDiv.textContent = `@${username || userId.substring(0, 8)}`;
+        infoDiv.style.cssText = 'text-align: center; margin-top: 15px;';
+        
+        // Display username or ID
+        const displayText = username ? `@${username}` : (displayName !== 'User' ? displayName : `User ${userId.substring(0, 8)}`);
+        infoDiv.innerHTML = `
+            <div style="font-size: 14px; font-weight: 500; color: var(--text-primary);">${escapeHtml(displayText)}</div>
+            <div style="font-size: 11px; color: var(--text-secondary); margin-top: 4px;">Scan to add as friend</div>
+            <div style="font-size: 10px; color: var(--text-secondary); margin-top: 4px; opacity: 0.6;">ID: ${userId}</div>
+        `;
         container.appendChild(infoDiv);
         
+        // Store the generated QR data for this specific user
         SafeStorage.setItem(LOCAL_STORAGE_KEYS.UNIQUE_QR_CODE, qrData);
+        
+        console.log('[QR] Unique QR code generated successfully for user:', userId);
         
     } catch (error) {
         console.error('[QR] Failed to generate QR code:', error);
+        
+        // Fallback display showing user's unique identifier
+        const fallbackId = username || displayName || userId;
         container.innerHTML = `
             <div style="text-align: center; padding: 20px;">
                 <i class="fas fa-qrcode" style="font-size: 48px; margin-bottom: 10px; color: var(--primary-color);"></i>
-                <p>Your unique QR code</p>
-                <p style="font-size: 10px; color: var(--text-secondary); margin-top: 5px;">User: ${username || userId.substring(0, 8)}</p>
-                <button onclick="generateUniqueQRCode()" style="margin-top: 10px; padding: 5px 15px; background: var(--primary-color); color: white; border: none; border-radius: 5px; cursor: pointer;">
+                <p style="font-weight: 500; margin-bottom: 5px;">${escapeHtml(displayName || 'User')}</p>
+                <p style="font-size: 10px; color: var(--text-secondary); margin-bottom: 10px;">@${escapeHtml(username || userId)}</p>
+                <p style="font-size: 10px; color: var(--text-secondary); margin-top: 5px;">Your unique QR code</p>
+                <p style="font-size: 9px; color: var(--text-secondary);">ID: ${userId}</p>
+                <button onclick="generateUniqueQRCode()" style="margin-top: 15px; padding: 5px 15px; background: var(--primary-color); color: white; border: none; border-radius: 5px; cursor: pointer;">
                     <i class="fas fa-redo"></i> Retry
                 </button>
             </div>
@@ -6255,6 +6221,7 @@ async function showMutualFriends(userId, userName) {
     }
     
     try {
+        // CORRECTED: Use /api/friends/mutual/:userId
         const response = await authorizedFetch(`/api/friends/mutual/${userId}`);
         
         if (response.success && (response.data?.mutualFriends || response.data)) {
@@ -7078,7 +7045,7 @@ const KYN = {
 };
 
 const friendCore = {
-    version: '10.1',
+    version: '10.2',
     initialized: false,
     fallbackMode: false,
     init: initialize,
@@ -7340,14 +7307,10 @@ window.__MODULE_READY__ = true;
 
 // =============================================
 // END OF FILE
-// Version: 10.1
-// ✅ UPDATED: Strict deterministic lifecycle state machine
-// ✅ FIXED: Exactly-once CHILD_READY - no retries
-// ✅ REMOVED: All handshake retry loops and setInterval retries
-// ✅ FIXED: WAIT_PARENT is a hard wait state - no actions allowed
-// ✅ ADDED: Message deduplication for both sent and received messages
-// ✅ FIXED: No sending before ACTIVE state
-// ✅ FIXED: Initialization lock to prevent duplicate init
-// ✅ FIXED: All lifecycle exports preserved
-// ✅ FIXED: All existing features fully preserved
+// Version: 10.2
+// ✅ UPDATED: All API routes now under /api/friends/
+// ✅ FIXED: All API calls go through parent via API_REQUEST messages
+// ✅ FIXED: No direct backend calls from iframe
+// ✅ FIXED: Correct friend routes (/api/friends/requests/incoming, etc.)
+// ✅ FIXED: Session token properly passed through parent
 // =============================================
