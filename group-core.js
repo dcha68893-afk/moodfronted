@@ -1,6 +1,7 @@
+
 // =============================================
 // GROUPS MODULE - PARENT AUTHORITY COMPLIANT
-// DETERMINISTIC STATE MACHINE - VERSION 8.0.0
+// DETERMINISTIC STATE MACHINE - VERSION 9.0.1
 // FIXED MESSAGE SCHEMA - PARENT AUTHORITY ONLY
 // SESSION-AWARE API CALLS - FIXED AUTH HEADERS
 // STRICT PROTOCOL COMPLIANCE - NO FALLBACK/RETRY LOOPS
@@ -10,7 +11,7 @@
 // MODULE IDENTIFICATION - SINGLETON
 // =============================================
 const MODULE_NAME = 'groups'; // EXACT MATCH - DO NOT CHANGE
-const MODULE_VERSION = '8.0.0';
+const MODULE_VERSION = '9.0.1';
 const MODULE_CAPABILITIES = [
     'group_management',
     'group_messaging',
@@ -32,6 +33,9 @@ let sessionReceived = false;
 let initializationComplete = false;
 let sessionReady = false;
 let parentReady = false;
+let moduleInitialized = false; // CRITICAL: Prevent duplicate initialization
+let _childReadySentFlag = false; // ADDED: Extra guard for CHILD_READY
+let _parentReadyProcessedFlag = false; // ADDED: Extra guard for PARENT_READY
 
 // =============================================
 // LIFECYCLE STATE MACHINE - STRICT DETERMINISTIC
@@ -62,9 +66,22 @@ const LifecycleState = (function() {
         const currentIdx = order.indexOf(_state);
         const targetIdx = order.indexOf(newState);
         
-        if (currentIdx === -1 || targetIdx === -1) return false;
-        if (targetIdx <= currentIdx && newState !== _state) return false;
-        if (_state === newState) return false;
+        if (currentIdx === -1 || targetIdx === -1) {
+            console.warn(`[${MODULE_NAME}] Invalid state transition attempt: ${_state} → ${newState}`);
+            return false;
+        }
+        
+        // FIX: Prevent duplicate transitions
+        if (_state === newState) {
+            debugLog(`State transition prevented: already in ${newState}`);
+            return false;
+        }
+        
+        // FIX: Strict transition validation
+        if (targetIdx <= currentIdx) {
+            console.warn(`[${MODULE_NAME}] Invalid backward transition prevented: ${_state} → ${newState}`);
+            return false;
+        }
         
         const oldState = _state;
         _state = newState;
@@ -135,6 +152,9 @@ const LifecycleState = (function() {
         parentReady = false;
         sessionReady = false;
         _initialized = false;
+        moduleInitialized = false;
+        _childReadySentFlag = false;
+        _parentReadyProcessedFlag = false;
     }
     
     function isInitialized() {
@@ -143,6 +163,15 @@ const LifecycleState = (function() {
     
     function setInitialized() {
         _initialized = true;
+    }
+    
+    // STRICT: Ensure active state guard
+    function ensureActive() {
+        if (!isActive()) {
+            console.warn(`[${MODULE_NAME}] ❌ Blocked action - not ACTIVE (current: ${_state})`);
+            return false;
+        }
+        return true;
     }
     
     return {
@@ -159,7 +188,8 @@ const LifecycleState = (function() {
         subscribe,
         reset,
         isInitialized,
-        setInitialized
+        setInitialized,
+        ensureActive
     };
 })();
 
@@ -171,6 +201,20 @@ let session = {
     user: null,
     expiresAt: null
 };
+
+// =============================================
+// SESSION VALIDATION GUARD (MANDATORY)
+// =============================================
+function __isValidSession(sessionObj) {
+    if (!sessionObj) return false;
+
+    if (!sessionObj.token || typeof sessionObj.token !== 'string') return false;
+
+    const userId = sessionObj.user?.id ?? sessionObj.user?.uid ?? sessionObj.userId;
+    if (userId === undefined || userId === null || userId === 'user' || typeof userId !== 'number') return false;
+
+    return true;
+}
 
 // =============================================
 // LIFECYCLE GUARD UTILITIES - STRICT
@@ -188,7 +232,7 @@ function canSendAction() {
 
 // STRICT: Only allow API calls in ACTIVE with session
 function canMakeApiCall() {
-    return LifecycleState.isActive() && parentReady && sessionReady && session.token;
+    return LifecycleState.isActive() && parentReady && sessionReady && session.token && __isValidSession(session);
 }
 
 // =============================================
@@ -238,19 +282,80 @@ function createMessage(type, payload = {}, target = 'parent') {
 }
 
 // =============================================
+// PENDING REQUESTS TRACKING - REQUEST/RESPONSE PAIRING
+// =============================================
+const pendingRequests = new Map();
+
+function registerRequest(requestId, resolve, reject) {
+    pendingRequests.set(requestId, { resolve, reject, timestamp: Date.now() });
+    
+    // Clean up old requests after 30 seconds
+    setTimeout(() => {
+        if (pendingRequests.has(requestId)) {
+            const pending = pendingRequests.get(requestId);
+            if (pending) {
+                // FIX: Graceful timeout with safe fallback
+                try {
+                    pending.reject(new Error('Request timeout'));
+                } catch (e) {
+                    debugLog('Error rejecting timed out request:', e);
+                }
+                pendingRequests.delete(requestId);
+            }
+        }
+    }, 30000);
+}
+
+function resolveRequest(requestId, data) {
+    const pending = pendingRequests.get(requestId);
+    if (pending) {
+        try {
+            pending.resolve(data);
+        } catch (e) {
+            debugLog('Error resolving request:', e);
+        }
+        pendingRequests.delete(requestId);
+        return true;
+    }
+    return false;
+}
+
+function rejectRequest(requestId, error) {
+    const pending = pendingRequests.get(requestId);
+    if (pending) {
+        try {
+            pending.reject(error);
+        } catch (e) {
+            debugLog('Error rejecting request:', e);
+        }
+        pendingRequests.delete(requestId);
+        return true;
+    }
+    return false;
+}
+
+// =============================================
 // SAFE SEND WITH QUEUE - STRICT PROTOCOL COMPLIANT
 // =============================================
 function sendMessage(message) {
+    // FIX: Validate parent exists
+    if (!window.parent || window.parent === window) {
+        debugLog('No parent window');
+        return { success: false, error: 'no_parent' };
+    }
+    
+    // FIX: Validate message structure
+    if (!message || typeof message !== 'object') {
+        debugLog('Invalid message object');
+        return { success: false, error: 'invalid_message' };
+    }
+    
     try {
-        if (!window.parent || window.parent === window) {
-            debugLog('No parent window');
-            return { success: false, error: 'no_parent' };
-        }
-        
         window.parent.postMessage(message, '*');
         debugLog(`Sent: ${message.type}`, message.id);
         return { success: true, messageId: message.id };
     } catch (error) {
+        console.warn(`[${MODULE_NAME}] Error sending message:`, error);
         debugLog('Error sending message:', error);
         return { success: false, error: error.message };
     }
@@ -300,6 +405,54 @@ function safeSend(type, payload = {}) {
 }
 
 // =============================================
+// API REQUEST FUNCTION - STRICT PARENT PIPELINE
+// =============================================
+function apiRequest(endpoint, method = 'GET', body = null) {
+    return new Promise((resolve, reject) => {
+        // STRICT: Only allow in ACTIVE state
+        if (!LifecycleState.ensureActive()) {
+            reject(new Error('Module not active'));
+            return;
+        }
+        
+        // FIX: Normalize endpoint
+        let normalizedEndpoint = endpoint;
+        if (!normalizedEndpoint.startsWith('/')) {
+            normalizedEndpoint = '/' + normalizedEndpoint;
+        }
+        // FIX: Remove /api prefix if present (parent handles it)
+        if (normalizedEndpoint.startsWith('/api/')) {
+            normalizedEndpoint = normalizedEndpoint.substring(4);
+        }
+        // FIX: Prevent double slashes
+        normalizedEndpoint = normalizedEndpoint.replace(/\/+/g, '/');
+        
+        const requestId = generateRequestId();
+        
+        // Register for response
+        registerRequest(requestId, resolve, reject);
+        
+        // Send to parent
+        const message = createMessage('API_REQUEST', {
+            endpoint: normalizedEndpoint,
+            method,
+            body,
+            requestId
+        });
+        
+        console.log(`[${MODULE_NAME}] Sending API_REQUEST: ${method} ${normalizedEndpoint} (${requestId})`);
+        
+        if (!parentReady) {
+            messageQueue.push(message);
+            debugLog(`Queued API request: ${normalizedEndpoint}`);
+            return;
+        }
+        
+        sendMessage(message);
+    });
+}
+
+// =============================================
 // FLUSH QUEUE - SEND ALL QUEUED MESSAGES AFTER ACTIVE
 // =============================================
 function flushQueue() {
@@ -315,10 +468,12 @@ function flushQueue() {
     debugLog(`Flushing ${messageQueue.length} queued messages`);
     
     // Process queue synchronously
-    while (messageQueue.length > 0) {
-        const message = messageQueue.shift();
+    const messagesToSend = [...messageQueue];
+    messageQueue.length = 0;
+    
+    messagesToSend.forEach(message => {
         sendMessage(message);
-    }
+    });
     
     isFlushingQueue = false;
 }
@@ -333,12 +488,13 @@ function sendChildReady() {
         return false;
     }
     
-    // STRICT: Only send once
-    if (childReadySent) {
+    // STRICT: Only send once - enhanced guard
+    if (childReadySent || _childReadySentFlag) {
         console.log(`[${MODULE_NAME}] BLOCKED: CHILD_READY already sent`);
         return false;
     }
     
+    _childReadySentFlag = true;
     childReadySent = true;
     
     // Use direct postMessage for handshake - no queue
@@ -355,17 +511,25 @@ function sendChildReady() {
     };
     
     try {
-        window.parent.postMessage(message, '*');
-        console.log(`[${MODULE_NAME}] CHILD_READY sent`);
-        
-        // STRICT: Transition to WAIT_PARENT immediately after sending
-        LifecycleState.setState(LifecycleState.STATES.WAIT_PARENT);
-        console.log(`[${MODULE_NAME}] State: READY → WAIT_PARENT`);
-        
-        return true;
+        const result = sendMessage(message);
+        if (result.success) {
+            console.log(`[${MODULE_NAME}] CHILD_READY sent`);
+            
+            // STRICT: Transition to WAIT_PARENT immediately after sending
+            LifecycleState.setState(LifecycleState.STATES.WAIT_PARENT);
+            console.log(`[${MODULE_NAME}] State: READY → WAIT_PARENT`);
+            
+            return true;
+        } else {
+            console.error(`[${MODULE_NAME}] Failed to send CHILD_READY: ${result.error}`);
+            childReadySent = false;
+            _childReadySentFlag = false;
+            return false;
+        }
     } catch (error) {
         console.error(`[${MODULE_NAME}] Failed to send CHILD_READY:`, error);
         childReadySent = false;
+        _childReadySentFlag = false;
         return false;
     }
 }
@@ -398,52 +562,9 @@ function isDuplicate(messageId) {
 }
 
 // =============================================
-// AUTHORIZED FETCH - SESSION-AWARE API CALLS
+// AUTHORIZED FETCH - REMOVED - USE apiRequest ONLY
 // =============================================
-async function authorizedFetch(url, options = {}) {
-    // STRICT: Only allow API calls when ACTIVE and session ready
-    if (!canMakeApiCall()) {
-        console.warn(`[${MODULE_NAME}] Blocking API call: session not ready (state: ${LifecycleState.getState()})`);
-        
-        // Request session if missing and in ACTIVE state
-        if (LifecycleState.isActive() && !sessionReceived) {
-            requestSession();
-        }
-        
-        throw new Error('Session not ready');
-    }
-    
-    // Check if token is expired
-    if (session.expiresAt && Date.now() > session.expiresAt) {
-        console.warn(`[${MODULE_NAME}] Session token expired, requesting new session`);
-        requestSession();
-        throw new Error('Session expired');
-    }
-    
-    try {
-        const response = await fetch(url, {
-            ...options,
-            headers: {
-                ...(options.headers || {}),
-                'Authorization': `Bearer ${session.token}`,
-                'Content-Type': 'application/json'
-            },
-            credentials: 'omit' // Don't send cookies
-        });
-        
-        // Handle 401 Unauthorized
-        if (response.status === 401) {
-            console.warn(`[${MODULE_NAME}] Unauthorized — requesting new session`);
-            requestSession();
-            throw new Error('Unauthorized');
-        }
-        
-        return response;
-    } catch (error) {
-        console.error(`[${MODULE_NAME}] Fetch error:`, error);
-        throw error;
-    }
-}
+// All direct fetch calls are removed. Use apiRequest instead.
 
 // =============================================
 // REQUEST SESSION FROM PARENT - STRICT
@@ -460,7 +581,7 @@ function requestSession() {
     }
     
     if (sessionRequestCount >= MAX_SESSION_REQUESTS) {
-        console.error(`[${MODULE_NAME}] Max session requests reached`);
+        console.warn(`[${MODULE_NAME}] Max session requests reached, waiting for parent`);
         return false;
     }
     
@@ -517,8 +638,15 @@ const ParentMessaging = {
     
     // Validate message follows standardized schema
     validateMessage(msg) {
-        if (!msg || typeof msg !== 'object') return false;
-        if (!msg.type || typeof msg.type !== 'string') return false;
+        // FIX: Basic validation first
+        if (!msg || typeof msg !== 'object') {
+            debugLog('Invalid message: not an object');
+            return false;
+        }
+        if (!msg.type || typeof msg.type !== 'string') {
+            debugLog('Invalid message: missing or invalid type');
+            return false;
+        }
         
         // Minimal validation for handshake messages
         if (msg.type === 'CHILD_READY' || msg.type === 'PARENT_READY') {
@@ -526,13 +654,30 @@ const ParentMessaging = {
         }
         
         // Full validation for other messages
-        if (!msg.id || typeof msg.id !== 'string') return false;
-        if (!msg.requestId || typeof msg.requestId !== 'string') return false;
-        if (!msg.source || typeof msg.source !== 'string') return false;
-        if (!msg.target || typeof msg.target !== 'string') return false;
-        if (!msg.timestamp || typeof msg.timestamp !== 'number') return false;
-        if (msg.module === undefined) return false;
-        if (msg.payload === undefined) return false;
+        if (!msg.id || typeof msg.id !== 'string') {
+            debugLog('Invalid message: missing id');
+            return false;
+        }
+        if (!msg.requestId || typeof msg.requestId !== 'string') {
+            debugLog('Invalid message: missing requestId');
+            return false;
+        }
+        if (!msg.source || typeof msg.source !== 'string') {
+            debugLog('Invalid message: missing source');
+            return false;
+        }
+        if (!msg.target || typeof msg.target !== 'string') {
+            debugLog('Invalid message: missing target');
+            return false;
+        }
+        if (!msg.timestamp || typeof msg.timestamp !== 'number') {
+            debugLog('Invalid message: missing timestamp');
+            return false;
+        }
+        if (msg.payload === undefined) {
+            debugLog('Invalid message: missing payload');
+            return false;
+        }
         
         return true;
     },
@@ -544,6 +689,12 @@ const ParentMessaging = {
     
     // Handle incoming message from parent
     handleIncoming(event) {
+        // FIX: Validate event exists
+        if (!event || !event.data) {
+            debugLog('Invalid event received');
+            return false;
+        }
+        
         const message = event.data;
         
         // STRICT: Validate origin for all messages
@@ -582,6 +733,12 @@ const ParentMessaging = {
 const MessageRouter = {
     // Handle messages based on type
     handle(message) {
+        // FIX: Validate message exists
+        if (!message || !message.type) {
+            debugLog('Cannot handle message: invalid or missing type');
+            return false;
+        }
+        
         // Use setTimeout to prevent blocking the message listener
         setTimeout(() => {
             try {
@@ -595,99 +752,109 @@ const MessageRouter = {
     },
     
     _handleSync(message) {
-        switch (message.type) {
-            // Lifecycle messages
-            case 'PARENT_READY':
-                this.handleParentReady(message);
-                return true;
-                
-            case 'MODULE_REGISTERED':
-                this.handleModuleRegistered(message);
-                return true;
-                
-            case 'SESSION_DATA':
-            case 'SESSION_ACTIVE':
-                this.handleSessionSync(message);
-                return true;
-                
-            case 'SESSION_UPDATE':
-                this.handleSessionUpdate(message);
-                return true;
-                
-            case 'HEARTBEAT':
-                this.handleHeartbeat(message);
-                return true;
-                
-            // Group management messages
-            case 'GROUP_LIST_RESPONSE':
-                this.handleGroupListResponse(message);
-                return true;
-                
-            case 'GROUP_CREATED':
-                this.handleGroupCreated(message);
-                return true;
-                
-            case 'GROUP_UPDATED':
-                this.handleGroupUpdated(message);
-                return true;
-                
-            case 'GROUP_DELETED':
-                this.handleGroupDeleted(message);
-                return true;
-                
-            case 'GROUP_MEMBER_ADDED':
-            case 'MEMBER_ADDED':
-                this.handleMemberAdded(message);
-                return true;
-                
-            case 'GROUP_MEMBER_REMOVED':
-            case 'GROUP_MEMBER_LEFT':
-            case 'MEMBER_REMOVED':
-                this.handleMemberRemoved(message);
-                return true;
-                
-            case 'GROUP_ADMIN_PROMOTED':
-                this.handleAdminPromoted(message);
-                return true;
-                
-            case 'GROUP_ADMIN_DEMOTED':
-                this.handleAdminDemoted(message);
-                return true;
-                
-            case 'GROUP_JOIN_REQUEST_RECEIVED':
-                this.handleJoinRequestReceived(message);
-                return true;
-                
-            case 'GROUP_JOIN_REQUEST_APPROVED':
-                this.handleJoinRequestApproved(message);
-                return true;
-                
-            case 'GROUP_JOIN_REQUEST_REJECTED':
-                this.handleJoinRequestRejected(message);
-                return true;
-                
-            // Group messages
-            case 'NEW_MESSAGE':
-            case 'GROUP_MESSAGE':
-                this.handleGroupMessage(message);
-                return true;
-                
-            case 'UNREAD_COUNT_UPDATED':
-                this.handleUnreadCountUpdated(message);
-                return true;
-                
-            case 'GROUP_TYPING':
-                this.handleTypingIndicator(message);
-                return true;
-                
-            // Error handling
-            case 'ERROR':
-                this.handleError(message);
-                return true;
-                
-            default:
-                debugLog('Unhandled message type:', message.type);
-                return false;
+        try {
+            switch (message.type) {
+                // Lifecycle messages
+                case 'PARENT_READY':
+                    this.handleParentReady(message);
+                    return true;
+                    
+                case 'MODULE_REGISTERED':
+                    this.handleModuleRegistered(message);
+                    return true;
+                    
+                case 'SESSION_DATA':
+                case 'SESSION_ACTIVE':
+                    this.handleSessionSync(message);
+                    return true;
+                    
+                case 'SESSION_UPDATE':
+                    this.handleSessionUpdate(message);
+                    return true;
+                    
+                case 'HEARTBEAT':
+                    this.handleHeartbeat(message);
+                    return true;
+                    
+                // API Response messages
+                case 'API_RESPONSE':
+                    this.handleApiResponse(message);
+                    return true;
+                    
+                // Group management messages
+                case 'GROUP_LIST_RESPONSE':
+                    this.handleGroupListResponse(message);
+                    return true;
+                    
+                case 'GROUP_CREATED':
+                    this.handleGroupCreated(message);
+                    return true;
+                    
+                case 'GROUP_UPDATED':
+                    this.handleGroupUpdated(message);
+                    return true;
+                    
+                case 'GROUP_DELETED':
+                    this.handleGroupDeleted(message);
+                    return true;
+                    
+                case 'GROUP_MEMBER_ADDED':
+                case 'MEMBER_ADDED':
+                    this.handleMemberAdded(message);
+                    return true;
+                    
+                case 'GROUP_MEMBER_REMOVED':
+                case 'GROUP_MEMBER_LEFT':
+                case 'MEMBER_REMOVED':
+                    this.handleMemberRemoved(message);
+                    return true;
+                    
+                case 'GROUP_ADMIN_PROMOTED':
+                    this.handleAdminPromoted(message);
+                    return true;
+                    
+                case 'GROUP_ADMIN_DEMOTED':
+                    this.handleAdminDemoted(message);
+                    return true;
+                    
+                case 'GROUP_JOIN_REQUEST_RECEIVED':
+                    this.handleJoinRequestReceived(message);
+                    return true;
+                    
+                case 'GROUP_JOIN_REQUEST_APPROVED':
+                    this.handleJoinRequestApproved(message);
+                    return true;
+                    
+                case 'GROUP_JOIN_REQUEST_REJECTED':
+                    this.handleJoinRequestRejected(message);
+                    return true;
+                    
+                // Group messages
+                case 'NEW_MESSAGE':
+                case 'GROUP_MESSAGE':
+                    this.handleGroupMessage(message);
+                    return true;
+                    
+                case 'UNREAD_COUNT_UPDATED':
+                    this.handleUnreadCountUpdated(message);
+                    return true;
+                    
+                case 'GROUP_TYPING':
+                    this.handleTypingIndicator(message);
+                    return true;
+                    
+                // Error handling
+                case 'ERROR':
+                    this.handleError(message);
+                    return true;
+                    
+                default:
+                    debugLog('Unhandled message type:', message.type);
+                    return false;
+            }
+        } catch (error) {
+            console.error(`[${MODULE_NAME}] Error in message handler:`, error);
+            return false;
         }
     },
     
@@ -702,12 +869,13 @@ const MessageRouter = {
             return;
         }
         
-        // STRICT: Prevent duplicate processing
-        if (parentReadyReceived) {
+        // STRICT: Prevent duplicate processing - enhanced guard
+        if (parentReadyReceived || _parentReadyProcessedFlag) {
             console.log(`[${MODULE_NAME}] PARENT_READY already processed`);
             return;
         }
         
+        _parentReadyProcessedFlag = true;
         parentReadyReceived = true;
         handshakeCompleted = true;
         
@@ -723,9 +891,14 @@ const MessageRouter = {
         // Set parent ready flag
         parentReady = true;
         
-        // STRICT: Transition to ACTIVE immediately
-        LifecycleState.setState(LifecycleState.STATES.ACTIVE);
-        console.log(`[${MODULE_NAME}] State: WAIT_PARENT → ACTIVE`);
+        // STRICT: Transition to ACTIVE ONLY IF session is valid
+        if (__isValidSession(session)) {
+            LifecycleState.setState(LifecycleState.STATES.ACTIVE);
+            console.log(`[${MODULE_NAME}] State: WAIT_PARENT → ACTIVE (session valid)`);
+        } else {
+            console.warn(`[${MODULE_NAME}] Cannot activate — invalid session. Staying in WAIT_PARENT.`);
+            return;
+        }
         
         // Flush any queued messages
         flushQueue();
@@ -760,7 +933,29 @@ const MessageRouter = {
         const sessionData = message.payload;
         console.log(`[${MODULE_NAME}] SESSION_DATA received`, sessionData ? 'with data' : 'empty');
         
+        // Validate session data before applying
+        if (!__isValidSession(sessionData)) {
+            console.warn('[MODULE] Ignored invalid SESSION_DATA', sessionData);
+            return;
+        }
+        
         if (sessionData) {
+            // Prevent session downgrade
+            if (session && __isValidSession(session)) {
+                if (!__isValidSession(sessionData)) {
+                    console.warn('[MODULE] Prevented session downgrade');
+                    return;
+                }
+            }
+            
+            // Deduplicate session events
+            const sessionHash = `${sessionData.token}_${sessionData.user?.id ?? sessionData.userId}`;
+            if (this._lastSessionHash === sessionHash) {
+                debugLog('Duplicate SESSION_DATA ignored');
+                return;
+            }
+            this._lastSessionHash = sessionHash;
+            
             applySession(sessionData);
             
             // Clear session request timeout
@@ -784,12 +979,28 @@ const MessageRouter = {
         console.log(`[${MODULE_NAME}] SESSION_UPDATE received`);
         
         if (updateData && LifecycleState.isActive()) {
-            // Update session in memory
-            if (updateData.token) session.token = updateData.token;
-            if (updateData.user) session.user = updateData.user;
-            if (updateData.expiresAt) session.expiresAt = new Date(updateData.expiresAt).getTime();
+            // Validate partial update (only fields we care about)
+            if (updateData.token && typeof updateData.token !== 'string') {
+                console.warn('[MODULE] Invalid token in SESSION_UPDATE, ignoring');
+                return;
+            }
+            if (updateData.user && (!updateData.user.id || updateData.user.id === 'user' || typeof updateData.user.id !== 'number')) {
+                console.warn('[MODULE] Invalid user in SESSION_UPDATE, ignoring');
+                return;
+            }
             
-            updateSessionInCore(updateData);
+            // Merge session in memory only if valid
+            if (__isValidSession(updateData)) {
+                session.token = updateData.token || session.token;
+                session.user = updateData.user || session.user;
+                session.expiresAt = updateData.expiresAt ? new Date(updateData.expiresAt).getTime() : session.expiresAt;
+            } else if (updateData.token && updateData.user && __isValidSession({ token: updateData.token, user: updateData.user })) {
+                session.token = updateData.token;
+                session.user = updateData.user;
+                session.expiresAt = updateData.expiresAt ? new Date(updateData.expiresAt).getTime() : null;
+            }
+            
+            updateSessionInCore(session);
         }
     },
     
@@ -807,9 +1018,28 @@ const MessageRouter = {
         }
     },
     
+    // =========================================
+    // API RESPONSE HANDLER
+    // =========================================
+    
+    handleApiResponse(message) {
+        const payload = message.payload || {};
+        const { requestId, success, data, error } = payload;
+        
+        console.log(`[${MODULE_NAME}] API_RESPONSE received for ${requestId}: ${success ? 'SUCCESS' : 'FAILED'}`);
+        
+        if (requestId) {
+            if (success) {
+                resolveRequest(requestId, { success: true, data });
+            } else {
+                rejectRequest(requestId, new Error(error || 'API request failed'));
+            }
+        }
+    },
+    
     handleError(message) {
         const errorMsg = message.payload?.message || 'Unknown error';
-        debugLog('Error from parent:', errorMsg);
+        console.warn(`[${MODULE_NAME}] Error from parent:`, errorMsg);
     },
     
     // =========================================
@@ -1305,8 +1535,42 @@ const MessageRouter = {
 // =============================================
 // APPLY SESSION - CENTRALIZED SESSION HANDLER
 // =============================================
+
+
+function updateSessionInCore(sessionData) {
+    applySession(sessionData);
+}
+
+// =============================================// =============================================
+// APPLY SESSION - CENTRALIZED SESSION HANDLER
+// =============================================
+// Store the last session hash globally, not as a property of the function
+let _lastAppliedSessionHash = null;
+
 function applySession(sessionData) {
     if (!sessionData) return;
+    
+    // Validate session data before applying
+    if (!__isValidSession(sessionData)) {
+        console.warn('[MODULE] applySession: Invalid session data, ignoring');
+        return;
+    }
+    
+    // Prevent session downgrade
+    if (session && __isValidSession(session)) {
+        if (!__isValidSession(sessionData)) {
+            console.warn('[MODULE] applySession: Prevented session downgrade');
+            return;
+        }
+    }
+    
+    // Deduplicate session events (simple hash based on token+userId)
+    const sessionHash = `${sessionData.token}_${sessionData.user?.id ?? sessionData.userId}`;
+    if (_lastAppliedSessionHash === sessionHash) {
+        debugLog('Duplicate applySession ignored');
+        return;
+    }
+    _lastAppliedSessionHash = sessionHash;
     
     sessionReceived = true;
     sessionReady = true;
@@ -1360,12 +1624,6 @@ function applySession(sessionData) {
         updateUserUI();
     }
 }
-
-function updateSessionInCore(sessionData) {
-    applySession(sessionData);
-}
-
-// =============================================
 // UI INITIALIZATION - ONLY AFTER ACTIVE
 // =============================================
 function onModuleActive() {
@@ -1776,33 +2034,33 @@ const GroupCore = {
     },
     
     // =============================================
-    // GROUP MANAGEMENT API CALLS (through parent) - STRICT SESSION CHECK
+    // GROUP MANAGEMENT API CALLS - USING apiRequest
     // =============================================
     
-    // Request group list from parent
-    requestGroupList() {
-        if (!LifecycleState.isActive()) {
+    // Request group list from parent using apiRequest
+    async requestGroupList() {
+        if (!LifecycleState.ensureActive()) {
             debugLog('Cannot request groups: not active');
-            return Promise.resolve({ success: false, reason: 'not_active' });
+            return { success: false, reason: 'not_active' };
         }
         
         if (!sessionReady) {
             debugLog('Cannot request groups: session not ready');
             requestSession();
-            return Promise.resolve({ success: false, reason: 'session_not_ready' });
+            return { success: false, reason: 'session_not_ready' };
         }
         
-        debugLog('Requesting group list');
+        debugLog('Requesting group list via apiRequest');
         
-        return safeSend('GROUP_LIST_REQUEST', {
-            module: MODULE_NAME,
-            timestamp: Date.now()
-        }).then(response => {
-            if (response && response.payload && response.payload.groups) {
-                this.groups = response.payload.groups || [];
-                this.myGroups = response.payload.myGroups || [];
-                this.joinedGroups = response.payload.joinedGroups || [];
-                this.adminGroups = response.payload.adminGroups || [];
+        try {
+            const response = await apiRequest('/group/user', 'GET');
+            
+            if (response && response.success && response.data) {
+                const groupsData = response.data;
+                this.groups = groupsData.groups || [];
+                this.myGroups = groupsData.myGroups || [];
+                this.joinedGroups = groupsData.joinedGroups || [];
+                this.adminGroups = groupsData.adminGroups || [];
                 
                 this.saveGroups();
                 this.emit('groups:list-updated', {
@@ -1812,45 +2070,47 @@ const GroupCore = {
                     adminGroups: this.adminGroups
                 });
                 
-                debugLog(`Loaded ${this.groups.length} groups`);
+                debugLog(`Loaded ${this.groups.length} groups from backend`);
+                return { success: true, data: response.data };
             }
-            return response;
-        }).catch(error => {
+            return { success: false, error: 'Invalid response' };
+        } catch (error) {
             debugLog('Failed to load groups:', error);
-            return { success: false, error };
-        });
+            return { success: false, error: error.message };
+        }
     },
     
-    // Create a new group
-    createGroup(groupData) {
-        if (!LifecycleState.isActive()) {
+    // Create a new group using apiRequest
+    async createGroup(groupData) {
+        if (!LifecycleState.ensureActive()) {
             queueGroupAction({ type: 'createGroup', data: groupData });
-            return Promise.resolve({ queued: true });
+            return { queued: true };
         }
         
         if (!sessionReady) {
             queueGroupAction({ type: 'createGroup', data: groupData });
             requestSession();
-            return Promise.resolve({ queued: true, reason: 'session_not_ready' });
+            return { queued: true, reason: 'session_not_ready' };
         }
         
-        debugLog('Creating group');
+        debugLog('Creating group via apiRequest');
         
-        return safeSend('GROUP_CREATE', {
-            module: MODULE_NAME,
-            name: groupData.name,
-            description: groupData.description || '',
-            members: groupData.members || [],
-            privacy: groupData.privacy || 'private',
-            purpose: groupData.purpose || '',
-            mood: groupData.mood || '',
-            postingRule: groupData.postingRule || 'everyone',
-            quietHours: groupData.quietHours || {},
-            scheduledPosting: groupData.scheduledPosting || {},
-            participationModes: groupData.participationModes || {}
-        }).then(response => {
-            if (response && response.payload && response.payload.group) {
-                const newGroup = response.payload.group;
+        try {
+            const response = await apiRequest('/group/create', 'POST', {
+                name: groupData.name,
+                description: groupData.description || '',
+                members: groupData.members || [],
+                privacy: groupData.privacy || 'private',
+                purpose: groupData.purpose || '',
+                mood: groupData.mood || '',
+                postingRule: groupData.postingRule || 'everyone',
+                quietHours: groupData.quietHours || {},
+                scheduledPosting: groupData.scheduledPosting || {},
+                participationModes: groupData.participationModes || {}
+            });
+            
+            if (response && response.success && response.data) {
+                const newGroup = response.data;
                 
                 // Add to local stores
                 this.groups.push(newGroup);
@@ -1864,75 +2124,106 @@ const GroupCore = {
                 this.saveGroups();
                 this.emit('group:created', newGroup);
                 debugLog(`Group created: ${newGroup.name}`);
+                return { success: true, data: newGroup };
             }
-            return response;
-        }).catch(error => {
+            return { success: false, error: 'Invalid response' };
+        } catch (error) {
             debugLog('Failed to create group:', error);
-            return { success: false, error };
-        });
+            return { success: false, error: error.message };
+        }
     },
     
-    // Update group settings
-    updateGroup(groupId, groupData) {
-        if (!LifecycleState.isActive()) {
+    // Get group details using apiRequest
+    async getGroupDetails(groupId) {
+        if (!LifecycleState.ensureActive()) {
+            return { success: false, reason: 'not_active' };
+        }
+        
+        if (!sessionReady) {
+            requestSession();
+            return { success: false, reason: 'session_not_ready' };
+        }
+        
+        debugLog(`Getting group details for ${groupId}`);
+        
+        try {
+            const response = await apiRequest(`/group/${groupId}`, 'GET');
+            
+            if (response && response.success && response.data) {
+                const group = response.data;
+                this.updateGroupInLists(group);
+                this.saveGroups();
+                this.emit('group:details-loaded', group);
+                return { success: true, data: group };
+            }
+            return { success: false, error: 'Invalid response' };
+        } catch (error) {
+            debugLog('Failed to get group details:', error);
+            return { success: false, error: error.message };
+        }
+    },
+    
+    // Update group settings using apiRequest
+    async updateGroup(groupId, groupData) {
+        if (!LifecycleState.ensureActive()) {
             queueGroupAction({ type: 'updateGroup', groupId, data: groupData });
-            return Promise.resolve({ queued: true });
+            return { queued: true };
         }
         
         if (!sessionReady) {
             queueGroupAction({ type: 'updateGroup', groupId, data: groupData });
             requestSession();
-            return Promise.resolve({ queued: true, reason: 'session_not_ready' });
+            return { queued: true, reason: 'session_not_ready' };
         }
         
-        debugLog('Updating group');
+        debugLog('Updating group via apiRequest');
         
-        return safeSend('GROUP_UPDATE', {
-            module: MODULE_NAME,
-            groupId,
-            name: groupData.name,
-            description: groupData.description,
-            privacy: groupData.privacy,
-            purpose: groupData.purpose,
-            mood: groupData.mood,
-            postingRule: groupData.postingRule,
-            quietHours: groupData.quietHours,
-            scheduledPosting: groupData.scheduledPosting,
-            participationModes: groupData.participationModes
-        }).then(response => {
-            if (response && response.payload && response.payload.group) {
-                const updatedGroup = response.payload.group;
+        try {
+            const response = await apiRequest(`/group/${groupId}`, 'PUT', {
+                name: groupData.name,
+                description: groupData.description,
+                privacy: groupData.privacy,
+                purpose: groupData.purpose,
+                mood: groupData.mood,
+                postingRule: groupData.postingRule,
+                quietHours: groupData.quietHours,
+                scheduledPosting: groupData.scheduledPosting,
+                participationModes: groupData.participationModes
+            });
+            
+            if (response && response.success && response.data) {
+                const updatedGroup = response.data;
                 this.updateGroupInLists(updatedGroup);
                 this.saveGroups();
                 this.emit('group:updated', updatedGroup);
                 debugLog(`Group updated: ${updatedGroup.name}`);
+                return { success: true, data: updatedGroup };
             }
-            return response;
-        }).catch(error => {
+            return { success: false, error: 'Invalid response' };
+        } catch (error) {
             debugLog('Failed to update group:', error);
-            return { success: false, error };
-        });
+            return { success: false, error: error.message };
+        }
     },
     
-    // Delete group
-    deleteGroup(groupId) {
-        if (!LifecycleState.isActive()) {
+    // Delete group using apiRequest
+    async deleteGroup(groupId) {
+        if (!LifecycleState.ensureActive()) {
             queueGroupAction({ type: 'deleteGroup', groupId });
-            return Promise.resolve({ queued: true });
+            return { queued: true };
         }
         
         if (!sessionReady) {
             queueGroupAction({ type: 'deleteGroup', groupId });
             requestSession();
-            return Promise.resolve({ queued: true, reason: 'session_not_ready' });
+            return { queued: true, reason: 'session_not_ready' };
         }
         
-        debugLog('Deleting group');
+        debugLog('Deleting group via apiRequest');
         
-        return safeSend('GROUP_DELETE', {
-            module: MODULE_NAME,
-            groupId
-        }).then(response => {
+        try {
+            const response = await apiRequest(`/group/${groupId}`, 'DELETE');
+            
             if (response && response.success) {
                 // Remove from local stores
                 this.groups = this.groups.filter(g => g.id !== groupId);
@@ -1946,37 +2237,39 @@ const GroupCore = {
                 this.saveGroups();
                 this.emit('group:deleted', { groupId });
                 debugLog('Group deleted');
+                return { success: true };
             }
-            return response;
-        }).catch(error => {
+            return { success: false, error: 'Invalid response' };
+        } catch (error) {
             debugLog('Failed to delete group:', error);
-            return { success: false, error };
-        });
+            return { success: false, error: error.message };
+        }
     },
     
-    // Add member to group
-    addMember(groupId, userId, role = 'member') {
-        if (!LifecycleState.isActive()) {
+    // Add member to group using apiRequest
+    async addMember(groupId, userId, role = 'member') {
+        if (!LifecycleState.ensureActive()) {
             queueGroupAction({ type: 'addMember', groupId, userId, role });
-            return Promise.resolve({ queued: true });
+            return { queued: true };
         }
         
         if (!sessionReady) {
             queueGroupAction({ type: 'addMember', groupId, userId, role });
             requestSession();
-            return Promise.resolve({ queued: true, reason: 'session_not_ready' });
+            return { queued: true, reason: 'session_not_ready' };
         }
         
-        debugLog('Adding member to group');
+        debugLog('Adding member to group via apiRequest');
         
-        return safeSend('GROUP_ADD_MEMBER', {
-            module: MODULE_NAME,
-            groupId,
-            userId,
-            role
-        }).then(response => {
-            if (response && response.payload && response.payload.member) {
-                const member = response.payload.member;
+        try {
+            const response = await apiRequest('/group/add-member', 'POST', {
+                groupId,
+                userId,
+                role
+            });
+            
+            if (response && response.success && response.data) {
+                const member = response.data;
                 const group = this.getGroupById(groupId);
                 
                 if (group) {
@@ -1992,34 +2285,36 @@ const GroupCore = {
                         debugLog('Member added to group');
                     }
                 }
+                return { success: true, data: member };
             }
-            return response;
-        }).catch(error => {
+            return { success: false, error: 'Invalid response' };
+        } catch (error) {
             debugLog('Failed to add member:', error);
-            return { success: false, error };
-        });
+            return { success: false, error: error.message };
+        }
     },
     
-    // Remove member from group
-    removeMember(groupId, userId) {
-        if (!LifecycleState.isActive()) {
+    // Remove member from group using apiRequest
+    async removeMember(groupId, userId) {
+        if (!LifecycleState.ensureActive()) {
             queueGroupAction({ type: 'removeMember', groupId, userId });
-            return Promise.resolve({ queued: true });
+            return { queued: true };
         }
         
         if (!sessionReady) {
             queueGroupAction({ type: 'removeMember', groupId, userId });
             requestSession();
-            return Promise.resolve({ queued: true, reason: 'session_not_ready' });
+            return { queued: true, reason: 'session_not_ready' };
         }
         
-        debugLog('Removing member from group');
+        debugLog('Removing member from group via apiRequest');
         
-        return safeSend('GROUP_REMOVE_MEMBER', {
-            module: MODULE_NAME,
-            groupId,
-            userId
-        }).then(response => {
+        try {
+            const response = await apiRequest('/group/remove-member', 'POST', {
+                groupId,
+                userId
+            });
+            
             if (response && response.success) {
                 const group = this.getGroupById(groupId);
                 
@@ -2033,33 +2328,33 @@ const GroupCore = {
                     this.emit('group:member-removed', { groupId, userId });
                     debugLog('Member removed from group');
                 }
+                return { success: true };
             }
-            return response;
-        }).catch(error => {
+            return { success: false, error: 'Invalid response' };
+        } catch (error) {
             debugLog('Failed to remove member:', error);
-            return { success: false, error };
-        });
+            return { success: false, error: error.message };
+        }
     },
     
-    // Leave group
-    leaveGroup(groupId) {
-        if (!LifecycleState.isActive()) {
+    // Leave group using apiRequest
+    async leaveGroup(groupId) {
+        if (!LifecycleState.ensureActive()) {
             queueGroupAction({ type: 'leaveGroup', groupId });
-            return Promise.resolve({ queued: true });
+            return { queued: true };
         }
         
         if (!sessionReady) {
             queueGroupAction({ type: 'leaveGroup', groupId });
             requestSession();
-            return Promise.resolve({ queued: true, reason: 'session_not_ready' });
+            return { queued: true, reason: 'session_not_ready' };
         }
         
-        debugLog('Leaving group');
+        debugLog('Leaving group via apiRequest');
         
-        return safeSend('GROUP_LEAVE', {
-            module: MODULE_NAME,
-            groupId
-        }).then(response => {
+        try {
+            const response = await apiRequest(`/group/${groupId}/leave`, 'POST');
+            
             if (response && response.success) {
                 // Remove from local stores
                 this.groups = this.groups.filter(g => g.id !== groupId);
@@ -2070,34 +2365,36 @@ const GroupCore = {
                 this.saveGroups();
                 this.emit('group:left', { groupId });
                 debugLog('Left group');
+                return { success: true };
             }
-            return response;
-        }).catch(error => {
+            return { success: false, error: 'Invalid response' };
+        } catch (error) {
             debugLog('Failed to leave group:', error);
-            return { success: false, error };
-        });
+            return { success: false, error: error.message };
+        }
     },
     
-    // Promote to admin
-    promoteToAdmin(groupId, userId) {
-        if (!LifecycleState.isActive()) {
+    // Promote to admin using apiRequest
+    async promoteToAdmin(groupId, userId) {
+        if (!LifecycleState.ensureActive()) {
             queueGroupAction({ type: 'promoteToAdmin', groupId, userId });
-            return Promise.resolve({ queued: true });
+            return { queued: true };
         }
         
         if (!sessionReady) {
             queueGroupAction({ type: 'promoteToAdmin', groupId, userId });
             requestSession();
-            return Promise.resolve({ queued: true, reason: 'session_not_ready' });
+            return { queued: true, reason: 'session_not_ready' };
         }
         
-        debugLog('Promoting to admin');
+        debugLog('Promoting to admin via apiRequest');
         
-        return safeSend('GROUP_PROMOTE_ADMIN', {
-            module: MODULE_NAME,
-            groupId,
-            userId
-        }).then(response => {
+        try {
+            const response = await apiRequest('/group/promote-admin', 'POST', {
+                groupId,
+                userId
+            });
+            
             if (response && response.success) {
                 const group = this.getGroupById(groupId);
                 
@@ -2111,34 +2408,36 @@ const GroupCore = {
                         debugLog('User promoted to admin');
                     }
                 }
+                return { success: true };
             }
-            return response;
-        }).catch(error => {
+            return { success: false, error: 'Invalid response' };
+        } catch (error) {
             debugLog('Failed to promote to admin:', error);
-            return { success: false, error };
-        });
+            return { success: false, error: error.message };
+        }
     },
     
-    // Demote from admin
-    demoteFromAdmin(groupId, userId) {
-        if (!LifecycleState.isActive()) {
+    // Demote from admin using apiRequest
+    async demoteFromAdmin(groupId, userId) {
+        if (!LifecycleState.ensureActive()) {
             queueGroupAction({ type: 'demoteFromAdmin', groupId, userId });
-            return Promise.resolve({ queued: true });
+            return { queued: true };
         }
         
         if (!sessionReady) {
             queueGroupAction({ type: 'demoteFromAdmin', groupId, userId });
             requestSession();
-            return Promise.resolve({ queued: true, reason: 'session_not_ready' });
+            return { queued: true, reason: 'session_not_ready' };
         }
         
-        debugLog('Demoting from admin');
+        debugLog('Demoting from admin via apiRequest');
         
-        return safeSend('GROUP_DEMOTE_ADMIN', {
-            module: MODULE_NAME,
-            groupId,
-            userId
-        }).then(response => {
+        try {
+            const response = await apiRequest('/group/demote-admin', 'POST', {
+                groupId,
+                userId
+            });
+            
             if (response && response.success) {
                 const group = this.getGroupById(groupId);
                 
@@ -2152,107 +2451,177 @@ const GroupCore = {
                         debugLog('User demoted from admin');
                     }
                 }
+                return { success: true };
             }
-            return response;
-        }).catch(error => {
+            return { success: false, error: 'Invalid response' };
+        } catch (error) {
             debugLog('Failed to demote from admin:', error);
-            return { success: false, error };
-        });
+            return { success: false, error: error.message };
+        }
     },
     
-    // Send join request
-    sendJoinRequest(groupId, message = '') {
-        if (!LifecycleState.isActive()) {
+    // Send join request using apiRequest
+    async sendJoinRequest(groupId, message = '') {
+        if (!LifecycleState.ensureActive()) {
             queueGroupAction({ type: 'sendJoinRequest', groupId, message });
-            return Promise.resolve({ queued: true });
+            return { queued: true };
         }
         
         if (!sessionReady) {
             queueGroupAction({ type: 'sendJoinRequest', groupId, message });
             requestSession();
-            return Promise.resolve({ queued: true, reason: 'session_not_ready' });
+            return { queued: true, reason: 'session_not_ready' };
         }
         
-        debugLog('Sending join request');
+        debugLog('Sending join request via apiRequest');
         
-        return safeSend('GROUP_JOIN_REQUEST', {
-            module: MODULE_NAME,
-            groupId,
-            message
-        }).then(response => {
+        try {
+            const response = await apiRequest(`/group/${groupId}/join-request`, 'POST', {
+                message
+            });
+            
             if (response && response.success) {
                 this.emit('group:join-request-sent', { groupId });
                 debugLog('Join request sent');
+                return { success: true };
             }
-            return response;
-        }).catch(error => {
+            return { success: false, error: 'Invalid response' };
+        } catch (error) {
             debugLog('Failed to send join request:', error);
-            return { success: false, error };
-        });
+            return { success: false, error: error.message };
+        }
     },
     
-    // Approve join request
-    approveJoinRequest(groupId, requestId, userId) {
-        if (!LifecycleState.isActive()) {
+    // Approve join request using apiRequest
+    async approveJoinRequest(groupId, requestId, userId) {
+        if (!LifecycleState.ensureActive()) {
             queueGroupAction({ type: 'approveJoinRequest', groupId, requestId, userId });
-            return Promise.resolve({ queued: true });
+            return { queued: true };
         }
         
         if (!sessionReady) {
             queueGroupAction({ type: 'approveJoinRequest', groupId, requestId, userId });
             requestSession();
-            return Promise.resolve({ queued: true, reason: 'session_not_ready' });
+            return { queued: true, reason: 'session_not_ready' };
         }
         
-        debugLog('Approving join request');
+        debugLog('Approving join request via apiRequest');
         
-        return safeSend('GROUP_JOIN_APPROVE', {
-            module: MODULE_NAME,
-            groupId,
-            requestId,
-            userId
-        }).then(response => {
+        try {
+            const response = await apiRequest(`/group/${groupId}/join-request/${requestId}/approve`, 'POST');
+            
             if (response && response.success) {
                 this.emit('group:join-request-approved', { groupId, userId });
                 debugLog('Join request approved');
+                return { success: true };
             }
-            return response;
-        }).catch(error => {
+            return { success: false, error: 'Invalid response' };
+        } catch (error) {
             debugLog('Failed to approve join request:', error);
-            return { success: false, error };
-        });
+            return { success: false, error: error.message };
+        }
     },
     
-    // Reject join request
-    rejectJoinRequest(groupId, requestId, userId) {
-        if (!LifecycleState.isActive()) {
+    // Reject join request using apiRequest
+    async rejectJoinRequest(groupId, requestId, userId) {
+        if (!LifecycleState.ensureActive()) {
             queueGroupAction({ type: 'rejectJoinRequest', groupId, requestId, userId });
-            return Promise.resolve({ queued: true });
+            return { queued: true };
         }
         
         if (!sessionReady) {
             queueGroupAction({ type: 'rejectJoinRequest', groupId, requestId, userId });
             requestSession();
-            return Promise.resolve({ queued: true, reason: 'session_not_ready' });
+            return { queued: true, reason: 'session_not_ready' };
         }
         
-        debugLog('Rejecting join request');
+        debugLog('Rejecting join request via apiRequest');
         
-        return safeSend('GROUP_JOIN_REJECT', {
-            module: MODULE_NAME,
-            groupId,
-            requestId,
-            userId
-        }).then(response => {
+        try {
+            const response = await apiRequest(`/group/${groupId}/join-request/${requestId}/reject`, 'POST');
+            
             if (response && response.success) {
                 this.emit('group:join-request-rejected', { groupId, userId });
                 debugLog('Join request rejected');
+                return { success: true };
             }
-            return response;
-        }).catch(error => {
+            return { success: false, error: 'Invalid response' };
+        } catch (error) {
             debugLog('Failed to reject join request:', error);
-            return { success: false, error };
-        });
+            return { success: false, error: error.message };
+        }
+    },
+    
+    // Send group message using apiRequest
+    async sendGroupMessage(groupId, content, topic = null, anonymous = false) {
+        if (!LifecycleState.ensureActive()) {
+            queueGroupAction({ type: 'sendMessage', groupId, content, topic, anonymous });
+            return { queued: true };
+        }
+        
+        if (!sessionReady) {
+            queueGroupAction({ type: 'sendMessage', groupId, content, topic, anonymous });
+            requestSession();
+            return { queued: true, reason: 'session_not_ready' };
+        }
+        
+        debugLog('Sending group message via apiRequest');
+        
+        try {
+            const response = await apiRequest('/group/message', 'POST', {
+                groupId,
+                content,
+                topic,
+                anonymous
+            });
+            
+            if (response && response.success && response.data) {
+                const messageData = response.data;
+                this.addGroupMessage(groupId, messageData);
+                this.emit('group:message-sent', { groupId, message: messageData });
+                debugLog('Message sent');
+                return { success: true, data: messageData };
+            }
+            return { success: false, error: 'Invalid response' };
+        } catch (error) {
+            debugLog('Failed to send message:', error);
+            return { success: false, error: error.message };
+        }
+    },
+    
+    // Load group messages using apiRequest
+    async loadGroupMessages(groupId, limit = 50) {
+        if (!LifecycleState.ensureActive()) {
+            return { success: false, reason: 'not_active' };
+        }
+        
+        if (!sessionReady) {
+            requestSession();
+            return { success: false, reason: 'session_not_ready' };
+        }
+        
+        debugLog(`Loading messages for group ${groupId}`);
+        
+        try {
+            const response = await apiRequest(`/group/messages?groupId=${groupId}&limit=${limit}`, 'GET');
+            
+            if (response && response.success && response.data) {
+                const messages = response.data;
+                this.groupMessages[groupId] = messages;
+                
+                try {
+                    SafeStorage.setItem(`group_messages_${groupId}`, messages);
+                } catch (e) {}
+                
+                this.emit('group:messages-loaded', { groupId, messages });
+                debugLog(`Loaded ${messages.length} messages`);
+                return { success: true, data: messages };
+            }
+            return { success: false, error: 'Invalid response' };
+        } catch (error) {
+            debugLog('Failed to load messages:', error);
+            return { success: false, error: error.message };
+        }
     },
     
     // Get group messages
@@ -2282,6 +2651,10 @@ const GroupCore = {
         if (!groupId || !message) return;
         
         const messages = this.groupMessages[groupId] || [];
+        
+        // Check for duplicates
+        if (messages.some(m => m.id === message.id)) return;
+        
         messages.push(message);
         
         if (messages.length > 100) {
@@ -2406,17 +2779,23 @@ if (typeof window !== 'undefined' && !window.__GROUPS_MESSAGE_LISTENER_SET__) {
 // INITIALIZATION SEQUENCE - DETERMINISTIC PROTOCOL
 // =============================================
 function initializeModule() {
-    // STRICT: Prevent duplicate initialization
+    // STRICT: Prevent duplicate initialization - CRITICAL FIX
+    if (moduleInitialized) {
+        console.warn(`[${MODULE_NAME}] ⚠️ Duplicate initialization prevented`);
+        return;
+    }
+    
     if (LifecycleState.isInitialized()) {
-        debugLog('Module already initialized');
+        console.warn(`[${MODULE_NAME}] ⚠️ Already initialized`);
         return;
     }
     
     if (LifecycleState.getState() !== LifecycleState.STATES.BOOT) {
-        debugLog('Module already in state:', LifecycleState.getState());
+        console.warn(`[${MODULE_NAME}] ⚠️ Cannot initialize - not in BOOT state (current: ${LifecycleState.getState()})`);
         return;
     }
     
+    moduleInitialized = true;
     LifecycleState.setInitialized();
     
     console.log(`[${MODULE_NAME}] Initializing - Version ${MODULE_VERSION}`);
@@ -2618,18 +2997,22 @@ function processGroupActionQueue() {
                         GroupCore.rejectJoinRequest(action.groupId, action.requestId, action.userId).catch(() => {});
                         break;
                     case 'sendMessage':
-                        if (action.fn && typeof action.fn === 'function') {
+                        if (action.groupId && action.content) {
+                            GroupCore.sendGroupMessage(action.groupId, action.content, action.topic, action.anonymous).catch(() => {});
+                        } else if (action.fn && typeof action.fn === 'function') {
                             action.fn();
                         }
                         break;
                     case 'joinGroup':
-                        if (action.groupId && typeof joinGroupOnline === 'function') {
-                            joinGroupOnline(action.groupId);
+                        if (action.groupId) {
+                            GroupCore.sendJoinRequest(action.groupId, '').catch(() => {});
                         }
                         break;
                     case 'changeMemberRole':
-                        if (action.groupId && action.userId && action.role && typeof changeMemberRoleOnline === 'function') {
-                            changeMemberRoleOnline(action.groupId, action.userId, action.role);
+                        if (action.groupId && action.userId && action.role === 'admin') {
+                            GroupCore.promoteToAdmin(action.groupId, action.userId).catch(() => {});
+                        } else if (action.groupId && action.userId) {
+                            GroupCore.demoteFromAdmin(action.groupId, action.userId).catch(() => {});
                         }
                         break;
                 }
@@ -2859,271 +3242,7 @@ const LOCAL_STORAGE_KEYS = Object.freeze({
 });
 
 // =============================================
-// SAFE FETCH WRAPPER - UPDATED TO USE authorizedFetch
-// =============================================
-let fetchErrorShown = false;
-
-async function safeFetch(url, options = {}) {
-    try {
-        const response = await authorizedFetch(url, {
-            credentials: "omit", // Don't send cookies
-            headers: {
-                'Content-Type': 'application/json',
-                ...options.headers
-            },
-            ...options
-        });
-
-        if (!response.ok) {
-            if (response.status === 404 && !fetchErrorShown) {
-                fetchErrorShown = true;
-            }
-            throw new Error(`HTTP error ${response.status}`);
-        }
-
-        const data = await response.json();
-        return data;
-    } catch (error) {
-        if (!fetchErrorShown) {
-            fetchErrorShown = true;
-        }
-        return { 
-            success: false, 
-            message: error.message,
-            fromCache: true
-        };
-    }
-}
-
-async function safeFetchGroups() {
-    try {
-        const result = await safeFetch('/api/groups', {
-            method: 'GET'
-        });
-        
-        if (!result || !result.success) {
-            return { success: false, data: [] };
-        }
-        
-        return result;
-    } catch (error) {
-        return { success: false, data: [] };
-    }
-}
-
-async function safeFetchGroupInvites() {
-    try {
-        const result = await safeFetch('/api/invites', {
-            method: 'GET'
-        });
-        
-        if (!result || !result.success) {
-            return { success: false, data: [] };
-        }
-        
-        return result;
-    } catch (error) {
-        return { success: false, data: [] };
-    }
-}
-
-// =============================================
-// SECURITY FUNCTIONS (PRESERVED)
-// =============================================
-const loggedErrors = new Set();
-const loggedWarnings = new Set();
-const maxRetries = 1;
-const retryCounters = new Map();
-
-function shouldRetry(operationId) {
-    const safeId = validateInput(operationId);
-    const count = retryCounters.get(safeId) || 0;
-    if (count >= maxRetries) {
-        return false;
-    }
-    retryCounters.set(safeId, count + 1);
-    return true;
-}
-
-function resetRetry(operationId) {
-    const safeId = validateInput(operationId);
-    retryCounters.delete(safeId);
-}
-
-function hasValidSession() {
-    return sessionReceived && sessionReady && session.token;
-}
-
-function isGroupOperationReady() {
-    return LifecycleState.isActive() && parentReady && sessionReady;
-}
-
-function guardGroupOperation(operation, fallback = null) {
-    if (isGroupOperationReady()) {
-        return operation();
-    }
-    
-    if (typeof fallback === 'function') {
-        return fallback();
-    }
-    
-    queueGroupAction(operation);
-    return null;
-}
-
-// =============================================
-// TOKEN MANAGEMENT - UPDATED TO USE SESSION ONLY
-// =============================================
-let tokenQueue = [];
-let isProcessingTokenQueue = false;
-let tokenReadyPromise = null;
-let tokenReadyResolve = null;
-let tokenReadyReject = null;
-
-let authReady = false;
-let authCheckComplete = false;
-let apiInitialized = false;
-
-let isPageInitialized = false;
-let syncIntervalId = null;
-let backgroundSyncRunning = false;
-
-let __PARENT_READY__ = false;
-let __SESSION_READY__ = false;
-let __HANDSHAKE_COMPLETE__ = false;
-let __SESSION_REQUEST_PENDING__ = false;
-
-let handshakeInProgress = false;
-let handshakeAttempts = 0;
-
-function initializeTokenSystem() {
-    try {
-        tokenReadyPromise = new Promise((resolve, reject) => {
-            tokenReadyResolve = resolve;
-            tokenReadyReject = reject;
-        });
-        
-        // DO NOT check localStorage for token - must come from parent
-        // Just resolve with null and wait for parent session
-        if (tokenReadyResolve) {
-            tokenReadyResolve(null);
-            authCheckComplete = true;
-        }
-    } catch (error) {}
-}
-
-async function waitForTokenReady() {
-    try {
-        // Check session memory first
-        if (session.token) {
-            authReady = true;
-            authCheckComplete = true;
-            return session.token;
-        }
-        
-        if (tokenReadyPromise) {
-            return await tokenReadyPromise;
-        }
-        
-        return null;
-    } catch (error) {
-        return null;
-    }
-}
-
-function getUnifiedToken() {
-    // Only return from session memory, never from localStorage
-    return session.token || null;
-}
-
-function saveUnifiedToken(token) {
-    // NO-OP - tokens must only come from parent
-    // This function exists for backward compatibility but does nothing
-    debugLog('saveUnifiedToken called but ignored - tokens must come from parent');
-}
-
-function getCurrentUserLocal() {
-    // Return from session memory, not localStorage
-    return session.user || currentUser || null;
-}
-
-function getCurrentUser() {
-    return getCurrentUserLocal();
-}
-
-// =============================================
-// QUEUE API CALL SYSTEM - UPDATED TO USE SESSION
-// =============================================
-function queueApiCall(apiCallFunction) {
-    return new Promise(async (resolve, reject) => {
-        try {
-            const queuedCall = {
-                fn: apiCallFunction,
-                resolve,
-                reject,
-                timestamp: Date.now()
-            };
-            
-            tokenQueue.push(queuedCall);
-            
-            if (tokenQueue.length > SECURITY_CONFIG.MAX_ARRAY_LENGTH) {
-                tokenQueue.shift();
-            }
-            
-            if (!isProcessingTokenQueue) {
-                processTokenQueue();
-            }
-        } catch (error) {
-            reject(error);
-        }
-    });
-}
-
-async function processTokenQueue() {
-    if (isProcessingTokenQueue || tokenQueue.length === 0) return;
-    
-    isProcessingTokenQueue = true;
-    
-    try {
-        const token = session.token; // Get from session, not waitForTokenReady
-        
-        if (!token) {
-            const callsToProcess = [...tokenQueue];
-            tokenQueue.length = 0;
-            
-            for (const call of callsToProcess) {
-                try {
-                    call.reject(new Error('No authentication token available'));
-                } catch (error) {
-                    call.reject(error);
-                }
-            }
-            return;
-        }
-        
-        const callsToProcess = [...tokenQueue];
-        tokenQueue.length = 0;
-        
-        for (const call of callsToProcess) {
-            try {
-                const result = await call.fn(token);
-                call.resolve(result);
-            } catch (error) {
-                call.reject(error);
-            }
-        }
-    } catch (error) {
-        tokenQueue.forEach(call => {
-            call.reject(error);
-        });
-        tokenQueue.length = 0;
-    } finally {
-        isProcessingTokenQueue = false;
-    }
-}
-
-// =============================================
-// SECURE API WRAPPER - UPDATED TO USE authorizedFetch
+// SECURE API WRAPPER - UPDATED TO USE apiRequest
 // =============================================
 const API_WRAPPER = {
     _ready: false,
@@ -3307,161 +3426,35 @@ const API_WRAPPER = {
             }
         }
         
-        const maxRetries = Math.min(options.retry ?? this._maxRetries, 1);
-        
-        for (let attempt = 0; attempt <= maxRetries; attempt++) {
-            try {
-                const controller = new AbortController();
-                const timeoutId = setTimeout(() => controller.abort(), 10000);
+        try {
+            const response = await apiRequest(cleanEndpoint, method, options.body);
+            
+            if (response && response.success) {
+                this._stats.success++;
                 
-                let response;
-                
-                if (window.__API_CORE__) {
-                    response = await window.__API_CORE__.request(cleanEndpoint, {
-                        ...options,
-                        signal: controller.signal
-                    });
-                } else {
-                    response = await this._mockRequest(cleanEndpoint, method, options);
+                if (method === 'GET' && response.data) {
+                    this._setCached(cacheKey, response.data);
                 }
                 
-                clearTimeout(timeoutId);
-                
-                if (!response || typeof response !== 'object') {
-                    throw new Error('Invalid API response format');
-                }
-                
-                if (response.success) {
-                    this._stats.success++;
-                    
-                    if (method === 'GET' && response.data) {
-                        this._setCached(cacheKey, response.data);
-                    }
-                    
-                    return response;
-                }
-                
-                if (attempt < maxRetries) {
-                    this._stats.retried++;
-                    await new Promise(r => setTimeout(r, this._retryDelay * Math.pow(2, attempt)));
-                    continue;
-                }
-                
-                this._stats.failed++;
-                
-                return {
-                    success: false,
-                    status: response.status || 'error',
-                    message: response.message || 'API request failed',
-                    data: response.data || null,
-                    fromCache: false
-                };
-                
-            } catch (error) {
-                if (error.name === 'AbortError') {
-                    if (attempt < maxRetries) {
-                        this._stats.retried++;
-                        await new Promise(r => setTimeout(r, this._retryDelay * Math.pow(2, attempt)));
-                        continue;
-                    }
-                    
-                    this._stats.failed++;
-                    return {
-                        success: false,
-                        status: 'timeout',
-                        message: 'Request timed out',
-                        fromCache: false
-                    };
-                }
-                
-                if (attempt < maxRetries) {
-                    this._stats.retried++;
-                    await new Promise(r => setTimeout(r, this._retryDelay * Math.pow(2, attempt)));
-                    continue;
-                }
-                
-                this._stats.failed++;
-                
-                return {
-                    success: false,
-                    status: 'error',
-                    message: error.message || 'Network error',
-                    fromCache: false
-                };
+                return response;
             }
-        }
-        
-        return {
-            success: false,
-            status: 'error',
-            message: 'Maximum retries exceeded',
-            fromCache: false
-        };
-    },
-    
-    async _mockRequest(endpoint, method, options) {
-        await new Promise(r => setTimeout(r, 300));
-        
-        if (endpoint === '/groups' && method === 'GET') {
+            
+            this._stats.failed++;
             return {
-                success: true,
-                data: groups
+                success: false,
+                status: 'error',
+                message: response?.error || 'API request failed',
+                fromCache: false
+            };
+        } catch (error) {
+            this._stats.failed++;
+            return {
+                success: false,
+                status: 'error',
+                message: error.message || 'Network error',
+                fromCache: false
             };
         }
-        
-        if (endpoint === '/invites' && method === 'GET') {
-            return {
-                success: true,
-                data: groupInvites
-            };
-        }
-        
-        if (endpoint.startsWith('/groups/') && method === 'GET' && endpoint.includes('/members')) {
-            const groupId = endpoint.split('/')[2];
-            return {
-                success: true,
-                data: generateSimulatedMembers(groupId)
-            };
-        }
-        
-        if (endpoint === '/auth/me' && method === 'GET') {
-            if (session.user) {
-                return {
-                    success: true,
-                    data: session.user
-                };
-            }
-            return {
-                success: true,
-                data: { id: 'guest', displayName: 'Guest User' }
-            };
-        }
-        
-        if (method === 'POST') {
-            return {
-                success: true,
-                data: { id: 'mock_' + Date.now() }
-            };
-        }
-        
-        if (method === 'PUT') {
-            return {
-                success: true,
-                data: options.body
-            };
-        }
-        
-        if (method === 'DELETE') {
-            return {
-                success: true,
-                data: { deleted: true }
-            };
-        }
-        
-        return {
-            success: true,
-            data: {}
-        };
     },
     
     getStats() {
@@ -3477,7 +3470,7 @@ const API_WRAPPER = {
 API_WRAPPER.init();
 
 // =============================================
-// SECURE API CALL FUNCTION - UPDATED TO USE SESSION
+// SECURE API CALL FUNCTION - UPDATED TO USE apiRequest
 // =============================================
 async function secureApiCall(endpoint, options = {}) {
     try {
@@ -3515,6 +3508,157 @@ async function secureApiCall(endpoint, options = {}) {
 
 async function safeApiCall(endpoint, options = {}) {
     return secureApiCall(endpoint, options);
+}
+
+// =============================================
+// TOKEN MANAGEMENT - UPDATED TO USE SESSION ONLY
+// =============================================
+let tokenQueue = [];
+let isProcessingTokenQueue = false;
+let tokenReadyPromise = null;
+let tokenReadyResolve = null;
+let tokenReadyReject = null;
+
+let authReady = false;
+let authCheckComplete = false;
+let apiInitialized = false;
+
+let isPageInitialized = false;
+let syncIntervalId = null;
+let backgroundSyncRunning = false;
+
+let __PARENT_READY__ = false;
+let __SESSION_READY__ = false;
+let __HANDSHAKE_COMPLETE__ = false;
+let __SESSION_REQUEST_PENDING__ = false;
+
+let handshakeInProgress = false;
+let handshakeAttempts = 0;
+
+function initializeTokenSystem() {
+    try {
+        tokenReadyPromise = new Promise((resolve, reject) => {
+            tokenReadyResolve = resolve;
+            tokenReadyReject = reject;
+        });
+        
+        // DO NOT check localStorage for token - must come from parent
+        // Just resolve with null and wait for parent session
+        if (tokenReadyResolve) {
+            tokenReadyResolve(null);
+            authCheckComplete = true;
+        }
+    } catch (error) {}
+}
+
+async function waitForTokenReady() {
+    try {
+        // Check session memory first
+        if (session.token) {
+            authReady = true;
+            authCheckComplete = true;
+            return session.token;
+        }
+        
+        if (tokenReadyPromise) {
+            return await tokenReadyPromise;
+        }
+        
+        return null;
+    } catch (error) {
+        return null;
+    }
+}
+
+function getUnifiedToken() {
+    // Only return from session memory, never from localStorage
+    return session.token || null;
+}
+
+function saveUnifiedToken(token) {
+    // NO-OP - tokens must only come from parent
+    // This function exists for backward compatibility but does nothing
+    debugLog('saveUnifiedToken called but ignored - tokens must come from parent');
+}
+
+function getCurrentUserLocal() {
+    // Return from session memory, not localStorage
+    return session.user || currentUser || null;
+}
+
+function getCurrentUser() {
+    return getCurrentUserLocal();
+}
+
+// =============================================
+// QUEUE API CALL SYSTEM - UPDATED TO USE SESSION
+// =============================================
+function queueApiCall(apiCallFunction) {
+    return new Promise(async (resolve, reject) => {
+        try {
+            const queuedCall = {
+                fn: apiCallFunction,
+                resolve,
+                reject,
+                timestamp: Date.now()
+            };
+            
+            tokenQueue.push(queuedCall);
+            
+            if (tokenQueue.length > SECURITY_CONFIG.MAX_ARRAY_LENGTH) {
+                tokenQueue.shift();
+            }
+            
+            if (!isProcessingTokenQueue) {
+                processTokenQueue();
+            }
+        } catch (error) {
+            reject(error);
+        }
+    });
+}
+
+async function processTokenQueue() {
+    if (isProcessingTokenQueue || tokenQueue.length === 0) return;
+    
+    isProcessingTokenQueue = true;
+    
+    try {
+        const token = session.token; // Get from session, not waitForTokenReady
+        
+        if (!token) {
+            const callsToProcess = [...tokenQueue];
+            tokenQueue.length = 0;
+            
+            for (const call of callsToProcess) {
+                try {
+                    call.reject(new Error('No authentication token available'));
+                } catch (error) {
+                    call.reject(error);
+                }
+            }
+            return;
+        }
+        
+        const callsToProcess = [...tokenQueue];
+        tokenQueue.length = 0;
+        
+        for (const call of callsToProcess) {
+            try {
+                const result = await call.fn(token);
+                call.resolve(result);
+            } catch (error) {
+                call.reject(error);
+            }
+        }
+    } catch (error) {
+        tokenQueue.forEach(call => {
+            call.reject(error);
+        });
+        tokenQueue.length = 0;
+    } finally {
+        isProcessingTokenQueue = false;
+    }
 }
 
 // =============================================
@@ -3841,6 +3985,9 @@ const openGroupChat = async function(groupData) {
         
         GroupCore.resetGroupUnreadCount(groupData.id);
         
+        // Load fresh messages from backend
+        await GroupCore.loadGroupMessages(groupData.id, 50);
+        
         const chatTitle = safeGetElement('#chatTitle');
         const chatMemberCount = safeGetElement('#chatMemberCount');
         const chatActive = safeGetElement('#chatActive');
@@ -4148,11 +4295,6 @@ async function loadGroupEvents(groupId) {
             if (response && response.success && response.data) {
                 events = response.data;
                 SafeStorage.setItem(cacheKey, events);
-            } else {
-                if (events.length === 0 && session.user) {
-                    events = generateUniqueEventsForUser(groupId, session.user.uid || session.user.id);
-                    SafeStorage.setItem(cacheKey, events);
-                }
             }
         } catch (error) {}
         
@@ -4188,70 +4330,6 @@ async function loadGroupEvents(groupId) {
     } catch (error) {
         const eventCountdownPanel = safeGetElement('#eventCountdownPanel');
         if (eventCountdownPanel) eventCountdownPanel.style.display = 'none';
-    }
-}
-
-function generateUniqueEventsForUser(groupId, userId) {
-    try {
-        const events = [];
-        const now = new Date();
-        
-        const userHash = hashCode(userId);
-        const eventTemplates = [
-            { title: 'Group Study Session', type: 'study', duration: 2 },
-            { title: 'Team Meeting', type: 'work', duration: 1 },
-            { title: 'Family Gathering', type: 'family', duration: 3 },
-            { title: 'Project Review', type: 'project', duration: 2 },
-            { title: 'Weekly Check-in', type: 'support', duration: 1 },
-            { title: 'Hobby Workshop', type: 'hobby', duration: 4 },
-            { title: 'Fitness Challenge', type: 'fitness', duration: 1 },
-            { title: 'Prayer Meeting', type: 'prayer', duration: 1 },
-            { title: 'Celebration Party', type: 'event', duration: 5 }
-        ];
-        
-        for (let i = 0; i < 3; i++) {
-            const templateIndex = (userHash + i) % eventTemplates.length;
-            const template = eventTemplates[templateIndex];
-            
-            const daysFromNow = 1 + ((userHash + i * 7) % 14);
-            const eventDate = new Date(now);
-            eventDate.setDate(eventDate.getDate() + daysFromNow);
-            
-            const hour = 9 + ((userHash + i * 3) % 8);
-            eventDate.setHours(hour, 0, 0, 0);
-            
-            events.push({
-                id: `event_${groupId}_${userId}_${i}`,
-                groupId: groupId,
-                title: template.title,
-                description: `Join us for a ${template.type} event!`,
-                date: eventDate.toISOString(),
-                duration: template.duration,
-                type: template.type,
-                createdBy: 'system',
-                attendees: [],
-                location: 'Online',
-                createdAt: new Date().toISOString()
-            });
-        }
-        
-        return events;
-    } catch (error) {
-        return [];
-    }
-}
-
-function hashCode(str) {
-    try {
-        let hash = 0;
-        for (let i = 0; i < str.length; i++) {
-            const char = str.charCodeAt(i);
-            hash = ((hash << 5) - hash) + char;
-            hash = hash & hash;
-        }
-        return Math.abs(hash);
-    } catch (error) {
-        return 0;
     }
 }
 
@@ -4352,11 +4430,9 @@ async function analyzeGroupEnergy(groupId) {
             const response = await secureApiCall(`/groups/${groupId}/messages`, { params: { limit: 50 }, silent: true });
             if (response && response.success && response.data) {
                 messages = response.data;
-            } else {
-                messages = generateSimulatedMessages(groupId);
             }
         } catch (error) {
-            messages = generateSimulatedMessages(groupId);
+            messages = [];
         }
         
         const now = new Date();
@@ -4407,36 +4483,6 @@ async function analyzeGroupEnergy(groupId) {
     } catch (error) {
         const energySuggestionPanel = safeGetElement('#energySuggestionPanel');
         if (energySuggestionPanel) energySuggestionPanel.style.display = 'none';
-    }
-}
-
-function generateSimulatedMessages(groupId) {
-    try {
-        const messages = [];
-        const now = new Date();
-        const members = ['user1', 'user2', 'user3', session.user?.uid || session.user?.id || 'user4'];
-        const messageTypes = ['text', 'announcement', 'question'];
-        
-        for (let i = 0; i < 50; i++) {
-            const hoursAgo = Math.random() * 24;
-            const timestamp = new Date(now.getTime() - hoursAgo * 60 * 60 * 1000);
-            const sender = members[Math.floor(Math.random() * members.length)];
-            
-            messages.push({
-                id: `msg_${groupId}_${i}`,
-                groupId: groupId,
-                senderId: sender,
-                senderName: `User ${sender.slice(-1)}`,
-                content: `Sample message ${i + 1} in this group`,
-                timestamp: timestamp.toISOString(),
-                type: messageTypes[Math.floor(Math.random() * messageTypes.length)],
-                readBy: members.slice(0, Math.floor(Math.random() * members.length) + 1)
-            });
-        }
-        
-        return messages;
-    } catch (error) {
-        return [];
     }
 }
 
@@ -4506,7 +4552,7 @@ async function loadGroupChatMessages(groupId) {
         }
         
         try {
-            const response = await secureApiCall(`/groups/${groupId}/messages`, { silent: true });
+            const response = await GroupCore.loadGroupMessages(groupId, 50);
             if (response && response.success && response.data) {
                 response.data.forEach(message => {
                     addMessageToChat(message, true);
@@ -4594,16 +4640,8 @@ function saveMessageToCache(groupId, message) {
 
 const sendGroupMessageOnline = async function(groupId, messageData) {
     try {
-        const response = await secureApiCall(`/groups/${groupId}/messages`, {
-            method: 'POST',
-            body: messageData
-        });
-        
-        if (!response || !response.success) {
-            throw new Error(response?.message || 'Failed to send message');
-        }
-        
-        return response.data;
+        const response = await GroupCore.sendGroupMessage(groupId, messageData.content, messageData.topic, messageData.anonymous);
+        return response;
     } catch (error) {
         console.error('Failed to send message online:', error);
         throw error;
@@ -4653,14 +4691,7 @@ const sendGroupMessage = async function() {
         addMessageToChat(tempMessage, true);
         
         try {
-            const response = await secureApiCall(`/groups/${currentChatGroup.id}/messages`, {
-                method: 'POST',
-                body: {
-                    content: messageContent,
-                    topic: selectedTopic || undefined,
-                    anonymous: isAnonymousMode
-                }
-            });
+            const response = await GroupCore.sendGroupMessage(currentChatGroup.id, messageContent, selectedTopic, isAnonymousMode);
             
             if (response && response.success) {
                 const finalMessage = {
@@ -4675,13 +4706,15 @@ const sendGroupMessage = async function() {
                     toggleAnonymousMode();
                 }
             } else {
-                throw new Error(response?.message || 'Failed to send message');
+                throw new Error(response?.error || 'Failed to send message');
             }
         } catch (error) {
             queueGroupAction({
                 type: 'sendMessage',
                 groupId: currentChatGroup.id,
-                message: message
+                content: messageContent,
+                topic: selectedTopic,
+                anonymous: isAnonymousMode
             });
         }
         
@@ -4852,17 +4885,19 @@ async function loadGroupMembersForManagement(groupData) {
         memberList.innerHTML = '<div class="loading-placeholder"><i class="fas fa-spinner fa-spin"></i><p>Loading members...</p></div>';
         
         try {
-            let memberDetails = [];
-            
             const response = await secureApiCall(`/groups/${groupData.id}/members`, { silent: true });
             
             if (response && response.success && response.data) {
-                memberDetails = response.data;
+                renderMembersList(response.data);
             } else {
-                memberDetails = generateSimulatedMembers(groupData.id);
+                memberList.innerHTML = `
+                    <div class="empty-state">
+                        <i class="fas fa-exclamation-triangle"></i>
+                        <p>Error loading members</p>
+                        <p class="subtext">Please try again later</p>
+                    </div>
+                `;
             }
-            
-            renderMembersList(memberDetails);
         } catch (error) {
             memberList.innerHTML = `
                 <div class="empty-state">
@@ -4873,42 +4908,6 @@ async function loadGroupMembersForManagement(groupData) {
             `;
         }
     } catch (error) {}
-}
-
-function generateSimulatedMembers(groupId) {
-    try {
-        const members = [];
-        const memberNames = ['Alex Johnson', 'Sam Wilson', 'Taylor Smith', 'Jordan Lee', 'Casey Brown'];
-        const roles = ['admin', 'moderator', 'member', 'member', 'member'];
-        
-        for (let i = 0; i < 5; i++) {
-            members.push({
-                id: `member_${groupId}_${i}`,
-                displayName: memberNames[i],
-                username: memberNames[i].toLowerCase().replace(' ', ''),
-                photoURL: '',
-                online: i < 2,
-                isCreator: i === 0,
-                isAdmin: roles[i] === 'admin' || roles[i] === 'moderator'
-            });
-        }
-        
-        if (session.user) {
-            members.unshift({
-                id: session.user.uid || session.user.id,
-                displayName: session.user.displayName || 'You',
-                username: session.user.username || 'you',
-                photoURL: session.user.photoURL || '',
-                online: true,
-                isCreator: true,
-                isAdmin: true
-            });
-        }
-        
-        return members;
-    } catch (error) {
-        return [];
-    }
 }
 
 function renderMembersList(memberDetails) {
@@ -4991,18 +4990,18 @@ async function handleMemberAction(action, memberId, groupData) {
         
         switch(action) {
             case 'promote':
-                success = GroupCore.promoteToAdmin(groupData.id, memberId).success;
+                success = (await GroupCore.promoteToAdmin(groupData.id, memberId)).success;
                 await secureApiCall(`/groups/${groupData.id}/members/${memberId}/promote`, { method: 'POST' }).catch(() => {});
                 logTransparencyAction(groupData.id, 'Promoted member to admin', memberId);
                 break;
             case 'demote':
-                success = GroupCore.demoteFromAdmin(groupData.id, memberId).success;
+                success = (await GroupCore.demoteFromAdmin(groupData.id, memberId)).success;
                 await secureApiCall(`/groups/${groupData.id}/members/${memberId}/demote`, { method: 'POST' }).catch(() => {});
                 logTransparencyAction(groupData.id, 'Demoted admin to member', memberId);
                 break;
             case 'remove':
                 if (confirm('Are you sure you want to remove this member from the group?')) {
-                    success = removeMemberFromGroup(groupData.id, memberId).success;
+                    success = (await GroupCore.removeMember(groupData.id, memberId)).success;
                     await secureApiCall(`/groups/${groupData.id}/members/${memberId}`, { method: 'DELETE' }).catch(() => {});
                     logTransparencyAction(groupData.id, 'Removed member from group', memberId);
                 }
@@ -5186,10 +5185,7 @@ const saveGroupSettings = async function(groupData) {
             }
         };
         
-        const response = await secureApiCall(`/groups/${groupData.id}`, {
-            method: 'PUT',
-            body: settings
-        });
+        const response = await GroupCore.updateGroup(groupData.id, settings);
         
         if (response && response.success) {
             Object.assign(groupData, settings);
@@ -5208,7 +5204,7 @@ const saveGroupSettings = async function(groupData) {
             
             GroupCore.saveGroups();
         } else {
-            throw new Error(response?.message || 'Failed to save settings');
+            throw new Error(response?.error || 'Failed to save settings');
         }
     } catch (error) {}
 };
@@ -5404,27 +5400,13 @@ const createGroupOnline = async function(groupData) {
             participationModes: groupData.participationModes || {}
         };
         
-        const response = await secureApiCall('/groups', {
-            method: 'POST',
-            body: groupDataToSave
-        });
+        const response = await GroupCore.createGroup(groupDataToSave);
         
         if (!response || !response.success) {
-            throw new Error(response?.message || 'Failed to create group');
+            throw new Error(response?.error || 'Failed to create group');
         }
         
         const newGroup = response.data;
-        
-        newGroup.createdBy = session.user?.uid || session.user?.id;
-        newGroup.createdAt = Date.now();
-        newGroup.members = members.map(userId => ({
-            userId,
-            role: userId === (session.user?.uid || session.user?.id) ? 'admin' : 'member',
-            joinedAt: Date.now()
-        }));
-        newGroup.memberCount = members.length;
-        newGroup.isAdmin = true;
-        newGroup.isCreator = true;
         
         groups.push(newGroup);
         myGroups.push(newGroup);
@@ -5472,9 +5454,7 @@ const joinGroupOnline = async function(groupId) {
             return;
         }
         
-        const response = await secureApiCall(`/groups/${groupId}/join`, {
-            method: 'POST'
-        });
+        const response = await GroupCore.sendJoinRequest(groupId);
         
         if (!response || !response.success) {
             return;
@@ -5525,9 +5505,7 @@ const leaveGroupOnline = async function(groupId) {
             return;
         }
         
-        const response = await secureApiCall(`/groups/${groupId}/leave`, {
-            method: 'POST'
-        });
+        const response = await GroupCore.leaveGroup(groupId);
         
         if (!response || !response.success) {
             return;
@@ -5700,12 +5678,8 @@ async function loadGroupDetails(groupData, type) {
                 const response = await secureApiCall(`/groups/${groupData.id}/members`, { silent: true });
                 if (response && response.success && response.data) {
                     realMembers = response.data.slice(0, 5);
-                } else {
-                    realMembers = generateSimulatedMembers(groupData.id).slice(0, 5);
                 }
-            } catch (error) {
-                realMembers = generateSimulatedMembers(groupData.id).slice(0, 5);
-            }
+            } catch (error) {}
             
             detailsContent.innerHTML = `
                 <div class="group-profile-header">
@@ -5722,7 +5696,7 @@ async function loadGroupDetails(groupData, type) {
                     <div class="role-badge ${userRole}">
                         <i class="${roleInfo.icon}"></i> ${roleInfo.name}
                     </div>
-                    ${moodInfo ? `<div class="group-mood-indicator mood-${mood}" style="margin: 10px auto; background: ${moodInfo.bgColor}; color: ${moodInfo.color}; padding: 8px 16px; border-radius: 20px; display: inline-flex; align-items: center; gap: 8px;">${moodInfo.icon} ${moodInfo.name}</span>` : ''}
+                    ${moodInfo ? `<div class="group-mood-indicator mood-${mood}" style="margin: 10px auto; background: ${moodInfo.bgColor}; color: ${moodInfo.color}; padding: 8px 16px; border-radius: 20px; display: inline-flex; align-items: center; gap: 8px;">${moodInfo.icon} ${moodInfo.name}</div>` : ''}
                     ${ruleInfo ? `<div class="posting-rules-banner rule-${postingRule.replace('_', '-')}" style="margin: 10px auto; background: ${ruleInfo.bgColor}; color: ${ruleInfo.color}; padding: 8px 16px; border-radius: 8px; display: inline-flex; align-items: center; gap: 8px;"><i class="fas fa-comment"></i> ${ruleInfo.name}</div>` : ''}
                 </div>
                 
@@ -5965,43 +5939,17 @@ async function syncGroupsFromServer() {
     if (!sessionReady && !sessionReceived) return;
     
     try {
-        const response = await secureApiCall('/groups', { silent: true });
+        const response = await GroupCore.requestGroupList();
         
-        if (!response || !response.success || !response.data) {
+        if (!response || !response.success) {
             return;
         }
         
-        const serverGroups = response.data;
-        const serverMyGroups = [];
-        const serverJoinedGroups = [];
-        const serverAdminGroups = [];
-        
-        serverGroups.forEach(groupData => {
-            const groupWithMeta = {
-                ...groupData,
-                id: groupData.id || groupData._id,
-                type: groupData.privacy || 'private',
-                theme: groupData.theme || 'blue',
-                memberCount: groupData.members ? groupData.members.length : 0,
-                isAdmin: groupData.admins && groupData.admins.includes(session.user?.uid || session.user?.id),
-                isCreator: groupData.createdBy === (session.user?.uid || session.user?.id),
-                lastActivity: groupData.lastActivity || groupData.createdAt,
-                purpose: groupData.purpose || '',
-                mood: groupData.mood || '',
-                postingRule: groupData.postingRule || 'everyone',
-                quietHours: groupData.quietHours || {},
-                scheduledPosting: groupData.scheduledPosting || {},
-                participationModes: groupData.participationModes || {}
-            };
-            
-            if (groupData.createdBy === (session.user?.uid || session.user?.id)) {
-                serverMyGroups.push(groupWithMeta);
-            } else if (groupData.admins && groupData.admins.includes(session.user?.uid || session.user?.id)) {
-                serverAdminGroups.push(groupWithMeta);
-            } else {
-                serverJoinedGroups.push(groupWithMeta);
-            }
-        });
+        const groupsData = response.data;
+        const serverGroups = groupsData.groups || [];
+        const serverMyGroups = groupsData.myGroups || [];
+        const serverJoinedGroups = groupsData.joinedGroups || [];
+        const serverAdminGroups = groupsData.adminGroups || [];
         
         if (JSON.stringify(serverGroups) !== JSON.stringify(groups)) {
             groups = serverGroups;
@@ -6891,6 +6839,7 @@ function createPoll() {
 function showGroupInviteDetails() {
     try {} catch (error) {}
 }
+
 // =============================================
 // MAIN INITIALIZATION FUNCTIONS
 // =============================================
@@ -6971,6 +6920,13 @@ export function updateUserUI() {
     } catch (error) {
         debugLog('Error updating user UI:', error);
     }
+}
+
+// =============================================
+// HELPER FUNCTIONS
+// =============================================
+function isGroupOperationReady() {
+    return LifecycleState.isActive() && parentReady && sessionReady;
 }
 
 // =============================================
@@ -7122,7 +7078,6 @@ export {
     processTokenQueue,
     secureApiCall,
     safeApiCall,
-    authorizedFetch,
     
     // Core group functions
     loadCachedDataInstantly,
@@ -7150,12 +7105,9 @@ export {
     loadUniqueFeaturesPanels,
     loadGroupNotes,
     loadGroupEvents,
-    generateUniqueEventsForUser,
-    hashCode,
     loadTransparencyLog,
     generateInitialTransparencyLog,
     analyzeGroupEnergy,
-    generateSimulatedMessages,
     closeGroupChatMobile,
     hideAllPanels,
     loadGroupChatMessages,
@@ -7177,7 +7129,6 @@ export {
     // Admin management
     openAdminManagement,
     loadGroupMembersForManagement,
-    generateSimulatedMembers,
     renderMembersList,
     handleMemberAction,
     logTransparencyAction,

@@ -27,6 +27,20 @@
         originalWarn.apply(console, arguments);
     };
 })();
+
+// ==================== CRITICAL: Set up window.name for iframe identification ====================
+if (!window.name) {
+    window.name = 'calls-iframe-' + Date.now() + '-' + Math.random().toString(36).substring(2, 8);
+}
+
+// ==================== Define global state for core communication ====================
+window.__CALLS_IFRAME__ = {
+    ready: false,
+    version: '9.0.0',
+    protocol: 'KYN-9.0',
+    startTime: Date.now(),
+    name: window.name
+};
 </script>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=yes">
@@ -2309,9 +2323,10 @@
     <div id="debugPanel">
         <div><strong>Environment:</strong> <span id="debugEnv">Detecting...</span></div>
         <div><strong>State:</strong> <span id="debugState">INIT</span></div>
-        <div><strong>Handshake:</strong> <span id="debugHandshake">Pending</span></div>
+        <div><strong>Lifecycle:</strong> <span id="debugLifecycle">BOOT</span></div>
         <div><strong>Session:</strong> <span id="debugSession">None</span></div>
         <div><strong>Parent Ready:</strong> <span id="debugParent">No</span></div>
+        <div><strong>Call Active:</strong> <span id="debugCallActive">No</span></div>
         <div><strong>Online:</strong> <span id="debugOnline">Yes</span></div>
         <div><strong>Recovery:</strong> <span id="debugRecovery">None</span></div>
         <div><strong>Transport:</strong> <span id="debugTransport">0 pending</span></div>
@@ -3004,10 +3019,9 @@
     <!-- Notification Area -->
     <div class="notification-area" id="notificationArea"></div>
     
-    <!-- Scripts loaded in correct order -->
+    <!-- ==================== CRITICAL: Scripts loaded in correct order ==================== -->
+    <!-- Vendor libraries (regular scripts, not modules) -->
     <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
-    
-    <!-- All vendor libraries (regular scripts, not modules) -->
     <script src="/js/vendor/qrcode.min.js"></script>
     <script src="/js/vendor/RecordRTC.min.js"></script>
     <script src="/js/vendor/viewer.min.js"></script>
@@ -3031,6 +3045,12 @@
         (function() {
             'use strict';
             
+            // Mark iframe as ready
+            if (window.__CALLS_IFRAME__) {
+                window.__CALLS_IFRAME__.ready = true;
+                window.__CALLS_IFRAME__.readyTime = Date.now();
+            }
+            
             // Ensure UI is visible immediately
             document.addEventListener('DOMContentLoaded', function() {
                 const appContainer = document.getElementById('appContainer');
@@ -3051,8 +3071,8 @@
             async function initializeApp() {
                 try {
                     // Wait for core to be ready (up to 10 seconds)
-                    if (window.callsCore && window.callsCore.waitForReady) {
-                        await window.callsCore.waitForReady(10000);
+                    if (window.callCore && window.callCore.waitForReady) {
+                        await window.callCore.waitForReady(10000);
                     }
                     
                     // Initialize UI system
@@ -3061,6 +3081,9 @@
                     }
                 } catch (error) {
                     // Silent fail - UI will still work in fallback mode
+                    if (window.__IFRAME_DEBUG__) {
+                        console.warn('UI initialization failed, using fallback mode', error);
+                    }
                 }
             }
 
@@ -3083,7 +3106,6 @@
             const urlParams = new URLSearchParams(window.location.search);
             if (urlParams.get('debug') === 'true') {
                 localStorage.setItem('calls_debug', 'true');
-                // Silent in production - no console logs
             }
             
             const debugMode = localStorage.getItem('calls_debug') === 'true';
@@ -3121,37 +3143,30 @@
                     
                     try {
                         // Get core status
-                        const core = window.callsCore;
+                        const core = window.callCore;
                         
-                        const env = core?.IframeEnvironment?.detect?.() || 'Unknown';
+                        // Environment detection
+                        const hostname = window.location.hostname;
+                        let env = 'Production';
+                        if (hostname === 'localhost' || hostname === '127.0.0.1') {
+                            env = 'Local Dev';
+                        } else if (hostname.endsWith('.onrender.com')) {
+                            env = 'Render';
+                        }
                         document.getElementById('debugEnv').textContent = env;
                         
-                        const state = core?.StateGovernor?.getState?.() || 'Unknown';
-                        document.getElementById('debugState').textContent = state;
-                        
-                        const handshake = core?.IframeHandshakeAuthority?.getStatus?.() || {};
-                        document.getElementById('debugHandshake').textContent = 
-                            handshake.handshakeComplete ? 'Complete' : 'Pending';
-                        
-                        const sessionValid = core?.IframeSessionClient?.isValid?.() ? 'Valid' : 'None';
-                        const sessionTime = core?.IframeSessionClient?.getTimeRemaining?.() || 0;
-                        document.getElementById('debugSession').textContent = sessionTime > 0 ? 
-                            `${sessionValid} (${Math.round(sessionTime/1000)}s)` : sessionValid;
-                        
-                        document.getElementById('debugParent').textContent = 
-                            core?._PARENT_READY_ ? 'Yes' : 'No';
-                        
-                        document.getElementById('debugOnline').textContent = 
-                            navigator.onLine ? 'Yes' : 'No';
-                        
-                        const recovery = core?.RecoveryManager?.getStatus?.() || {};
-                        document.getElementById('debugRecovery').textContent = 
-                            recovery.recoveryInProgress ? 'In Progress' : 
-                            recovery.recoveryAttempts > 0 ? `${recovery.recoveryAttempts} attempts` : 'None';
+                        // Core state
+                        const state = core?.getState?.() || {};
+                        document.getElementById('debugState').textContent = state.callState || 'IDLE';
+                        document.getElementById('debugLifecycle').textContent = core?.getLifecycleState?.() || 'BOOT';
+                        document.getElementById('debugSession').textContent = state.sessionStatus === 'valid' ? 'Valid' : 'None';
+                        document.getElementById('debugParent').textContent = state.parentReady ? 'Yes' : 'No';
+                        document.getElementById('debugCallActive').textContent = state.callActive ? 'Yes' : 'No';
+                        document.getElementById('debugOnline').textContent = navigator.onLine ? 'Yes' : 'No';
+                        document.getElementById('debugRecovery').textContent = state.recoveryMode ? 'In Progress' : 'None';
                         
                         const transport = core?.IframeTransport?.getStatus?.() || {};
-                        document.getElementById('debugTransport').textContent = 
-                            `${transport.queueSize || 0} pending, ${transport.offlineQueueSize || 0} offline`;
+                        document.getElementById('debugTransport').textContent = `${transport.messageQueueSize || 0} queued`;
                         
                         // Environment badge
                         const envBadge = document.getElementById('envBadge');
@@ -3159,22 +3174,15 @@
                         if (envBadge && envText) {
                             envBadge.className = 'env-badge active';
                             let envClass = '';
-                            switch(env) {
-                                case 'LOCAL_DEV':
-                                    envClass = 'local-dev';
-                                    envText.textContent = 'DEV';
-                                    break;
-                                case 'RENDER_HOSTED':
-                                    envClass = 'render';
-                                    envText.textContent = 'RENDER';
-                                    break;
-                                case 'VPN_NETWORK':
-                                    envClass = 'vpn';
-                                    envText.textContent = 'VPN';
-                                    break;
-                                default:
-                                    envClass = 'production';
-                                    envText.textContent = 'PROD';
+                            if (hostname === 'localhost' || hostname === '127.0.0.1') {
+                                envClass = 'local-dev';
+                                envText.textContent = 'DEV';
+                            } else if (hostname.endsWith('.onrender.com')) {
+                                envClass = 'render';
+                                envText.textContent = 'RENDER';
+                            } else {
+                                envClass = 'production';
+                                envText.textContent = 'PROD';
                             }
                             envBadge.classList.add(envClass);
                         }
@@ -3182,10 +3190,9 @@
                         // Recovery indicator
                         const recoveryIndicator = document.getElementById('recoveryIndicator');
                         if (recoveryIndicator) {
-                            if (recovery.recoveryInProgress) {
+                            if (state.recoveryMode) {
                                 recoveryIndicator.classList.add('active');
-                                document.getElementById('recoveryMessage').textContent = 
-                                    `Attempt ${recovery.recoveryAttempts}/${recovery.maxRecoveryAttempts}`;
+                                document.getElementById('recoveryMessage').textContent = 'Reconnecting...';
                             } else {
                                 recoveryIndicator.classList.remove('active');
                             }
@@ -3198,18 +3205,77 @@
                 
                 // Expose diagnostics globally (debug only)
                 window.callsDebug = {
-                    getCoreStatus: () => window.callsCore,
-                    getHandshakeStatus: () => window.callsCore?.IframeHandshakeAuthority?.getStatus?.(),
+                    getCore: () => window.callCore,
+                    getState: () => window.callCore?.getState?.(),
+                    getLifecycleState: () => window.callCore?.getLifecycleState?.(),
                     getSession: () => window.__CHILD_SESSION__,
-                    getRecoveryStatus: () => window.callsCore?.RecoveryManager?.getStatus?.(),
-                    getEnvironment: () => window.callsCore?.IframeEnvironment?.getFullReport?.(),
-                    getTransportStatus: () => window.callsCore?.IframeTransport?.getStatus?.(),
-                    forceRecovery: () => window.callsCore?.RecoveryManager?.recover?.(),
+                    getUIState: () => window.callsUI?.getUIState?.(),
+                    getDiagnostics: () => window.callsUI?.getDiagnostics?.(),
+                    forceRecovery: () => window.callCore?.RecoveryManager?.recover?.(),
                     resetSession: () => {
                         window.__CHILD_SESSION__ = { token: null, userId: null, expires: null };
-                        window.callsCore?.IframeSessionClient?.clear?.();
+                        window.callCore?.SessionClient?.clear?.();
                     }
                 };
+            }
+        })();
+    </script>
+    
+    <!-- Fallback for offline mode -->
+    <script>
+        // ==================== OFFLINE FALLBACK ====================
+        (function() {
+            'use strict';
+            
+            // Track online status
+            const offlineBanner = document.getElementById('offlineBanner');
+            const apiStatusIndicator = document.getElementById('apiStatusIndicator');
+            const apiStatusText = document.getElementById('apiStatusText');
+            
+            function updateOnlineStatus() {
+                const isOnline = navigator.onLine;
+                
+                if (offlineBanner) {
+                    offlineBanner.style.display = isOnline ? 'none' : 'flex';
+                }
+                
+                if (apiStatusIndicator) {
+                    if (isOnline) {
+                        apiStatusIndicator.className = 'api-status-indicator connecting';
+                        apiStatusText.textContent = 'Connecting...';
+                    } else {
+                        apiStatusIndicator.className = 'api-status-indicator disconnected';
+                        apiStatusText.textContent = 'Offline Mode';
+                    }
+                }
+            }
+            
+            window.addEventListener('online', () => {
+                updateOnlineStatus();
+                if (window.callCore && window.callCore.sendToParent) {
+                    window.callCore.sendToParent('NETWORK_RESTORED', { timestamp: Date.now() });
+                }
+            });
+            
+            window.addEventListener('offline', () => {
+                updateOnlineStatus();
+                if (window.callCore && window.callCore.sendToParent) {
+                    window.callCore.sendToParent('NETWORK_LOST', { timestamp: Date.now() });
+                }
+            });
+            
+            updateOnlineStatus();
+        })();
+    </script>
+    
+    <!-- Ensure UI is visible immediately -->
+    <script>
+        (function() {
+            const container = document.getElementById('appContainer');
+            if (container) {
+                container.style.display = 'flex';
+                container.style.visibility = 'visible';
+                container.style.opacity = '1';
             }
         })();
     </script>

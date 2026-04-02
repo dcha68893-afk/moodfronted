@@ -1,14 +1,14 @@
 // =============================================
-// TOOLS-CORE.JS - COMPLETE PRODUCTION MODULE
+// TOOLS-CORE.JS - COMPLETE PRODUCTION MODULE (STABILIZED)
 // =============================================
-// Version: 10.2.0 - DETERMINISTIC HANDSHAKE PROTOCOL (STRICT)
+// Version: 10.2.2 - STABILIZED SESSION VALIDATION
 // =============================================
 
 // =============================================
 // MODULE IDENTIFIER - MUST MATCH PARENT EXPECTATIONS
 // =============================================
 const MODULE_NAME = 'tools'; // EXACT match required
-const MODULE_VERSION = '10.2.0'; // UPDATED VERSION
+const MODULE_VERSION = '10.2.2'; // STABILIZED VERSION
 const MODULE_CAPABILITIES = ['marketplace', 'storage', 'heartbeat', 'ui'];
 
 // =============================================
@@ -20,6 +20,7 @@ const LIFECYCLE_STATE = {
     INITIALIZING: 'INITIALIZING',
     READY: 'READY',
     WAIT_PARENT: 'WAIT_PARENT',
+    WAITING_AUTH: 'WAITING_AUTH',
     ACTIVE: 'ACTIVE'
 };
 
@@ -34,11 +35,13 @@ const VALID_TRANSITIONS = {
     [LIFECYCLE_STATE.BOOT]: [LIFECYCLE_STATE.INITIALIZING],
     [LIFECYCLE_STATE.INITIALIZING]: [LIFECYCLE_STATE.READY],
     [LIFECYCLE_STATE.READY]: [LIFECYCLE_STATE.WAIT_PARENT],
-    [LIFECYCLE_STATE.WAIT_PARENT]: [LIFECYCLE_STATE.ACTIVE],
+    [LIFECYCLE_STATE.WAIT_PARENT]: [LIFECYCLE_STATE.WAITING_AUTH, LIFECYCLE_STATE.ACTIVE],
+    [LIFECYCLE_STATE.WAITING_AUTH]: [LIFECYCLE_STATE.ACTIVE],
     [LIFECYCLE_STATE.ACTIVE]: []
 };
 
 function transitionTo(nextState, reason = '') {
+    // Prevent duplicate transitions
     if (currentState === nextState) {
         console.log(`[Tools][Lifecycle] Already in ${nextState} - ignoring transition request`);
         return true;
@@ -77,6 +80,28 @@ function assertActive(actionName) {
 
 function isActive() {
     return currentState === LIFECYCLE_STATE.ACTIVE && parentReadyReceived === true;
+}
+
+// =============================================
+// SESSION VALIDATION UTILITY (MANDATORY)
+// =============================================
+
+function __isValidSession(session) {
+    if (!session || typeof session !== 'object') return false;
+    
+    // Check token exists and is valid
+    if (!session.userToken && !session.token) return false;
+    const token = session.userToken || session.token;
+    if (typeof token !== 'string' || token.length < 5) return false;
+    
+    // Check userId is valid (never "user", "default", "null", "undefined")
+    const userId = session.userId || session.user_id || session.userid || session.id;
+    if (userId === undefined || userId === null) return false;
+    if (userId === 'user' || userId === 'default' || userId === 'null' || userId === 'undefined') return false;
+    if (typeof userId !== 'number' && typeof userId !== 'string') return false;
+    if (typeof userId === 'string' && (userId === '' || userId.length < 1)) return false;
+    
+    return true;
 }
 
 // =============================================
@@ -212,14 +237,21 @@ const SessionClient = {
     sessionPromise: null,
     sessionResolvers: [],
     pendingRequests: new Map(),
+    _lastSessionId: null,
+    
+    _generateSessionId(session) {
+        const token = session.userToken || session.token;
+        const userId = session.userId || session.user_id || session.userid || session.id;
+        return `${userId}_${token.substring(0, 16)}`;
+    },
     
     requestSession() {
         if (this.sessionPromise) return this.sessionPromise;
         
-        // Only request if active
-        if (!isActive()) {
-            console.warn('[Tools][Session] Cannot request session - module not active');
-            return Promise.reject(new Error('Module not active'));
+        // Only request if active or waiting for auth
+        if (!isActive() && currentState !== LIFECYCLE_STATE.WAITING_AUTH && currentState !== LIFECYCLE_STATE.WAIT_PARENT) {
+            console.warn('[Tools][Session] Cannot request session - module not ready');
+            return Promise.reject(new Error('Module not ready'));
         }
         
         this.sessionPromise = new Promise((resolve, reject) => {
@@ -242,6 +274,47 @@ const SessionClient = {
     },
     
     handleSessionData(sessionData, requestId = null) {
+        // STRICT: Validate session before accepting
+        if (!__isValidSession(sessionData)) {
+            console.warn('[Tools][Session] Rejected invalid session data', { 
+                hasToken: !!(sessionData?.userToken || sessionData?.token),
+                userId: sessionData?.userId || sessionData?.user_id || sessionData?.id
+            });
+            if (requestId && this.pendingRequests.has(requestId)) {
+                const { reject, timeout } = this.pendingRequests.get(requestId);
+                clearTimeout(timeout);
+                this.pendingRequests.delete(requestId);
+                reject(new Error('Invalid session data'));
+            }
+            return false;
+        }
+        
+        // Prevent session downgrade: if we already have a valid session, don't overwrite with invalid
+        if (this.session && __isValidSession(this.session)) {
+            if (!__isValidSession(sessionData)) {
+                console.warn('[Tools][Session] Prevented session downgrade - ignoring invalid session');
+                return false;
+            }
+            
+            // Check for duplicate session using session ID
+            const newSessionId = this._generateSessionId(sessionData);
+            if (this._lastSessionId === newSessionId) {
+                console.log('[Tools][Session] Duplicate session ignored');
+                if (requestId && this.pendingRequests.has(requestId)) {
+                    const { resolve, timeout } = this.pendingRequests.get(requestId);
+                    clearTimeout(timeout);
+                    this.pendingRequests.delete(requestId);
+                    resolve(this.session);
+                }
+                return true;
+            }
+            this._lastSessionId = newSessionId;
+        } else {
+            // First time setting session
+            const newSessionId = this._generateSessionId(sessionData);
+            this._lastSessionId = newSessionId;
+        }
+        
         if (requestId && this.pendingRequests.has(requestId)) {
             const { resolve, timeout } = this.pendingRequests.get(requestId);
             clearTimeout(timeout);
@@ -249,15 +322,25 @@ const SessionClient = {
             resolve(sessionData);
         }
         
-        this.session = sessionData;
+        // Merge session data - never overwrite entirely
+        if (this.session && __isValidSession(this.session)) {
+            this.session = { ...this.session, ...sessionData };
+        } else {
+            this.session = sessionData;
+        }
         
         // Notify all waiting resolvers
-        this.sessionResolvers.forEach(resolver => resolver(sessionData));
+        this.sessionResolvers.forEach(resolver => resolver(this.session));
         this.sessionResolvers = [];
         
         window.dispatchEvent(new CustomEvent('session:updated', { 
-            detail: sessionData 
+            detail: this.session 
         }));
+        
+        console.log('[Tools][Session] Valid session accepted', { 
+            userId: this.session.userId || this.session.user_id || this.session.id,
+            hasToken: !!(this.session.userToken || this.session.token)
+        });
         
         return true;
     },
@@ -282,7 +365,12 @@ const SessionClient = {
     },
     
     isReady() {
-        return !!this.session && !!this.getToken();
+        if (!this.session) return false;
+        if (!this.getToken()) return false;
+        // Validate userId is not fake
+        const userId = this.session.userId || this.session.user_id || this.session.id;
+        if (userId === 'user' || userId === 'default' || userId === 'null' || userId === 'undefined') return false;
+        return true;
     },
     
     isValid() {
@@ -301,6 +389,7 @@ const SessionClient = {
         this.session = null;
         this.sessionPromise = null;
         this.pendingRequests.clear();
+        this._lastSessionId = null;
         
         parent.postMessage({
             type: 'SESSION_CLEAR',
@@ -472,10 +561,10 @@ function sendMessage(message) {
 }
 
 function safeSend(type, payload = {}) {
-    // STRICT RULE: Only CHILD_READY allowed before ACTIVE
+    // STRICT RULE: Only CHILD_READY allowed before WAIT_PARENT
     if (!parentReadyReceived && type !== 'CHILD_READY') {
-        if (currentState === LIFECYCLE_STATE.WAIT_PARENT) {
-            console.warn(`[Tools][Queue] Message ${type} blocked - in WAIT_PARENT state (only CHILD_READY allowed)`);
+        if (currentState === LIFECYCLE_STATE.WAIT_PARENT || currentState === LIFECYCLE_STATE.WAITING_AUTH) {
+            console.warn(`[Tools][Queue] Message ${type} blocked - in ${currentState} state (only CHILD_READY allowed)`);
             return { success: false, error: 'wait_parent_blocked', queued: false };
         }
         debugLog(`[Queue] Message ${type} queued - parent not ready`);
@@ -1201,7 +1290,7 @@ class ParentCommunicator {
 const parentComm = new ParentCommunicator();
 
 // =============================================
-// MODULE 3 - SESSION CLIENT (UPDATED - NO STORAGE)
+// MODULE 3 - SESSION CLIENT WRAPPER (UPDATED - NO STORAGE)
 // =============================================
 
 class SessionClientWrapper {
@@ -1214,29 +1303,56 @@ class SessionClientWrapper {
             expiresAt: null,
             lastSync: 0
         };
+        this._lastSessionId = null;
+    }
+    
+    _generateSessionId(session) {
+        const token = session.userToken || session.token;
+        const userId = session.userId || session.user_id || session.userid || session.id;
+        return `${userId}_${token ? token.substring(0, 16) : 'no_token'}`;
     }
 
     acceptParentSession(sessionData) {
         try {
             if (!sessionData || typeof sessionData !== 'object') return false;
+            
+            // STRICT: Validate session before accepting
+            if (!__isValidSession(sessionData)) {
+                console.warn('[Tools][SessionWrapper] Rejected invalid session data', { 
+                    hasToken: !!(sessionData?.userToken || sessionData?.token),
+                    userId: sessionData?.userId || sessionData?.user_id || sessionData?.id
+                });
+                return false;
+            }
+            
+            // Prevent session downgrade
+            if (this.currentSession && __isValidSession(this.currentSession)) {
+                if (!__isValidSession(sessionData)) {
+                    console.warn('[Tools][SessionWrapper] Prevented session downgrade');
+                    return false;
+                }
+                
+                // Check for duplicate session
+                const newSessionId = this._generateSessionId(sessionData);
+                if (this._lastSessionId === newSessionId) {
+                    console.log('[Tools][SessionWrapper] Duplicate session ignored');
+                    return true;
+                }
+                this._lastSessionId = newSessionId;
+            } else {
+                const newSessionId = this._generateSessionId(sessionData);
+                this._lastSessionId = newSessionId;
+            }
 
             const validatedSession = this.validateSessionSchema(sessionData);
             if (!validatedSession) return false;
 
-            this.currentSession = {
-                userId: validatedSession.userId,
-                userToken: validatedSession.userToken,
-                expiresAt: validatedSession.expiresAt || new Date(Date.now() + 3600000).toISOString(),
-                displayName: validatedSession.displayName || 'User',
-                email: validatedSession.email || '',
-                photoURL: validatedSession.photoURL || '',
-                isPremium: validatedSession.isPremium || false,
-                trustLevel: validatedSession.trustLevel || 'new',
-                groups: Array.isArray(validatedSession.groups) ? validatedSession.groups : [],
-                friends: Array.isArray(validatedSession.friends) ? validatedSession.friends : [],
-                source: 'parent',
-                receivedAt: new Date().toISOString()
-            };
+            // Merge session data - never overwrite entirely
+            if (this.currentSession && __isValidSession(this.currentSession)) {
+                this.currentSession = { ...this.currentSession, ...validatedSession };
+            } else {
+                this.currentSession = validatedSession;
+            }
 
             moduleState.sessionActive = true;
             moduleState.sessionAuthority = 'parent';
@@ -1260,6 +1376,9 @@ class SessionClientWrapper {
             const userToken = session.userToken || session.token || session.user_token;
 
             if (!userId || !userToken) return null;
+            
+            // Reject fake userId values
+            if (userId === 'user' || userId === 'default' || userId === 'null' || userId === 'undefined') return null;
 
             return {
                 userId: userId,
@@ -1285,6 +1404,7 @@ class SessionClientWrapper {
     isValid() {
         const session = this.currentSession;
         if (!session) return false;
+        if (!__isValidSession(session)) return false;
         if (session.expiresAt) {
             try {
                 return new Date(session.expiresAt) > new Date();
@@ -1298,6 +1418,7 @@ class SessionClientWrapper {
     clear() {
         this.currentSession = null;
         this.sessionState = { requested: false, received: false, expiresAt: null, lastSync: 0 };
+        this._lastSessionId = null;
         moduleState.sessionActive = false;
         moduleState.sessionAuthority = 'unknown';
         this.notifyListeners('session:cleared', null);
@@ -1502,7 +1623,7 @@ class MessageHandler {
         });
 
         this.registerHandler('REGISTERED', (message) => {
-            if (!this.isValidStateForMessage('REGISTERED', [LIFECYCLE_STATE.WAIT_PARENT, LIFECYCLE_STATE.ACTIVE])) return;
+            if (!this.isValidStateForMessage('REGISTERED', [LIFECYCLE_STATE.WAIT_PARENT, LIFECYCLE_STATE.WAITING_AUTH, LIFECYCLE_STATE.ACTIVE])) return;
             
             logOnce('receive', 'REGISTERED received');
             moduleState.handshakeState.registered = true;
@@ -1510,7 +1631,7 @@ class MessageHandler {
         });
 
         this.registerHandler('SESSION_DATA', (message) => {
-            if (!isActive() && currentState !== LIFECYCLE_STATE.ACTIVE) {
+            if (!isActive() && currentState !== LIFECYCLE_STATE.ACTIVE && currentState !== LIFECYCLE_STATE.WAITING_AUTH) {
                 debugLog('SESSION_DATA received before active - still processing');
             }
             
@@ -1536,11 +1657,26 @@ class MessageHandler {
         });
 
         this.registerHandler('SESSION_UPDATE', (message) => {
-            if (!message.payload || !sessionClient.currentSession) return;
+            if (!message.payload) return;
+            
+            // Validate session update before applying
+            if (!__isValidSession(message.payload)) {
+                console.warn('[Tools][MessageHandler] Ignored invalid session update');
+                return;
+            }
             
             const currentSession = sessionClient.getSession();
-            const updatedSession = { ...currentSession, ...message.payload, updatedAt: new Date().toISOString() };
-            sessionClient.acceptParentSession(updatedSession);
+            if (currentSession && __isValidSession(currentSession)) {
+                // Merge only valid data
+                const mergedSession = { ...currentSession, ...message.payload };
+                if (__isValidSession(mergedSession)) {
+                    sessionClient.acceptParentSession(mergedSession);
+                } else {
+                    console.warn('[Tools][MessageHandler] Session update would create invalid session - rejected');
+                }
+            } else {
+                sessionClient.acceptParentSession(message.payload);
+            }
             
             if (message.payload.userId || message.payload.displayName) {
                 window.currentUser = { ...window.currentUser, ...message.payload };
@@ -1615,6 +1751,35 @@ class MessageHandler {
         this.registerHandler('SESSION_STORAGE_RESULT', (message) => {
             debugLog('SESSION_STORAGE_RESULT received', message.payload);
         });
+        
+        // API_REQUEST handler with endpoint normalization
+        this.registerHandler('API_REQUEST', (message) => {
+            if (!assertActive('API_REQUEST')) return;
+            if (!message.payload) return;
+            
+            const { requestId, endpoint, method, data } = message.payload;
+            if (!requestId || !endpoint || !method) {
+                console.warn('[Tools] Invalid API_REQUEST - missing required fields');
+                return;
+            }
+            
+            // Normalize endpoint
+            let normalizedEndpoint = endpoint;
+            if (!normalizedEndpoint.startsWith('/')) {
+                normalizedEndpoint = '/' + normalizedEndpoint;
+            }
+            if (normalizedEndpoint.startsWith('/api/')) {
+                normalizedEndpoint = normalizedEndpoint.substring(4);
+            }
+            if (normalizedEndpoint.includes('//')) {
+                normalizedEndpoint = normalizedEndpoint.replace(/\/+/g, '/');
+            }
+            
+            // Forward to marketplace API handler
+            if (marketplace && typeof marketplace.handleApiRequest === 'function') {
+                marketplace.handleApiRequest(requestId, normalizedEndpoint, method, data);
+            }
+        });
     }
 
     handleParentReady(message) {
@@ -1628,18 +1793,40 @@ class MessageHandler {
             this.parentReadyTimeout = null;
         }
 
-        // Apply session data if present
+        // Apply session data if present and valid
         if (message.payload && message.payload.session) {
-            this.handleSessionData(message.payload.session);
+            const sessionValid = this.handleSessionData(message.payload.session);
+            if (!sessionValid) {
+                console.warn('[Tools][Lifecycle] PARENT_READY contained invalid session - waiting for valid session');
+                // Transition to WAITING_AUTH instead of ACTIVE
+                if (transitionTo(LIFECYCLE_STATE.WAITING_AUTH, 'parent_ready_invalid_session')) {
+                    // Request valid session
+                    setTimeout(() => {
+                        if (currentState === LIFECYCLE_STATE.WAITING_AUTH && !SessionClient.isReady()) {
+                            SessionClient.requestSession().catch(() => {});
+                        }
+                    }, 100);
+                }
+                return;
+            }
         }
 
-        // STRICT: Transition only once from WAIT_PARENT
-        transitionTo(LIFECYCLE_STATE.ACTIVE, 'parent_ready_received');
-
-        // Flush queued messages
-        flushMessageQueue();
-        
-        // Complete activation is handled in transitionTo
+        // Check if we have a valid session before activating
+        if (SessionClient.isReady() && __isValidSession(SessionClient.getSession())) {
+            // STRICT: Transition only once from WAIT_PARENT to ACTIVE with valid session
+            transitionTo(LIFECYCLE_STATE.ACTIVE, 'parent_ready_valid_session');
+            flushMessageQueue();
+        } else {
+            // No valid session yet - wait for it
+            console.log('[Tools][Lifecycle] PARENT_READY received but no valid session - waiting for session');
+            transitionTo(LIFECYCLE_STATE.WAITING_AUTH, 'parent_ready_waiting_session');
+            
+            // Request session if not already requested
+            if (!moduleState.sessionState.requested) {
+                moduleState.sessionState.requested = true;
+                SessionClient.requestSession().catch(() => {});
+            }
+        }
     }
 
     isValidStateForMessage(messageType, allowedStates) {
@@ -1671,7 +1858,16 @@ class MessageHandler {
     }
 
     handleSessionData(sessionData) {
-        if (!sessionData) return;
+        if (!sessionData) return false;
+        
+        // STRICT: Validate session before processing
+        if (!__isValidSession(sessionData)) {
+            console.warn('[Tools][MessageHandler] Rejected invalid session data', {
+                hasToken: !!(sessionData?.userToken || sessionData?.token),
+                userId: sessionData?.userId || sessionData?.user_id || sessionData?.id
+            });
+            return false;
+        }
         
         const accepted = sessionClient.acceptParentSession(sessionData);
         if (accepted) {
@@ -1689,8 +1885,19 @@ class MessageHandler {
                 };
                 window.userData = window.currentUser;
             }
+            
+            // If we were waiting for auth and now have valid session, activate
+            if (currentState === LIFECYCLE_STATE.WAITING_AUTH && parentReadyReceived) {
+                console.log('[Tools][Lifecycle] Valid session received - activating');
+                transitionTo(LIFECYCLE_STATE.ACTIVE, 'valid_session_received');
+                flushMessageQueue();
+            }
+            
             logOnce('receive', 'Session data processed');
+            return true;
         }
+        
+        return false;
     }
 
     completeActivation() {
@@ -1781,7 +1988,7 @@ class SecurityValidator {
         // Use whitelist from CONFIG
         const originWhitelist = [
             window.location.origin,
-            'http://127.0.0.1:5500',
+            'http://localhost:4000',
             'http://localhost:5500',
             'http://localhost:3000',
             'http://127.0.0.1:3000',
@@ -2544,10 +2751,18 @@ class MarketplaceCoreImpl {
                 }
             });
             
-            setTimeout(() => {
+            // Timeout with safe fallback
+            const timeoutId = setTimeout(() => {
                 window.removeEventListener('message', responseHandler);
                 reject(new Error('Request timeout'));
             }, 10000);
+            
+            // Cleanup timeout on resolve
+            const originalResolve = resolve;
+            resolve = (value) => {
+                clearTimeout(timeoutId);
+                originalResolve(value);
+            };
         });
     }
 
@@ -3232,9 +3447,11 @@ function onModuleActive() {
     
     heartbeatResponder.start();
     
-    // Initialize marketplace if session is ready
+    // Initialize marketplace if session is ready and valid
     if (sessionClient.isReady ? sessionClient.isReady() : false) {
-        marketplace.initialize().catch(() => {});
+        if (__isValidSession(sessionClient.getSession())) {
+            marketplace.initialize().catch(() => {});
+        }
     }
     
     window.dispatchEvent(new CustomEvent('tools:active', {
@@ -3377,7 +3594,7 @@ initializeCore = async function(options = {}) {
         sessionValid = sessionClient.isReady ? sessionClient.isReady() : false;
         sessionData = sessionClient.getSession();
 
-        if (sessionData && !sessionData.isGuest && !sessionData.isDemo) {
+        if (sessionData && !sessionData.isGuest && !sessionData.isDemo && __isValidSession(sessionData)) {
             window.currentUser = {
                 id: sessionData.userId,
                 displayName: sessionData.displayName,
@@ -3533,7 +3750,8 @@ checkParentHealth = function() {
         memorySession: {
             ready: sessionClient.isReady ? sessionClient.isReady() : false,
             hasToken: !!sessionClient.getToken ? sessionClient.getToken() : false,
-            hasUser: !!sessionClient.getUser ? sessionClient.getUser() : false
+            hasUser: !!sessionClient.getUser ? sessionClient.getUser() : false,
+            validSession: sessionClient.isReady() ? __isValidSession(sessionClient.getSession()) : false
         }
     };
 };
@@ -3551,12 +3769,16 @@ export function safeGetElement(id) {
 }
 
 export function hasValidSession() {
-    return sessionClient.isReady ? sessionClient.isReady() : false;
+    const session = sessionClient.getSession();
+    if (!session) return false;
+    return __isValidSession(session);
 }
 
 export function hasValidUser() {
     const user = sessionClient.getUser ? sessionClient.getUser() : null;
-    return !!(user && user.id);
+    if (!user || !user.id) return false;
+    if (user.id === 'user' || user.id === 'default' || user.id === 'null' || user.id === 'undefined') return false;
+    return true;
 }
 
 export function showStatusMessage(message, type = 'info') {
@@ -3689,7 +3911,7 @@ export function handleParentMessage(event) {
 export function handleParentInit(payload) {
     try {
         if (!payload) return;
-        if (payload.session) handleSessionDataFromParent(payload.session);
+        if (payload.session && __isValidSession(payload.session)) handleSessionDataFromParent(payload.session);
         if (payload.data) {
             if (payload.data.friendsList) updateData(DATA_TYPES.FRIENDS, payload.data.friendsList);
             if (payload.data.groupsList) updateData(DATA_TYPES.GROUPS, payload.data.groupsList);
@@ -3805,7 +4027,11 @@ export const pageCore = {
                 await new Promise((resolve) => {
                     const checkSession = () => {
                         if (sessionData || moduleState.sessionActive || (sessionClient.isReady ? sessionClient.isReady() : false)) {
-                            resolve();
+                            if (sessionClient.getSession() && __isValidSession(sessionClient.getSession())) {
+                                resolve();
+                            } else {
+                                setTimeout(checkSession, 100);
+                            }
                         } else {
                             setTimeout(checkSession, 100);
                         }
@@ -3967,7 +4193,7 @@ export async function initializeMarketplaceCore() {
 
 export function handleSessionDataFromParent(sessionDataFromParent) {
     try {
-        if (!isActive()) {
+        if (!isActive() && currentState !== LIFECYCLE_STATE.WAITING_AUTH) {
             logOnce('warn', 'SESSION_DATA received before active - queuing');
             setTimeout(() => handleSessionDataFromParent(sessionDataFromParent), 100);
             return;
@@ -3977,6 +4203,19 @@ export function handleSessionDataFromParent(sessionDataFromParent) {
             safeSend('AUTH_ERROR', {
                 error: 'INVALID_SESSION_SCHEMA',
                 received: Object.keys(sessionDataFromParent || {})
+            });
+            return;
+        }
+        
+        // Validate session content
+        if (!__isValidSession(sessionDataFromParent)) {
+            console.warn('[Tools] Rejected invalid session from parent', {
+                hasToken: !!(sessionDataFromParent?.userToken || sessionDataFromParent?.token),
+                userId: sessionDataFromParent?.userId || sessionDataFromParent?.user_id
+            });
+            safeSend('AUTH_ERROR', {
+                error: 'INVALID_SESSION_DATA',
+                reason: 'Invalid userId or token format'
             });
             return;
         }
@@ -4039,8 +4278,14 @@ export function validateSessionSchema(session) {
 
 export function processSessionData(sessionDataFromParent) {
     try {
+        const userId = sessionDataFromParent.userId || sessionDataFromParent.user_id || sessionDataFromParent.userid;
+        // Reject fake userId values
+        if (userId === 'user' || userId === 'default' || userId === 'null' || userId === 'undefined') {
+            throw new Error('Invalid userId format');
+        }
+        
         const userDataFromSession = {
-            id: sessionDataFromParent.userId || sessionDataFromParent.user_id || sessionDataFromParent.userid,
+            id: userId,
             displayName: sessionDataFromParent.displayName || sessionDataFromParent.name || 'User',
             email: sessionDataFromParent.email || '',
             photoURL: sessionDataFromParent.photoURL || sessionDataFromParent.avatar || '',
@@ -4099,17 +4344,28 @@ export function showMarketplaceUI() {
 
 export function handleSessionUpdate(updatedData) {
     try {
-        if (!isActive()) {
+        if (!isActive() && currentState !== LIFECYCLE_STATE.WAITING_AUTH) {
             setTimeout(() => handleSessionUpdate(updatedData), 100);
             return;
         }
         if (!updatedData || typeof updatedData !== 'object') return;
         
-        const currentSession = sessionClient.getSession() || sessionData || {};
-        const mergedSession = { ...currentSession, ...updatedData };
+        // Validate update data
+        if (!__isValidSession(updatedData)) {
+            console.warn('[Tools] Ignored invalid session update');
+            return;
+        }
         
-        sessionData = mergedSession;
-        sessionClient.acceptParentSession(mergedSession);
+        const currentSession = sessionClient.getSession() || sessionData || {};
+        // Merge only valid data
+        const mergedSession = { ...currentSession, ...updatedData };
+        if (__isValidSession(mergedSession)) {
+            sessionData = mergedSession;
+            sessionClient.acceptParentSession(mergedSession);
+        } else {
+            console.warn('[Tools] Session update would create invalid session - rejected');
+            return;
+        }
         
         if (updatedData.userId || updatedData.id || updatedData.displayName) {
             if (!window.currentUser) window.currentUser = {};
@@ -4304,6 +4560,11 @@ export function initializeTokenSystem() {
                 throw new Error('Invalid token in session data');
             }
             
+            // Validate session before accepting
+            if (!__isValidSession(session)) {
+                throw new Error('Invalid session data format');
+            }
+            
             isAuthReady = true;
             resolve();
         } catch (error) {
@@ -4332,7 +4593,7 @@ export async function bootstrapIframe() {
             try { await tokenInitializationPromise; } catch {}
         }
         loadCachedDataInstantly();
-        if ((sessionClient.isReady ? sessionClient.isReady() : false) && isActive()) {
+        if ((sessionClient.isReady ? sessionClient.isReady() : false) && isActive() && __isValidSession(sessionClient.getSession())) {
             try { await authorizedFetch('/api/auth/verify', { method: 'GET' }); } catch {}
         }
         isBootstrapped = true;
@@ -5457,7 +5718,7 @@ export async function fetchUserDataDirectly() {
             throw new Error('No authentication token available');
         }
         
-        const response = await authorizedFetch('/api/user/profile', { method: 'GET' });
+        const response = await authorizedFetch('/api/profile', { method: 'GET' });
         
         if (response && response.user) {
             directAPILoaded = true;
@@ -5478,6 +5739,18 @@ export async function fetchUserDataDirectly() {
 
 export function processUserData(userDataFromSource, source) {
     try {
+        // Validate user data before processing
+        if (!userDataFromSource || !userDataFromSource.id) {
+            console.warn('[Tools] Invalid user data received from', source);
+            return;
+        }
+        
+        const userId = userDataFromSource.id || userDataFromSource.userId;
+        if (userId === 'user' || userId === 'default' || userId === 'null' || userId === 'undefined') {
+            console.warn('[Tools] Rejected fake user ID from', source);
+            return;
+        }
+        
         window.currentUser = userDataFromSource;
         window.userData = userDataFromSource;
         
@@ -5492,7 +5765,11 @@ export function processUserData(userDataFromSource, source) {
             source: source
         };
         
-        sessionClient.acceptParentSession(sessionData);
+        if (__isValidSession(sessionData)) {
+            sessionClient.acceptParentSession(sessionData);
+        } else {
+            console.warn('[Tools] Invalid session data from', source);
+        }
     } catch {}
 }
 
@@ -5532,7 +5809,10 @@ export function updateUserDataFromParent(updatedData) {
             subscription: updatedData.subscription,
             trustLevel: updatedData.trustLevel
         };
-        sessionClient.acceptParentSession(sessionUpdate);
+        
+        if (__isValidSession(sessionUpdate)) {
+            sessionClient.acceptParentSession(sessionUpdate);
+        }
     } catch {}
 }
 
@@ -5577,7 +5857,9 @@ export function getMarketplaceUser() {
 
 export function isMarketplaceReady() {
     try {
-        return isBootstrapped && ((sessionClient.isReady ? sessionClient.isReady() : false) || window.currentUser) && isActive();
+        const session = sessionClient.getSession();
+        const hasValidSession = session && __isValidSession(session);
+        return isBootstrapped && hasValidSession && isActive();
     } catch {
         return false;
     }
@@ -5599,8 +5881,15 @@ export function migrateLegacyUserData(data) {
     try {
         if (!data) return;
         
+        // Validate legacy data
+        const userId = data.id || data.userId || data.user_id;
+        if (userId === 'user' || userId === 'default' || userId === 'null' || userId === 'undefined') {
+            console.warn('[Tools] Rejected legacy user data with fake ID');
+            return;
+        }
+        
         const sessionData = {
-            userId: data.id || data.userId || data.user_id,
+            userId: userId,
             userToken: data.token || data.userToken || getCentralToken(),
             displayName: data.displayName || data.name,
             email: data.email,
@@ -5608,7 +5897,11 @@ export function migrateLegacyUserData(data) {
             isPremium: data.isPremium || false,
             trustLevel: data.trustLevel || 'new'
         };
-        sessionClient.acceptParentSession(sessionData);
+        
+        if (__isValidSession(sessionData)) {
+            sessionClient.acceptParentSession(sessionData);
+        }
+        
         if (data.groups) {
             userGroups = data.groups;
             safeStorage.set(LOCAL_STORAGE_KEYS.USER_GROUPS, userGroups);
@@ -5661,7 +5954,10 @@ export const AppState = {
     sessionValid,
     _STATE: { ...moduleState },
     getSession: () => sessionClient.getSession(),
-    hasValidSession: () => sessionClient.isReady ? sessionClient.isReady() : false,
+    hasValidSession: () => {
+        const session = sessionClient.getSession();
+        return session && __isValidSession(session);
+    },
     isUserPremium,
     isMarketplaceReady,
     getDiagnostics: () => diagnostics?.getReport(),
@@ -5757,7 +6053,11 @@ if (typeof window !== 'undefined') {
             sessionStore: {
                 isReady: () => sessionClient.isReady ? sessionClient.isReady() : false,
                 getUser: () => sessionClient.getUser ? sessionClient.getUser() : null,
-                hasToken: () => !!sessionClient.getToken ? sessionClient.getToken() : false
+                hasToken: () => !!sessionClient.getToken ? sessionClient.getToken() : false,
+                isValidSession: () => {
+                    const session = sessionClient.getSession();
+                    return session && __isValidSession(session);
+                }
             },
             lifecycle: {
                 getState: () => currentState,
@@ -5767,7 +6067,8 @@ if (typeof window !== 'undefined') {
                 transitions: VALID_TRANSITIONS
             },
             storageProxy: StorageProxy,
-            messageGuard: MessageGuard
+            messageGuard: MessageGuard,
+            validateSession: __isValidSession
         };
         
         window.pageCore = pageCore;
@@ -5793,6 +6094,7 @@ if (typeof window !== 'undefined') {
         
         window.authorizedFetch = authorizedFetch;
         window.StorageProxy = StorageProxy;
+        window.__isValidSession = __isValidSession;
     } catch {}
 }
 

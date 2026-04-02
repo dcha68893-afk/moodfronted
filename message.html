@@ -28,7 +28,7 @@
     };
 })();
 
-// Add lifecycle state listener for UI feedback
+// Add lifecycle state listener for UI feedback - DETERMINISTIC: WAIT_PARENT = NO VISIBLE LOADING
 (function() {
     window.addEventListener('messagesLifecycleChange', function(e) {
         const tokenStatus = document.getElementById('tokenStatus');
@@ -36,16 +36,52 @@
             if (e.detail.state === 'ACTIVE') {
                 tokenStatus.textContent = '🟢 Connected';
                 tokenStatus.className = 'token-status ready';
-            } else if (e.detail.state === 'WAITING_FOR_PARENT') {
-                tokenStatus.textContent = '🟡 Waiting for parent...';
-                tokenStatus.className = 'token-status pending';
+                tokenStatus.style.display = 'block';
+            } else if (e.detail.state === 'WAIT_PARENT') {
+                // WAIT_PARENT: Hide status completely - background connection only
+                tokenStatus.style.display = 'none';
             } else if (e.detail.state === 'READY') {
-                tokenStatus.textContent = '🟡 Ready, waiting for parent...';
+                tokenStatus.textContent = '🟡 Ready...';
                 tokenStatus.className = 'token-status pending';
+                tokenStatus.style.display = 'block';
             } else {
                 tokenStatus.textContent = '🔴 Connecting...';
                 tokenStatus.className = 'token-status pending';
+                tokenStatus.style.display = 'block';
             }
+        }
+        
+        // Update any loading indicators based on state
+        const chatsList = document.getElementById('chatsList');
+        if (chatsList && e.detail.state !== 'ACTIVE' && e.detail.state !== 'WAIT_PARENT') {
+            if (chatsList.children.length === 0 || chatsList.querySelector('.empty-state.subtle')) {
+                if (e.detail.state === 'WAIT_PARENT') {
+                    // WAIT_PARENT: Show nothing - background only
+                    // Keep existing content or empty
+                } else if (e.detail.state === 'READY') {
+                    chatsList.innerHTML = `
+                        <div class="empty-state subtle">
+                            <i class="fas fa-comments empty-icon" style="opacity: 0.3;"></i>
+                            <div class="empty-title" style="font-size: 14px;">Ready...</div>
+                        </div>
+                    `;
+                } else {
+                    chatsList.innerHTML = `
+                        <div class="empty-state subtle">
+                            <i class="fas fa-comments empty-icon" style="opacity: 0.3;"></i>
+                            <div class="empty-title" style="font-size: 14px;">Loading chats...</div>
+                        </div>
+                    `;
+                }
+            }
+        }
+        
+        // Remove any visible WAIT_PARENT elements if present
+        if (e.detail.state === 'WAIT_PARENT') {
+            const waitParentElements = document.querySelectorAll('.wait-parent-state, .connecting-overlay, .connection-waiting');
+            waitParentElements.forEach(el => {
+                if (el && el.remove) el.remove();
+            });
         }
     });
 })();
@@ -70,8 +106,9 @@
 
     <style>
         /* =============================================
-           ENHANCED UI STYLES - v3.5.0
-           SILENT BACKGROUND - NO VISIBLE LOADING
+           ENHANCED UI STYLES - v4.0.0
+           SILENT BACKGROUND - NO VISIBLE LOADING FOR WAIT_PARENT
+           REAL DATA ONLY - NO PLACEHOLDERS
         ============================================= */
         
         /* Message status indicators */
@@ -448,7 +485,6 @@
             border-radius: 10px;
             font-size: 10px;
             z-index: 1000;
-            display: none;
             backdrop-filter: blur(10px);
         }
         
@@ -809,6 +845,14 @@
             display: none !important;
         }
         
+        /* WAIT_PARENT state - completely hidden */
+        .wait-parent-state, .connecting-overlay, .connection-waiting {
+            display: none !important;
+            opacity: 0 !important;
+            visibility: hidden !important;
+            pointer-events: none !important;
+        }
+        
         /* Reply indicator */
         .reply-indicator {
             background: rgba(0, 132, 255, 0.1);
@@ -916,6 +960,12 @@
         
         .category-tab.active .badge {
             background: rgba(255, 255, 255, 0.2);
+        }
+        
+        /* UI disabled state (when not ACTIVE) */
+        .ui-disabled {
+            opacity: 0.5;
+            pointer-events: none;
         }
     </style>
     <link rel="stylesheet" href="/css/suppress-webgl.css">
@@ -1493,72 +1543,102 @@
                 window.__IFRAME_DEBUG__ = true;
             }
             
-            // Check if core is ready and initialize UI
+            // DETERMINISTIC: Check if core is ready and initialize UI
+            // NO RETRY LOOPS - just passive waiting
             let coreCheckCount = 0;
             const checkCoreInterval = setInterval(() => {
                 coreCheckCount++;
                 
-                if (window.messagesCore && window.messagesCore.isReady && window.messagesCore.isReady()) {
+                // Check if core is ACTIVE
+                const isActive = window.messagesCore && 
+                                 window.messagesCore.isReady && 
+                                 window.messagesCore.isReady();
+                
+                if (isActive) {
                     clearInterval(checkCoreInterval);
-                    console.log('[Messages] Core ready, UI initialized');
+                    console.log('[Messages] Core ACTIVE, UI ready for interaction');
                     
                     // Show token status as ready
                     const tokenStatus = document.getElementById('tokenStatus');
                     if (tokenStatus) {
                         tokenStatus.textContent = '🟢 Connected';
                         tokenStatus.className = 'token-status ready';
+                        tokenStatus.style.display = 'block';
+                    }
+                    
+                    // Remove any loading states
+                    const chatsList = document.getElementById('chatsList');
+                    if (chatsList && chatsList.children.length === 0) {
+                        // Keep empty state - real data will load
                     }
                 } else if (coreCheckCount > 30) {
+                    // After 30 seconds, don't retry - just show passive message
                     clearInterval(checkCoreInterval);
-                    console.log('[Messages] Core not ready after 30 attempts');
+                    console.log('[Messages] Core not ACTIVE, waiting for parent connection');
                     
-                    // Show fallback UI
-                    const tokenStatus = document.getElementById('tokenStatus');
-                    if (tokenStatus) {
-                        tokenStatus.textContent = '🔴 Connection issue';
-                        tokenStatus.className = 'token-status error';
+                    // Get lifecycle state to determine UI behavior
+                    const lifecycleState = window.messagesCore?.getState?.()?.state || 'UNKNOWN';
+                    
+                    if (lifecycleState === 'WAIT_PARENT') {
+                        // WAIT_PARENT: No visible UI changes - background connection only
+                        // Hide token status
+                        const tokenStatus = document.getElementById('tokenStatus');
+                        if (tokenStatus) {
+                            tokenStatus.style.display = 'none';
+                        }
+                    } else {
+                        // Show subtle fallback for other states
+                        const tokenStatus = document.getElementById('tokenStatus');
+                        if (tokenStatus) {
+                            tokenStatus.textContent = '🟡 Connecting...';
+                            tokenStatus.className = 'token-status pending';
+                            tokenStatus.style.display = 'block';
+                        }
                     }
                 }
             }, 1000);
             
             // Silent background initialization - no console noise
             setTimeout(() => {
-                if (!window.messagesCore || !window.messagesCore.isReady || !window.messagesCore.isReady()) {
+                const lifecycleState = window.messagesCore?.getState?.()?.state || 'UNKNOWN';
+                
+                if (lifecycleState !== 'ACTIVE' && lifecycleState !== 'WAIT_PARENT') {
                     const chatsList = document.getElementById('chatsList');
                     if (chatsList && chatsList.children.length === 0) {
                         chatsList.innerHTML = `
                             <div class="empty-state subtle">
                                 <i class="fas fa-sync-alt fa-spin empty-icon" style="opacity: 0.3;"></i>
-                                <div class="empty-title" style="font-size: 14px;">Still connecting...</div>
+                                <div class="empty-title" style="font-size: 14px;">Connecting...</div>
                             </div>
                         `;
                     }
                 }
             }, 5000);
             
-            // 10 second timeout - show retry option (still subtle)
+            // 15 second timeout - show minimal message (still subtle)
             setTimeout(() => {
-                if (!window.messagesCore || !window.messagesCore.isReady || !window.messagesCore.isReady()) {
+                const lifecycleState = window.messagesCore?.getState?.()?.state || 'UNKNOWN';
+                
+                if (lifecycleState !== 'ACTIVE' && lifecycleState !== 'WAIT_PARENT') {
                     const chatsList = document.getElementById('chatsList');
                     if (chatsList && chatsList.children.length === 0) {
                         chatsList.innerHTML = `
-                            <div class="empty-state error">
+                            <div class="empty-state">
                                 <i class="fas fa-exclamation-triangle empty-icon"></i>
-                                <div class="empty-title">Connection issue</div>
-                                <div class="empty-message">Working to reconnect...</div>
-                                <button class="retry-btn subtle" onclick="location.reload()">
-                                    <i class="fas fa-sync-alt"></i> Retry
-                                </button>
+                                <div class="empty-title">Connection in progress</div>
+                                <div class="empty-message">This will resolve automatically</div>
                             </div>
                         `;
                     }
                 }
-            }, 10000);
+            }, 15000);
             
             // Add retry connection function for the reconnect button
             window.retryConnection = function() {
                 if (window.messagesCore && window.messagesCore.retryConnection) {
                     window.messagesCore.retryConnection();
+                } else if (window.messagesCore && window.messagesCore.reset) {
+                    window.messagesCore.reset();
                 } else {
                     location.reload();
                 }
@@ -1580,6 +1660,20 @@
                     return true;
                 }
                 return false;
+            };
+            
+            // Add helper to open chat
+            window.openChat = function(chat) {
+                if (window.messagesCore && window.messagesCore.openConversation) {
+                    window.messagesCore.openConversation(chat.id, chat);
+                }
+            };
+            
+            // Add helper to load chat by friend ID
+            window.loadChatByFriendId = function(friendId) {
+                if (window.messagesCore && window.messagesCore.createConversation) {
+                    window.messagesCore.createConversation([friendId]);
+                }
             };
         })();
     </script>

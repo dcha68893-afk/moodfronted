@@ -1,11 +1,10 @@
-// api.core.js - ENHANCED API GATEWAY WITH SECURITY & CROSS-ENVIRONMENT SUPPORT
-// Version: 23.0.9 - FIXED: Parent session synchronization, request gating, session normalization
-// Date: 2024-06-21
-// CRITICAL: Single token source, localStorage persistence, guaranteed auth headers
-// ENHANCED: Parent orchestration alignment with chat.html
+﻿// api.core.js - ENHANCED API GATEWAY WITH SECURITY & CROSS-ENVIRONMENT SUPPORT
+// Version: 24.0.4 - FIXED: Race condition between module initialization and API gateway
+// Date: 2026-03-26
+// CRITICAL: Ensure API gateway is fully initialized before any requests are processed
 
 // ============================================================================
-// MODULE-LEVEL DECLARATIONS (MUST BE OUTSIDE IIFE FOR EXPORTS)
+// MODULE-LEVEL DECLARATIONS
 // ============================================================================
 
 // Core gateway functions
@@ -18,7 +17,7 @@ let getBaseUrl;
 let setBaseUrl;
 let detectEnvironment;
 
-// Fetch wrapper with timeout, retry, caching, fallback
+// Fetch wrapper with guaranteed resolution
 let fetchWithTimeout;
 let fetchWithRetry;
 let fetchWithCache;
@@ -56,7 +55,7 @@ let AUTH_TOKEN = null;
 let TOKEN_READY = false;
 
 // ============================================================================
-// [NEW] PARENT ORCHESTRATION STATE - ADDED FOR SESSION SYNCHRONIZATION
+// PARENT ORCHESTRATION STATE
 // ============================================================================
 
 let PARENT_SESSION = null;
@@ -78,6 +77,10 @@ let PARENT_MESSAGE_HANDLERS = new Map();
 let REQUEST_GATE_ACTIVE = false;
 let GATED_REQUESTS_QUEUE = [];
 
+// Active requests tracking for deduplication
+const activeRequests = new Map();
+const requestTimeouts = new Map();
+
 let TokenManager;
 let SecureStorage;
 let encryptToken;
@@ -94,7 +97,7 @@ let migrateLegacyTokens;
 let validateTokenFormat;
 let sanitizeToken;
 
-// NEW TOKEN FUNCTIONS - Add declarations here
+// NEW TOKEN FUNCTIONS
 let ensureToken;
 let waitForToken;
 let guardedRequest;
@@ -127,7 +130,7 @@ let deleteCacheItem;
 let pruneCache;
 let cacheStats;
 
-// Request queue
+// Request queue with guaranteed processing
 let RequestQueue;
 let queueRequest;
 let processQueue;
@@ -136,8 +139,10 @@ let clearQueue;
 let pauseQueue;
 let resumeQueue;
 
-// Request deduplication map
-const pendingRequests = new Map();
+// Core ready state for queue processing
+let isCoreReady = false;
+let initializationPromise = null;
+let initializationResolve = null;
 
 // Original exports - all preserved
 let requestSession;
@@ -270,14 +275,14 @@ let del;
 let sendToIframe;
 let broadcastToParent;
 let waitForReady;
-let isCoreReady;
+let isCoreReadyFn;
 let getRequestQueueStatus;
 let registerIframe;
 let unregisterIframe;
 let getIframeStatus;
 let broadcastToAllIframes;
 
-// CHAT FUNCTIONS - DECLARED ONCE
+// CHAT FUNCTIONS
 let openChat;
 let closeChat;
 let minimizeChat;
@@ -287,459 +292,425 @@ let getChatHistory;
 let getUnreadCount;
 
 // ============================================================================
-// [NEW] PARENT ORCHESTRATION FUNCTIONS - ADDED FOR SESSION SYNCHRONIZATION
+// ENHANCED ENVIRONMENT DETECTION - FIXED
 // ============================================================================
 
-/**
- * Normalize session data from parent
- * Ensures consistent types (userId as string or number based on original format)
- * @param {Object} sessionData - Raw session data from parent
- * @returns {Object} Normalized session data
- */
-function _normalizeParentSession(sessionData) {
-    if (!sessionData || typeof sessionData !== 'object') {
-        return null;
-    }
-    
-    const normalized = { ...sessionData };
-    
-    // Normalize userId - preserve original type but ensure consistency
-    if (normalized.userId !== undefined && normalized.userId !== null) {
-        const originalUserId = normalized.userId;
+ENVIRONMENTS = {
+    PRODUCTION: 'production',
+    DEVELOPMENT: 'development',
+    DEMO: 'demo',
+    AUTO: 'auto',
+    STAGING: 'staging',
+    TEST: 'test',
+    LOCAL: 'local'
+};
+
+function resolveBaseURL() {
+    try {
+        const env = CURRENT_ENVIRONMENT === ENVIRONMENTS.AUTO ? detectEnvironment() : CURRENT_ENVIRONMENT;
         
-        // Store both string and number representations for compatibility
-        if (typeof originalUserId === 'number') {
-            normalized.userIdNumber = originalUserId;
-            normalized.userIdString = String(originalUserId);
-        } else if (typeof originalUserId === 'string') {
-            normalized.userIdString = originalUserId;
-            const parsed = parseInt(originalUserId, 10);
-            if (!isNaN(parsed)) {
-                normalized.userIdNumber = parsed;
-            }
+        if (env === ENVIRONMENTS.LOCAL || env === ENVIRONMENTS.DEVELOPMENT) {
+            return 'http://localhost:4000/api';  // CHANGE THIS - add /api
+        } else {
+            return 'https://moodchat-fy56.onrender.com/api';  // CHANGE THIS - add /api
         }
-        
-        // Keep original for backward compatibility
-        normalized._originalUserId = originalUserId;
+    } catch (error) {
+        console.error('[ENV] Base URL resolution error:', error);
+        return 'https://moodchat-fy56.onrender.com/api';
     }
-    
-    // Normalize token
-    if (normalized.token && typeof normalized.token === 'string') {
-        normalized.token = normalized.token.trim();
-    }
-    
-    // Ensure authenticated flag
-    if (normalized.authenticated === undefined && normalized.token) {
-        normalized.authenticated = true;
-    }
-    
-    // Add metadata
-    normalized._normalized = true;
-    normalized._normalizedAt = Date.now();
-    normalized._normalizationVersion = '23.0.9';
-    
-    return normalized;
 }
 
-/**
- * Update internal session from parent
- * @param {Object} sessionData - Session data from parent
- * @returns {boolean} Success status
- */
-function _updateSessionFromParent(sessionData) {
+BASE_URLS = {
+    [ENVIRONMENTS.PRODUCTION]: 'https://moodchat-fy56.onrender.com/api',
+    [ENVIRONMENTS.DEVELOPMENT]: 'http://localhost:4000/api',
+    [ENVIRONMENTS.DEMO]: 'https://demo.moodchat.onrender.com/api',
+    [ENVIRONMENTS.STAGING]: 'https://staging.moodchat.onrender.com/api',
+    [ENVIRONMENTS.TEST]: 'https://test.moodchat.onrender.com/api',
+    [ENVIRONMENTS.LOCAL]: 'http://localhost:4000/api',  // ADD /api HERE
+    [ENVIRONMENTS.AUTO]: null
+};
+
+ENVIRONMENT_DETECTION_RULES = [
+    { pattern: /localhost|127\.0\.0\.1|::1|0\.0\.0\.0/i, env: ENVIRONMENTS.LOCAL },
+    { pattern: /render\.com|onrender\.com|moodchat-fy56/i, env: ENVIRONMENTS.PRODUCTION },
+    { pattern: /staging|stage/i, env: ENVIRONMENTS.STAGING },
+    { pattern: /demo|testdrive/i, env: ENVIRONMENTS.DEMO },
+    { pattern: /test|testing/i, env: ENVIRONMENTS.TEST },
+    { pattern: /192\.168\.|10\.0\.|172\.(1[6-9]|2[0-9]|3[0-1])\./i, env: ENVIRONMENTS.DEVELOPMENT },
+    { pattern: /dev\.|development\./i, env: ENVIRONMENTS.DEVELOPMENT }
+];
+
+CURRENT_ENVIRONMENT = ENVIRONMENTS.AUTO;
+ACTIVE_BASE_URL = null;
+
+detectEnvironment = function() {
     try {
-        if (!sessionData || typeof sessionData !== 'object') {
-            console.warn('[PARENT-SYNC] Invalid session data received');
-            return false;
+        const hostname = window.location.hostname;
+        const port = window.location.port;
+        const href = window.location.href;
+        const protocol = window.location.protocol;
+        
+        // LOCAL DETECTION - Highest priority
+        if (hostname === 'localhost' || 
+            hostname === '127.0.0.1' || 
+            hostname === '::1' ||
+            hostname === '0.0.0.0' ||
+            port === '5500' || 
+            port === '3000' || 
+            port === '3001' || 
+            port === '5173' || 
+            port === '5174' || 
+            port === '5175' || 
+            port === '4200' || 
+            port === '8080') {
+            console.log(`[ENV] ✅ Detected LOCAL environment from: ${hostname}:${port}`);
+            // FORCE LOCAL environment
+            CURRENT_ENVIRONMENT = ENVIRONMENTS.LOCAL;
+            return ENVIRONMENTS.LOCAL;
         }
         
-        // Normalize session
-        const normalized = _normalizeParentSession(sessionData);
-        if (!normalized) {
-            console.warn('[PARENT-SYNC] Failed to normalize session data');
-            return false;
+        // PRODUCTION DETECTION
+        if (hostname.includes('render.com') || 
+            hostname.includes('onrender.com') ||
+            href.includes('render.com') || 
+            href.includes('onrender.com')) {
+            console.log(`[ENV] ✅ Detected PRODUCTION environment from: ${hostname}`);
+            return ENVIRONMENTS.PRODUCTION;
         }
         
-        // Check if session actually changed
-        const sessionChanged = JSON.stringify(PARENT_SESSION) !== JSON.stringify(normalized);
-        
-        if (!sessionChanged && SESSION_READY) {
-            // No change, but ensure we're ready
-            if (!SESSION_READY) {
-                SESSION_READY = true;
-                _processGatedRequests();
+        // Check rules for other environments
+        for (const rule of ENVIRONMENT_DETECTION_RULES) {
+            if (rule.pattern.test(hostname) || rule.pattern.test(href)) {
+                console.log(`[ENV] ✅ Detected environment: ${rule.env} from: ${hostname}`);
+                return rule.env;
             }
+        }
+        
+        // Default to PRODUCTION for any other domain
+        console.log(`[ENV] ⚠️ Defaulting to PRODUCTION for: ${hostname}`);
+        return ENVIRONMENTS.PRODUCTION;
+        
+    } catch (error) {
+        console.error('[ENV] Detection error:', error);
+        return ENVIRONMENTS.PRODUCTION;
+    }
+};
+
+setEnvironment = function(env) {
+    try {
+        if (!env) return false;
+        
+        const envString = env.toString().toLowerCase();
+        
+        if (Object.values(ENVIRONMENTS).includes(envString)) {
+            CURRENT_ENVIRONMENT = envString;
+            ACTIVE_BASE_URL = resolveBaseURL();
+            
+            console.log(`[ENV] Environment set to: ${CURRENT_ENVIRONMENT}, backend URL: ${ACTIVE_BASE_URL}`);
+            
+            if (CURRENT_ENVIRONMENT === ENVIRONMENTS.PRODUCTION && 
+                ACTIVE_BASE_URL && 
+                !ACTIVE_BASE_URL.startsWith('https://')) {
+                console.warn('[ENV] Production environment requires HTTPS - upgrading URL');
+                ACTIVE_BASE_URL = ACTIVE_BASE_URL.replace('http://', 'https://');
+            }
+            
+            if (typeof window !== 'undefined') {
+                window.dispatchEvent(new CustomEvent('environment-changed', {
+                    detail: {
+                        environment: CURRENT_ENVIRONMENT,
+                        baseUrl: ACTIVE_BASE_URL,
+                        timestamp: new Date().toISOString()
+                    }
+                }));
+            }
+            
             return true;
         }
         
-        // Store previous session for logging
-        const previousSession = PARENT_SESSION;
-        
-        // Update session
-        PARENT_SESSION = normalized;
-        LAST_SESSION_UPDATE = Date.now();
-        SESSION_UPDATE_COUNT++;
-        
-        // Update token if present
-        if (normalized.token && typeof normalized.token === 'string') {
-            const tokenUpdated = setUserToken(normalized.token, true, 'parent.session');
-            
-            if (tokenUpdated) {
-                console.log('[PARENT-SYNC] ✅ Token updated from parent session');
-                
-                // Update TokenManager for consistency
-                if (TokenManager && typeof TokenManager._setTokenInternal === 'function') {
-                    TokenManager._setTokenInternal(normalized.token);
-                }
-            }
+        // Legacy mapping
+        if (envString.includes('prod') || envString.includes('render')) {
+            CURRENT_ENVIRONMENT = ENVIRONMENTS.PRODUCTION;
+        } else if (envString.includes('dev') || envString.includes('local')) {
+            CURRENT_ENVIRONMENT = ENVIRONMENTS.LOCAL;
+        } else if (envString.includes('demo')) {
+            CURRENT_ENVIRONMENT = ENVIRONMENTS.DEMO;
+        } else if (envString.includes('stage')) {
+            CURRENT_ENVIRONMENT = ENVIRONMENTS.STAGING;
+        } else if (envString.includes('test')) {
+            CURRENT_ENVIRONMENT = ENVIRONMENTS.TEST;
+        } else {
+            return false;
         }
         
-        // Update user data if present
-        if (normalized.user && typeof normalized.user === 'object') {
-            const userUpdated = setUserData(normalized.user, true);
-            if (userUpdated) {
-                console.log('[PARENT-SYNC] ✅ User data updated from parent session');
-            }
-        } else if (normalized.userId) {
-            // Create minimal user object from userId
-            const minimalUser = {
-                id: normalized.userIdNumber || normalized.userIdString || normalized.userId,
-                _fromParent: true,
-                _sessionUpdate: SESSION_UPDATE_COUNT
-            };
-            setUserData(minimalUser, true);
+        ACTIVE_BASE_URL = resolveBaseURL();
+        
+        console.log(`[ENV] Environment set to: ${CURRENT_ENVIRONMENT}, backend URL: ${ACTIVE_BASE_URL}`);
+        
+        if (CURRENT_ENVIRONMENT === ENVIRONMENTS.PRODUCTION && 
+            ACTIVE_BASE_URL && 
+            !ACTIVE_BASE_URL.startsWith('https://')) {
+            ACTIVE_BASE_URL = ACTIVE_BASE_URL.replace('http://', 'https://');
         }
         
-        // Update NORMALIZED_USER_ID for quick access
-        NORMALIZED_USER_ID = normalized.userIdNumber || normalized.userIdString || normalized.userId;
-        
-        // Mark session as ready
-        const wasReady = SESSION_READY;
-        SESSION_READY = true;
-        
-        // Update request queue dependencies
-        if (RequestQueue && typeof RequestQueue.updateDependency === 'function') {
-            RequestQueue.updateDependency('parentReady', PARENT_READY);
-            RequestQueue.updateDependency('sessionReady', SESSION_READY);
-        }
-        
-        // Update token readiness
-        TOKEN_READY = !!normalized.token;
-        
-        // Log session update
-        console.log(`[PARENT-SYNC] 📡 Session updated (v${SESSION_UPDATE_COUNT})`, {
-            hasToken: !!normalized.token,
-            hasUser: !!normalized.user,
-            userId: NORMALIZED_USER_ID,
-            wasReady,
-            isReady: SESSION_READY,
-            timestamp: new Date().toISOString()
-        });
-        
-        // Dispatch session update event
         if (typeof window !== 'undefined') {
-            window.dispatchEvent(new CustomEvent('parent-session-updated', {
+            window.dispatchEvent(new CustomEvent('environment-changed', {
                 detail: {
-                    session: normalized,
-                    updateCount: SESSION_UPDATE_COUNT,
-                    previous: previousSession ? {
-                        hasToken: !!previousSession.token,
-                        hasUser: !!previousSession.user
-                    } : null,
+                    environment: CURRENT_ENVIRONMENT,
+                    baseUrl: ACTIVE_BASE_URL,
                     timestamp: new Date().toISOString()
                 }
             }));
         }
         
-        // Process any pending requests that were waiting for session
-        if (!wasReady && SESSION_READY) {
-            _processGatedRequests();
+        return true;
+        
+    } catch (error) {
+        console.error('[ENV] Set environment error:', error);
+        return false;
+    }
+};
+
+getEnvironment = function() {
+    return CURRENT_ENVIRONMENT;
+};
+
+getEnvironmentDisplayName = function() {
+    const envMap = {
+        [ENVIRONMENTS.PRODUCTION]: 'Production',
+        [ENVIRONMENTS.DEVELOPMENT]: 'Development',
+        [ENVIRONMENTS.DEMO]: 'Demo',
+        [ENVIRONMENTS.STAGING]: 'Staging',
+        [ENVIRONMENTS.TEST]: 'Test',
+        [ENVIRONMENTS.LOCAL]: 'Local',
+        [ENVIRONMENTS.AUTO]: 'Auto-detected'
+    };
+    
+    return envMap[CURRENT_ENVIRONMENT] || CURRENT_ENVIRONMENT || 'Unknown';
+};
+
+isProduction = function() {
+    return CURRENT_ENVIRONMENT === ENVIRONMENTS.PRODUCTION;
+};
+
+isDevelopment = function() {
+    return CURRENT_ENVIRONMENT === ENVIRONMENTS.DEVELOPMENT || 
+           CURRENT_ENVIRONMENT === ENVIRONMENTS.LOCAL;
+};
+
+isDemo = function() {
+    return CURRENT_ENVIRONMENT === ENVIRONMENTS.DEMO;
+};
+
+isLocalhost = function() {
+    try {
+        const hostname = window.location.hostname;
+        return hostname === 'localhost' || 
+               hostname === '127.0.0.1' || 
+               hostname === '::1' ||
+               hostname === '0.0.0.0' ||
+               CURRENT_ENVIRONMENT === ENVIRONMENTS.LOCAL;
+    } catch (error) {
+        return false;
+    }
+};
+
+isRenderDeployment = function() {
+    try {
+        const hostname = window.location.hostname;
+        return hostname.includes('render.com') || 
+               hostname.includes('onrender.com') ||
+               (ACTIVE_BASE_URL && (ACTIVE_BASE_URL.includes('render.com') || ACTIVE_BASE_URL.includes('onrender.com')));
+    } catch (error) {
+        return false;
+    }
+};
+
+getBaseUrl = function() {
+    try {
+        if (ACTIVE_BASE_URL) {
+            return ACTIVE_BASE_URL;
+        }
+        
+        if (CURRENT_ENVIRONMENT === ENVIRONMENTS.AUTO) {
+            CURRENT_ENVIRONMENT = detectEnvironment();
+            console.log(`[ENV] Auto-detected environment: ${CURRENT_ENVIRONMENT}`);
+        }
+        
+        ACTIVE_BASE_URL = resolveBaseURL();
+        
+        if (CURRENT_ENVIRONMENT === ENVIRONMENTS.PRODUCTION && 
+            ACTIVE_BASE_URL && 
+            !ACTIVE_BASE_URL.startsWith('https://')) {
+            console.warn('[ENV] Production environment requires HTTPS - upgrading URL');
+            ACTIVE_BASE_URL = ACTIVE_BASE_URL.replace('http://', 'https://');
+        }
+        
+        console.log(`[ENV] 📍 Using backend URL: ${ACTIVE_BASE_URL} (env: ${CURRENT_ENVIRONMENT})`);
+        return ACTIVE_BASE_URL;
+        
+    } catch (error) {
+        console.error('[ENV] Get base URL error:', error);
+        return 'http://localhost:4000/api';  // CHANGE THIS - add /api
+    }
+};
+
+setBaseUrl = function(url) {
+    try {
+        if (!url || typeof url !== 'string') {
+            console.error('[ENV] Invalid URL provided');
+            return false;
+        }
+        
+        if (!url.startsWith('http://') && !url.startsWith('https://')) {
+            console.error('[ENV] URL must start with http:// or https://');
+            return false;
+        }
+        
+        // Ensure URL ends with /api for consistency, but don't force it
+        if (isProduction() && !url.startsWith('https://')) {
+            console.warn('[ENV] Production environment requires HTTPS - upgrading URL');
+            url = url.replace('http://', 'https://');
+        }
+        
+        ACTIVE_BASE_URL = url;
+        CURRENT_ENVIRONMENT = ENVIRONMENTS.AUTO;
+        
+        console.log(`[ENV] Base URL manually set to: ${ACTIVE_BASE_URL}`);
+        
+        if (typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('base-url-changed', {
+                detail: {
+                    baseUrl: ACTIVE_BASE_URL,
+                    timestamp: new Date().toISOString()
+                }
+            }));
         }
         
         return true;
         
     } catch (error) {
-        console.error('[PARENT-SYNC] Failed to update session:', error);
+        console.error('[ENV] Set base URL error:', error);
+        return false;
+    }
+};
+
+
+determineBackendUrl = function() {
+    return getBaseUrl();
+};
+
+getApiBaseUrl = getBaseUrl;
+getBackendBaseUrl = getBaseUrl;
+
+// ============================================================================
+// ENHANCED TOKEN MANAGEMENT - UNIFIED SOURCE
+// ============================================================================
+
+const AUTH_STORAGE_KEY = 'kynecta_auth';
+const TOKEN_PRIORITY_KEYS = [
+    'token',
+    'moodchat_token',
+    'accessToken',
+    'jwt',
+    'authToken',
+    'userToken',
+    'moodchat_auth_token'
+];
+
+function getAuthToken() {
+    // Priority 1: Memory token
+    if (AUTH_TOKEN && typeof AUTH_TOKEN === 'string' && AUTH_TOKEN.length > 20) {
+        return AUTH_TOKEN;
+    }
+    
+    // Priority 2: Parent session token
+    if (PARENT_SESSION && PARENT_SESSION.token && typeof PARENT_SESSION.token === 'string') {
+        AUTH_TOKEN = PARENT_SESSION.token;
+        TOKEN_READY = true;
+        return AUTH_TOKEN;
+    }
+    
+    // Priority 3: Secure storage
+    try {
+        const stored = localStorage.getItem(AUTH_STORAGE_KEY);
+        if (stored) {
+            const parsed = JSON.parse(stored);
+            if (parsed && parsed.token && typeof parsed.token === 'string' && parsed.token.length > 20) {
+                AUTH_TOKEN = parsed.token;
+                TOKEN_READY = true;
+                return AUTH_TOKEN;
+            }
+        }
+    } catch (error) {
+        console.warn('[TOKEN] Failed to parse stored auth:', error.message);
+    }
+    
+    // Priority 4: Legacy keys
+    for (const key of TOKEN_PRIORITY_KEYS) {
+        try {
+            const legacyToken = localStorage.getItem(key);
+            if (legacyToken && legacyToken.length > 20 && legacyToken !== 'null' && legacyToken !== 'undefined') {
+                AUTH_TOKEN = legacyToken;
+                TOKEN_READY = true;
+                _saveAuthToStorage(legacyToken);
+                console.log(`[TOKEN] Migrated token from legacy key: ${key}`);
+                return AUTH_TOKEN;
+            }
+        } catch (error) {
+            // Continue to next key
+        }
+    }
+    
+    return null;
+}
+
+function _saveAuthToStorage(token, user = null) {
+    try {
+        if (!token || typeof token !== 'string') return false;
+        
+        const authData = {
+            token: token,
+            user: user || getCurrentUser() || null,
+            timestamp: Date.now(),
+            version: '24.0.4'
+        };
+        
+        localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(authData));
+        
+        // Also store in legacy location for compatibility
+        localStorage.setItem('moodchat_token', token);
+        
+        return true;
+    } catch (error) {
+        console.error('[TOKEN] Failed to save auth data:', error.message);
         return false;
     }
 }
 
-/**
- * Gate requests until session is ready
- * @param {Function} requestFn - Request function to execute when session ready
- * @param {Object} options - Request options
- * @returns {Promise} Promise that resolves when request can proceed
- */
-function _gateRequest(requestFn, options = {}) {
-    return new Promise((resolve, reject) => {
-        // If session is ready and we have token (if auth required), execute immediately
-        const requiresAuth = options.auth !== false && !isPublicEndpoint(options.endpoint || '');
-        
-        if (SESSION_READY && (!requiresAuth || (AUTH_TOKEN && TOKEN_READY))) {
-            requestFn().then(resolve).catch(reject);
-            return;
-        }
-        
-        // Add to gated queue
-        const requestId = `gated_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-        
-        GATED_REQUESTS_QUEUE.push({
-            id: requestId,
-            fn: requestFn,
-            resolve,
-            reject,
-            options,
-            requiresAuth,
-            createdAt: Date.now(),
-            endpoint: options.endpoint || 'unknown'
-        });
-        
-        // Log gated request
-        console.debug(`[REQUEST-GATE] Request gated (${requestId})`, {
-            endpoint: options.endpoint,
-            requiresAuth,
-            sessionReady: SESSION_READY,
-            hasToken: !!AUTH_TOKEN,
-            queueSize: GATED_REQUESTS_QUEUE.length
-        });
-        
-        // Set timeout to prevent infinite waiting
-        const timeout = setTimeout(() => {
-            const index = GATED_REQUESTS_QUEUE.findIndex(r => r.id === requestId);
-            if (index !== -1) {
-                GATED_REQUESTS_QUEUE.splice(index, 1);
-                reject(new KnectaError(
-                    `Request gated timeout after ${options.gateTimeout || 30000}ms`,
-                    408,
-                    'GATE_TIMEOUT',
-                    { endpoint: options.endpoint, requestId }
-                ));
-            }
-        }, options.gateTimeout || 30000);
-        
-        // Store timeout for cleanup
-        GATED_REQUESTS_QUEUE[GATED_REQUESTS_QUEUE.length - 1].timeout = timeout;
-    });
-}
-
-/**
- * Process gated requests when session becomes ready
- */
-function _processGatedRequests() {
-    if (IS_PROCESSING_PENDING || GATED_REQUESTS_QUEUE.length === 0) {
-        return;
-    }
-    
-    IS_PROCESSING_PENDING = true;
-    
-    console.log(`[REQUEST-GATE] Processing ${GATED_REQUESTS_QUEUE.length} gated requests`);
-    
-    // Process in order
-    const requestsToProcess = [...GATED_REQUESTS_QUEUE];
-    GATED_REQUESTS_QUEUE = [];
-    
-    requestsToProcess.forEach(request => {
-        // Clear timeout
-        if (request.timeout) {
-            clearTimeout(request.timeout);
-        }
-        
-        // Check if request can be executed now
-        const requiresAuth = request.requiresAuth;
-        
-        if (!requiresAuth || (AUTH_TOKEN && TOKEN_READY)) {
-            request.fn()
-                .then(request.resolve)
-                .catch(request.reject);
-        } else {
-            // Still can't execute - re-queue with delay
-            setTimeout(() => {
-                GATED_REQUESTS_QUEUE.push(request);
-                _processGatedRequests();
-            }, 100);
-        }
-    });
-    
-    IS_PROCESSING_PENDING = false;
-    
-    if (GATED_REQUESTS_QUEUE.length > 0) {
-        // Some requests still waiting
-        console.log(`[REQUEST-GATE] ${GATED_REQUESTS_QUEUE.length} requests still waiting`);
-    }
-}
-
-/**
- * Initialize parent message listeners
- */
-function _initParentMessageListeners() {
-    if (typeof window === 'undefined') return;
-    
-    // Listen for messages from parent
-    window.addEventListener('message', (event) => {
-        try {
-            const { type, data, source } = event.data || {};
-            
-            // Only process messages from parent (or trusted sources)
-            const isTrusted = source === 'parent' || 
-                             (event.source === window.parent && window.parent !== window) ||
-                             (event.origin === window.location.origin);
-            
-            if (!isTrusted && type !== 'PARENT_READY' && type !== 'SESSION_DATA') {
-                return;
-            }
-            
-            // Handle PARENT_READY message
-            if (type === 'PARENT_READY') {
-                PARENT_READY = true;
-                
-                console.log('[PARENT-SYNC] Parent ready signal received');
-                
-                // Update dependencies
-                if (RequestQueue && typeof RequestQueue.updateDependency === 'function') {
-                    RequestQueue.updateDependency('parentReady', true);
-                }
-                
-                // Dispatch event
-                window.dispatchEvent(new CustomEvent('parent-ready', {
-                    detail: {
-                        timestamp: new Date().toISOString(),
-                        data: data
-                    }
-                }));
-                
-                return;
-            }
-            
-            // Handle SESSION_DATA message
-            if (type === 'SESSION_DATA' || type === 'SESSION_UPDATE') {
-                const sessionData = data || event.data.session;
-                
-                if (sessionData) {
-                    console.log('[PARENT-SYNC] Session data received from parent');
-                    _updateSessionFromParent(sessionData);
-                }
-                
-                return;
-            }
-            
-            // Handle custom handlers
-            if (PARENT_MESSAGE_HANDLERS.has(type)) {
-                const handler = PARENT_MESSAGE_HANDLERS.get(type);
-                handler(event.data);
-            }
-            
-        } catch (error) {
-            console.error('[PARENT-SYNC] Message handler error:', error);
-        }
-    });
-    
-    // Also check if we're in an iframe and parent might already be ready
-    if (window !== window.parent) {
-        // Send READY message to parent
-        window.parent.postMessage({
-            type: 'CHILD_READY',
-            data: {
-                version: '23.0.9',
-                timestamp: new Date().toISOString(),
-                requiresSession: true
-            }
-        }, '*');
-        
-        // Request session from parent if we have a ready promise
-        setTimeout(() => {
-            if (!SESSION_READY && !PARENT_SESSION) {
-                window.parent.postMessage({
-                    type: 'REQUEST_SESSION',
-                    data: {
-                        version: '23.0.9',
-                        timestamp: new Date().toISOString()
-                    }
-                }, '*');
-            }
-        }, 100);
-    } else {
-        // Not in iframe - mark parent as ready (self-contained)
-        PARENT_READY = true;
-        SESSION_READY = true;
-        
-        // Try to restore session from storage
-        const storedToken = _getTokenFromStorage();
-        if (storedToken) {
-            PARENT_SESSION = {
-                token: storedToken,
-                authenticated: true,
-                userId: _getUserFromStorage()?.id || null,
-                user: _getUserFromStorage(),
-                _source: 'storage',
-                _normalized: true
-            };
-            SESSION_READY = true;
-            TOKEN_READY = true;
-        }
-    }
-}
-
-/**
- * Register custom parent message handler
- * @param {string} type - Message type
- * @param {Function} handler - Handler function
- * @returns {Function} Unregister function
- */
-function _registerParentMessageHandler(type, handler) {
-    PARENT_MESSAGE_HANDLERS.set(type, handler);
-    return () => PARENT_MESSAGE_HANDLERS.delete(type);
-}
-
-// ============================================================================
-// [FIX] SINGLE TOKEN SOURCE - WITH SOURCE TRACKING AND PERSISTENCE
-// ============================================================================
-
-// Flag to prevent recursive token setting
-let _isSettingToken = false;
-let _lastTokenSource = null;
-let _tokenSetCount = 0;
-let _tokenFromApiLogged = false;
-let _authHeaderLogged = false;
-let _401logged = false;
-let _loginSuccessLogged = false;
-
-// Storage key for auth data
-const AUTH_STORAGE_KEY = 'kynecta_auth';
-
-/**
- * Safely get token from localStorage with error handling
- * @private
- * @returns {string|null} Token or null
- */
-function _getTokenFromStorage() {
+function _clearAuthFromStorage() {
     try {
-        const stored = localStorage.getItem(AUTH_STORAGE_KEY);
-        if (!stored) return null;
+        localStorage.removeItem(AUTH_STORAGE_KEY);
+        localStorage.removeItem('moodchat_token');
         
-        const parsed = JSON.parse(stored);
-        if (parsed && parsed.token && typeof parsed.token === 'string') {
-            // Validate token format (basic check)
-            if (parsed.token.length > 20) {
-                return parsed.token;
-            }
+        // Clear legacy keys
+        for (const key of TOKEN_PRIORITY_KEYS) {
+            try {
+                localStorage.removeItem(key);
+            } catch (e) {}
         }
-        return null;
+        
+        return true;
     } catch (error) {
-        // Log warning but don't crash
-        console.warn('[API] Failed to parse stored auth data:', error.message);
-        // Attempt to clear corrupted data
-        try {
-            localStorage.removeItem(AUTH_STORAGE_KEY);
-        } catch (e) {}
-        return null;
+        console.error('[TOKEN] Failed to clear auth data:', error.message);
+        return false;
     }
 }
 
-/**
- * Safely get user from localStorage with error handling
- * @private
- * @returns {Object|null} User data or null
- */
+function _getTokenFromStorage() {
+    return getAuthToken();
+}
+
 function _getUserFromStorage() {
     try {
         const stored = localStorage.getItem(AUTH_STORAGE_KEY);
@@ -751,63 +722,20 @@ function _getUserFromStorage() {
         }
         return null;
     } catch (error) {
-        console.warn('[API] Failed to parse stored user data:', error.message);
+        console.warn('[TOKEN] Failed to parse stored user data:', error.message);
         return null;
     }
 }
 
-/**
- * Save auth data to localStorage
- * @private
- * @param {string} token - Authentication token
- * @param {Object} user - User data
- * @returns {boolean} Success status
- */
-function _saveAuthToStorage(token, user = null) {
-    try {
-        if (!token || typeof token !== 'string') return false;
-        
-        const authData = {
-            token: token,
-            user: user || getCurrentUser() || null,
-            timestamp: Date.now(),
-            version: '23.0.9'
-        };
-        
-        localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(authData));
-        
-        // console.log('[Auth Debug] Token saved to storage:', token.substring(0, 10) + '...');
-        return true;
-    } catch (error) {
-        console.error('[API] Failed to save auth data:', error.message);
-        return false;
-    }
-}
+let _isSettingToken = false;
+let _lastTokenSource = null;
+let _tokenSetCount = 0;
+let _tokenFromApiLogged = false;
+let _authHeaderLogged = false;
+let _401logged = false;
+let _loginSuccessLogged = false;
 
-/**
- * Clear auth data from localStorage
- * @private
- * @returns {boolean} Success status
- */
-function _clearAuthFromStorage() {
-    try {
-        localStorage.removeItem(AUTH_STORAGE_KEY);
-        return true;
-    } catch (error) {
-        console.error('[API] Failed to clear auth data:', error.message);
-        return false;
-    }
-}
-
-/**
- * Set authentication token - SINGLE SOURCE OF TRUTH
- * @param {string} token - JWT token
- * @param {boolean} skipManager - Skip TokenManager update to prevent recursion
- * @param {string} source - Source module/file that triggered the token set
- * @returns {boolean} Success status
- */
 setUserToken = function(token, skipManager = false, source = 'unknown') {
-    // Prevent recursive calls
     if (_isSettingToken) {
         if (source !== 'TokenManager.internal') {
             console.warn(`[API] Token set prevented - recursion detected from ${source}`);
@@ -823,7 +751,6 @@ setUserToken = function(token, skipManager = false, source = 'unknown') {
         
         _isSettingToken = true;
         
-        // Sanitize token
         const sanitizedToken = token
             .toString()
             .trim()
@@ -831,39 +758,32 @@ setUserToken = function(token, skipManager = false, source = 'unknown') {
             .replace(/\s+/g, '')
             .replace(/[^\w\-\.]/g, '');
         
-        // Only update if token actually changed
         const tokenChanged = AUTH_TOKEN !== sanitizedToken;
         
         if (!tokenChanged) {
             _isSettingToken = false;
-            return true; // Token unchanged, no need to log
+            return true;
         }
         
         AUTH_TOKEN = sanitizedToken;
         TOKEN_READY = true;
         _tokenSetCount++;
         
-        // Save to localStorage for persistence
         _saveAuthToStorage(sanitizedToken);
         
-        // Update TokenManager for backward compatibility - but skip if called from TokenManager
         if (!skipManager && TokenManager && typeof TokenManager._setTokenInternal === 'function') {
             TokenManager._setTokenInternal(sanitizedToken);
         }
         
-        // Update global token for iframe compatibility
         if (typeof window !== 'undefined') {
             window.__GLOBAL_TOKEN = sanitizedToken;
         }
         
-        // Update request queue dependency
         if (RequestQueue && typeof RequestQueue.updateDependency === 'function') {
             RequestQueue.updateDependency('tokenReady', true);
         }
         
-        // Update parent session if we're updating token
         if (PARENT_SESSION && source !== 'parent.session') {
-            // Sync back to parent if this token came from elsewhere
             if (window !== window.parent && window.parent && typeof window.parent.postMessage === 'function') {
                 window.parent.postMessage({
                     type: 'TOKEN_UPDATE',
@@ -876,7 +796,6 @@ setUserToken = function(token, skipManager = false, source = 'unknown') {
             }
         }
         
-        // Dispatch event
         if (typeof window !== 'undefined') {
             window.dispatchEvent(new CustomEvent('token-stored', {
                 detail: {
@@ -888,16 +807,13 @@ setUserToken = function(token, skipManager = false, source = 'unknown') {
             }));
         }
         
-        // Log token success ONCE per actual token change with source
-        console.log(`[API] 🔐 Token #${_tokenSetCount} set by: ${source}`);
+        console.log(`[API] ðŸ” Token #${_tokenSetCount} set by: ${source}`);
         
-        // Log source change if different from last
         if (_lastTokenSource !== source) {
-            console.log(`[API] Token source changed: ${_lastTokenSource || 'initial'} → ${source}`);
+            console.log(`[API] Token source changed: ${_lastTokenSource || 'initial'} â†’ ${source}`);
             _lastTokenSource = source;
         }
         
-        // Process any gated requests now that token is available
         if (SESSION_READY && GATED_REQUESTS_QUEUE.length > 0) {
             _processGatedRequests();
         }
@@ -907,53 +823,17 @@ setUserToken = function(token, skipManager = false, source = 'unknown') {
         
     } catch (error) {
         _isSettingToken = false;
-        console.error(`[API] ✗ Set token error from ${source}:`, error.message);
+        console.error(`[API] âœ— Set token error from ${source}:`, error.message);
         return false;
     }
 };
 
-/**
- * Get authentication token - SINGLE SOURCE OF TRUTH
- * @param {string} caller - Optional caller for debugging
- * @returns {string|null} Token or null
- */
 getUserToken = function(caller = 'unknown') {
-    // If we have AUTH_TOKEN in memory, return it
-    if (AUTH_TOKEN) {
-        // console.log('[Auth Debug] Token from memory:', AUTH_TOKEN.substring(0, 10) + '...');
-        return AUTH_TOKEN;
-    }
-    
-    // Check parent session first (if available)
-    if (PARENT_SESSION && PARENT_SESSION.token && typeof PARENT_SESSION.token === 'string') {
-        AUTH_TOKEN = PARENT_SESSION.token;
-        TOKEN_READY = true;
-        // console.log('[Auth Debug] Token from parent session:', AUTH_TOKEN.substring(0, 10) + '...');
-        return AUTH_TOKEN;
-    }
-    
-    // Fallback to localStorage if memory is empty
-    const storedToken = _getTokenFromStorage();
-    if (storedToken) {
-        // Restore to memory
-        AUTH_TOKEN = storedToken;
-        TOKEN_READY = true;
-        // console.log('[Auth Debug] Token restored from storage:', storedToken.substring(0, 10) + '...');
-        return storedToken;
-    }
-    
-    // NO FALLBACKS - if we don't have token, return null
-    return null;
+    return getAuthToken();
 };
 
-/**
- * Clear authentication token
- * @param {string} source - Source module/file that triggered the clear
- * @returns {boolean} Success status
- */
 clearUserToken = function(source = 'unknown') {
     try {
-        // Skip if already cleared
         if (AUTH_TOKEN === null && TOKEN_READY === false) {
             return true;
         }
@@ -964,25 +844,20 @@ clearUserToken = function(source = 'unknown') {
         AUTH_TOKEN = null;
         TOKEN_READY = false;
         
-        // Clear from localStorage
         _clearAuthFromStorage();
         
-        // Clear TokenManager
         if (TokenManager && typeof TokenManager._clearTokenInternal === 'function') {
             TokenManager._clearTokenInternal();
         }
         
-        // Clear global token
         if (typeof window !== 'undefined') {
             window.__GLOBAL_TOKEN = null;
         }
         
-        // Update request queue dependency
         if (RequestQueue && typeof RequestQueue.updateDependency === 'function') {
             RequestQueue.updateDependency('tokenReady', false);
         }
         
-        // Notify parent if we're in iframe
         if (window !== window.parent && window.parent && typeof window.parent.postMessage === 'function') {
             window.parent.postMessage({
                 type: 'TOKEN_CLEARED',
@@ -993,7 +868,6 @@ clearUserToken = function(source = 'unknown') {
             }, '*');
         }
         
-        // Dispatch event
         if (typeof window !== 'undefined') {
             window.dispatchEvent(new CustomEvent('token-cleared', {
                 detail: {
@@ -1004,45 +878,36 @@ clearUserToken = function(source = 'unknown') {
             }));
         }
         
-        // Log token clear if we actually cleared something
         if (hadToken) {
-            console.log(`[API] 🔓 Token cleared by: ${source} (was: ${lastToken})`);
+            console.log(`[API] ðŸ”“ Token cleared by: ${source} (was: ${lastToken})`);
         }
         
         return true;
         
     } catch (error) {
-        console.error(`[API] ✗ Clear token error from ${source}:`, error.message);
+        console.error(`[API] âœ— Clear token error from ${source}:`, error.message);
         return false;
     }
 };
 
-/**
- * Restore token from storage on module load
- * @returns {boolean} True if token was restored
- */
 function _restoreTokenFromStorage() {
-    const token = _getTokenFromStorage();
+    const token = getAuthToken();
     if (token) {
         AUTH_TOKEN = token;
         TOKEN_READY = true;
         
-        // Restore user data if available
         const user = _getUserFromStorage();
         if (user && !getCurrentUser()) {
-            // Will be set via setUserData if available
             if (typeof setUserData === 'function') {
                 setUserData(user, true);
             }
         }
         
-        // console.log('[Auth Debug] Token auto-restored on load');
         return true;
     }
     return false;
 }
 
-// Legacy aliases for backward compatibility
 getToken = function(caller) { return getUserToken(caller || 'legacy'); };
 setToken = function(token, source) { return setUserToken(token, false, source || 'legacy'); };
 secureGetToken = getUserToken;
@@ -1050,15 +915,11 @@ secureSetToken = setUserToken;
 secureClearToken = clearUserToken;
 getValidToken = getUserToken;
 
-/**
- * Ensure token exists before request - THROWS if no token
- * @throws {Error} If no token available
- */
 ensureToken = function() {
     const token = getUserToken('ensureToken');
     if (!token) {
         throw new KnectaError(
-            '[API] No auth token — request blocked',
+            '[API] No auth token â€” request blocked',
             401,
             'NO_TOKEN',
             { timestamp: new Date().toISOString() }
@@ -1066,15 +927,10 @@ ensureToken = function() {
     }
 };
 
-/**
- * Wait for token to be ready
- * @returns {Promise<void>}
- */
 waitForToken = async function() {
     if (TOKEN_READY && AUTH_TOKEN) return;
     
     return new Promise((resolve, reject) => {
-        // Set timeout to prevent infinite waiting
         const timeout = setTimeout(() => {
             clearInterval(interval);
             reject(new KnectaError(
@@ -1082,7 +938,7 @@ waitForToken = async function() {
                 408,
                 'TOKEN_TIMEOUT'
             ));
-        }, 10000); // 10 second timeout
+        }, 10000);
         
         const interval = setInterval(() => {
             if (TOKEN_READY && AUTH_TOKEN) {
@@ -1094,14 +950,468 @@ waitForToken = async function() {
     });
 };
 
-/**
- * Guarded request with token wait and session gating
- * @param {string} url - Request URL
- * @param {Object} options - Request options
- * @returns {Promise<Object>} Response
- */
+// ============================================================================
+// UTILITY FUNCTIONS - STANDARD RESPONSE FORMAT
+// ============================================================================
+
+function normalizeResponse(result, isError = false) {
+    if (isError || (result && result.__error === true)) {
+        return {
+            success: false,
+            error: result?.message || result?.error || 'An unknown error occurred',
+            timestamp: new Date().toISOString()
+        };
+    }
+    
+    if (result && typeof result === 'object' && 'success' in result) {
+        return result;
+    }
+    
+    return {
+        success: true,
+        data: result,
+        timestamp: new Date().toISOString()
+    };
+}
+
+function withTimeout(promise, timeoutMs = 30000, errorMessage = 'Request timeout') {
+    return Promise.race([
+        promise,
+        new Promise((_, reject) => {
+            const timeoutId = setTimeout(() => {
+                reject(new KnectaError(errorMessage, 408, 'TIMEOUT_ERROR'));
+            }, timeoutMs);
+            promise.finally(() => clearTimeout(timeoutId));
+        })
+    ]);
+}
+
+function generateRequestId() {
+    return `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}_${Math.random().toString(36).substr(2, 4)}`;
+}
+
+// ============================================================================
+// ENHANCED CORE FETCH FUNCTION WITH RETRY LIMITS
+// ============================================================================
+
+const DEFAULT_TIMEOUT = 10000; // 10 seconds timeout
+const MAX_RETRIES = 1; // Only retry once
+const abortControllers = new Map();
+
+async function coreFetch(url, options = {}) {
+    const requestStartTime = Date.now();
+    const requestId = options.requestId || generateRequestId();
+    let retryCount = 0;
+    
+    async function executeRequest() {
+        try {
+            if (url === 'GET' || url === 'POST' || url === 'PUT' || 
+                url === 'PATCH' || url === 'DELETE' || url === 'HEAD' ||
+                url === 'OPTIONS') {
+                return normalizeResponse({
+                    __error: true,
+                    message: 'HTTP method cannot be used as endpoint',
+                    method: url
+                }, true);
+            }
+            
+            if (!url || typeof url !== 'string') {
+                return normalizeResponse({
+                    __error: true,
+                    message: 'Endpoint must be a string',
+                    received: typeof url
+                }, true);
+            }
+            
+            const requestKey = `${options.method || 'GET'}:${url}`;
+            if (activeRequests.has(requestKey) && options.dedupe !== false) {
+                console.debug('[API] Deduplicating request:', requestKey);
+                return activeRequests.get(requestKey);
+            }
+            
+            let fullUrl;
+            let endpointPath;
+            
+            if (url.startsWith('http://') || url.startsWith('https://')) {
+                fullUrl = url;
+                try {
+                    const urlObj = new URL(url);
+                    endpointPath = urlObj.pathname;
+                } catch (e) {
+                    endpointPath = url;
+                }
+            } else {
+                const baseUrl = getBaseUrl();
+                const cleanBase = baseUrl.endsWith('/') ? baseUrl.slice(0, -1) : baseUrl;
+                let cleanEndpoint = url.startsWith('/') ? url : '/' + url;
+                // Fix: strip duplicate /api prefix if baseUrl already ends with /api
+                const baseSuffix = cleanBase.match(/\/api\/?$/)?.[0]?.replace(/\/$/, '');
+                if (baseSuffix && cleanEndpoint.toLowerCase().startsWith(baseSuffix.toLowerCase() + '/')) {
+                    cleanEndpoint = cleanEndpoint.slice(baseSuffix.length);
+                }
+                fullUrl = cleanBase + cleanEndpoint;
+                endpointPath = cleanEndpoint;
+                
+                console.log(`[API] ðŸš€ Building request URL: ${fullUrl} (base: ${baseUrl}, endpoint: ${url})`);
+                console.log(`[API CORE] ENV: ${CURRENT_ENVIRONMENT} | BASE_URL: ${baseUrl} | ENDPOINT: ${endpointPath}`);
+            }
+            
+            const baseUrl = getBaseUrl();
+            if (!isValidEndpoint(fullUrl, baseUrl)) {
+                return normalizeResponse({
+                    __error: true,
+                    message: 'Invalid or unsafe endpoint',
+                    url: fullUrl,
+                    baseUrl
+                }, true);
+            }
+            
+            if (isProduction() && fullUrl.startsWith('http://')) {
+                console.warn('[API-SECURITY] Upgrading HTTP to HTTPS in production');
+                fullUrl = fullUrl.replace('http://', 'https://');
+            }
+            
+            const method = (options.method || 'GET').toUpperCase();
+            
+            const isPublic = isPublicEndpoint(endpointPath);
+            const isAuth = isAuthEndpoint(endpointPath);
+            const isStatus = isStatusEndpoint(endpointPath);
+            const requiresAuth = !(options.auth === false || isPublic || isAuth || isStatus);
+            
+            if (requiresAuth) {
+                if (!SESSION_READY && !options._gated) {
+                    return _gateRequest(() => coreFetch(url, { ...options, _gated: true, retryCount }), {
+                        endpoint: endpointPath,
+                        requiresAuth,
+                        gateTimeout: options.timeout || DEFAULT_TIMEOUT
+                    });
+                }
+                
+                await waitForToken();
+                ensureToken();
+            }
+            
+            const fetchOptions = {
+                method,
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-Requested-With': 'XMLHttpRequest',
+                    ...options.headers
+                },
+                credentials: isProduction() ? 'include' : (options.credentials || 'same-origin'),
+                mode: options.mode || 'cors',
+                cache: options.cache || 'default',
+                redirect: options.redirect || 'follow',
+                referrerPolicy: options.referrerPolicy || 'strict-origin-when-cross-origin'
+            };
+            
+            // For local development, use token-based auth; for production, use cookies
+            if (requiresAuth) {
+                const token = getUserToken('coreFetch');
+                if (token && !isProduction()) {
+                    fetchOptions.headers['Authorization'] = `Bearer ${token}`;
+                    
+                    if (!_authHeaderLogged) {
+                        console.log(`[API] ðŸ” Auth header attached for: ${endpointPath} (token length: ${token.length})`);
+                        _authHeaderLogged = true;
+                        setTimeout(() => { _authHeaderLogged = false; }, 60000);
+                    }
+                } else if (isProduction()) {
+                    console.log(`[API] ðŸ” Production mode - using cookie-based auth for: ${endpointPath}`);
+                }
+            }
+            
+            if (options.body) {
+                if (options.body instanceof FormData) {
+                    fetchOptions.body = options.body;
+                    delete fetchOptions.headers['Content-Type'];
+                } else if (typeof options.body === 'string') {
+                    fetchOptions.body = options.body;
+                } else {
+                    try {
+                        fetchOptions.body = JSON.stringify(options.body);
+                    } catch (e) {
+                        return normalizeResponse({
+                            __error: true,
+                            message: 'Failed to stringify request body',
+                            originalError: e.message
+                        }, true);
+                    }
+                }
+            }
+            
+            const requestPromise = (async () => {
+                const controller = createAbortController(requestId);
+                const timeoutId = setTimeout(() => {
+                    console.warn(`[API] â° Request timeout after ${options.timeout || DEFAULT_TIMEOUT}ms: ${fullUrl}`);
+                    controller.abort();
+                    abortControllers.delete(requestId);
+                }, options.timeout || DEFAULT_TIMEOUT);
+                
+                try {
+                    const response = await fetch(fullUrl, {
+                        ...fetchOptions,
+                        signal: controller.signal
+                    });
+                    
+                    clearTimeout(timeoutId);
+                    abortControllers.delete(requestId);
+                    
+                    return response;
+                } catch (fetchError) {
+                    clearTimeout(timeoutId);
+                    abortControllers.delete(requestId);
+                    throw fetchError;
+                }
+            })();
+            
+            let response;
+            try {
+                response = await withTimeout(
+                    requestPromise,
+                    options.timeout || DEFAULT_TIMEOUT,
+                    `Request timeout after ${options.timeout || DEFAULT_TIMEOUT}ms - backend unreachable`
+                );
+            } catch (timeoutError) {
+                activeRequests.delete(requestKey);
+                console.error('[API] âŒ Request timeout:', fullUrl);
+                return normalizeResponse({
+                    __error: true,
+                    message: timeoutError.message || 'Request timeout - backend unreachable',
+                    url: fullUrl,
+                    requestId,
+                    timeout: true
+                }, true);
+            }
+            
+            const requestDuration = Date.now() - requestStartTime;
+            
+            let data = null;
+            let responseText = null;
+            
+            try {
+                responseText = await response.text();
+            } catch (textError) {
+                console.warn('[API] Failed to read response text', textError);
+                responseText = '';
+            }
+            
+            const isLoginEndpoint = endpointPath.includes('/auth/login') || 
+                                   endpointPath.includes('/login') ||
+                                   (options && options._isLogin);
+            
+            if (isLoginEndpoint) {
+                let parsed = safeJsonParse(responseText, null);
+                
+                if (parsed === null && responseText && typeof responseText === 'string') {
+                    const trimmed = responseText.trim();
+                    
+                    if (trimmed.length > 20 && (trimmed.includes('.') || /^[A-Za-z0-9-_]+\.[A-Za-z0-9-_]+\.[A-Za-z0-9-_]+$/.test(trimmed))) {
+                        parsed = {
+                            success: true,
+                            token: trimmed,
+                            message: "Login successful",
+                            _fromPlainText: true
+                        };
+                    } 
+                    else if (trimmed.toLowerCase().includes('success') || 
+                             trimmed.toLowerCase().includes('welcome') ||
+                             trimmed.toLowerCase().includes('logged in')) {
+                        parsed = {
+                            success: true,
+                            message: trimmed,
+                            _fromPlainText: true
+                        };
+                    }
+                }
+                
+                data = parsed || {};
+            } else {
+                const contentType = response.headers.get('content-type');
+                
+                if (contentType && contentType.includes('application/json')) {
+                    data = safeJsonParse(responseText, {});
+                    if (data === null || data === undefined) {
+                        data = {};
+                    }
+                } else {
+                    data = safeJsonParse(responseText, null);
+                    
+                    if (data === null) {
+                        data = {
+                            message: responseText || (response.ok ? 'Success' : 'Request failed'),
+                            _contentType: contentType || 'unknown'
+                        };
+                    }
+                }
+            }
+            
+            if (data === null || data === undefined) {
+                data = {};
+            }
+            if (typeof data !== 'object') {
+                data = { value: data };
+            }
+            
+            if (response.ok && data) {
+                const token = data.token || 
+                            data.accessToken || 
+                            data.jwt || 
+                            data.access_token ||
+                            (data.tokens && data.tokens.accessToken) ||
+                            (data.data && data.data.token) ||
+                            (data.data && data.data.accessToken);
+                
+                if (token && typeof token === 'string') {
+                    setUserToken(token, true, 'api.response');
+                    RequestQueue.updateDependency('tokenReady', true);
+                    
+                    if (!_tokenFromApiLogged) {
+                        console.log(`[API] âœ… Token received from ${endpointPath}`);
+                        _tokenFromApiLogged = true;
+                    }
+                }
+                
+                const user = data.user || 
+                           (data.data && data.data.user) || 
+                           (data.data && !data.data.token ? data.data : null);
+                
+                if (user && setUserData) {
+                    setUserData(user, true);
+                    const currentToken = getUserToken();
+                    if (currentToken) {
+                        _saveAuthToStorage(currentToken, user);
+                    }
+                }
+            }
+            
+            if (!response.ok) {
+                if (response.status === 401) {
+                    if (!_401logged) {
+                        console.warn('[API] âš ï¸ 401 Unauthorized - attempting token refresh');
+                        _401logged = true;
+                    }
+                    
+                    // Try to refresh token if possible
+                    if (retryCount < MAX_RETRIES && TokenManager && TokenManager.getRefreshToken()) {
+                        console.log(`[API] ðŸ”„ Attempting token refresh (attempt ${retryCount + 1}/${MAX_RETRIES})`);
+                        const refreshResult = await refreshTokenIfNeeded();
+                        
+                        if (refreshResult && refreshResult.success) {
+                            console.log('[API] âœ… Token refresh successful, retrying request');
+                            retryCount++;
+                            return executeRequest();
+                        } else {
+                            console.warn('[AUTH] No refresh token or refresh failed â€” forcing logout');
+                            clearUserToken('401.response');
+                        }
+                    } else {
+                        console.warn('[AUTH] No refresh token available â€” forcing logout');
+                        clearUserToken('401.response');
+                    }
+                    
+                    if (typeof window !== 'undefined') {
+                        window.dispatchEvent(new CustomEvent('auth:unauthorized', {
+                            detail: {
+                                endpoint: endpointPath,
+                                requestId,
+                                timestamp: new Date().toISOString()
+                            }
+                        }));
+                    }
+                    
+                    if (handleUnauthorizedAccess && !options._suppressAuthRedirect) {
+                        handleUnauthorizedAccess();
+                    }
+                }
+                
+                const errorMessage = (data && (data.message || data.error)) || response.statusText || 'Request failed';
+                
+                return normalizeResponse({
+                    __error: true,
+                    message: errorMessage,
+                    status: response.status,
+                    statusText: response.statusText,
+                    data: data,
+                    url: response.url || fullUrl,
+                    requestId
+                }, true);
+            }
+            
+            const result = {
+                success: true,
+                status: response.status,
+                statusText: response.statusText,
+                data: data,
+                headers: Object.fromEntries(response.headers.entries()),
+                url: response.url || fullUrl,
+                method: method,
+                requestDuration: requestDuration,
+                timestamp: Date.now(),
+                requestId: requestId
+            };
+            
+            console.log(`[API] âœ… Request completed: ${method} ${endpointPath} (${requestDuration}ms)`);
+            return normalizeResponse(result);
+            
+        } catch (error) {
+            console.error('[API] âŒ Core fetch error:', error);
+            
+            // Check if we should retry (only for network errors)
+            if (retryCount < MAX_RETRIES && 
+                (error.message?.toLowerCase().includes('network') || 
+                 error.message?.toLowerCase().includes('failed to fetch') ||
+                 error.name === 'AbortError')) {
+                console.log(`[API] ðŸ”„ Network error, retrying (attempt ${retryCount + 1}/${MAX_RETRIES})`);
+                retryCount++;
+                return executeRequest();
+            }
+            
+            return normalizeResponse({
+                __error: true,
+                message: error.message || 'Request failed',
+                status: error.status || 500,
+                code: error.code || 'UNKNOWN_ERROR',
+                url: url,
+                requestId: requestId,
+                stack: error.stack
+            }, true);
+        } finally {
+            const requestKey = `${options.method || 'GET'}:${url}`;
+            activeRequests.delete(requestKey);
+            
+            if (requestTimeouts.has(requestId)) {
+                clearTimeout(requestTimeouts.get(requestId));
+                requestTimeouts.delete(requestId);
+            }
+        }
+    }
+    
+    return executeRequest();
+}
+
+secureApiFetch = async function(url, options = {}) {
+    // Ensure API core is ready before making requests
+    if (SAIC.currentState !== SAIC.STATES.READY) {
+        console.log(`[API] â³ Waiting for API core to be ready (state: ${SAIC.currentState})`);
+        await SAIC.readyPromise;
+    }
+    return coreFetch(url, options);
+};
+
+secureRequest = secureApiFetch;
+
+// ============================================================================
+// GUARDED REQUEST
+// ============================================================================
+
 guardedRequest = async function(url, options = {}) {
-    // Determine if this endpoint requires authentication
+    // Ensure API core is ready before processing requests
+    if (SAIC.currentState !== SAIC.STATES.READY) {
+        console.log(`[API] â³ Guarded request waiting for API core ready (state: ${SAIC.currentState})`);
+        await SAIC.readyPromise;
+    }
+    
     const endpointPath = url.startsWith('http') ? new URL(url).pathname : url;
     const isPublic = isPublicEndpoint(endpointPath);
     const isAuth = isAuthEndpoint(endpointPath);
@@ -1109,7 +1419,6 @@ guardedRequest = async function(url, options = {}) {
     
     const requiresAuth = !(options.auth === false || isPublic || isAuth || isStatus);
     
-    // [NEW] Gate request until session is ready
     if (requiresAuth && !SESSION_READY) {
         return _gateRequest(() => guardedRequest(url, { ...options, _gated: true }), {
             endpoint: endpointPath,
@@ -1118,7 +1427,6 @@ guardedRequest = async function(url, options = {}) {
         });
     }
     
-    // Wait for token if required
     if (requiresAuth) {
         await waitForToken();
         ensureToken();
@@ -1128,487 +1436,73 @@ guardedRequest = async function(url, options = {}) {
 };
 
 // ============================================================================
-// [FIX] CORE: secureApiFetch - Single Source of Truth with Token Guard
+// PUBLIC API METHODS
 // ============================================================================
 
-const DEFAULT_TIMEOUT = 30000; // 30 seconds
-
-const abortControllers = new Map();
-
-/**
- * Secure API fetch with guaranteed token validation
- * @param {string} url - Endpoint or full URL
- * @param {Object} options - Request options
- * @returns {Promise<Object>} Normalized response
- */
-secureApiFetch = async function(url, options = {}) {
-    // Track request for debugging
-    const requestStartTime = Date.now();
-    const requestId = options.requestId || `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-    
-    try {
-        // Validate endpoint
-        if (url === 'GET' || url === 'POST' || url === 'PUT' || 
-            url === 'PATCH' || url === 'DELETE' || url === 'HEAD' ||
-            url === 'OPTIONS') {
-            throw new KnectaError(
-                'HTTP method cannot be used as endpoint',
-                400,
-                'INVALID_ENDPOINT',
-                { method: url }
-            );
-        }
-        
-        if (!url || typeof url !== 'string') {
-            throw new KnectaError(
-                'Endpoint must be a string',
-                400,
-                'INVALID_ENDPOINT',
-                { received: typeof url }
-            );
-        }
-        
-        // Check if core is ready, if not queue the request
-        if (SAIC.currentState !== SAIC.STATES.READY && !options.skipQueue) {
-            console.debug('[API] Core not ready, queueing request:', url);
-            return new Promise((resolve, reject) => {
-                RequestQueue.add(
-                    () => secureApiFetch(url, { ...options, skipQueue: true }),
-                    {
-                        endpoint: url,
-                        requiresAuth: options.auth !== false && !isPublicEndpoint(url),
-                        priority: options.priority || 0,
-                        dependencies: ['config', 'environment', 'tokenReady']
-                    }
-                ).then(resolve).catch(reject);
-            });
-        }
-        
-        // Build full URL
-        let fullUrl;
-        let endpointPath;
-        
-        if (url.startsWith('http://') || url.startsWith('https://')) {
-            fullUrl = url;
-            try {
-                const urlObj = new URL(url);
-                endpointPath = urlObj.pathname;
-            } catch (e) {
-                endpointPath = url;
-            }
-        } else {
-            const baseUrl = getBaseUrl();
-            const cleanBase = baseUrl.endsWith('/') ? baseUrl.slice(0, -1) : baseUrl;
-            const cleanEndpoint = url.startsWith('/') ? url : '/' + url;
-            fullUrl = cleanBase + cleanEndpoint;
-            endpointPath = cleanEndpoint;
-        }
-        
-        // SECURITY: Validate endpoint to prevent unsafe access
-        const baseUrl = getBaseUrl();
-        if (!isValidEndpoint(fullUrl, baseUrl)) {
-            throw new KnectaError(
-                'Invalid or unsafe endpoint',
-                403,
-                'SECURITY_VIOLATION',
-                { url: fullUrl, baseUrl }
-            );
-        }
-        
-        // SECURITY: Enforce HTTPS in production
-        if (isProduction() && fullUrl.startsWith('http://')) {
-            console.warn('[API-SECURITY] Upgrading HTTP to HTTPS in production');
-            fullUrl = fullUrl.replace('http://', 'https://');
-        }
-        
-        const method = (options.method || 'GET').toUpperCase();
-        
-        // Determine if this endpoint requires authentication
-        const isPublic = isPublicEndpoint(endpointPath);
-        const isAuth = isAuthEndpoint(endpointPath);
-        const isStatus = isStatusEndpoint(endpointPath);
-        
-        const requiresAuth = !(options.auth === false || isPublic || isAuth || isStatus);
-        
-        // [FIX] CRITICAL: Wait for token if required
-        if (requiresAuth) {
-            // [NEW] Also ensure session is ready
-            if (!SESSION_READY && !options._gated) {
-                return _gateRequest(() => secureApiFetch(url, { ...options, _gated: true }), {
-                    endpoint: endpointPath,
-                    requiresAuth,
-                    gateTimeout: options.timeout || 30000
-                });
-            }
-            
-            await waitForToken();
-            ensureToken();
-        }
-        
-        // Prepare fetch options
-        const fetchOptions = {
-            method,
-            headers: {
-                'Content-Type': 'application/json',
-                'X-Requested-With': 'XMLHttpRequest',
-                ...options.headers
-            },
-            credentials: options.credentials || 'include',
-            mode: options.mode || 'cors',
-            cache: options.cache || 'default',
-            redirect: options.redirect || 'follow',
-            referrerPolicy: options.referrerPolicy || 'strict-origin-when-cross-origin'
-        };
-        
-        // [FIX] Add Authorization header if token exists and endpoint requires auth
-        if (requiresAuth) {
-            const token = getUserToken('secureApiFetch');
-            if (token) {
-                fetchOptions.headers['Authorization'] = `Bearer ${token}`;
-                
-                // Log first time only
-                if (!_authHeaderLogged) {
-                    console.log(`[API] 🔐 Auth header attached for: ${endpointPath}`);
-                    _authHeaderLogged = true;
-                    
-                    // Reset after 1 minute to allow one more log if needed
-                    setTimeout(() => {
-                        _authHeaderLogged = false;
-                    }, 60000);
-                }
-            }
-        }
-        
-        // Handle request body
-        if (options.body) {
-            if (options.body instanceof FormData) {
-                fetchOptions.body = options.body;
-                delete fetchOptions.headers['Content-Type'];
-            } else if (typeof options.body === 'string') {
-                fetchOptions.body = options.body;
-            } else {
-                try {
-                    fetchOptions.body = JSON.stringify(options.body);
-                } catch (e) {
-                    throw new KnectaError(
-                        'Failed to stringify request body',
-                        400,
-                        'INVALID_BODY',
-                        { originalError: e.message }
-                    );
-                }
-            }
-        }
-        
-        // Execute request with timeout
-        let response;
-        try {
-            const controller = createAbortController(requestId);
-            const timeoutId = setTimeout(() => {
-                controller.abort();
-                abortControllers.delete(requestId);
-            }, options.timeout || DEFAULT_TIMEOUT);
-            
-            try {
-                response = await fetch(fullUrl, {
-                    ...fetchOptions,
-                    signal: controller.signal
-                });
-            } finally {
-                clearTimeout(timeoutId);
-                abortControllers.delete(requestId);
-            }
-        } catch (fetchError) {
-            // Handle abort/timeout errors
-            if (fetchError.name === 'AbortError') {
-                const timeoutError = new KnectaError(
-                    `Request timeout after ${options.timeout || DEFAULT_TIMEOUT}ms`,
-                    408,
-                    'TIMEOUT_ERROR',
-                    { url: fullUrl, timeout: options.timeout || DEFAULT_TIMEOUT, requestId }
-                );
-                throw timeoutError;
-            }
-            
-            console.warn('[API] Fetch error:', fetchError.message, { url: fullUrl, requestId });
-            const normalizedError = normalizeError(fetchError, `Request failed: ${url}`);
-            throw normalizedError;
-        }
-        
-        const requestDuration = Date.now() - requestStartTime;
-        
-        // Parse response data
-        let data = null;
-        const contentType = response.headers.get('content-type');
-        let responseText = null;
-        
-        try {
-            responseText = await response.text();
-        } catch (textError) {
-            console.warn('[API] Failed to read response text', textError);
-            responseText = '';
-        }
-        
-        // Enhanced handling for login endpoints
-        const isLoginEndpoint = endpointPath.includes('/auth/login') || 
-                               endpointPath.includes('/login') ||
-                               (options && options._isLogin);
-        
-        if (isLoginEndpoint) {
-            let parsed = safeJsonParse(responseText, null);
-            
-            if (parsed === null && responseText && typeof responseText === 'string') {
-                const trimmed = responseText.trim();
-                
-                if (trimmed.length > 20 && (trimmed.includes('.') || /^[A-Za-z0-9-_]+\.[A-Za-z0-9-_]+\.[A-Za-z0-9-_]+$/.test(trimmed))) {
-                    parsed = {
-                        success: true,
-                        token: trimmed,
-                        message: "Login successful",
-                        _fromPlainText: true
-                    };
-                } 
-                else if (trimmed.toLowerCase().includes('success') || 
-                         trimmed.toLowerCase().includes('welcome') ||
-                         trimmed.toLowerCase().includes('logged in')) {
-                    parsed = {
-                        success: true,
-                        message: trimmed,
-                        _fromPlainText: true
-                    };
-                }
-            }
-            
-            if (parsed !== null) {
-                data = parsed;
-            } else {
-                data = {};
-            }
-        } else {
-            if (contentType && contentType.includes('application/json')) {
-                data = safeJsonParse(responseText, {});
-                if (data === null || data === undefined) {
-                    data = {};
-                }
-            } else {
-                data = safeJsonParse(responseText, null);
-                
-                if (data === null) {
-                    data = {
-                        message: responseText || (response.ok ? 'Success' : 'Request failed'),
-                        _contentType: contentType || 'unknown'
-                    };
-                }
-            }
-        }
-        
-        // Ensure data is always an object
-        if (data === null || data === undefined) {
-            data = {};
-        }
-        if (typeof data !== 'object') {
-            data = { value: data };
-        }
-        
-        // Handle token extraction for successful responses - UPDATE SINGLE SOURCE
-        if (response.ok && data) {
-            const token = data.token || 
-                        data.accessToken || 
-                        data.jwt || 
-                        data.access_token ||
-                        (data.tokens && data.tokens.accessToken) ||
-                        (data.data && data.data.token) ||
-                        (data.data && data.data.accessToken);
-            
-            if (token && typeof token === 'string') {
-                // Update single source of truth - skip TokenManager to prevent recursion
-                setUserToken(token, true, 'api.response');
-                
-                RequestQueue.updateDependency('tokenReady', true);
-                
-                // Log token from API response (once)
-                if (!_tokenFromApiLogged) {
-                    console.log(`[API] ✅ Token received from ${endpointPath}`);
-                    _tokenFromApiLogged = true;
-                }
-            }
-            
-            const user = data.user || 
-                       (data.data && data.data.user) || 
-                       (data.data && !data.data.token ? data.data : null);
-            
-            if (user && setUserData) {
-                setUserData(user, true);
-                // Also save user to storage
-                const currentToken = getUserToken();
-                if (currentToken) {
-                    _saveAuthToStorage(currentToken, user);
-                }
-            }
-        }
-        
-        // Build normalized response
-        const normalizedResponse = {
-            ok: response.ok,
-            success: response.ok,
-            status: response.status,
-            statusText: response.statusText,
-            data: data,
-            headers: Object.fromEntries(response.headers.entries()),
-            url: response.url || fullUrl,
-            method: method,
-            requestDuration: requestDuration,
-            timestamp: Date.now(),
-            json: async () => data,
-            text: async () => typeof data === 'string' ? data : JSON.stringify(data),
-            clone: function() { 
-                return { 
-                    ...this, 
-                    data: JSON.parse(JSON.stringify(data || {})) 
-                }; 
-            }
-        };
-        
-        // Handle 401 Unauthorized responses - CLEAR TOKEN
-        if (!response.ok) {
-            const errorMessage = (data && (data.message || data.error)) || response.statusText || 'Request failed';
-            const errorCode = (data && data.code) || `HTTP_${response.status}`;
-            
-            const error = new KnectaError(
-                errorMessage,
-                response.status,
-                errorCode,
-                {
-                    url: response.url,
-                    data: data,
-                    headers: normalizedResponse.headers,
-                    responseText: responseText
-                }
-            );
-            
-            // Special handling for 401 Unauthorized - CLEAR TOKEN
-            if (response.status === 401) {
-                // Log 401 once
-                if (!_401logged) {
-                    console.warn('[API] ⚠️ 401 Unauthorized - clearing token');
-                    _401logged = true;
-                }
-                
-                // Clear token - SINGLE SOURCE
-                clearUserToken('401.response');
-                
-                // Dispatch auth failure event
-                if (typeof window !== 'undefined') {
-                    window.dispatchEvent(new CustomEvent('auth:unauthorized', {
-                        detail: {
-                            endpoint: endpointPath,
-                            requestId,
-                            timestamp: new Date().toISOString()
-                        }
-                    }));
-                }
-                
-                // Call unauthorized handler if available
-                if (handleUnauthorizedAccess && !options._suppressAuthRedirect) {
-                    handleUnauthorizedAccess();
-                }
-            }
-            
-            // Throw error
-            throw error;
-        }
-        
-        return normalizedResponse;
-        
-    } catch (error) {
-        const normalizedError = normalizeError(error, `Request failed: ${url}`);
-        
-        // Always throw errors
-        throw normalizedError;
-    }
-};
-
-secureRequest = secureApiFetch;
-
-// ============================================================================
-// PUBLIC API METHODS - Using Guarded Requests
-// ============================================================================
-
-/**
- * GET request
- * @param {string} endpoint - API endpoint
- * @param {Object} params - Query parameters
- * @returns {Promise<Object>} Response
- */
 get = async function(endpoint, params = {}) {
-    let url = endpoint;
-    if (params && Object.keys(params).length > 0) {
-        const queryString = new URLSearchParams(params).toString();
-        url += (url.includes('?') ? '&' : '?') + queryString;
+    try {
+        let url = endpoint;
+        if (params && Object.keys(params).length > 0) {
+            const queryString = new URLSearchParams(params).toString();
+            url += (url.includes('?') ? '&' : '?') + queryString;
+        }
+        return await guardedRequest(url, { method: 'GET' });
+    } catch (error) {
+        return normalizeResponse(error, true);
     }
-    return guardedRequest(url, { method: 'GET' });
 };
 
-/**
- * POST request
- * @param {string} endpoint - API endpoint
- * @param {Object} data - Request body
- * @returns {Promise<Object>} Response
- */
 post = async function(endpoint, data = {}) {
-    return guardedRequest(endpoint, { method: 'POST', body: data });
+    try {
+        return await guardedRequest(endpoint, { method: 'POST', body: data });
+    } catch (error) {
+        return normalizeResponse(error, true);
+    }
 };
 
-/**
- * PUT request
- * @param {string} endpoint - API endpoint
- * @param {Object} data - Request body
- * @returns {Promise<Object>} Response
- */
 put = async function(endpoint, data = {}) {
-    return guardedRequest(endpoint, { method: 'PUT', body: data });
+    try {
+        return await guardedRequest(endpoint, { method: 'PUT', body: data });
+    } catch (error) {
+        return normalizeResponse(error, true);
+    }
 };
 
-/**
- * PATCH request
- * @param {string} endpoint - API endpoint
- * @param {Object} data - Request body
- * @returns {Promise<Object>} Response
- */
 patch = async function(endpoint, data = {}) {
-    return guardedRequest(endpoint, { method: 'PATCH', body: data });
+    try {
+        return await guardedRequest(endpoint, { method: 'PATCH', body: data });
+    } catch (error) {
+        return normalizeResponse(error, true);
+    }
 };
 
-/**
- * DELETE request
- * @param {string} endpoint - API endpoint
- * @returns {Promise<Object>} Response
- */
 del = async function(endpoint) {
-    return guardedRequest(endpoint, { method: 'DELETE' });
+    try {
+        return await guardedRequest(endpoint, { method: 'DELETE' });
+    } catch (error) {
+        return normalizeResponse(error, true);
+    }
 };
 
-/**
- * HEAD request
- * @param {string} endpoint - API endpoint
- * @returns {Promise<Object>} Response
- */
 head = async function(endpoint) {
-    return guardedRequest(endpoint, { method: 'HEAD' });
+    try {
+        return await guardedRequest(endpoint, { method: 'HEAD' });
+    } catch (error) {
+        return normalizeResponse(error, true);
+    }
 };
 
-/**
- * OPTIONS request
- * @param {string} endpoint - API endpoint
- * @returns {Promise<Object>} Response
- */
 options = async function(endpoint) {
-    return guardedRequest(endpoint, { method: 'OPTIONS' });
+    try {
+        return await guardedRequest(endpoint, { method: 'OPTIONS' });
+    } catch (error) {
+        return normalizeResponse(error, true);
+    }
 };
 
-// ============================================================================
-// DEPRECATED FETCH WRAPPERS - Now route through secureApiFetch
-// ============================================================================
+fetchWithTimeout = async function(url, options = {}) {
+    return secureApiFetch(url, options);
+};
 
 fetchWithRetry = async function(url, options = {}) {
     console.warn('[API] fetchWithRetry is deprecated - using secureApiFetch');
@@ -1630,415 +1524,14 @@ fetchDedupe = async function(url, options = {}) {
     return secureApiFetch(url, options);
 };
 
-fetchWithTimeout = async function(url, options = {}) {
-    return secureApiFetch(url, options);
-};
-
 requestWithAbort = async function(url, options = {}) {
     return secureApiFetch(url, options);
 };
 
 // ============================================================================
-// SECTION 1: ENVIRONMENT CONFIGURATION - ENHANCED AUTO-DETECTION
+// ERROR NORMALIZATION - COMPLETE IMPLEMENTATION
 // ============================================================================
 
-ENVIRONMENTS = {
-    PRODUCTION: 'production',
-    DEVELOPMENT: 'development',
-    DEMO: 'demo',
-    AUTO: 'auto',
-    STAGING: 'staging',
-    TEST: 'test',
-    LOCAL: 'local'
-};
-
-// Base URLs for different environments
-BASE_URLS = {
-    [ENVIRONMENTS.PRODUCTION]: 'https://moodchat-fy56.onrender.com',
-    [ENVIRONMENTS.DEVELOPMENT]: 'http://localhost:4000',
-    [ENVIRONMENTS.DEMO]: 'https://demo.moodchat.onrender.com',
-    [ENVIRONMENTS.STAGING]: 'https://staging.moodchat.onrender.com',
-    [ENVIRONMENTS.TEST]: 'https://test.moodchat.onrender.com',
-    [ENVIRONMENTS.LOCAL]: 'http://localhost:4000',
-    [ENVIRONMENTS.AUTO]: null
-};
-
-// Enhanced environment detection rules
-ENVIRONMENT_DETECTION_RULES = [
-    { pattern: /render\.com|onrender\.com|moodchat-fy56/i, env: ENVIRONMENTS.PRODUCTION },
-    { pattern: /staging|stage/i, env: ENVIRONMENTS.STAGING },
-    { pattern: /demo|testdrive/i, env: ENVIRONMENTS.DEMO },
-    { pattern: /test|testing/i, env: ENVIRONMENTS.TEST },
-    { pattern: /localhost|127\.0\.0\.1|::1/i, env: ENVIRONMENTS.LOCAL },
-    { pattern: /192\.168\.|10\.0\.|172\.(1[6-9]|2[0-9]|3[0-1])\./i, env: ENVIRONMENTS.DEVELOPMENT },
-    { pattern: /dev\.|development\./i, env: ENVIRONMENTS.DEVELOPMENT }
-];
-
-CURRENT_ENVIRONMENT = ENVIRONMENTS.AUTO;
-ACTIVE_BASE_URL = null;
-
-/**
- * Detect environment based on window.location with enhanced rules
- * @returns {string} Detected environment
- */
-detectEnvironment = function() {
-    try {
-        const hostname = window.location.hostname;
-        const port = window.location.port;
-        const href = window.location.href;
-        const protocol = window.location.protocol;
-        
-        // SECURITY: Enforce HTTPS in production-like environments
-        if (protocol !== 'https:' && 
-            !hostname.includes('localhost') && 
-            !hostname.includes('127.0.0.1') &&
-            !hostname.includes('::1')) {
-            console.warn('[ENV] Non-HTTPS connection detected in non-local environment');
-        }
-        
-        // Check each detection rule
-        for (const rule of ENVIRONMENT_DETECTION_RULES) {
-            if (rule.pattern.test(hostname) || rule.pattern.test(href)) {
-                return rule.env;
-            }
-        }
-        
-        // Development ports detection
-        if (port === '3000' || port === '3001' || port === '4000' || 
-            port === '8080' || port === '5500' || port === '5173' || 
-            port === '5174' || port === '5175' || port === '4200' || 
-            port === '5000' || port === '5001') {
-            return ENVIRONMENTS.DEVELOPMENT;
-        }
-        
-        // Subdomain-based detection
-        if (hostname.startsWith('dev.') || hostname.startsWith('development.')) {
-            return ENVIRONMENTS.DEVELOPMENT;
-        }
-        if (hostname.startsWith('staging.')) {
-            return ENVIRONMENTS.STAGING;
-        }
-        if (hostname.startsWith('demo.') || hostname.startsWith('test.')) {
-            return ENVIRONMENTS.DEMO;
-        }
-        
-        // Default to production for unknown environments
-        return ENVIRONMENTS.PRODUCTION;
-        
-    } catch (error) {
-        console.error('[ENV] Detection error:', error);
-        return ENVIRONMENTS.PRODUCTION;
-    }
-};
-
-/**
- * Set environment manually with validation
- * @param {string} env - Environment to set
- * @returns {boolean} Success status
- */
-setEnvironment = function(env) {
-    try {
-        if (!env) return false;
-        
-        const envString = env.toString().toLowerCase();
-        
-        // Direct match with predefined environments
-        if (Object.values(ENVIRONMENTS).includes(envString)) {
-            CURRENT_ENVIRONMENT = envString;
-            ACTIVE_BASE_URL = BASE_URLS[envString] || determineBackendUrl();
-            
-            // SECURITY: Enforce HTTPS in production
-            if (CURRENT_ENVIRONMENT === ENVIRONMENTS.PRODUCTION && 
-                ACTIVE_BASE_URL && 
-                !ACTIVE_BASE_URL.startsWith('https://')) {
-                console.warn('[ENV] Production environment requires HTTPS - upgrading URL');
-                ACTIVE_BASE_URL = ACTIVE_BASE_URL.replace('http://', 'https://');
-            }
-            
-            // Dispatch environment change event
-            window.dispatchEvent(new CustomEvent('environment-changed', {
-                detail: {
-                    environment: CURRENT_ENVIRONMENT,
-                    baseUrl: ACTIVE_BASE_URL,
-                    timestamp: new Date().toISOString()
-                }
-            }));
-            
-            return true;
-        }
-        
-        // Fuzzy matching for common environment names
-        if (envString.includes('prod')) {
-            CURRENT_ENVIRONMENT = ENVIRONMENTS.PRODUCTION;
-        } else if (envString.includes('dev')) {
-            CURRENT_ENVIRONMENT = ENVIRONMENTS.DEVELOPMENT;
-        } else if (envString.includes('demo')) {
-            CURRENT_ENVIRONMENT = ENVIRONMENTS.DEMO;
-        } else if (envString.includes('stage')) {
-            CURRENT_ENVIRONMENT = ENVIRONMENTS.STAGING;
-        } else if (envString.includes('test')) {
-            CURRENT_ENVIRONMENT = ENVIRONMENTS.TEST;
-        } else if (envString.includes('local')) {
-            CURRENT_ENVIRONMENT = ENVIRONMENTS.LOCAL;
-        } else {
-            return false;
-        }
-        
-        ACTIVE_BASE_URL = BASE_URLS[CURRENT_ENVIRONMENT] || determineBackendUrl();
-        
-        // SECURITY: Enforce HTTPS in production
-        if (CURRENT_ENVIRONMENT === ENVIRONMENTS.PRODUCTION && 
-            ACTIVE_BASE_URL && 
-            !ACTIVE_BASE_URL.startsWith('https://')) {
-            ACTIVE_BASE_URL = ACTIVE_BASE_URL.replace('http://', 'https://');
-        }
-        
-        // Dispatch environment change event
-        window.dispatchEvent(new CustomEvent('environment-changed', {
-            detail: {
-                environment: CURRENT_ENVIRONMENT,
-                baseUrl: ACTIVE_BASE_URL,
-                timestamp: new Date().toISOString()
-            }
-        }));
-        
-        return true;
-        
-    } catch (error) {
-        console.error('[ENV] Set environment error:', error);
-        return false;
-    }
-};
-
-/**
- * Get current environment
- * @returns {string} Current environment
- */
-getEnvironment = function() {
-    return CURRENT_ENVIRONMENT;
-};
-
-/**
- * Get environment display name (user-friendly)
- * @returns {string} Display name
- */
-getEnvironmentDisplayName = function() {
-    const envMap = {
-        [ENVIRONMENTS.PRODUCTION]: 'Production',
-        [ENVIRONMENTS.DEVELOPMENT]: 'Development',
-        [ENVIRONMENTS.DEMO]: 'Demo',
-        [ENVIRONMENTS.STAGING]: 'Staging',
-        [ENVIRONMENTS.TEST]: 'Test',
-        [ENVIRONMENTS.LOCAL]: 'Local',
-        [ENVIRONMENTS.AUTO]: 'Auto-detected'
-    };
-    
-    return envMap[CURRENT_ENVIRONMENT] || CURRENT_ENVIRONMENT || 'Unknown';
-};
-
-/**
- * Check if current environment is production
- * @returns {boolean} True if production
- */
-isProduction = function() {
-    return CURRENT_ENVIRONMENT === ENVIRONMENTS.PRODUCTION;
-};
-
-/**
- * Check if current environment is development
- * @returns {boolean} True if development
- */
-isDevelopment = function() {
-    return CURRENT_ENVIRONMENT === ENVIRONMENTS.DEVELOPMENT || 
-           CURRENT_ENVIRONMENT === ENVIRONMENTS.LOCAL;
-};
-
-/**
- * Check if current environment is demo
- * @returns {boolean} True if demo
- */
-isDemo = function() {
-    return CURRENT_ENVIRONMENT === ENVIRONMENTS.DEMO;
-};
-
-/**
- * Check if current environment is localhost
- * @returns {boolean} True if localhost
- */
-isLocalhost = function() {
-    try {
-        const hostname = window.location.hostname;
-        return hostname === 'localhost' || 
-               hostname === '127.0.0.1' || 
-               hostname === '[::1]' ||
-               CURRENT_ENVIRONMENT === ENVIRONMENTS.LOCAL;
-    } catch (error) {
-        return false;
-    }
-};
-
-/**
- * Check if current environment is Render deployment
- * @returns {boolean} True if Render deployment
- */
-isRenderDeployment = function() {
-    try {
-        const hostname = window.location.hostname;
-        return hostname.includes('render.com') || 
-               hostname.includes('onrender.com') ||
-               (ACTIVE_BASE_URL && (ACTIVE_BASE_URL.includes('render.com') || ACTIVE_BASE_URL.includes('onrender.com')));
-    } catch (error) {
-        return false;
-    }
-};
-
-/**
- * Get base URL for current environment with fallback chain
- * @returns {string} Base URL
- */
-getBaseUrl = function() {
-    try {
-        if (ACTIVE_BASE_URL) {
-            return ACTIVE_BASE_URL;
-        }
-        
-        if (CURRENT_ENVIRONMENT === ENVIRONMENTS.AUTO) {
-            CURRENT_ENVIRONMENT = detectEnvironment();
-        }
-        
-        ACTIVE_BASE_URL = BASE_URLS[CURRENT_ENVIRONMENT];
-        
-        if (!ACTIVE_BASE_URL) {
-            const hostname = window.location.hostname;
-            const protocol = window.location.protocol;
-            
-            if (hostname === 'localhost' || hostname === '127.0.0.1') {
-                ACTIVE_BASE_URL = `${protocol}//${hostname}:4000`;
-            } else if (hostname.includes('render.com') || hostname.includes('onrender.com')) {
-                ACTIVE_BASE_URL = 'https://moodchat-fy56.onrender.com';
-            } else {
-                ACTIVE_BASE_URL = `${protocol}//${hostname}`;
-                if (!ACTIVE_BASE_URL.includes(':4000')) {
-                    ACTIVE_BASE_URL = ACTIVE_BASE_URL.replace(/:\d+$/, '') + ':4000';
-                }
-            }
-        }
-        
-        // SECURITY: Enforce HTTPS in production
-        if (CURRENT_ENVIRONMENT === ENVIRONMENTS.PRODUCTION && 
-            ACTIVE_BASE_URL && 
-            !ACTIVE_BASE_URL.startsWith('https://')) {
-            ACTIVE_BASE_URL = ACTIVE_BASE_URL.replace('http://', 'https://');
-        }
-        
-        return ACTIVE_BASE_URL;
-        
-    } catch (error) {
-        console.error('[ENV] Get base URL error:', error);
-        // Safe fallback
-        return 'https://moodchat-fy56.onrender.com';
-    }
-};
-
-/**
- * Set base URL manually with validation
- * @param {string} url - Base URL to set
- * @returns {boolean} Success status
- */
-setBaseUrl = function(url) {
-    try {
-        if (!url || typeof url !== 'string') {
-            console.error('[ENV] Invalid URL provided');
-            return false;
-        }
-        
-        if (!url.startsWith('http://') && !url.startsWith('https://')) {
-            console.error('[ENV] URL must start with http:// or https://');
-            return false;
-        }
-        
-        // SECURITY: Enforce HTTPS in production
-        if (isProduction() && !url.startsWith('https://')) {
-            console.warn('[ENV] Production environment requires HTTPS - upgrading URL');
-            url = url.replace('http://', 'https://');
-        }
-        
-        ACTIVE_BASE_URL = url;
-        CURRENT_ENVIRONMENT = ENVIRONMENTS.AUTO;
-        
-        window.dispatchEvent(new CustomEvent('base-url-changed', {
-            detail: {
-                baseUrl: ACTIVE_BASE_URL,
-                timestamp: new Date().toISOString()
-            }
-        }));
-        
-        return true;
-        
-    } catch (error) {
-        console.error('[ENV] Set base URL error:', error);
-        return false;
-    }
-};
-
-/**
- * Determine backend URL with enhanced detection
- * @returns {string} Backend URL
- */
-determineBackendUrl = function() {
-    try {
-        if (ACTIVE_BASE_URL) {
-            return ACTIVE_BASE_URL;
-        }
-        
-        if (CURRENT_ENVIRONMENT === ENVIRONMENTS.AUTO) {
-            CURRENT_ENVIRONMENT = detectEnvironment();
-        }
-        
-        ACTIVE_BASE_URL = BASE_URLS[CURRENT_ENVIRONMENT];
-        
-        if (!ACTIVE_BASE_URL) {
-            const hostname = window.location.hostname;
-            const protocol = window.location.protocol;
-            
-            if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '[::1]') {
-                ACTIVE_BASE_URL = `${protocol}//${hostname}:4000`;
-            } else if (hostname.includes('render.com') || hostname.includes('onrender.com')) {
-                ACTIVE_BASE_URL = 'https://moodchat-fy56.onrender.com';
-            } else if (hostname.includes('vercel.app')) {
-                ACTIVE_BASE_URL = 'https://moodchat-api.vercel.app';
-            } else if (hostname.includes('netlify.app')) {
-                ACTIVE_BASE_URL = 'https://moodchat-api.netlify.app';
-            } else {
-                ACTIVE_BASE_URL = `${protocol}//${hostname}`;
-                if (!ACTIVE_BASE_URL.includes(':4000')) {
-                    ACTIVE_BASE_URL += ':4000';
-                }
-            }
-        }
-        
-        // SECURITY: Enforce HTTPS in production
-        if (CURRENT_ENVIRONMENT === ENVIRONMENTS.PRODUCTION && 
-            ACTIVE_BASE_URL && 
-            !ACTIVE_BASE_URL.startsWith('https://')) {
-            ACTIVE_BASE_URL = ACTIVE_BASE_URL.replace('http://', 'https://');
-        }
-        
-        return ACTIVE_BASE_URL;
-        
-    } catch (error) {
-        console.error('[ENV] Determine backend URL error:', error);
-        return 'https://moodchat-fy56.onrender.com';
-    }
-};
-
-// ============================================================================
-// SECTION 2: ERROR NORMALIZATION - COMPLETE KnectaError IMPLEMENTATION
-// ============================================================================
-
-/**
- * KnectaError - Complete custom error class for API errors
- */
 KnectaError = class KnectaError extends Error {
     constructor(message, status = 500, code = 'UNKNOWN_ERROR', data = null, metadata = {}) {
         super(message);
@@ -2095,9 +1588,6 @@ KnectaError = class KnectaError extends Error {
     }
 };
 
-/**
- * NetworkError - Specific error for network failures
- */
 NetworkError = class NetworkError extends KnectaError {
     constructor(message = 'Network connection failed', data = null) {
         super(message, 0, 'NETWORK_ERROR', data);
@@ -2105,9 +1595,6 @@ NetworkError = class NetworkError extends KnectaError {
     }
 };
 
-/**
- * SessionError - Specific error for session/authentication issues
- */
 SessionError = class SessionError extends KnectaError {
     constructor(message = 'Session invalid or expired', data = null) {
         super(message, 401, 'SESSION_ERROR', data);
@@ -2115,9 +1602,6 @@ SessionError = class SessionError extends KnectaError {
     }
 };
 
-/**
- * AuthError - Specific error for authentication failures
- */
 AuthError = class AuthError extends KnectaError {
     constructor(message = 'Authentication failed', status = 401, code = 'AUTH_ERROR', data = null) {
         super(message, status, code, data);
@@ -2125,9 +1609,6 @@ AuthError = class AuthError extends KnectaError {
     }
 };
 
-/**
- * ValidationError - Specific error for validation failures
- */
 ValidationError = class ValidationError extends KnectaError {
     constructor(message = 'Validation failed', status = 400, code = 'VALIDATION_ERROR', data = null) {
         super(message, status, code, data);
@@ -2138,13 +1619,6 @@ ValidationError = class ValidationError extends KnectaError {
 ApiError = KnectaError;
 ApiGatewayError = KnectaError;
 
-/**
- * Normalize any error to standard KnectaError format
- * @param {*} error - Error to normalize
- * @param {string} defaultMessage - Default message
- * @param {number} defaultStatus - Default status code
- * @returns {KnectaError} Normalized error
- */
 normalizeError = function(error, defaultMessage = 'An error occurred', defaultStatus = 500) {
     try {
         if (error && error.isKnectaError === true) {
@@ -2261,34 +1735,16 @@ normalizeError = function(error, defaultMessage = 'An error occurred', defaultSt
     }
 };
 
-/**
- * Check if value is ApiError/KnectaError
- * @param {*} value - Value to check
- * @returns {boolean} True if API error
- */
 isApiError = function(value) {
     return value instanceof KnectaError || 
            (value && value.isKnectaError === true) ||
            (value && value.isApiError === true);
 };
 
-/**
- * Create error with specific code and status
- * @param {string} message - Error message
- * @param {number} status - HTTP status code
- * @param {string} code - Error code
- * @param {*} data - Additional data
- * @returns {KnectaError} Created error
- */
 createError = function(message, status = 500, code = 'CUSTOM_ERROR', data = null) {
     return new KnectaError(message, status, code, data);
 };
 
-/**
- * Format error message for display - FIXED: Escape HTML to prevent XSS
- * @param {*} error - Error to format
- * @returns {string} Formatted error message
- */
 formatErrorMessage = function(error) {
     const normalized = normalizeError(error);
     
@@ -2310,36 +1766,20 @@ formatErrorMessage = function(error) {
         return statusMessages[normalized.status];
     }
     
-    // Escape the message to prevent XSS
     const message = normalized.message || 'An unexpected error occurred.';
     return escapeHtml ? escapeHtml(message) : message;
 };
 
-/**
- * Get HTTP status code from error
- * @param {*} error - Error to check
- * @returns {number} HTTP status code
- */
 getErrorStatusCode = function(error) {
     const normalized = normalizeError(error, '', 500);
     return normalized.status;
 };
 
-/**
- * Get error code from error
- * @param {*} error - Error to check
- * @returns {string} Error code
- */
 getErrorCode = function(error) {
     const normalized = normalizeError(error);
     return normalized.code;
 };
 
-/**
- * Check if error is network error
- * @param {*} error - Error to check
- * @returns {boolean} True if network error
- */
 isNetworkError = function(error) {
     const normalized = normalizeError(error);
     return normalized.status === 0 || 
@@ -2348,11 +1788,6 @@ isNetworkError = function(error) {
            error instanceof NetworkError;
 };
 
-/**
- * Check if error is timeout error
- * @param {*} error - Error to check
- * @returns {boolean} True if timeout error
- */
 isTimeoutError = function(error) {
     const normalized = normalizeError(error);
     return normalized.status === 408 || 
@@ -2360,11 +1795,6 @@ isTimeoutError = function(error) {
            normalized.category === 'timeout';
 };
 
-/**
- * Check if error is authentication error
- * @param {*} error - Error to check
- * @returns {boolean} True if auth error
- */
 isAuthError = function(error) {
     const normalized = normalizeError(error);
     return normalized.status === 401 || 
@@ -2378,31 +1808,16 @@ isAuthError = function(error) {
            error instanceof AuthError;
 };
 
-/**
- * Check if error is server error (5xx)
- * @param {*} error - Error to check
- * @returns {boolean} True if server error
- */
 isServerError = function(error) {
     const normalized = normalizeError(error);
     return normalized.status >= 500 && normalized.status < 600;
 };
 
-/**
- * Check if error is client error (4xx)
- * @param {*} error - Error to check
- * @returns {boolean} True if client error
- */
 isClientError = function(error) {
     const normalized = normalizeError(error);
     return normalized.status >= 400 && normalized.status < 500 && normalized.status !== 401 && normalized.status !== 403;
 };
 
-/**
- * Check if error is rate limit error
- * @param {*} error - Error to check
- * @returns {boolean} True if rate limit error
- */
 isRateLimitError = function(error) {
     const normalized = normalizeError(error);
     return normalized.status === 429 || 
@@ -2411,54 +1826,434 @@ isRateLimitError = function(error) {
 };
 
 // ============================================================================
-// SECTION 3: SECURE TOKEN STORAGE - ENHANCED ENCRYPTION & PROTECTION
+// PARENT SESSION NORMALIZATION
 // ============================================================================
 
-/**
- * SecureStorage - Encrypted localStorage wrapper with enhanced security
- */
+function _normalizeParentSession(sessionData) {
+    if (!sessionData || typeof sessionData !== 'object') {
+        return null;
+    }
+    
+    const normalized = { ...sessionData };
+    
+    if (normalized.userId !== undefined && normalized.userId !== null) {
+        const originalUserId = normalized.userId;
+        
+        if (typeof originalUserId === 'number') {
+            normalized.userIdNumber = originalUserId;
+            normalized.userIdString = String(originalUserId);
+        } else if (typeof originalUserId === 'string') {
+            normalized.userIdString = originalUserId;
+            const parsed = parseInt(originalUserId, 10);
+            if (!isNaN(parsed)) {
+                normalized.userIdNumber = parsed;
+            }
+        }
+        
+        normalized._originalUserId = originalUserId;
+    }
+    
+    if (normalized.token && typeof normalized.token === 'string') {
+        normalized.token = normalized.token.trim();
+    }
+    
+    if (normalized.authenticated === undefined && normalized.token) {
+        normalized.authenticated = true;
+    }
+    
+    normalized._normalized = true;
+    normalized._normalizedAt = Date.now();
+    normalized._normalizationVersion = '24.0.4';
+    
+    return normalized;
+}
+
+function _updateSessionFromParent(sessionData) {
+    try {
+        if (!sessionData || typeof sessionData !== 'object') {
+            console.warn('[PARENT-SYNC] Invalid session data received');
+            return false;
+        }
+        
+        const normalized = _normalizeParentSession(sessionData);
+        if (!normalized) {
+            console.warn('[PARENT-SYNC] Failed to normalize session data');
+            return false;
+        }
+        
+        const sessionChanged = JSON.stringify(PARENT_SESSION) !== JSON.stringify(normalized);
+        
+        if (!sessionChanged && SESSION_READY) {
+            if (!SESSION_READY) {
+                SESSION_READY = true;
+                _processGatedRequests();
+            }
+            return true;
+        }
+        
+        const previousSession = PARENT_SESSION;
+        
+        PARENT_SESSION = normalized;
+        LAST_SESSION_UPDATE = Date.now();
+        SESSION_UPDATE_COUNT++;
+        
+        if (normalized.token && typeof normalized.token === 'string') {
+            const tokenUpdated = setUserToken(normalized.token, true, 'parent.session');
+            
+            if (tokenUpdated) {
+                console.log('[PARENT-SYNC] âœ… Token updated from parent session');
+                
+                if (TokenManager && typeof TokenManager._setTokenInternal === 'function') {
+                    TokenManager._setTokenInternal(normalized.token);
+                }
+            }
+        }
+        
+        if (normalized.user && typeof normalized.user === 'object') {
+            const userUpdated = setUserData(normalized.user, true);
+            if (userUpdated) {
+                console.log('[PARENT-SYNC] âœ… User data updated from parent session');
+            }
+        } else if (normalized.userId) {
+            const minimalUser = {
+                id: normalized.userIdNumber || normalized.userIdString || normalized.userId,
+                _fromParent: true,
+                _sessionUpdate: SESSION_UPDATE_COUNT
+            };
+            setUserData(minimalUser, true);
+        }
+        
+        NORMALIZED_USER_ID = normalized.userIdNumber || normalized.userIdString || normalized.userId;
+        
+        const wasReady = SESSION_READY;
+        SESSION_READY = true;
+        
+        if (RequestQueue && typeof RequestQueue.updateDependency === 'function') {
+            RequestQueue.updateDependency('parentReady', PARENT_READY);
+            RequestQueue.updateDependency('sessionReady', SESSION_READY);
+        }
+        
+        TOKEN_READY = !!normalized.token;
+        
+        console.log(`[PARENT-SYNC] ðŸ“¡ Session updated (v${SESSION_UPDATE_COUNT})`, {
+            hasToken: !!normalized.token,
+            hasUser: !!normalized.user,
+            userId: NORMALIZED_USER_ID,
+            wasReady,
+            isReady: SESSION_READY,
+            timestamp: new Date().toISOString()
+        });
+        
+        if (typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('parent-session-updated', {
+                detail: {
+                    session: normalized,
+                    updateCount: SESSION_UPDATE_COUNT,
+                    previous: previousSession ? {
+                        hasToken: !!previousSession.token,
+                        hasUser: !!previousSession.user
+                    } : null,
+                    timestamp: new Date().toISOString()
+                }
+            }));
+        }
+        
+        if (!wasReady && SESSION_READY) {
+            _processGatedRequests();
+        }
+        
+        return true;
+        
+    } catch (error) {
+        console.error('[PARENT-SYNC] Failed to update session:', error);
+        return false;
+    }
+}
+
+function _gateRequest(requestFn, options = {}) {
+    return new Promise((resolve, reject) => {
+        const requiresAuth = options.auth !== false && !isPublicEndpoint(options.endpoint || '');
+        
+        if (SESSION_READY && (!requiresAuth || (AUTH_TOKEN && TOKEN_READY))) {
+            requestFn().then(resolve).catch(reject);
+            return;
+        }
+        
+        const requestId = `gated_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        
+        GATED_REQUESTS_QUEUE.push({
+            id: requestId,
+            fn: requestFn,
+            resolve,
+            reject,
+            options,
+            requiresAuth,
+            createdAt: Date.now(),
+            endpoint: options.endpoint || 'unknown'
+        });
+        
+        console.debug(`[REQUEST-GATE] Request gated (${requestId})`, {
+            endpoint: options.endpoint,
+            requiresAuth,
+            sessionReady: SESSION_READY,
+            hasToken: !!AUTH_TOKEN,
+            queueSize: GATED_REQUESTS_QUEUE.length
+        });
+        
+        const timeout = setTimeout(() => {
+            const index = GATED_REQUESTS_QUEUE.findIndex(r => r.id === requestId);
+            if (index !== -1) {
+                GATED_REQUESTS_QUEUE.splice(index, 1);
+                reject(new KnectaError(
+                    `Request gated timeout after ${options.gateTimeout || 30000}ms`,
+                    408,
+                    'GATE_TIMEOUT',
+                    { endpoint: options.endpoint, requestId }
+                ));
+            }
+        }, options.gateTimeout || 30000);
+        
+        GATED_REQUESTS_QUEUE[GATED_REQUESTS_QUEUE.length - 1].timeout = timeout;
+    });
+}
+
+function _processGatedRequests() {
+    if (IS_PROCESSING_PENDING || GATED_REQUESTS_QUEUE.length === 0) {
+        return;
+    }
+    
+    IS_PROCESSING_PENDING = true;
+    
+    console.log(`[REQUEST-GATE] Processing ${GATED_REQUESTS_QUEUE.length} gated requests`);
+    
+    const requestsToProcess = [...GATED_REQUESTS_QUEUE];
+    GATED_REQUESTS_QUEUE = [];
+    
+    requestsToProcess.forEach(request => {
+        if (request.timeout) {
+            clearTimeout(request.timeout);
+        }
+        
+        const requiresAuth = request.requiresAuth;
+        
+        if (!requiresAuth || (AUTH_TOKEN && TOKEN_READY)) {
+            request.fn()
+                .then(request.resolve)
+                .catch(request.reject);
+        } else {
+            setTimeout(() => {
+                GATED_REQUESTS_QUEUE.push(request);
+                _processGatedRequests();
+            }, 100);
+        }
+    });
+    
+    IS_PROCESSING_PENDING = false;
+    
+    if (GATED_REQUESTS_QUEUE.length > 0) {
+        console.log(`[REQUEST-GATE] ${GATED_REQUESTS_QUEUE.length} requests still waiting`);
+    }
+}
+
+function _initParentMessageListeners() {
+    if (typeof window === 'undefined') return;
+    
+    window.addEventListener('message', (event) => {
+        try {
+            const { type, data, source } = event.data || {};
+            
+            const isTrusted = source === 'parent' || 
+                             (event.source === window.parent && window.parent !== window) ||
+                             (event.origin === window.location.origin);
+            
+            if (!isTrusted && type !== 'PARENT_READY' && type !== 'SESSION_DATA') {
+                return;
+            }
+            
+            if (type === 'PARENT_READY') {
+                PARENT_READY = true;
+                
+                console.log('[PARENT-SYNC] Parent ready signal received');
+                
+                if (RequestQueue && typeof RequestQueue.updateDependency === 'function') {
+                    RequestQueue.updateDependency('parentReady', true);
+                }
+                
+                window.dispatchEvent(new CustomEvent('parent-ready', {
+                    detail: {
+                        timestamp: new Date().toISOString(),
+                        data: data
+                    }
+                }));
+                
+                return;
+            }
+            
+            if (type === 'SESSION_DATA' || type === 'SESSION_UPDATE') {
+                const sessionData = data || event.data.session;
+                
+                if (sessionData) {
+                    console.log('[PARENT-SYNC] Session data received from parent');
+                    _updateSessionFromParent(sessionData);
+                }
+                
+                return;
+            }
+            
+            if (PARENT_MESSAGE_HANDLERS.has(type)) {
+                const handler = PARENT_MESSAGE_HANDLERS.get(type);
+                handler(event.data);
+            }
+            
+        } catch (error) {
+            console.error('[PARENT-SYNC] Message handler error:', error);
+        }
+    });
+    
+    if (window !== window.parent) {
+        window.parent.postMessage({
+            type: 'CHILD_READY',
+            data: {
+                version: '24.0.4',
+                timestamp: new Date().toISOString(),
+                requiresSession: true
+            }
+        }, '*');
+        
+        setTimeout(() => {
+            if (!SESSION_READY && !PARENT_SESSION) {
+                window.parent.postMessage({
+                    type: 'REQUEST_SESSION',
+                    data: {
+                        version: '24.0.4',
+                        timestamp: new Date().toISOString()
+                    }
+                }, '*');
+            }
+        }, 100);
+    } else {
+        PARENT_READY = true;
+        SESSION_READY = true;
+        
+        const storedToken = _getTokenFromStorage();
+        if (storedToken) {
+            PARENT_SESSION = {
+                token: storedToken,
+                authenticated: true,
+                userId: _getUserFromStorage()?.id || null,
+                user: _getUserFromStorage(),
+                _source: 'storage',
+                _normalized: true
+            };
+            SESSION_READY = true;
+            TOKEN_READY = true;
+        }
+    }
+}
+
+function _registerParentMessageHandler(type, handler) {
+    PARENT_MESSAGE_HANDLERS.set(type, handler);
+    return () => PARENT_MESSAGE_HANDLERS.delete(type);
+}
+
+// ============================================================================
+// SECURE STORAGE
+// ============================================================================
+
 SecureStorage = {
-    _encryptionKey: 'moodchat_secure_v23_2024',
-    _prefix: 'sc_v23_',
-    _version: '23.0.9',
+    _encryptionKey: 'moodchat_secure_v24_2026',
+    _prefix: 'sc_v24_',
+    _version: '24.0.4',
     _salt: Math.random().toString(36).substring(2, 15),
     
-    /**
-     * XOR encryption with salt (simple but effective for client-side)
-     * @private
-     */
-    _xorEncrypt: function(text, key) {
+   // Replace the _xorEncrypt function with this Unicode-safe version
+_xorEncrypt: function(text, key) {
+    try {
+        if (!text) return text;
+        
+        const textStr = typeof text === 'string' ? text : JSON.stringify(text);
+        const saltedKey = key + this._salt;
+        
+        // Convert string to UTF-8 bytes for proper Unicode handling
+        const utf8Bytes = new TextEncoder().encode(textStr);
+        const resultBytes = new Uint8Array(utf8Bytes.length);
+        
+        for (let i = 0; i < utf8Bytes.length; i++) {
+            const keyChar = saltedKey.charCodeAt(i % saltedKey.length);
+            resultBytes[i] = utf8Bytes[i] ^ keyChar;
+        }
+        
+        // Convert to base64 safely
+        const result = Array.from(resultBytes).map(b => String.fromCharCode(b)).join('');
+        const encrypted = btoa(result);
+        return `v24:${this._salt.substring(0, 8)}:${encrypted}`;
+        
+    } catch (e) {
+        console.error('[SECURE-STORAGE] Encryption error:', e);
+        // Fallback: store without encryption for text with Unicode
+        return text;
+    }
+},
+
+_xorDecrypt: function(encrypted, key) {
+    try {
+        if (!encrypted || typeof encrypted !== 'string') return encrypted;
+        
+        if (encrypted.startsWith('v24:')) {
+            const parts = encrypted.split(':');
+            if (parts.length >= 3) {
+                const salt = parts[1];
+                const encryptedData = parts.slice(2).join(':');
+                const decoded = atob(encryptedData);
+                
+                // Convert back from UTF-8
+                const decodedBytes = new Uint8Array(decoded.length);
+                for (let i = 0; i < decoded.length; i++) {
+                    decodedBytes[i] = decoded.charCodeAt(i);
+                }
+                
+                const saltedKey = key + salt;
+                const resultBytes = new Uint8Array(decodedBytes.length);
+                
+                for (let i = 0; i < decodedBytes.length; i++) {
+                    const keyChar = saltedKey.charCodeAt(i % saltedKey.length);
+                    resultBytes[i] = decodedBytes[i] ^ keyChar;
+                }
+                
+                // Decode UTF-8 bytes back to string
+                const result = new TextDecoder().decode(resultBytes);
+                return result;
+            }
+        }
+        
+        // Legacy decryption attempt
         try {
-            if (!text) return text;
-            
-            const textStr = typeof text === 'string' ? text : JSON.stringify(text);
+            const decoded = atob(encrypted);
             const saltedKey = key + this._salt;
             let result = '';
             
-            for (let i = 0; i < textStr.length; i++) {
+            for (let i = 0; i < decoded.length; i++) {
                 const keyChar = saltedKey.charCodeAt(i % saltedKey.length);
-                const textChar = textStr.charCodeAt(i);
+                const textChar = decoded.charCodeAt(i);
                 result += String.fromCharCode(textChar ^ keyChar);
             }
             
-            const encrypted = btoa(result);
-            return `v23:${this._salt.substring(0, 8)}:${encrypted}`;
-            
+            return result;
         } catch (e) {
-            console.error('[SECURE-STORAGE] Encryption error:', e);
-            return text;
+            return encrypted;
         }
-    },
-    
-    /**
-     * XOR decryption with salt
-     * @private
-     */
+        
+    } catch (e) {
+        console.error('[SECURE-STORAGE] Decryption error:', e);
+        return encrypted;
+    }
+},
+
     _xorDecrypt: function(encrypted, key) {
         try {
             if (!encrypted || typeof encrypted !== 'string') return encrypted;
             
-            if (encrypted.startsWith('v23:')) {
+            if (encrypted.startsWith('v24:')) {
                 const parts = encrypted.split(':');
                 if (parts.length >= 3) {
                     const salt = parts[1];
@@ -2499,13 +2294,6 @@ SecureStorage = {
         }
     },
     
-    /**
-     * Set item in secure storage
-     * @param {string} key - Storage key
-     * @param {*} value - Value to store
-     * @param {boolean} encrypt - Whether to encrypt
-     * @returns {boolean} Success status
-     */
     setItem: function(key, value, encrypt = true) {
         try {
             const storageKey = this._prefix + key;
@@ -2525,13 +2313,6 @@ SecureStorage = {
         }
     },
     
-    /**
-     * Get item from secure storage
-     * @param {string} key - Storage key
-     * @param {boolean} decrypt - Whether to decrypt
-     * @param {boolean} parseJSON - Whether to parse JSON
-     * @returns {*} Retrieved value
-     */
     getItem: function(key, decrypt = true, parseJSON = false) {
         try {
             const storageKey = this._prefix + key;
@@ -2559,11 +2340,6 @@ SecureStorage = {
         }
     },
     
-    /**
-     * Remove item from secure storage
-     * @param {string} key - Storage key
-     * @returns {boolean} Success status
-     */
     removeItem: function(key) {
         try {
             localStorage.removeItem(this._prefix + key);
@@ -2574,10 +2350,6 @@ SecureStorage = {
         }
     },
     
-    /**
-     * Clear all secure storage items
-     * @returns {boolean} Success status
-     */
     clear: function() {
         try {
             const keysToRemove = [];
@@ -2599,19 +2371,10 @@ SecureStorage = {
         }
     },
     
-    /**
-     * Check if item exists in secure storage
-     * @param {string} key - Storage key
-     * @returns {boolean} True if exists
-     */
     hasItem: function(key) {
         return localStorage.getItem(this._prefix + key) !== null;
     },
     
-    /**
-     * Get all secure storage keys
-     * @returns {string[]} Array of keys
-     */
     keys: function() {
         const keys = [];
         
@@ -2625,10 +2388,6 @@ SecureStorage = {
         return keys;
     },
     
-    /**
-     * Get approximate storage size in bytes
-     * @returns {number} Size in bytes
-     */
     getSize: function() {
         let size = 0;
         
@@ -2644,9 +2403,10 @@ SecureStorage = {
     }
 };
 
-/**
- * TokenManager - Updated to use single source of truth - NO CIRCULAR DEPENDENCIES
- */
+// ============================================================================
+// TOKEN MANAGER
+// ============================================================================
+
 TokenManager = {
     TOKEN_KEY: 'USER_TOKEN',
     REFRESH_TOKEN_KEY: 'REFRESH_TOKEN',
@@ -2654,16 +2414,11 @@ TokenManager = {
     TOKEN_CREATED_KEY: 'TOKEN_CREATED',
     TOKEN_TYPE_KEY: 'TOKEN_TYPE',
     DEFAULT_EXPIRY: 3600,
-    REFRESH_THRESHOLD: 300, // 5 minutes
+    REFRESH_THRESHOLD: 300,
     
-    // Token refresh lock to prevent multiple simultaneous refresh attempts
     _refreshLock: false,
     _refreshPromise: null,
     
-    /**
-     * Internal method to set token without circular reference
-     * @private
-     */
     _setTokenInternal: function(token) {
         try {
             if (!token || typeof token !== 'string') {
@@ -2671,7 +2426,6 @@ TokenManager = {
             }
             
             const sanitizedToken = sanitizeToken(token);
-            
             SecureStorage.setItem(this.TOKEN_KEY, sanitizedToken, true);
             
             return true;
@@ -2681,10 +2435,6 @@ TokenManager = {
         }
     },
     
-    /**
-     * Internal method to clear token without circular reference
-     * @private
-     */
     _clearTokenInternal: function() {
         try {
             SecureStorage.removeItem(this.TOKEN_KEY);
@@ -2700,14 +2450,6 @@ TokenManager = {
         }
     },
     
-    /**
-     * Set authentication token with optional refresh token and expiry
-     * @param {string} token - JWT token
-     * @param {string} refreshToken - Refresh token
-     * @param {number} expiresIn - Expiry time in seconds
-     * @param {string} tokenType - Token type (Bearer, etc.)
-     * @returns {boolean} Success status
-     */
     setToken: function(token, refreshToken = null, expiresIn = this.DEFAULT_EXPIRY, tokenType = 'Bearer') {
         try {
             if (!token || typeof token !== 'string') {
@@ -2715,11 +2457,9 @@ TokenManager = {
                 return false;
             }
             
-            // Update single source of truth - skip manager to prevent recursion
             setUserToken(token, true, 'TokenManager');
             
             const sanitizedToken = sanitizeToken(token);
-            
             SecureStorage.setItem(this.TOKEN_KEY, sanitizedToken, true);
             
             if (refreshToken) {
@@ -2744,19 +2484,10 @@ TokenManager = {
         }
     },
     
-    /**
-     * Get current authentication token
-     * @returns {string|null} Token or null
-     */
     getToken: function() {
-        // Use single source of truth
         return getUserToken('TokenManager');
     },
     
-    /**
-     * Get refresh token
-     * @returns {string|null} Refresh token or null
-     */
     getRefreshToken: function() {
         try {
             return SecureStorage.getItem(this.REFRESH_TOKEN_KEY, true, false);
@@ -2766,33 +2497,19 @@ TokenManager = {
         }
     },
     
-    /**
-     * Clear all token data
-     * @returns {boolean} Success status
-     */
     clearToken: function() {
         try {
-            // Clear single source of truth
             clearUserToken('TokenManager');
-            
             this._clearTokenInternal();
-            
-            // Reset refresh lock
             this._refreshLock = false;
             this._refreshPromise = null;
-            
             return true;
-            
         } catch (error) {
             console.error('[TOKEN-MANAGER] Clear token error:', error);
             return false;
         }
     },
     
-    /**
-     * Check if token is expired
-     * @returns {boolean} True if expired
-     */
     isTokenExpired: function() {
         try {
             const expiryStr = localStorage.getItem(this.TOKEN_EXPIRY_KEY);
@@ -2800,17 +2517,12 @@ TokenManager = {
             
             const expiry = parseInt(expiryStr, 10);
             return Date.now() >= expiry;
-            
         } catch (error) {
             console.error('[TOKEN-MANAGER] Check token expired error:', error);
             return true;
         }
     },
     
-    /**
-     * Get token expiry timestamp
-     * @returns {number|null} Expiry timestamp or null
-     */
     getTokenExpiry: function() {
         try {
             const expiryStr = localStorage.getItem(this.TOKEN_EXPIRY_KEY);
@@ -2821,10 +2533,6 @@ TokenManager = {
         }
     },
     
-    /**
-     * Get token creation timestamp
-     * @returns {number|null} Creation timestamp or null
-     */
     getTokenCreated: function() {
         try {
             const createdStr = localStorage.getItem(this.TOKEN_CREATED_KEY);
@@ -2834,10 +2542,6 @@ TokenManager = {
         }
     },
     
-    /**
-     * Get token type
-     * @returns {string} Token type (default: Bearer)
-     */
     getTokenType: function() {
         try {
             return localStorage.getItem(this.TOKEN_TYPE_KEY) || 'Bearer';
@@ -2846,13 +2550,6 @@ TokenManager = {
         }
     },
     
-    /**
-     * Set token with specific expiry timestamp
-     * @param {string} token - JWT token
-     * @param {number} expiryTimestamp - Expiry timestamp
-     * @param {string} refreshToken - Refresh token
-     * @returns {boolean} Success status
-     */
     setTokenWithExpiry: function(token, expiryTimestamp, refreshToken = null) {
         try {
             const expiresIn = Math.max(1, Math.floor((expiryTimestamp - Date.now()) / 1000));
@@ -2863,10 +2560,6 @@ TokenManager = {
         }
     },
     
-    /**
-     * Check if token should be refreshed
-     * @returns {boolean} True if refresh needed
-     */
     shouldRefreshToken: function() {
         try {
             const expiry = this.getTokenExpiry();
@@ -2874,43 +2567,28 @@ TokenManager = {
             
             const timeUntilExpiry = expiry - Date.now();
             return timeUntilExpiry < (this.REFRESH_THRESHOLD * 1000);
-            
         } catch (error) {
             return true;
         }
     },
     
-    /**
-     * Validate token format (JWT structure)
-     * @private
-     * @param {string} token - Token to validate
-     * @returns {boolean} True if valid format
-     */
     _validateTokenFormat: function(token) {
         if (!token || typeof token !== 'string') return false;
         
-        // Check JWT format (header.payload.signature)
         const parts = token.split('.');
         if (parts.length === 3) {
             try {
-                // Try to decode header and payload (base64)
                 const header = JSON.parse(atob(parts[0]));
                 const payload = JSON.parse(atob(parts[1]));
                 return !!(header && payload);
             } catch (e) {
-                // Not a valid JWT, but might be another token format
                 return token.length > 20;
             }
         }
         
-        // Not a JWT, but might be valid (e.g., opaque token)
         return token.length > 20;
     },
     
-    /**
-     * Clear expired tokens if they exist
-     * @returns {boolean} True if tokens were cleared
-     */
     clearExpiredTokens: function() {
         try {
             if (this.isTokenExpired()) {
@@ -2924,21 +2602,11 @@ TokenManager = {
         }
     },
     
-    /**
-     * Migrate tokens from legacy storage formats
-     * @returns {boolean} True if migration occurred
-     */
     migrateLegacyTokens: function() {
         try {
             const legacyKeys = [
-                'accessToken',
-                'moodchat_token',
-                'token',
-                'moodchat_auth_token',
-                'authToken',
-                'userToken',
-                'jwt',
-                'access_token'
+                'accessToken', 'moodchat_token', 'token', 'moodchat_auth_token',
+                'authToken', 'userToken', 'jwt', 'access_token'
             ];
             
             for (const key of legacyKeys) {
@@ -2949,7 +2617,6 @@ TokenManager = {
                 }
             }
             
-            // Check authUser object
             try {
                 const authUserStr = localStorage.getItem('authUser');
                 if (authUserStr) {
@@ -2971,7 +2638,6 @@ TokenManager = {
     }
 };
 
-// Token utility functions
 encryptToken = function(token) {
     SecureStorage.setItem('temp_token', token, true);
     return true;
@@ -2980,10 +2646,6 @@ encryptToken = function(token) {
 decryptToken = function(encryptedToken) {
     return SecureStorage.getItem('temp_token', true, false);
 };
-
-secureGetToken = getUserToken;
-secureSetToken = setUserToken;
-secureClearToken = clearUserToken;
 
 isTokenExpired = function() {
     return TokenManager.isTokenExpired();
@@ -3020,12 +2682,7 @@ sanitizeToken = function(token) {
         .replace(/[^\w\-\.]/g, '');
 };
 
-/**
- * Refresh token if needed
- * @returns {Promise<Object>} Refresh result
- */
 refreshTokenIfNeeded = async function() {
-    // If refresh is already in progress, return the existing promise
     if (TokenManager._refreshLock && TokenManager._refreshPromise) {
         return TokenManager._refreshPromise;
     }
@@ -3054,7 +2711,6 @@ refreshTokenIfNeeded = async function() {
             };
         }
         
-        // Set refresh lock
         TokenManager._refreshLock = true;
         
         TokenManager._refreshPromise = (async () => {
@@ -3084,7 +2740,6 @@ refreshTokenIfNeeded = async function() {
                     const expiresIn = data.expiresIn || TokenManager.DEFAULT_EXPIRY;
                     
                     if (newToken) {
-                        // Update single source of truth - skip manager to prevent recursion
                         setUserToken(newToken, true, 'token.refresh');
                         TokenManager.setToken(newToken, newRefreshToken, expiresIn);
                         
@@ -3103,7 +2758,6 @@ refreshTokenIfNeeded = async function() {
                     token: currentToken
                 };
             } finally {
-                // Release lock
                 TokenManager._refreshLock = false;
                 TokenManager._refreshPromise = null;
             }
@@ -3125,13 +2779,13 @@ refreshTokenIfNeeded = async function() {
 };
 
 // ============================================================================
-// SECTION 4: CACHE MANAGEMENT - ENHANCED IMPLEMENTATION
+// CACHE MANAGEMENT
 // ============================================================================
 
 CacheManager = {
     _memoryCache: new Map(),
     _persistentCache: null,
-    _defaultTTL: 300000, // 5 minutes
+    _defaultTTL: 300000,
     _maxItems: 200,
     _pruneInterval: null,
     _stats: {
@@ -3142,10 +2796,6 @@ CacheManager = {
         prunes: 0
     },
     
-    /**
-     * Initialize cache manager
-     * @returns {boolean} Success status
-     */
     init: function() {
         try {
             this._loadFromStorage();
@@ -3157,17 +2807,10 @@ CacheManager = {
         }
     },
     
-    /**
-     * Get item from cache
-     * @param {string} key - Cache key
-     * @param {Object} options - Options
-     * @returns {*} Cached data or null
-     */
     get: function(key, options = {}) {
         try {
             const cacheKey = this._getCacheKey(key);
             
-            // Check memory cache first
             if (this._memoryCache.has(cacheKey)) {
                 const item = this._memoryCache.get(cacheKey);
                 
@@ -3179,7 +2822,6 @@ CacheManager = {
                 }
             }
             
-            // Check persistent cache if enabled
             if (options.usePersistent !== false) {
                 try {
                     const persistentStr = localStorage.getItem(`cache_${cacheKey}`);
@@ -3206,14 +2848,6 @@ CacheManager = {
         }
     },
     
-    /**
-     * Set item in cache
-     * @param {string} key - Cache key
-     * @param {*} data - Data to cache
-     * @param {number} ttl - Time to live in ms
-     * @param {Object} options - Options
-     * @returns {boolean} Success status
-     */
     set: function(key, data, ttl = this._defaultTTL, options = {}) {
         try {
             const cacheKey = this._getCacheKey(key);
@@ -3223,12 +2857,11 @@ CacheManager = {
                 data,
                 expiresAt,
                 timestamp: Date.now(),
-                version: '23.0.9'
+                version: '24.0.4'
             };
             
             this._memoryCache.set(cacheKey, cacheItem);
             
-            // Store in persistent cache if enabled
             if (options.usePersistent !== false) {
                 try {
                     localStorage.setItem(`cache_${cacheKey}`, JSON.stringify(cacheItem));
@@ -3242,7 +2875,6 @@ CacheManager = {
                 }
             }
             
-            // Prune if memory cache exceeds limit
             if (this._memoryCache.size > this._maxItems) {
                 this._pruneMemoryCache();
             }
@@ -3256,15 +2888,9 @@ CacheManager = {
         }
     },
     
-    /**
-     * Delete item from cache
-     * @param {string} key - Cache key
-     * @returns {boolean} True if deleted
-     */
     delete: function(key) {
         try {
             const cacheKey = this._getCacheKey(key);
-            
             const deleted = this._memoryCache.delete(cacheKey);
             
             try {
@@ -3283,10 +2909,6 @@ CacheManager = {
         }
     },
     
-    /**
-     * Clear all cache
-     * @returns {boolean} Success status
-     */
     clear: function() {
         try {
             this._memoryCache.clear();
@@ -3317,12 +2939,6 @@ CacheManager = {
         }
     },
     
-    /**
-     * Generate cache key
-     * @private
-     * @param {string} key - Original key
-     * @returns {string} Normalized cache key
-     */
     _getCacheKey: function(key) {
         return String(key)
             .toLowerCase()
@@ -3331,10 +2947,6 @@ CacheManager = {
             .replace(/^_|_$/g, '');
     },
     
-    /**
-     * Load cache from persistent storage
-     * @private
-     */
     _loadFromStorage: function() {
         try {
             for (let i = 0; i < localStorage.length; i++) {
@@ -3361,10 +2973,6 @@ CacheManager = {
         }
     },
     
-    /**
-     * Prune memory cache (remove expired and oldest items)
-     * @private
-     */
     _pruneMemoryCache: function() {
         try {
             const now = Date.now();
@@ -3393,10 +3001,6 @@ CacheManager = {
         }
     },
     
-    /**
-     * Prune persistent cache (remove oldest 20%)
-     * @private
-     */
     _prunePersistentCache: function() {
         try {
             const cacheItems = [];
@@ -3426,25 +3030,16 @@ CacheManager = {
         }
     },
     
-    /**
-     * Start prune interval - OPTIMIZED: Increased interval to reduce CPU usage
-     * @private
-     */
     _startPruneInterval: function() {
-        // Clear existing interval if any
         if (this._pruneInterval) {
             clearInterval(this._pruneInterval);
         }
         
-        // Prune every 2 minutes instead of every minute
         this._pruneInterval = setInterval(() => {
             this._pruneMemoryCache();
         }, 120000);
     },
     
-    /**
-     * Stop prune interval
-     */
     stop: function() {
         if (this._pruneInterval) {
             clearInterval(this._pruneInterval);
@@ -3452,10 +3047,6 @@ CacheManager = {
         }
     },
     
-    /**
-     * Get cache statistics
-     * @returns {Object} Cache stats
-     */
     getStats: function() {
         const hitRate = this._stats.hits + this._stats.misses > 0
             ? (this._stats.hits / (this._stats.hits + this._stats.misses) * 100).toFixed(2)
@@ -3470,11 +3061,6 @@ CacheManager = {
         };
     },
     
-    /**
-     * Estimate memory usage
-     * @private
-     * @returns {number} Estimated memory usage in bytes
-     */
     _getMemoryUsage: function() {
         try {
             let size = 0;
@@ -3502,7 +3088,7 @@ cacheStats = CacheManager.getStats.bind(CacheManager);
 CacheManager.init();
 
 // ============================================================================
-// SECTION 5: REQUEST QUEUE - ENHANCED FOR DEPENDENCY WAITING AND FALLBACK
+// REQUEST QUEUE
 // ============================================================================
 
 RequestQueue = {
@@ -3525,16 +3111,10 @@ RequestQueue = {
         bootstrap: false,
         tokenReady: false,
         apiCoreReady: false,
-        parentReady: false,     // [NEW] Parent readiness dependency
-        sessionReady: false      // [NEW] Session readiness dependency
+        parentReady: false,
+        sessionReady: false
     },
     
-    /**
-     * Add request to queue
-     * @param {Function} requestFn - Request function
-     * @param {Object} options - Options
-     * @returns {Promise} Promise that resolves with request result
-     */
     add: function(requestFn, options = {}) {
         return new Promise((resolve, reject) => {
             try {
@@ -3548,7 +3128,7 @@ RequestQueue = {
                     return;
                 }
                 
-                const requestId = this._generateRequestId();
+                const requestId = `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
                 const requiresAuth = options.requiresAuth !== false;
                 
                 this._queue.push({
@@ -3576,21 +3156,12 @@ RequestQueue = {
         });
     },
     
-    /**
-     * Check if request can be processed
-     * @private
-     * @param {Object} request - Request object
-     * @returns {boolean} True if can process
-     */
     _canProcessRequest: function(request) {
-        // API Core must be ready for all requests
         if (!this._dependencies.apiCoreReady) {
             return false;
         }
         
-        // [NEW] If requires auth, ensure parent ready or session ready
         if (request.requiresAuth) {
-            // Check session readiness
             if (!this._dependencies.sessionReady && !SESSION_READY) {
                 return false;
             }
@@ -3599,7 +3170,6 @@ RequestQueue = {
             if (!token) return false;
         }
         
-        // Check custom dependencies
         if (request.dependencies && request.dependencies.length > 0) {
             for (const dep of request.dependencies) {
                 if (!this._dependencies[dep]) return false;
@@ -3609,10 +3179,6 @@ RequestQueue = {
         return true;
     },
     
-    /**
-     * Process queue
-     * @private
-     */
     _process: async function() {
         if (this._isProcessing || this._isPaused || this._queue.length === 0) {
             return;
@@ -3621,11 +3187,9 @@ RequestQueue = {
         this._isProcessing = true;
         
         while (this._queue.length > 0 && this._currentConcurrent < this._maxConcurrent && !this._isPaused) {
-            // Find first request that can be processed based on dependencies
             const requestIndex = this._queue.findIndex(req => this._canProcessRequest(req));
             
             if (requestIndex === -1) {
-                // No requests can be processed yet, wait and retry
                 break;
             }
             
@@ -3648,11 +3212,6 @@ RequestQueue = {
         this._isProcessing = false;
     },
     
-    /**
-     * Execute request
-     * @private
-     * @param {Object} request - Request object
-     */
     async _executeRequest(request) {
         try {
             const result = await request.fn();
@@ -3661,46 +3220,27 @@ RequestQueue = {
             this._stats.processed++;
             
         } catch (error) {
-            // No retries - fail immediately
             request.reject(error);
             this._stats.failed++;
             this._stats.processed++;
         }
     },
     
-    /**
-     * Generate unique request ID
-     * @private
-     * @returns {string} Request ID
-     */
     _generateRequestId: function() {
         return `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     },
     
-    /**
-     * Pause queue processing
-     * @returns {boolean} Success status
-     */
     pause: function() {
         this._isPaused = true;
         return true;
     },
     
-    /**
-     * Resume queue processing
-     * @returns {boolean} Success status
-     */
     resume: function() {
         this._isPaused = false;
         this._process();
         return true;
     },
     
-    /**
-     * Clear queue
-     * @param {boolean} rejectAll - Whether to reject all pending requests
-     * @returns {boolean} Success status
-     */
     clear: function(rejectAll = false) {
         if (rejectAll) {
             const error = new KnectaError('Queue cleared', 0, 'QUEUE_CLEARED');
@@ -3714,10 +3254,6 @@ RequestQueue = {
         return true;
     },
     
-    /**
-     * Get queue status
-     * @returns {Object} Queue status
-     */
     getStatus: function() {
         return {
             queueLength: this._queue.length,
@@ -3735,11 +3271,6 @@ RequestQueue = {
         };
     },
     
-    /**
-     * Set maximum concurrent requests
-     * @param {number} max - Maximum concurrent
-     * @returns {boolean} Success status
-     */
     setMaxConcurrent: function(max) {
         if (max > 0 && max <= 10) {
             this._maxConcurrent = max;
@@ -3748,11 +3279,6 @@ RequestQueue = {
         return false;
     },
     
-    /**
-     * Set maximum queue size
-     * @param {number} max - Maximum queue size
-     * @returns {boolean} Success status
-     */
     setMaxQueueSize: function(max) {
         if (max > 0) {
             this._maxQueueSize = max;
@@ -3761,19 +3287,13 @@ RequestQueue = {
         return false;
     },
     
-    /**
-     * Update dependency status
-     * @param {string} dependency - Dependency name
-     * @param {boolean} status - Dependency status
-     * @returns {boolean} Success status
-     */
     updateDependency: function(dependency, status) {
         if (this._dependencies.hasOwnProperty(dependency)) {
             const oldStatus = this._dependencies[dependency];
             this._dependencies[dependency] = status;
             
             if (oldStatus !== status && status === true) {
-                this._process(); // Try to process queue after dependency update
+                this._process();
             }
             return true;
         }
@@ -3792,11 +3312,6 @@ resumeQueue = RequestQueue.resume.bind(RequestQueue);
 // ABORT CONTROLLER FUNCTIONS
 // ============================================================================
 
-/**
- * Create abort controller for request
- * @param {string} requestId - Request ID
- * @returns {AbortController} Abort controller
- */
 createAbortController = function(requestId) {
     const controller = new AbortController();
     if (requestId) {
@@ -3805,11 +3320,6 @@ createAbortController = function(requestId) {
     return controller;
 };
 
-/**
- * Abort specific request
- * @param {string} requestId - Request ID
- * @returns {boolean} True if aborted
- */
 abortRequest = function(requestId) {
     const controller = abortControllers.get(requestId);
     if (controller) {
@@ -3820,10 +3330,6 @@ abortRequest = function(requestId) {
     return false;
 };
 
-/**
- * Abort all requests
- * @returns {boolean} True if aborted
- */
 abortAllRequests = function() {
     abortControllers.forEach((controller, requestId) => {
         controller.abort();
@@ -3833,7 +3339,7 @@ abortAllRequests = function() {
 };
 
 // ============================================================================
-// PUBLIC ENDPOINTS - Don't require authentication
+// PUBLIC ENDPOINTS
 // ============================================================================
 
 const PUBLIC_ENDPOINTS = [
@@ -3847,22 +3353,16 @@ const PUBLIC_ENDPOINTS = [
     '/api/auth/verify', '/auth/verify'
 ];
 
-// Authentication endpoints (may or may not require auth)
 const AUTH_ENDPOINTS = [
     '/api/auth/login', '/auth/login',
     '/api/auth/register', '/auth/register',
     '/api/auth/forgot', '/auth/forgot-password',
     '/api/auth/reset', '/auth/reset-password',
     '/api/auth/refresh', '/auth/refresh',
-    '/api/auth/me', '/auth/me',
+    // '/api/auth/me' removed - this should NOT be public!
     '/api/auth/verify', '/auth/verify'
 ];
 
-/**
- * Check if endpoint is public (no auth required)
- * @param {string} endpoint - API endpoint
- * @returns {boolean} True if public
- */
 isPublicEndpoint = function(endpoint) {
     if (!endpoint || typeof endpoint !== 'string') return false;
     
@@ -3875,11 +3375,6 @@ isPublicEndpoint = function(endpoint) {
     );
 };
 
-/**
- * Check if endpoint is auth-related
- * @param {string} endpoint - API endpoint
- * @returns {boolean} True if auth endpoint
- */
 isAuthEndpoint = function(endpoint) {
     if (!endpoint || typeof endpoint !== 'string') return false;
     
@@ -3892,11 +3387,6 @@ isAuthEndpoint = function(endpoint) {
     );
 };
 
-/**
- * Check if endpoint is status/health endpoint
- * @param {string} endpoint - API endpoint
- * @returns {boolean} True if status endpoint
- */
 isStatusEndpoint = function(endpoint) {
     if (!endpoint || typeof endpoint !== 'string') return false;
     
@@ -3912,11 +3402,6 @@ isStatusEndpoint = function(endpoint) {
            normalized.startsWith('/status/');
 };
 
-/**
- * Get authentication headers for endpoint
- * @param {string} endpoint - API endpoint
- * @returns {Object} Headers object
- */
 getAuthHeaders = function(endpoint) {
     try {
         if (isPublicEndpoint(endpoint)) {
@@ -3942,14 +3427,12 @@ getAuthHeaders = function(endpoint) {
 };
 
 // ============================================================================
-// URL SECURITY VALIDATION - ENHANCED TO PREVENT UNSAFE ENDPOINT ACCESS
+// URL SECURITY VALIDATION
 // ============================================================================
 
 function isValidEndpoint(url, baseUrl) {
     try {
-        // If it's a relative URL, it's safe
         if (url.startsWith('/')) {
-            // Check for directory traversal attempts
             if (url.includes('..') || url.includes('./') || url.includes('.\\') || 
                 url.includes('%2e%2e') || url.includes('%2E%2E') ||
                 url.includes('..%5c') || url.includes('..%2f')) {
@@ -3959,11 +3442,9 @@ function isValidEndpoint(url, baseUrl) {
             return true;
         }
         
-        // If it's an absolute URL, ensure it's allowed
         if (url.startsWith('http://') || url.startsWith('https://')) {
             const urlObj = new URL(url);
             
-            // ALLOWED DOMAINS - Add your production domain here
             const allowedDomains = [
                 'moodchat-fy56.onrender.com',
                 'moodfronted.onrender.com',
@@ -3971,27 +3452,21 @@ function isValidEndpoint(url, baseUrl) {
                 '127.0.0.1'
             ];
             
-            // Check if the domain is in the allowed list
             if (allowedDomains.some(domain => urlObj.hostname === domain || 
                                                urlObj.hostname.endsWith('.' + domain))) {
                 return true;
             }
             
-            // Check if it's a subdomain of allowed domains
             if (urlObj.hostname.endsWith('.onrender.com')) {
                 return true;
             }
             
-            // Check if it's exactly a subdomain (e.g., api.example.com for example.com)
             const baseObj = new URL(baseUrl);
             if (urlObj.origin === baseObj.origin) {
                 return true;
             }
             
-            // Development-only: allow localhost - checked via SAIC state
-            const isDev = SAIC.currentState === SAIC.STATES.INITIALIZING ? 
-                         (CURRENT_ENVIRONMENT === 'development' || CURRENT_ENVIRONMENT === 'local') :
-                         (getEnvironment && (getEnvironment() === 'development' || getEnvironment() === 'local'));
+            const isDev = getEnvironment && (getEnvironment() === 'development' || getEnvironment() === 'local');
             
             if (isDev && (urlObj.hostname === 'localhost' || urlObj.hostname === '127.0.0.1')) {
                 return true;
@@ -4010,34 +3485,26 @@ function isValidEndpoint(url, baseUrl) {
 }
 
 // ============================================================================
-// SAFE JSON PARSER UTILITY - ENHANCED FOR LOGIN RESPONSES
+// SAFE JSON PARSER
 // ============================================================================
 
 function safeJsonParse(value, fallback = null) {
-    // If it's already an object and not null, return it
     if (value !== null && typeof value === 'object') {
         return value;
     }
     
-    // If it's not a string, return fallback
     if (typeof value !== 'string') {
         return fallback;
     }
     
-    // Trim whitespace
     const trimmed = value.trim();
     
-    // Empty string returns fallback
     if (trimmed === '') {
         return fallback;
     }
     
-    // Check if it looks like JSON (starts with { or [)
     if (!trimmed.startsWith('{') && !trimmed.startsWith('[')) {
-        // FIX: For login endpoints, try to extract token from plain text
-        // This handles cases where backend returns plain text token
         if (trimmed.length > 20 && (trimmed.includes('.') || /^[A-Za-z0-9-_]+\.[A-Za-z0-9-_]+\.[A-Za-z0-9-_]+$/.test(trimmed))) {
-            // This looks like a JWT token - wrap it in a proper response structure
             return {
                 success: true,
                 token: trimmed,
@@ -4046,7 +3513,6 @@ function safeJsonParse(value, fallback = null) {
             };
         }
         
-        // Check if it contains success indicators
         if (trimmed.toLowerCase().includes('success') || 
             trimmed.toLowerCase().includes('welcome') ||
             trimmed.toLowerCase().includes('logged in')) {
@@ -4060,21 +3526,18 @@ function safeJsonParse(value, fallback = null) {
         return fallback;
     }
     
-    // Attempt to parse
     try {
         return JSON.parse(trimmed);
     } catch (e) {
-        // Return fallback on error
         return fallback;
     }
 }
 
 // ============================================================================
-// CRITICAL: SINGLE AUTHORITATIVE INITIALIZATION CONTROLLER (SAIC)
+// SINGLE AUTHORITATIVE INITIALIZATION CONTROLLER (SAIC)
 // ============================================================================
 
 const SAIC = {
-    // State machine - strict enum, irreversible transitions
     STATES: {
         UNINITIALIZED: 'UNINITIALIZED',
         INITIALIZING: 'INITIALIZING',
@@ -4092,7 +3555,6 @@ const SAIC = {
     stageResults: {},
     errors: [],
     
-    // Initialize SAIC itself
     initialize() {
         if (this.readyPromise) return;
         
@@ -4100,30 +3562,18 @@ const SAIC = {
             this.readyResolve = resolve;
             this.readyReject = reject;
         });
-        
-        // STABILIZED: No timeout-based forced readiness
-        // System becomes READY only through proper initialization
     },
     
-    // Strict state transition - single authority
     transitionTo(newState, error = null) {
         const validTransitions = {
             [this.STATES.UNINITIALIZED]: [this.STATES.INITIALIZING, this.STATES.FAILED],
             [this.STATES.INITIALIZING]: [this.STATES.READY, this.STATES.FAILED],
-            [this.STATES.READY]: [], // No transitions from READY
-            [this.STATES.FAILED]: []  // No transitions from FAILED
+            [this.STATES.READY]: [],
+            [this.STATES.FAILED]: []
         };
         
         if (!validTransitions[this.currentState].includes(newState)) {
-            const error = new Error(`Invalid state transition: ${this.currentState} -> ${newState}`);
-            console.error('[SAIC]', error.message);
-            
-            // Log but don't throw - we're in production
-            if (this.currentState === this.STATES.READY && newState !== this.STATES.READY) {
-                console.error('[SAIC] CRITICAL: Attempted to leave READY state - blocked');
-                return false;
-            }
-            
+            console.error(`[SAIC] Invalid state transition: ${this.currentState} -> ${newState}`);
             return false;
         }
         
@@ -4160,7 +3610,6 @@ const SAIC = {
         return true;
     },
     
-    // Record stage completion
     recordStage(stage, success, result = null) {
         this.stageResults[stage] = {
             success,
@@ -4169,13 +3618,9 @@ const SAIC = {
             duration: Date.now() - this.initializationStartTime
         };
         
-        console.log(`[SAIC] Stage ${stage}: ${success ? '✓' : '✗'}`, {
-            duration: Date.now() - this.initializationStartTime,
-            result
-        });
+        console.log(`[SAIC] Stage ${stage}: ${success ? 'âœ“' : 'âœ—'}`);
     },
     
-    // Get current state
     getState() {
         return {
             state: this.currentState,
@@ -4188,12 +3633,10 @@ const SAIC = {
         };
     },
     
-    // Check if initialization can proceed
     canInitialize() {
         return this.currentState === this.STATES.UNINITIALIZED && !this.initLock;
     },
     
-    // Lock initialization
     acquireLock() {
         if (this.initLock) return false;
         this.initLock = true;
@@ -4201,17 +3644,15 @@ const SAIC = {
         return true;
     },
     
-    // Release lock
     releaseLock() {
         this.initLock = false;
     }
 };
 
-// Initialize SAIC immediately
 SAIC.initialize();
 
 // ============================================================================
-// GLOBAL SINGLETON GUARD - MUST BE FIRST EXECUTION
+// GLOBAL INITIALIZATION AND USER FUNCTIONS
 // ============================================================================
 
 (function(global) {
@@ -4223,15 +3664,12 @@ SAIC.initialize();
     
     const root = global || window;
     
-    // CRITICAL: Singleton guard - if already loaded with same or newer version, return early
-    if (root.__API_CORE_LOADED_V23) {
+    if (root.__API_CORE_LOADED_V24) {
         const existing = root.__API_CORE;
         
-        // Check version - if ours is newer, we should load (but preserve features)
-        if (existing && existing.version && existing.version >= '23.0.9') {
+        if (existing && existing.version && existing.version >= '24.0.4') {
             console.log('[API-CORE] Already loaded v' + existing.version + ', skipping initialization');
             
-            // Ensure all bridge properties exist
             if (!root.api) root.api = {};
             if (!root.api.core) {
                 root.api.core = {
@@ -4251,42 +3689,25 @@ SAIC.initialize();
             return existing;
         }
         
-        // If older version, we'll overwrite but preserve critical data
-        console.log('[API-CORE] Upgrading from v' + (existing ? existing.version : 'unknown') + ' to v23.0.9');
+        console.log('[API-CORE] Upgrading from v' + (existing ? existing.version : 'unknown') + ' to v24.0.4');
     }
     
-    // Set loaded flag immediately to prevent parallel initialization
-    root.__API_CORE_LOADED_V23 = '23.0.9';
+    root.__API_CORE_LOADED_V24 = '24.0.4';
     
-    // ============================================================================
-    // GLOBAL REGISTRATION - MUST EXIST IMMEDIATELY
-    // ============================================================================
     
     if (!root.__API_CORE) {
         root.__API_CORE = {};
     }
     
-    // Prevent multiple bootstrapping using SAIC state
     if (root.__API_CORE.__bootstrapped && SAIC.currentState !== SAIC.STATES.UNINITIALIZED) {
         console.log('[API-CORE] Already bootstrapped, skipping');
         return;
     }
     
-    // Mark bootstrapping started
     root.__API_CORE.__bootstrapped = true;
     
-    // ============================================================================
-    // READY PROMISE SYSTEM - NOW CONTROLLED BY SAIC
-    // ============================================================================
-    
-    // STABILIZED: No timeout-based forced readiness - removed completely
-    
-    // ============================================================================
-    // REQUIRED EXPOSED PROPERTIES - MUST ALL EXIST
-    // ============================================================================
-    
     const requiredProperties = {
-        version: '23.0.9',
+        version: '24.0.4',
         initialized: false,
         ready: SAIC.readyPromise,
         secureApiFetch: null,
@@ -4327,40 +3748,30 @@ SAIC.initialize();
                 }
             } catch (e) {}
         },
-        __resolveReady: function(value) { /* Legacy - now handled by SAIC */ },
-        __rejectReady: function(error) { /* Legacy - now handled by SAIC */ }
+        __resolveReady: function(value) { },
+        __rejectReady: function(error) { }
     };
     
-    // Assign required properties
     Object.assign(root.__API_CORE, requiredProperties);
     
-    // ============================================================================
-    // LEGACY COMPATIBILITY LAYER - PRESERVE ALL EXISTING FUNCTIONALITY
-    // ============================================================================
-    
-    // Ensure window.api.core exists with minimal safe surface
     if (!root.api) root.api = {};
     if (!root.api.core) {
         root.api.core = {
             __initializing: true,
-            __version: '23.0.9'
+            __version: '24.0.4'
         };
     }
     
-    // Ensure window.api.core.waitFor exists IMMEDIATELY
     root.api.core.waitFor = function() {
         return SAIC.readyPromise;
     };
     
-    // Ensure window.api.core.ready exists IMMEDIATELY
     root.api.core.ready = SAIC.readyPromise;
     
-    // Ensure window.api.core.isReady exists
     root.api.core.isReady = function() {
         return SAIC.currentState === SAIC.STATES.READY;
     };
     
-    // Ensure window.api.core.whenReady exists (legacy callback support)
     root.api.core.whenReady = function(callback) {
         if (typeof callback === 'function') {
             SAIC.readyPromise.then(callback).catch(() => {});
@@ -4368,7 +3779,6 @@ SAIC.initialize();
         return SAIC.readyPromise;
     };
     
-    // Ensure window.api.core.getStatus exists
     root.api.core.getStatus = function() {
         return {
             ready: SAIC.currentState === SAIC.STATES.READY,
@@ -4393,12 +3803,10 @@ SAIC.initialize();
         };
     };
     
-    // Ensure window.api.core.init exists
     root.api.core.init = function() {
         return SAIC.readyPromise;
     };
     
-    // Ensure window.api.core.diagnostics exists
     root.api.core.diagnostics = {
         startupTime: Date.now(),
         checks: {},
@@ -4406,26 +3814,20 @@ SAIC.initialize();
     };
     
     // ============================================================================
-    // SECTION 7: USER AND TOKEN FUNCTIONS
+    // USER FUNCTIONS
     // ============================================================================
 
-    /**
-     * Get current user data
-     * @returns {Object|null} User data or null
-     */
     getCurrentUser = function() {
         try {
             if (root.currentUser) {
                 return root.currentUser;
             }
             
-            // Try parent session first
             if (PARENT_SESSION && PARENT_SESSION.user) {
                 root.currentUser = PARENT_SESSION.user;
                 return PARENT_SESSION.user;
             }
             
-            // Try to get user from storage first
             const storedUser = _getUserFromStorage();
             if (storedUser) {
                 root.currentUser = storedUser;
@@ -4461,12 +3863,6 @@ SAIC.initialize();
         }
     };
     
-    /**
-     * Set user data
-     * @param {Object} userData - User data
-     * @param {boolean} skipLegacy - Skip legacy storage
-     * @returns {boolean} Success status
-     */
     setUserData = function(userData, skipLegacy = false) {
         try {
             if (!userData || typeof userData !== 'object') {
@@ -4481,13 +3877,11 @@ SAIC.initialize();
             }
             root.currentUser = safeData;
             
-            // Save to main auth storage as well
             const currentToken = getUserToken();
             if (currentToken) {
                 _saveAuthToStorage(currentToken, safeData);
             }
             
-            // Update parent session if we're in iframe
             if (window !== window.parent && window.parent && typeof window.parent.postMessage === 'function') {
                 window.parent.postMessage({
                     type: 'USER_UPDATE',
@@ -4527,11 +3921,6 @@ SAIC.initialize();
     getUserData = getCurrentUser;
     updateCurrentUser = setUserData;
     
-    /**
-     * Clear all authentication data
-     * @param {string} source - Source of the clear
-     * @returns {boolean} Success status
-     */
     clearAllAuthData = function(source = 'unknown') {
         try {
             clearUserToken(source);
@@ -4542,10 +3931,8 @@ SAIC.initialize();
             }
             root.currentUser = null;
             
-            // Clear main auth storage
             _clearAuthFromStorage();
             
-            // Reset parent session if needed
             if (source !== 'parent.clear') {
                 PARENT_SESSION = null;
                 SESSION_READY = false;
@@ -4582,12 +3969,7 @@ SAIC.initialize();
         return SAIC.readyPromise;
     };
     
-    /**
-     * Check if session is valid
-     * @returns {boolean} True if valid
-     */
     isSessionValid = function() {
-        // Check parent session first
         if (PARENT_SESSION && PARENT_SESSION.token && PARENT_SESSION.authenticated !== false) {
             return true;
         }
@@ -4595,7 +3977,6 @@ SAIC.initialize();
         const token = getUserToken('isSessionValid');
         const user = getCurrentUser();
         
-        // Only clear session if no token AND no stored token
         if (!token && !_getTokenFromStorage()) {
             return false;
         }
@@ -4607,12 +3988,7 @@ SAIC.initialize();
         return isSessionValid();
     };
     
-    /**
-     * Get session data
-     * @returns {Object} Session data
-     */
     getSession = function() {
-        // Return parent session if available
         if (PARENT_SESSION) {
             return {
                 ...PARENT_SESSION,
@@ -4638,11 +4014,6 @@ SAIC.initialize();
     
     getSessionData = getSession;
     
-    /**
-     * Set session data
-     * @param {Object} data - Session data
-     * @returns {boolean} Success status
-     */
     setSessionData = function(data) {
         try {
             if (data.token) {
@@ -4652,7 +4023,6 @@ SAIC.initialize();
                 setUserData(data.user);
             }
             
-            // Update parent session if this came from parent
             if (data._fromParent) {
                 _updateSessionFromParent(data);
             }
@@ -4679,41 +4049,18 @@ SAIC.initialize();
     apiCall = secureApiFetch;
     callApi = secureApiFetch;
     
-    /**
-     * API GET request
-     * @param {string} endpoint - API endpoint
-     * @param {Object} params - Query parameters
-     * @returns {Promise<Object>} Response
-     */
     apiGet = async function(endpoint, params = {}) {
         return get(endpoint, params);
     };
     
-    /**
-     * API POST request
-     * @param {string} endpoint - API endpoint
-     * @param {Object} data - Request body
-     * @returns {Promise<Object>} Response
-     */
     apiPost = async function(endpoint, data = {}) {
         return post(endpoint, data);
     };
     
-    /**
-     * API PUT request
-     * @param {string} endpoint - API endpoint
-     * @param {Object} data - Request body
-     * @returns {Promise<Object>} Response
-     */
     apiPut = async function(endpoint, data = {}) {
         return put(endpoint, data);
     };
     
-    /**
-     * API DELETE request
-     * @param {string} endpoint - API endpoint
-     * @returns {Promise<Object>} Response
-     */
     apiDelete = async function(endpoint) {
         return del(endpoint);
     };
@@ -4724,14 +4071,9 @@ SAIC.initialize();
     };
     
     // ============================================================================
-    // SECTION 8: AUTHENTICATION FUNCTIONS - ENHANCED
+    // AUTHENTICATION FUNCTIONS
     // ============================================================================
     
-    /**
-     * Login user
-     * @param {Object} credentials - Login credentials
-     * @returns {Promise<Object>} Login response
-     */
     login = async function(credentials) {
         try {
             const response = await secureApiFetch('/api/auth/login', {
@@ -4741,14 +4083,13 @@ SAIC.initialize();
                 _isLogin: true
             });
             
-            if (response && response.data) {
+            if (response && response.success && response.data) {
                 const token = response.data.token || 
                             response.data.accessToken || 
                             response.data.jwt ||
                             (typeof response.data === 'string' && response.data.length > 20 ? response.data : null);
                 
                 if (token) {
-                    // Update single source of truth - skip manager to prevent recursion
                     setUserToken(token, true, 'login');
                     
                     if (TokenManager) {
@@ -4765,14 +4106,11 @@ SAIC.initialize();
                     
                     if (user && setUserData) {
                         setUserData(user);
-                        // Save to storage with user data
                         _saveAuthToStorage(token, user);
                     } else {
-                        // Save token only if no user data
                         _saveAuthToStorage(token);
                     }
                     
-                    // Update parent session
                     if (window !== window.parent && window.parent && typeof window.parent.postMessage === 'function') {
                         window.parent.postMessage({
                             type: 'SESSION_UPDATE',
@@ -4785,7 +4123,6 @@ SAIC.initialize();
                         }, '*');
                     }
                     
-                    // Mark session as ready
                     SESSION_READY = true;
                     RequestQueue.updateDependency('sessionReady', true);
                     
@@ -4798,26 +4135,9 @@ SAIC.initialize();
                     
                     root.__API_CORE.emit('user-logged-in', { user: user || { email: credentials.identifier || credentials.email } });
                     
-                    // Log login success once
                     if (!_loginSuccessLogged) {
-                        console.log('[API] ✅ Login successful - token stored from login()');
+                        console.log('[API] âœ… Login successful - token stored from login()');
                         _loginSuccessLogged = true;
-                    }
-                }
-            }
-            
-            if (response && response.data && typeof response.data === 'string') {
-                const trimmed = response.data.trim();
-                if (trimmed.toLowerCase().includes('success') || 
-                    trimmed.toLowerCase().includes('welcome') ||
-                    trimmed.toLowerCase().includes('logged in')) {
-                    
-                    const possibleToken = trimmed.match(/[A-Za-z0-9-_]+\.[A-Za-z0-9-_]+\.[A-Za-z0-9-_]+/);
-                    if (possibleToken) {
-                        setUserToken(possibleToken[0], true, 'login.plaintext');
-                        RequestQueue.updateDependency('tokenReady', true);
-                        _saveAuthToStorage(possibleToken[0]);
-                        SESSION_READY = true;
                     }
                 }
             }
@@ -4826,14 +4146,10 @@ SAIC.initialize();
             
         } catch (error) {
             console.error('[API-LOGIN] Login error:', error);
-            throw normalizeError(error, 'Login failed');
+            return normalizeResponse(error, true);
         }
     };
     
-    /**
-     * Logout user
-     * @returns {Promise<Object>} Logout response
-     */
     logout = async function() {
         try {
             const token = getUserToken('logout');
@@ -4855,7 +4171,6 @@ SAIC.initialize();
         RequestQueue.updateDependency('tokenReady', false);
         RequestQueue.updateDependency('sessionReady', false);
         
-        // Reset session state
         PARENT_SESSION = null;
         SESSION_READY = false;
         NORMALIZED_USER_ID = null;
@@ -4866,16 +4181,11 @@ SAIC.initialize();
         
         root.__API_CORE.emit('user-logged-out', {});
         
-        console.log('[API] 👋 User logged out');
+        console.log('[API] ðŸ‘‹ User logged out');
         
         return { success: true, message: 'Logged out successfully' };
     };
     
-    /**
-     * Register new user
-     * @param {Object} userData - Registration data
-     * @returns {Promise<Object>} Registration response
-     */
     register = async function(userData) {
         return secureApiFetch('/api/auth/register', {
             method: 'POST',
@@ -4884,11 +4194,6 @@ SAIC.initialize();
         });
     };
     
-    /**
-     * Forgot password
-     * @param {string} email - User email
-     * @returns {Promise<Object>} Response
-     */
     forgotPassword = async function(email) {
         return secureApiFetch('/api/auth/forgot', {
             method: 'POST',
@@ -4897,12 +4202,6 @@ SAIC.initialize();
         });
     };
     
-    /**
-     * Reset password
-     * @param {string} token - Reset token
-     * @param {string} newPassword - New password
-     * @returns {Promise<Object>} Response
-     */
     resetPassword = async function(token, newPassword) {
         return secureApiFetch('/api/auth/reset', {
             method: 'POST',
@@ -4911,10 +4210,6 @@ SAIC.initialize();
         });
     };
     
-    /**
-     * Refresh authentication token
-     * @returns {Promise<Object>} Refresh response
-     */
     refreshToken = async function() {
         const refreshTokenValue = TokenManager ? TokenManager.getRefreshToken() : null;
         
@@ -4949,10 +4244,6 @@ SAIC.initialize();
         }
     };
     
-    /**
-     * Validate authentication
-     * @returns {Promise<boolean>} True if valid
-     */
     validateAuth = async function() {
         const token = getUserToken('validateAuth');
         
@@ -4992,29 +4283,20 @@ SAIC.initialize();
         });
     };
     
-    /**
-     * Update global access token reference
-     * @returns {string|null} Updated token
-     */
     updateGlobalAccessToken = function() {
         const token = getUserToken('updateGlobalAccessToken');
         root.__GLOBAL_TOKEN = token;
         return token;
     };
     
-    /**
-     * Handle unauthorized access - Enhanced with debounce and event emission
-     * Only clears session if no token in storage
-     */
     handleUnauthorizedAccess = (function() {
         let timeoutId = null;
         let lastTriggerTime = 0;
-        const THROTTLE_MS = 2000; // Prevent multiple triggers within 2 seconds
+        const THROTTLE_MS = 2000;
         
         return function(options = {}) {
             const now = Date.now();
             
-            // Throttle to prevent multiple rapid calls
             if (now - lastTriggerTime < THROTTLE_MS) {
                 return;
             }
@@ -5029,18 +4311,14 @@ SAIC.initialize();
                 clearTimeout(timeoutId);
             }
             
-            // Check if we have a token in storage before clearing
             const storedToken = _getTokenFromStorage();
             
             if (!storedToken) {
-                // No stored token, safe to clear
                 clearUserToken('handleUnauthorizedAccess');
                 
-                // Reset parent session
                 PARENT_SESSION = null;
                 SESSION_READY = false;
                 
-                // Emit event for EventBus listeners (non-blocking)
                 root.dispatchEvent(new CustomEvent('auth:unauthorized-handled', {
                     detail: {
                         timestamp: new Date().toISOString(),
@@ -5049,20 +4327,17 @@ SAIC.initialize();
                     }
                 }));
                 
-                // Set flag to prevent further requests until resolved
                 localStorage.setItem('_auth_clearing_in_progress', 'true');
                 
                 RequestQueue.updateDependency('tokenReady', false);
                 RequestQueue.updateDependency('sessionReady', false);
                 
-                // Debounced redirect to login
                 if (!root.location.pathname.includes('/login') && 
                     !root.location.pathname.includes('index.html') &&
                     !root.location.pathname.includes('/register') &&
                     !root.location.pathname.includes('/forgot-password')) {
                     
                     timeoutId = setTimeout(() => {
-                        // Only redirect if still not authenticated after delay
                         const stillHasToken = getUserToken('redirect.check');
                         if (!stillHasToken && !_getTokenFromStorage()) {
                             root.location.href = '/login?reason=session_expired';
@@ -5071,13 +4346,11 @@ SAIC.initialize();
                         timeoutId = null;
                     }, 500);
                 } else {
-                    // Already on login page, just clear the flag
                     setTimeout(() => {
                         localStorage.removeItem('_auth_clearing_in_progress');
                     }, 1000);
                 }
             } else {
-                // We have a stored token but memory token is invalid, try to restore
                 console.log('[API] Attempting to restore token from storage after 401');
                 setUserToken(storedToken, false, '401.restore');
                 SESSION_READY = true;
@@ -5085,15 +4358,7 @@ SAIC.initialize();
         };
     })();
     
-    getApiBaseUrl = getBaseUrl;
-    getBackendBaseUrl = getBaseUrl;
-    
-    /**
-     * Initialize token system
-     * @returns {Object} Token and user info
-     */
     initializeTokenSystem = function() {
-        // First try to restore from storage
         _restoreTokenFromStorage();
         
         if (migrateLegacyTokens) {
@@ -5107,7 +4372,6 @@ SAIC.initialize();
         
         RequestQueue.updateDependency('tokenReady', !!token);
         
-        // If we have a token, mark session as ready (but wait for parent if applicable)
         if (token && !PARENT_SESSION) {
             SESSION_READY = true;
             RequestQueue.updateDependency('sessionReady', true);
@@ -5117,16 +4381,9 @@ SAIC.initialize();
     };
     
     // ============================================================================
-    // SECTION 9: OPEN CHAT FUNCTIONS - PRESERVED WITH ENHANCEMENTS
+    // OPEN CHAT FUNCTIONS
     // ============================================================================
     
-    /**
-     * Open chat interface
-     * @param {string} userId - User ID
-     * @param {string} chatId - Chat ID
-     * @param {Object} options - Options
-     * @returns {Object} Result
-     */
     openChat = function(userId, chatId = null, options = {}) {
         try {
             if (!userId && !chatId && !(options && options.groupId)) {
@@ -5137,7 +4394,6 @@ SAIC.initialize();
                 );
             }
             
-            const currentUser = getCurrentUser();
             const targetUserId = userId || (options && options.user && options.user.id);
             
             let url = '/message.html';
@@ -5302,11 +4558,6 @@ SAIC.initialize();
         }
     };
     
-    /**
-     * Close chat
-     * @param {string} chatId - Chat ID
-     * @returns {Object} Result
-     */
     closeChat = function(chatId) {
         try {
             const closeEvent = new CustomEvent('close-chat', {
@@ -5332,11 +4583,6 @@ SAIC.initialize();
         }
     };
     
-    /**
-     * Minimize chat
-     * @param {string} chatId - Chat ID
-     * @returns {Object} Result
-     */
     minimizeChat = function(chatId) {
         try {
             const minimizeEvent = new CustomEvent('minimize-chat', {
@@ -5362,11 +4608,6 @@ SAIC.initialize();
         }
     };
     
-    /**
-     * Maximize chat
-     * @param {string} chatId - Chat ID
-     * @returns {Object} Result
-     */
     maximizeChat = function(chatId) {
         try {
             const maximizeEvent = new CustomEvent('maximize-chat', {
@@ -5392,13 +4633,6 @@ SAIC.initialize();
         }
     };
     
-    /**
-     * Send chat message
-     * @param {string} chatId - Chat ID
-     * @param {string} content - Message content
-     * @param {Object} options - Options
-     * @returns {Promise<Object>} Response
-     */
     sendChatMessage = async function(chatId, content, options = {}) {
         try {
             if (!chatId) {
@@ -5425,13 +4659,6 @@ SAIC.initialize();
         }
     };
     
-    /**
-     * Get chat history
-     * @param {string} chatId - Chat ID
-     * @param {number} limit - Message limit
-     * @param {string} before - Cursor for pagination
-     * @returns {Promise<Object>} Response
-     */
     getChatHistory = async function(chatId, limit = 50, before = null) {
         try {
             let url = `/api/chats/${chatId}/messages?limit=${limit}`;
@@ -5448,10 +4675,6 @@ SAIC.initialize();
         }
     };
     
-    /**
-     * Get unread message count
-     * @returns {Promise<Object>} Response
-     */
     getUnreadCount = async function() {
         try {
             const response = await secureApiFetch('/api/chats/unread', {
@@ -5465,11 +4688,6 @@ SAIC.initialize();
         }
     };
     
-    /**
-     * Mark chat as read
-     * @param {string} chatId - Chat ID
-     * @returns {Promise<Object>} Response
-     */
     markChatAsRead = async function(chatId) {
         try {
             if (!chatId) {
@@ -5497,7 +4715,7 @@ SAIC.initialize();
     };
     
     // ============================================================================
-    // SECTION 10: API FUNCTIONS - ALL PRESERVED
+    // API FUNCTIONS - ALL PRESERVED
     // ============================================================================
     
     getTeamMembers = async function(teamId) {
@@ -5553,16 +4771,9 @@ SAIC.initialize();
     };
     
     getUserGroups = async function() {
-        return get('/api/group/user');
+        return get('/api/groups/user');
     };
     
-    /**
-     * Show notification
-     * @param {string} message - Notification message
-     * @param {string} type - Notification type
-     * @param {number} duration - Duration in ms
-     * @returns {Object} Result
-     */
     showNotification = function(message, type = 'info', duration = 3000) {
         try {
             const id = `notif_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
@@ -5600,14 +4811,14 @@ SAIC.initialize();
             `;
             
             const iconMap = {
-                success: '✓',
-                warning: '⚠',
-                error: '✕',
-                info: 'ℹ'
+                success: 'âœ“',
+                warning: 'âš ',
+                error: 'âœ•',
+                info: 'â„¹'
             };
             
             notification.innerHTML = `
-                <span style="font-size: 16px; font-weight: bold;">${iconMap[type] || '•'}</span>
+                <span style="font-size: 16px; font-weight: bold;">${iconMap[type] || 'â€¢'}</span>
                 <span>${escapeHtml ? escapeHtml(message) : message}</span>
                 <button style="
                     margin-left: auto;
@@ -5618,7 +4829,7 @@ SAIC.initialize();
                     font-size: 18px;
                     padding: 0 4px;
                     opacity: 0.7;
-                " onclick="this.parentElement.remove()">×</button>
+                " onclick="this.parentElement.remove()">Ã—</button>
             `;
             
             document.body.appendChild(notification);
@@ -5646,7 +4857,7 @@ SAIC.initialize();
     };
     
     acceptGroupInvite = async function(inviteId) {
-        return post(`/api/group/invites/${inviteId}/accept`, {});
+        return post(`/api/groups/invites/${inviteId}/accept`, {});
     };
     
     getMessageTypes = function() {
@@ -5682,12 +4893,6 @@ SAIC.initialize();
         };
     };
     
-    /**
-     * Track analytics event
-     * @param {string} eventName - Event name
-     * @param {Object} eventData - Event data
-     * @returns {Object} Result
-     */
     trackEvent = function(eventName, eventData = {}) {
         console.log(`[EVENT] ${eventName}`, eventData);
         
@@ -5709,10 +4914,6 @@ SAIC.initialize();
         };
     };
     
-    /**
-     * Generate sample mood data for testing
-     * @returns {Array} Sample mood data
-     */
     generateSampleMoodData = function() {
         const moods = ['happy', 'sad', 'excited', 'calm', 'anxious', 'tired', 'energetic', 'peaceful'];
         const activities = ['work', 'social', 'exercise', 'rest', 'entertainment', 'family', 'friends'];
@@ -5743,7 +4944,7 @@ SAIC.initialize();
     };
     
     // ============================================================================
-    // SECTION 11: SOCIAL FUNCTIONS
+    // SOCIAL FUNCTIONS
     // ============================================================================
     
     getFriends = async function() {
@@ -5771,7 +4972,7 @@ SAIC.initialize();
     };
     
     // ============================================================================
-    // SECTION 12: MESSAGING FUNCTIONS
+    // MESSAGING FUNCTIONS
     // ============================================================================
     
     getConversations = async function() {
@@ -5799,43 +5000,43 @@ SAIC.initialize();
     };
     
     // ============================================================================
-    // SECTION 13: GROUP FUNCTIONS
+    // GROUP FUNCTIONS
     // ============================================================================
     
     createGroup = async function(groupData) {
-        return post('/api/group', groupData);
+        return post('/api/groups', groupData);
     };
     
     getGroups = async function() {
-        return get('/api/group');
+        return get('/api/groups');
     };
     
     getGroupDetails = async function(groupId) {
-        return get(`/api/group/${groupId}`);
+        return get(`/api/groups/${groupId}`);
     };
     
     updateGroup = async function(groupId, groupData) {
-        return put(`/api/group/${groupId}`, groupData);
+        return put(`/api/groups/${groupId}`, groupData);
     };
     
     deleteGroup = async function(groupId) {
-        return del(`/api/group/${groupId}`);
+        return del(`/api/groups/${groupId}`);
     };
     
     addGroupMember = async function(groupId, userId) {
-        return post(`/api/group/${groupId}/members`, { userId });
+        return post(`/api/groups/${groupId}/members`, { userId });
     };
     
     removeGroupMember = async function(groupId, userId) {
-        return del(`/api/group/${groupId}/members/${userId}`);
+        return del(`/api/groups/${groupId}/members/${userId}`);
     };
     
     leaveGroup = async function(groupId) {
-        return post(`/api/group/${groupId}/leave`, {});
+        return post(`/api/groups/${groupId}/leave`, {});
     };
     
     // ============================================================================
-    // SECTION 14: NOTIFICATION FUNCTIONS
+    // NOTIFICATION FUNCTIONS
     // ============================================================================
     
     getNotifications = async function() {
@@ -5855,7 +5056,7 @@ SAIC.initialize();
     };
     
     // ============================================================================
-    // SECTION 15: PROFILE FUNCTIONS
+    // PROFILE FUNCTIONS
     // ============================================================================
     
     getProfile = async function() {
@@ -5875,7 +5076,7 @@ SAIC.initialize();
     };
     
     // ============================================================================
-    // SECTION 16: USER FUNCTIONS
+    // USER FUNCTIONS
     // ============================================================================
     
     getOnlineUsers = async function() {
@@ -5887,7 +5088,7 @@ SAIC.initialize();
     };
     
     // ============================================================================
-    // SECTION 17: CALL FUNCTIONS
+    // CALL FUNCTIONS
     // ============================================================================
     
     getCallHistory = async function() {
@@ -5920,7 +5121,7 @@ SAIC.initialize();
     };
     
     // ============================================================================
-    // SECTION 18: SETTINGS FUNCTIONS
+    // SETTINGS FUNCTIONS
     // ============================================================================
     
     getSettings = async function() {
@@ -5932,7 +5133,7 @@ SAIC.initialize();
     };
     
     // ============================================================================
-    // SECTION 19: FILE FUNCTIONS
+    // FILE FUNCTIONS
     // ============================================================================
     
     uploadFile = async function(file, type = 'general') {
@@ -5960,7 +5161,7 @@ SAIC.initialize();
     };
     
     // ============================================================================
-    // SECTION 20: ANALYTICS FUNCTIONS
+    // ANALYTICS FUNCTIONS
     // ============================================================================
     
     requestSession = async function() {
@@ -5980,11 +5181,6 @@ SAIC.initialize();
         return post('/api/analytics/export', analyticsData);
     };
     
-    /**
-     * Format time ago
-     * @param {string|Date} date - Date to format
-     * @returns {string} Formatted time
-     */
     formatTimeAgo = function(date) {
         if (!date) return 'Unknown';
         
@@ -6021,43 +5217,35 @@ SAIC.initialize();
     };
     
     // ============================================================================
-    // SECTION 21: UTILITY FUNCTIONS
+    // UTILITY FUNCTIONS
     // ============================================================================
-    
-    /**
-     * Check network status
-     * @returns {Promise<boolean>} True if network is available
-     */
-    checkNetworkStatus = async function() {
-        try {
-            const baseUrl = getBaseUrl();
-            const response = await fetch(`${baseUrl}/api/status`, {
-                method: 'GET',
-                headers: { 'Content-Type': 'application/json' }
-            });
-            
-            const isOk = response.ok;
-            
-            if (root.AppNetwork && root.AppNetwork.updateBackendStatus) {
-                root.AppNetwork.updateBackendStatus(isOk);
-            }
-            
-            return isOk;
-        } catch (error) {
-            if (root.AppNetwork && root.AppNetwork.updateBackendStatus) {
-                root.AppNetwork.updateBackendStatus(false);
-            }
-            return false;
+  
+    // In api.core.js, find checkNetworkStatus function and fix the URL
+checkNetworkStatus = async function() {
+    try {
+        const baseUrl = getBaseUrl();
+        // Remove any trailing /api if it exists to avoid double /api
+        const cleanBaseUrl = baseUrl.replace(/\/api$/, '');
+        const response = await fetch(`${cleanBaseUrl}/api/status`, {
+            method: 'GET',
+            headers: { 'Content-Type': 'application/json' }
+        });
+        
+        const isOk = response.ok;
+        
+        if (root.AppNetwork && root.AppNetwork.updateBackendStatus) {
+            root.AppNetwork.updateBackendStatus(isOk);
         }
-    };
+        
+        return isOk;
+    } catch (error) {
+        if (root.AppNetwork && root.AppNetwork.updateBackendStatus) {
+            root.AppNetwork.updateBackendStatus(false);
+        }
+        return false;
+    }
+};
     
-    /**
-     * Debounce function
-     * @param {Function} func - Function to debounce
-     * @param {number} wait - Wait time in ms
-     * @param {boolean} immediate - Execute immediately
-     * @returns {Function} Debounced function
-     */
     debounce = function(func, wait, immediate = false) {
         let timeout;
         
@@ -6077,12 +5265,6 @@ SAIC.initialize();
         };
     };
     
-    /**
-     * Throttle function
-     * @param {Function} func - Function to throttle
-     * @param {number} limit - Limit in ms
-     * @returns {Function} Throttled function
-     */
     throttle = function(func, limit) {
         let inThrottle;
         let lastFunc;
@@ -6112,20 +5294,10 @@ SAIC.initialize();
         };
     };
     
-    /**
-     * Generate unique ID
-     * @returns {string} Unique ID
-     */
     generateId = function() {
         return `${Date.now().toString(36)}_${Math.random().toString(36).substr(2, 9)}_${Math.random().toString(36).substr(2, 4)}`;
     };
     
-    /**
-     * Format date
-     * @param {string|Date} date - Date to format
-     * @param {string} format - Format type
-     * @returns {string} Formatted date
-     */
     formatDate = function(date, format = 'short') {
         try {
             const d = new Date(date);
@@ -6157,12 +5329,6 @@ SAIC.initialize();
         }
     };
     
-    /**
-     * Format time
-     * @param {string|Date} date - Date to format
-     * @param {boolean} includeSeconds - Include seconds
-     * @returns {string} Formatted time
-     */
     formatTime = function(date, includeSeconds = false) {
         try {
             const d = new Date(date);
@@ -6181,11 +5347,6 @@ SAIC.initialize();
         }
     };
     
-    /**
-     * Escape HTML special characters
-     * @param {string} text - Text to escape
-     * @returns {string} Escaped text
-     */
     escapeHtml = function(text) {
         if (text === null || text === undefined) return '';
         
@@ -6206,17 +5367,12 @@ SAIC.initialize();
     };
     
     // ============================================================================
-    // SECTION 22: EVENT EMITTER - COMPLETE IMPLEMENTATION
+    // EVENT EMITTER
     // ============================================================================
     
     const eventEmitter = {
         events: {},
         
-        /**
-         * Emit event
-         * @param {string} event - Event name
-         * @param {*} data - Event data
-         */
         emit(event, data) {
             try {
                 if (this.events[event]) {
@@ -6235,12 +5391,6 @@ SAIC.initialize();
             }
         },
         
-        /**
-         * Register event listener
-         * @param {string} event - Event name
-         * @param {Function} callback - Callback function
-         * @returns {Function} Unsubscribe function
-         */
         on(event, callback) {
             try {
                 if (!this.events[event]) {
@@ -6255,11 +5405,6 @@ SAIC.initialize();
             }
         },
         
-        /**
-         * Remove event listener
-         * @param {string} event - Event name
-         * @param {Function} callback - Callback function
-         */
         off(event, callback) {
             try {
                 if (this.events[event]) {
@@ -6274,12 +5419,6 @@ SAIC.initialize();
             }
         },
         
-        /**
-         * Register one-time event listener
-         * @param {string} event - Event name
-         * @param {Function} callback - Callback function
-         * @returns {Function} Unsubscribe function
-         */
         once(event, callback) {
             try {
                 const onceWrapper = (data) => {
@@ -6296,10 +5435,6 @@ SAIC.initialize();
             }
         },
         
-        /**
-         * Clear all listeners for an event
-         * @param {string} event - Event name (optional)
-         */
         clear(event) {
             try {
                 if (event) {
@@ -6312,11 +5447,6 @@ SAIC.initialize();
             }
         },
         
-        /**
-         * Get listener count for an event
-         * @param {string} event - Event name
-         * @returns {number} Listener count
-         */
         listeners(event) {
             return this.events[event]?.length || 0;
         }
@@ -6328,7 +5458,7 @@ SAIC.initialize();
     once = eventEmitter.once.bind(eventEmitter);
     
     // ============================================================================
-    // SECTION 23: MULTI-IFRAME ORCHESTRATION - ENHANCED
+    // MULTI-IFRAME ORCHESTRATION
     // ============================================================================
     
     const ORCHESTRATION_STATE = {
@@ -6343,26 +5473,14 @@ SAIC.initialize();
         _readyResolve: SAIC.readyResolve
     };
     
-    /**
-     * Wait for core to be ready
-     * @returns {Promise} Ready promise
-     */
     waitForReady = function() {
         return SAIC.readyPromise;
     };
     
-    /**
-     * Check if core is ready
-     * @returns {boolean} True if ready
-     */
-    isCoreReady = function() {
+    isCoreReadyFn = function() {
         return SAIC.currentState === SAIC.STATES.READY;
     };
     
-    /**
-     * Get request queue status
-     * @returns {Object} Queue status
-     */
     getRequestQueueStatus = function() {
         return {
             queueLength: ORCHESTRATION_STATE.requestQueue.length,
@@ -6376,12 +5494,6 @@ SAIC.initialize();
         };
     };
     
-    /**
-     * Register iframe
-     * @param {string} iframeId - Iframe ID
-     * @param {Window} iframeWindow - Iframe window object
-     * @returns {boolean} Success status
-     */
     registerIframe = function(iframeId, iframeWindow) {
         if (!ORCHESTRATION_STATE.iframes.has(iframeId)) {
             ORCHESTRATION_STATE.iframes.set(iframeId, {
@@ -6397,20 +5509,10 @@ SAIC.initialize();
         return false;
     };
     
-    /**
-     * Unregister iframe
-     * @param {string} iframeId - Iframe ID
-     * @returns {boolean} Success status
-     */
     unregisterIframe = function(iframeId) {
         return ORCHESTRATION_STATE.iframes.delete(iframeId);
     };
     
-    /**
-     * Get iframe status
-     * @param {string} iframeId - Iframe ID
-     * @returns {Object} Iframe status
-     */
     getIframeStatus = function(iframeId) {
         const iframe = ORCHESTRATION_STATE.iframes.get(iframeId);
         
@@ -6427,11 +5529,6 @@ SAIC.initialize();
         };
     };
     
-    /**
-     * Broadcast to all iframes
-     * @param {*} data - Data to broadcast
-     * @returns {Array} Results
-     */
     broadcastToAllIframes = function(data) {
         const results = [];
         
@@ -6456,12 +5553,6 @@ SAIC.initialize();
         return results;
     };
     
-    /**
-     * Send message to specific iframe
-     * @param {string} iframeId - Iframe ID
-     * @param {*} data - Data to send
-     * @returns {Promise} Promise that resolves when sent
-     */
     sendToIframe = function(iframeId, data) {
         return new Promise((resolve, reject) => {
             try {
@@ -6501,12 +5592,6 @@ SAIC.initialize();
         });
     };
     
-    /**
-     * Broadcast to parent window
-     * @param {string} event - Event name
-     * @param {*} data - Data to broadcast
-     * @returns {Promise} Promise that resolves when broadcast
-     */
     broadcastToParent = function(event, data) {
         return new Promise((resolve, reject) => {
             try {
@@ -6535,7 +5620,6 @@ SAIC.initialize();
         });
     };
     
-    // Message handler for iframe communication
     root.addEventListener('message', (event) => {
         try {
             const { type, iframeId, data, requestId } = event.data || {};
@@ -6560,12 +5644,12 @@ SAIC.initialize();
     });
     
     // ============================================================================
-    // SECTION 24: API GATEWAY - COMPLETE UNIFIED INTERFACE
+    // API GATEWAY
     // ============================================================================
     
     ApiGateway = {
-        version: '23.0.9',
-        build: '2024-06-21',
+        version: '24.0.4',
+        build: '2026-03-26',
         
         env: {
             getCurrent: getEnvironment,
@@ -6809,7 +5893,7 @@ SAIC.initialize();
                 return status;
             },
             waitForReady: waitForReady,
-            isReady: isCoreReady,
+            isReady: isCoreReadyFn,
             getQueueStatus: getRequestQueueStatus
         },
         
@@ -6823,21 +5907,14 @@ SAIC.initialize();
         request: secureApiFetch,
         secureFetch: secureApiFetch,
         secureApiFetch: secureApiFetch,
-        apiCallWithRetry: function(endpoint, options) { 
-            console.warn('[API] apiCallWithRetry is deprecated - using apiCall instead');
-            return secureApiFetch(endpoint, options); 
-        },
         
-        // Single token source functions
         setUserToken: setUserToken,
         getUserToken: getUserToken,
         clearToken: clearUserToken,
         
-        // Public API for window.API
         setToken: setUserToken,
         getToken: getUserToken,
         
-        // Parent orchestration API
         parentSync: {
             getSession: () => PARENT_SESSION,
             isReady: () => SESSION_READY,
@@ -6847,10 +5924,6 @@ SAIC.initialize();
             registerHandler: _registerParentMessageHandler
         },
         
-        /**
-         * Get gateway status
-         * @returns {Object} Status object
-         */
         getStatus: function() {
             return {
                 version: this.version,
@@ -6907,24 +5980,21 @@ SAIC.initialize();
     gateway = ApiGateway;
     
     // ============================================================================
-    // SECTION 25: INITIALIZE GATEWAY - STABILIZED DETERMINISTIC PIPELINE
+    // INITIALIZE GATEWAY
     // ============================================================================
     
     initializeGateway = async function(options = {}) {
-        // CRITICAL: Single initialization lock
         if (!SAIC.canInitialize()) {
             console.log('[API-CORE] Initialization already in progress or completed, returning existing promise');
             return SAIC.readyPromise;
         }
         
-        // Acquire lock
         SAIC.acquireLock();
         SAIC.transitionTo(SAIC.STATES.INITIALIZING);
         
-        console.log('[API-CORE] Initializing API Gateway v23.0.9');
+        console.log('[API-CORE] Initializing API Gateway v24.0.4');
         
         try {
-            // STAGE 1: Environment detection
             SAIC.recordStage('environment', true);
             
             if (options.environment) {
@@ -6936,7 +6006,6 @@ SAIC.initialize();
             RequestQueue.updateDependency('environment', true);
             SAIC.recordStage('environment', true, { environment: CURRENT_ENVIRONMENT });
             
-            // STAGE 2: Base URL resolution
             SAIC.recordStage('baseUrl', true);
             
             if (options.baseUrl) {
@@ -6948,16 +6017,11 @@ SAIC.initialize();
             RequestQueue.updateDependency('config', true);
             SAIC.recordStage('baseUrl', true, { baseUrl: ACTIVE_BASE_URL });
             
-            // STAGE 3: SafeStorage setup
+            SAIC.recordStage('storage', true);
             SAIC.recordStage('storage', true);
             
-            // SecureStorage already initialized at module level
-            SAIC.recordStage('storage', true);
-            
-            // STAGE 4: Origin validation
             SAIC.recordStage('origin', true);
             
-            // Validate current origin against allowed domains
             try {
                 const currentOrigin = root.location.origin;
                 const isValid = isValidEndpoint(currentOrigin, getBaseUrl());
@@ -6969,10 +6033,8 @@ SAIC.initialize();
                 SAIC.recordStage('origin', true, { warning: e.message });
             }
             
-            // STAGE 5: Token restore (if exists)
             SAIC.recordStage('token', true);
             
-            // First try to restore from storage
             const restored = _restoreTokenFromStorage();
             
             if (TokenManager && TokenManager.migrateLegacyTokens) {
@@ -6990,13 +6052,10 @@ SAIC.initialize();
                 SAIC.recordStage('token', true, { warning: 'Token system not available' });
             }
             
-            // STAGE 6: Parent synchronization setup - NEW
             SAIC.recordStage('parentSync', true);
             
-            // Initialize parent message listeners
             _initParentMessageListeners();
             
-            // Update dependencies
             RequestQueue.updateDependency('parentReady', PARENT_READY);
             RequestQueue.updateDependency('sessionReady', SESSION_READY);
             
@@ -7006,7 +6065,6 @@ SAIC.initialize();
                 hasParent: !!(window.parent && window.parent !== window)
             });
             
-            // STAGE 7: Dependency verification
             SAIC.recordStage('dependencies', true);
             
             RequestQueue.updateDependency('bootstrap', true);
@@ -7018,25 +6076,18 @@ SAIC.initialize();
                 parentReady: PARENT_READY
             });
             
-            // STAGE 8: Security firewall setup
             SAIC.recordStage('security', true);
-            
-            // Security functions already defined
             SAIC.recordStage('security', true, { 
                 endpointValidation: typeof isValidEndpoint === 'function',
                 publicEndpoints: PUBLIC_ENDPOINTS.length
             });
             
-            // STAGE 9: Endpoint registry setup
             SAIC.recordStage('endpoint', true);
-            
-            // Endpoint functions already defined
             SAIC.recordStage('endpoint', true, {
                 publicEndpoints: PUBLIC_ENDPOINTS.length,
                 authEndpoints: AUTH_ENDPOINTS.length
             });
             
-            // STAGE 10: Self-tests
             SAIC.recordStage('selftest', true);
             
             try {
@@ -7044,10 +6095,8 @@ SAIC.initialize();
                 SAIC.recordStage('selftest', true, testResults);
             } catch (testError) {
                 SAIC.recordStage('selftest', false, { error: testError.message });
-                // Non-fatal - continue
             }
             
-            // STAGE 11: AppNetwork setup
             SAIC.recordStage('network', true);
             
             if (!root.AppNetwork) {
@@ -7078,7 +6127,6 @@ SAIC.initialize();
             
             SAIC.recordStage('network', true);
             
-            // Cache pruning
             if (CacheManager && CacheManager._pruneMemoryCache) {
                 CacheManager._pruneMemoryCache();
             }
@@ -7087,24 +6135,20 @@ SAIC.initialize();
                 updateGlobalAccessToken();
             }
             
-            // Mark queue dependency
             RequestQueue.updateDependency('apiCoreReady', true);
             
-            // Check if all critical dependencies are ready before transitioning to READY
             const configReady = !!ACTIVE_BASE_URL;
             const apiConfigValid = true;
-            
-            // For iframes, we wait for parent ready or session ready
             const isInIframe = window !== window.parent;
             const parentDepsMet = !isInIframe || PARENT_READY || SESSION_READY;
             
             if (configReady && apiConfigValid && parentDepsMet) {
-                // All stages complete - transition to READY
                 SAIC.transitionTo(SAIC.STATES.READY);
+                isCoreReady = true;
                 
                 const readyEvent = new CustomEvent('api-gateway-ready', {
                     detail: {
-                        version: '23.0.9',
+                        version: '24.0.4',
                         environment: CURRENT_ENVIRONMENT,
                         baseUrl: ACTIVE_BASE_URL,
                         timestamp: new Date().toISOString(),
@@ -7143,17 +6187,28 @@ SAIC.initialize();
                             'selective-session-clear',
                             'parent-session-sync',
                             'request-gating',
-                            'session-normalization'
+                            'session-normalization',
+                            'guaranteed-request-resolution',
+                            'timeout-protection',
+                            'response-normalization',
+                            'proper-base-url-detection',
+                            'enhanced-environment-detection',
+                            'token-priority-system',
+                            'max-retry-limit-1',
+                            'cookie-auth-production',
+                            'token-refresh-on-401',
+                            'race-condition-fixed',
+                            'api-ready-waiting'
                         ]
                     }
                 });
                 
                 root.dispatchEvent(readyEvent);
                 
-                console.log('[API-CORE] ✅ Initialized successfully', {
+                console.log('[API-CORE] âœ… Initialized successfully', {
                     environment: CURRENT_ENVIRONMENT,
                     baseUrl: ACTIVE_BASE_URL,
-                    version: '23.0.9',
+                    version: '24.0.4',
                     state: SAIC.currentState,
                     duration: Date.now() - SAIC.initializationStartTime,
                     hasToken: !!getUserToken('init.success'),
@@ -7162,8 +6217,7 @@ SAIC.initialize();
                     isIframe: window !== window.parent
                 });
             } else {
-                // If not ready, stay in INITIALIZING state
-                console.warn('[API-CORE] ⚠️ Initialization incomplete - waiting for dependencies', {
+                console.warn('[API-CORE] âš ï¸ Initialization incomplete - waiting for dependencies', {
                     configReady,
                     parentDepsMet,
                     isIframe: window !== window.parent,
@@ -7176,7 +6230,7 @@ SAIC.initialize();
                 success: SAIC.currentState === SAIC.STATES.READY,
                 environment: CURRENT_ENVIRONMENT,
                 baseUrl: ACTIVE_BASE_URL,
-                version: '23.0.9',
+                version: '24.0.4',
                 state: SAIC.currentState,
                 stages: SAIC.stageResults,
                 parentSync: {
@@ -7188,7 +6242,7 @@ SAIC.initialize();
             };
             
         } catch (error) {
-            console.error('[API-CORE] ❌ Initialization error:', error);
+            console.error('[API-CORE] âŒ Initialization error:', error);
             SAIC.transitionTo(SAIC.STATES.FAILED, error);
             
             return {
@@ -7203,7 +6257,6 @@ SAIC.initialize();
         }
     };
     
-    // Self-test function
     async function runSelfTests() {
         const results = {
             passed: 0,
@@ -7211,7 +6264,6 @@ SAIC.initialize();
             tests: []
         };
         
-        // Test 1: Verify root.api.core exists
         if (!root.api || !root.api.core) {
             results.tests.push({ name: 'api.core exists', passed: false });
             results.failed++;
@@ -7220,7 +6272,6 @@ SAIC.initialize();
             results.passed++;
         }
         
-        // Test 2: Verify waitFor exists
         if (typeof root.api.core.waitFor !== 'function') {
             results.tests.push({ name: 'waitFor function', passed: false });
             results.failed++;
@@ -7229,7 +6280,6 @@ SAIC.initialize();
             results.passed++;
         }
         
-        // Test 3: Verify ready is a Promise
         const isPromise = root.api.core.ready instanceof Promise || 
                          (root.api.core.ready && typeof root.api.core.ready.then === 'function');
         
@@ -7241,7 +6291,6 @@ SAIC.initialize();
             results.passed++;
         }
         
-        // Test 4: Verify whenReady exists
         if (typeof root.api.core.whenReady !== 'function') {
             results.tests.push({ name: 'whenReady function', passed: false });
             results.failed++;
@@ -7250,7 +6299,6 @@ SAIC.initialize();
             results.passed++;
         }
         
-        // Test 5: Verify isReady exists
         if (typeof root.api.core.isReady !== 'function') {
             results.tests.push({ name: 'isReady function', passed: false });
             results.failed++;
@@ -7259,7 +6307,6 @@ SAIC.initialize();
             results.passed++;
         }
         
-        // Test 6: Verify __API_CORE exists
         if (!root.__API_CORE) {
             results.tests.push({ name: '__API_CORE exists', passed: false });
             results.failed++;
@@ -7268,7 +6315,6 @@ SAIC.initialize();
             results.passed++;
         }
         
-        // Test 7: Security validation
         const testUrls = [
             ['/api/users/me', true],
             ['/api/users/../config', false],
@@ -7298,15 +6344,12 @@ SAIC.initialize();
             results.failed++;
         }
         
-        // Test 8: Token persistence
-        const testToken = 'test.token.123';
+        const testToken = '';
         const testUser = { id: 'test', name: 'Test User' };
         
         try {
-            // Save test data
             _saveAuthToStorage(testToken, testUser);
             
-            // Try to retrieve
             const retrievedToken = _getTokenFromStorage();
             const retrievedUser = _getUserFromStorage();
             
@@ -7325,14 +6368,12 @@ SAIC.initialize();
                 results.failed++;
             }
             
-            // Clean up
             _clearAuthFromStorage();
         } catch (e) {
             results.tests.push({ name: 'token persistence', passed: false, details: e.message });
             results.failed++;
         }
         
-        // Test 9: Parent synchronization - NEW
         results.tests.push({ 
             name: 'parent sync initialization', 
             passed: typeof _initParentMessageListeners === 'function',
@@ -7340,11 +6381,20 @@ SAIC.initialize();
         });
         results.passed++;
         
+        // Test environment detection
+        const detectedEnv = detectEnvironment();
+        results.tests.push({
+            name: 'environment detection',
+            passed: detectedEnv === ENVIRONMENTS.LOCAL || detectedEnv === ENVIRONMENTS.PRODUCTION,
+            details: `Detected: ${detectedEnv}`
+        });
+        results.passed++;
+        
         return results;
     }
     
     // ============================================================================
-    // SECTION 26: API CORE INTERFACE
+    // API CORE INTERFACE
     // ============================================================================
     
     apiCore = {
@@ -7368,7 +6418,7 @@ SAIC.initialize();
         
         getQueueStatus: getRequestQueueStatus,
         waitForReady: waitForReady,
-        isReady: isCoreReady,
+        isReady: isCoreReadyFn,
         
         get: get,
         post: post,
@@ -7378,10 +6428,6 @@ SAIC.initialize();
         del: del
     };
     
-    // ============================================================================
-    // WINDOW.API EXPORT - SINGLE GLOBAL API INTERFACE
-    // ============================================================================
-    
     root.API = {
         get: get,
         post: post,
@@ -7390,33 +6436,30 @@ SAIC.initialize();
         setUserToken: setUserToken,
         getUserToken: getUserToken,
         clearToken: clearUserToken,
-        version: '23.0.9'
+        version: '24.0.4'
     };
     
     root.API_READY = SAIC.currentState === SAIC.STATES.READY;
     
-    // ============================================================================
-    // GLOBAL INITIALIZATION
-    // ============================================================================
+    // Ensure gateway is ready before any requests are processed
+    initializeGateway().then(() => {
+        console.log('[API-CORE] Gateway ready, processing any queued requests');
+    }).catch(error => {
+        console.error('[API-CORE] Gateway initialization failed:', error);
+    });
     
-    // Start initialization (non-blocking)
-    initializeGateway();
-    
-    // Periodic token refresh - OPTIMIZED: Increased interval to reduce network calls
     setInterval(() => {
         if (TokenManager && TokenManager.shouldRefreshToken && TokenManager.shouldRefreshToken()) {
             refreshTokenIfNeeded().catch(() => {});
         }
-    }, 120000); // Every 2 minutes
+    }, 120000);
     
-    // Periodic network check - OPTIMIZED: Increased interval
     setInterval(() => {
         if (navigator.onLine) {
             checkNetworkStatus().catch(() => {});
         }
-    }, 60000); // Every minute
+    }, 60000);
     
-    // Expose to global scope
     root.ApiGateway = ApiGateway;
     root.gateway = ApiGateway;
     root.api = ApiGateway;
@@ -7433,12 +6476,8 @@ SAIC.initialize();
     root.CacheManager = CacheManager;
     root.RequestQueue = RequestQueue;
     
-    // ============================================================================
-    // CRITICAL: Update __API_CORE with all required properties
-    // ============================================================================
-    
     Object.assign(root.__API_CORE, {
-        version: '23.0.9',
+        version: '24.0.4',
         initialized: SAIC.currentState === SAIC.STATES.READY,
         ready: SAIC.readyPromise,
         secureApiFetch: secureApiFetch,
@@ -7460,13 +6499,12 @@ SAIC.initialize();
         }
     });
     
-    // Ensure legacy bridges
     root.apiCore = root.apiCore || root.__API_CORE;
     root.api_core = root.api_core || root.__API_CORE;
     
     root.__API_GATEWAY = {
-        version: '23.0.9',
-        build: '2024-06-21',
+        version: '24.0.4',
+        build: '2026-03-26',
         environment: CURRENT_ENVIRONMENT,
         baseUrl: ACTIVE_BASE_URL,
         initialized: SAIC.currentState === SAIC.STATES.READY,
@@ -7508,15 +6546,21 @@ SAIC.initialize();
             'selective-session-clear',
             'parent-session-sync',
             'request-gating',
-            'session-normalization'
+            'session-normalization',
+            'guaranteed-request-resolution',
+            'timeout-protection',
+            'response-normalization',
+            'proper-base-url-detection',
+            'enhanced-environment-detection',
+            'token-priority-system',
+            'max-retry-limit-1',
+            'cookie-auth-production',
+            'token-refresh-on-401',
+            'race-condition-fixed',
+            'api-ready-waiting'
         ]
     };
     
-    // ============================================================================
-    // FINAL READY RESOLUTION HANDLED BY SAIC
-    // ============================================================================
-    
-    // Ensure root.api.core exists
     if (!root.api) root.api = {};
     
     const coreReadyPromise = SAIC.readyPromise;
@@ -7524,7 +6568,7 @@ SAIC.initialize();
     if (!root.api.core) {
         root.api.core = {
             __initializing: SAIC.currentState === SAIC.STATES.INITIALIZING,
-            __version: '23.0.9',
+            __version: '24.0.4',
             ready: coreReadyPromise,
             waitFor: function() { 
                 return coreReadyPromise; 
@@ -7544,7 +6588,7 @@ SAIC.initialize();
                     initializing: SAIC.currentState === SAIC.STATES.INITIALIZING,
                     failed: SAIC.currentState === SAIC.STATES.FAILED,
                     state: SAIC.currentState,
-                    version: '23.0.9',
+                    version: '24.0.4',
                     parentSync: {
                         parentReady: PARENT_READY,
                         sessionReady: SESSION_READY
@@ -7556,7 +6600,6 @@ SAIC.initialize();
             }
         };
     } else {
-        // Ensure existing core object has all required properties
         root.api.core.ready = root.api.core.ready || coreReadyPromise;
         root.api.core.waitFor = root.api.core.waitFor || function() { return coreReadyPromise; };
         root.api.core.whenReady = root.api.core.whenReady || function(callback) {
@@ -7574,7 +6617,7 @@ SAIC.initialize();
                 initializing: SAIC.currentState === SAIC.STATES.INITIALIZING,
                 failed: SAIC.currentState === SAIC.STATES.FAILED,
                 state: SAIC.currentState,
-                version: '23.0.9',
+                version: '24.0.4',
                 parentSync: {
                     parentReady: PARENT_READY,
                     sessionReady: SESSION_READY
@@ -7584,17 +6627,15 @@ SAIC.initialize();
         root.api.core.init = root.api.core.init || function() { return coreReadyPromise; };
     }
     
-    // Mark as initialized (if already READY)
     root.api.core.__initialized = SAIC.currentState === SAIC.STATES.READY;
     root.api.core.__initializing = SAIC.currentState === SAIC.STATES.INITIALIZING;
     root.api.core.__ready = SAIC.currentState === SAIC.STATES.READY;
     
-    // Dispatch events if already READY
     if (SAIC.currentState === SAIC.STATES.READY) {
         try {
             root.dispatchEvent(new CustomEvent('api-core-ready', {
                 detail: {
-                    version: '23.0.9',
+                    version: '24.0.4',
                     environment: CURRENT_ENVIRONMENT,
                     baseUrl: ACTIVE_BASE_URL,
                     timestamp: new Date().toISOString(),
@@ -7612,7 +6653,7 @@ SAIC.initialize();
         if (root.__API_CORE && typeof root.__API_CORE.emit === 'function') {
             try {
                 root.__API_CORE.emit('ready', {
-                    version: '23.0.9',
+                    version: '24.0.4',
                     environment: CURRENT_ENVIRONMENT,
                     timestamp: new Date().toISOString(),
                     parentSync: {
@@ -7626,10 +6667,10 @@ SAIC.initialize();
         }
     }
     
-    console.log('[API-CORE] ✅ Fully loaded', {
+    console.log('[API-CORE] âœ… Fully loaded', {
         environment: CURRENT_ENVIRONMENT,
         baseUrl: ACTIVE_BASE_URL,
-        version: '23.0.9',
+        version: '24.0.4',
         state: SAIC.currentState,
         stages: Object.keys(SAIC.stageResults).length,
         parentSync: {
@@ -7640,11 +6681,36 @@ SAIC.initialize();
         features: root.__API_GATEWAY.features.length,
         hasToken: !!getUserToken('final')
     });
+    // Expose API globally for debugging and modules
+window.__API_CORE = root.__API_CORE;
+window.__API_GATEWAY = root.__API_GATEWAY;
+window.api = ApiGateway;
+window.apiCore = apiCore;
+window.gateway = ApiGateway;
+
+// Also expose to window for console access
+if (typeof window !== 'undefined') {
+    window.__API = {
+        get: get,
+        post: post,
+        put: put,
+        delete: del,
+        getUserToken: getUserToken,
+        setUserToken: setUserToken,
+        clearToken: clearUserToken,
+        getBaseUrl: getBaseUrl,
+        setBaseUrl: setBaseUrl,
+        getEnvironment: getEnvironment,
+        isAuthenticated: isAuthenticated,
+        getSession: getSession,
+        refreshToken: refreshTokenIfNeeded
+    };
+}
     
 })(typeof window !== 'undefined' ? window : global);
 
 // ============================================================================
-// ES6 EXPORTS - COMPLETE EXPORT LIST WITH ALL 350+ FUNCTIONS
+// ES6 EXPORTS
 // ============================================================================
 
 export {
@@ -7865,7 +6931,7 @@ export {
     sendToIframe,
     broadcastToParent,
     waitForReady,
-    isCoreReady,
+    isCoreReadyFn as isCoreReady,
     getRequestQueueStatus,
     registerIframe,
     unregisterIframe,

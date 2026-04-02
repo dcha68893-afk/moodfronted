@@ -37,19 +37,18 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Groups | Knecta Chat</title>
     
-    <!-- API System - LOADED FIRST -->
-     
-<script type="module" src="group-core.js"></script>
-<script type="module" src="group-ui.js"></script>
-
+    <!-- API System - LOADED FIRST (Using type="module" for ES6 imports) -->
+    <script type="module" src="group-core.js"></script>
+    <script type="module" src="group-ui.js"></script>
+    
     <script type="module" src="/js/settingsManager.js"></script>
 
     <!-- Font Awesome -->
-<link rel="stylesheet" href="/css/vendor/font-awesome.min.css">
-<link rel="stylesheet" href="/css/vendor/pickr-nano.min.css">
-<link rel="stylesheet" href="/css/vendor/viewer.min.css">
-<link rel="stylesheet" href="/css/vendor/spectrum.min.css">
-<link rel="stylesheet" href="/css/vendor/video-js.min.css">    
+    <link rel="stylesheet" href="/css/vendor/font-awesome.min.css">
+    <link rel="stylesheet" href="/css/vendor/pickr-nano.min.css">
+    <link rel="stylesheet" href="/css/vendor/viewer.min.css">
+    <link rel="stylesheet" href="/css/vendor/spectrum.min.css">
+    <link rel="stylesheet" href="/css/vendor/video-js.min.css">    
     <!-- QR Code Library -->
     <script src="/js/vendor/qrcode.min.js"></script>
     <!-- Link CSS -->
@@ -674,6 +673,23 @@
             text-overflow: ellipsis;
             white-space: nowrap;
         }
+        
+        /* ========== ADDED: Protocol status indicator ========== */
+        .protocol-status {
+            position: fixed;
+            bottom: 10px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0,0,0,0.5);
+            color: white;
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 9px;
+            font-family: monospace;
+            z-index: 1000;
+            pointer-events: none;
+            opacity: 0.5;
+        }
     </style>
     <link rel="stylesheet" href="/css/suppress-webgl.css">
 </head>
@@ -685,6 +701,11 @@
     <div class="connection-status" id="connectionStatus" style="display: none;">
         <span class="status-dot"></span>
         <span class="status-text" id="connectionStatusText">Connecting...</span>
+    </div>
+    
+    <!-- ========== Protocol Status Indicator ========== -->
+    <div class="protocol-status" id="protocolStatus" style="display: none;">
+        <span id="protocolState">BOOT</span>
     </div>
     
     <!-- ========== MODIFIED: Loading Overlay - Hidden by default ========== -->
@@ -1004,7 +1025,7 @@
                 </div>
             </div>
             
-            <!-- ========== EXISTING: Admin Transparency Log ========== -->
+            <!-- ========== EXISTING: Admin Transparency Panel ========== -->
             <div id="adminTransparencyPanel" style="display: none; border-top: 1px solid var(--border-color); padding: 15px;">
                 <h4 style="margin: 0 0 10px 0;"><i class="fas fa-history"></i> Recent Changes</h4>
                 <div id="adminTransparencyLog" class="admin-transparency-log">
@@ -1680,7 +1701,7 @@
         <span id="notificationText">Operation completed successfully</span>
     </div>
 
-    <!-- ========== MODIFIED: Script without debug panel ========== -->
+    <!-- ========== MODIFIED: Script without debug panel, with protocol monitoring ========== -->
     <script>
         (function() {
             // Retry button handler
@@ -1719,6 +1740,40 @@
             };
             
             hideAllOverlays();
+            
+            // Monitor protocol state from core
+            if (window.LifecycleState && typeof window.LifecycleState.subscribe === 'function') {
+                window.LifecycleState.subscribe((newState, oldState) => {
+                    const protocolStatus = document.getElementById('protocolStatus');
+                    const protocolStateSpan = document.getElementById('protocolState');
+                    if (protocolStatus && protocolStateSpan) {
+                        protocolStatus.style.display = 'block';
+                        protocolStateSpan.textContent = newState;
+                        
+                        // Update status color based on state
+                        if (newState === 'ACTIVE') {
+                            protocolStatus.style.background = 'rgba(76, 175, 80, 0.7)';
+                            protocolStatus.style.opacity = '0.3';
+                        } else if (newState === 'WAIT_PARENT') {
+                            protocolStatus.style.background = 'rgba(255, 152, 0, 0.7)';
+                        } else {
+                            protocolStatus.style.background = 'rgba(0,0,0,0.5)';
+                        }
+                        
+                        // Auto-hide after 3 seconds if ACTIVE
+                        if (newState === 'ACTIVE') {
+                            setTimeout(() => {
+                                if (protocolStatus) protocolStatus.style.opacity = '0.1';
+                            }, 3000);
+                        } else {
+                            protocolStatus.style.opacity = '0.5';
+                        }
+                    }
+                });
+            }
+            
+            // Expose core to window for debugging (optional, but helpful)
+            window.__GROUPS_MODULE_READY__ = true;
         })();
     </script>
 </body>

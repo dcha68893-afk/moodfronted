@@ -2061,464 +2061,608 @@ class AuthGateway {
     // ============================================================================
     // PUBLIC API METHODS - UPDATED TO USE API AUTH PROXY WITH waitForReady()
     // ============================================================================
-    
-    /**
-     * Login with credentials - Uses apiAuthProxy.login() with waitForReady()
-     * ENHANCED: Added token propagation and multiple storage locations
-     */
-    async login(credentials) {
-        try {
-            if (!credentials || !credentials.email || !credentials.password) {
-                throw new Error('Missing credentials: email and password are required');
-            }
-            
-            const email = credentials.email.trim();
-            const password = credentials.password;
-            
-            // Ensure API Auth is ready AND fully initialized - USE waitForReady()
-            await this._ensureAPIReady();
-            
-            // Additional wait for full initialization - USE waitForReady() if available
-            if (window.api?.auth && typeof window.api.auth.waitForReady === 'function' && !this._apiAuthFullyInitialized) {
-                console.log('⏳ Calling waitForReady() before login...');
-                try {
-                    await window.api.auth.waitForReady();
-                    this._apiAuthFullyInitialized = true;
-                    console.log('✅ waitForReady() complete for login');
-                } catch (error) {
-                    console.warn('⚠️ waitForReady() failed before login', error);
-                }
-            }
-            
-            // Check if api.auth.js is available directly
-            if (window.api?.auth && typeof window.api.auth.login === 'function') {
-                console.log('✅ api.auth.js v2.1.1+ is directly available, skipping wait');
-                this._apiAuthFullyInitialized = true;
-            } else {
-                // Additional wait for full initialization (legacy path)
-                if (!this._apiAuthFullyInitialized) {
-                    console.log('⏳ api.auth.js not fully initialized, waiting before login...');
-                    const fullInitResult = await window.__apiAuthReadinessManager.waitForFullInitialization();
-                    this._apiAuthFullyInitialized = fullInitResult.fullyInitialized;
-                    
-                    if (!this._apiAuthFullyInitialized) {
-                        console.warn('⚠️ api.auth.js still not fully initialized for login');
-                        // Force check: if we have essential methods, we're ready
-                        if (window.api?.auth && typeof window.api.auth.login === 'function') {
-                            console.log('✅ Forcing ready state - essential methods present');
-                            this._apiAuthFullyInitialized = true;
-                        }
-                    }
-                }
-            }
-            
-            // Ensure UI orchestration is ready
-            await this._ensureUIOrchestrationReady();
-            
-            // Check if login is already in progress for this user
-            const loginKey = `${email}_${Date.now() % 1000}`;
-            if (this._loginInProgress && this._pendingLoginResolvers.has(loginKey)) {
-                console.log('Login already in progress for this user, waiting for existing request');
-                return new Promise((resolve) => {
-                    const checkInterval = setInterval(() => {
-                        if (!this._loginInProgress || !this._pendingLoginResolvers.has(loginKey)) {
-                            clearInterval(checkInterval);
-                            resolve(this.login(credentials));
-                        }
-                    }, 100);
-                });
-            }
-            
-            // Check if user is blocked
-            const blockInfo = this._isUserBlocked(email);
-            if (blockInfo) {
-                return {
-                    success: false,
-                    message: `Too many login attempts. Please wait ${Math.ceil(blockInfo.remaining / 1000)} seconds.`,
-                    blocked: true,
-                    remaining: blockInfo.remaining
-                };
-            }
-            
-            // Mark login as in progress
-            this._loginInProgress = true;
-            this._pendingLoginResolvers.set(loginKey, null);
-            
+
+    // app.ui.auth.js - Complete login function with all fixes
+
+/**
+ * Login with credentials - Uses apiAuthProxy.login() with waitForReady()
+ * ENHANCED: Added token propagation and multiple storage locations
+ * FIXED: Token stored in ALL locations for cross-module compatibility
+ * FIXED: Added storage verification and retry mechanism
+ */
+async login(credentials) {
+    try {
+        console.log('🔐 [AuthGateway] Login attempt for:', credentials.email);
+        
+        // Validate credentials
+        if (!credentials || !credentials.email || !credentials.password) {
+            throw new Error('Missing credentials: email and password are required');
+        }
+        
+        const email = credentials.email.trim();
+        const password = credentials.password;
+        
+        console.log('🔐 [AuthGateway] Login attempt for:', email.substring(0, 3) + '...');
+        
+        // Ensure API Auth is ready AND fully initialized
+        await this._ensureAPIReady();
+        
+        // Additional wait for full initialization - USE waitForReady() if available
+        if (window.api?.auth && typeof window.api.auth.waitForReady === 'function' && !this._apiAuthFullyInitialized) {
+            console.log('⏳ Calling waitForReady() before login...');
             try {
-                console.log('Attempting login with identifier:', email.substring(0, 3) + '...');
+                await window.api.auth.waitForReady();
+                this._apiAuthFullyInitialized = true;
+                console.log('✅ waitForReady() complete for login');
+            } catch (error) {
+                console.warn('⚠️ waitForReady() failed before login', error);
+            }
+        }
+        
+        // Check if api.auth.js is available directly
+        if (window.api?.auth && typeof window.api.auth.login === 'function') {
+            console.log('✅ api.auth.js v2.1.1+ is directly available, skipping wait');
+            this._apiAuthFullyInitialized = true;
+        } else {
+            // Additional wait for full initialization (legacy path)
+            if (!this._apiAuthFullyInitialized) {
+                console.log('⏳ api.auth.js not fully initialized, waiting before login...');
+                const fullInitResult = await window.__apiAuthReadinessManager.waitForFullInitialization();
+                this._apiAuthFullyInitialized = fullInitResult.fullyInitialized;
                 
-                // Use apiAuthProxy.login()
-                const response = await this._apiAuthProxy.login(email, password, { source: 'auth_gateway' });
-                
-                console.log('Login API call completed, processing response...');
-                console.debug('[AUTH] Raw login response:', response);
-                
-                // Handle fallback mode
-                if (response.fallbackMode) {
-                    console.warn('⚠️ Login in fallback mode');
-                    this._loginInProgress = false;
-                    this._pendingLoginResolvers.delete(loginKey);
-                    
-                    // If retryable, queue for retry
-                    if (response.retryable) {
-                        console.log('🔄 Login fallback is retryable, will retry automatically');
+                if (!this._apiAuthFullyInitialized) {
+                    console.warn('⚠️ api.auth.js still not fully initialized for login');
+                    // Force check: if we have essential methods, we're ready
+                    if (window.api?.auth && typeof window.api.auth.login === 'function') {
+                        console.log('✅ Forcing ready state - essential methods present');
+                        this._apiAuthFullyInitialized = true;
                     }
-                    
-                    return response;
+                }
+            }
+        }
+        
+        // Ensure UI orchestration is ready
+        await this._ensureUIOrchestrationReady();
+        
+        // Check if login is already in progress for this user
+        const loginKey = `${email}_${Date.now() % 1000}`;
+        if (this._loginInProgress && this._pendingLoginResolvers.has(loginKey)) {
+            console.log('Login already in progress for this user, waiting for existing request');
+            return new Promise((resolve) => {
+                const checkInterval = setInterval(() => {
+                    if (!this._loginInProgress || !this._pendingLoginResolvers.has(loginKey)) {
+                        clearInterval(checkInterval);
+                        resolve(this.login(credentials));
+                    }
+                }, 100);
+            });
+        }
+        
+        // Check if user is blocked
+        const blockInfo = this._isUserBlocked(email);
+        if (blockInfo) {
+            return {
+                success: false,
+                message: `Too many login attempts. Please wait ${Math.ceil(blockInfo.remaining / 1000)} seconds.`,
+                blocked: true,
+                remaining: blockInfo.remaining
+            };
+        }
+        
+        // Mark login as in progress
+        this._loginInProgress = true;
+        this._pendingLoginResolvers.set(loginKey, null);
+        
+        try {
+            console.log('Attempting login with identifier:', email.substring(0, 3) + '...');
+            
+            // Use apiAuthProxy.login()
+            const response = await this._apiAuthProxy.login(email, password, { source: 'auth_gateway' });
+            
+            console.log('Login API call completed, processing response...');
+            console.debug('[AUTH] Raw login response:', response);
+            
+            // Handle fallback mode
+            if (response.fallbackMode) {
+                console.warn('⚠️ Login in fallback mode');
+                this._loginInProgress = false;
+                this._pendingLoginResolvers.delete(loginKey);
+                
+                // If retryable, queue for retry
+                if (response.retryable) {
+                    console.log('🔄 Login fallback is retryable, will retry automatically');
                 }
                 
-                // Check if response indicates success
-                const isSuccessful = response.success === true || response.ok === true || response.token;
+                return response;
+            }
+            
+            // Check if response indicates success
+            const isSuccessful = response.success === true || response.ok === true || response.token;
+            
+            if (isSuccessful) {
+                // Extract data from response
+                const token = response.token || response.accessToken || response.jwt;
+                let user = response.user || response.data?.user || response.data;
                 
-                if (isSuccessful) {
-                    // Extract data from response
-                    const token = response.token || response.accessToken || response.jwt;
-                    let user = response.user || response.data?.user || response.data;
+                // ========== CRITICAL FIX: ENHANCED TOKEN PROPAGATION ==========
+                if (token) {
+                    console.log('✅ Token received from login:', token.substring(0, 20) + '...');
+                    console.log('Token length:', token.length);
                     
-                    // ========== CRITICAL FIX: ENHANCED TOKEN PROPAGATION ==========
-                    if (token) {
-                        console.log('✅ Token received from login:', token.substring(0, 20) + '...');
+                    // ========== STORE TOKEN IN ALL LOCATIONS ==========
+                    try {
+                        // 1. Standard localStorage keys
+                        localStorage.setItem('token', token);
+                        localStorage.setItem('accessToken', token);
+                        localStorage.setItem('USER_TOKEN', token);
+                        localStorage.setItem('moodchat_token', token);
+                        localStorage.setItem('jwt', token);
+                        localStorage.setItem('authToken', token);
                         
-                        // Store token in multiple locations for compatibility
-                        try {
-                            // 1. Standard localStorage keys
-                            localStorage.setItem('token', token);
-                            localStorage.setItem('accessToken', token);
-                            localStorage.setItem('USER_TOKEN', token);
-                            localStorage.setItem('moodchat_token', token);
-                            
-                            // 2. For backward compatibility
-                            localStorage.setItem('authToken', token);
-                            
-                            console.log('✅ Token stored in all localStorage locations');
-                        } catch (e) {
-                            console.warn('⚠️ Failed to store token in localStorage:', e);
-                        }
-                        
-                        // 3. Store on window object for in-memory access
-                        try {
-                            window.token = token;
-                            window.accessToken = token;
-                            window.__userToken = token;
-                            window.__accessToken = token;
-                            
-                            console.log('✅ Token stored on window object');
-                        } catch (e) {
-                            console.warn('⚠️ Failed to store token on window object:', e);
-                        }
-                        
-                        // 4. Store in sessionStorage as backup
-                        try {
-                            sessionStorage.setItem('token', token);
-                            sessionStorage.setItem('accessToken', token);
-                        } catch (e) {
-                            console.warn('⚠️ Failed to store token in sessionStorage:', e);
-                        }
-                        
-                        // 5. Dispatch events for other modules
-                        try {
-                            window.dispatchEvent(new CustomEvent('token:stored', {
-                                detail: { token: token, timestamp: Date.now() }
-                            }));
-                            
-                            window.dispatchEvent(new CustomEvent('auth:token:ready', {
-                                detail: { token: token, timestamp: Date.now() }
-                            }));
-                        } catch (e) {
-                            console.warn('⚠️ Failed to dispatch token events:', e);
-                        }
+                        console.log('✅ Token stored in all localStorage locations');
+                    } catch (e) {
+                        console.warn('⚠️ Failed to store token in localStorage:', e);
                     }
                     
-                    // Handle edge cases
-                    if (!user && token) {
-                        console.warn('Login successful but no user data, creating minimal user object');
-                        user = {
-                            email: email,
-                            username: email.split('@')[0],
-                            id: 'temp_' + Date.now()
+                    // 2. Unified auth storage (kynecta_auth)
+                    try {
+                        const unifiedAuth = {
+                            token: token,
+                            user: user,
+                            userId: user?.id || user?.userId,
+                            timestamp: Date.now(),
+                            validated: true,
+                            expiresAt: Date.now() + 3600000,
+                            version: '4.1.1'
                         };
+                        localStorage.setItem('kynecta_auth', JSON.stringify(unifiedAuth));
+                        console.log('✅ Token stored in unified auth storage');
+                    } catch (e) {
+                        console.warn('⚠️ Failed to store unified auth:', e);
                     }
                     
-                    // Validate user object
-                    if (user && !this._validateUserObject(user)) {
-                        console.error('Login failed: Invalid user object', user);
-                        this._recordLoginAttempt(email, false);
-                        this._loginInProgress = false;
-                        this._pendingLoginResolvers.delete(loginKey);
-                        return {
-                            success: false,
-                            message: 'Login failed: Invalid user data received'
-                        };
+                    // 3. Session storage as backup
+                    try {
+                        sessionStorage.setItem('token', token);
+                        sessionStorage.setItem('accessToken', token);
+                        sessionStorage.setItem('moodchat_token', token);
+                        console.log('✅ Token stored in sessionStorage');
+                    } catch (e) {
+                        console.warn('⚠️ Failed to store token in sessionStorage:', e);
                     }
                     
-                    // Record successful attempt
-                    this._recordLoginAttempt(email, true);
-                    
-                    // Update auth state immediately
-                    const updateResult = await this._updateAuthStateImmediately('authenticated', user, token);
-                    
-                    if (!updateResult.success) {
-                        console.error('Failed to update auth state immediately:', updateResult.error);
-                        this._loginInProgress = false;
-                        this._pendingLoginResolvers.delete(loginKey);
-                        return {
-                            success: false,
-                            message: 'Login failed: Could not save authentication state'
-                        };
+                    // 4. Store on window object for in-memory access
+                    try {
+                        window.token = token;
+                        window.accessToken = token;
+                        window.__userToken = token;
+                        window.__accessToken = token;
+                        window.moodchatToken = token;
+                        console.log('✅ Token stored on window object');
+                    } catch (e) {
+                        console.warn('⚠️ Failed to store token on window object:', e);
                     }
                     
-                    // Update window.currentUser for UI compatibility
-                    if (typeof window !== 'undefined') {
-                        window.currentUser = user;
-                        Object.defineProperty(window, 'currentUser', {
-                            value: user,
-                            writable: true,
-                            configurable: true
+                    // 5. Also store in window.api if available
+                    try {
+                        if (window.api && window.api.core) {
+                            if (typeof window.api.core.setUserToken === 'function') {
+                                window.api.core.setUserToken(token);
+                                console.log('✅ Token set in api.core');
+                            }
+                            if (typeof window.api.core.setToken === 'function') {
+                                window.api.core.setToken(token);
+                                console.log('✅ Token set in api.core.setToken');
+                            }
+                        }
+                    } catch (e) {
+                        console.warn('⚠️ Failed to set token in api.core:', e);
+                    }
+                    
+                    // 6. Dispatch events for other modules
+                    try {
+                        const tokenEvent = new CustomEvent('token:stored', {
+                            detail: { 
+                                token: token, 
+                                timestamp: Date.now(),
+                                source: 'login',
+                                userId: user?.id
+                            }
                         });
+                        window.dispatchEvent(tokenEvent);
+                        
+                        const authEvent = new CustomEvent('auth:token:ready', {
+                            detail: { 
+                                token: token, 
+                                timestamp: Date.now(),
+                                source: 'login'
+                            }
+                        });
+                        window.dispatchEvent(authEvent);
+                        
+                        console.log('✅ Token events dispatched');
+                    } catch (e) {
+                        console.warn('⚠️ Failed to dispatch token events:', e);
                     }
-                    
-                    // Force immediate UI update
-                    this._forceUIUpdate();
-                    
-                    // Clear login in progress flag
-                    this._loginInProgress = false;
-                    this._pendingLoginResolvers.delete(loginKey);
-                    
-                    console.log('✅ Login successful, auth state updated:', {
-                        userEmail: user ? (user.email || user.username) : 'unknown',
-                        tokenPresent: !!token,
-                        successIndicators: {
-                            success: response.success,
-                            ok: response.ok,
-                            hasToken: !!token
-                        }
-                    });
-                    
-                    // Get success message
-                    const successMessage = response.message || response.msg || 'Authentication successful';
-                    
-                    return {
-                        success: true,
-                        user,
-                        token,
-                        message: successMessage
+                }
+                
+                // Handle edge cases - create minimal user if missing
+                if (!user && token) {
+                    console.warn('Login successful but no user data, creating minimal user object');
+                    user = {
+                        id: email.split('@')[0] + '_' + Date.now(),
+                        email: email,
+                        username: email.split('@')[0],
+                        displayName: email.split('@')[0]
                     };
-                } else {
-                    // Handle error response
-                    console.log('Login failed - response:', response);
+                }
+                
+                // Validate user object
+                if (user && !this._validateUserObject(user)) {
+                    console.error('Login failed: Invalid user object', user);
                     this._recordLoginAttempt(email, false);
                     this._loginInProgress = false;
                     this._pendingLoginResolvers.delete(loginKey);
-                    
-                    // Get error message
-                    const errorMessage = response.message || response.error || 'Login failed';
-                    
                     return {
                         success: false,
-                        message: errorMessage
+                        message: 'Login failed: Invalid user data received'
                     };
                 }
-            } catch (error) {
-                console.error('Login error:', error);
+                
+                // Record successful attempt
+                this._recordLoginAttempt(email, true);
+                
+                // Update auth state immediately
+                const updateResult = await this._updateAuthStateImmediately('authenticated', user, token);
+                
+                if (!updateResult.success) {
+                    console.error('Failed to update auth state immediately:', updateResult.error);
+                    this._loginInProgress = false;
+                    this._pendingLoginResolvers.delete(loginKey);
+                    return {
+                        success: false,
+                        message: 'Login failed: Could not save authentication state'
+                    };
+                }
+                
+                // Update window.currentUser for UI compatibility
+                if (typeof window !== 'undefined') {
+                    window.currentUser = user;
+                    window.user = user;
+                    
+                    // Also store user in localStorage
+                    try {
+                        localStorage.setItem('currentUser', JSON.stringify(user));
+                        localStorage.setItem('moodchat_user', JSON.stringify(user));
+                        localStorage.setItem('user', JSON.stringify(user));
+                    } catch (e) {
+                        console.warn('⚠️ Failed to store user data:', e);
+                    }
+                }
+                
+                // CRITICAL: Force a small delay to ensure storage is written
+                console.log('⏳ Waiting for storage to be written...');
+                await new Promise(resolve => setTimeout(resolve, 100));
+                
+                // Verify token was stored correctly
+                const verifyToken = localStorage.getItem('token');
+                const verifyUnified = localStorage.getItem('kynecta_auth');
+                
+                console.log('🔍 Verification after storage:');
+                console.log('   - localStorage.token:', verifyToken ? 'YES (length: ' + verifyToken.length + ')' : 'NO');
+                console.log('   - localStorage.kynecta_auth:', verifyUnified ? 'YES' : 'NO');
+                console.log('   - window.token:', window.token ? 'YES' : 'NO');
+                
+                if (!verifyToken) {
+                    console.error('❌ CRITICAL: Token was not stored! Retrying...');
+                    // Force store again
+                    localStorage.setItem('token', token);
+                    localStorage.setItem('accessToken', token);
+                    localStorage.setItem('moodchat_token', token);
+                    
+                    const retryUnified = {
+                        token: token,
+                        user: user,
+                        userId: user?.id,
+                        timestamp: Date.now(),
+                        validated: true,
+                        expiresAt: Date.now() + 3600000
+                    };
+                    localStorage.setItem('kynecta_auth', JSON.stringify(retryUnified));
+                    
+                    // Verify again
+                    const retryVerify = localStorage.getItem('token');
+                    if (!retryVerify) {
+                        console.error('❌ FATAL: Token storage failed even after retry!');
+                    } else {
+                        console.log('✅ Token storage successful on retry');
+                    }
+                }
+                
+                // Force immediate UI update
+                this._forceUIUpdate();
+                
+                // Clear login in progress flag
+                this._loginInProgress = false;
+                this._pendingLoginResolvers.delete(loginKey);
+                
+                console.log('✅ Login successful, auth state updated:', {
+                    userEmail: user ? (user.email || user.username) : 'unknown',
+                    tokenPresent: !!token,
+                    tokenLength: token ? token.length : 0,
+                    userId: user?.id,
+                    storageVerified: !!verifyToken
+                });
+                
+                // Show success message
+                try {
+                    if (window.CoreUtils && window.CoreUtils.showNotification) {
+                        window.CoreUtils.showNotification('Success', 'Login successful! Redirecting...', 'success');
+                    } else if (window.showNotification) {
+                        window.showNotification('Login successful! Redirecting...', 'success');
+                    } else {
+                        console.log('✅ Login successful! Redirecting to chat...');
+                    }
+                } catch (notifError) {
+                    console.log('✅ Login successful! Redirecting to chat...');
+                }
+                
+                // Get success message
+                const successMessage = response.message || response.msg || 'Authentication successful';
+                
+                // CRITICAL: Redirect to chat.html
+                console.log('🚀 Redirecting to chat.html...');
+                
+                // Use setTimeout to ensure all storage operations are complete
+                setTimeout(() => {
+                    window.location.href = 'chat.html';
+                }, 200);
+                
+                return {
+                    success: true,
+                    user: user,
+                    token: token,
+                    message: successMessage,
+                    userId: user?.id,
+                    redirectTo: 'chat.html'
+                };
+            } else {
+                // Handle error response
+                console.log('Login failed - response:', response);
                 this._recordLoginAttempt(email, false);
                 this._loginInProgress = false;
                 this._pendingLoginResolvers.delete(loginKey);
                 
-                // Check if it's a network timeout but auth state was updated
-                if (error.message && (error.message.includes('timeout') || error.message.includes('Timeout'))) {
-                    console.warn('Login request timed out, checking if auth state was updated');
-                    if (this._state.status === 'authenticated' && this._state.user && this._state.token) {
-                        console.log('Auth state indicates successful login despite timeout');
-                        return {
-                            success: true,
-                            user: this._state.user,
-                            token: this._state.token,
-                            message: 'Login successful (recovered from timeout)'
-                        };
-                    }
-                }
+                // Get error message
+                const errorMessage = response.message || response.error || 'Login failed';
                 
-                // Check if it's a "module not ready" error
-                if (error.message && error.message.includes('not ready')) {
-                    console.warn('Login failed: Authentication module not ready');
-                    return {
-                        success: false,
-                        message: 'Authentication service is still initializing. Please try again in a moment.',
-                        retryable: true,
-                        fallback: true
-                    };
-                }
+                // Show error notification
+                try {
+                    if (window.CoreUtils && window.CoreUtils.showNotification) {
+                        window.CoreUtils.showNotification('Error', errorMessage, 'error');
+                    } else if (window.showNotification) {
+                        window.showNotification(errorMessage, 'error');
+                    }
+                } catch (notifError) {}
                 
                 return {
                     success: false,
-                    message: this._getUserFriendlyErrorMessage(error)
+                    message: errorMessage,
+                    code: response.code || 'LOGIN_FAILED'
                 };
             }
         } catch (error) {
-            window.__authSafetyGuards._logOnce(`Login method failed: ${error.message}`, 'LOGIN_METHOD');
+            console.error('Login error:', error);
+            this._recordLoginAttempt(email, false);
+            this._loginInProgress = false;
+            this._pendingLoginResolvers.delete(loginKey);
+            
+            // Check if it's a network timeout but auth state was updated
+            if (error.message && (error.message.includes('timeout') || error.message.includes('Timeout'))) {
+                console.warn('Login request timed out, checking if auth state was updated');
+                if (this._state.status === 'authenticated' && this._state.user && this._state.token) {
+                    console.log('Auth state indicates successful login despite timeout');
+                    
+                    // Show success message and redirect
+                    try {
+                        if (window.CoreUtils && window.CoreUtils.showNotification) {
+                            window.CoreUtils.showNotification('Success', 'Login successful! Redirecting...', 'success');
+                        }
+                    } catch (notifError) {}
+                    
+                    setTimeout(() => {
+                        window.location.href = 'chat.html';
+                    }, 200);
+                    
+                    return {
+                        success: true,
+                        user: this._state.user,
+                        token: this._state.token,
+                        message: 'Login successful (recovered from timeout)'
+                    };
+                }
+            }
+            
+            // Check if it's a "module not ready" error
+            if (error.message && error.message.includes('not ready')) {
+                console.warn('Login failed: Authentication module not ready');
+                return {
+                    success: false,
+                    message: 'Authentication service is still initializing. Please try again in a moment.',
+                    retryable: true,
+                    fallback: true
+                };
+            }
+            
+            // Show error notification
+            const errorMessage = this._getUserFriendlyErrorMessage(error);
+            try {
+                if (window.CoreUtils && window.CoreUtils.showNotification) {
+                    window.CoreUtils.showNotification('Error', errorMessage, 'error');
+                } else if (window.showNotification) {
+                    window.showNotification(errorMessage, 'error');
+                }
+            } catch (notifError) {}
+            
             return {
                 success: false,
-                message: 'Login service temporarily unavailable',
-                fallback: true,
-                retryable: true
+                message: errorMessage,
+                code: error.code || 'LOGIN_ERROR'
             };
         }
+    } catch (error) {
+        console.error('❌ [AuthGateway] Login method failed:', error);
+        
+        // Show error notification
+        try {
+            if (window.CoreUtils && window.CoreUtils.showNotification) {
+                window.CoreUtils.showNotification('Error', 'Login service temporarily unavailable', 'error');
+            }
+        } catch (notifError) {}
+        
+        return {
+            success: false,
+            message: 'Login service temporarily unavailable',
+            fallback: true,
+            retryable: true,
+            code: 'SERVICE_UNAVAILABLE'
+        };
     }
-    
+}
+
     /**
      * Register a new user - Uses apiAuthProxy.register()
      */
-    async register(data) {
+   async register(data) {
+    try {
+        console.log('🔐 [AuthGateway] Register called with:', { email: data.email, username: data.username });
+        
+        if (!data || !data.email || !data.password || !data.username) {
+            throw new Error('Missing required registration data');
+        }
+        
+        // Ensure API Auth is ready
+        await this._ensureAPIReady();
+        
+        // Ensure UI orchestration is ready
+        await this._ensureUIOrchestrationReady();
+        
         try {
-            if (!data || !data.email || !data.password || !data.username) {
-                throw new Error('Missing required registration data');
-            }
-            
-            // Ensure API Auth is ready AND fully initialized - USE waitForReady()
-            await this._ensureAPIReady();
-            
-            // Wait for full initialization if needed - USE waitForReady()
-            if (!this._apiAuthFullyInitialized) {
-                if (window.api?.auth && typeof window.api.auth.waitForReady === 'function') {
-                    try {
-                        await window.api.auth.waitForReady();
-                        this._apiAuthFullyInitialized = true;
-                    } catch (error) {
-                        console.warn('⚠️ waitForReady() failed before register', error);
-                        const fullInitResult = await window.__apiAuthReadinessManager.waitForFullInitialization();
-                        this._apiAuthFullyInitialized = fullInitResult.fullyInitialized;
-                    }
-                } else {
-                    const fullInitResult = await window.__apiAuthReadinessManager.waitForFullInitialization();
-                    this._apiAuthFullyInitialized = fullInitResult.fullyInitialized;
-                }
-            }
-            
-            // Ensure UI orchestration is ready
-            await this._ensureUIOrchestrationReady();
-            
-            try {
-                // Validate passwords match
-                if (data.password !== data.confirmPassword) {
-                    return {
-                        success: false,
-                        message: 'Passwords do not match'
-                    };
-                }
-                
-                // Validate email format
-                if (!this._validateEmail(data.email)) {
-                    return {
-                        success: false,
-                        message: 'Please provide a valid email address'
-                    };
-                }
-                
-                console.log('Attempting registration for:', data.email);
-                
-                // Use apiAuthProxy.register()
-                const response = await this._apiAuthProxy.register({
-                    email: data.email.trim().toLowerCase(),
-                    username: data.username.trim(),
-                    password: data.password,
-                    displayName: data.displayName || data.username
-                });
-                
-                console.log('Registration API call completed, processing response...');
-                
-                // Handle fallback mode
-                if (response.fallbackMode) {
-                    console.warn('⚠️ Registration in fallback mode');
-                    return response;
-                }
-                
-                // Check success
-                const isSuccessful = response.success === true || response.ok === true;
-                
-                if (isSuccessful) {
-                    const token = response.token || response.accessToken || response.jwt;
-                    let user = response.user || response.data?.user || response.data;
-                    
-                    if (token && user) {
-                        // Auto-login after registration
-                        if (!this._validateUserObject(user)) {
-                            console.error('Registration failed: Invalid user object', user);
-                            return {
-                                success: false,
-                                message: 'Registration successful but user data is invalid'
-                            };
-                        }
-                        
-                        // Update auth state immediately
-                        const updateResult = await this._updateAuthStateImmediately('authenticated', user, token);
-                        
-                        if (!updateResult.success) {
-                            console.error('Failed to update auth state after registration:', updateResult.error);
-                            return {
-                                success: false,
-                                message: 'Registration successful but could not auto-login'
-                            };
-                        }
-                        
-                        // Update window.currentUser for UI compatibility
-                        if (typeof window !== 'undefined') {
-                            window.currentUser = user;
-                            Object.defineProperty(window, 'currentUser', {
-                                value: user,
-                                writable: true,
-                                configurable: true
-                            });
-                        }
-                        
-                        // Force immediate UI update
-                        this._forceUIUpdate();
-                        
-                        // Get success message
-                        const successMessage = response.message || response.msg || 'Registration successful';
-                        
-                        return {
-                            success: true,
-                            user,
-                            token,
-                            autoLoggedIn: true,
-                            message: successMessage
-                        };
-                    } else {
-                        // Registration successful, no auto-login
-                        const successMessage = response.message || response.msg || 'Registration successful. Please check your email to verify your account.';
-                        
-                        return {
-                            success: true,
-                            autoLoggedIn: false,
-                            message: successMessage
-                        };
-                    }
-                } else {
-                    // Get error message
-                    const errorMessage = response.message || response.error || 'Registration failed';
-                    
-                    return {
-                        success: false,
-                        message: errorMessage
-                    };
-                }
-            } catch (error) {
-                console.error('Registration error:', error);
+            // Validate passwords match
+            if (data.password !== data.confirmPassword) {
                 return {
                     success: false,
-                    message: this._getUserFriendlyErrorMessage(error)
+                    message: 'Passwords do not match'
+                };
+            }
+            
+            // Validate email format
+            if (!this._validateEmail(data.email)) {
+                return {
+                    success: false,
+                    message: 'Please provide a valid email address'
+                };
+            }
+            
+            console.log('🔐 [AuthGateway] Sending registration to api.auth...');
+            
+            // Use apiAuthProxy.register()
+            const response = await this._apiAuthProxy.register({
+                email: data.email.trim().toLowerCase(),
+                username: data.username.trim(),
+                password: data.password,
+                displayName: data.displayName || data.username
+            });
+            
+            console.log('🔐 [AuthGateway] Registration response:', response);
+            
+            // Check if response indicates success
+            const isSuccessful = response.success === true || response.ok === true;
+            
+            if (isSuccessful) {
+                const token = response.token || response.accessToken;
+                const user = response.user || response.data?.user;
+                
+                console.log('✅ [AuthGateway] Registration successful');
+                console.log('   Token present:', !!token);
+                console.log('   User present:', !!user);
+                
+                if (token && user) {
+                    // Store token in multiple locations
+                    try {
+                        localStorage.setItem('token', token);
+                        localStorage.setItem('accessToken', token);
+                        localStorage.setItem('moodchat_token', token);
+                        localStorage.setItem('USER_TOKEN', token);
+                        localStorage.setItem('kynecta_auth', JSON.stringify({ token, user, timestamp: Date.now() }));
+                        window.token = token;
+                        window.accessToken = token;
+                        window.currentUser = user;
+                        console.log('✅ [AuthGateway] Token stored in all locations');
+                    } catch (e) {
+                        console.warn('⚠️ [AuthGateway] Failed to store token:', e);
+                    }
+                    
+                    // Update auth state
+                    const updateResult = await this._updateAuthStateImmediately('authenticated', user, token);
+                    
+                    if (updateResult.success) {
+                        console.log('✅ [AuthGateway] Auth state updated, redirecting...');
+                        
+                        // Show success message
+                        window.CoreUtils.showNotification('Success', 'Registration successful! Redirecting to chat...', 'success');
+                        
+                        // Force redirect to chat.html
+                        setTimeout(() => {
+                            console.log('🚀 [AuthGateway] Redirecting to chat.html');
+                            window.location.href = 'chat.html';
+                        }, 1000);
+                        
+                        return {
+                            success: true,
+                            user: user,
+                            token: token,
+                            message: response.message || 'Registration successful'
+                        };
+                    } else {
+                        console.error('❌ [AuthGateway] Failed to update auth state:', updateResult.error);
+                        return {
+                            success: false,
+                            message: 'Registration successful but auto-login failed'
+                        };
+                    }
+                } else {
+                    console.warn('⚠️ [AuthGateway] Registration successful but no token/user received');
+                    console.log('   Response:', response);
+                    return {
+                        success: true,
+                        message: 'Registration successful but no token received. Please log in manually.'
+                    };
+                }
+            } else {
+                console.error('❌ [AuthGateway] Registration failed:', response.message);
+                return {
+                    success: false,
+                    message: response.message || 'Registration failed'
                 };
             }
         } catch (error) {
-            window.__authSafetyGuards._logOnce(`Register method failed: ${error.message}`, 'REGISTER_METHOD');
+            console.error('❌ [AuthGateway] Register error:', error);
             return {
                 success: false,
-                message: 'Registration service temporarily unavailable',
-                fallback: true,
-                retryable: true
+                message: this._getUserFriendlyErrorMessage(error)
             };
         }
+    } catch (error) {
+        window.__authSafetyGuards._logOnce(`Register method failed: ${error.message}`, 'REGISTER_METHOD');
+        return {
+            success: false,
+            message: 'Registration service temporarily unavailable',
+            fallback: true,
+            retryable: true
+        };
     }
+}
     
     /**
      * Auto-login from stored token - Uses apiAuthProxy.validateAuth() or getUser() with waitForReady()

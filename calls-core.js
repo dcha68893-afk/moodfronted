@@ -1,6 +1,6 @@
 // calls-core.js
 // ==================== CALL IFRAME CORE MODULE - DETERMINISTIC LIFECYCLE ====================
-// Version: 8.2.2 - DETERMINISTIC PROTOCOL: Strict lifecycle, no retry loops, exact handshake
+// Version: 9.0.2 - STABILITY FIXES: Session validation, lifecycle hardening, duplicate prevention
 // ============================================================================================
 
 (function() {
@@ -8,8 +8,67 @@
 
     const MODULE_NAME = 'calls';  // EXACT module name per contract
     
+    // ==================== SESSION VALIDATION GUARD (CRITICAL PATCH) ====================
+function __isValidSession(session) {
+    if (!session) return false;
+    
+    // Token validation
+    if (!session.token || typeof session.token !== 'string' || session.token.length < 10) {
+        return false;
+    }
+    
+    // Extract userId from various possible locations
+    let userId = session.userId;
+    if (!userId && session.user) {
+        userId = session.user.id || session.user.userId;
+    }
+    if (!userId && session.userData) {
+        userId = session.userData.id || session.userData.userId;
+    }
+    
+    // userId validation - CRITICAL: Reject fake/default values
+    if (userId === undefined || userId === null) {
+        // For initial validation, if we don't have userId but have token, we might still accept
+        // This helps with debugging - we'll see that userId is missing
+        console.log(`[${MODULE_NAME}][__isValidSession] No userId found, but token present`);
+        return false;
+    }
+    
+    // Reject invalid userId patterns
+    if (typeof userId === 'string') {
+        const trimmedUserId = userId.trim();
+        if (trimmedUserId === '' || trimmedUserId === 'user' || trimmedUserId === 'default' || 
+            trimmedUserId === 'null' || trimmedUserId === 'undefined') {
+            console.log(`[${MODULE_NAME}][__isValidSession] Invalid userId string: ${trimmedUserId}`);
+            return false;
+        }
+    }
+    
+    // Reject numeric userId 0 (fake/default)
+    if (typeof userId === 'number' && userId === 0) {
+        console.log(`[${MODULE_NAME}][__isValidSession] Invalid userId number: 0`);
+        return false;
+    }
+    
+    // Authenticated flag must be true for valid session
+    if (session.authenticated !== true) {
+        console.log(`[${MODULE_NAME}][__isValidSession] authenticated flag not true`);
+        return false;
+    }
+    
+    // Optional: Check expiration
+    if (session.expiresAt && session.expiresAt < Date.now()) {
+        console.log(`[${MODULE_NAME}][__isValidSession] Session expired`);
+        return false;
+    }
+    
+    console.log(`[${MODULE_NAME}][__isValidSession] Session valid, userId: ${userId}`);
+    return true;
+}
+
     // ==================== SANDBOX-COMPLIANT STORAGE PROXY ====================
     // CRITICAL: No direct localStorage/sessionStorage access in sandboxed iframe
+    // NOTE: Storage is ONLY for non-critical UI preferences, NEVER for call state
     const StorageProxy = {
         _pendingRequests: new Map(),
         _requestId: 0,
@@ -134,6 +193,8 @@
         _pendingRequests: new Map(),
         _requestId: 0,
         _listeners: new Set(),
+        _lastSessionId: null,
+        _validSessionSet: false,  // Track if we already have a valid session
         
         _generateRequestId() {
             return `session_${++this._requestId}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
@@ -165,7 +226,7 @@
         },
         
         isAuthenticated() {
-            return this._isAuthenticated && !!this._token;
+            return this._isAuthenticated && !!this._token && this._validSessionSet;
         },
         
         handleSessionMessage(event) {
@@ -173,27 +234,63 @@
             
             const message = event.data;
             
+            // CRITICAL: Session deduplication using sessionId
+            const sessionId = message.sessionId || message.payload?.sessionId || message.data?.sessionId;
+            if (sessionId && this._lastSessionId === sessionId) {
+                console.log(`[${MODULE_NAME}][SessionClient] Duplicate session message ignored (sessionId: ${sessionId})`);
+                return true;
+            }
+            
             // Handle different session message types
             if (message.type === 'SESSION_DATA' || message.type === 'SESSION_ACTIVE') {
                 const sessionData = message.payload || message.data || message;
                 
-                this._session = {
+                // ==================== CRITICAL: SESSION VALIDATION ====================
+                // Extract and validate session data
+                const candidateSession = {
                     token: sessionData.token || sessionData.jwt || sessionData.accessToken,
                     userId: sessionData.userId || sessionData.user?.id,
                     user: sessionData.user || {},
                     expiresAt: sessionData.expiresAt || sessionData.expiry || (Date.now() + 3600000),
-                    authenticated: sessionData.authenticated !== false
+                    authenticated: sessionData.authenticated !== false,
+                    sessionId: sessionId || Date.now()
                 };
                 
+                // REJECT INVALID SESSION IMMEDIATELY
+                if (!__isValidSession(candidateSession)) {
+                    console.warn(`[${MODULE_NAME}][SessionClient] Rejected invalid session data`, {
+                        hasToken: !!candidateSession.token,
+                        userId: candidateSession.userId,
+                        authenticated: candidateSession.authenticated
+                    });
+                    return true;
+                }
+                
+                // IMMUTABLE SESSION PROTECTION: Prevent overwriting valid session with invalid data
+                if (this._validSessionSet && this._session && __isValidSession(this._session)) {
+                    if (!__isValidSession(candidateSession)) {
+                        console.warn(`[${MODULE_NAME}][SessionClient] Prevented session downgrade - keeping existing valid session`);
+                        return true;
+                    }
+                }
+                
+                // Safe update
+                this._session = candidateSession;
                 this._token = this._session.token;
                 this._userId = this._session.userId;
                 this._isAuthenticated = this._session.authenticated && !!this._token;
+                this._validSessionSet = true;
+                
+                if (sessionId) {
+                    this._lastSessionId = sessionId;
+                }
                 
                 this._notifyListeners('session_updated', this._session);
                 
-                console.log(`[${MODULE_NAME}][SessionClient] Session received:`, {
+                console.log(`[${MODULE_NAME}][SessionClient] Valid session received:`, {
                     authenticated: this._isAuthenticated,
-                    userId: this._userId
+                    userId: this._userId,
+                    sessionId: this._session.sessionId
                 });
                 
                 return true;
@@ -204,6 +301,8 @@
                 this._token = null;
                 this._userId = null;
                 this._isAuthenticated = false;
+                this._lastSessionId = null;
+                this._validSessionSet = false;
                 
                 this._notifyListeners('session_invalid', {});
                 console.log(`[${MODULE_NAME}][SessionClient] Session invalidated`);
@@ -214,13 +313,16 @@
             if (message.type === 'TOKEN_UPDATE' || message.type === 'SESSION_REFRESHED') {
                 const tokenData = message.payload || message.data;
                 if (tokenData && tokenData.token) {
-                    this._token = tokenData.token;
-                    if (this._session) {
+                    // Only update token if we have a valid session
+                    if (this._validSessionSet && this._session && __isValidSession(this._session)) {
+                        this._token = tokenData.token;
                         this._session.token = tokenData.token;
+                        this._isAuthenticated = true;
+                        this._notifyListeners('token_updated', { token: this._token });
+                        console.log(`[${MODULE_NAME}][SessionClient] Token refreshed`);
+                    } else {
+                        console.warn(`[${MODULE_NAME}][SessionClient] Token refresh ignored - no valid session`);
                     }
-                    this._isAuthenticated = true;
-                    this._notifyListeners('token_updated', { token: this._token });
-                    console.log(`[${MODULE_NAME}][SessionClient] Token refreshed`);
                 }
                 return true;
             }
@@ -230,6 +332,8 @@
                 this._token = null;
                 this._userId = null;
                 this._isAuthenticated = false;
+                this._lastSessionId = null;
+                this._validSessionSet = false;
                 this._notifyListeners('auth_error', message.payload || {});
                 console.warn(`[${MODULE_NAME}][SessionClient] Auth error received`);
                 return true;
@@ -261,19 +365,33 @@
         cleanup() {
             this._pendingRequests.clear();
             this._listeners.clear();
+            this._validSessionSet = false;
         }
     };
     
     // ==================== MESSAGE DEDUPLICATION ====================
     const MessageGuard = {
-        _seenMessages: new Set(),
+        _seenMessages: new Map(), // Store with timestamp for TTL
         _maxSize: 1000,
+        _ttlMs: 30000, // 30 seconds TTL
         _cleanupInterval: null,
         
         initialize() {
             this._cleanupInterval = setInterval(() => {
+                const now = Date.now();
+                for (const [messageId, timestamp] of this._seenMessages.entries()) {
+                    if (now - timestamp > this._ttlMs) {
+                        this._seenMessages.delete(messageId);
+                    }
+                }
                 if (this._seenMessages.size > this._maxSize) {
-                    this._seenMessages.clear();
+                    const toDelete = this._seenMessages.size - this._maxSize;
+                    let deleted = 0;
+                    for (const [messageId] of this._seenMessages) {
+                        if (deleted >= toDelete) break;
+                        this._seenMessages.delete(messageId);
+                        deleted++;
+                    }
                 }
             }, 60000);
         },
@@ -281,7 +399,7 @@
         isDuplicate(messageId) {
             if (!messageId) return false;
             if (this._seenMessages.has(messageId)) return true;
-            this._seenMessages.add(messageId);
+            this._seenMessages.set(messageId, Date.now());
             return false;
         },
         
@@ -297,6 +415,7 @@
     MessageGuard.initialize();
     
     // ==================== LIFECYCLE STATE DEFINITIONS ====================
+    // CRITICAL: VALID FLOW ONLY: BOOT → INITIALIZING → READY → WAIT_PARENT → ACTIVE
     const LifecycleState = {
         BOOT: 'BOOT',
         INITIALIZING: 'INITIALIZING',
@@ -331,10 +450,13 @@
     let parentReady = false;
     let initializationLock = false;
     let moduleInitialized = false;
+    let validSessionConfirmed = false;  // Track if valid session has been received
     
     // ==================== STRICT STATE MANAGEMENT ====================
     function transitionTo(nextState, reason = '') {
+        // CRITICAL: Prevent duplicate transitions to same state
         if (currentState === nextState) {
+            console.log(`[${MODULE_NAME}][LIFECYCLE] Already in state ${nextState}, ignoring transition`);
             return true;
         }
         
@@ -425,82 +547,205 @@
         }
     }
     
-    // ==================== PARENT_READY HANDLER ====================
-    function handleParentReady(message) {
-        // CRITICAL: Only accept PARENT_READY in WAIT_PARENT state
-        if (currentState !== LifecycleState.WAIT_PARENT) {
-            console.warn(`[${MODULE_NAME}][LIFECYCLE] Cannot handle PARENT_READY — invalid state: ${currentState} (requires WAIT_PARENT)`);
-            return;
-        }
-        
-        if (parentReadyReceived) {
-            console.warn(`[${MODULE_NAME}][LIFECYCLE] PARENT_READY already received — ignoring duplicate`);
-            return;
-        }
-        
-        parentReadyReceived = true;
-        parentReadyReceivedCompat = true;
-        parentReady = true;
-        if (typeof callsState !== 'undefined' && callsState) {
-            callsState.parentReady = true;
-        }
-        
-        // Extract session data from message
-        const sessionData = message.session || message.payload || {};
-        
-        // Apply session if present
-        if (sessionData) {
-            applySession(sessionData);
-        }
-        
-        // Transition to ACTIVE
-        transitionTo(LifecycleState.ACTIVE, 'parent_ready_received');
-        
-        if (parentReadyPromiseResolve) {
-            parentReadyPromiseResolve();
-        }
-        
-        // Flush any queued messages
-        flushQueue();
-        
-        // Activate module
-        onModuleActive();
-        
-        console.log(`[${MODULE_NAME}][LIFECYCLE] ✅ PARENT_READY processed, module ACTIVE`);
+    // ==================== PARENT_READY HANDLER (STRICT WITH SESSION VALIDATION) ====================
+  function handleParentReady(message) {
+    // CRITICAL: Only accept PARENT_READY in WAIT_PARENT state
+    if (currentState !== LifecycleState.WAIT_PARENT) {
+        console.warn(`[${MODULE_NAME}][LIFECYCLE] Cannot handle PARENT_READY — invalid state: ${currentState} (requires WAIT_PARENT) — ignoring duplicate`);
+        return;
     }
     
-    // ==================== SAFE SESSION HANDLING ====================
-    function applySession(sessionData) {
-        if (!sessionData) return;
-        
-        const token = sessionData.token || sessionData.jwt || sessionData.accessToken;
-        if (token && typeof callsState !== 'undefined' && callsState) {
-            const normalizedSession = {
-                token: token,
-                user: sessionData.user || { id: sessionData.userId },
-                userId: sessionData.userId || sessionData.user?.id,
-                expiresAt: sessionData.expiresAt || sessionData.expiry || (Date.now() + 3600000),
-                authenticated: sessionData.authenticated !== false
-            };
-            
-            callsState.session = normalizedSession;
-            callsState.token = token;
-            callsState.sessionStatus = 'valid';
-            callsState.sessionReceived = true;
-            
-            console.log(`[${MODULE_NAME}][LIFECYCLE] Session applied:`, {
-                authenticated: normalizedSession.authenticated,
-                userId: normalizedSession.userId
-            });
-        }
+    if (parentReadyReceived) {
+        console.warn(`[${MODULE_NAME}][LIFECYCLE] PARENT_READY already received — ignoring duplicate`);
+        return;
     }
+    
+    parentReadyReceived = true;
+    parentReadyReceivedCompat = true;
+    parentReady = true;
+    if (typeof callsState !== 'undefined' && callsState) {
+        callsState.parentReady = true;
+    }
+    
+    // Extract session data from message - handle different message structures
+    let sessionData = message.payload?.session || message.session || message.payload || {};
+    
+    // Log what we received for debugging
+    console.log(`[${MODULE_NAME}][handleParentReady] Session data received:`, {
+        hasPayload: !!message.payload,
+        hasSessionInPayload: !!message.payload?.session,
+        hasDirectSession: !!message.session,
+        sessionDataKeys: Object.keys(sessionData)
+    });
+    
+    // Apply session if present and VALID
+    if (sessionData && Object.keys(sessionData).length > 0) {
+        // CRITICAL: Make sure userId is extracted correctly
+        // SessionData might be the raw session from parent or might be wrapped
+        let userId = sessionData.userId;
+        if (!userId && sessionData.user) {
+            userId = sessionData.user.id || sessionData.user.userId;
+        }
+        if (!userId && sessionData.id && typeof sessionData.id === 'number') {
+            userId = sessionData.id;
+        }
+        
+        // Create a properly formatted session object
+        const formattedSession = {
+            token: sessionData.token || sessionData.jwt || sessionData.accessToken,
+            userId: userId,
+            user: sessionData.user || { id: userId, userId: userId },
+            expiresAt: sessionData.expiresAt || sessionData.expiry || (Date.now() + 3600000),
+            authenticated: sessionData.authenticated !== false,
+            sessionId: sessionData.sessionId || sessionData.id || Date.now()
+        };
+        
+        console.log(`[${MODULE_NAME}][handleParentReady] Formatted session:`, {
+            hasToken: !!formattedSession.token,
+            userId: formattedSession.userId,
+            authenticated: formattedSession.authenticated,
+            sessionId: formattedSession.sessionId
+        });
+        
+        // Apply the formatted session
+        const applyResult = applySession(formattedSession);
+        
+        // CRITICAL: WAIT_PARENT → ACTIVE ONLY IF session is valid
+        if (applyResult && validSessionConfirmed && __isValidSession(callsState.session)) {
+            // Transition to ACTIVE only with valid session
+            transitionTo(LifecycleState.ACTIVE, 'parent_ready_received_with_valid_session');
+            
+            if (parentReadyPromiseResolve) {
+                parentReadyPromiseResolve();
+            }
+            
+            // Flush any queued messages
+            flushQueue();
+            
+            // Activate module
+            onModuleActive();
+            
+            console.log(`[${MODULE_NAME}][LIFECYCLE] ✅ PARENT_READY processed, module ACTIVE with valid session`);
+        } else {
+            // Stay in WAIT_PARENT - session not valid yet
+            console.log(`[${MODULE_NAME}][LIFECYCLE] ⏳ WAIT_PARENT: Session not valid yet, awaiting valid session`);
+            // Request session if needed
+            if (!callsState.session || !__isValidSession(callsState.session)) {
+                SessionClient.requestSession();
+            }
+        }
+    } else {
+        // No session data, request it
+        console.log(`[${MODULE_NAME}][LIFECYCLE] ⏳ WAIT_PARENT: No session data, requesting session`);
+        SessionClient.requestSession();
+    }
+}
+    
+function applySession(sessionData) {
+    if (!sessionData) return false;
+    
+    // The sessionData should already be formatted when coming from handleParentReady
+    // But handle the case where it's not
+    let token = sessionData.token || sessionData.jwt || sessionData.accessToken;
+    
+    if (token && typeof callsState !== 'undefined' && callsState) {
+        // Extract userId - it should be at root level now
+        let userId = sessionData.userId;
+        if (!userId && sessionData.user) {
+            userId = sessionData.user.id || sessionData.user.userId;
+        }
+        
+        // If we still don't have userId, but we have sessionData.id, use that
+        if (!userId && sessionData.id) {
+            userId = sessionData.id;
+        }
+        
+        // Log for debugging
+        console.log(`[${MODULE_NAME}][applySession] Processing session:`, {
+            hasToken: !!token,
+            userId: userId,
+            hasUserObject: !!sessionData.user,
+            sessionDataKeys: Object.keys(sessionData)
+        });
+        
+        // Create candidate session with validated userId
+        const candidateSession = {
+            token: token,
+            user: sessionData.user || { id: userId, userId: userId },
+            userId: userId,
+            expiresAt: sessionData.expiresAt || (Date.now() + 3600000),
+            authenticated: sessionData.authenticated !== false,
+            sessionId: sessionData.sessionId || Date.now()
+        };
+        
+        // CRITICAL: Validate session before applying
+        if (!__isValidSession(candidateSession)) {
+            console.warn(`[${MODULE_NAME}][LIFECYCLE] Rejected invalid session in applySession`, {
+                hasToken: !!candidateSession.token,
+                userId: candidateSession.userId,
+                authenticated: candidateSession.authenticated,
+                rawUserId: userId
+            });
+            return false;
+        }
+        
+        // IMMUTABLE SESSION PROTECTION: Prevent overwriting valid session
+        if (callsState.session && __isValidSession(callsState.session)) {
+            if (!__isValidSession(candidateSession)) {
+                console.warn(`[${MODULE_NAME}][LIFECYCLE] Prevented session downgrade in applySession`);
+                return false;
+            }
+        }
+        
+        // Session deduplication
+        if (callsState.lastSessionId === candidateSession.sessionId) {
+            console.log(`[${MODULE_NAME}][applySession] Duplicate session ignored`);
+            return false;
+        }
+        
+        callsState.lastSessionId = candidateSession.sessionId;
+        callsState.session = candidateSession;
+        callsState.token = token;
+        callsState.sessionStatus = 'valid';
+        callsState.sessionReceived = true;
+        validSessionConfirmed = true;
+        
+        console.log(`[${MODULE_NAME}][LIFECYCLE] Valid session applied:`, {
+            authenticated: candidateSession.authenticated,
+            userId: candidateSession.userId,
+            sessionId: candidateSession.sessionId
+        });
+        
+        // If we're in WAIT_PARENT and now have valid session, try to activate
+        if (currentState === LifecycleState.WAIT_PARENT && parentReady && !parentReadyReceived) {
+            // This handles session arriving before PARENT_READY
+            console.log(`[${MODULE_NAME}][LIFECYCLE] Valid session received while in WAIT_PARENT, ready for activation when PARENT_READY arrives`);
+        } else if (currentState === LifecycleState.WAIT_PARENT && parentReadyReceived) {
+            // Session arrived after PARENT_READY but while still in WAIT_PARENT
+            transitionTo(LifecycleState.ACTIVE, 'valid_session_received_after_parent_ready');
+            
+            if (parentReadyPromiseResolve) {
+                parentReadyPromiseResolve();
+            }
+            
+            flushQueue();
+            onModuleActive();
+            
+            console.log(`[${MODULE_NAME}][LIFECYCLE] ✅ Module activated after valid session received`);
+        }
+        
+        return true;
+    }
+    
+    return false;
+}
     
     // ==================== MODULE ACTIVATION HOOK ====================
     function onModuleActive() {
         console.log(`[${MODULE_NAME}][LIFECYCLE] Module ACTIVE — safe zone entered`);
         
-        // Request session from parent if needed
-        if (typeof callsState !== 'undefined' && callsState && (!callsState.session || !callsState.token)) {
+        // Request session from parent if needed (safety check)
+        if (typeof callsState !== 'undefined' && callsState && (!callsState.session || !__isValidSession(callsState.session))) {
             SessionClient.requestSession();
         }
         
@@ -550,10 +795,7 @@
     function loadDataAsync() {
         setTimeout(() => {
             if (currentState === LifecycleState.ACTIVE) {
-                // Load any async data needed
-                if (typeof callsState !== 'undefined' && callsState && callsState.session && callsState.token) {
-                    // Data loading happens here
-                }
+                // Load any async data needed (non-call related only)
             }
         }, 500);
     }
@@ -568,6 +810,32 @@
     
     function generateRequestId() {
         return 'req_' + Math.random().toString(36).substring(2, 15) + '_' + Date.now();
+    }
+    
+    // ==================== ENDPOINT NORMALIZATION ====================
+    function normalizeEndpoint(endpoint) {
+        if (!endpoint || typeof endpoint !== 'string') {
+            return '';
+        }
+        
+        let normalized = endpoint.trim();
+        
+        // Remove /api prefix if present
+        if (normalized.startsWith('/api/')) {
+            normalized = normalized.substring(4);
+        } else if (normalized.startsWith('api/')) {
+            normalized = '/' + normalized.substring(3);
+        }
+        
+        // Ensure starts with /
+        if (!normalized.startsWith('/')) {
+            normalized = '/' + normalized;
+        }
+        
+        // Remove double slashes
+        normalized = normalized.replace(/\/+/g, '/');
+        
+        return normalized;
     }
     
     // ==================== STANDARDIZED MESSAGE SENDER ====================
@@ -600,17 +868,95 @@
         }
         
         console.log(`[${MODULE_NAME}] 📤 ${type}`, { messageId, requestId });
-        window.parent.postMessage(message, '*');
+        
+        // SAFE POSTMESSAGE WRAPPER
+        try {
+            window.parent.postMessage(message, '*');
+        } catch (error) {
+            console.error(`[${MODULE_NAME}] Failed to send message ${type}:`, error);
+            return Promise.resolve({ success: false, reason: 'postmessage_failed', error: error.message });
+        }
         
         if (requireAck) {
             return new Promise((resolve) => {
-                setTimeout(() => {
+                const timeoutId = setTimeout(() => {
                     resolve({ success: true, messageId, requestId, timeout: true });
                 }, 3000);
+                
+                // Store timeout ID for cleanup
+                if (typeof MessageRegistry !== 'undefined' && MessageRegistry) {
+                    MessageRegistry._pendingMessages.set(messageId, { timeoutId });
+                }
             });
         }
         
         return Promise.resolve({ success: true, messageId, requestId });
+    }
+    
+    // ==================== SAFE API REQUEST ====================
+    function sendApiRequest(endpoint, method = 'GET', data = null, options = {}) {
+        if (!assertActive('API_REQUEST')) {
+            return Promise.resolve({ success: false, reason: 'not_active', error: 'Module not active' });
+        }
+        
+        // Validate and normalize endpoint
+        const normalizedEndpoint = normalizeEndpoint(endpoint);
+        if (!normalizedEndpoint) {
+            console.error(`[${MODULE_NAME}] Invalid API endpoint: ${endpoint}`);
+            return Promise.resolve({ success: false, reason: 'invalid_endpoint', error: 'Endpoint is required' });
+        }
+        
+        const requestId = options.requestId || generateRequestId();
+        
+        const message = {
+            type: 'API_REQUEST',
+            id: generateId(),
+            requestId: requestId,
+            source: MODULE_NAME,
+            target: 'parent',
+            timestamp: Date.now(),
+            payload: {
+                endpoint: normalizedEndpoint,
+                method: method.toUpperCase(),
+                data: data || null,
+                headers: options.headers || {},
+                timeout: options.timeout || 10000
+            },
+            messageId: generateId()
+        };
+        
+        console.log(`[${MODULE_NAME}] 📤 API_REQUEST: ${method} ${normalizedEndpoint}`);
+        
+        // SAFE POSTMESSAGE WRAPPER
+        try {
+            window.parent.postMessage(message, '*');
+        } catch (error) {
+            console.error(`[${MODULE_NAME}] Failed to send API request:`, error);
+            return Promise.resolve({ success: false, reason: 'postmessage_failed', error: error.message });
+        }
+        
+        // Return promise with timeout
+        return new Promise((resolve) => {
+            const timeoutId = setTimeout(() => {
+                console.warn(`[${MODULE_NAME}] API request timeout: ${method} ${normalizedEndpoint}`);
+                resolve({ 
+                    success: false, 
+                    reason: 'timeout', 
+                    error: 'API request timeout',
+                    requestId: requestId
+                });
+            }, options.timeout || 10000);
+            
+            // Store for response handling
+            if (typeof MessageRegistry !== 'undefined' && MessageRegistry) {
+                MessageRegistry._pendingMessages.set(requestId, { 
+                    timeoutId, 
+                    resolve,
+                    type: 'API_REQUEST',
+                    endpoint: normalizedEndpoint
+                });
+            }
+        });
     }
     
     // ==================== SAFE SEND WITH QUEUE ====================
@@ -626,6 +972,14 @@
             });
         }
         
+        // Special handling for API_REQUEST
+        if (type === 'API_REQUEST') {
+            const endpoint = payload.endpoint || payload.url;
+            const method = payload.method || 'GET';
+            const data = payload.data || payload.body;
+            return sendApiRequest(endpoint, method, data, payload);
+        }
+        
         return sendMessage(type, payload, requireAck);
     }
     
@@ -637,7 +991,16 @@
         
         while (messageQueue.length) {
             const queued = messageQueue.shift();
-            const result = sendMessage(queued.type, queued.payload, queued.requireAck);
+            let result;
+            
+            if (queued.type === 'API_REQUEST') {
+                const endpoint = queued.payload.endpoint || queued.payload.url;
+                const method = queued.payload.method || 'GET';
+                const data = queued.payload.data || queued.payload.body;
+                result = sendApiRequest(endpoint, method, data, queued.payload);
+            } else {
+                result = sendMessage(queued.type, queued.payload, queued.requireAck);
+            }
             
             if (queued.resolve) {
                 result.then(queued.resolve).catch(queued.resolve);
@@ -708,7 +1071,7 @@
         
         if (typeof IframeTransport !== 'undefined' && IframeTransport && IframeTransport._sessionRequested) return;
         
-        if (typeof callsState !== 'undefined' && callsState && callsState.session && callsState.session.token) {
+        if (typeof callsState !== 'undefined' && callsState && callsState.session && __isValidSession(callsState.session)) {
             sessionRequestAttempts = 0;
         }
         
@@ -747,9 +1110,10 @@
             callsState.verified = false;
             callsState.sessionReceived = false;
             callsState.sessionStatus = 'pending';
+            validSessionConfirmed = false;
         }
         
-        // Use StorageProxy for persistence if needed
+        // Storage is ONLY for UI preferences, never for call state
         StorageProxy.set('session_state', 'invalid');
         
         const delay = Math.min(1000 * Math.pow(2, sessionRequestAttempts), 10000);
@@ -776,6 +1140,7 @@
     }
     
     // ==================== GLOBAL CALL STATE STRUCTURE ====================
+    // CRITICAL: Call state is in-memory ONLY - no storage dependency
     const callsState = {
         moduleName: MODULE_NAME,
         lifecycleState: LifecycleState.INITIALIZING,
@@ -790,11 +1155,31 @@
         verified: false,
         verificationLock: false,
         heartbeatEnabled: false,
-        callActive: false,
-        pendingCall: null,
         webrtcInitialized: false,
         recoveryMode: false,
         sessionReceived: false,
+        
+        // ==================== CALL STATE (IN-MEMORY ONLY) ====================
+        // CRITICAL: No storage for call state - single active call enforcement
+        activeCall: null,           // { callId, type, participants, startTime, state }
+        activeCallId: null,
+        callActive: false,
+        callState: 'idle',          // idle, initiating, ringing, connecting, connected, ended, failed
+        callParticipants: [],
+        callStartTime: null,
+        callDuration: 0,
+        callType: null,
+        callInvitationTimer: null,
+        callInvitationTimeout: 30000,
+        
+        // WebRTC state (in-memory only)
+        peerConnection: null,
+        iceCandidates: [],
+        iceRestartCount: 0,
+        maxIceRestarts: 3,
+        pendingSignals: [],
+        signalingState: 'new',
+        connectionState: 'new',
         
         localStream: null,
         remoteStream: null,
@@ -809,19 +1194,7 @@
             audioOutput: []
         },
         
-        activeCallId: null,
-        callParticipants: [],
-        callStartTime: null,
-        callDuration: 0,
-        callType: null,
-        callInvitationTimer: null,
-        callInvitationTimeout: 30000,
-        
-        peerConnection: null,
-        iceCandidates: [],
-        iceRestartCount: 0,
-        maxIceRestarts: 3,
-        
+        // UI state (in-memory only)
         currentMood: 'neutral',
         currentIntention: 'quick',
         currentFocusMode: false,
@@ -842,7 +1215,10 @@
         
         processedMessageIds: new Set(),
         lastMessageCleanup: Date.now(),
-        degraded: false
+        degraded: false,
+        
+        // Session deduplication
+        lastSessionId: null
     };
     
     // ==================== CLEAN LOGGING SYSTEM ====================
@@ -855,6 +1231,7 @@
     const _stateLogs = new Map();
     const _sessionLogs = new Map();
     const _heartbeatLogs = new Map();
+    const _callLogs = new Map();
     
     function logInfo(module, message, data = null) {
         const key = `${module}:${message}`;
@@ -953,6 +1330,17 @@
         _heartbeatLogs.set(key, Date.now());
         setTimeout(() => _heartbeatLogs.delete(key), 2000);
         console.log(`[${module}] 💓 ${message}`, data ? data : '');
+    }
+    
+    function logCall(module, message, data = null) {
+        const key = `${module}:call:${message}`;
+        if (_callLogs.has(key)) {
+            const lastTime = _callLogs.get(key);
+            if (Date.now() - lastTime < 1000) return;
+        }
+        _callLogs.set(key, Date.now());
+        setTimeout(() => _callLogs.delete(key), 1000);
+        console.log(`[${module}] 📞 ${message}`, data ? data : '');
     }
     
     const MODULE = 'CallsCore';
@@ -1075,7 +1463,11 @@
         
         ACTION: 'ACTION',
         
+        // ==================== CALL SIGNALING (REAL BACKEND) ====================
+        CALL_INITIATE: 'CALL_INITIATE',
         CALL_INCOMING: 'CALL_INCOMING',
+        CALL_ACCEPT: 'CALL_ACCEPT',
+        CALL_REJECT: 'CALL_REJECT',
         CALL_INITIATED: 'CALL_INITIATED',
         CALL_CONNECTING: 'CALL_CONNECTING',
         CALL_STARTED: 'CALL_STARTED',
@@ -1083,7 +1475,10 @@
         CALL_ENDED: 'CALL_ENDED',
         CALL_REJECTED: 'CALL_REJECTED',
         CALL_FAILED: 'CALL_FAILED',
+        CALL_TIMEOUT: 'CALL_TIMEOUT',
+        CALL_BUSY: 'CALL_BUSY',
         
+        // WebRTC Signaling (must go through parent → backend)
         SIGNALING_MESSAGE: 'SIGNALING_MESSAGE',
         SIGNAL_OFFER: 'SIGNAL_OFFER',
         SIGNAL_ANSWER: 'SIGNAL_ANSWER',
@@ -1139,8 +1534,8 @@
     
     // ==================== CONFIGURATION ====================
     const CONFIG = {
-        VERSION: '8.2.2',
-        PROTOCOL_VERSION: 'KYN-8.2',
+        VERSION: '9.0.2',
+        PROTOCOL_VERSION: 'KYN-9.0',
         
         PARENT_READY_TIMEOUT: 20000,
         REGISTRATION_TIMEOUT: 5000,
@@ -1153,6 +1548,9 @@
         
         ICE_RESTART_TIMEOUT: 5000,
         MAX_ICE_RESTARTS: 3,
+        
+        CALL_INVITATION_TIMEOUT: 30000,
+        CALL_CONNECTION_TIMEOUT: 15000,
         
         STORAGE_PREFIX: 'calls_core_',
         
@@ -1343,6 +1741,7 @@
     
     // ==================== SAFE STORAGE (SANDBOX-COMPLIANT) ====================
     // CRITICAL: No direct localStorage access in sandboxed iframe
+    // NOTE: Storage is ONLY for UI preferences, NEVER for call state
     const SafeStorage = {
         _memory: new Map(),
         _strategy: 'proxy',
@@ -1354,8 +1753,9 @@
         },
         
         get: async function(key, fallback = null) {
-            if (key === 'session' || key.includes('token')) {
-                console.warn(`[${MODULE}] SafeStorage.get('${key}') blocked - use session from memory only`);
+            // CRITICAL: Never store or retrieve call state from storage
+            if (key === 'session' || key.includes('token') || key.includes('call')) {
+                console.warn(`[${MODULE}] SafeStorage.get('${key}') blocked - use session/call from memory only`);
                 return fallback;
             }
             
@@ -1372,8 +1772,9 @@
         },
         
         set: function(key, value) {
-            if (key === 'session' || key.includes('token')) {
-                console.warn(`[${MODULE}] SafeStorage.set('${key}') blocked - use session from memory only`);
+            // CRITICAL: Never store call state to storage
+            if (key === 'session' || key.includes('token') || key.includes('call')) {
+                console.warn(`[${MODULE}] SafeStorage.set('${key}') blocked - use session/call from memory only`);
                 return false;
             }
             
@@ -1470,8 +1871,16 @@
             const now = Date.now();
             
             for (const [messageId, pending] of this._pendingMessages) {
-                if (pending.expiry < now) {
+                if (pending.expiry && pending.expiry < now) {
                     this._failWithReason(messageId, 'expired');
+                } else if (pending.timeoutId && !pending.resolved) {
+                    // Clean up timeout promises
+                    clearTimeout(pending.timeoutId);
+                    if (pending.resolve) {
+                        pending.resolve({ success: false, reason: 'timeout', error: 'Request timeout' });
+                        pending.resolved = true;
+                    }
+                    this._pendingMessages.delete(messageId);
                 }
             }
             
@@ -1521,7 +1930,8 @@
                 expiry: Date.now() + timeout,
                 options,
                 originalId: messageId,
-                promise
+                promise,
+                resolved: false
             });
             
             return promise;
@@ -1541,9 +1951,10 @@
                 }
             }
             
-            if (pending) {
+            if (pending && !pending.resolved) {
                 clearTimeout(pending.timer);
                 pending.resolve(payload);
+                pending.resolved = true;
                 this._pendingMessages.delete(pending.originalId || messageId);
                 return true;
             }
@@ -1553,10 +1964,11 @@
         
         _failWithReason: function(messageId, reason) {
             const pending = this._pendingMessages.get(messageId);
-            if (!pending) return;
+            if (!pending || pending.resolved) return;
             
             clearTimeout(pending.timer);
             pending.reject(new Error(`Message failed: ${reason}`));
+            pending.resolved = true;
             this._pendingMessages.delete(messageId);
         },
         
@@ -1575,8 +1987,11 @@
         
         reset: function() {
             for (const [messageId, pending] of this._pendingMessages) {
-                clearTimeout(pending.timer);
-                pending.reject(new Error('Registry reset'));
+                if (!pending.resolved) {
+                    clearTimeout(pending.timer);
+                    pending.reject(new Error('Registry reset'));
+                    pending.resolved = true;
+                }
             }
             this._pendingMessages.clear();
             this._processedMessages.clear();
@@ -1599,11 +2014,14 @@
         _messageHandler: null,
         _rateLimitCounter: 0,
         _rateLimitResetTimer: null,
+        _initialized: false,
         
         initialize: function() {
+            if (this._initialized) return this;
             this._setupMessageHandler();
             this._setupListeners();
             this._startRateLimiting();
+            this._initialized = true;
             logReady(MODULE, 'IframeTransport initialized');
             return this;
         },
@@ -1755,6 +2173,26 @@
                     return;
                 }
                 
+                // Handle API_RESPONSE
+                if (message.type === MESSAGE_TYPES.API_RESPONSE) {
+                    const requestId = message.requestId || message.payload?.requestId;
+                    if (requestId && MessageRegistry._pendingMessages.has(requestId)) {
+                        const pending = MessageRegistry._pendingMessages.get(requestId);
+                        if (pending && pending.resolve && !pending.resolved) {
+                            clearTimeout(pending.timeoutId);
+                            pending.resolve({
+                                success: message.success !== false,
+                                data: message.payload?.data || message.data,
+                                error: message.payload?.error || message.error,
+                                requestId: requestId
+                            });
+                            pending.resolved = true;
+                            MessageRegistry._pendingMessages.delete(requestId);
+                        }
+                    }
+                    return;
+                }
+                
                 if (message.type === MESSAGE_TYPES.HEARTBEAT) {
                     this._handleHeartbeat(message);
                     return;
@@ -1788,6 +2226,7 @@
                     callsState.token = null;
                     callsState.sessionReceived = false;
                     callsState.sessionStatus = 'invalid';
+                    validSessionConfirmed = false;
                     this._sessionActive = false;
                     logSession(MODULE, 'SESSION_NULL received');
                     return;
@@ -1805,8 +2244,19 @@
                     return;
                 }
                 
+                // ==================== CALL SIGNALING HANDLERS (REAL) ====================
                 if (message.type === MESSAGE_TYPES.CALL_INCOMING) {
                     handleIncomingCall(message.payload || message.data);
+                    return;
+                }
+                
+                if (message.type === MESSAGE_TYPES.CALL_INITIATED) {
+                    handleCallInitiated(message.payload || message.data);
+                    return;
+                }
+                
+                if (message.type === MESSAGE_TYPES.CALL_ACCEPT) {
+                    handleCallAccepted(message.payload || message.data);
                     return;
                 }
                 
@@ -1822,11 +2272,6 @@
                 
                 if (message.type === MESSAGE_TYPES.CALL_REJECTED) {
                     handleCallRejected(message.payload || message.data);
-                    
-                    if (callsState.callInvitationTimer) {
-                        clearTimeout(callsState.callInvitationTimer);
-                        callsState.callInvitationTimer = null;
-                    }
                     return;
                 }
                 
@@ -1837,11 +2282,32 @@
                 
                 if (message.type === MESSAGE_TYPES.CALL_FAILED) {
                     handleCallFailed(message.payload || message.data);
-                    
-                    if (callsState.callInvitationTimer) {
-                        clearTimeout(callsState.callInvitationTimer);
-                        callsState.callInvitationTimer = null;
-                    }
+                    return;
+                }
+                
+                if (message.type === MESSAGE_TYPES.CALL_TIMEOUT) {
+                    handleCallTimeout(message.payload || message.data);
+                    return;
+                }
+                
+                if (message.type === MESSAGE_TYPES.CALL_BUSY) {
+                    handleCallBusy(message.payload || message.data);
+                    return;
+                }
+                
+                // WebRTC Signaling (real)
+                if (message.type === MESSAGE_TYPES.SIGNAL_OFFER) {
+                    handleSignalOffer(message.payload || message.data);
+                    return;
+                }
+                
+                if (message.type === MESSAGE_TYPES.SIGNAL_ANSWER) {
+                    handleSignalAnswer(message.payload || message.data);
+                    return;
+                }
+                
+                if (message.type === MESSAGE_TYPES.ICE_CANDIDATE) {
+                    handleIceCandidate(message.payload || message.data);
                     return;
                 }
                 
@@ -1852,14 +2318,6 @@
                 
                 if (message.type === MESSAGE_TYPES.REMOTE_STREAM_REMOVED) {
                     handleRemoteStreamRemoved(message.payload || message.data);
-                    return;
-                }
-                
-                if (message.type === MESSAGE_TYPES.SIGNAL_OFFER ||
-                    message.type === MESSAGE_TYPES.SIGNAL_ANSWER ||
-                    message.type === MESSAGE_TYPES.ICE_CANDIDATE) {
-                    
-                    handleSignalingMessage(message.type, message.payload || message.data);
                     return;
                 }
                 
@@ -1886,11 +2344,14 @@
                 }
                 
                 if (message.type === 'USER_LOGGED_OUT') {
+                    // Clean up call state on logout
+                    resetCallState();
                     callsState.session = null;
                     callsState.token = null;
                     callsState.verified = false;
                     callsState.sessionReceived = false;
                     callsState.sessionStatus = 'invalid';
+                    validSessionConfirmed = false;
                     this._sessionActive = false;
                     notifyListeners('logout', {});
                     return;
@@ -1899,19 +2360,24 @@
                 if (message.type === 'SESSION_REFRESHED') {
                     if ((message.payload || message.data) && (message.payload || message.data).token) {
                         const data = message.payload || message.data;
-                        callsState.token = data.token;
-                        if (callsState.session) {
-                            callsState.session.token = data.token;
+                        // Only update token if we have a valid session
+                        if (validSessionConfirmed && callsState.session && __isValidSession(callsState.session)) {
+                            callsState.token = data.token;
+                            if (callsState.session) {
+                                callsState.session.token = data.token;
+                            }
                         }
                     }
                     return;
                 }
                 
                 if (message.type === 'SESSION_INVALIDATED') {
+                    resetCallState();
                     callsState.session = null;
                     callsState.token = null;
                     callsState.sessionReceived = false;
                     callsState.sessionStatus = 'invalid';
+                    validSessionConfirmed = false;
                     this._sessionActive = false;
                     return;
                 }
@@ -1980,7 +2446,7 @@
             
             const token = sessionData.token || sessionData.jwt || sessionData.accessToken;
             if (token) {
-                const normalizedSession = {
+                const candidateSession = {
                     token: token,
                     user: sessionData.user || { id: sessionData.userId },
                     userId: sessionData.userId || sessionData.user?.id,
@@ -1988,10 +2454,17 @@
                     authenticated: sessionData.authenticated !== false
                 };
                 
-                callsState.session = normalizedSession;
+                // CRITICAL: Validate session before applying
+                if (!__isValidSession(candidateSession)) {
+                    console.warn(`[${MODULE}] SESSION_SYNC rejected - invalid session data`);
+                    return;
+                }
+                
+                callsState.session = candidateSession;
                 callsState.token = token;
                 callsState.sessionStatus = 'valid';
                 callsState.sessionReceived = true;
+                validSessionConfirmed = true;
                 this._sessionActive = true;
                 
                 safeSend('SESSION_ACK', {
@@ -2009,58 +2482,125 @@
             }
         },
         
-        _handleSessionMessage: function(message) {
-            this._sessionRequested = false;
-            if (this._sessionRequestTimer) {
-                clearTimeout(this._sessionRequestTimer);
-                this._sessionRequestTimer = null;
-            }
-            
-            const requestId = message.requestId || message.payload?.requestId || message.id;
-            if (requestId) {
-                MessageRegistry.acknowledge(requestId, message.payload);
-            }
-            
-            const sessionData = message.payload || message.data || message;
-            
-            logSession(MODULE, 'Session message received from parent', { 
-                hasToken: !!(sessionData.token || sessionData.jwt || sessionData.accessToken)
-            });
-            
-            const token = sessionData.token || sessionData.jwt || sessionData.accessToken;
-            if (token) {
-                const normalizedSession = {
-                    token: token,
-                    user: sessionData.user || { id: sessionData.userId },
-                    userId: sessionData.userId || sessionData.user?.id,
-                    expiresAt: sessionData.expiresAt || sessionData.expiry || (Date.now() + 3600000),
-                    authenticated: sessionData.authenticated !== false
-                };
-                
-                callsState.session = normalizedSession;
-                callsState.token = token;
-                callsState.sessionStatus = 'valid';
-                
-                if (!callsState.sessionReceived) {
-                    callsState.sessionReceived = true;
-                    logSession(MODULE, 'Session activated', { 
-                        authenticated: normalizedSession.authenticated,
-                        userId: normalizedSession.userId
-                    });
-                }
-                
-                this._sessionActive = true;
-                
-                window.dispatchEvent(new CustomEvent('CALLS_CORE_READY', {
-                    detail: { core: window.callCore, timestamp: Date.now() }
-                }));
-                
-                window.dispatchEvent(new CustomEvent('MODULE_READY', {
-                    detail: { module: MODULE_NAME, timestamp: Date.now() }
-                }));
-            }
-        },
+      _handleSessionMessage: function(message) {
+    this._sessionRequested = false;
+    if (this._sessionRequestTimer) {
+        clearTimeout(this._sessionRequestTimer);
+        this._sessionRequestTimer = null;
+    }
+    
+    const requestId = message.requestId || message.payload?.requestId || message.id;
+    if (requestId) {
+        MessageRegistry.acknowledge(requestId, message.payload);
+    }
+    
+    // CRITICAL FIX: Extract session data from all possible locations
+    let sessionData = message.payload || message.data || message;
+    
+    // If sessionData has a 'session' property, use that (some messages wrap it)
+    if (sessionData.session) {
+        sessionData = sessionData.session;
+    }
+    
+    // If sessionData has a 'payload' property with session, use that
+    if (sessionData.payload && sessionData.payload.session) {
+        sessionData = sessionData.payload.session;
+    }
+    
+    logSession(MODULE, 'Session message received from parent', { 
+        hasToken: !!(sessionData.token || sessionData.jwt || sessionData.accessToken),
+        hasRootUserId: !!sessionData.userId,
+        hasUserIdInUser: !!(sessionData.user && (sessionData.user.id || sessionData.user.userId)),
+        sessionDataKeys: Object.keys(sessionData)
+    });
+    
+    const token = sessionData.token || sessionData.jwt || sessionData.accessToken;
+    if (token) {
+        // CRITICAL: Extract userId from various possible locations
+        let userId = sessionData.userId;
+        if (!userId && sessionData.user) {
+            userId = sessionData.user.id || sessionData.user.userId;
+        }
+        if (!userId && sessionData.userData) {
+            userId = sessionData.userData.id || sessionData.userData.userId;
+        }
+        if (!userId && sessionData.id && typeof sessionData.id === 'number') {
+            userId = sessionData.id;
+        }
         
+        // Log what we found
+        console.log(`[${MODULE_NAME}][_handleSessionMessage] Extracted userId:`, userId);
+        
+        const candidateSession = {
+            token: token,
+            user: sessionData.user || { id: userId, userId: userId },
+            userId: userId,
+            expiresAt: sessionData.expiresAt || sessionData.expiry || (Date.now() + 3600000),
+            authenticated: sessionData.authenticated !== false,
+            sessionId: sessionData.sessionId || sessionData.id || Date.now()
+        };
+        
+        // CRITICAL: Validate session before applying
+        if (!__isValidSession(candidateSession)) {
+            console.warn(`[${MODULE_NAME}][LIFECYCLE] Session message rejected - invalid session data`, {
+                hasToken: !!candidateSession.token,
+                userId: candidateSession.userId,
+                authenticated: candidateSession.authenticated,
+                rawUserId: userId,
+                sessionDataKeys: Object.keys(sessionData)
+            });
+            return;
+        }
+        
+        // IMMUTABLE SESSION PROTECTION
+        if (callsState.session && __isValidSession(callsState.session)) {
+            if (!__isValidSession(candidateSession)) {
+                console.warn(`[${MODULE_NAME}][LIFECYCLE] Prevented session downgrade`);
+                return;
+            }
+        }
+        
+        // Session deduplication
+        const sessionId = candidateSession.sessionId;
+        if (sessionId && callsState.lastSessionId === sessionId) {
+            logInfo(MODULE, 'Duplicate session message ignored', { sessionId });
+            return;
+        }
+        
+        if (sessionId) {
+            callsState.lastSessionId = sessionId;
+        }
+        
+        callsState.session = candidateSession;
+        callsState.token = token;
+        callsState.sessionStatus = 'valid';
+        callsState.sessionReceived = true;
+        validSessionConfirmed = true;
+        
+        logSession(MODULE, 'Session activated', { 
+            authenticated: candidateSession.authenticated,
+            userId: candidateSession.userId,
+            sessionId: candidateSession.sessionId
+        });
+        
+        // If we're in WAIT_PARENT and have parent ready, transition to ACTIVE
+        if (currentState === LifecycleState.WAIT_PARENT && parentReadyReceived) {
+            transitionTo(LifecycleState.ACTIVE, 'session_received_after_parent_ready');
+            flushQueue();
+            onModuleActive();
+            console.log(`[${MODULE_NAME}][LIFECYCLE] ✅ Module activated after valid session received`);
+        }
+        
+        window.dispatchEvent(new CustomEvent('CALLS_CORE_READY', {
+            detail: { core: window.callCore, timestamp: Date.now() }
+        }));
+        
+        window.dispatchEvent(new CustomEvent('MODULE_READY', {
+            detail: { module: MODULE_NAME, timestamp: Date.now() }
+        }));
+    }
+},
+
         _processQueue: function() {
             if (this._processing) return;
             if (this._queue.length === 0) return;
@@ -2128,6 +2668,7 @@
             messageQueue.length = 0;
             MessageRegistry.reset();
             this._listeners.clear();
+            this._initialized = false;
         }
     };
     
@@ -2234,8 +2775,11 @@
         _videoTracks: [],
         _listeners: new Set(),
         _deviceCheckDone: false,
+        _initialized: false,
         
         initialize: async function() {
+            if (this._initialized) return { success: true };
+            
             try {
                 logInfo(MODULE, 'Initializing media manager');
                 
@@ -2244,6 +2788,7 @@
                     return { success: false, error: 'Media devices not supported' };
                 }
                 
+                this._initialized = true;
                 return { success: true, deferred: true };
                 
             } catch (error) {
@@ -2488,7 +3033,8 @@
                 cameraFacingMode: callsState.cameraFacingMode,
                 screenSharing: callsState.screenSharing,
                 devices: callsState.mediaDevices,
-                deviceCheckDone: this._deviceCheckDone
+                deviceCheckDone: this._deviceCheckDone,
+                initialized: this._initialized
             };
         }
     };
@@ -2497,7 +3043,7 @@
         logError(MODULE, 'Media manager initialization failed', error);
     });
     
-    // ==================== WEBRTC MANAGER ====================
+    // ==================== WEBRTC MANAGER (REAL) ====================
     const WebRTCManager = {
         _peerConnection: null,
         _iceCandidates: [],
@@ -2505,8 +3051,13 @@
         _remoteStreams: new Map(),
         _dataChannel: null,
         _listeners: new Set(),
+        _currentCallId: null,
+        _connectionTimeout: null,
+        _initialized: false,
         
         initialize: function() {
+            if (this._initialized) return;
+            this._initialized = true;
             logInfo(MODULE, 'WebRTC manager initialized');
         },
         
@@ -2544,22 +3095,66 @@
                     this._iceCandidates.push(event.candidate);
                     this._notifyListeners('ice_candidate', { candidate: event.candidate });
                     
-                    IframeTransport.sendAction('ICE_CANDIDATE', {
-                        candidate: event.candidate,
-                        callId: callsState.activeCallId
-                    }).catch(() => {});
+                    // Send ICE candidate through parent to backend
+                    if (this._currentCallId) {
+                        IframeTransport.sendAction('ICE_CANDIDATE', {
+                            candidate: event.candidate,
+                            callId: this._currentCallId
+                        }).catch(() => {});
+                    }
                 }
             };
             
             this._peerConnection.oniceconnectionstatechange = () => {
                 const state = this._peerConnection.iceConnectionState;
+                callsState.signalingState = state;
                 logInfo(MODULE, `ICE connection state: ${state}`);
                 
-                if (state === 'failed' || state === 'disconnected') {
+                if (state === 'connected' || state === 'completed') {
+                    // Clear connection timeout
+                    if (this._connectionTimeout) {
+                        clearTimeout(this._connectionTimeout);
+                        this._connectionTimeout = null;
+                    }
+                    this._notifyListeners('ice_connected', { state });
+                } else if (state === 'failed') {
                     this.handleIceFailure();
+                    this._notifyListeners('ice_failed', { state });
+                } else if (state === 'disconnected') {
+                    logWarn(MODULE, 'ICE disconnected - attempting recovery');
+                    this._notifyListeners('ice_disconnected', { state });
                 }
                 
                 this._notifyListeners('ice_state', { state });
+            };
+            
+            this._peerConnection.onconnectionstatechange = () => {
+                const state = this._peerConnection.connectionState;
+                callsState.connectionState = state;
+                logInfo(MODULE, `Connection state: ${state}`);
+                
+                if (state === 'connected') {
+                    // REAL connection established
+                    callsState.callState = 'connected';
+                    callsState.callActive = true;
+                    this._notifyListeners('call_connected', { callId: this._currentCallId });
+                    
+                    // Notify UI
+                    notifyListeners('call_connected', { callId: this._currentCallId });
+                    
+                    // Clear connection timeout
+                    if (this._connectionTimeout) {
+                        clearTimeout(this._connectionTimeout);
+                        this._connectionTimeout = null;
+                    }
+                } else if (state === 'failed') {
+                    this._notifyListeners('call_failed', { reason: 'connection_failed' });
+                    notifyListeners('call_failed', { reason: 'connection_failed', callId: this._currentCallId });
+                } else if (state === 'closed') {
+                    this._notifyListeners('call_ended', {});
+                }
+                
+                this._notifyListeners('connection_state', { state });
             };
             
             this._peerConnection.onsignalingstatechange = () => {
@@ -2573,8 +3168,11 @@
                 if (stream) {
                     this._remoteStreams.set(stream.id, stream);
                     callsState.remoteStreams.set(stream.id, stream);
+                    callsState.remoteStream = stream;
                     
+                    logSuccess(MODULE, 'Remote stream added');
                     this._notifyListeners('remote_stream_added', { stream, track: event.track });
+                    notifyListeners('remote_stream_added', { stream });
                 }
             };
             
@@ -2734,7 +3332,7 @@
                     .then(offer => {
                         IframeTransport.sendAction('SIGNAL_OFFER', {
                             offer: offer,
-                            callId: callsState.activeCallId,
+                            callId: this._currentCallId,
                             iceRestart: true
                         }).catch(() => {});
                     })
@@ -2744,10 +3342,15 @@
             } else {
                 logError(MODULE, 'Max ICE restarts reached, call may fail');
                 this._notifyListeners('call_failed', { reason: 'ice_failed' });
+                notifyListeners('call_failed', { reason: 'ice_failed', callId: this._currentCallId });
             }
         },
         
         close: function() {
+            if (this._connectionTimeout) {
+                clearTimeout(this._connectionTimeout);
+                this._connectionTimeout = null;
+            }
             if (this._peerConnection) {
                 this._peerConnection.close();
                 this._peerConnection = null;
@@ -2756,6 +3359,22 @@
             this._iceRestartCount = 0;
             this._remoteStreams.clear();
             this._dataChannel = null;
+            this._currentCallId = null;
+        },
+        
+        setCurrentCallId: function(callId) {
+            this._currentCallId = callId;
+        },
+        
+        setConnectionTimeout: function(timeoutMs) {
+            if (this._connectionTimeout) clearTimeout(this._connectionTimeout);
+            this._connectionTimeout = setTimeout(() => {
+                if (callsState.callState !== 'connected') {
+                    logWarn(MODULE, 'Connection timeout reached');
+                    this._notifyListeners('call_timeout', {});
+                    notifyListeners('call_timeout', { callId: this._currentCallId });
+                }
+            }, timeoutMs);
         },
         
         addListener: function(listener) {
@@ -2777,18 +3396,85 @@
                 hasPeerConnection: !!this._peerConnection,
                 iceConnectionState: this._peerConnection?.iceConnectionState || 'new',
                 signalingState: this._peerConnection?.signalingState || 'stable',
+                connectionState: this._peerConnection?.connectionState || 'new',
                 iceCandidates: this._iceCandidates.length,
                 iceRestartCount: this._iceRestartCount,
                 remoteStreams: this._remoteStreams.size,
                 hasDataChannel: !!this._dataChannel,
-                dataChannelState: this._dataChannel?.readyState || 'closed'
+                dataChannelState: this._dataChannel?.readyState || 'closed',
+                currentCallId: this._currentCallId,
+                initialized: this._initialized
             };
         }
     };
     
     WebRTCManager.initialize();
     
-    // ==================== CALL STATE GOVERNOR ====================
+    // ==================== SINGLE ACTIVE CALL ENFORCEMENT ====================
+    // CRITICAL: Only one active call at a time
+    function enforceSingleActiveCall() {
+        if (callsState.callActive && callsState.activeCall) {
+            logWarn(MODULE, 'Call blocked - another call already active', { activeCallId: callsState.activeCallId });
+            return false;
+        }
+        return true;
+    }
+    
+    function setActiveCall(callId, callType, participants) {
+        if (callsState.callActive) {
+            logWarn(MODULE, 'Cannot set active call - another call already active', { existing: callsState.activeCallId });
+            return false;
+        }
+        
+        callsState.activeCall = {
+            callId: callId,
+            type: callType,
+            participants: participants,
+            startTime: Date.now(),
+            state: 'initiating'
+        };
+        callsState.activeCallId = callId;
+        callsState.callActive = true;
+        callsState.callType = callType;
+        callsState.callParticipants = participants;
+        callsState.callStartTime = Date.now();
+        callsState.callState = 'initiating';
+        
+        logCall(MODULE, 'Active call set', { callId, callType });
+        return true;
+    }
+    
+    function clearActiveCall() {
+        callsState.activeCall = null;
+        callsState.activeCallId = null;
+        callsState.callActive = false;
+        callsState.callType = null;
+        callsState.callParticipants = [];
+        callsState.callStartTime = null;
+        callsState.callState = 'idle';
+        callsState.connectionState = 'new';
+        callsState.signalingState = 'new';
+        
+        // Clear any pending timers
+        if (callsState.callInvitationTimer) {
+            clearTimeout(callsState.callInvitationTimer);
+            callsState.callInvitationTimer = null;
+        }
+        
+        logCall(MODULE, 'Active call cleared');
+    }
+    
+    function resetCallState() {
+        clearActiveCall();
+        MediaManager.stopLocalStream();
+        WebRTCManager.close();
+        callsState.remoteStream = null;
+        callsState.remoteStreams.clear();
+        callsState.iceCandidates = [];
+        callsState.iceRestartCount = 0;
+    }
+    
+    // ==================== CALL STATE GOVERNOR (REAL) ====================
     const CallsStateGovernor = {
         _currentState: CALLS_STATE.INIT,
         _previousState: null,
@@ -2801,6 +3487,7 @@
         _verificationInProgress: false,
         _lastVerificationTime: 0,
         _lastVerificationResult: true,
+        _validSessionConfirmed: false,
         
         initialize: function() {
             this._currentState = CALLS_STATE.INIT;
@@ -2809,6 +3496,7 @@
             this._sessionReceived = false;
             this._parentReadyReceived = false;
             this._session = null;
+            this._validSessionConfirmed = false;
             
             callsState.registered = false;
             callsState.parentReady = false;
@@ -2817,13 +3505,12 @@
             callsState.token = null;
             callsState.verified = false;
             callsState.verificationLock = false;
-            callsState.callActive = false;
-            callsState.pendingCall = null;
             callsState.webrtcInitialized = false;
             callsState.recoveryMode = false;
             callsState.sessionReceived = false;
             callsState.childReadySent = false;
             callsState.registrationSent = false;
+            validSessionConfirmed = false;
             transitionTo(LifecycleState.INITIALIZING);
             
             logInfo(MODULE, 'Calls State Governor initialized');
@@ -2904,26 +3591,40 @@
                 return;
             }
             
-            const session = {
+            const candidateSession = {
                 authenticated: sessionData.authenticated === true,
                 userId: sessionData.userId || sessionData.user?.id,
                 token: sessionData.token || sessionData.jwt || sessionData.accessToken,
                 user: sessionData.user || {},
                 expiresAt: sessionData.expiresAt || sessionData.expiry || (Date.now() + 3600000),
-                version: sessionData.version || 1
+                version: sessionData.version || 1,
+                sessionId: sessionData.sessionId || Date.now()
             };
             
-            this._session = session;
-            callsState.session = session;
-            callsState.token = session.token;
+            // CRITICAL: Validate session before accepting
+            if (!__isValidSession(candidateSession)) {
+                console.warn(`[${MODULE}] handleSessionActive rejected - invalid session`, {
+                    hasToken: !!candidateSession.token,
+                    userId: candidateSession.userId,
+                    authenticated: candidateSession.authenticated
+                });
+                return;
+            }
+            
+            this._session = candidateSession;
+            callsState.session = candidateSession;
+            callsState.token = candidateSession.token;
             callsState.sessionStatus = 'valid';
+            this._validSessionConfirmed = true;
+            validSessionConfirmed = true;
             
             if (!this._sessionReceived) {
                 this._sessionReceived = true;
                 callsState.sessionReceived = true;
                 logSession(MODULE, 'SESSION_ACTIVE received', { 
-                    authenticated: session.authenticated,
-                    userId: session.userId
+                    authenticated: candidateSession.authenticated,
+                    userId: candidateSession.userId,
+                    sessionId: candidateSession.sessionId
                 });
                 
                 if (this._currentState === CALLS_STATE.SESSION_PENDING || this._currentState === CALLS_STATE.REGISTERED) {
@@ -2959,6 +3660,8 @@
             callsState.token = null;
             callsState.sessionReceived = false;
             callsState.sessionStatus = 'invalid';
+            this._validSessionConfirmed = false;
+            validSessionConfirmed = false;
             
             if (!this._sessionReceived) {
                 this._sessionReceived = true;
@@ -2976,10 +3679,12 @@
             callsState.parentReady = true;
             logSuccess(MODULE, 'PARENT_READY received');
             
-            if (this._currentState === CALLS_STATE.SESSION_RECEIVED) {
+            if (this._currentState === CALLS_STATE.SESSION_RECEIVED && this._validSessionConfirmed) {
                 this.transition(CALLS_STATE.ACTIVE, 'parent_ready');
             } else if (this._currentState === CALLS_STATE.SESSION_PENDING) {
                 logInfo(MODULE, 'PARENT_READY received before session - waiting for SESSION_ACTIVE');
+            } else if (this._currentState === CALLS_STATE.SESSION_RECEIVED && !this._validSessionConfirmed) {
+                logWarn(MODULE, 'PARENT_READY received but session is invalid - waiting for valid session');
             }
         },
         
@@ -3012,7 +3717,7 @@
                     return;
                 }
                 
-                if (!callsState.session || !callsState.session.token) {
+                if (!callsState.session || !__isValidSession(callsState.session)) {
                     resolve({ valid: false, reason: 'no_token' });
                     return;
                 }
@@ -3089,6 +3794,13 @@
         },
         
         initiateCall: async function(callType, participants = []) {
+            // CRITICAL: Single active call enforcement
+            if (!enforceSingleActiveCall()) {
+                logWarn(MODULE, 'Cannot initiate call - another call already active');
+                this._notifyListeners('call_blocked', { reason: 'call_active' });
+                return { success: false, reason: 'call_active' };
+            }
+            
             if (!assertActive('initiateCall')) {
                 logWarn(MODULE, 'Cannot initiate call - not in ACTIVE state', { currentState });
                 this._notifyListeners('call_blocked', { reason: 'not_active' });
@@ -3101,16 +3813,17 @@
                 return { success: false, reason: 'parent_not_ready' };
             }
             
-            if (callsState.callActive) {
-                logWarn(MODULE, 'Cannot initiate call - call already active', { currentState });
-                this._notifyListeners('call_blocked', { reason: 'call_active' });
-                return { success: false, reason: 'call_active' };
-            }
-            
             if (callsState.recoveryMode) {
                 logWarn(MODULE, 'Cannot initiate call - recovery mode active', { currentState });
                 this._notifyListeners('call_blocked', { reason: 'recovery' });
                 return { success: false, reason: 'recovery' };
+            }
+            
+            // CRITICAL: Verify valid session before call
+            if (!callsState.session || !__isValidSession(callsState.session)) {
+                logWarn(MODULE, 'Cannot initiate call - no valid session');
+                this._notifyListeners('call_blocked', { reason: 'no_valid_session' });
+                return { success: false, reason: 'no_valid_session' };
             }
             
             const permCheck = await PermissionManager.checkPermissions({
@@ -3124,13 +3837,10 @@
                 return { success: false, reason: 'permission_denied', error: permCheck.error };
             }
             
-            callsState.pendingCall = { type: callType, participants };
-            
             const verifyResult = await this.verifySession(true);
             
             if (!verifyResult.valid) {
                 logWarn(MODULE, 'Call blocked - session verification failed', verifyResult);
-                callsState.pendingCall = null;
                 return { success: false, reason: 'verification_failed' };
             }
             
@@ -3138,32 +3848,20 @@
             
             if (!callsState.parentReady) {
                 logWarn(MODULE, 'Call blocked - parent not ready');
-                callsState.pendingCall = null;
                 return { success: false, reason: 'parent_not_ready' };
             }
             
             if (!this._session || !this._session.authenticated) {
                 logWarn(MODULE, 'Call blocked - no valid session');
-                callsState.pendingCall = null;
                 return { success: false, reason: 'no_session' };
             }
             
             if (!callsState.token) {
                 logWarn(MODULE, 'Call blocked - no token');
-                callsState.pendingCall = null;
                 return { success: false, reason: 'no_token' };
             }
             
-            if (callsState.callActive) {
-                logWarn(MODULE, 'Call blocked - call already active');
-                callsState.pendingCall = null;
-                return { success: false, reason: 'call_active' };
-            }
-            
             try {
-                callsState.callActive = true;
-                callsState.webrtcInitialized = true;
-                
                 const constraints = {
                     audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
                     video: callType === 'video' ? { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user' } : false
@@ -3176,36 +3874,43 @@
                 }
                 
                 const callId = `call_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
-                callsState.activeCallId = callId;
-                callsState.callParticipants = participants;
-                callsState.callStartTime = Date.now();
-                callsState.callType = callType;
                 
+                // Set active call BEFORE sending to parent to prevent duplicates
+                setActiveCall(callId, callType, participants);
+                
+                // Set up WebRTC
                 WebRTCManager.createPeerConnection();
                 WebRTCManager.addStream(streamResult.stream);
+                WebRTCManager.setCurrentCallId(callId);
+                WebRTCManager.setConnectionTimeout(CONFIG.CALL_CONNECTION_TIMEOUT);
                 
-                callsState.callInvitationTimer = setTimeout(() => {
-                    if (callsState.callActive && !callsState.webrtcInitialized) {
-                        logWarn(MODULE, 'Call invitation timed out');
-                        this.endCall();
-                        this._notifyListeners('call_timeout', { callId });
-                    }
-                }, CONFIG.CALL_INVITATION_TIMEOUT);
+                // Send initiate request to parent (parent will send to backend)
+                logCall(MODULE, 'Sending CALL_INITIATE to parent', { callId, callType, participants });
                 
-                IframeTransport.sendAction('START_CALL', {
+                const result = await IframeTransport.sendAction('CALL_INITIATE', {
                     callId,
                     callType,
                     participants,
                     timestamp: Date.now()
-                }).catch(error => {
-                    logError(MODULE, 'Failed to send START_CALL action', error);
                 });
+                
+                if (result.success === false) {
+                    throw new Error(result.reason || 'Failed to initiate call');
+                }
+                
+                // Set invitation timeout
+                callsState.callInvitationTimer = setTimeout(() => {
+                    if (callsState.callState === 'initiating') {
+                        logWarn(MODULE, 'Call invitation timed out');
+                        this.endCall(callId);
+                        this._notifyListeners('call_timeout', { callId });
+                        notifyListeners('call_timeout', { callId });
+                    }
+                }, CONFIG.CALL_INVITATION_TIMEOUT);
                 
                 this.transition(CALLS_STATE.CALL_READY, 'call_initiated');
                 
                 logSuccess(MODULE, 'Call initiated', { type: callType, callId });
-                
-                callsState.pendingCall = null;
                 
                 return { 
                     success: true, 
@@ -3215,51 +3920,137 @@
                 
             } catch (error) {
                 logError(MODULE, 'Failed to initiate call', error);
-                callsState.callActive = false;
-                callsState.webrtcInitialized = false;
-                callsState.pendingCall = null;
-                MediaManager.stopLocalStream();
-                WebRTCManager.close();
+                resetCallState();
                 return { success: false, reason: error.message };
             }
         },
         
-        endCall: async function() {
-            if (!callsState.activeCallId) return;
-            
-            logInfo(MODULE, 'Ending call', { callId: callsState.activeCallId });
-            
-            if (callsState.callInvitationTimer) {
-                clearTimeout(callsState.callInvitationTimer);
-                callsState.callInvitationTimer = null;
+        acceptCall: async function(callId) {
+            // CRITICAL: Single active call enforcement
+            if (!enforceSingleActiveCall()) {
+                logWarn(MODULE, 'Cannot accept call - another call already active');
+                this._notifyListeners('call_blocked', { reason: 'call_active' });
+                return { success: false, reason: 'call_active' };
             }
             
-            IframeTransport.sendAction('END_CALL', {
-                callId: callsState.activeCallId,
-                timestamp: Date.now()
-            }).catch(error => {
-                logError(MODULE, 'Failed to send END_CALL action', error);
-            });
-            
-            MediaManager.stopLocalStream();
-            WebRTCManager.close();
-            
-            callsState.activeCallId = null;
-            callsState.callActive = false;
-            callsState.webrtcInitialized = false;
-            callsState.remoteStream = null;
-            callsState.remoteStreams.clear();
-            callsState.callType = null;
-            
-            if (this._currentState === CALLS_STATE.IN_CALL) {
-                this.transition(CALLS_STATE.CALL_READY, 'call_ended');
+            if (!assertActive('acceptCall')) {
+                return { success: false, reason: 'not_active' };
             }
             
-            logSuccess(MODULE, 'Call ended');
+            // CRITICAL: Verify valid session before accepting call
+            if (!callsState.session || !__isValidSession(callsState.session)) {
+                logWarn(MODULE, 'Cannot accept call - no valid session');
+                return { success: false, reason: 'no_valid_session' };
+            }
+            
+            logCall(MODULE, 'Accepting call', { callId });
+            
+            try {
+                const constraints = {
+                    audio: true,
+                    video: false
+                };
+                
+                const streamResult = await MediaManager.getLocalStream(constraints);
+                
+                if (!streamResult.success) {
+                    throw new Error(streamResult.error || 'Failed to get media stream');
+                }
+                
+                // Set active call
+                setActiveCall(callId, 'voice', []);
+                
+                // Set up WebRTC
+                WebRTCManager.createPeerConnection();
+                WebRTCManager.addStream(streamResult.stream);
+                WebRTCManager.setCurrentCallId(callId);
+                WebRTCManager.setConnectionTimeout(CONFIG.CALL_CONNECTION_TIMEOUT);
+                
+                // Send accept to parent
+                const result = await IframeTransport.sendAction('CALL_ACCEPT', {
+                    callId,
+                    timestamp: Date.now()
+                });
+                
+                if (result.success === false) {
+                    throw new Error(result.reason || 'Failed to accept call');
+                }
+                
+                this.transition(CALLS_STATE.IN_CALL, 'call_accepted');
+                
+                return { success: true };
+                
+            } catch (error) {
+                logError(MODULE, 'Failed to accept call', error);
+                resetCallState();
+                return { success: false, reason: error.message };
+            }
+        },
+        
+        rejectCall: async function(callId, reason = 'declined') {
+            if (!assertActive('rejectCall')) {
+                return { success: false, reason: 'not_active' };
+            }
+            
+            logCall(MODULE, 'Rejecting call', { callId, reason });
+            
+            try {
+                await IframeTransport.sendAction('CALL_REJECT', {
+                    callId,
+                    reason,
+                    timestamp: Date.now()
+                });
+                
+                if (callsState.activeCallId === callId) {
+                    resetCallState();
+                }
+                
+                return { success: true };
+                
+            } catch (error) {
+                logError(MODULE, 'Failed to reject call', error);
+                return { success: false, reason: error.message };
+            }
+        },
+        
+        endCall: async function(callId) {
+            if (!callId && callsState.activeCallId) {
+                callId = callsState.activeCallId;
+            }
+            
+            if (!callId) {
+                logWarn(MODULE, 'No active call to end');
+                return { success: false, reason: 'no_active_call' };
+            }
+            
+            logCall(MODULE, 'Ending call', { callId });
+            
+            try {
+                await IframeTransport.sendAction('CALL_ENDED', {
+                    callId,
+                    timestamp: Date.now()
+                });
+                
+                resetCallState();
+                
+                if (this._currentState === CALLS_STATE.IN_CALL) {
+                    this.transition(CALLS_STATE.CALL_READY, 'call_ended');
+                }
+                
+                this._notifyListeners('call_ended', { callId });
+                notifyListeners('call_ended', { callId });
+                
+                return { success: true };
+                
+            } catch (error) {
+                logError(MODULE, 'Failed to end call', error);
+                resetCallState();
+                return { success: false, reason: error.message };
+            }
         },
         
         handleIncomingCall: function(callData) {
-            logInfo(MODULE, 'Incoming call received', callData);
+            logCall(MODULE, 'Incoming call received', callData);
             
             if (!parentReady) {
                 logWarn(MODULE, 'Incoming call ignored - parent not ready');
@@ -3271,25 +4062,26 @@
                 return;
             }
             
-            if (!this._session || !this._session.authenticated || this._session.expiresAt <= Date.now()) {
+            // CRITICAL: Check for valid session
+            if (!this._session || !__isValidSession(this._session) || this._session.expiresAt <= Date.now()) {
                 logWarn(MODULE, 'Incoming call rejected - session invalid');
                 return;
             }
             
             if (callsState.recoveryMode) {
                 logWarn(MODULE, 'Incoming call queued - recovery mode active');
-                callsState.pendingCall = callData;
                 return;
             }
             
+            // CRITICAL: Check for existing active call
             if (callsState.callActive) {
                 logWarn(MODULE, 'Incoming call rejected - already in a call');
                 
-                IframeTransport.sendAction('DECLINE_CALL', {
+                IframeTransport.sendAction('CALL_REJECT', {
                     callId: callData.callId,
                     reason: 'busy',
                     timestamp: Date.now()
-                });
+                }).catch(() => {});
                 return;
             }
             
@@ -3302,6 +4094,7 @@
                 callsState.callData = callData;
                 callsState.callState = 'incoming';
                 this._notifyListeners('incoming_call', callData);
+                notifyListeners('incoming_call', callData);
             });
         },
         
@@ -3314,7 +4107,7 @@
         },
         
         isActive: function() {
-            return this._currentState === CALLS_STATE.ACTIVE;
+            return this._currentState === CALLS_STATE.ACTIVE && this._validSessionConfirmed;
         },
         
         isCallReady: function() {
@@ -3328,11 +4121,12 @@
         canInitiateCall: function() {
             return this._currentState === CALLS_STATE.ACTIVE && 
                    this._session && 
-                   this._session.authenticated &&
+                   __isValidSession(this._session) &&
                    this._session.expiresAt > Date.now() &&
                    callsState.verified &&
                    callsState.parentReady &&
-                   !callsState.recoveryMode;
+                   !callsState.recoveryMode &&
+                   !callsState.callActive;
         },
         
         addListener: function(listener) {
@@ -3358,9 +4152,8 @@
             this._parentReadyReceived = false;
             this._session = null;
             this._verificationInProgress = false;
-            callsState.activeCallId = null;
-            callsState.callActive = false;
-            callsState.webrtcInitialized = false;
+            this._validSessionConfirmed = false;
+            resetCallState();
             callsState.registered = false;
             callsState.parentReady = false;
             callsState.session = null;
@@ -3368,12 +4161,11 @@
             callsState.token = null;
             callsState.verified = false;
             callsState.verificationLock = false;
-            callsState.callActive = false;
-            callsState.pendingCall = null;
             callsState.recoveryMode = false;
             callsState.sessionReceived = false;
             callsState.childReadySent = false;
             callsState.registrationSent = false;
+            validSessionConfirmed = false;
             transitionTo(LifecycleState.INITIALIZING);
             
             MediaManager.stopLocalStream();
@@ -3381,6 +4173,10 @@
         },
         
         _clearTimers: function() {
+            if (callsState.callInvitationTimer) {
+                clearTimeout(callsState.callInvitationTimer);
+                callsState.callInvitationTimer = null;
+            }
         }
     };
     
@@ -3512,6 +4308,7 @@
         _sessionActive: false,
         _fatalError: null,
         _allowTransitions: true,
+        _validSessionConfirmed: false,
         
         initialize: function() {
             if (this._initializationPromise) return this._initializationPromise;
@@ -3663,9 +4460,10 @@
                 return Promise.resolve({ success: true, immediate: true });
             }
             
-            if (callsState.session && callsState.token) {
+            if (callsState.session && __isValidSession(callsState.session)) {
                 logInfo(MODULE, 'Valid session found in callsState');
                 this._sessionActive = true;
+                this._validSessionConfirmed = true;
                 return Promise.resolve({ success: true, fromState: true });
             }
             
@@ -3684,9 +4482,10 @@
                 this._sessionResolve = resolve;
                 
                 this._sessionTimeoutId = setTimeout(() => {
-                    if (callsState.session && callsState.token) {
+                    if (callsState.session && __isValidSession(callsState.session)) {
                         logInfo(MODULE, 'Session became valid during timeout');
                         this._sessionActive = true;
+                        this._validSessionConfirmed = true;
                         callsState.sessionReceived = true;
                         callsState.sessionStatus = 'valid';
                         if (this._sessionResolve) {
@@ -3728,6 +4527,7 @@
             this._previousState = null;
             this._initialized = false;
             this._sessionActive = false;
+            this._validSessionConfirmed = false;
             this._fatalError = null;
             this._initializationPromise = null;
             this._initializationResolve = null;
@@ -3762,6 +4562,7 @@
         _sessionResolve: null,
         _sessionReject: null,
         _initLock: false,
+        _lastSessionId: null,
         
         initialize: function() {
             if (this._initLock) return this;
@@ -3830,6 +4631,22 @@
             let updated = false;
             let hadToken = !!this._token;
             
+            // Session deduplication
+            const sessionId = data.sessionId || data.id;
+            if (sessionId && this._lastSessionId === sessionId) {
+                logInfo(MODULE, 'Duplicate session update ignored', { sessionId });
+                return;
+            }
+            if (sessionId) {
+                this._lastSessionId = sessionId;
+            }
+            
+            // CRITICAL: Validate session data
+            if (data.token && (!data.userId || data.userId === 'user' || data.userId === 0)) {
+                logWarn(MODULE, 'Session update rejected - invalid userId', { userId: data.userId });
+                return;
+            }
+            
             if (data.token) {
                 this._token = data.token;
                 this._tokenReceived = true;
@@ -3838,7 +4655,13 @@
             }
             
             if (data.userId || data.user?.id) {
-                this._userId = data.userId || data.user?.id;
+                const newUserId = data.userId || data.user?.id;
+                // Reject invalid userId
+                if (newUserId === 'user' || newUserId === 0) {
+                    logWarn(MODULE, 'Session update rejected - invalid userId', { userId: newUserId });
+                    return;
+                }
+                this._userId = newUserId;
                 updated = true;
             }
             
@@ -3880,17 +4703,22 @@
                 if (!data || !data.token) return;
                 if (this._token === data.token) return;
                 
-                this._token = data.token;
-                this._tokenReceived = true;
-                this._expiresAt = data.expires || data.expiry || (Date.now() + 3600000);
-                this._state = 'valid';
-                this._valid = true;
-                
-                this._updateSession();
-                
-                this._notifyListeners('token', data);
-                this._resolveSessionPromise();
-                logSession(MODULE, 'updated from parent');
+                // CRITICAL: Only update if we have valid session context
+                if (this._userId && this._userId !== 'user' && this._userId !== 0) {
+                    this._token = data.token;
+                    this._tokenReceived = true;
+                    this._expiresAt = data.expires || data.expiry || (Date.now() + 3600000);
+                    this._state = 'valid';
+                    this._valid = true;
+                    
+                    this._updateSession();
+                    
+                    this._notifyListeners('token', data);
+                    this._resolveSessionPromise();
+                    logSession(MODULE, 'updated from parent');
+                } else {
+                    logWarn(MODULE, 'Token update rejected - no valid userId context');
+                }
                 
             } finally {
                 setTimeout(() => { this._processingToken = false; }, 500);
@@ -3907,7 +4735,8 @@
                 userId: this._userId,
                 expiresAt: this._expiresAt,
                 valid: this._valid,
-                guestMode: this._guestMode
+                guestMode: this._guestMode,
+                sessionId: this._lastSessionId
             };
             
             this._state = this._valid ? 'valid' : 'invalid';
@@ -3928,6 +4757,7 @@
             this._state = 'invalid';
             this._usingCachedSession = false;
             this._tokenReceived = false;
+            this._lastSessionId = null;
             
             this._notifyListeners('clear', {});
             this._expiryWarningSent = false;
@@ -3938,6 +4768,7 @@
             callsState.token = null;
             callsState.sessionReceived = false;
             callsState.sessionStatus = 'invalid';
+            validSessionConfirmed = false;
             
             logInfo(MODULE, 'Session cleared');
         },
@@ -4009,6 +4840,10 @@
             }
             
             if (this._expiresAt && this._expiresAt < Date.now()) {
+                return false;
+            }
+            
+            if (!this._userId || this._userId === 'user' || this._userId === 0) {
                 return false;
             }
             
@@ -4215,13 +5050,14 @@
         },
         
         createCheckpoint: function(name, data = {}) {
+            // CRITICAL: Never store call state in checkpoints
             const checkpoint = {
                 name,
                 timestamp: Date.now(),
                 state: StateGovernor.getState(),
                 sessionValid: IframeSessionClient.isValid(),
                 environment: 'production',
-                data: data
+                data: { ...data, callState: undefined } // Strip call state
             };
             
             this._checkpoints.push(checkpoint);
@@ -4457,7 +5293,14 @@
             callStartTime: 0,
             callEndReason: null,
             recoveryTriggers: 0,
-            sessionRefreshes: 0
+            sessionRefreshes: 0,
+            callsInitiated: 0,
+            callsAccepted: 0,
+            callsRejected: 0,
+            callsEnded: 0,
+            callsFailed: 0,
+            signalingMessagesSent: 0,
+            signalingMessagesReceived: 0
         },
         _history: [],
         _startTime: Date.now(),
@@ -4481,15 +5324,32 @@
             if (name === 'call_start') {
                 this._metrics.callStartTime = Date.now();
                 this._metrics.callEndReason = null;
+                this._metrics.callsInitiated++;
             }
-            if (name === 'call_end' && data.reason) {
-                this._metrics.callEndReason = data.reason;
+            if (name === 'call_accept') {
+                this._metrics.callsAccepted++;
+            }
+            if (name === 'call_reject') {
+                this._metrics.callsRejected++;
+            }
+            if (name === 'call_end') {
+                this._metrics.callsEnded++;
+                if (data.reason) this._metrics.callEndReason = data.reason;
+            }
+            if (name === 'call_fail') {
+                this._metrics.callsFailed++;
             }
             if (name === 'recovery_trigger') {
                 this._metrics.recoveryTriggers++;
             }
             if (name === 'session_refresh') {
                 this._metrics.sessionRefreshes++;
+            }
+            if (name === 'signaling_send') {
+                this._metrics.signalingMessagesSent++;
+            }
+            if (name === 'signaling_recv') {
+                this._metrics.signalingMessagesReceived++;
             }
             
             const entry = {
@@ -4504,6 +5364,8 @@
                     v5State: V5StateGovernor ? V5StateGovernor.getState() : 'unknown',
                     tokenValid: !!callsState.token,
                     lifecycleState: currentState,
+                    callActive: callsState.callActive,
+                    callState: callsState.callState,
                     inPassiveMode: false
                 }
             };
@@ -4527,6 +5389,8 @@
                     v5State: V5StateGovernor ? V5StateGovernor.getState() : 'unknown',
                     tokenValid: !!callsState.token,
                     lifecycleState: currentState,
+                    callActive: callsState.callActive,
+                    callState: callsState.callState,
                     inPassiveMode: false
                 },
                 environment: { environment: ENVIRONMENT.current },
@@ -4537,7 +5401,12 @@
                     timeRemaining: IframeSessionClient.getTimeRemaining()
                 } : { valid: false },
                 recovery: RecoveryManager.getStatus(),
-                callsState: { ...callsState }
+                callsState: { 
+                    ...callsState,
+                    localStream: !!callsState.localStream,
+                    remoteStream: !!callsState.remoteStream,
+                    remoteStreams: callsState.remoteStreams.size
+                }
             };
             
             this._snapshots.push(snapshot);
@@ -4560,6 +5429,8 @@
                     v5State: V5StateGovernor ? V5StateGovernor.getState() : 'unknown',
                     tokenValid: !!callsState.token,
                     lifecycleState: currentState,
+                    callActive: callsState.callActive,
+                    callState: callsState.callState,
                     inPassiveMode: false
                 },
                 environment: { environment: ENVIRONMENT.current },
@@ -4569,7 +5440,12 @@
                     timeRemaining: IframeSessionClient.getTimeRemaining()
                 } : { valid: false },
                 recovery: RecoveryManager.getStatus(),
-                callsState: { ...callsState }
+                callsState: { 
+                    ...callsState,
+                    localStream: !!callsState.localStream,
+                    remoteStream: !!callsState.remoteStream,
+                    remoteStreams: callsState.remoteStreams.size
+                }
             };
         },
         
@@ -4587,7 +5463,14 @@
                 callStartTime: 0,
                 callEndReason: null,
                 recoveryTriggers: 0,
-                sessionRefreshes: 0
+                sessionRefreshes: 0,
+                callsInitiated: 0,
+                callsAccepted: 0,
+                callsRejected: 0,
+                callsEnded: 0,
+                callsFailed: 0,
+                signalingMessagesSent: 0,
+                signalingMessagesReceived: 0
             };
             this._history = [];
             this._snapshots = [];
@@ -4618,7 +5501,10 @@
                 origin: OriginSecurity,
                 state: StateGovernor,
                 v5State: V5StateGovernor,
-                callsState: callsState
+                callsState: callsState,
+                webRTC: WebRTCManager,
+                media: MediaManager,
+                callsGovernor: CallsStateGovernor
             };
             
             this._initialized = true;
@@ -5357,7 +6243,203 @@
     
     SessionPipeline.initialize();
     
-    // ==================== EVENT HANDLERS ====================
+    // ==================== CALL SIGNALING HANDLERS (REAL) ====================
+    
+    function handleIncomingCall(callData) {
+        logCall(MODULE, 'handleIncomingCall', callData);
+        
+        if (!parentReady) {
+            logWarn(MODULE, 'Incoming call ignored - parent not ready');
+            return;
+        }
+        
+        if (!assertActive('handleIncomingCall')) {
+            logWarn(MODULE, 'Incoming call ignored - not ACTIVE');
+            return;
+        }
+        
+        // CRITICAL: Check for existing active call
+        if (callsState.callActive) {
+            logWarn(MODULE, 'Incoming call rejected - already in a call');
+            IframeTransport.sendAction('CALL_REJECT', {
+                callId: callData.callId,
+                reason: 'busy',
+                timestamp: Date.now()
+            }).catch(() => {});
+            return;
+        }
+        
+        callsState.callData = callData;
+        callsState.callState = 'incoming';
+        notifyListeners('incoming_call', callData);
+    }
+    
+    function handleCallInitiated(callData) {
+        logCall(MODULE, 'handleCallInitiated', callData);
+        
+        callsState.callData = callData;
+        callsState.callState = 'initiated';
+        callsState.activeCallId = callData.callId;
+        callsState.callParticipants = callData.participants || [];
+        callsState.callStartTime = Date.now();
+        callsState.callType = callData.callType;
+        callsState.callActive = true;
+        
+        if (callsState.callInvitationTimer) {
+            clearTimeout(callsState.callInvitationTimer);
+            callsState.callInvitationTimer = null;
+        }
+        
+        notifyListeners('call_initiated', callData);
+    }
+    
+    function handleCallAccepted(callData) {
+        logCall(MODULE, 'handleCallAccepted', callData);
+        
+        callsState.callState = 'connecting';
+        notifyListeners('call_accepted', callData);
+    }
+    
+    function handleCallStarted(callData) {
+        logCall(MODULE, 'handleCallStarted', callData);
+        
+        callsState.callState = 'starting';
+        notifyListeners('call_started', callData);
+    }
+    
+    function handleCallConnected(callData) {
+        logCall(MODULE, 'handleCallConnected', callData);
+        
+        callsState.callState = 'connected';
+        callsState.callActive = true;
+        notifyListeners('call_connected', callData);
+    }
+    
+    function handleCallRejected(callData) {
+        logCall(MODULE, 'handleCallRejected', callData);
+        
+        resetCallState();
+        notifyListeners('call_rejected', callData);
+    }
+    
+    function handleCallEnded(callData) {
+        logCall(MODULE, 'handleCallEnded', callData);
+        
+        resetCallState();
+        notifyListeners('call_ended', callData);
+    }
+    
+    function handleCallFailed(callData) {
+        logCall(MODULE, 'handleCallFailed', callData);
+        
+        resetCallState();
+        notifyListeners('call_failed', callData);
+    }
+    
+    function handleCallTimeout(callData) {
+        logCall(MODULE, 'handleCallTimeout', callData);
+        
+        resetCallState();
+        notifyListeners('call_timeout', callData);
+    }
+    
+    function handleCallBusy(callData) {
+        logCall(MODULE, 'handleCallBusy', callData);
+        
+        resetCallState();
+        notifyListeners('call_busy', callData);
+    }
+    
+    // WebRTC Signaling Handlers (Real)
+    async function handleSignalOffer(payload) {
+        logCall(MODULE, 'handleSignalOffer', { callId: payload.callId });
+        
+        if (!callsState.callActive && callsState.callState !== 'initiating') {
+            logWarn(MODULE, 'Signal offer received but no active call');
+            return;
+        }
+        
+        if (!WebRTCManager._peerConnection) {
+            logWarn(MODULE, 'No peer connection for signal offer');
+            return;
+        }
+        
+        try {
+            await WebRTCManager.setRemoteDescription(payload.offer);
+            const answer = await WebRTCManager.createAnswer();
+            
+            // Send answer through parent to backend
+            await IframeTransport.sendAction('SIGNAL_ANSWER', {
+                answer: answer,
+                callId: payload.callId,
+                timestamp: Date.now()
+            });
+            
+            DiagnosticsAgent.record('signaling_send');
+            logCall(MODULE, 'Signal answer sent', { callId: payload.callId });
+            
+        } catch (error) {
+            logError(MODULE, 'Failed to handle signal offer', error);
+        }
+    }
+    
+    async function handleSignalAnswer(payload) {
+        logCall(MODULE, 'handleSignalAnswer', { callId: payload.callId });
+        
+        if (!callsState.callActive && callsState.callState !== 'initiating') {
+            logWarn(MODULE, 'Signal answer received but no active call');
+            return;
+        }
+        
+        if (!WebRTCManager._peerConnection) {
+            logWarn(MODULE, 'No peer connection for signal answer');
+            return;
+        }
+        
+        try {
+            await WebRTCManager.setRemoteDescription(payload.answer);
+            DiagnosticsAgent.record('signaling_recv');
+            logCall(MODULE, 'Signal answer processed', { callId: payload.callId });
+        } catch (error) {
+            logError(MODULE, 'Failed to handle signal answer', error);
+        }
+    }
+    
+    async function handleIceCandidate(payload) {
+        logCall(MODULE, 'handleIceCandidate', { callId: payload.callId });
+        
+        if (!callsState.callActive && callsState.callState !== 'initiating') {
+            logWarn(MODULE, 'ICE candidate received but no active call');
+            return;
+        }
+        
+        if (!WebRTCManager._peerConnection) {
+            logWarn(MODULE, 'No peer connection for ICE candidate');
+            return;
+        }
+        
+        try {
+            await WebRTCManager.addIceCandidate(payload.candidate);
+            DiagnosticsAgent.record('signaling_recv');
+        } catch (error) {
+            logError(MODULE, 'Failed to add ICE candidate', error);
+        }
+    }
+    
+    function handleRemoteStreamAdded(payload) {
+        if (payload.stream) {
+            callsState.remoteStream = payload.stream;
+            logCall(MODULE, 'Remote stream added');
+            notifyListeners('remote_stream_added', payload);
+        }
+    }
+    
+    function handleRemoteStreamRemoved(payload) {
+        callsState.remoteStream = null;
+        logCall(MODULE, 'Remote stream removed');
+        notifyListeners('remote_stream_removed', payload);
+    }
+    
     function handleInitData(message) {
         const data = message.payload || message.data || {};
         
@@ -5366,20 +6448,34 @@
         });
         
         if (data.session) {
-            callsState.session = data.session;
-            if (data.session.token) callsState.token = data.session.token;
-            callsState.sessionReceived = true;
-            callsState.sessionStatus = 'valid';
-        } else if (data.user) {
-            callsState.session = {
-                user: data.user,
-                token: data.token,
-                authenticated: data.authenticated !== false
-            };
-            if (data.token) callsState.token = data.token;
-            if (data.user && data.token) {
+            // Validate session before applying
+            if (__isValidSession(data.session)) {
+                callsState.session = data.session;
+                if (data.session.token) callsState.token = data.session.token;
                 callsState.sessionReceived = true;
                 callsState.sessionStatus = 'valid';
+                validSessionConfirmed = true;
+            } else {
+                logWarn(MODULE, 'Init data session rejected - invalid', data.session);
+            }
+        } else if (data.user) {
+            const candidateSession = {
+                user: data.user,
+                token: data.token,
+                authenticated: data.authenticated !== false,
+                userId: data.user.id,
+                expiresAt: data.expiresAt || Date.now() + 3600000
+            };
+            if (__isValidSession(candidateSession)) {
+                callsState.session = candidateSession;
+                if (data.token) callsState.token = data.token;
+                if (data.user && data.token) {
+                    callsState.sessionReceived = true;
+                    callsState.sessionStatus = 'valid';
+                    validSessionConfirmed = true;
+                }
+            } else {
+                logWarn(MODULE, 'Init data session rejected - invalid user data');
             }
         }
         
@@ -5399,140 +6495,6 @@
         });
         
         logSuccess(MODULE, 'Module initialization complete');
-    }
-    
-    function handleIncomingCall(callData) {
-        callsState.callData = callData;
-        callsState.callState = 'incoming';
-        callsState.callActive = true;
-        
-        notifyListeners('incoming_call', callData);
-    }
-    
-    function handleCallStarted(callData) {
-        callsState.callData = callData;
-        callsState.callState = 'outgoing';
-        callsState.callActive = true;
-        callsState.activeCallId = callData.callId;
-        callsState.callParticipants = callData.participants || [];
-        callsState.callStartTime = Date.now();
-        callsState.callType = callData.callType;
-        
-        if (callsState.callInvitationTimer) {
-            clearTimeout(callsState.callInvitationTimer);
-            callsState.callInvitationTimer = null;
-        }
-        
-        notifyListeners('call_started', callData);
-    }
-    
-    function handleCallConnected(callData) {
-        callsState.callState = 'active';
-        
-        notifyListeners('call_connected', callData);
-    }
-    
-    function handleCallRejected(callData) {
-        callsState.callState = 'idle';
-        callsState.callActive = false;
-        callsState.activeCallId = null;
-        
-        if (callsState.callInvitationTimer) {
-            clearTimeout(callsState.callInvitationTimer);
-            callsState.callInvitationTimer = null;
-        }
-        
-        notifyListeners('call_rejected', callData);
-        
-        MediaManager.stopLocalStream();
-        WebRTCManager.close();
-    }
-    
-    function handleCallEnded(callData) {
-        callsState.callState = 'idle';
-        callsState.callActive = false;
-        callsState.activeCallId = null;
-        callsState.callParticipants = [];
-        callsState.callStartTime = null;
-        callsState.callType = null;
-        
-        if (callsState.callInvitationTimer) {
-            clearTimeout(callsState.callInvitationTimer);
-            callsState.callInvitationTimer = null;
-        }
-        
-        notifyListeners('call_ended', callData);
-        
-        MediaManager.stopLocalStream();
-        WebRTCManager.close();
-    }
-    
-    function handleCallFailed(callData) {
-        callsState.callState = 'idle';
-        callsState.callActive = false;
-        callsState.activeCallId = null;
-        
-        if (callsState.callInvitationTimer) {
-            clearTimeout(callsState.callInvitationTimer);
-            callsState.callInvitationTimer = null;
-        }
-        
-        notifyListeners('call_failed', callData);
-        
-        MediaManager.stopLocalStream();
-        WebRTCManager.close();
-    }
-    
-    function handleRemoteStreamAdded(payload) {
-        if (payload.stream) {
-            callsState.remoteStream = payload.stream;
-        }
-        
-        notifyListeners('remote_stream_added', payload);
-    }
-    
-    function handleRemoteStreamRemoved(payload) {
-        callsState.remoteStream = null;
-        
-        notifyListeners('remote_stream_removed', payload);
-    }
-    
-    function handleSignalingMessage(type, payload) {
-        switch (type) {
-            case MESSAGE_TYPES.SIGNAL_OFFER:
-                if (payload.offer) {
-                    WebRTCManager.setRemoteDescription(payload.offer)
-                        .then(() => WebRTCManager.createAnswer())
-                        .then(answer => {
-                            IframeTransport.sendAction('SIGNAL_ANSWER', {
-                                answer: answer,
-                                callId: payload.callId
-                            }).catch(() => {});
-                        })
-                        .catch(error => {
-                            logError(MODULE, 'Failed to handle offer', error);
-                        });
-                }
-                break;
-                
-            case MESSAGE_TYPES.SIGNAL_ANSWER:
-                if (payload.answer) {
-                    WebRTCManager.setRemoteDescription(payload.answer)
-                        .catch(error => {
-                            logError(MODULE, 'Failed to handle answer', error);
-                        });
-                }
-                break;
-                
-            case MESSAGE_TYPES.ICE_CANDIDATE:
-                if (payload.candidate) {
-                    WebRTCManager.addIceCandidate(payload.candidate)
-                        .catch(error => {
-                            logError(MODULE, 'Failed to add ICE candidate', error);
-                        });
-                }
-                break;
-        }
     }
     
     // ==================== NOTIFICATION SYSTEM ====================
@@ -5585,7 +6547,7 @@
                         notifyListeners('session_required', { action: 'start-call' });
                         return;
                     }
-                    if (!callsState.session || callsState.sessionStatus !== 'valid') {
+                    if (!callsState.session || !__isValidSession(callsState.session)) {
                         notifyListeners('session_required', { action: 'start-call' });
                         return;
                     }
@@ -5863,6 +6825,26 @@
                     return;
                 }
                 
+                // Handle API_RESPONSE
+                if (msg.type === MESSAGE_TYPES.API_RESPONSE) {
+                    const requestId = msg.requestId || msg.payload?.requestId;
+                    if (requestId && MessageRegistry._pendingMessages.has(requestId)) {
+                        const pending = MessageRegistry._pendingMessages.get(requestId);
+                        if (pending && pending.resolve && !pending.resolved) {
+                            clearTimeout(pending.timeoutId);
+                            pending.resolve({
+                                success: msg.success !== false,
+                                data: msg.payload?.data || msg.data,
+                                error: msg.payload?.error || msg.error,
+                                requestId: requestId
+                            });
+                            pending.resolved = true;
+                            MessageRegistry._pendingMessages.delete(requestId);
+                        }
+                    }
+                    return;
+                }
+                
                 if (msg.type === 'MODULE_REGISTERED') {
                     logSuccess(MODULE_NAME, 'MODULE_REGISTERED received');
                     callsState.registered = true;
@@ -5885,11 +6867,38 @@
                     
                     const sessionData = msg.payload || msg.data || {};
                     if (sessionData.token) {
-                        callsState.session = sessionData;
-                        callsState.token = sessionData.token;
+                        // Session deduplication
+                        const sessionId = sessionData.sessionId || sessionData.id;
+                        if (sessionId && callsState.lastSessionId === sessionId) {
+                            logInfo(MODULE, 'Duplicate session message ignored', { sessionId });
+                            return;
+                        }
+                        
+                        // CRITICAL: Validate session before accepting
+                        const candidateSession = {
+                            token: sessionData.token,
+                            userId: sessionData.userId || sessionData.user?.id,
+                            user: sessionData.user || {},
+                            expiresAt: sessionData.expiresAt || sessionData.expiry || (Date.now() + 3600000),
+                            authenticated: sessionData.authenticated !== false,
+                            sessionId: sessionId || Date.now()
+                        };
+                        
+                        if (!__isValidSession(candidateSession)) {
+                            logWarn(MODULE, 'Session message rejected - invalid session data');
+                            return;
+                        }
+                        
+                        if (sessionId) {
+                            callsState.lastSessionId = sessionId;
+                        }
+                        
+                        callsState.session = candidateSession;
+                        callsState.token = candidateSession.token;
                         callsState.sessionReceived = true;
                         callsState.sessionStatus = 'valid';
-                        logSession(MODULE_NAME, 'Session received');
+                        validSessionConfirmed = true;
+                        logSession(MODULE_NAME, 'Session received', { sessionId });
                         
                         sessionRequestAttempts = 0;
                         
@@ -5906,12 +6915,25 @@
                     callsState.token = null;
                     callsState.sessionReceived = false;
                     callsState.sessionStatus = 'invalid';
+                    callsState.lastSessionId = null;
+                    validSessionConfirmed = false;
                     logSession(MODULE_NAME, 'SESSION_NULL received');
                     return;
                 }
                 
+                // ==================== CALL SIGNALING HANDLERS ====================
                 if (msg.type === MESSAGE_TYPES.CALL_INCOMING) {
                     handleIncomingCall(msg.payload || msg.data);
+                    return;
+                }
+                
+                if (msg.type === MESSAGE_TYPES.CALL_INITIATED) {
+                    handleCallInitiated(msg.payload || msg.data);
+                    return;
+                }
+                
+                if (msg.type === MESSAGE_TYPES.CALL_ACCEPT) {
+                    handleCallAccepted(msg.payload || msg.data);
                     return;
                 }
                 
@@ -5940,6 +6962,31 @@
                     return;
                 }
                 
+                if (msg.type === MESSAGE_TYPES.CALL_TIMEOUT) {
+                    handleCallTimeout(msg.payload || msg.data);
+                    return;
+                }
+                
+                if (msg.type === MESSAGE_TYPES.CALL_BUSY) {
+                    handleCallBusy(msg.payload || msg.data);
+                    return;
+                }
+                
+                if (msg.type === MESSAGE_TYPES.SIGNAL_OFFER) {
+                    handleSignalOffer(msg.payload || msg.data);
+                    return;
+                }
+                
+                if (msg.type === MESSAGE_TYPES.SIGNAL_ANSWER) {
+                    handleSignalAnswer(msg.payload || msg.data);
+                    return;
+                }
+                
+                if (msg.type === MESSAGE_TYPES.ICE_CANDIDATE) {
+                    handleIceCandidate(msg.payload || msg.data);
+                    return;
+                }
+                
                 if (msg.type === MESSAGE_TYPES.REMOTE_STREAM_ADDED) {
                     handleRemoteStreamAdded(msg.payload || msg.data);
                     return;
@@ -5947,14 +6994,6 @@
                 
                 if (msg.type === MESSAGE_TYPES.REMOTE_STREAM_REMOVED) {
                     handleRemoteStreamRemoved(msg.payload || msg.data);
-                    return;
-                }
-                
-                if (msg.type === MESSAGE_TYPES.SIGNAL_OFFER ||
-                    msg.type === MESSAGE_TYPES.SIGNAL_ANSWER ||
-                    msg.type === MESSAGE_TYPES.ICE_CANDIDATE) {
-                    
-                    handleSignalingMessage(msg.type, msg.payload || msg.data);
                     return;
                 }
                 
@@ -5983,11 +7022,14 @@
                 }
                 
                 if (msg.type === 'USER_LOGGED_OUT') {
+                    resetCallState();
                     callsState.session = null;
                     callsState.token = null;
                     callsState.verified = false;
                     callsState.sessionReceived = false;
                     callsState.sessionStatus = 'invalid';
+                    callsState.lastSessionId = null;
+                    validSessionConfirmed = false;
                     notifyListeners('logout', {});
                     return;
                 }
@@ -5995,11 +7037,14 @@
                 if (msg.type === 'SESSION_REFRESHED') {
                     const data = msg.payload || msg.data;
                     if (data && data.token) {
-                        callsState.token = data.token;
-                        if (callsState.session) {
-                            callsState.session.token = data.token;
+                        // Only update token if we have a valid session
+                        if (validSessionConfirmed && callsState.session && __isValidSession(callsState.session)) {
+                            callsState.token = data.token;
+                            if (callsState.session) {
+                                callsState.session.token = data.token;
+                            }
+                            DiagnosticsAgent.record('session_refresh');
                         }
-                        DiagnosticsAgent.record('session_refresh');
                     }
                     return;
                 }
@@ -6045,7 +7090,9 @@
                    callsState.registered && 
                    callsState.sessionReceived && 
                    callsState.sessionStatus === 'valid' &&
-                   callsState.parentReady;
+                   callsState.parentReady &&
+                   validSessionConfirmed &&
+                   __isValidSession(callsState.session);
         },
         
         getState: function() {
@@ -6057,6 +7104,7 @@
                 coreReady: this.isCoreReady(),
                 callState: callsState.callState,
                 callActive: callsState.callActive,
+                activeCallId: callsState.activeCallId,
                 micEnabled: callsState.micEnabled,
                 cameraEnabled: callsState.cameraEnabled,
                 cameraFacingMode: callsState.cameraFacingMode,
@@ -6080,7 +7128,10 @@
                 childReadySent: callsState.childReadySent,
                 registrationSent: callsState.registrationSent,
                 parentReady: parentReady,
-                queuedMessages: messageQueue.length
+                queuedMessages: messageQueue.length,
+                signalingState: callsState.signalingState,
+                connectionState: callsState.connectionState,
+                sessionValid: validSessionConfirmed && __isValidSession(callsState.session)
             };
         },
         
@@ -6089,7 +7140,7 @@
         },
         
         getSession: function() {
-            return callsState.session ? { ...callsState.session } : null;
+            return callsState.session && __isValidSession(callsState.session) ? { ...callsState.session } : null;
         },
         
         getSessionStatus: function() {
@@ -6098,11 +7149,11 @@
         
         isAuthenticated: function() {
             return callsState.sessionStatus === 'valid' && 
-                   !!(callsState.session && callsState.session.authenticated);
+                   !!(callsState.session && __isValidSession(callsState.session) && callsState.session.authenticated);
         },
         
         authorizedFetch: function(url, options = {}) {
-            if (!callsState.session || !callsState.session.token) {
+            if (!callsState.session || !__isValidSession(callsState.session)) {
                 logWarn(MODULE, 'Blocking API call: session not ready');
                 return Promise.reject(new Error('Session not ready'));
             }
@@ -6143,12 +7194,19 @@
                 return Promise.resolve({ success: false, reason: 'not_active' });
             }
             
-            return IframeTransport.sendAction('START_CALL', {
-                targetUserId,
-                callType,
-                ...options,
-                timestamp: Date.now()
-            });
+            if (callsState.callActive) {
+                logWarn(MODULE, 'Cannot start call - another call already active');
+                return Promise.resolve({ success: false, reason: 'call_active' });
+            }
+            
+            if (!callsState.session || !__isValidSession(callsState.session)) {
+                logWarn(MODULE, 'Cannot start call - no valid session');
+                return Promise.resolve({ success: false, reason: 'no_valid_session' });
+            }
+            
+            DiagnosticsAgent.record('call_start');
+            
+            return CallsStateGovernor.initiateCall(callType, [targetUserId]);
         },
         
         startGroupCall: function(participants = [], callType = 'voice', options = {}) {
@@ -6156,17 +7214,22 @@
                 return Promise.resolve({ success: false, reason: 'not_active' });
             }
             
+            if (callsState.callActive) {
+                return Promise.resolve({ success: false, reason: 'call_active' });
+            }
+            
+            if (!callsState.session || !__isValidSession(callsState.session)) {
+                return Promise.resolve({ success: false, reason: 'no_valid_session' });
+            }
+            
             if (!callsState.isPremium && !callsState.premiumFeatures.groupCalls) {
                 notifyListeners('premium_required', { feature: 'groupCalls' });
                 return { success: false, reason: 'premium_required' };
             }
             
-            return IframeTransport.sendAction('START_GROUP_CALL', {
-                participants,
-                callType,
-                ...options,
-                timestamp: Date.now()
-            });
+            DiagnosticsAgent.record('call_start');
+            
+            return CallsStateGovernor.initiateCall(callType, participants);
         },
         
         answerCall: function(callId) {
@@ -6174,21 +7237,27 @@
                 return Promise.resolve({ success: false, reason: 'not_active' });
             }
             
-            return IframeTransport.sendAction('ANSWER_CALL', {
-                callId,
-                timestamp: Date.now()
-            });
+            if (callsState.callActive) {
+                return Promise.resolve({ success: false, reason: 'call_active' });
+            }
+            
+            if (!callsState.session || !__isValidSession(callsState.session)) {
+                return Promise.resolve({ success: false, reason: 'no_valid_session' });
+            }
+            
+            DiagnosticsAgent.record('call_accept');
+            
+            return CallsStateGovernor.acceptCall(callId);
         },
         
-        declineCall: function(callId) {
+        declineCall: function(callId, reason = 'declined') {
             if (!assertActive('declineCall')) {
                 return Promise.resolve({ success: false, reason: 'not_active' });
             }
             
-            return IframeTransport.sendAction('DECLINE_CALL', {
-                callId,
-                timestamp: Date.now()
-            });
+            DiagnosticsAgent.record('call_reject');
+            
+            return CallsStateGovernor.rejectCall(callId, reason);
         },
         
         endCall: function(callId) {
@@ -6196,15 +7265,9 @@
                 return Promise.resolve({ success: false, reason: 'not_active' });
             }
             
-            const result = IframeTransport.sendAction('END_CALL', {
-                callId: callId || callsState.activeCallId,
-                timestamp: Date.now()
-            });
+            DiagnosticsAgent.record('call_end', { reason: 'user_ended' });
             
-            MediaManager.stopLocalStream();
-            WebRTCManager.close();
-            
-            return result;
+            return CallsStateGovernor.endCall(callId);
         },
         
         toggleMic: function() {
@@ -6503,6 +7566,7 @@
         cleanup: function() {
             logInfo(MODULE_NAME, 'Cleaning up call core');
             
+            resetCallState();
             MediaManager.stopLocalStream();
             WebRTCManager.close();
             IframeTransport.cleanup();
@@ -6514,14 +7578,7 @@
             
             messageQueue.length = 0;
             
-            callsState.callState = 'idle';
-            callsState.callActive = false;
-            callsState.activeCallId = null;
-            callsState.callParticipants = [];
-            callsState.callStartTime = null;
-            callsState.callType = null;
-            callsState.remoteStream = null;
-            callsState.remoteStreams.clear();
+            resetCallState();
             
             listeners.clear();
         },
@@ -6588,7 +7645,35 @@
         UIBridge: UIBridge,
         StorageProxy: StorageProxy,
         MessageGuard: MessageGuard,
-        SessionClientLegacy: SessionClient
+        SessionClientLegacy: SessionClient,
+        
+        // Additional utility methods
+        isInCall: function() {
+            return callsState.callActive && callsState.callState === 'connected';
+        },
+        
+        getCallDuration: function() {
+            if (!callsState.callStartTime) return 0;
+            return Math.floor((Date.now() - callsState.callStartTime) / 1000);
+        },
+        
+        getActiveCallId: function() {
+            return callsState.activeCallId;
+        },
+        
+        getCallParticipants: function() {
+            return [...callsState.callParticipants];
+        },
+        
+        // API request helper
+        apiRequest: function(endpoint, method = 'GET', data = null, options = {}) {
+            return sendApiRequest(endpoint, method, data, options);
+        },
+        
+        // Endpoint normalization helper
+        normalizeEndpoint: function(endpoint) {
+            return normalizeEndpoint(endpoint);
+        }
     };
     
     // ==================== MODULE CORE CONTROLLER ====================

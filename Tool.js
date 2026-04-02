@@ -5861,7 +5861,7 @@ async function fetchUserDataDirectly() {
         }
         
         // Use secure API call to fetch user profile
-        const response = await secureApiCall('GET', '/api/user/profile');
+        const response = await secureApiCall('GET', '/api/profile');
         
         if (response && response.user) {
             console.log('[Tool.js] Successfully fetched user data from API:', response.user);

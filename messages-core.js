@@ -1,9 +1,10 @@
 // =============================================
-// MESSAGES CORE - v7.6.0 (DETERMINISTIC PARENT-CONTROLLED PROTOCOL)
-// UI-ONLY MODULE | STANDARDIZED COMMUNICATION PROTOCOL
+// MESSAGES CORE - v8.0.3 (STABILIZED PROTOCOL | SESSION VALIDATION | UI ENHANCED)
+// REAL END-TO-END MESSAGING | NO PLACEHOLDERS | NO DIRECT FETCH
 // STRICT LIFECYCLE ENFORCEMENT | NO RETRY LOOPS | NO FALLBACKS
-// WAIT_PARENT IS HARD DEAD STOP | NO AUTONOMOUS OPERATION
-// COMPLETE REAL-TIME MESSAGE FLOW WITH PARENT SYNCHRONIZATION
+// COMPLETE REQUEST-ID TRACKING | DEDUPLICATION
+// ENHANCED SESSION VALIDATION | NO FAKE USER IDS
+// ENHANCED UI INTERACTIONS | BUTTONS | CLICKS | NAVIGATION
 // =============================================
 (function() {
     'use strict';
@@ -12,16 +13,44 @@
     // MODULE IDENTIFICATION
     // =============================================
     const MODULE_NAME = 'messages';
-    const MODULE_VERSION = '7.6.0';
+    const MODULE_VERSION = '8.0.3';
     
     // =============================================
     // DEBUG MODE (DISABLED IN PRODUCTION)
     // =============================================
     const DEBUG = false;
-    const ALLOWED_LOGS = new Set(['INIT', 'READY', 'ERROR', 'STATE_CHANGE', 'HANDSHAKE', 'LIFECYCLE_GUARD', 'SESSION']);
+    const ALLOWED_LOGS = new Set(['INIT', 'READY', 'ERROR', 'STATE_CHANGE', 'HANDSHAKE', 'LIFECYCLE_GUARD', 'SESSION', 'API_REQUEST', 'API_RESPONSE', 'UI']);
     
     function debugLog(...args) {
         if (DEBUG) console.log(...args);
+    }
+
+    // =============================================
+    // SESSION VALIDATION UTILITY (CRITICAL)
+    // =============================================
+    function __isValidSession(session) {
+        if (!session) return false;
+        
+        // Must have token
+        if (!session.token || typeof session.token !== 'string') return false;
+        
+        // Must have valid userId (number, not 'user' or 'default')
+        if (session.userId === undefined || session.userId === null) return false;
+        if (typeof session.userId !== 'number') return false;
+        if (session.userId === 0) return false;
+        
+        // Additional validation for userId strings that might be numeric
+        const userIdStr = String(session.userId);
+        if (userIdStr === 'user' || userIdStr === 'default' || userIdStr === '') return false;
+        
+        return true;
+    }
+    
+    // Session ID generator for deduplication
+    function __getSessionId(session) {
+        if (!session) return null;
+        if (session.sessionId) return session.sessionId;
+        return `${session.token}_${session.userId}`;
     }
 
     // =============================================
@@ -40,6 +69,15 @@
         window.__lifecycleCanPerformAction = function(state) {
             return state === LIFECYCLE_STATES.ACTIVE;
         };
+    }
+    
+    // ENSURE ACTIVE - CRITICAL GUARD
+    function ensureActive(actionName) {
+        if (currentState !== LIFECYCLE_STATES.ACTIVE) {
+            console.warn(`[${MODULE_NAME}][LifecycleGuard] ❌ Blocked action '${actionName}' - not ACTIVE (current: ${currentState})`);
+            return false;
+        }
+        return true;
     }
     
     // Safe CHILD_READY sender - EXACTLY ONCE, NO RETRY
@@ -84,11 +122,8 @@
         CLEANUP_INTERVAL: 60000,
         MAX_QUEUE_SIZE: 500,
         TYPING_TIMEOUT: 3000,
-        TYPING_RATE_LIMIT: 2000
-        // NO RETRY CONSTANTS - removed per deterministic protocol
-        // NO HANDSHAKE_RETRY_INTERVAL - removed
-        // NO MAX_MESSAGE_RETRIES - removed
-        // NO MAX_SESSION_RETRIES - removed
+        TYPING_RATE_LIMIT: 2000,
+        REQUEST_TIMEOUT: 30000 // 30 seconds timeout for API requests
     };
 
     // =============================================
@@ -99,6 +134,7 @@
         INITIALIZING: 'INITIALIZING',
         READY: 'READY',
         WAIT_PARENT: 'WAIT_PARENT',
+        WAITING_AUTH: 'WAITING_AUTH',
         ACTIVE: 'ACTIVE'
     };
 
@@ -112,11 +148,43 @@
     const processedMessageIds = new Set();
     const sentMessageIds = new Set();
     
+    // Session tracking for deduplication
+    let _lastSessionId = null;
+    let _validSessionSet = false;
+    let _storedSession = null;
+    
+    // UI initialization flag
+    let _uiInitialized = false;
+    
     // Parent ready promise
     let parentReadyResolver;
     let parentReadyPromise = new Promise((resolve) => {
         parentReadyResolver = resolve;
     });
+
+    // =============================================
+    // PENDING REQUESTS TRACKING (REQUEST ID MANDATORY)
+    // =============================================
+    const pendingRequests = new Map(); // requestId -> { resolve, reject, timeout, timestamp, type }
+    
+    function cleanupPendingRequests() {
+        const now = Date.now();
+        for (const [requestId, pending] of pendingRequests.entries()) {
+            if (now - pending.timestamp > TIMING.REQUEST_TIMEOUT) {
+                console.warn(`[${MODULE_NAME}] Request timeout: ${requestId} (${pending.type})`);
+                if (pending.reject) {
+                    pending.reject(new Error(`Request timeout: ${pending.type}`));
+                }
+                if (pending.timeout) {
+                    clearTimeout(pending.timeout);
+                }
+                pendingRequests.delete(requestId);
+            }
+        }
+    }
+    
+    // Cleanup interval for pending requests
+    setInterval(cleanupPendingRequests, TIMING.CLEANUP_INTERVAL);
 
     // =============================================
     // MESSAGE QUEUE SYSTEM (ONLY DURING WAIT_PARENT)
@@ -125,13 +193,18 @@
     let processingQueue = false;
 
     function setState(nextState, reason = '') {
-        if (currentState === nextState) return true;
+        // Prevent duplicate transitions to same state
+        if (currentState === nextState) {
+            debugLog(`[${MODULE_NAME}] Attempted duplicate transition to ${nextState}, ignoring`);
+            return true;
+        }
 
         const validTransitions = {
             [LIFECYCLE_STATES.BOOT]: [LIFECYCLE_STATES.INITIALIZING],
             [LIFECYCLE_STATES.INITIALIZING]: [LIFECYCLE_STATES.READY],
             [LIFECYCLE_STATES.READY]: [LIFECYCLE_STATES.WAIT_PARENT],
-            [LIFECYCLE_STATES.WAIT_PARENT]: [LIFECYCLE_STATES.ACTIVE],
+            [LIFECYCLE_STATES.WAIT_PARENT]: [LIFECYCLE_STATES.WAITING_AUTH, LIFECYCLE_STATES.ACTIVE],
+            [LIFECYCLE_STATES.WAITING_AUTH]: [LIFECYCLE_STATES.ACTIVE],
             [LIFECYCLE_STATES.ACTIVE]: []
         };
 
@@ -159,6 +232,11 @@
 
         notifyStateListeners(nextState, fromState, reason);
         
+        // When transitioning to ACTIVE, ensure UI is fully initialized
+        if (nextState === LIFECYCLE_STATES.ACTIVE && !_uiInitialized) {
+            initializeUISafe();
+        }
+        
         return true;
     }
 
@@ -166,12 +244,16 @@
         stateListeners.forEach(listener => {
             try {
                 listener(toState, fromState, reason);
-            } catch (e) {}
+            } catch (e) {
+                console.warn(`[${MODULE_NAME}] State listener error:`, e);
+            }
         });
         
-        window.dispatchEvent(new CustomEvent('messagesLifecycleChange', {
-            detail: { state: toState, previous: fromState, reason }
-        }));
+        try {
+            window.dispatchEvent(new CustomEvent('messagesLifecycleChange', {
+                detail: { state: toState, previous: fromState, reason }
+            }));
+        } catch (e) {}
     }
 
     function isDuplicateMessage(messageId) {
@@ -201,15 +283,22 @@
             state: currentState,
             childReadySent,
             parentReadyReceived,
-            history: stateHistory.slice(-10)
+            history: stateHistory.slice(-10),
+            hasValidSession: _validSessionSet && _storedSession && __isValidSession(_storedSession)
         };
     }
 
     function canSendUserMessages() {
-        return currentState === LIFECYCLE_STATES.ACTIVE;
+        return currentState === LIFECYCLE_STATES.ACTIVE && _validSessionSet && __isValidSession(_storedSession);
     }
 
     function resetLifecycle() {
+        // Prevent reset during active state
+        if (currentState === LIFECYCLE_STATES.ACTIVE) {
+            console.warn(`[${MODULE_NAME}] Cannot reset lifecycle while ACTIVE`);
+            return;
+        }
+        
         currentState = LIFECYCLE_STATES.BOOT;
         childReadySent = false;
         parentReadyReceived = false;
@@ -218,10 +307,16 @@
         processedMessageIds.clear();
         sentMessageIds.clear();
         messageQueue.length = 0;
+        _uiInitialized = false;
         
         parentReadyPromise = new Promise((resolve) => {
             parentReadyResolver = resolve;
         });
+        
+        // Reset session tracking
+        _lastSessionId = null;
+        _validSessionSet = false;
+        _storedSession = null;
     }
 
     // =============================================
@@ -247,7 +342,8 @@
             'ERROR',
             'CHILD_READY',
             'MESSAGE_ACK',
-            'MESSAGE_RECEIVE'
+            'MESSAGE_RECEIVE',
+            'API_RESPONSE'
         ]),
         
         USER_ACTIONS: new Set([
@@ -269,7 +365,8 @@
             'SEARCH_MESSAGES',
             'GET_FRIEND_LIST',
             'CREATE_CHAT',
-            'GET_CHAT_HISTORY'
+            'GET_CHAT_HISTORY',
+            'API_REQUEST'
         ]),
         
         lockdown: true,
@@ -278,7 +375,8 @@
             if (currentState === LIFECYCLE_STATES.BOOT || 
                 currentState === LIFECYCLE_STATES.INITIALIZING ||
                 currentState === LIFECYCLE_STATES.READY ||
-                currentState === LIFECYCLE_STATES.WAIT_PARENT) {
+                currentState === LIFECYCLE_STATES.WAIT_PARENT ||
+                currentState === LIFECYCLE_STATES.WAITING_AUTH) {
                 return true;
             }
             
@@ -300,7 +398,7 @@
         canSendMessage: function(type, lifecycleState) {
             if (this.isEssentialMessage(type)) return true;
             if (this.isUserAction(type)) {
-                return lifecycleState === LIFECYCLE_STATES.ACTIVE;
+                return lifecycleState === LIFECYCLE_STATES.ACTIVE && _validSessionSet && __isValidSession(_storedSession);
             }
             if (type === 'REGISTER_MODULE') {
                 return lifecycleState === LIFECYCLE_STATES.INITIALIZING || 
@@ -309,7 +407,7 @@
             if (type === 'CHILD_READY') {
                 return lifecycleState === LIFECYCLE_STATES.READY && !childReadySent;
             }
-            return lifecycleState === LIFECYCLE_STATES.ACTIVE;
+            return lifecycleState === LIFECYCLE_STATES.ACTIVE && _validSessionSet && __isValidSession(_storedSession);
         },
         
         getSecurityReport: function() {
@@ -343,6 +441,155 @@
 
     function generateRequestId() {
         return 'req_' + Math.random().toString(36).substring(2, 15) + '_' + Date.now();
+    }
+
+    // =============================================
+    // ENDPOINT NORMALIZATION UTILITY
+    // =============================================
+    function normalizeEndpoint(endpoint) {
+        if (!endpoint || typeof endpoint !== 'string') {
+            console.warn(`[${MODULE_NAME}] Invalid endpoint provided:`, endpoint);
+            return '';
+        }
+        
+        let normalized = endpoint.trim();
+        
+        // Remove /api prefix if present (parent handles it)
+        if (normalized.startsWith('/api/')) {
+            normalized = normalized.substring(4);
+        }
+        
+        // Ensure starts with /
+        if (!normalized.startsWith('/')) {
+            normalized = '/' + normalized;
+        }
+        
+        // Prevent double slashes
+        normalized = normalized.replace(/\/+/g, '/');
+        
+        return normalized;
+    }
+
+    // =============================================
+    // API REQUEST HANDLER (NO DIRECT FETCH - PARENT ROUTED)
+    // =============================================
+    function makeApiRequest(endpoint, method, data = null, params = null) {
+        return new Promise((resolve, reject) => {
+            // CRITICAL: Block if not ACTIVE or no valid session
+            if (!ensureActive(`API_REQUEST: ${endpoint}`)) {
+                reject(new Error(`Module not ACTIVE (current: ${currentState})`));
+                return;
+            }
+            
+            if (!_validSessionSet || !__isValidSession(_storedSession)) {
+                reject(new Error(`No valid session for API request`));
+                return;
+            }
+            
+            const normalizedEndpoint = normalizeEndpoint(endpoint);
+            if (!normalizedEndpoint) {
+                reject(new Error(`Invalid endpoint: ${endpoint}`));
+                return;
+            }
+            
+            const requestId = generateRequestId();
+            const timestamp = Date.now();
+            
+            let timeoutId = null;
+            
+            // Store pending request with timeout
+            timeoutId = setTimeout(() => {
+                if (pendingRequests.has(requestId)) {
+                    console.warn(`[${MODULE_NAME}] API request timeout: ${method} ${normalizedEndpoint} (${requestId})`);
+                    pendingRequests.delete(requestId);
+                    reject(new Error(`API request timeout: ${method} ${normalizedEndpoint}`));
+                }
+            }, TIMING.REQUEST_TIMEOUT);
+            
+            pendingRequests.set(requestId, {
+                resolve,
+                reject,
+                timestamp,
+                type: normalizedEndpoint,
+                timeout: timeoutId
+            });
+            
+            // Build message to parent with validated payload
+            const message = {
+                id: generateMessageId(),
+                type: 'API_REQUEST',
+                source: MODULE_NAME,
+                target: 'parent',
+                requestId: requestId,
+                payload: {
+                    endpoint: normalizedEndpoint,
+                    method: method.toUpperCase(),
+                    body: data || null,
+                    params: params || null
+                },
+                timestamp: timestamp
+            };
+            
+            console.log(`[${MODULE_NAME}] 📤 Sending API_REQUEST: ${method} ${normalizedEndpoint} (${requestId})`);
+            
+            // Send to parent with safety check
+            try {
+                if (!window.parent || window.parent === window) {
+                    throw new Error('No parent window');
+                }
+                window.parent.postMessage(message, '*');
+            } catch (error) {
+                console.error(`[${MODULE_NAME}] Failed to send API_REQUEST:`, error);
+                if (pendingRequests.has(requestId)) {
+                    const pending = pendingRequests.get(requestId);
+                    if (pending.timeout) clearTimeout(pending.timeout);
+                    pendingRequests.delete(requestId);
+                }
+                reject(error);
+            }
+        });
+    }
+    
+    // Handle API_RESPONSE from parent
+    function handleApiResponse(data) {
+        const requestId = data.requestId;
+        const response = data.payload || data;
+        
+        if (!requestId) {
+            console.warn(`[${MODULE_NAME}] API_RESPONSE missing requestId`);
+            return;
+        }
+        
+        console.log(`[${MODULE_NAME}] 📥 API_RESPONSE received: ${requestId}`);
+        
+        if (!pendingRequests.has(requestId)) {
+            console.warn(`[${MODULE_NAME}] No pending request for: ${requestId}`);
+            return;
+        }
+        
+        const pending = pendingRequests.get(requestId);
+        
+        // Clear timeout
+        if (pending.timeout) {
+            clearTimeout(pending.timeout);
+        }
+        
+        // Remove from pending
+        pendingRequests.delete(requestId);
+        
+        // Handle response with safe fallback
+        try {
+            if (response && response.success === false) {
+                console.error(`[${MODULE_NAME}] API request failed:`, response.error);
+                pending.reject(new Error(response.error || 'API request failed'));
+            } else {
+                const result = (response && response.data) ? response.data : (response || {});
+                pending.resolve(result);
+            }
+        } catch (error) {
+            console.error(`[${MODULE_NAME}] Error handling API response:`, error);
+            pending.reject(new Error('Failed to process API response'));
+        }
     }
 
     // =============================================
@@ -400,11 +647,16 @@
 
         debugLog(`[${MODULE_NAME}] Sending message:`, message);
 
-        // Queue if in WAIT_PARENT - HARD BLOCK STATE
-        if (currentState === LIFECYCLE_STATES.WAIT_PARENT && !SECURITY.isEssentialMessage(type)) {
-            messageQueue.push(message);
-            debugLog(`[${MODULE_NAME}] Queued message (WAIT_PARENT): ${type}`);
-            return { success: true, queued: true, id, requestId };
+        // Queue if in WAIT_PARENT or WAITING_AUTH - HARD BLOCK STATE
+        if ((currentState === LIFECYCLE_STATES.WAIT_PARENT || currentState === LIFECYCLE_STATES.WAITING_AUTH) && !SECURITY.isEssentialMessage(type)) {
+            if (messageQueue.length < TIMING.MAX_QUEUE_SIZE) {
+                messageQueue.push(message);
+                debugLog(`[${MODULE_NAME}] Queued message (${currentState}): ${type}`);
+                return { success: true, queued: true, id, requestId };
+            } else {
+                console.warn(`[${MODULE_NAME}] Message queue full, dropping message: ${type}`);
+                return { success: false, blocked: true, reason: 'queue_full' };
+            }
         }
 
         // Block if not ACTIVE for user actions
@@ -464,9 +716,15 @@
         
         processingQueue = true;
         
-        while (messageQueue.length > 0) {
-            const queuedMessage = messageQueue.shift();
+        const queueCopy = [...messageQueue];
+        messageQueue.length = 0;
+        
+        for (const queuedMessage of queueCopy) {
             try {
+                if (!window.parent || window.parent === window) {
+                    console.warn(`[${MODULE_NAME}] No parent window, cannot flush message`);
+                    continue;
+                }
                 window.parent.postMessage(queuedMessage, '*');
                 debugLog(`[${MODULE_NAME}] Flushed queued message: ${queuedMessage.type}`);
             } catch (error) {
@@ -536,7 +794,8 @@
         HEARTBEAT_ACK: 'HEARTBEAT_ACK',
         MODULE_DEGRADED: 'MODULE_DEGRADED',
         VERIFY_RESPONSE: 'VERIFY_RESPONSE',
-        MODULE_HEARTBEAT: 'MODULE_HEARTBEAT'
+        MODULE_HEARTBEAT: 'MODULE_HEARTBEAT',
+        API_RESPONSE: 'API_RESPONSE'
     };
 
     // =============================================
@@ -579,23 +838,23 @@
     // LOCAL STORAGE KEYS (FOR UI STATE ONLY - NEVER TOKENS)
     // =============================================
     const LOCAL_STORAGE_KEYS = {
-        SESSION_CACHE: 'kynecta_session_cache_v7',
-        USER_CACHE: 'kynecta_user_cache_v7',
-        FRIENDS_CACHE: 'kynecta_friends_cache_v7',
-        CHATS_CACHE: 'kynecta_chats_cache_v7',
-        MESSAGES_PREFIX: 'kynecta_messages_v7_',
-        CONTACTS_CACHE: 'kynecta_contacts_cache_v7',
-        CHAT_THEMES: 'kynecta_chat_themes_v7',
-        DRAFTS: 'kynecta_message_drafts_v7',
-        OFFLINE_QUEUE: 'kynecta_offline_queue_v7',
-        SCHEDULED_MESSAGES: 'kynecta_scheduled_messages_v7',
-        USER_SETTINGS: 'kynecta_user_settings_v7',
-        BLOCKED_USERS: 'kynecta_blocked_users_v7',
-        ARCHIVED_CHATS: 'kynecta_archived_chats_v7',
-        STARRED_MESSAGES: 'kynecta_starred_messages_v7',
-        UI_STATE: 'kynecta_ui_state_v7',
-        MESSAGE_QUEUE: 'kynecta_message_queue_v7',
-        CHAT_STATE: 'kynecta_chat_state_v7'
+        SESSION_CACHE: 'kynecta_session_cache_v8',
+        USER_CACHE: 'kynecta_user_cache_v8',
+        FRIENDS_CACHE: 'kynecta_friends_cache_v8',
+        CHATS_CACHE: 'kynecta_chats_cache_v8',
+        MESSAGES_PREFIX: 'kynecta_messages_v8_',
+        CONTACTS_CACHE: 'kynecta_contacts_cache_v8',
+        CHAT_THEMES: 'kynecta_chat_themes_v8',
+        DRAFTS: 'kynecta_message_drafts_v8',
+        OFFLINE_QUEUE: 'kynecta_offline_queue_v8',
+        SCHEDULED_MESSAGES: 'kynecta_scheduled_messages_v8',
+        USER_SETTINGS: 'kynecta_user_settings_v8',
+        BLOCKED_USERS: 'kynecta_blocked_users_v8',
+        ARCHIVED_CHATS: 'kynecta_archived_chats_v8',
+        STARRED_MESSAGES: 'kynecta_starred_messages_v8',
+        UI_STATE: 'kynecta_ui_state_v8',
+        MESSAGE_QUEUE: 'kynecta_message_queue_v8',
+        CHAT_STATE: 'kynecta_chat_state_v8'
     };
 
     // =============================================
@@ -893,7 +1152,9 @@
                 try {
                     const value = localStorage.getItem(key);
                     if (value !== null) return value;
-                } catch (e) {}
+                } catch (e) {
+                    // Silent fail, use memory store
+                }
             }
             return this.memoryStore.has(key) ? this.memoryStore.get(key) : fallback;
         },
@@ -963,24 +1224,29 @@
         },
         
         validateIncomingMessage: function(event) {
+            // Validate origin
             if (!SECURITY.validateOrigin(event.origin)) {
                 return { valid: false, reason: 'invalid_origin' };
             }
             
+            // Validate structure
             if (!SecurityUtils.validateMessageStructure(event.data)) {
                 return { valid: false, reason: 'invalid_structure' };
             }
             
             const data = event.data;
             
+            // Validate source
             if (data.source && data.source !== 'parent') {
                 return { valid: false, reason: 'invalid_source' };
             }
             
+            // Validate target
             if (data.target && data.target !== MODULE_NAME && data.target !== 'all' && data.target !== '*') {
                 return { valid: false, reason: 'wrong_target' };
             }
             
+            // Validate duplicate
             if (data.messageId && isDuplicateMessage(data.messageId)) {
                 return { valid: false, reason: 'duplicate_message' };
             }
@@ -1005,18 +1271,20 @@
     }.init();
 
     // =============================================
-    // SESSION MANAGER (MEMORY ONLY - NO STORAGE)
+    // SESSION MANAGER (MEMORY ONLY - NO STORAGE) WITH VALIDATION
     // =============================================
     const SessionManager = {
         _session: {
             token: null,
             user: null,
             expiresAt: null,
-            authenticated: false
+            authenticated: false,
+            userId: null
         },
         _sessionReady: false,
         _listeners: new Set(),
         _initialized: false,
+        _lastSessionId: null,
 
         init: function() {
             if (this._initialized) return this;
@@ -1026,53 +1294,103 @@
         },
 
         setSession: function(sessionData) {
-            if (sessionData && sessionData.token) {
-                this._session.token = sessionData.token;
-                this._session.user = sessionData.user || null;
-                this._session.expiresAt = sessionData.expiresAt || null;
-                this._session.authenticated = true;
-                this._sessionReady = true;
-                
-                Logger.success('SessionManager', 'Session established', { 
-                    authenticated: true,
-                    userId: this._session.user?.id
+            // CRITICAL: Validate session before accepting
+            if (!__isValidSession(sessionData)) {
+                console.warn('[SessionManager] Ignored invalid session data', { 
+                    hasToken: !!sessionData?.token,
+                    userId: sessionData?.userId,
+                    tokenType: typeof sessionData?.token,
+                    userIdType: typeof sessionData?.userId
                 });
-                
-                if (sessionData.user) {
-                    SafeStorage.setJSON(LOCAL_STORAGE_KEYS.USER_CACHE, sessionData.user);
+                return false;
+            }
+            
+            // Deduplicate: Prevent processing same session multiple times
+            const sessionId = __getSessionId(sessionData);
+            if (sessionId && this._lastSessionId === sessionId) {
+                console.log('[SessionManager] Duplicate session ignored');
+                return false;
+            }
+            
+            // Prevent session downgrade: If we already have valid session, don't replace with invalid
+            if (this._session.authenticated && __isValidSession(this._session)) {
+                if (!__isValidSession(sessionData)) {
+                    console.warn('[SessionManager] Prevented session downgrade - rejecting invalid session');
+                    return false;
                 }
-                
-                this._notifyListeners();
-                
+            }
+            
+            console.log('[SessionManager] Setting valid session', { userId: sessionData.userId });
+            
+            this._session.token = sessionData.token;
+            this._session.user = sessionData.user || null;
+            this._session.userId = sessionData.userId;
+            this._session.expiresAt = sessionData.expiresAt || null;
+            this._session.authenticated = true;
+            this._sessionReady = true;
+            this._lastSessionId = sessionId;
+            
+            // Store in global for validation access
+            _storedSession = this._session;
+            _validSessionSet = true;
+            
+            Logger.success('SessionManager', 'Session established', { 
+                authenticated: true,
+                userId: this._session.userId
+            });
+            
+            if (sessionData.user) {
+                try {
+                    SafeStorage.setJSON(LOCAL_STORAGE_KEYS.USER_CACHE, sessionData.user);
+                } catch (e) {}
+            }
+            
+            this._notifyListeners();
+            
+            try {
                 window.dispatchEvent(new CustomEvent('sessionUpdated', {
                     detail: { 
                         authenticated: true,
-                        user: this._session.user
+                        user: this._session.user,
+                        userId: this._session.userId
                     }
                 }));
-                
+            } catch (e) {}
+            
+            // If we're in WAITING_AUTH, transition to ACTIVE
+            if (currentState === LIFECYCLE_STATES.WAITING_AUTH && __isValidSession(this._session)) {
+                console.log('[SessionManager] Valid session received, transitioning to ACTIVE');
+                setState(LIFECYCLE_STATES.ACTIVE, 'valid_session_received');
+                flushMessageQueue();
                 startDataFlow();
-            } else {
-                Logger.warn('SessionManager', 'Invalid session data - no token');
-                this._session.authenticated = false;
-                this._sessionReady = false;
+            } else if (currentState === LIFECYCLE_STATES.ACTIVE) {
+                startDataFlow();
             }
+            
+            return true;
         },
 
         getToken: function() {
+            if (!_validSessionSet || !__isValidSession(this._session)) return null;
             return this._session.token;
         },
 
         getUser: function() {
+            if (!_validSessionSet || !__isValidSession(this._session)) return null;
             return this._session.user ? { ...this._session.user } : null;
+        },
+        
+        getUserId: function() {
+            if (!_validSessionSet || !__isValidSession(this._session)) return null;
+            return this._session.userId;
         },
 
         isAuthenticated: function() {
-            return this._session.authenticated && !!this._session.token;
+            return this._session.authenticated && !!this._session.token && __isValidSession(this._session);
         },
 
         isSessionReady: function() {
-            return this._sessionReady;
+            return this._sessionReady && __isValidSession(this._session);
         },
 
         clear: function() {
@@ -1080,9 +1398,13 @@
                 token: null,
                 user: null,
                 expiresAt: null,
-                authenticated: false
+                authenticated: false,
+                userId: null
             };
             this._sessionReady = false;
+            this._lastSessionId = null;
+            _validSessionSet = false;
+            _storedSession = null;
             
             this._notifyListeners();
             Logger.info('SessionManager', 'Session cleared');
@@ -1097,6 +1419,7 @@
             const sessionInfo = {
                 authenticated: this._session.authenticated,
                 user: this._session.user,
+                userId: this._session.userId,
                 ready: this._sessionReady
             };
             
@@ -1107,9 +1430,9 @@
 
         getState: function() {
             return {
-                authenticated: this._session.authenticated,
+                authenticated: this._session.authenticated && __isValidSession(this._session),
                 ready: this._sessionReady,
-                userId: this._session.user?.id,
+                userId: this._session.userId,
                 hasToken: !!this._session.token
             };
         }
@@ -1130,6 +1453,7 @@
         _lastHeartbeatTime: 0,
         _sessionData: null,
         _initialized: false,
+        _messageListenerAttached: false,
         
         init: function() {
             if (this._initialized) return this;
@@ -1144,6 +1468,8 @@
         },
         
         _setupMessageListener: function() {
+            if (this._messageListenerAttached) return;
+            
             window.addEventListener('message', (event) => {
                 if (!SECURITY.validateOrigin(event.origin)) {
                     if (DEBUG) console.log(`[${MODULE_NAME}] Rejected message from origin: ${event.origin}`);
@@ -1152,6 +1478,8 @@
                 
                 setTimeout(() => this._handleIncomingMessage(event), 0);
             }, true);
+            
+            this._messageListenerAttached = true;
         },
         
         _handleIncomingMessage: function(event) {
@@ -1170,7 +1498,17 @@
                 MessageIdCache.add(data.messageId);
             }
             
-            // Handle PARENT_READY - DETERMINISTIC: Only activate if in WAIT_PARENT
+            // Handle API_RESPONSE from parent
+            if (data.type === INCOMING_TYPES.API_RESPONSE) {
+                handleApiResponse(data);
+            }
+            
+            // Handle SESSION_DATA - with validation
+            if (data.type === INCOMING_TYPES.SESSION_DATA || data.type === INCOMING_TYPES.SESSION_RESPONSE) {
+                this._handleSessionData(data);
+            }
+            
+            // Handle PARENT_READY - DETERMINISTIC: Only activate if in WAIT_PARENT and have valid session
             if (data.type === INCOMING_TYPES.PARENT_READY || data.type === INCOMING_TYPES.coreReady) {
                 this._handleParentReady(data);
             }
@@ -1183,11 +1521,6 @@
             // Handle MESSAGE_RECEIVE - Incoming message from parent
             if (data.type === INCOMING_TYPES.MESSAGE_RECEIVE || data.type === INCOMING_TYPES.NEW_MESSAGE) {
                 this._handleMessageReceive(data);
-            }
-            
-            // Handle SESSION_DATA
-            if (data.type === INCOMING_TYPES.SESSION_DATA || data.type === INCOMING_TYPES.SESSION_RESPONSE) {
-                this._handleSessionData(data);
             }
             
             if (this._handlers.has(data.type)) {
@@ -1213,48 +1546,98 @@
             }
         },
         
-        _handleParentReady: function(data) {
-            if (parentReadyReceived) {
-                console.log(`[${MODULE_NAME}] Duplicate PARENT_READY ignored`);
-                return;
-            }
+// In messages-core.js, find the _handleParentReady function and update:
+
+_handleParentReady: function(data) {
+    if (parentReadyReceived) {
+        console.log(`[${MODULE_NAME}] Duplicate PARENT_READY ignored`);
+        return;
+    }
+    
+    // CRITICAL FIX: Check if module matches OR if it's undefined (accept any)
+    if (data.module && data.module !== MODULE_NAME) {
+        console.warn(`[${MODULE_NAME}] Invalid PARENT_READY - module mismatch (expected: ${MODULE_NAME}, got: ${data.module})`);
+        return;
+    }
+    
+    console.log(`[${MODULE_NAME}] PARENT_READY received`);
+    
+    parentReadyReceived = true;
+    parentReadyData = data.payload || data;
+    
+    if (parentReadyResolver) {
+        parentReadyResolver();
+        parentReadyResolver = null;
+    }
+    
+    // Check if session was provided in PARENT_READY payload
+    const providedSession = parentReadyData.session || parentReadyData;
+    if (providedSession && providedSession.token && providedSession.userId) {
+        console.log(`[${MODULE_NAME}] Session provided in PARENT_READY, userId: ${providedSession.userId}`);
+        SessionManager.setSession(providedSession);
+    } else {
+        console.log(`[${MODULE_NAME}] No session in PARENT_READY payload, will wait for SESSION_DATA`);
+    }
+    
+    // Transition based on session validity
+    if (currentState === LIFECYCLE_STATES.WAIT_PARENT) {
+        if (SessionManager.isAuthenticated()) {
+            // Valid session exists, go to ACTIVE
+            setState(LIFECYCLE_STATES.ACTIVE, 'parent_ready_with_valid_session');
+            console.log(`[${MODULE_NAME}] ACTIVE (valid session)`);
             
-            // Validate PARENT_READY structure
-            if (!data.module || data.module !== MODULE_NAME) {
-                console.warn(`[${MODULE_NAME}] Invalid PARENT_READY - module mismatch`);
-                return;
-            }
+            initializeUISafe();
+            flushMessageQueue();
+            startDataFlow();
+        } else {
+            // No valid session yet, wait for it
+            console.log(`[${MODULE_NAME}] WAITING_AUTH (no valid session yet)`);
+            setState(LIFECYCLE_STATES.WAITING_AUTH, 'parent_ready_waiting_for_session');
             
-            console.log(`[${MODULE_NAME}] PARENT_READY received`);
+            // Request session from parent
+            safeSend(OUTGOING_ACTIONS.REQUEST_SESSION, {
+                module: MODULE_NAME,
+                timestamp: Date.now()
+            }, { requireAck: false });
             
-            parentReadyReceived = true;
-            parentReadyData = data.payload || data;
-            
-            if (parentReadyResolver) {
-                parentReadyResolver();
-                parentReadyResolver = null;
-            }
-            
-            // Transition to ACTIVE ONLY from WAIT_PARENT
-            if (currentState === LIFECYCLE_STATES.WAIT_PARENT) {
-                setState(LIFECYCLE_STATES.ACTIVE, 'parent_ready_received');
-                
-                // Initialize UI after activation
-                initializeUISafe();
-                
-                console.log(`[${MODULE_NAME}] ACTIVE`);
-                
-                // Set session if provided in PARENT_READY
-                if (parentReadyData.session) {
-                    SessionManager.setSession(parentReadyData.session);
-                }
-                
-                // Flush queued messages
-                flushMessageQueue();
-            } else {
-                console.log(`[${MODULE_NAME}] PARENT_READY received in state: ${currentState} - ignoring (expected WAIT_PARENT)`);
-            }
-        },
+            initializeUISafe();
+        }
+    } else {
+        console.log(`[${MODULE_NAME}] PARENT_READY received in state: ${currentState} - ignoring (expected WAIT_PARENT)`);
+    }
+},
+
+    _handleSessionData: function(data) {
+    const sessionData = data.payload || data;
+    Logger.info('ParentConnectionManager', 'Received session data from parent');
+    
+    // CRITICAL: Validate session data
+    if (sessionData && sessionData.token && sessionData.userId) {
+        // Ensure userId is a number
+        if (typeof sessionData.userId === 'string' && !isNaN(parseInt(sessionData.userId))) {
+            sessionData.userId = parseInt(sessionData.userId);
+        }
+        
+        // Also ensure id is set
+        if (!sessionData.id && sessionData.userId) {
+            sessionData.id = sessionData.userId;
+        }
+        
+        Logger.info('ParentConnectionManager', 'Valid session data received', { 
+            userId: sessionData.userId, 
+            hasToken: !!sessionData.token 
+        });
+        
+        SessionManager.setSession(sessionData);
+    } else {
+        console.warn('[ParentConnectionManager] Ignored invalid session data from parent', {
+            hasToken: !!sessionData?.token,
+            userId: sessionData?.userId,
+            userIdType: typeof sessionData?.userId
+        });
+    }
+},
+
         
         _handleMessageAck: function(data) {
             const { messageId, status, payload } = data.payload || data;
@@ -1264,12 +1647,16 @@
             Logger.info('ParentConnectionManager', `Message ACK: ${messageId} - ${status}`);
             
             // Update message status in UI
-            MessageHandler.updateMessageStatus(messageId, status, payload);
+            if (MessageHandler && MessageHandler.updateMessageStatus) {
+                MessageHandler.updateMessageStatus(messageId, status, payload);
+            }
             
             // Dispatch event for UI update
-            window.dispatchEvent(new CustomEvent('messageStatusUpdated', {
-                detail: { messageId, status, payload }
-            }));
+            try {
+                window.dispatchEvent(new CustomEvent('messageStatusUpdated', {
+                    detail: { messageId, status, payload }
+                }));
+            } catch (e) {}
         },
         
         _handleMessageReceive: function(data) {
@@ -1289,29 +1676,24 @@
             Logger.info('ParentConnectionManager', `Message received: ${message.id}`);
             
             // Add to chat manager
-            ChatManager.addMessage({
-                ...message,
-                status: message.status || 'delivered'
-            });
+            if (ChatManager && ChatManager.addMessage) {
+                ChatManager.addMessage({
+                    ...message,
+                    status: message.status || 'delivered'
+                });
+            }
             
             // Play notification if needed
-            if (message.senderId !== SessionManager.getUser()?.id) {
+            if (message.senderId !== SessionManager.getUserId() && UIFeatures) {
                 UIFeatures.playNotificationSound();
             }
             
             // Dispatch event for UI
-            window.dispatchEvent(new CustomEvent('newMessage', {
-                detail: { message }
-            }));
-        },
-        
-        _handleSessionData: function(data) {
-            const sessionData = data.payload || data;
-            Logger.info('ParentConnectionManager', 'Received session data from parent');
-            
-            if (sessionData && sessionData.token) {
-                SessionManager.setSession(sessionData);
-            }
+            try {
+                window.dispatchEvent(new CustomEvent('newMessage', {
+                    detail: { message }
+                }));
+            } catch (e) {}
         },
         
         send: function(type, payload = {}, options = {}) {
@@ -1351,7 +1733,9 @@
             
             for (const item of freshQueue) {
                 try {
-                    window.parent.postMessage(item.message, '*');
+                    if (window.parent && window.parent !== window) {
+                        window.parent.postMessage(item.message, '*');
+                    }
                 } catch (e) {}
             }
             
@@ -1381,11 +1765,11 @@
         },
         
         _generateFrameId: function() {
-            const stored = SafeStorage.get('kyn_frame_id_v7');
+            const stored = SafeStorage.get('kyn_frame_id_v8');
             if (stored) return stored;
             
-            const newId = `frame_${Date.now()}_${Math.random().toString(36).substr(2, 9)}_v7`;
-            SafeStorage.set('kyn_frame_id_v7', newId);
+            const newId = `frame_${Date.now()}_${Math.random().toString(36).substr(2, 9)}_v8`;
+            SafeStorage.set('kyn_frame_id_v8', newId);
             return newId;
         },
         
@@ -1419,7 +1803,7 @@
         },
         
         isConnected: function() {
-            return currentState === LIFECYCLE_STATES.ACTIVE;
+            return currentState === LIFECYCLE_STATES.ACTIVE && SessionManager.isAuthenticated();
         },
         
         getProtocol: function() {
@@ -1507,7 +1891,7 @@
     }.init();
 
     // =============================================
-    // SESSION STORE (UI ONLY)
+    // SESSION STORE (UI ONLY) WITH VALIDATION
     // =============================================
     const SessionStore = {
         _user: null,
@@ -1515,21 +1899,32 @@
         _listeners: new Set(),
         
         init: function() {
-            const cachedUser = SafeStorage.getJSON(LOCAL_STORAGE_KEYS.USER_CACHE);
-            if (cachedUser) {
-                this._user = cachedUser;
-                this._userId = cachedUser.id;
-            }
+            try {
+                const cachedUser = SafeStorage.getJSON(LOCAL_STORAGE_KEYS.USER_CACHE);
+                if (cachedUser && cachedUser.id && typeof cachedUser.id === 'number' && cachedUser.id !== 0) {
+                    this._user = cachedUser;
+                    this._userId = cachedUser.id;
+                }
+            } catch (e) {}
             return this;
         },
         
         setUser: function(user) {
             if (!user) return false;
             
-            this._user = { ...user };
-            this._userId = user.id || user.uid || null;
+            // Validate user has valid ID
+            const userId = user.id || user.uid;
+            if (!userId || typeof userId !== 'number' || userId === 0) {
+                console.warn('[SessionStore] Cannot set user with invalid ID:', userId);
+                return false;
+            }
             
-            SafeStorage.setJSON(LOCAL_STORAGE_KEYS.USER_CACHE, this._user);
+            this._user = { ...user };
+            this._userId = userId;
+            
+            try {
+                SafeStorage.setJSON(LOCAL_STORAGE_KEYS.USER_CACHE, this._user);
+            } catch (e) {}
             
             this._notifyListeners();
             return true;
@@ -1546,7 +1941,9 @@
         clear: function() {
             this._user = null;
             this._userId = null;
-            SafeStorage.remove(LOCAL_STORAGE_KEYS.USER_CACHE);
+            try {
+                SafeStorage.remove(LOCAL_STORAGE_KEYS.USER_CACHE);
+            } catch (e) {}
             this._notifyListeners();
         },
         
@@ -1563,7 +1960,7 @@
     }.init();
 
     // =============================================
-    // CHAT MANAGER
+    // CHAT MANAGER (REAL DATA ONLY - NO MOCKS)
     // =============================================
     const ChatManager = {
         _conversations: [],
@@ -1574,6 +1971,8 @@
         _subscribers: new Set(),
         _loaded: false,
         _historyCache: new Map(),
+        _loadingChats: false,
+        _loadingMessages: false,
         
         init: function() {
             this._loadFromCache();
@@ -1581,18 +1980,20 @@
         },
         
         _loadFromCache: function() {
-            const cached = SafeStorage.getJSON(LOCAL_STORAGE_KEYS.CHATS_CACHE);
-            if (cached && Array.isArray(cached.conversations)) {
-                this._conversations = cached.conversations;
-                this._rebuildMap();
-                this._loaded = true;
-            }
-            
-            const archived = SafeStorage.getJSON(LOCAL_STORAGE_KEYS.ARCHIVED_CHATS, []);
-            archived.forEach(chatId => {
-                const chat = this._conversationsMap.get(chatId);
-                if (chat) chat.archived = true;
-            });
+            try {
+                const cached = SafeStorage.getJSON(LOCAL_STORAGE_KEYS.CHATS_CACHE);
+                if (cached && Array.isArray(cached.conversations)) {
+                    this._conversations = cached.conversations;
+                    this._rebuildMap();
+                    this._loaded = true;
+                }
+                
+                const archived = SafeStorage.getJSON(LOCAL_STORAGE_KEYS.ARCHIVED_CHATS, []);
+                archived.forEach(chatId => {
+                    const chat = this._conversationsMap.get(chatId);
+                    if (chat) chat.archived = true;
+                });
+            } catch (e) {}
         },
         
         _rebuildMap: function() {
@@ -1613,29 +2014,161 @@
             });
         },
         
+        // REAL API CALLS - NO PLACEHOLDERS
+        async fetchConversations() {
+            if (!ensureActive('fetchConversations')) {
+                this._notifyError('Cannot fetch conversations - module not active');
+                return;
+            }
+            
+            if (!SessionManager.isAuthenticated()) {
+                console.log('[ChatManager] Not authenticated, cannot fetch conversations');
+                return;
+            }
+            
+            if (this._loadingChats) return;
+            this._loadingChats = true;
+            this._notifyLoading('chats', true);
+            
+            try {
+                console.log('[ChatManager] 📤 Fetching conversations from backend');
+                const conversations = await makeApiRequest('/api/chats', 'GET');
+                
+                console.log(`[ChatManager] 📥 Received ${conversations?.length || 0} conversations from backend`);
+                
+                if (conversations && Array.isArray(conversations)) {
+                    this.setConversations(conversations);
+                    this._notifySuccess('Conversations loaded');
+                } else {
+                    this.setConversations([]);
+                    console.warn('[ChatManager] No conversations received');
+                }
+            } catch (error) {
+                console.error('[ChatManager] Failed to fetch conversations:', error);
+                this._notifyError(error.message);
+            } finally {
+                this._loadingChats = false;
+                this._notifyLoading('chats', false);
+            }
+        },
+        
+        async fetchMessages(conversationId, options = {}) {
+            if (!ensureActive('fetchMessages')) {
+                this._notifyError('Cannot fetch messages - module not active');
+                return;
+            }
+            
+            if (!SessionManager.isAuthenticated()) {
+                console.log('[ChatManager] Not authenticated, cannot fetch messages');
+                return;
+            }
+            
+            if (!conversationId) {
+                console.warn('[ChatManager] Cannot fetch messages - no conversation ID');
+                return;
+            }
+            
+            if (this._loadingMessages) return;
+            this._loadingMessages = true;
+            this._notifyLoading('messages', true);
+            
+            try {
+                console.log(`[ChatManager] 📤 Fetching messages for conversation: ${conversationId}`);
+                const params = { 
+                    chatId: conversationId,
+                    before: options.before,
+                    limit: options.limit || 50
+                };
+                const messages = await makeApiRequest('/messages', 'GET', null, params);
+                
+                console.log(`[ChatManager] 📥 Received ${messages?.length || 0} messages from backend`);
+                
+                if (messages && Array.isArray(messages)) {
+                    this.setMessages(messages);
+                    this._notifySuccess('Messages loaded');
+                } else {
+                    this.setMessages([]);
+                }
+            } catch (error) {
+                console.error('[ChatManager] Failed to fetch messages:', error);
+                this._notifyError(error.message);
+                this.setMessages([]);
+            } finally {
+                this._loadingMessages = false;
+                this._notifyLoading('messages', false);
+            }
+        },
+        
+        async sendMessageToBackend(content, conversationId, options = {}) {
+            if (!ensureActive('sendMessage')) {
+                throw new Error('Cannot send message - module not active');
+            }
+            
+            if (!SessionManager.isAuthenticated()) {
+                throw new Error('Not authenticated');
+            }
+            
+            if (!conversationId) {
+                throw new Error('No conversation ID');
+            }
+            
+            if (!content && !options.attachment) {
+                throw new Error('Empty message');
+            }
+            
+            console.log(`[ChatManager] 📤 Sending message to conversation: ${conversationId}`);
+            
+            const result = await makeApiRequest('/messages/send', 'POST', {
+                chatId: conversationId,
+                content: content,
+                type: options.type || 'text',
+                attachment: options.attachment,
+                replyTo: options.replyTo,
+                mentions: options.mentions
+            });
+            
+            console.log(`[ChatManager] 📥 Message sent successfully:`, result);
+            
+            return result;
+        },
+        
         setConversations: function(conversations) {
             this._conversations = conversations || [];
             this._rebuildMap();
             this._loaded = true;
+            this._saveToCache();
             this._notifySubscribers();
         },
         
         setMessages: function(messages) {
-            this._messages = messages || [];
+            // Deduplicate messages by ID
+            const uniqueMessages = [];
+            const seenIds = new Set();
+            
+            for (const msg of (messages || [])) {
+                if (msg.id && !seenIds.has(msg.id)) {
+                    seenIds.add(msg.id);
+                    uniqueMessages.push(msg);
+                }
+            }
+            
+            this._messages = uniqueMessages;
             this._rebuildMessagesMap();
+            this._saveMessagesToCache();
             this._notifySubscribers();
         },
         
         addMessage: function(message) {
             if (!message || !message.id) return;
             
-            const existing = this._messagesMap.get(message.id);
-            if (existing) {
-                Object.assign(existing, message);
-            } else {
-                this._messages.push(message);
-                this._messagesMap.set(message.id, message);
+            // Prevent duplicate
+            if (this._messagesMap.has(message.id)) {
+                console.log(`[ChatManager] Duplicate message ignored: ${message.id}`);
+                return;
             }
+            
+            this._messages.push(message);
+            this._messagesMap.set(message.id, message);
             
             this._messages.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
             
@@ -1651,7 +2184,7 @@
             }
             
             if (this._activeConversation && message.conversationId === this._activeConversation.id) {
-                SafeStorage.setJSON(`${LOCAL_STORAGE_KEYS.MESSAGES_PREFIX}${this._activeConversation.id}`, this._messages);
+                this._saveMessagesToCache();
             }
             
             this._notifySubscribers();
@@ -1681,6 +2214,16 @@
         setActiveConversation: function(conversation) {
             this._activeConversation = conversation;
             this._notifySubscribers();
+            
+            // Save last chat to cache
+            if (conversation) {
+                try {
+                    SafeStorage.setJSON(LOCAL_STORAGE_KEYS.UI_STATE, {
+                        lastChatId: conversation.id,
+                        timestamp: Date.now()
+                    });
+                } catch (e) {}
+            }
         },
         
         getActiveChat: function() {
@@ -1699,16 +2242,35 @@
                 }
             }
             
-            const stored = SafeStorage.getJSON(`${LOCAL_STORAGE_KEYS.MESSAGES_PREFIX}${conversationId}`);
-            if (stored && Array.isArray(stored)) {
-                this._historyCache.set(conversationId, {
-                    messages: stored,
-                    timestamp: Date.now()
-                });
-                return stored;
-            }
+            try {
+                const stored = SafeStorage.getJSON(`${LOCAL_STORAGE_KEYS.MESSAGES_PREFIX}${conversationId}`);
+                if (stored && Array.isArray(stored)) {
+                    this._historyCache.set(conversationId, {
+                        messages: stored,
+                        timestamp: Date.now()
+                    });
+                    return stored;
+                }
+            } catch (e) {}
             
             return null;
+        },
+        
+        _saveToCache: function() {
+            try {
+                SafeStorage.setJSON(LOCAL_STORAGE_KEYS.CHATS_CACHE, { 
+                    conversations: this._conversations, 
+                    timestamp: Date.now() 
+                });
+            } catch (e) {}
+        },
+        
+        _saveMessagesToCache: function() {
+            if (this._activeConversation) {
+                try {
+                    SafeStorage.setJSON(`${LOCAL_STORAGE_KEYS.MESSAGES_PREFIX}${this._activeConversation.id}`, this._messages);
+                } catch (e) {}
+            }
         },
         
         subscribe: function(callback) {
@@ -1722,6 +2284,30 @@
             });
         },
         
+        _notifyLoading: function(type, isLoading) {
+            try {
+                window.dispatchEvent(new CustomEvent('chatLoading', {
+                    detail: { type, isLoading }
+                }));
+            } catch (e) {}
+        },
+        
+        _notifyError: function(error) {
+            try {
+                window.dispatchEvent(new CustomEvent('chatError', {
+                    detail: { error }
+                }));
+            } catch (e) {}
+        },
+        
+        _notifySuccess: function(message) {
+            try {
+                window.dispatchEvent(new CustomEvent('chatSuccess', {
+                    detail: { message }
+                }));
+            } catch (e) {}
+        },
+        
         clear: function() {
             this._conversations = [];
             this._conversationsMap.clear();
@@ -1733,7 +2319,7 @@
     }.init();
 
     // =============================================
-    // FRIEND MANAGER
+    // FRIEND MANAGER (REAL DATA ONLY)
     // =============================================
     const FriendManager = {
         _friends: [],
@@ -1751,23 +2337,27 @@
         },
         
         _loadFromCache: function() {
-            const cached = SafeStorage.getJSON(LOCAL_STORAGE_KEYS.FRIENDS_CACHE);
-            if (cached && Array.isArray(cached.friends)) {
-                this._friends = cached.friends;
-                this._rebuildMap();
-                this._loaded = true;
-                
-                this._friends.forEach(friend => {
-                    if (friend.online) {
-                        this._activeFriends.add(friend.id || friend.uid);
-                    }
-                });
-            }
+            try {
+                const cached = SafeStorage.getJSON(LOCAL_STORAGE_KEYS.FRIENDS_CACHE);
+                if (cached && Array.isArray(cached.friends)) {
+                    this._friends = cached.friends;
+                    this._rebuildMap();
+                    this._loaded = true;
+                    
+                    this._friends.forEach(friend => {
+                        if (friend.online) {
+                            this._activeFriends.add(friend.id || friend.uid);
+                        }
+                    });
+                }
+            } catch (e) {}
         },
         
         _loadBlockedUsers: function() {
-            const blocked = SafeStorage.getJSON(LOCAL_STORAGE_KEYS.BLOCKED_USERS, []);
-            this._blockedFriends = new Set(blocked);
+            try {
+                const blocked = SafeStorage.getJSON(LOCAL_STORAGE_KEYS.BLOCKED_USERS, []);
+                this._blockedFriends = new Set(blocked);
+            } catch (e) {}
         },
         
         _rebuildMap: function() {
@@ -1780,10 +2370,42 @@
             });
         },
         
+        async fetchFriends() {
+            if (!ensureActive('fetchFriends')) {
+                this._notifyError('Cannot fetch friends - module not active');
+                return;
+            }
+            
+            if (!SessionManager.isAuthenticated()) {
+                console.log('[FriendManager] Not authenticated, cannot fetch friends');
+                return;
+            }
+            
+            if (this._loading) return;
+            this._loading = true;
+            
+            try {
+                console.log('[FriendManager] 📤 Fetching friends from backend');
+                const friends = await makeApiRequest('/friends', 'GET');
+                
+                console.log(`[FriendManager] 📥 Received ${friends?.length || 0} friends from backend`);
+                
+                if (friends && Array.isArray(friends)) {
+                    this.setFriends(friends);
+                }
+            } catch (error) {
+                console.error('[FriendManager] Failed to fetch friends:', error);
+                this._notifyError(error.message);
+            } finally {
+                this._loading = false;
+            }
+        },
+        
         setFriends: function(friends) {
             this._friends = friends || [];
             this._rebuildMap();
             this._loaded = true;
+            this._saveToCache();
             this._notifySubscribers();
         },
         
@@ -1816,10 +2438,7 @@
             });
             
             if (changed) {
-                SafeStorage.setJSON(LOCAL_STORAGE_KEYS.FRIENDS_CACHE, {
-                    friends: this._friends,
-                    timestamp: Date.now()
-                });
+                this._saveToCache();
                 this._notifySubscribers();
             }
         },
@@ -1843,11 +2462,7 @@
             }
             
             this._notifySubscribers();
-            
-            SafeStorage.setJSON(LOCAL_STORAGE_KEYS.FRIENDS_CACHE, {
-                friends: this._friends,
-                timestamp: Date.now()
-            });
+            this._saveToCache();
             
             return true;
         },
@@ -1917,9 +2532,28 @@
                 try { cb(friends, this._friends); } catch (e) {}
             });
             
-            window.dispatchEvent(new CustomEvent('friendsUpdated', {
-                detail: { friends: this._friends, availableFriends: friends }
-            }));
+            try {
+                window.dispatchEvent(new CustomEvent('friendsUpdated', {
+                    detail: { friends: this._friends, availableFriends: friends }
+                }));
+            } catch (e) {}
+        },
+        
+        _notifyError: function(error) {
+            try {
+                window.dispatchEvent(new CustomEvent('friendsError', {
+                    detail: { error }
+                }));
+            } catch (e) {}
+        },
+        
+        _saveToCache: function() {
+            try {
+                SafeStorage.setJSON(LOCAL_STORAGE_KEYS.FRIENDS_CACHE, {
+                    friends: this._friends,
+                    timestamp: Date.now()
+                });
+            } catch (e) {}
         },
         
         isLoaded: function() {
@@ -1931,7 +2565,9 @@
             this._friendsMap.clear();
             this._loaded = false;
             this._activeFriends.clear();
-            SafeStorage.remove(LOCAL_STORAGE_KEYS.FRIENDS_CACHE);
+            try {
+                SafeStorage.remove(LOCAL_STORAGE_KEYS.FRIENDS_CACHE);
+            } catch (e) {}
         }
     }.init();
 
@@ -2018,7 +2654,7 @@
         },
         
         sendTyping: function(conversationId, isTyping) {
-            if (!conversationId || !SessionStore.getUserId()) return false;
+            if (!conversationId || !SessionManager.getUserId()) return false;
             if (!canSendUserMessages()) return false;
             
             const guardResult = window.__guardAction('sendTyping', MODULE_NAME, currentState, false);
@@ -2079,7 +2715,7 @@
         _optimisticMessages: new Map(),
         _pendingRequests: new Map(),
         
-        sendMessage: function(content, options = {}) {
+        async sendMessage(content, options = {}) {
             const guardResult = window.__guardAction('sendMessage', MODULE_NAME, currentState, { success: false, error: 'module_not_active' });
             if (guardResult !== null) {
                 return guardResult;
@@ -2087,6 +2723,10 @@
             
             if (!canSendUserMessages()) {
                 return { success: false, error: 'module_not_active' };
+            }
+            
+            if (!SessionManager.isAuthenticated()) {
+                return { success: false, error: 'not_authenticated' };
             }
             
             if (!ChatManager.getActiveChat() && !options.conversationId) {
@@ -2108,8 +2748,8 @@
                 localId: localId,
                 requestId: requestId,
                 conversationId: conversationId,
-                senderId: SessionStore.getUserId() || 'me',
-                sender: SessionStore.getUser(),
+                senderId: SessionManager.getUserId() || null,
+                sender: SessionManager.getUser(),
                 content: SecurityUtils.sanitizeString(content || ''),
                 type: options.type || 'text',
                 timestamp: Date.now(),
@@ -2127,29 +2767,52 @@
             ChatManager.addMessage(optimisticMessage);
             EventBus.emit('message:sending', { message: optimisticMessage, optimistic: true });
             
-            // Send to parent - parent will respond with MESSAGE_ACK
-            const result = safeSend(OUTGOING_ACTIONS.SEND_MESSAGE, {
-                conversationId: conversationId,
-                content: content,
-                type: options.type || 'text',
-                attachment: options.attachment,
-                replyTo: options.replyTo,
-                mentions: options.mentions,
-                localId: localId,
-                requestId: requestId,
-                messageId: localId
-            }, { requireAck: false });
-            
-            if (result.blocked) {
-                optimisticMessage.status = 'blocked';
-                ChatManager.updateMessageStatus(localId, 'blocked', { reason: result.reason });
-                EventBus.emit('message:failed', { messageId: localId, error: `Blocked: ${result.reason}` });
+            try {
+                // REAL BACKEND CALL via parent
+                const result = await ChatManager.sendMessageToBackend(content, conversationId, options);
+                
+                console.log(`[MessageHandler] Message sent successfully:`, result);
+                
+                // Update optimistic message with real data
+                const realMessage = result.message || result;
+                if (realMessage && realMessage.id) {
+                    optimisticMessage.id = realMessage.id;
+                    optimisticMessage.status = 'sent';
+                    optimisticMessage.optimistic = false;
+                    optimisticMessage.realId = realMessage.id;
+                    
+                    // Replace in messages list
+                    const messages = ChatManager.getMessages();
+                    const index = messages.findIndex(m => m.localId === localId);
+                    if (index !== -1) {
+                        messages[index] = { ...optimisticMessage, ...realMessage };
+                        ChatManager.setMessages(messages);
+                    }
+                } else {
+                    optimisticMessage.status = 'sent';
+                    optimisticMessage.optimistic = false;
+                }
+                
                 this._optimisticMessages.delete(localId);
                 this._pendingRequests.delete(requestId);
-                return { success: false, blocked: true, reason: result.reason };
+                
+                EventBus.emit('message:sent', { message: optimisticMessage, success: true });
+                
+                return { success: true, localId, requestId, message: optimisticMessage };
+                
+            } catch (error) {
+                console.error(`[MessageHandler] Failed to send message:`, error);
+                
+                optimisticMessage.status = 'failed';
+                optimisticMessage.error = error.message;
+                ChatManager.updateMessageStatus(localId, 'failed', { reason: error.message });
+                EventBus.emit('message:failed', { messageId: localId, error: error.message });
+                
+                this._optimisticMessages.delete(localId);
+                this._pendingRequests.delete(requestId);
+                
+                return { success: false, error: error.message, localId };
             }
-            
-            return { success: true, localId, requestId, optimistic: optimisticMessage };
         },
         
         updateMessageStatus: function(messageId, status, details = {}) {
@@ -2183,6 +2846,7 @@
             }
             
             if (!canSendUserMessages()) return false;
+            if (!SessionManager.isAuthenticated()) return false;
             
             const result = safeSend(OUTGOING_ACTIONS.DELETE_MESSAGE, {
                 messageId,
@@ -2204,7 +2868,9 @@
                 }
                 
                 if (ChatManager.getActiveChat()) {
-                    SafeStorage.setJSON(`${LOCAL_STORAGE_KEYS.MESSAGES_PREFIX}${ChatManager.getActiveChat().id}`, messages);
+                    try {
+                        SafeStorage.setJSON(`${LOCAL_STORAGE_KEYS.MESSAGES_PREFIX}${ChatManager.getActiveChat().id}`, messages);
+                    } catch (e) {}
                 }
                 
                 EventBus.emit('message:deleted', { messageId, forEveryone });
@@ -2220,6 +2886,7 @@
             }
             
             if (!canSendUserMessages()) return false;
+            if (!SessionManager.isAuthenticated()) return false;
             
             const result = safeSend(OUTGOING_ACTIONS.EDIT_MESSAGE, {
                 messageId,
@@ -2238,7 +2905,9 @@
                 message.editedAt = Date.now();
                 
                 if (ChatManager.getActiveChat()) {
-                    SafeStorage.setJSON(`${LOCAL_STORAGE_KEYS.MESSAGES_PREFIX}${ChatManager.getActiveChat().id}`, messages);
+                    try {
+                        SafeStorage.setJSON(`${LOCAL_STORAGE_KEYS.MESSAGES_PREFIX}${ChatManager.getActiveChat().id}`, messages);
+                    } catch (e) {}
                 }
                 
                 EventBus.emit('message:edited', { messageId, content: newContent });
@@ -2254,6 +2923,7 @@
             }
             
             if (!canSendUserMessages()) return false;
+            if (!SessionManager.isAuthenticated()) return false;
             
             const result = safeSend(OUTGOING_ACTIONS.ADD_REACTION, {
                 messageId,
@@ -2271,7 +2941,7 @@
                 if (!message.reactions) message.reactions = {};
                 if (!message.reactions[emoji]) message.reactions[emoji] = [];
                 
-                const userId = SessionStore.getUserId();
+                const userId = SessionManager.getUserId();
                 const userIndex = message.reactions[emoji].indexOf(userId);
                 
                 if (add && userIndex === -1) {
@@ -2285,7 +2955,9 @@
                 }
                 
                 if (ChatManager.getActiveChat()) {
-                    SafeStorage.setJSON(`${LOCAL_STORAGE_KEYS.MESSAGES_PREFIX}${ChatManager.getActiveChat().id}`, messages);
+                    try {
+                        SafeStorage.setJSON(`${LOCAL_STORAGE_KEYS.MESSAGES_PREFIX}${ChatManager.getActiveChat().id}`, messages);
+                    } catch (e) {}
                 }
                 
                 EventBus.emit('message:reaction', { messageId, emoji, add });
@@ -2301,6 +2973,7 @@
             }
             
             if (!canSendUserMessages()) return false;
+            if (!SessionManager.isAuthenticated()) return false;
             
             const result = safeSend(OUTGOING_ACTIONS.FORWARD_MESSAGE, {
                 messageId,
@@ -2321,6 +2994,7 @@
             }
             
             if (!canSendUserMessages()) return false;
+            if (!SessionManager.isAuthenticated()) return false;
             
             const result = safeSend(OUTGOING_ACTIONS.REPORT_MESSAGE, {
                 messageId,
@@ -2342,6 +3016,10 @@
             
             if (!canSendUserMessages()) {
                 return Promise.reject(new Error('Module not active'));
+            }
+            
+            if (!SessionManager.isAuthenticated()) {
+                return Promise.reject(new Error('Not authenticated'));
             }
             
             return new Promise((resolve, reject) => {
@@ -2367,22 +3045,28 @@
     };
 
     // =============================================
-    // CONVERSATION MANAGER
+    // CONVERSATION MANAGER (REAL API CALLS)
     // =============================================
     const ConversationManager = {
-        openConversation: function(conversationId, options = {}) {
+        async openConversation(conversationId, options = {}) {
             const guardResult = window.__guardAction('openConversation', MODULE_NAME, currentState, false);
             if (guardResult !== null) {
                 return guardResult;
             }
             
             if (!conversationId) return false;
+            if (!ensureActive('openConversation')) return false;
+            if (!SessionManager.isAuthenticated()) return false;
             
             const conversation = ChatManager.getConversation(conversationId);
             if (conversation) {
                 ChatManager.setActiveConversation(conversation);
+            } else {
+                // If conversation doesn't exist in cache, still allow to open and fetch
+                ChatManager.setActiveConversation({ id: conversationId, name: 'Loading...' });
             }
             
+            // Mark conversation as active
             const result = safeSend(OUTGOING_ACTIONS.OPEN_CONVERSATION, {
                 conversationId: conversationId
             }, { requireAck: false });
@@ -2391,7 +3075,8 @@
                 return false;
             }
             
-            this.fetchMessages(conversationId, options);
+            // Fetch messages for this conversation
+            await this.fetchMessages(conversationId, options);
             
             const draft = UIStateManager.getDraft(conversationId);
             EventBus.emit('draft:loaded', { conversationId, draft });
@@ -2401,34 +3086,39 @@
             
             this.markAsRead(conversationId);
             
+            // Dispatch UI event to show chat panel
+            try {
+                window.dispatchEvent(new CustomEvent('conversationOpened', {
+                    detail: { conversationId, conversation }
+                }));
+            } catch (e) {}
+            
             return true;
         },
         
-        fetchMessages: function(conversationId, options = {}) {
+        async fetchMessages(conversationId, options = {}) {
             const guardResult = window.__guardAction('fetchMessages', MODULE_NAME, currentState);
             if (guardResult !== null) {
                 return;
             }
             
             if (!conversationId) return;
-            if (!canSendUserMessages()) return;
+            if (!ensureActive('fetchMessages')) return;
+            if (!SessionManager.isAuthenticated()) return;
             
-            safeSend(OUTGOING_ACTIONS.FETCH_MESSAGES, {
-                conversationId: conversationId,
-                before: options.before,
-                limit: options.limit || 50
-            }, { requireAck: false });
+            await ChatManager.fetchMessages(conversationId, options);
         },
         
-        fetchConversations: function() {
+        async fetchConversations() {
             const guardResult = window.__guardAction('fetchConversations', MODULE_NAME, currentState);
             if (guardResult !== null) {
                 return;
             }
             
-            if (!canSendUserMessages()) return;
+            if (!ensureActive('fetchConversations')) return;
+            if (!SessionManager.isAuthenticated()) return;
             
-            safeSend(OUTGOING_ACTIONS.FETCH_CONVERSATIONS, {}, { requireAck: false });
+            await ChatManager.fetchConversations();
         },
         
         markAsRead: function(conversationId) {
@@ -2439,6 +3129,7 @@
             
             if (!conversationId) return;
             if (!canSendUserMessages()) return;
+            if (!SessionManager.isAuthenticated()) return;
             
             safeSend(OUTGOING_ACTIONS.MARK_AS_READ, {
                 conversationId: conversationId
@@ -2448,6 +3139,13 @@
             if (conversation) {
                 conversation.unreadCount = 0;
                 EventBus.emit('conversation:updated', conversation);
+                
+                // Dispatch UI event to update unread count
+                try {
+                    window.dispatchEvent(new CustomEvent('conversationRead', {
+                        detail: { conversationId }
+                    }));
+                } catch (e) {}
             }
         },
         
@@ -2459,6 +3157,7 @@
             
             if (!participants || participants.length === 0) return false;
             if (!canSendUserMessages()) return false;
+            if (!SessionManager.isAuthenticated()) return false;
             
             const result = safeSend(OUTGOING_ACTIONS.CREATE_CONVERSATION, {
                 participants: participants,
@@ -2471,6 +3170,13 @@
                 return false;
             }
             
+            // Dispatch UI event to show new chat panel
+            try {
+                window.dispatchEvent(new CustomEvent('conversationCreated', {
+                    detail: { participants, options }
+                }));
+            } catch (e) {}
+            
             return true;
         },
         
@@ -2482,6 +3188,7 @@
             
             if (!conversationId) return;
             if (!canSendUserMessages()) return;
+            if (!SessionManager.isAuthenticated()) return;
             
             safeSend(OUTGOING_ACTIONS.ARCHIVE_CONVERSATION, {
                 conversationId: conversationId,
@@ -2492,14 +3199,16 @@
             if (conversation) {
                 conversation.archived = archived;
                 
-                const archivedChats = SafeStorage.getJSON(LOCAL_STORAGE_KEYS.ARCHIVED_CHATS, []);
-                if (archived && !archivedChats.includes(conversationId)) {
-                    archivedChats.push(conversationId);
-                } else if (!archived) {
-                    const index = archivedChats.indexOf(conversationId);
-                    if (index !== -1) archivedChats.splice(index, 1);
-                }
-                SafeStorage.setJSON(LOCAL_STORAGE_KEYS.ARCHIVED_CHATS, archivedChats);
+                try {
+                    const archivedChats = SafeStorage.getJSON(LOCAL_STORAGE_KEYS.ARCHIVED_CHATS, []);
+                    if (archived && !archivedChats.includes(conversationId)) {
+                        archivedChats.push(conversationId);
+                    } else if (!archived) {
+                        const index = archivedChats.indexOf(conversationId);
+                        if (index !== -1) archivedChats.splice(index, 1);
+                    }
+                    SafeStorage.setJSON(LOCAL_STORAGE_KEYS.ARCHIVED_CHATS, archivedChats);
+                } catch (e) {}
                 
                 EventBus.emit('conversation:updated', conversation);
             }
@@ -2512,6 +3221,7 @@
             }
             
             if (!canSendUserMessages()) return false;
+            if (!SessionManager.isAuthenticated()) return false;
             
             const result = safeSend(OUTGOING_ACTIONS.BLOCK_USER, {
                 userId,
@@ -2522,14 +3232,16 @@
                 return false;
             }
             
-            const blockedUsers = SafeStorage.getJSON(LOCAL_STORAGE_KEYS.BLOCKED_USERS, []);
-            if (block && !blockedUsers.includes(userId)) {
-                blockedUsers.push(userId);
-            } else if (!block) {
-                const index = blockedUsers.indexOf(userId);
-                if (index !== -1) blockedUsers.splice(index, 1);
-            }
-            SafeStorage.setJSON(LOCAL_STORAGE_KEYS.BLOCKED_USERS, blockedUsers);
+            try {
+                const blockedUsers = SafeStorage.getJSON(LOCAL_STORAGE_KEYS.BLOCKED_USERS, []);
+                if (block && !blockedUsers.includes(userId)) {
+                    blockedUsers.push(userId);
+                } else if (!block) {
+                    const index = blockedUsers.indexOf(userId);
+                    if (index !== -1) blockedUsers.splice(index, 1);
+                }
+                SafeStorage.setJSON(LOCAL_STORAGE_KEYS.BLOCKED_USERS, blockedUsers);
+            } catch (e) {}
             
             EventBus.emit('user:blocked', { userId, block });
             
@@ -2776,17 +3488,10 @@
     const UIBridge = {
         _listeners: new Map(),
         _initialized: false,
+        _uiAttached: false,
         
         init: function() {
             if (this._initialized) return this;
-            
-            if (document.readyState === 'loading') {
-                document.addEventListener('DOMContentLoaded', () => this._attachListeners());
-            } else {
-                if (currentState === LIFECYCLE_STATES.ACTIVE) {
-                    this._attachListeners();
-                }
-            }
             
             this._initialized = true;
             Logger.info('UIBridge', 'Initialized');
@@ -2794,7 +3499,12 @@
         },
         
         _attachListeners: function() {
-            if (currentState !== LIFECYCLE_STATES.ACTIVE) {
+            if (this._uiAttached) {
+                Logger.info('UIBridge', 'UI listeners already attached');
+                return;
+            }
+            
+            if (currentState !== LIFECYCLE_STATES.ACTIVE && currentState !== LIFECYCLE_STATES.WAITING_AUTH) {
                 Logger.info('UIBridge', 'Delaying UI attachment until ACTIVE');
                 return;
             }
@@ -2804,8 +3514,36 @@
             this._attachMarkReadListener();
             this._attachConversationListeners();
             this._attachFriendListeners();
+            this._attachStartChatListeners();
             
+            this._uiAttached = true;
             Logger.info('UIBridge', 'UI listeners attached');
+            _uiInitialized = true;
+        },
+        
+        _attachStartChatListeners: function() {
+            // Attach listener for "Start Chat" button or similar
+            const startChatButton = document.getElementById('startChatBtn') || document.querySelector('.start-chat-btn');
+            if (startChatButton) {
+                startChatButton.addEventListener('click', () => {
+                    if (!canSendUserMessages() || !SessionManager.isAuthenticated()) {
+                        console.log('[UI] Cannot start chat - not ready or not authenticated');
+                        return;
+                    }
+                    
+                    // Show friend list or create new chat panel
+                    const friendListPanel = document.getElementById('friendListPanel');
+                    const startChatPanel = document.getElementById('startChatPanel');
+                    
+                    if (friendListPanel) friendListPanel.style.display = 'block';
+                    if (startChatPanel) startChatPanel.style.display = 'block';
+                    
+                    // Dispatch event to show friends
+                    EventBus.emit('ui:showFriends', { timestamp: Date.now() });
+                    
+                    Logger.info('UIBridge', 'Start chat panel activated');
+                });
+            }
         },
         
         _attachSendMessageListener: function() {
@@ -2813,7 +3551,7 @@
             const input = document.getElementById('messageInput');
             
             if (sendButton) {
-                sendButton.addEventListener('click', () => {
+                sendButton.addEventListener('click', async () => {
                     const guardResult = window.__guardAction('UI:sendMessage', MODULE_NAME, currentState);
                     if (guardResult !== null) {
                         console.log(`[${MODULE_NAME}] ⏳ Waiting for activation...`);
@@ -2833,15 +3571,24 @@
                     if (!input) return;
                     const text = input.value.trim();
                     if (text) {
-                        MessageHandler.sendMessage(text);
-                        input.value = '';
-                        UIStateManager.clearDraft(ChatManager.getActiveChat()?.id);
+                        const result = await MessageHandler.sendMessage(text);
+                        if (result.success) {
+                            input.value = '';
+                            UIStateManager.clearDraft(ChatManager.getActiveChat()?.id);
+                        } else {
+                            console.error('[UI] Failed to send message:', result.error);
+                            try {
+                                window.dispatchEvent(new CustomEvent('messageError', {
+                                    detail: { error: result.error }
+                                }));
+                            } catch (e) {}
+                        }
                     }
                 });
             }
             
             if (input) {
-                input.addEventListener('keypress', (e) => {
+                input.addEventListener('keypress', async (e) => {
                     if (e.key === 'Enter' && !e.shiftKey) {
                         e.preventDefault();
                         
@@ -2863,9 +3610,18 @@
                         
                         const text = input.value.trim();
                         if (text) {
-                            MessageHandler.sendMessage(text);
-                            input.value = '';
-                            UIStateManager.clearDraft(ChatManager.getActiveChat()?.id);
+                            const result = await MessageHandler.sendMessage(text);
+                            if (result.success) {
+                                input.value = '';
+                                UIStateManager.clearDraft(ChatManager.getActiveChat()?.id);
+                            } else {
+                                console.error('[UI] Failed to send message:', result.error);
+                                try {
+                                    window.dispatchEvent(new CustomEvent('messageError', {
+                                        detail: { error: result.error }
+                                    }));
+                                } catch (e) {}
+                            }
                         }
                     }
                 });
@@ -2928,12 +3684,20 @@
         },
         
         _attachConversationListeners: function() {
-            document.addEventListener('click', (e) => {
+            document.addEventListener('click', async (e) => {
                 const conversationItem = e.target.closest('.conversation-item');
                 if (conversationItem && canSendUserMessages() && SessionManager.isAuthenticated()) {
                     const conversationId = conversationItem.dataset.conversationId;
                     if (conversationId) {
-                        ConversationManager.openConversation(conversationId);
+                        // Hide start chat panel if visible
+                        const startChatPanel = document.getElementById('startChatPanel');
+                        if (startChatPanel) startChatPanel.style.display = 'none';
+                        
+                        // Show chat panel
+                        const chatPanel = document.getElementById('chatPanel');
+                        if (chatPanel) chatPanel.style.display = 'block';
+                        
+                        await ConversationManager.openConversation(conversationId);
                     }
                 }
             });
@@ -2944,8 +3708,18 @@
                 const friendItem = e.target.closest('.friend-item');
                 if (friendItem && canSendUserMessages() && SessionManager.isAuthenticated()) {
                     const friendId = friendItem.dataset.friendId;
+                    const friendName = friendItem.dataset.friendName || 'Friend';
                     if (friendId) {
-                        ConversationManager.createConversation([friendId]);
+                        // Hide friend list panel if visible
+                        const friendListPanel = document.getElementById('friendListPanel');
+                        if (friendListPanel) friendListPanel.style.display = 'none';
+                        
+                        // Show chat panel
+                        const chatPanel = document.getElementById('chatPanel');
+                        if (chatPanel) chatPanel.style.display = 'block';
+                        
+                        // Create and open conversation
+                        ConversationManager.createConversation([parseInt(friendId)], { name: friendName });
                     }
                 }
             });
@@ -2996,7 +3770,8 @@
         getStats: function() {
             return {
                 listeners: this._listeners.size,
-                initialized: this._initialized
+                initialized: this._initialized,
+                uiAttached: this._uiAttached
             };
         }
     }.init();
@@ -3091,7 +3866,10 @@
         },
         
         start: async function() {
-            if (this._state === 'running') return;
+            if (this._state === 'running') {
+                Logger.info('ModuleLifecycleController', 'Already running');
+                return;
+            }
             
             this._state = 'starting';
             this._startTime = Date.now();
@@ -3111,7 +3889,7 @@
             SessionManager.init();
             HeartbeatClient.init();
             
-            loadCachedData().catch(e => Logger.warn('ModuleLifecycleController', 'Cache load error', e));
+            await loadCachedData().catch(e => Logger.warn('ModuleLifecycleController', 'Cache load error', e));
             
             setState(LIFECYCLE_STATES.READY, 'initialization_complete');
             
@@ -3126,7 +3904,19 @@
                 ParentConnectionManager.notifyChildReady();
             }
             
-            await parentReadyPromise;
+            // Wait for parent ready but don't block - we'll transition to WAITING_AUTH if no session
+            const parentReadyTimeout = setTimeout(() => {
+                if (currentState === LIFECYCLE_STATES.WAIT_PARENT && !parentReadyReceived) {
+                    console.log(`[${MODULE_NAME}] Parent ready timeout, requesting session...`);
+                    safeSend(OUTGOING_ACTIONS.REQUEST_SESSION, {
+                        module: MODULE_NAME,
+                        timestamp: Date.now()
+                    }, { requireAck: false });
+                }
+            }, 5000);
+            
+            await parentReadyPromise.catch(() => {});
+            clearTimeout(parentReadyTimeout);
         },
         
         stop: function() {
@@ -3304,16 +4094,17 @@
     // SAFE UI INITIALIZATION
     // =============================================
     function initializeUISafe() {
-        if (currentState !== LIFECYCLE_STATES.ACTIVE) {
+        if (currentState !== LIFECYCLE_STATES.ACTIVE && currentState !== LIFECYCLE_STATES.WAITING_AUTH) {
             Logger.info('UI', 'Delaying UI init until ACTIVE');
             return;
         }
         
-        UIBridge.init();
+        UIBridge._attachListeners();
         
         EventBus.emit('ui:ready', { timestamp: Date.now() });
         
         Logger.success('UI', 'UI initialized');
+        _uiInitialized = true;
     }
     
     function startDataFlow() {
@@ -3329,7 +4120,14 @@
         
         Logger.info('DataFlow', 'Starting data flow');
         
-        ConversationManager.fetchConversations();
+        // Fetch real data from backend
+        ConversationManager.fetchConversations().catch(e => {
+            Logger.error('DataFlow', 'Failed to fetch conversations', e);
+        });
+        
+        FriendManager.fetchFriends().catch(e => {
+            Logger.error('DataFlow', 'Failed to fetch friends', e);
+        });
         
         restoreLastChat();
         
@@ -3340,7 +4138,7 @@
     // INITIALIZATION (DETERMINISTIC HANDSHAKE)
     // =============================================
     async function initialize() {
-        console.log(`[${MODULE_NAME}] 🚀 Messages Core v${MODULE_VERSION} (Deterministic Parent-Controlled Protocol)`);
+        console.log(`[${MODULE_NAME}] 🚀 Messages Core v${MODULE_VERSION} (Stabilized Protocol | Real Data Only | Session Validation | UI Enhanced)`);
         
         try {
             setState(LIFECYCLE_STATES.BOOT, 'initialization_start');
@@ -3355,7 +4153,7 @@
                 }
             });
             
-            console.log(`[${MODULE_NAME}] ✅ Initialized - waiting for parent activation`);
+            console.log(`[${MODULE_NAME}] ✅ Initialized - waiting for parent activation and valid session`);
             
         } catch (error) {
             console.error(`[${MODULE_NAME}] Initialization error:`, error);
@@ -3365,7 +4163,7 @@
     async function loadCachedData() {
         try {
             const cachedUser = SafeStorage.getJSON(LOCAL_STORAGE_KEYS.USER_CACHE);
-            if (cachedUser) {
+            if (cachedUser && cachedUser.id && typeof cachedUser.id === 'number' && cachedUser.id !== 0) {
                 SessionStore.setUser(cachedUser);
             }
             
@@ -3383,7 +4181,9 @@
             if (uiState?.lastChatId) {
                 SafeStorage.set('lastChatId', uiState.lastChatId);
             }
-        } catch (error) {}
+        } catch (error) {
+            // Silent fail on cache load
+        }
     }
     
     function restoreLastChat() {
@@ -3413,18 +4213,24 @@
         TypingManager.stopTyping();
         
         if (ChatManager.getActiveChat()) {
-            SafeStorage.setJSON(`${LOCAL_STORAGE_KEYS.MESSAGES_PREFIX}${ChatManager.getActiveChat().id}`, ChatManager.getMessages());
+            try {
+                SafeStorage.setJSON(`${LOCAL_STORAGE_KEYS.MESSAGES_PREFIX}${ChatManager.getActiveChat().id}`, ChatManager.getMessages());
+            } catch (e) {}
         }
         
-        SafeStorage.setJSON(LOCAL_STORAGE_KEYS.CHATS_CACHE, { 
-            conversations: ChatManager.getConversations(), 
-            timestamp: Date.now() 
-        });
+        try {
+            SafeStorage.setJSON(LOCAL_STORAGE_KEYS.CHATS_CACHE, { 
+                conversations: ChatManager.getConversations(), 
+                timestamp: Date.now() 
+            });
+        } catch (e) {}
         
-        SafeStorage.setJSON(LOCAL_STORAGE_KEYS.FRIENDS_CACHE, {
-            friends: FriendManager.getFriends(),
-            timestamp: Date.now()
-        });
+        try {
+            SafeStorage.setJSON(LOCAL_STORAGE_KEYS.FRIENDS_CACHE, {
+                friends: FriendManager.getFriends(),
+                timestamp: Date.now()
+            });
+        } catch (e) {}
     });
 
     // =============================================
@@ -3460,9 +4266,10 @@
         Logger,
         
         getState: getLifecycleState,
-        isReady: () => currentState === LIFECYCLE_STATES.ACTIVE,
-        isCoreReady: () => currentState === LIFECYCLE_STATES.ACTIVE,
-        getCurrentUser: () => SessionStore.getUser(),
+        isReady: () => currentState === LIFECYCLE_STATES.ACTIVE && SessionManager.isAuthenticated(),
+        isCoreReady: () => currentState === LIFECYCLE_STATES.ACTIVE && SessionManager.isAuthenticated(),
+        getCurrentUser: () => SessionManager.getUser(),
+        getCurrentUserId: () => SessionManager.getUserId(),
         getCurrentConversation: () => ChatManager.getActiveChat(),
         getConversations: () => ChatManager.getConversations(),
         getMessages: () => ChatManager.getMessages(),
@@ -3543,6 +4350,7 @@
             SessionManager,
             messageQueue,
             flushQueue: flushMessageQueue,
+            pendingRequests: () => Array.from(pendingRequests.keys()),
             lifecycleGuards: {
                 canSendChildReady: (state) => window.__lifecycleCanSendChildReady(state),
                 canPerformAction: (state) => window.__lifecycleCanPerformAction(state)

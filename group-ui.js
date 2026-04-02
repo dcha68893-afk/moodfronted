@@ -1,8 +1,9 @@
+
 // =============================================
 // GROUPS UI FUNCTIONS - RESILIENT UI CONTROLLER
 // COMPLETE PRODUCTION-READY IMPLEMENTATION
 // HIGHLY SECURE - XSS PROTECTED, CSP COMPLIANT
-// VERSION: 4.0.0 - UPDATED TO MATCH PROTOCOL-COMPLIANT CORE
+// VERSION: 5.0.1 - UPDATED TO MATCH PROTOCOL-COMPLIANT CORE V9.0.1
 // ENHANCED: Protocol-aware lifecycle, Parent-ready synchronization
 // STRICT: No retry loops, deterministic state, duplicate prevention
 // =============================================
@@ -62,7 +63,7 @@ const DIAGNOSTICS = {
 };
 
 // =============================================
-// IMPORT VERIFICATION - FIXED EXPORTS MATCHING CORE
+// IMPORT VERIFICATION - FIXED EXPORTS MATCHING CORE V9.0.1
 // =============================================
 
 import {
@@ -122,9 +123,6 @@ import {
     // Local storage keys
     LOCAL_STORAGE_KEYS,
 
-    // Flags and state - THESE ARE MODULE-LEVEL VARIABLES, NOT EXPORTS
-    // We access them via the core module's internal state
-    
     // Token management
     getCurrentUser,
     getCurrentUserLocal,
@@ -138,7 +136,6 @@ import {
     processTokenQueue,
     secureApiCall,
     safeApiCall,
-    authorizedFetch,
 
     // Main initialization
     initGroupPage,
@@ -167,12 +164,9 @@ import {
     loadUniqueFeaturesPanels,
     loadGroupNotes,
     loadGroupEvents,
-    generateUniqueEventsForUser,
-    hashCode,
     loadTransparencyLog,
     generateInitialTransparencyLog,
     analyzeGroupEnergy,
-    generateSimulatedMessages,
     closeGroupChatMobile,
     hideAllPanels,
     loadGroupChatMessages,
@@ -194,7 +188,6 @@ import {
     // Admin management
     openAdminManagement,
     loadGroupMembersForManagement,
-    generateSimulatedMembers,
     renderMembersList,
     handleMemberAction,
     logTransparencyAction,
@@ -268,19 +261,35 @@ import {
 } from './group-core.js';
 
 // =============================================
-// PROTOCOL COMPLIANCE TRACKING - STRICT
+// SESSION VALIDATION (mirrors core validation)
+// =============================================
+
+function __isValidSession(sessionObj) {
+    if (!sessionObj) return false;
+    if (!sessionObj.token || typeof sessionObj.token !== 'string') return false;
+    const userId = sessionObj.user?.id ?? sessionObj.user?.uid ?? sessionObj.userId;
+    if (userId === undefined || userId === null || userId === 'user' || typeof userId !== 'number') return false;
+    return true;
+}
+
+// =============================================
+// PROTOCOL COMPLIANCE TRACKING - STRICT (UPDATED)
 // =============================================
 
 // Track parent-ready and session state from core
-// Access these via LifecycleState since they're not exported directly
 let _protocolReady = false;
 let _parentReadyReceived = false;
 let _activationComplete = false;
 let _sessionReady = false;
 let _uiInitializationStarted = false;
+let _lifecycleSubscriptionActive = false;
+let _uiInitializationCompleted = false; // ADDED: Prevent duplicate UI init
+let _childReadyProcessed = false; // ADDED: Track child ready
+let _lastValidSessionHash = null; // ADDED: Deduplicate session events
 
 // Subscribe to lifecycle changes from core
-if (LifecycleState && typeof LifecycleState.subscribe === 'function') {
+if (LifecycleState && typeof LifecycleState.subscribe === 'function' && !_lifecycleSubscriptionActive) {
+    _lifecycleSubscriptionActive = true;
     LifecycleState.subscribe((newState, oldState) => {
         // STRICT: Only mark ready when ACTIVE state is reached
         _protocolReady = newState === LifecycleState.STATES.ACTIVE;
@@ -293,13 +302,24 @@ if (LifecycleState && typeof LifecycleState.subscribe === 'function') {
     });
 }
 
-// Check if session is ready via GroupCore
+// Check if session is ready via GroupCore and session validity
 function checkSessionReady() {
-    return GroupCore && GroupCore.isReady ? GroupCore.isReady() : false;
+    try {
+        const isCoreReady = GroupCore && typeof GroupCore.isReady === 'function' ? GroupCore.isReady() : false;
+        const hasValidSession = GroupCore && GroupCore.currentUser && __isValidSession({ token: GroupCore.currentUser?.token, user: GroupCore.currentUser });
+        return isCoreReady || hasValidSession;
+    } catch (error) {
+        return false;
+    }
 }
 
 // Function called when protocol activates module
 function onProtocolActivation() {
+    // STRICT: Prevent duplicate activation
+    if (_uiInitializationCompleted) {
+        return;
+    }
+    
     // Protocol is ACTIVE - UI can fully initialize
     _sessionReady = checkSessionReady();
     
@@ -319,22 +339,38 @@ function isUIOperationAllowed() {
 
 // Refresh UI data when protocol becomes active
 function refreshUIData() {
-    if (typeof updateGroupCounts === 'function') {
-        updateGroupCounts();
-    }
-    if (typeof updateCurrentSection === 'function') {
-        updateCurrentSection();
-    }
-    if (typeof updateUserUI === 'function') {
-        updateUserUI();
-    }
-    if (typeof startBackgroundSync === 'function') {
-        startBackgroundSync();
+    try {
+        if (typeof updateGroupCounts === 'function') {
+            updateGroupCounts();
+        }
+        if (typeof updateCurrentSection === 'function') {
+            updateCurrentSection();
+        }
+        if (typeof updateUserUI === 'function') {
+            updateUserUI();
+        }
+        if (typeof startBackgroundSync === 'function') {
+            startBackgroundSync();
+        }
+        
+        // Load fresh data from backend
+        if (GroupCore && typeof GroupCore.requestGroupList === 'function') {
+            GroupCore.requestGroupList().catch(() => {});
+        }
+    } catch (error) {
+        // Silent failure
     }
 }
 
 // Complete UI initialization after protocol activation
 function completeUIInitialization() {
+    // STRICT: Prevent duplicate completion
+    if (_uiInitializationCompleted) {
+        return;
+    }
+    
+    _uiInitializationCompleted = true;
+    
     if (_UI_STATE.initialRenderComplete) {
         refreshUIData();
     } else {
@@ -369,12 +405,12 @@ const _UI_STATE = {
     debounceTimers: new Map(),
     renderTimings: [],
     lastRender: null,
-    isMobile: window.innerWidth <= 768,
-    isTablet: window.innerWidth > 768 && window.innerWidth <= 1024,
-    isDesktop: window.innerWidth > 1024,
-    touchSupport: 'ontouchstart' in window,
+    isMobile: typeof window !== 'undefined' ? window.innerWidth <= 768 : false,
+    isTablet: typeof window !== 'undefined' ? (window.innerWidth > 768 && window.innerWidth <= 1024) : false,
+    isDesktop: typeof window !== 'undefined' ? window.innerWidth > 1024 : true,
+    touchSupport: typeof window !== 'undefined' ? 'ontouchstart' in window : false,
     keyboardVisible: false,
-    orientation: window.innerHeight > window.innerWidth ? 'portrait' : 'landscape',
+    orientation: typeof window !== 'undefined' ? (window.innerHeight > window.innerWidth ? 'portrait' : 'landscape') : 'landscape',
     skeletonRendered: false,
     initialRenderComplete: false,
     progressiveEnhancementComplete: false,
@@ -1474,38 +1510,42 @@ export function renderPipeline() {
  * Initial render from cache
  */
 export function initialRenderFromCache() {
-    if (typeof loadCachedDataInstantly === 'function') {
-        loadCachedDataInstantly();
-    }
-    
-    const activeSection = getActiveSection();
-    
-    switch(activeSection) {
-        case 'allGroupsSection':
-            renderAllGroupsSecure();
-            break;
-        case 'myGroupsSection':
-            renderMyGroupsSecure();
-            break;
-        case 'joinedSection':
-            renderJoinedGroupsSecure();
-            break;
-        case 'invitesSection':
-            renderGroupInvitesSecure();
-            break;
-        case 'adminSection':
-            renderAdminGroupsSecure();
-            break;
-        default:
-            renderAllGroupsSecure();
-    }
-    
-    if (typeof updateGroupCounts === 'function') {
-        updateGroupCounts();
-    }
-    
-    if (typeof updateUserUI === 'function') {
-        updateUserUI();
+    try {
+        if (typeof loadCachedDataInstantly === 'function') {
+            loadCachedDataInstantly();
+        }
+        
+        const activeSection = getActiveSection();
+        
+        switch(activeSection) {
+            case 'allGroupsSection':
+                renderAllGroupsSecure();
+                break;
+            case 'myGroupsSection':
+                renderMyGroupsSecure();
+                break;
+            case 'joinedSection':
+                renderJoinedGroupsSecure();
+                break;
+            case 'invitesSection':
+                renderGroupInvitesSecure();
+                break;
+            case 'adminSection':
+                renderAdminGroupsSecure();
+                break;
+            default:
+                renderAllGroupsSecure();
+        }
+        
+        if (typeof updateGroupCounts === 'function') {
+            updateGroupCounts();
+        }
+        
+        if (typeof updateUserUI === 'function') {
+            updateUserUI();
+        }
+    } catch (error) {
+        // Silent failure
     }
 }
 
@@ -1513,6 +1553,9 @@ export function initialRenderFromCache() {
  * Progressive enhancement
  */
 export function progressiveEnhancement() {
+    // STRICT: Prevent duplicate enhancement
+    if (_UI_STATE.progressiveEnhancementComplete) return;
+    
     const timer = setTimeout(() => {
         try {
             setupEventListeners();
@@ -1704,7 +1747,7 @@ export function registerMessageHandlers() {
             const allowedOrigins = [
                 window.location.origin,
                 'http://localhost:5500',
-                'http://127.0.0.1:5500'
+                'http://localhost:4000'
             ];
             
             if (!allowedOrigins.includes(event.origin) && event.origin !== 'null') {
@@ -3009,6 +3052,7 @@ export function checkMobile() {
  * Initialize the UI components
  */
 export function initGroupUI() {
+    // STRICT: Prevent duplicate initialization
     if (_UI_STATE.isInitialized) {
         return;
     }
@@ -3080,6 +3124,7 @@ export function cleanupUISession() {
     _parentReadyReceived = false;
     _activationComplete = false;
     _uiInitializationStarted = false;
+    _uiInitializationCompleted = false;
 }
 
 // =============================================
@@ -3157,4 +3202,5 @@ if (typeof document !== 'undefined') {
 // SILENT LOADING - NO OVERLAYS, NO CONSOLE NOISE
 // PROTOCOL-COMPLIANT - PARENT-READY AWARE
 // NO DUPLICATES, NO ERRORS, FULLY PRODUCTION READY
+// VERSION 5.0.1 - SYNCED WITH CORE V9.0.1
 // =============================================

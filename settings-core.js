@@ -1,8 +1,26 @@
 // =============================================
-// SETTINGS MODULE - COMMUNICATION INFRASTRUCTURE UPDATE
-// VERSION: 8.0.0 - DETERMINISTIC HANDSHAKE
-// ALIGNED: Parent-controlled lifecycle with strict state machine
+// SETTINGS MODULE - REAL BACKEND-DRIVEN CONTROL SYSTEM
+// VERSION: 9.2.1 - SESSION VALIDATION HARDENED
 // =============================================
+
+// =============================================
+// SESSION VALIDATION UTILITY - CRITICAL GUARD
+// =============================================
+function __isValidSession(session) {
+  if (!session) return false;
+
+  if (!session.token || typeof session.token !== 'string') return false;
+
+  if (
+    session.userId === undefined ||
+    session.userId === null ||
+    session.userId === 'user' ||
+    session.userId === 'default' ||
+    typeof session.userId !== 'number'
+  ) return false;
+
+  return true;
+}
 
 // =============================================
 // INITIALIZATION GUARD - PREVENT MULTIPLE INITIALIZATIONS
@@ -19,7 +37,7 @@
 // MODULE IDENTITY & VERSION
 // =============================================
 const MODULE_NAME = 'settings';
-const MODULE_VERSION = '8.0.0';
+const MODULE_VERSION = '9.2.1';
 const FRAME_ID = 'settings';
 let moduleId = `settings-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
 
@@ -32,11 +50,18 @@ let DEBUG_ENABLED = DEBUG;
 let CONSOLE_NOISE_SUPPRESSED = true;
 
 // =============================================
+// AUTH STATE - CRITICAL FIX
+// =============================================
+let isAuthenticated = false;
+let authCheckComplete = false;
+
+// =============================================
 // STRICT LIFECYCLE STATE MACHINE - DETERMINISTIC HANDSHAKE
 // =============================================
 const LifecycleState = {
     BOOT: 'BOOT',
     INITIALIZING: 'INITIALIZING',
+    WAITING_AUTH: 'WAITING_AUTH',
     READY: 'READY',
     WAIT_PARENT: 'WAIT_PARENT',
     ACTIVE: 'ACTIVE'
@@ -62,19 +87,441 @@ const MAX_PROCESSED_MESSAGES = 100;
 let messageQueue = [];
 let queueFlushed = false;
 
+// =============================================
+// SESSION DEDUPLICATION TRACKING
+// =============================================
+let _lastSessionId = null;
+let _currentValidSession = null;
+
+// =============================================
+// REQUEST QUEUE FOR AUTH-BLOCKED CALLS
+// =============================================
+let requestQueue = [];
+let queueProcessing = false;
+
+// =============================================
+// CENTRALIZED AUTHORIZED REQUEST - NO DIRECT FETCH
+// =============================================
+const pendingRequests = new Map();
+
+function authorizedRequest(endpoint, options = {}) {
+    return new Promise((resolve, reject) => {
+        // Block requests if not authenticated
+        if (!isAuthenticated) {
+            console.warn(`[${MODULE_NAME}] ⏳ Auth not ready, queuing request: ${endpoint}`);
+            requestQueue.push(() => authorizedRequest(endpoint, options).then(resolve).catch(reject));
+            return;
+        }
+
+        const requestId = `req_${Date.now()}_${Math.random().toString(36).substring(2, 10)}`;
+        const method = options.method || 'GET';
+        
+        if (DEBUG) {
+            console.log(`[${MODULE_NAME}] 📡 API Request: ${method} ${endpoint}`);
+        }
+        
+        const timeoutId = setTimeout(() => {
+            if (pendingRequests.has(requestId)) {
+                pendingRequests.delete(requestId);
+                reject(new Error(`Request timeout: ${endpoint}`));
+            }
+        }, 30000);
+        
+        const handler = (event) => {
+            if (event.data?.type === 'API_RESPONSE' && 
+                event.data?.requestId === requestId) {
+                
+                clearTimeout(timeoutId);
+                window.removeEventListener('message', handler);
+                pendingRequests.delete(requestId);
+                
+                const response = event.data.response || event.data;
+                
+                // Handle auth failures
+                if (response.status === 401 || response.message === 'Authentication required') {
+                    console.error(`[${MODULE_NAME}] ❌ Unauthorized: ${endpoint}`);
+                    
+                    window.parent.postMessage({
+                        type: 'AUTH_ERROR',
+                        module: MODULE_NAME,
+                        timestamp: Date.now()
+                    }, '*');
+                    
+                    reject(new Error('Authentication required'));
+                    return;
+                }
+                
+                if (DEBUG) {
+                    console.log(`[${MODULE_NAME}] ✅ Response: ${method} ${endpoint}`);
+                }
+                resolve(response);
+            }
+            
+            if (event.data?.type === 'API_ERROR' && 
+                event.data?.requestId === requestId) {
+                
+                clearTimeout(timeoutId);
+                window.removeEventListener('message', handler);
+                pendingRequests.delete(requestId);
+                
+                console.error(`[${MODULE_NAME}] ❌ API Error: ${endpoint}`, event.data.error);
+                reject(new Error(event.data.error || 'API request failed'));
+            }
+        };
+        
+        pendingRequests.set(requestId, { resolve, reject, timeoutId });
+        window.addEventListener('message', handler);
+        
+        // Send request to parent
+        window.parent.postMessage({
+            type: 'API_REQUEST',
+            requestId: requestId,
+            module: MODULE_NAME,
+            endpoint: normalizeEndpoint(endpoint),
+            method: method,
+            data: options.body,
+            headers: options.headers || {},
+            timestamp: Date.now()
+        }, '*');
+    });
+}
+
+// Process queued requests after auth is ready
+async function processRequestQueue() {
+    if (queueProcessing) return;
+    if (!isAuthenticated) return;
+    
+    queueProcessing = true;
+    
+    while (requestQueue.length > 0) {
+        const queuedRequest = requestQueue.shift();
+        try {
+            await queuedRequest();
+        } catch (error) {
+            console.error(`[${MODULE_NAME}] ❌ Queued request failed:`, error);
+        }
+    }
+    
+    queueProcessing = false;
+}
+
+// =============================================
+// REAL SETTINGS STATE MANAGEMENT - NO MOCK DATA
+// =============================================
+const SettingsState = {
+    loaded: false,
+    loading: false,
+    data: {},
+    lastSynced: null,
+    syncInProgress: false,
+    pendingUpdates: new Map(),
+    listeners: new Set(),
+    
+    get() {
+        return this.data;
+    },
+    
+    getSection(section) {
+        return this.data[section] || null;
+    },
+    
+    getSetting(section, key, defaultValue = null) {
+        return this.data[section]?.[key] ?? defaultValue;
+    },
+    
+    async update(section, key, value) {
+        if (!isAuthenticated) {
+            throw new Error('Authentication not ready');
+        }
+        
+        if (currentState !== LifecycleState.ACTIVE) {
+            throw new Error('Settings not ready: module not active');
+        }
+        
+        const oldValue = this.getSetting(section, key);
+        
+        if (!this.data[section]) {
+            this.data[section] = {};
+        }
+        this.data[section][key] = value;
+        
+        this._notify('optimistic-update', { section, key, value, oldValue });
+        
+        const updateId = `${section}:${key}`;
+        this.pendingUpdates.set(updateId, { oldValue, timestamp: Date.now() });
+        
+        try {
+            const response = await this._sendUpdateToBackend(section, key, value);
+            
+            if (response && response.success) {
+                if (response.data) {
+                    this.data[section][key] = response.data.value || value;
+                }
+                this.lastSynced = Date.now();
+                this.pendingUpdates.delete(updateId);
+                this._saveToCache();
+                this._notify('update-success', { section, key, value: this.data[section][key], oldValue });
+                this._applySettingGlobally(section, key, this.data[section][key]);
+                return { success: true, data: this.data[section][key] };
+            } else {
+                this.data[section][key] = oldValue;
+                this.pendingUpdates.delete(updateId);
+                this._notify('update-failed', { section, key, oldValue, error: response?.error || 'Update failed' });
+                throw new Error(response?.error || 'Update failed');
+            }
+        } catch (error) {
+            this.data[section][key] = oldValue;
+            this.pendingUpdates.delete(updateId);
+            this._notify('update-failed', { section, key, oldValue, error: error.message });
+            throw error;
+        }
+    },
+    
+    async _sendUpdateToBackend(section, key, value) {
+        try {
+            const response = await authorizedRequest('/api/settings/update', {
+                method: 'POST',
+                body: { section, key, value }
+            });
+            return { success: true, data: response };
+        } catch (error) {
+            throw new Error(error.message || 'Update failed');
+        }
+    },
+    
+    _applySettingGlobally(section, key, value) {
+        if (window.parent && window.parent !== window) {
+            window.parent.postMessage({
+                type: 'SETTINGS_GLOBAL_UPDATE',
+                module: MODULE_NAME,
+                section: section,
+                key: key,
+                value: value,
+                timestamp: Date.now()
+            }, '*');
+        }
+        
+        this._applyLocalEffects(section, key, value);
+    },
+    
+    _applyLocalEffects(section, key, value) {
+        switch (section) {
+            case 'appearance':
+                if (key === 'theme') {
+                    this._applyTheme(value);
+                }
+                if (key === 'language') {
+                    this._applyLanguage(value);
+                }
+                break;
+            case 'privacy':
+                this._updatePrivacyUI(key, value);
+                break;
+            case 'notifications':
+                this._updateNotificationUI(key, value);
+                break;
+        }
+    },
+    
+    _applyTheme(theme) {
+        try {
+            const root = document.documentElement;
+            if (theme === 'auto') {
+                const isDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+                root.setAttribute('data-theme', isDark ? 'dark' : 'light');
+            } else {
+                root.setAttribute('data-theme', theme);
+            }
+            
+            const event = new CustomEvent('themeApplied', {
+                detail: { theme, timestamp: Date.now() }
+            });
+            window.dispatchEvent(event);
+        } catch (error) {}
+    },
+    
+    _applyLanguage(language) {
+        try {
+            const event = new CustomEvent('languageChanged', {
+                detail: { language, timestamp: Date.now() }
+            });
+            window.dispatchEvent(event);
+        } catch (error) {}
+    },
+    
+    _updatePrivacyUI(key, value) {
+        const event = new CustomEvent('privacyUpdated', {
+            detail: { key, value, timestamp: Date.now() }
+        });
+        window.dispatchEvent(event);
+    },
+    
+    _updateNotificationUI(key, value) {
+        const event = new CustomEvent('notificationsUpdated', {
+            detail: { key, value, timestamp: Date.now() }
+        });
+        window.dispatchEvent(event);
+    },
+    
+    async load() {
+        if (!isAuthenticated) {
+            console.warn(`[${MODULE_NAME}] ⏳ Cannot load settings: auth not ready`);
+            throw new Error('Authentication not ready');
+        }
+        
+        if (this.loading) {
+            return new Promise((resolve) => {
+                const checkLoaded = () => {
+                    if (this.loaded) {
+                        resolve(this.data);
+                    } else {
+                        setTimeout(checkLoaded, 100);
+                    }
+                };
+                checkLoaded();
+            });
+        }
+        
+        if (currentState !== LifecycleState.ACTIVE) {
+            throw new Error('Cannot load settings: module not active');
+        }
+        
+        this.loading = true;
+        
+        try {
+            const cached = this._loadFromCache();
+            if (cached && Object.keys(cached).length > 0) {
+                this.data = cached;
+                this.loaded = true;
+                this._notify('loaded', this.data);
+            }
+            
+            const response = await this._fetchFromBackend();
+            
+            if (response && response.success && response.data) {
+                this.data = response.data;
+                this.loaded = true;
+                this.lastSynced = Date.now();
+                this._saveToCache();
+                this._notify('loaded', this.data);
+                return this.data;
+            } else if (cached) {
+                return cached;
+            } else {
+                this.data = JSON.parse(JSON.stringify(DEFAULT_SETTINGS));
+                this.loaded = true;
+                this._saveToCache();
+                this._notify('loaded', this.data);
+                return this.data;
+            }
+        } catch (error) {
+            const cached = this._loadFromCache();
+            if (cached && Object.keys(cached).length > 0) {
+                this.data = cached;
+                this.loaded = true;
+                this._notify('loaded', this.data);
+                return this.data;
+            }
+            
+            this.data = JSON.parse(JSON.stringify(DEFAULT_SETTINGS));
+            this.loaded = true;
+            this._notify('loaded', this.data);
+            return this.data;
+        } finally {
+            this.loading = false;
+        }
+    },
+    
+    async _fetchFromBackend() {
+        try {
+            const response = await authorizedRequest('/api/settings', { method: 'GET' });
+            return { success: true, data: response.data || response };
+        } catch (error) {
+            throw new Error('Fetch failed: ' + error.message);
+        }
+    },
+    
+    _saveToCache() {
+        try {
+            const cacheData = {
+                data: this.data,
+                timestamp: Date.now(),
+                version: MODULE_VERSION
+            };
+            localStorage.setItem('knecta_settings_cache', JSON.stringify(cacheData));
+        } catch (error) {}
+    },
+    
+    _loadFromCache() {
+        try {
+            const cached = localStorage.getItem('knecta_settings_cache');
+            if (cached) {
+                const parsed = JSON.parse(cached);
+                if (parsed.timestamp && (Date.now() - parsed.timestamp) < 24 * 60 * 60 * 1000) {
+                    return parsed.data;
+                }
+            }
+        } catch (error) {}
+        return null;
+    },
+    
+    subscribe(callback) {
+        this.listeners.add(callback);
+        return () => this.listeners.delete(callback);
+    },
+    
+    _notify(event, data) {
+        this.listeners.forEach(callback => {
+            try {
+                callback(event, data);
+            } catch (error) {}
+        });
+    },
+    
+    async reset() {
+        if (!isAuthenticated) {
+            throw new Error('Authentication not ready');
+        }
+        
+        if (currentState !== LifecycleState.ACTIVE) {
+            throw new Error('Cannot reset settings: module not active');
+        }
+        
+        const defaultData = JSON.parse(JSON.stringify(DEFAULT_SETTINGS));
+        
+        try {
+            const response = await authorizedRequest('/api/settings/reset', {
+                method: 'POST',
+                body: {}
+            });
+            
+            if (response && response.success) {
+                this.data = defaultData;
+                this.lastSynced = Date.now();
+                this._saveToCache();
+                this._notify('reset', this.data);
+                return { success: true };
+            }
+            throw new Error('Reset failed');
+        } catch (error) {
+            throw error;
+        }
+    }
+};
+
 function setState(newState, reason = '') {
     if (currentState === newState) return false;
     
-    // STRICT VALID TRANSITIONS - NO BACKWARDS, NO SKIPS
+    // Prevent invalid transitions
     const validTransitions = {
         [LifecycleState.BOOT]: [LifecycleState.INITIALIZING],
-        [LifecycleState.INITIALIZING]: [LifecycleState.READY],
+        [LifecycleState.INITIALIZING]: [LifecycleState.WAITING_AUTH, LifecycleState.ERROR],
+        [LifecycleState.WAITING_AUTH]: [LifecycleState.READY, LifecycleState.ERROR],
         [LifecycleState.READY]: [LifecycleState.WAIT_PARENT],
         [LifecycleState.WAIT_PARENT]: [LifecycleState.ACTIVE],
         [LifecycleState.ACTIVE]: []
     };
     
-    // HARD RULE: No invalid transitions
     if (!validTransitions[currentState]?.includes(newState)) {
         if (DEBUG) {
             console.warn(`[${MODULE_NAME}] ❌ Invalid transition blocked: ${currentState} → ${newState}`);
@@ -85,7 +532,6 @@ function setState(newState, reason = '') {
     const oldState = currentState;
     currentState = newState;
     
-    // MANDATORY LOGGING
     console.log(`[${MODULE_NAME}] 📍 State: ${oldState} → ${newState}${reason ? ` (${reason})` : ''}`);
     
     recordStateTransition(oldState, newState, reason);
@@ -119,7 +565,6 @@ function recordStateTransition(from, to, reason = '') {
 // STRICT CHILD_READY - SENT EXACTLY ONCE
 // =============================================
 function sendChildReady() {
-    // HARD RULE: Only send when state is READY AND not already sent
     if (childReadySent) {
         if (DEBUG) {
             console.log(`[${MODULE_NAME}] ⚠️ CHILD_READY already sent, ignoring duplicate`);
@@ -143,15 +588,14 @@ function sendChildReady() {
         frameId: FRAME_ID,
         messageId: generateMessageId(),
         timestamp: Date.now(),
-        environment: window.__iframeEnvironment || 'unknown'
+        environment: window.__iframeEnvironment || 'unknown',
+        waitingForAuth: !isAuthenticated
     };
     
     try {
         if (window.parent && window.parent !== window) {
             window.parent.postMessage(message, '*');
             console.log(`[${MODULE_NAME}] 📤 CHILD_READY sent (ONCE)`);
-            
-            // STRICT: Transition to WAIT_PARENT immediately after sending
             setState(LifecycleState.WAIT_PARENT, 'child_ready_sent');
             return true;
         } else {
@@ -169,10 +613,9 @@ function sendChildReady() {
 }
 
 // =============================================
-// STRICT PARENT_READY HANDLER - ACTIVATION GATE
+// STRICT PARENT_READY HANDLER - ACTIVATION GATE WITH SESSION VALIDATION
 // =============================================
 function handleParentReady(message) {
-    // HARD RULE: Only accept PARENT_READY in WAIT_PARENT state
     if (currentState !== LifecycleState.WAIT_PARENT) {
         if (DEBUG) {
             console.log(`[${MODULE_NAME}] 📥 PARENT_READY ignored (state: ${currentState}, expected WAIT_PARENT)`);
@@ -193,19 +636,48 @@ function handleParentReady(message) {
     
     console.log(`[${MODULE_NAME}] 📥 PARENT_READY received${sessionData ? ' with session' : ''}`);
     
+    // CRITICAL: Validate session before activating
     if (sessionData) {
+        if (!__isValidSession(sessionData)) {
+            console.warn(`[${MODULE_NAME}] ⚠️ PARENT_READY with invalid session - cannot activate, staying in WAIT_PARENT`);
+            return false;
+        }
+        
+        // Deduplicate session if already processed
+        const sessionId = sessionData.sessionId || `${sessionData.token}_${sessionData.userId}`;
+        if (_lastSessionId === sessionId && _currentValidSession) {
+            console.log(`[${MODULE_NAME}] 📥 PARENT_READY with duplicate session ignored`);
+            return false;
+        }
+        _lastSessionId = sessionId;
+        _currentValidSession = sessionData;
+        
         applySession(sessionData);
+    } else {
+        console.warn(`[${MODULE_NAME}] ⚠️ PARENT_READY without session data - cannot activate, staying in WAIT_PARENT`);
+        return false;
     }
     
     window.parentReady = true;
     window.parentReadyReceived = true;
     window.parentCommunicationReady = true;
     
-    // STRICT: Transition to ACTIVE
-    setState(LifecycleState.ACTIVE, 'parent_ready_received');
+    // ONLY transition to ACTIVE if session is valid
+    if (__isValidSession(sessionData)) {
+        setState(LifecycleState.ACTIVE, 'parent_ready_received_valid_session');
+    } else {
+        console.warn(`[${MODULE_NAME}] ⚠️ Cannot activate - session validation failed, staying in WAIT_PARENT`);
+        return false;
+    }
     
-    // Flush queued messages
     flushQueue();
+    
+    // Only load settings if auth is ready
+    if (isAuthenticated) {
+        loadSettingsAfterActivation();
+    } else {
+        console.log(`[${MODULE_NAME}] ⏳ Waiting for authentication before loading settings`);
+    }
     
     onModuleActive();
     
@@ -219,8 +691,241 @@ function handleParentReady(message) {
     return true;
 }
 
+async function loadSettingsAfterActivation() {
+    if (!isAuthenticated) {
+        console.warn(`[${MODULE_NAME}] ⏳ Cannot load settings: auth not ready`);
+        return;
+    }
+    
+    try {
+        await SettingsState.load();
+        applySettingsToUI(SettingsState.get());
+        
+        const event = new CustomEvent('settingsLoaded', {
+            detail: { settings: SettingsState.get(), timestamp: Date.now() }
+        });
+        window.dispatchEvent(event);
+    } catch (error) {
+        if (DEBUG) {
+            console.error('[settings-core] Error loading settings:', error);
+        }
+        showRetryUI();
+    }
+}
+
+function applySettingsToUI(settings) {
+    try {
+        if (settings.appearance?.theme) {
+            applyTheme(settings.appearance.theme);
+        }
+        
+        if (settings.appearance?.language) {
+            const event = new CustomEvent('languageChanged', {
+                detail: { language: settings.appearance.language, timestamp: Date.now() }
+            });
+            window.dispatchEvent(event);
+        }
+        
+        if (settings.privacy) {
+            const event = new CustomEvent('privacySettingsApplied', {
+                detail: { privacy: settings.privacy, timestamp: Date.now() }
+            });
+            window.dispatchEvent(event);
+        }
+        
+        if (settings.notifications) {
+            const event = new CustomEvent('notificationSettingsApplied', {
+                detail: { notifications: settings.notifications, timestamp: Date.now() }
+            });
+            window.dispatchEvent(event);
+        }
+        
+        updateUIWithSettings(settings);
+        
+    } catch (error) {}
+}
+
+function updateUIWithSettings(settings) {
+    try {
+        if (settings.profile) {
+            const displayNameInput = document.getElementById('displayName');
+            if (displayNameInput && settings.profile.displayName) {
+                displayNameInput.value = settings.profile.displayName;
+            }
+            
+            const usernameInput = document.getElementById('username');
+            if (usernameInput && settings.profile.username) {
+                usernameInput.value = settings.profile.username;
+            }
+            
+            const bioTextarea = document.getElementById('bio');
+            if (bioTextarea && settings.profile.bio) {
+                bioTextarea.value = settings.profile.bio;
+            }
+            
+            const emailInput = document.getElementById('email');
+            if (emailInput && settings.profile.email) {
+                emailInput.value = settings.profile.email;
+            }
+            
+            const moodSelect = document.getElementById('currentMood');
+            if (moodSelect && settings.profile.currentMood) {
+                moodSelect.value = settings.profile.currentMood;
+            }
+        }
+        
+        if (settings.privacy) {
+            const whoCanAddMe = document.getElementById('whoCanAddMe');
+            if (whoCanAddMe && settings.privacy.whoCanAddMe) {
+                whoCanAddMe.value = settings.privacy.whoCanAddMe;
+            }
+            
+            const canMessageMe = document.getElementById('canMessageMe');
+            if (canMessageMe && settings.privacy.canMessageMe) {
+                canMessageMe.value = settings.privacy.canMessageMe;
+            }
+            
+            const readReceipts = document.getElementById('readReceipts');
+            if (readReceipts) {
+                readReceipts.checked = settings.privacy.readReceipts !== false;
+            }
+            
+            const typingIndicators = document.getElementById('typingIndicators');
+            if (typingIndicators) {
+                typingIndicators.checked = settings.privacy.typingIndicators !== false;
+            }
+        }
+        
+        if (settings.notifications) {
+            const messageNotifications = document.getElementById('messageNotifications');
+            if (messageNotifications) {
+                messageNotifications.checked = settings.notifications.messageNotifications !== false;
+            }
+            
+            const groupNotifications = document.getElementById('groupNotifications');
+            if (groupNotifications) {
+                groupNotifications.checked = settings.notifications.groupNotifications !== false;
+            }
+            
+            const callNotifications = document.getElementById('callNotifications');
+            if (callNotifications) {
+                callNotifications.checked = settings.notifications.callNotifications !== false;
+            }
+        }
+        
+        if (settings.appearance) {
+            const themeSelect = document.getElementById('theme');
+            if (themeSelect && settings.appearance.theme) {
+                themeSelect.value = settings.appearance.theme;
+            }
+            
+            const fontSizeSlider = document.getElementById('fontSize');
+            if (fontSizeSlider && settings.appearance.fontSize) {
+                fontSizeSlider.value = settings.appearance.fontSize;
+                document.documentElement.style.fontSize = `${settings.appearance.fontSize}px`;
+            }
+            
+            const languageSelect = document.getElementById('language');
+            if (languageSelect && settings.appearance.language) {
+                languageSelect.value = settings.appearance.language;
+            }
+        }
+        
+        if (settings.storage) {
+            const totalStorageUsed = document.getElementById('totalStorageUsed');
+            if (totalStorageUsed) {
+                totalStorageUsed.textContent = formatStorageSize(settings.storage.totalStorageUsed || 0);
+            }
+            
+            const chatCacheSize = document.getElementById('chatCacheSize');
+            if (chatCacheSize) {
+                chatCacheSize.textContent = formatStorageSize(settings.storage.chatCacheSize || 0);
+            }
+            
+            const mediaCacheSize = document.getElementById('mediaCacheSize');
+            if (mediaCacheSize) {
+                mediaCacheSize.textContent = formatStorageSize(settings.storage.mediaCacheSize || 0);
+            }
+        }
+        
+    } catch (error) {}
+}
+
+function showRetryUI() {
+    try {
+        const container = document.getElementById('settingsContent');
+        if (container) {
+            const retryDiv = document.createElement('div');
+            retryDiv.className = 'settings-retry';
+            retryDiv.style.cssText = `
+                background: var(--warning-color);
+                color: white;
+                padding: 12px 20px;
+                margin: 20px;
+                border-radius: 8px;
+                text-align: center;
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+            `;
+            retryDiv.innerHTML = `
+                <span>⚠️ Failed to load settings. Using cached settings.</span>
+                <button onclick="window.__retryLoadSettings()" style="
+                    background: white;
+                    color: var(--warning-color);
+                    border: none;
+                    padding: 6px 12px;
+                    border-radius: 4px;
+                    cursor: pointer;
+                ">Retry</button>
+            `;
+            container.prepend(retryDiv);
+        }
+        
+        window.__retryLoadSettings = async () => {
+            if (!isAuthenticated) {
+                console.warn('[settings-core] Cannot retry: auth not ready');
+                return;
+            }
+            try {
+                await SettingsState.load();
+                applySettingsToUI(SettingsState.get());
+                const retryDiv = document.querySelector('.settings-retry');
+                if (retryDiv) retryDiv.remove();
+            } catch (error) {}
+        };
+    } catch (error) {}
+}
+
+// =============================================
+// APPLY SESSION WITH VALIDATION AND DEDUPLICATION
+// =============================================
 function applySession(sessionData) {
-    if (!sessionData) return;
+    if (!sessionData) {
+        console.warn(`[${MODULE_NAME}] ⚠️ applySession called with null/undefined session`);
+        return;
+    }
+    
+    // CRITICAL: Validate session before applying
+    if (!__isValidSession(sessionData)) {
+        console.warn(`[${MODULE_NAME}] ⚠️ Ignored invalid session data`, {
+            hasToken: !!sessionData.token,
+            userId: sessionData.userId,
+            tokenType: typeof sessionData.token
+        });
+        return;
+    }
+    
+    // Deduplicate session
+    const sessionId = sessionData.sessionId || `${sessionData.token}_${sessionData.userId}`;
+    if (_lastSessionId === sessionId && _currentValidSession) {
+        if (DEBUG) {
+            console.log(`[${MODULE_NAME}] 📥 Duplicate session ignored (sessionId: ${sessionId})`);
+        }
+        return;
+    }
+    _lastSessionId = sessionId;
+    _currentValidSession = sessionData;
     
     const token = sessionData.token || sessionData.accessToken;
     const user = sessionData.user || sessionData;
@@ -246,9 +951,7 @@ function applySession(sessionData) {
     window.sessionValidated = true;
     window.__SETTINGS_SESSION_ACTIVE__ = true;
     
-    if (DEBUG) {
-        console.log(`[${MODULE_NAME}] ✅ Session applied:`, user ? `user: ${user.name || user.id || 'unknown'}` : 'no user');
-    }
+    console.log(`[${MODULE_NAME}] ✅ Valid session applied:`, user ? `userId: ${user.id || user.userId || 'unknown'}` : 'no user');
 }
 
 function flushQueue() {
@@ -274,8 +977,13 @@ function onModuleActive() {
         requestSettingsLoad();
     }
     
-    if (typeof startBackgroundTasks === 'function') {
-        startBackgroundTasks();
+    // Only start background tasks if auth is ready
+    if (isAuthenticated) {
+        if (typeof startBackgroundTasks === 'function') {
+            startBackgroundTasks();
+        }
+    } else {
+        console.log(`[${MODULE_NAME}] ⏳ Waiting for authentication before starting background tasks`);
     }
     
     if (typeof initializeUI === 'function') {
@@ -358,7 +1066,6 @@ function isSentDuplicate(messageId) {
 // SAFE SEND TO PARENT - QUEUE BEFORE ACTIVE
 // =============================================
 function sendMessage(message) {
-    // STRICT: No messages before ACTIVE (except CHILD_READY which is handled separately)
     if (currentState !== LifecycleState.ACTIVE) {
         if (DEBUG && message.type !== 'PING') {
             console.log(`[${MODULE_NAME}] 📦 Queuing message (state: ${currentState})`);
@@ -378,7 +1085,6 @@ function sendMessage(message) {
             );
         }
         
-        // STRICT: No duplicate message sending
         if (canonicalMessage.messageId && isSentDuplicate(canonicalMessage.messageId)) {
             if (DEBUG) {
                 console.log(`[${MODULE_NAME}] ⚠️ Duplicate message blocked: ${canonicalMessage.messageId}`);
@@ -424,7 +1130,33 @@ function createCanonicalMessage(type, payload = {}, target = 'parent') {
 }
 
 // =============================================
-// SIMPLIFIED MESSAGE LISTENER WITH DEDUPLICATION
+// API REQUEST HELPER - ENDPOINT NORMALIZATION
+// =============================================
+function normalizeEndpoint(endpoint) {
+    if (!endpoint || typeof endpoint !== 'string') return '/';
+    
+    let normalized = endpoint.trim();
+    
+    // Remove /api prefix if present
+    if (normalized.startsWith('/api/')) {
+        normalized = normalized.substring(4);
+    } else if (normalized.startsWith('api/')) {
+        normalized = '/' + normalized.substring(4);
+    }
+    
+    // Ensure starts with /
+    if (!normalized.startsWith('/')) {
+        normalized = '/' + normalized;
+    }
+    
+    // Remove double slashes
+    normalized = normalized.replace(/\/+/g, '/');
+    
+    return normalized;
+}
+
+// =============================================
+// SIMPLIFIED MESSAGE LISTENER WITH AUTH HANDLING AND SESSION VALIDATION
 // =============================================
 function setupMessageListener() {
     window.addEventListener('message', (event) => {
@@ -433,7 +1165,6 @@ function setupMessageListener() {
         if (!data || typeof data !== 'object') return;
         if (!data.type) return;
         
-        // STRICT: Deduplicate incoming messages
         if (data.messageId && isMessageDuplicate(data.messageId)) {
             if (DEBUG) {
                 console.log(`[${MODULE_NAME}] 📥 Duplicate message ignored: ${data.type} (${data.messageId})`);
@@ -441,13 +1172,150 @@ function setupMessageListener() {
             return;
         }
         
-        // Special handling for PARENT_READY - allowed in WAIT_PARENT state
+        // =============================================
+        // AUTH_READY HANDLER - CRITICAL FIX
+        // =============================================
+        if (data.type === 'AUTH_READY') {
+            console.log(`[${MODULE_NAME}] ✅ AUTH_READY received`);
+            isAuthenticated = true;
+            authCheckComplete = true;
+            
+            // Process queued requests
+            processRequestQueue();
+            
+            // If parent is already ready and we have valid session, load settings
+            if (parentReadyReceived && currentState === LifecycleState.ACTIVE && __isValidSession(_currentValidSession)) {
+                loadSettingsAfterActivation();
+                startBackgroundTasks();
+            }
+            
+            // If we're still waiting for auth, transition to READY
+            if (currentState === LifecycleState.WAITING_AUTH) {
+                setState(LifecycleState.READY, 'auth_ready');
+                sendChildReady();
+            }
+            
+            return;
+        }
+        
+        // =============================================
+        // AUTH_ERROR HANDLER
+        // =============================================
+        if (data.type === 'AUTH_ERROR') {
+            console.error(`[${MODULE_NAME}] ❌ AUTH_ERROR received`);
+            isAuthenticated = false;
+            authCheckComplete = true;
+            setState(LifecycleState.ERROR, 'auth_error');
+            return;
+        }
+        
+        // =============================================
+        // SESSION_DATA HANDLER WITH VALIDATION
+        // =============================================
+        if (data.type === 'SESSION_DATA') {
+            const sessionData = data.session || data.payload?.session || data;
+            
+            if (!__isValidSession(sessionData)) {
+                console.warn(`[${MODULE_NAME}] ⚠️ Ignored invalid SESSION_DATA`, {
+                    hasToken: !!sessionData.token,
+                    userId: sessionData.userId,
+                    tokenType: typeof sessionData.token
+                });
+                return;
+            }
+            
+            const sessionId = sessionData.sessionId || `${sessionData.token}_${sessionData.userId}`;
+            if (_lastSessionId === sessionId && _currentValidSession) {
+                if (DEBUG) {
+                    console.log(`[${MODULE_NAME}] 📥 Duplicate SESSION_DATA ignored`);
+                }
+                return;
+            }
+            _lastSessionId = sessionId;
+            _currentValidSession = sessionData;
+            
+            applySession(sessionData);
+            console.log(`[${MODULE_NAME}] ✅ Valid SESSION_DATA applied`);
+            
+            return;
+        }
+        
+        // =============================================
+        // SESSION_UPDATE HANDLER WITH VALIDATION AND PROTECTION
+        // =============================================
+        if (data.type === 'SESSION_UPDATE') {
+            const sessionData = data.session || data.payload?.session || data;
+            
+            // Prevent session downgrade
+            if (_currentValidSession && __isValidSession(_currentValidSession)) {
+                if (!__isValidSession(sessionData)) {
+                    console.warn(`[${MODULE_NAME}] ⚠️ Prevented session downgrade - ignoring invalid SESSION_UPDATE`);
+                    return;
+                }
+            }
+            
+            if (!__isValidSession(sessionData)) {
+                console.warn(`[${MODULE_NAME}] ⚠️ Ignored invalid SESSION_UPDATE`);
+                return;
+            }
+            
+            const sessionId = sessionData.sessionId || `${sessionData.token}_${sessionData.userId}`;
+            if (_lastSessionId === sessionId && _currentValidSession) {
+                if (DEBUG) {
+                    console.log(`[${MODULE_NAME}] 📥 Duplicate SESSION_UPDATE ignored`);
+                }
+                return;
+            }
+            _lastSessionId = sessionId;
+            
+            // Merge safely without overwriting entire state
+            if (_currentValidSession) {
+                _currentValidSession = { ..._currentValidSession, ...sessionData };
+            } else {
+                _currentValidSession = sessionData;
+            }
+            
+            applySession(_currentValidSession);
+            console.log(`[${MODULE_NAME}] ✅ Valid SESSION_UPDATE merged`);
+            
+            return;
+        }
+        
         if (data.type === 'PARENT_READY') {
             handleParentReady(data);
             return;
         }
         
-        // STRICT: Only process other messages in ACTIVE state
+        if (data.type === 'SETTINGS_DATA') {
+            handleSettingsDataResponse(data);
+            return;
+        }
+        
+        if (data.type === 'SETTINGS_UPDATE_CONFIRMED') {
+            handleSettingsUpdateConfirmedMessage(data);
+            return;
+        }
+        
+        if (data.type === 'SETTINGS_UPDATE_ERROR') {
+            handleSettingsUpdateErrorMessage(data);
+            return;
+        }
+        
+        if (data.type === 'SETTINGS_FETCH_ERROR') {
+            handleSettingsFetchErrorMessage(data);
+            return;
+        }
+        
+        if (data.type === 'SETTINGS_GLOBAL_UPDATE') {
+            handleSettingsGlobalUpdateMessage(data);
+            return;
+        }
+        
+        if (data.type === 'API_REQUEST') {
+            handleApiRequest(data);
+            return;
+        }
+        
         if (currentState !== LifecycleState.ACTIVE) {
             if (DEBUG && data.type !== 'PING') {
                 console.log(`[${MODULE_NAME}] 📥 Ignoring ${data.type} (state: ${currentState})`);
@@ -459,6 +1327,95 @@ function setupMessageListener() {
     });
 }
 
+function handleApiRequest(message) {
+    if (currentState !== LifecycleState.ACTIVE) {
+        console.warn(`[${MODULE_NAME}] API request ignored - module not active`);
+        return;
+    }
+    
+    if (!isAuthenticated) {
+        console.warn(`[${MODULE_NAME}] API request ignored - not authenticated`);
+        return;
+    }
+    
+    // Ensure request has required fields
+    const request = message.payload || message;
+    const requestId = request.requestId || generateRequestId();
+    const endpoint = normalizeEndpoint(request.endpoint);
+    const method = request.method || 'GET';
+    
+    const apiMessage = {
+        type: 'API_REQUEST',
+        requestId: requestId,
+        endpoint: endpoint,
+        method: method,
+        data: request.data,
+        headers: request.headers || {},
+        timestamp: Date.now()
+    };
+    
+    if (window.parent && window.parent !== window) {
+        window.parent.postMessage(apiMessage, '*');
+    }
+}
+
+function handleSettingsDataResponse(data) {
+    if (data.payload && data.payload.settings) {
+        SettingsState.data = data.payload.settings;
+        SettingsState.loaded = true;
+        SettingsState.lastSynced = Date.now();
+        SettingsState._saveToCache();
+        applySettingsToUI(SettingsState.data);
+        
+        const event = new CustomEvent('settingsDataReceived', {
+            detail: { settings: SettingsState.data, timestamp: Date.now() }
+        });
+        window.dispatchEvent(event);
+    }
+}
+
+function handleSettingsUpdateConfirmedMessage(data) {
+    const event = new CustomEvent('settingsUpdateConfirmed', {
+        detail: { data: data.payload, timestamp: Date.now() }
+    });
+    window.dispatchEvent(event);
+}
+
+function handleSettingsUpdateErrorMessage(data) {
+    const event = new CustomEvent('settingsUpdateError', {
+        detail: { error: data.error, timestamp: Date.now() }
+    });
+    window.dispatchEvent(event);
+}
+
+function handleSettingsFetchErrorMessage(data) {
+    if (DEBUG) {
+        console.error('[settings-core] Settings fetch error:', data.error);
+    }
+    
+    const event = new CustomEvent('settingsFetchError', {
+        detail: { error: data.error, timestamp: Date.now() }
+    });
+    window.dispatchEvent(event);
+}
+
+function handleSettingsGlobalUpdateMessage(data) {
+    if (data.section && data.key !== undefined) {
+        if (!SettingsState.data[data.section]) {
+            SettingsState.data[data.section] = {};
+        }
+        SettingsState.data[data.section][data.key] = data.value;
+        SettingsState.lastSynced = Date.now();
+        SettingsState._saveToCache();
+        applySettingsToUI(SettingsState.data);
+        
+        const event = new CustomEvent('settingsGlobalUpdated', {
+            detail: { section: data.section, key: data.key, value: data.value, timestamp: Date.now() }
+        });
+        window.dispatchEvent(event);
+    }
+}
+
 function routeMessage(message) {
     const type = message.type;
     
@@ -467,69 +1424,69 @@ function routeMessage(message) {
             if (typeof handleSessionData === 'function') handleSessionData(message);
             break;
         case 'MODULE_REGISTERED':
-            if (typeof handleModuleRegistered === 'function') handleModuleRegistered(message);
+            if (typeof handleModuleRegisteredMessage === 'function') handleModuleRegisteredMessage(message);
             break;
         case 'SESSION_SYNC':
-            if (typeof handleSessionSync === 'function') handleSessionSync(message);
+            if (typeof handleSessionSyncMessage === 'function') handleSessionSyncMessage(message);
             break;
         case 'SESSION_UPDATE':
-            if (typeof handleSessionUpdate === 'function') handleSessionUpdate(message);
+            if (typeof handleSessionUpdateMessage === 'function') handleSessionUpdateMessage(message);
             break;
         case 'SESSION_INVALIDATED':
-            if (typeof handleSessionInvalidated === 'function') handleSessionInvalidated(message);
+            if (typeof handleSessionInvalidatedMessage === 'function') handleSessionInvalidatedMessage(message);
             break;
         case 'SETTINGS_LOAD_RESPONSE':
-            if (typeof handleSettingsLoadResponse === 'function') handleSettingsLoadResponse(message);
+            if (typeof handleSettingsLoadResponseMessage === 'function') handleSettingsLoadResponseMessage(message);
             break;
         case 'SETTINGS_UPDATED':
-            if (typeof handleSettingsUpdated === 'function') handleSettingsUpdated(message);
+            if (typeof handleSettingsUpdatedMessage === 'function') handleSettingsUpdatedMessage(message);
             break;
         case 'PROFILE_UPDATED':
-            if (typeof handleProfileUpdated === 'function') handleProfileUpdated(message);
+            if (typeof handleProfileUpdatedMessage === 'function') handleProfileUpdatedMessage(message);
             break;
         case 'PRIVACY_UPDATED':
-            if (typeof handlePrivacyUpdated === 'function') handlePrivacyUpdated(message);
+            if (typeof handlePrivacyUpdatedMessage === 'function') handlePrivacyUpdatedMessage(message);
             break;
         case 'NOTIFICATIONS_UPDATED':
-            if (typeof handleNotificationsUpdated === 'function') handleNotificationsUpdated(message);
+            if (typeof handleNotificationsUpdatedMessage === 'function') handleNotificationsUpdatedMessage(message);
             break;
         case 'LANGUAGE_CHANGED':
-            if (typeof handleLanguageChanged === 'function') handleLanguageChanged(message);
+            if (typeof handleLanguageChangedMessage === 'function') handleLanguageChangedMessage(message);
             break;
         case 'THEME_CHANGED':
-            if (typeof handleThemeChanged === 'function') handleThemeChanged(message);
+            if (typeof handleThemeChangedMessage === 'function') handleThemeChangedMessage(message);
             break;
         case 'ACCOUNT_LOGGED_OUT':
-            if (typeof handleAccountLoggedOut === 'function') handleAccountLoggedOut(message);
+            if (typeof handleAccountLoggedOutMessage === 'function') handleAccountLoggedOutMessage(message);
             break;
         case 'BLOCKED_USERS_UPDATED':
-            if (typeof handleBlockedUsersUpdated === 'function') handleBlockedUsersUpdated(message);
+            if (typeof handleBlockedUsersUpdatedMessage === 'function') handleBlockedUsersUpdatedMessage(message);
             break;
         case 'ACTIVE_SESSIONS_UPDATED':
-            if (typeof handleActiveSessionsUpdated === 'function') handleActiveSessionsUpdated(message);
+            if (typeof handleActiveSessionsUpdatedMessage === 'function') handleActiveSessionsUpdatedMessage(message);
             break;
         case 'USER_CONTACTS_UPDATED':
-            if (typeof handleUserContactsUpdated === 'function') handleUserContactsUpdated(message);
+            if (typeof handleUserContactsUpdatedMessage === 'function') handleUserContactsUpdatedMessage(message);
             break;
         case 'USER_GROUPS_UPDATED':
-            if (typeof handleUserGroupsUpdated === 'function') handleUserGroupsUpdated(message);
+            if (typeof handleUserGroupsUpdatedMessage === 'function') handleUserGroupsUpdatedMessage(message);
             break;
         case 'STORAGE_USAGE_UPDATED':
-            if (typeof handleStorageUsageUpdated === 'function') handleStorageUsageUpdated(message);
+            if (typeof handleStorageUsageUpdatedMessage === 'function') handleStorageUsageUpdatedMessage(message);
             break;
         case 'ERROR':
-            if (typeof handleErrorMessage === 'function') handleErrorMessage(message);
+            if (typeof handleErrorMessageMessage === 'function') handleErrorMessageMessage(message);
             break;
         case 'PING':
-            if (typeof handlePing === 'function') handlePing(message);
+            if (typeof handlePingMessage === 'function') handlePingMessage(message);
             break;
         case 'PONG':
-            if (typeof handlePong === 'function') handlePong(message);
+            if (typeof handlePongMessage === 'function') handlePongMessage(message);
             break;
     }
 }
 
-function handlePing(message) {
+function handlePingMessage(message) {
     if (currentState === LifecycleState.ACTIVE) {
         try {
             const pongMessage = {
@@ -548,12 +1505,35 @@ function handlePing(message) {
     }
 }
 
-function handlePong(message) {
+function handlePongMessage(message) {
     window.lastPongTime = Date.now();
     if (typeof ReliabilityEngine !== 'undefined' && ReliabilityEngine.emit) {
         ReliabilityEngine.emit('pong', { timestamp: Date.now() });
     }
 }
+
+// =============================================
+// PLACEHOLDER HANDLERS TO PREVENT UNDEFINED ERRORS
+// =============================================
+function handleSessionData(message) {}
+function handleModuleRegisteredMessage(message) {}
+function handleSessionSyncMessage(message) {}
+function handleSessionUpdateMessage(message) {}
+function handleSessionInvalidatedMessage(message) {}
+function handleSettingsLoadResponseMessage(message) {}
+function handleSettingsUpdatedMessage(message) {}
+function handleProfileUpdatedMessage(message) {}
+function handlePrivacyUpdatedMessage(message) {}
+function handleNotificationsUpdatedMessage(message) {}
+function handleLanguageChangedMessage(message) {}
+function handleThemeChangedMessage(message) {}
+function handleAccountLoggedOutMessage(message) {}
+function handleBlockedUsersUpdatedMessage(message) {}
+function handleActiveSessionsUpdatedMessage(message) {}
+function handleUserContactsUpdatedMessage(message) {}
+function handleUserGroupsUpdatedMessage(message) {}
+function handleStorageUsageUpdatedMessage(message) {}
+function handleErrorMessageMessage(message) {}
 
 // =============================================
 // REGISTRATION FLAGS
@@ -812,7 +1792,10 @@ const MessageTransport = {
             
             const message = event.data;
             
-            if (message.type !== 'PARENT_READY' && !validateCanonicalMessage(message)) {
+            if (message.type !== 'PARENT_READY' && !validateCanonicalMessage(message) && 
+                message.type !== 'SETTINGS_DATA' && message.type !== 'SETTINGS_UPDATE_CONFIRMED' &&
+                message.type !== 'SETTINGS_UPDATE_ERROR' && message.type !== 'SETTINGS_FETCH_ERROR' &&
+                message.type !== 'SETTINGS_GLOBAL_UPDATE' && message.type !== 'AUTH_READY' && message.type !== 'AUTH_ERROR') {
                 return;
             }
             
@@ -822,107 +1805,104 @@ const MessageTransport = {
             
             receiveLog(message.type);
             
+            if (message.type === 'AUTH_READY') {
+                isAuthenticated = true;
+                authCheckComplete = true;
+                processRequestQueue();
+                
+                if (parentReadyReceived && currentState === LifecycleState.ACTIVE && __isValidSession(_currentValidSession)) {
+                    loadSettingsAfterActivation();
+                    startBackgroundTasks();
+                }
+                
+                if (currentState === LifecycleState.WAITING_AUTH) {
+                    setState(LifecycleState.READY, 'auth_ready');
+                    sendChildReady();
+                }
+                return;
+            }
+            
+            if (message.type === 'AUTH_ERROR') {
+                console.error(`[${MODULE_NAME}] ❌ AUTH_ERROR received`);
+                isAuthenticated = false;
+                authCheckComplete = true;
+                setState(LifecycleState.ERROR, 'auth_error');
+                return;
+            }
+            
+            if (message.type === 'SESSION_DATA') {
+                const sessionData = message.session || message.payload?.session || message;
+                if (!__isValidSession(sessionData)) {
+                    console.warn(`[${MODULE_NAME}] ⚠️ Ignored invalid SESSION_DATA in MessageTransport`);
+                    return;
+                }
+                const sessionId = sessionData.sessionId || `${sessionData.token}_${sessionData.userId}`;
+                if (_lastSessionId === sessionId && _currentValidSession) {
+                    return;
+                }
+                _lastSessionId = sessionId;
+                _currentValidSession = sessionData;
+                applySession(sessionData);
+                return;
+            }
+            
+            if (message.type === 'SESSION_UPDATE') {
+                const sessionData = message.session || message.payload?.session || message;
+                if (_currentValidSession && __isValidSession(_currentValidSession)) {
+                    if (!__isValidSession(sessionData)) {
+                        console.warn(`[${MODULE_NAME}] ⚠️ Prevented session downgrade in MessageTransport`);
+                        return;
+                    }
+                }
+                if (!__isValidSession(sessionData)) {
+                    console.warn(`[${MODULE_NAME}] ⚠️ Ignored invalid SESSION_UPDATE in MessageTransport`);
+                    return;
+                }
+                const sessionId = sessionData.sessionId || `${sessionData.token}_${sessionData.userId}`;
+                if (_lastSessionId === sessionId && _currentValidSession) {
+                    return;
+                }
+                _lastSessionId = sessionId;
+                if (_currentValidSession) {
+                    _currentValidSession = { ..._currentValidSession, ...sessionData };
+                } else {
+                    _currentValidSession = sessionData;
+                }
+                applySession(_currentValidSession);
+                return;
+            }
+            
             if (message.type === 'PARENT_READY') {
                 handleParentReady(message);
                 return;
             }
             
+            if (message.type === 'SETTINGS_DATA') {
+                handleSettingsDataResponse(message);
+                return;
+            }
+            
+            if (message.type === 'SETTINGS_UPDATE_CONFIRMED') {
+                handleSettingsUpdateConfirmedMessage(message);
+                return;
+            }
+            
+            if (message.type === 'SETTINGS_UPDATE_ERROR') {
+                handleSettingsUpdateErrorMessage(message);
+                return;
+            }
+            
+            if (message.type === 'SETTINGS_FETCH_ERROR') {
+                handleSettingsFetchErrorMessage(message);
+                return;
+            }
+            
+            if (message.type === 'SETTINGS_GLOBAL_UPDATE') {
+                handleSettingsGlobalUpdateMessage(message);
+                return;
+            }
+            
             if (!window.parentReady) {
-                return;
-            }
-            
-            if (message.type === 'MODULE_REGISTERED') {
-                handleModuleRegistered(message);
-                return;
-            }
-            
-            if (message.type === 'SESSION_SYNC') {
-                handleSessionSync(message);
-                return;
-            }
-            
-            if (message.type === 'SESSION_UPDATE') {
-                handleSessionUpdate(message);
-                return;
-            }
-            
-            if (message.type === 'SESSION_INVALIDATED') {
-                handleSessionInvalidated(message);
-                return;
-            }
-            
-            if (message.type === 'SETTINGS_LOAD_RESPONSE') {
-                handleSettingsLoadResponse(message);
-                return;
-            }
-            
-            if (message.type === 'SETTINGS_UPDATED') {
-                handleSettingsUpdated(message);
-                return;
-            }
-            
-            if (message.type === 'PROFILE_UPDATED') {
-                handleProfileUpdated(message);
-                return;
-            }
-            
-            if (message.type === 'PRIVACY_UPDATED') {
-                handlePrivacyUpdated(message);
-                return;
-            }
-            
-            if (message.type === 'NOTIFICATIONS_UPDATED') {
-                handleNotificationsUpdated(message);
-                return;
-            }
-            
-            if (message.type === 'LANGUAGE_CHANGED') {
-                handleLanguageChanged(message);
-                return;
-            }
-            
-            if (message.type === 'THEME_CHANGED') {
-                handleThemeChanged(message);
-                return;
-            }
-            
-            if (message.type === 'ACCOUNT_LOGGED_OUT') {
-                handleAccountLoggedOut(message);
-                return;
-            }
-            
-            if (message.type === 'BLOCKED_USERS_UPDATED') {
-                handleBlockedUsersUpdated(message);
-                return;
-            }
-            
-            if (message.type === 'ACTIVE_SESSIONS_UPDATED') {
-                handleActiveSessionsUpdated(message);
-                return;
-            }
-            
-            if (message.type === 'USER_CONTACTS_UPDATED') {
-                handleUserContactsUpdated(message);
-                return;
-            }
-            
-            if (message.type === 'USER_GROUPS_UPDATED') {
-                handleUserGroupsUpdated(message);
-                return;
-            }
-            
-            if (message.type === 'STORAGE_USAGE_UPDATED') {
-                handleStorageUsageUpdated(message);
-                return;
-            }
-            
-            if (message.type === 'ERROR') {
-                handleErrorMessage(message);
-                return;
-            }
-            
-            if (message.type === 'PING') {
-                handlePing(message);
                 return;
             }
             
@@ -1021,273 +2001,52 @@ const LifecycleController = {
     _initializeComponents() {
         loadFromLocalStorage();
         
-        // STRICT: Only transition through allowed states
         if (currentState === LifecycleState.BOOT) {
             setState(LifecycleState.INITIALIZING, 'component_init');
-            setState(LifecycleState.READY, 'initialization_complete');
-            
-            // STRICT: Send CHILD_READY exactly once from READY state
-            this._sendChildReady();
+            // Wait for authentication instead of going directly to READY
+            setState(LifecycleState.WAITING_AUTH, 'waiting_for_auth');
+            console.log(`[${MODULE_NAME}] ⏳ Waiting for AUTH_READY from parent...`);
         }
     },
     
     _sendChildReady() {
-        // STRICT: Only send if not already sent and state is READY
         if (childReadySent) return;
         if (currentState !== LifecycleState.READY) return;
         
         sendChildReady();
-        
         initLog('CHILD_READY sent, waiting for PARENT_READY');
     },
     
     _setupMessageHandlers() {
         MessageTransport.on('PARENT_READY', (message) => {});
-        
-        MessageTransport.on('MODULE_REGISTERED', (message) => {
-            this._handleModuleRegistered(message);
-        });
-        
-        MessageTransport.on('SESSION_SYNC', (message) => {
-            this._handleSessionSync(message);
-        });
-        
-        MessageTransport.on('SESSION_UPDATE', (message) => {
-            this._handleSessionUpdate(message);
-        });
-        
-        MessageTransport.on('SESSION_INVALIDATED', (message) => {
-            this._handleSessionInvalidated(message);
-        });
-        
-        MessageTransport.on('SETTINGS_LOAD_RESPONSE', (message) => {
-            this._handleSettingsLoadResponse(message);
-        });
-        
-        MessageTransport.on('SETTINGS_UPDATED', (message) => {
-            this._handleSettingsUpdated(message);
-        });
-        
-        MessageTransport.on('PROFILE_UPDATED', (message) => {
-            handleProfileUpdated(message);
-        });
-        
-        MessageTransport.on('PRIVACY_UPDATED', (message) => {
-            handlePrivacyUpdated(message);
-        });
-        
-        MessageTransport.on('NOTIFICATIONS_UPDATED', (message) => {
-            handleNotificationsUpdated(message);
-        });
-        
-        MessageTransport.on('LANGUAGE_CHANGED', (message) => {
-            handleLanguageChanged(message);
-        });
-        
-        MessageTransport.on('THEME_CHANGED', (message) => {
-            handleThemeChanged(message);
-        });
-        
-        MessageTransport.on('ACCOUNT_LOGGED_OUT', (message) => {
-            handleAccountLoggedOut(message);
-        });
-        
-        MessageTransport.on('BLOCKED_USERS_UPDATED', (message) => {
-            handleBlockedUsersUpdated(message);
-        });
-        
-        MessageTransport.on('ACTIVE_SESSIONS_UPDATED', (message) => {
-            handleActiveSessionsUpdated(message);
-        });
-        
-        MessageTransport.on('USER_CONTACTS_UPDATED', (message) => {
-            handleUserContactsUpdated(message);
-        });
-        
-        MessageTransport.on('USER_GROUPS_UPDATED', (message) => {
-            handleUserGroupsUpdated(message);
-        });
-        
-        MessageTransport.on('STORAGE_USAGE_UPDATED', (message) => {
-            handleStorageUsageUpdated(message);
-        });
-        
-        MessageTransport.on('ERROR', (message) => {
-            handleErrorMessage(message);
-        });
-    },
-    
-    _handleModuleRegistered(message) {
-        if (currentState !== LifecycleState.WAIT_PARENT && currentState !== LifecycleState.ACTIVE) return;
-        if (registrationCompleted) return;
-        
-        registrationCompleted = true;
-        moduleRegistered = true;
-        
-        receiveLog('MODULE_REGISTERED received');
-    },
-    
-    _handleSessionSync(message) {
-        if (currentState !== LifecycleState.ACTIVE) return;
-        
-        const sessionData = message.payload?.session || message.payload;
-        if (!sessionData) return;
-        
-        const user = sessionData.user || sessionData;
-        const token = sessionData.token;
-        const expiry = sessionData.expiry || sessionData.expiresAt || (Date.now() + 3600000);
-        
-        updateSession(user, token, expiry);
-        parentSessionData = { user, token, expiry };
-        parentSessionReceived = true;
-        sessionValidated = true;
-        sessionSyncCompleted = true;
-    },
-    
-    _handleSessionUpdate(message) {
-        if (currentState !== LifecycleState.ACTIVE) return;
-        
-        const sessionData = message.payload?.session || message.payload;
-        if (!sessionData) return;
-        
-        const user = sessionData.user || sessionData;
-        const token = sessionData.token;
-        const expiry = sessionData.expiry || sessionData.expiresAt;
-        
-        if (user || token) updateSession(user, token, expiry);
-        
-        updateUserUI();
-    },
-    
-    _handleSessionInvalidated(message) {
-        clearSession();
-        parentSessionReceived = false;
-        sessionValidated = false;
-        sessionSyncCompleted = false;
-        
-        const event = new CustomEvent('userLoggedOut', {
-            detail: { timestamp: Date.now() }
-        });
-        window.dispatchEvent(event);
-        
-        if (currentState === LifecycleState.ACTIVE) {
-            this._sessionRequestRetries = 0;
-            this._requestSession();
-        }
-    },
-    
-    _requestSession() {
-        if (currentState !== LifecycleState.ACTIVE) return;
-        if (window.session.token) return;
-        
-        this._sessionRequestRetries++;
-        if (this._sessionRequestRetries > this._maxSessionRetries) {
-            errorLog('Max session request retries reached');
-            return;
-        }
-        
-        MessageTransport.send('REQUEST_SESSION', {
-            module: MODULE_NAME,
-            requestId: generateRequestId()
-        });
-    },
-    
-    _requestSettingsLoad() {
-        if (currentState !== LifecycleState.ACTIVE) return;
-        
-        MessageTransport.send('SETTINGS_LOAD_REQUEST', {});
-    },
-    
-    _handleSettingsLoadResponse(message) {
-        if (currentState !== LifecycleState.ACTIVE) return;
-        
-        const settingsData = message.payload?.settings || message.payload;
-        if (settingsData) {
-            userSettings = settingsData;
-            
-            SettingsStore.load({
-                account: settingsData.profile || {},
-                privacy: settingsData.privacy || {},
-                notifications: settingsData.notifications || {},
-                appearance: settingsData.appearance || {}
-            });
-            
-            SafeStorage.setJSON('user_settings', userSettings);
-            calculateStorageUsage();
-            
-            if (userSettings.appearance) {
-                applyTheme(userSettings.appearance.theme);
-            }
-            
-            dispatchSettingsLoadedEvent();
-            
-            MessageTransport.send('SETTINGS_READY', {});
-            
-            startBackgroundTasks();
-        }
-    },
-    
-    _handleSettingsUpdated(message) {
-        if (currentState !== LifecycleState.ACTIVE) return;
-        
-        const settingsData = message.payload?.settings || message.payload;
-        if (settingsData) {
-            userSettings = settingsData;
-            
-            SettingsStore.load({
-                account: settingsData.profile || {},
-                privacy: settingsData.privacy || {},
-                notifications: settingsData.notifications || {},
-                appearance: settingsData.appearance || {}
-            });
-            
-            SafeStorage.setJSON('user_settings', userSettings);
-            calculateStorageUsage();
-            
-            if (settingsData.appearance?.theme) {
-                applyTheme(settingsData.appearance.theme);
-            }
-            
-            const event = new CustomEvent('settingsUpdated', {
-                detail: { settings: settingsData, timestamp: Date.now() }
-            });
-            window.dispatchEvent(event);
-        }
+        MessageTransport.on('MODULE_REGISTERED', (message) => {});
+        MessageTransport.on('SESSION_SYNC', (message) => {});
+        MessageTransport.on('SESSION_UPDATE', (message) => {});
+        MessageTransport.on('SESSION_INVALIDATED', (message) => {});
+        MessageTransport.on('SETTINGS_LOAD_RESPONSE', (message) => {});
+        MessageTransport.on('SETTINGS_UPDATED', (message) => {});
+        MessageTransport.on('PROFILE_UPDATED', (message) => {});
+        MessageTransport.on('PRIVACY_UPDATED', (message) => {});
+        MessageTransport.on('NOTIFICATIONS_UPDATED', (message) => {});
+        MessageTransport.on('LANGUAGE_CHANGED', (message) => {});
+        MessageTransport.on('THEME_CHANGED', (message) => {});
+        MessageTransport.on('ACCOUNT_LOGGED_OUT', (message) => {});
+        MessageTransport.on('BLOCKED_USERS_UPDATED', (message) => {});
+        MessageTransport.on('ACTIVE_SESSIONS_UPDATED', (message) => {});
+        MessageTransport.on('USER_CONTACTS_UPDATED', (message) => {});
+        MessageTransport.on('USER_GROUPS_UPDATED', (message) => {});
+        MessageTransport.on('STORAGE_USAGE_UPDATED', (message) => {});
+        MessageTransport.on('ERROR', (message) => {});
+        MessageTransport.on('SETTINGS_DATA', (message) => {});
+        MessageTransport.on('SETTINGS_UPDATE_CONFIRMED', (message) => {});
+        MessageTransport.on('SETTINGS_GLOBAL_UPDATE', (message) => {});
+        MessageTransport.on('AUTH_READY', (message) => {});
+        MessageTransport.on('AUTH_ERROR', (message) => {});
     }
 };
 
 // =============================================
-// SESSION DATA HANDLER
-// =============================================
-function handleSessionData(message) {
-    if (currentState !== LifecycleState.ACTIVE) return;
-    
-    const payload = message.payload || {};
-    const sessionData = payload.session || payload;
-    
-    if (sessionData.token) {
-        window.session.token = sessionData.token;
-        window.session.user = sessionData.user || null;
-        window.session.expiresAt = sessionData.expiresAt || (Date.now() + 3600000);
-        window.session.version = (window.session.version || 0) + 1;
-        
-        currentUser = window.session.user;
-        parentSessionReceived = true;
-        sessionValidated = true;
-        
-        receiveLog('SESSION_DATA received');
-        
-        LifecycleController._requestSettingsLoad();
-        
-        const event = new CustomEvent('sessionReady', {
-            detail: { timestamp: Date.now() }
-        });
-        window.dispatchEvent(event);
-    }
-}
-
-// =============================================
-// API CORE GATEWAY
+// API CORE GATEWAY - USES authorizedRequest
 // =============================================
 const ApiCore = {
     _ready: false,
@@ -1303,7 +2062,7 @@ const ApiCore = {
     },
     
     isReady() {
-        return this._ready && currentState === LifecycleState.ACTIVE && !!window.session.token;
+        return this._ready && currentState === LifecycleState.ACTIVE && isAuthenticated;
     },
     
     whenReady() {
@@ -1320,39 +2079,23 @@ const ApiCore = {
             };
         }
         
-        if (!window.session.token) {
+        if (!isAuthenticated) {
             return {
                 success: false,
                 status: 'error',
-                message: 'Session not ready',
+                message: 'Authentication not ready',
                 data: null
             };
         }
         
-        const requestId = `req_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-        const method = options.method || 'GET';
-        
         try {
-            const response = await new Promise((resolve) => {
-                MessageTransport.send('API_REQUEST', {
-                    endpoint: endpoint,
-                    method: method,
-                    data: options.body,
-                    headers: {
-                        ...(options.headers || {}),
-                        Authorization: `Bearer ${window.session.token}`
-                    },
-                    requestId: requestId
-                });
-            });
-            
+            const response = await authorizedRequest(endpoint, options);
             return response;
-            
         } catch (error) {
             return {
                 success: false,
                 status: 'error',
-                message: 'Network or server error',
+                message: error.message || 'Request failed',
                 data: null
             };
         }
@@ -1361,13 +2104,13 @@ const ApiCore = {
     getDiagnostics() {
         return {
             ready: this._ready,
-            hasToken: !!window.session.token
+            authenticated: isAuthenticated
         };
     }
 }.init();
 
 // =============================================
-// SECURE API WRAPPER
+// SECURE API WRAPPER - USES authorizedRequest
 // =============================================
 async function secureApiCall(endpoint, options = {}) {
     if (currentState !== LifecycleState.ACTIVE) {
@@ -1379,29 +2122,18 @@ async function secureApiCall(endpoint, options = {}) {
         };
     }
     
-    if (!window.session.token) {
+    if (!isAuthenticated) {
         return {
             success: false,
             status: 'error',
-            message: 'Session not ready',
+            message: 'Authentication not ready',
             data: null
         };
     }
     
     try {
-        const response = await MessageTransport.send('API_REQUEST', {
-            endpoint: endpoint,
-            method: options.method || 'GET',
-            data: options.body,
-            headers: {
-                ...(options.headers || {}),
-                Authorization: `Bearer ${window.session.token}`
-            },
-            options: options
-        });
-        
+        const response = await authorizedRequest(endpoint, options);
         return { success: true, data: response };
-        
     } catch (error) {
         return {
             success: false,
@@ -1413,21 +2145,16 @@ async function secureApiCall(endpoint, options = {}) {
 }
 
 // =============================================
-// AUTHORIZED FETCH
+// AUTHORIZED FETCH - NO LONGER USED DIRECTLY
 // =============================================
 function authorizedFetch(url, options = {}) {
-    if (!window.session || !window.session.token) {
-        throw new Error("Session not ready");
+    if (!isAuthenticated) {
+        throw new Error("Authentication not ready");
     }
     
-    return fetch(url, {
-        ...options,
-        headers: {
-            ...(options.headers || {}),
-            Authorization: `Bearer ${window.session.token}`,
-            "Content-Type": "application/json"
-        }
-    });
+    // This should not be called directly - use authorizedRequest instead
+    console.warn(`[${MODULE_NAME}] ⚠️ authorizedFetch called - this should be replaced with authorizedRequest`);
+    return authorizedRequest(url, options);
 }
 
 // =============================================
@@ -1901,61 +2628,6 @@ const CompatibilityBridge = {
         this._reason = reason;
     },
     
-    _setupLegacyAPIs() {
-        this._legacyAPIs.set('sendToParentLegacy', (type, payload) => {
-            const legacyMsg = {
-                type,
-                ...payload,
-                _legacy: true,
-                timestamp: Date.now()
-            };
-            
-            try {
-                if (window.parent) {
-                    window.parent.postMessage(legacyMsg, '*');
-                }
-            } catch (e) {}
-        });
-        
-        this._legacyAPIs.set('receiveFromParentLegacy', (handler) => {
-            const wrapper = (event) => {
-                if (event.data && event.data._legacy) {
-                    handler(event);
-                }
-            };
-            window.addEventListener('message', wrapper);
-            return () => window.removeEventListener('message', wrapper);
-        });
-    },
-    
-    _setupMessageTranslation() {
-        this._messageTranslator = {
-            toLegacy(canonical) {
-                return {
-                    type: canonical.type || canonical.payload?.type,
-                    ...canonical.payload,
-                    _legacy: true,
-                    _originalId: canonical.messageId
-                };
-            },
-            
-            toCanonical(legacy) {
-                return {
-                    type: legacy.type,
-                    source: legacy.source || 'unknown',
-                    target: legacy.target || '*',
-                    messageId: legacy.messageId || `legacy_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
-                    timestamp: legacy.timestamp || Date.now(),
-                    payload: { ...legacy },
-                    legacy: true
-                };
-            }
-        };
-    },
-    
-    _applyCompatibility() {
-    },
-    
     isEnabled() {
         return this._enabled;
     },
@@ -2042,19 +2714,6 @@ const OriginAdapter = {
             return true;
         }
         return TrustedOrigins.isValid(origin);
-    },
-    
-    _cacheValidation(origin, trusted) {
-        this._validationCache.set(origin, {
-            trusted,
-            timestamp: Date.now()
-        });
-        
-        if (this._validationCache.size > 100) {
-            const oldest = Array.from(this._validationCache.entries())
-                .sort((a, b) => a[1].timestamp - b[1].timestamp)[0];
-            this._validationCache.delete(oldest[0]);
-        }
     },
     
     setParentOrigin(origin) {
@@ -2266,9 +2925,30 @@ const IframeTransport = {
 IframeTransport.init();
 
 // =============================================
-// SESSION STORAGE - MEMORY ONLY
+// SESSION STORAGE - MEMORY ONLY WITH VALIDATION
 // =============================================
 function updateSession(user, token, expiry, version) {
+    // Validate incoming session data
+    const sessionData = {
+        userId: user?.id || user?.userId,
+        token: token,
+        user: user
+    };
+    
+    if (!__isValidSession(sessionData)) {
+        console.warn(`[${MODULE_NAME}] ⚠️ updateSession called with invalid data - rejected`);
+        return false;
+    }
+    
+    // Prevent session downgrade
+    if (window.session.user && __isValidSession({ userId: window.session.user.id, token: window.session.token })) {
+        const newUserId = user?.id || user?.userId;
+        if (newUserId === 'user' || newUserId === 'default') {
+            console.warn(`[${MODULE_NAME}] ⚠️ Prevented session downgrade in updateSession`);
+            return false;
+        }
+    }
+    
     if (token) {
         window.session.token = token;
     }
@@ -2287,7 +2967,8 @@ function updateSession(user, token, expiry, version) {
         window.session.version = version;
     }
     
-    window.__SETTINGS_SESSION_ACTIVE__ = !!window.session.user && !!window.session.token;
+    window.__SETTINGS_SESSION_ACTIVE__ = !!window.session.user && isAuthenticated;
+    return true;
 }
 
 function clearSession() {
@@ -2303,7 +2984,11 @@ function clearSession() {
 }
 
 function isSessionValid() {
-    return !!window.session.user && !!window.session.token && window.session.expiresAt > Date.now();
+    const sessionData = {
+        userId: window.session.user?.id || window.session.user?.userId,
+        token: window.session.token
+    };
+    return isAuthenticated && __isValidSession(sessionData) && window.session.expiresAt > Date.now();
 }
 
 // =============================================
@@ -2441,7 +3126,7 @@ const HeartbeatClient = {
 const HeartbeatManager = HeartbeatClient;
 
 // =============================================
-// SESSION CLIENT
+// SESSION CLIENT WITH VALIDATION
 // =============================================
 const SessionClient = {
     _session: null,
@@ -2471,6 +3156,10 @@ const SessionClient = {
             return false;
         }
         
+        if (!isAuthenticated) {
+            return false;
+        }
+        
         if (this._syncInProgress) return false;
         
         this._syncInProgress = true;
@@ -2479,10 +3168,16 @@ const SessionClient = {
             const response = await MessageTransport.send('SESSION_SYNC', {});
             
             if (response && response.payload && response.payload.session) {
+                const sessionData = response.payload.session;
+                if (!__isValidSession(sessionData)) {
+                    console.warn(`[${MODULE_NAME}] ⚠️ SessionClient.sync received invalid session`);
+                    this._syncInProgress = false;
+                    return false;
+                }
                 this.updateSession(
-                    response.payload.session.user,
-                    response.payload.session.token,
-                    response.payload.session.expiry
+                    sessionData.user,
+                    sessionData.token,
+                    sessionData.expiry
                 );
                 this._syncInProgress = false;
                 return true;
@@ -2497,10 +3192,31 @@ const SessionClient = {
     },
     
     updateSession(user, token, expiry) {
+        const sessionData = {
+            userId: user?.id || user?.userId,
+            token: token,
+            user: user
+        };
+        
+        if (!__isValidSession(sessionData)) {
+            console.warn(`[${MODULE_NAME}] ⚠️ SessionClient.updateSession received invalid session`);
+            return false;
+        }
+        
+        // Prevent session downgrade
+        if (this._session && __isValidSession({ userId: this._session?.id, token: this._sessionToken })) {
+            const newUserId = user?.id || user?.userId;
+            if (newUserId === 'user' || newUserId === 'default') {
+                console.warn(`[${MODULE_NAME}] ⚠️ SessionClient prevented session downgrade`);
+                return false;
+            }
+        }
+        
         if (user) {
             window.session.user = typeof user === 'object' ? { ...user } : user;
             currentUser = window.session.user;
             coreData.user = window.session.user;
+            this._session = window.session.user;
         }
         
         if (token) {
@@ -2527,9 +3243,6 @@ const SessionClient = {
         return true;
     },
     
-    _scheduleRefresh() {
-    },
-    
     async refresh() {
         if (!this.isValid()) return false;
         
@@ -2537,10 +3250,15 @@ const SessionClient = {
             const response = await MessageTransport.send('SESSION_REFRESH', {});
             
             if (response && response.payload && response.payload.session) {
+                const sessionData = response.payload.session;
+                if (!__isValidSession(sessionData)) {
+                    console.warn(`[${MODULE_NAME}] ⚠️ SessionClient.refresh received invalid session`);
+                    return false;
+                }
                 this.updateSession(
-                    response.payload.session.user,
-                    response.payload.session.token,
-                    response.payload.session.expiry
+                    sessionData.user,
+                    sessionData.token,
+                    sessionData.expiry
                 );
                 return true;
             }
@@ -2604,6 +3322,7 @@ const SessionClient = {
         };
         currentUser = null;
         coreData.user = null;
+        this._session = null;
         this._sessionToken = null;
         this._sessionExpiry = null;
         this._sessionVersion = 0;
@@ -2777,7 +3496,12 @@ const MessageDispatcher = {
         'SESSION_DATA',
         'MODULE_REGISTERED',
         'ACK',
-        'HEARTBEAT_ACK'
+        'HEARTBEAT_ACK',
+        'SETTINGS_DATA',
+        'SETTINGS_UPDATE_CONFIRMED',
+        'SETTINGS_GLOBAL_UPDATE',
+        'AUTH_READY',
+        'AUTH_ERROR'
     ]),
     _silent: true,
     
@@ -2797,6 +3521,11 @@ const MessageDispatcher = {
         });
         
         this.register('SESSION_DATA', (message) => {
+            const sessionData = message.session || message.payload?.session || message;
+            if (!__isValidSession(sessionData)) {
+                console.warn(`[${MODULE_NAME}] ⚠️ MessageDispatcher ignored invalid SESSION_DATA`);
+                return;
+            }
             handleSessionData(message);
         });
         
@@ -2812,6 +3541,30 @@ const MessageDispatcher = {
         
         this.register('HEARTBEAT_ACK', (message) => {
             HeartbeatClient.handleAck();
+        });
+        
+        this.register('SETTINGS_DATA', (message) => {
+            handleSettingsDataResponse(message);
+        });
+        
+        this.register('SETTINGS_UPDATE_CONFIRMED', (message) => {
+            handleSettingsUpdateConfirmedMessage(message);
+        });
+        
+        this.register('SETTINGS_GLOBAL_UPDATE', (message) => {
+            handleSettingsGlobalUpdateMessage(message);
+        });
+        
+        this.register('AUTH_READY', (message) => {
+            isAuthenticated = true;
+            authCheckComplete = true;
+            processRequestQueue();
+            console.log('[settings-core] ✅ AUTH_READY received');
+        });
+        
+        this.register('AUTH_ERROR', (message) => {
+            isAuthenticated = false;
+            console.error('[settings-core] ❌ AUTH_ERROR received');
         });
     },
     
@@ -3370,22 +4123,18 @@ const RecoveryManager = {
     _registerDefaultStrategies() {
         this.registerStrategy('connection_lost', async () => {
             ParentConnectionManager._detectParent();
-            
             if (ParentConnectionManager.isConnected()) {
                 return true;
             }
-            
             return false;
         });
         
         this.registerStrategy('heartbeat_failure', async () => {
             HeartbeatClient.stop();
-            
             if (currentState === LifecycleState.ACTIVE) {
                 HeartbeatClient.start();
                 return HeartbeatClient.isHealthy();
             }
-            
             return false;
         });
         
@@ -3395,29 +4144,40 @@ const RecoveryManager = {
         });
         
         this.registerStrategy('session_expired', async () => {
+            if (!isAuthenticated) return false;
             if (!window.session.token) return false;
-            
             const response = await MessageTransport.send('SESSION_REFRESH', {});
-            
             if (response && response.payload && response.payload.session) {
+                const sessionData = response.payload.session;
+                if (!__isValidSession(sessionData)) {
+                    console.warn(`[${MODULE_NAME}] ⚠️ RecoveryManager received invalid session`);
+                    return false;
+                }
                 updateSession(
-                    response.payload.session.user,
-                    response.payload.session.token,
-                    response.payload.session.expiry
+                    sessionData.user,
+                    sessionData.token,
+                    sessionData.expiry
                 );
                 return isSessionValid();
             }
-            
             return false;
         });
         
         this.registerStrategy('handshake_timeout', async () => {
             if (parentReadyReceived) return true;
-            
             sendChildReady();
             await new Promise(resolve => setTimeout(resolve, 1000));
-            
             return parentReadyReceived;
+        });
+        
+        this.registerStrategy('settings_load_failed', async () => {
+            if (!isAuthenticated) return false;
+            try {
+                await SettingsState.load();
+                return SettingsState.loaded;
+            } catch (error) {
+                return false;
+            }
         });
     },
     
@@ -3427,10 +4187,7 @@ const RecoveryManager = {
     },
     
     async attemptRecovery(options = {}) {
-        const {
-            reason = 'unknown',
-            force = false
-        } = options;
+        const { reason = 'unknown', force = false } = options;
         
         if (this._recoveryInProgress && !force) {
             return { success: false, error: 'recovery_in_progress' };
@@ -3443,7 +4200,6 @@ const RecoveryManager = {
         
         this._recoveryInProgress = true;
         this._attempts++;
-        
         this.emit('recovery_started', { reason, attempt: this._attempts });
         
         try {
@@ -3451,7 +4207,6 @@ const RecoveryManager = {
             
             if (strategy) {
                 const result = await strategy();
-                
                 if (result) {
                     this._recoveryInProgress = false;
                     this._attempts = 0;
@@ -3467,7 +4222,6 @@ const RecoveryManager = {
                         if (result) break;
                     } catch (e) {}
                 }
-                
                 if (results.some(r => r.success)) {
                     this._recoveryInProgress = false;
                     this._attempts = 0;
@@ -3478,12 +4232,10 @@ const RecoveryManager = {
             
             if (this._attempts < this._maxAttempts) {
                 const backoffDelay = this._backoffMs * Math.pow(1.5, this._attempts - 1);
-                
                 this._recoveryTimer = safeSetTimeout(() => {
                     this.attemptRecovery({ reason, force });
                 }, backoffDelay);
                 activeTimers.add(this._recoveryTimer);
-                
                 this.emit('recovery_retry', { reason, attempt: this._attempts, delay: backoffDelay });
                 return { success: false, retrying: true, attempt: this._attempts };
             } else {
@@ -3501,13 +4253,11 @@ const RecoveryManager = {
     reset() {
         this._attempts = 0;
         this._recoveryInProgress = false;
-        
         if (this._recoveryTimer) {
             clearTimeout(this._recoveryTimer);
             activeTimers.delete(this._recoveryTimer);
             this._recoveryTimer = null;
         }
-        
         this.emit('reset', {});
     },
     
@@ -3915,7 +4665,7 @@ const MultiModuleCoordinator = {
     
     _handleBroadcastMessage(data) {
         if (data.type === 'SETTINGS_UPDATED' && data.source !== this._moduleId) {
-            if (currentState === LifecycleState.ACTIVE) {
+            if (currentState === LifecycleState.ACTIVE && isAuthenticated) {
                 MessageTransport.send('SETTINGS_LOAD_REQUEST', {});
             }
         }
@@ -3923,6 +4673,19 @@ const MultiModuleCoordinator = {
         if (data.type === 'LANGUAGE_CHANGED' && data.source !== this._moduleId) {
             const event = new CustomEvent('languageChanged', {
                 detail: { language: data.language, source: 'broadcast' }
+            });
+            window.dispatchEvent(event);
+        }
+        
+        if (data.type === 'THEME_CHANGED' && data.source !== this._moduleId) {
+            if (data.theme) {
+                applyTheme(data.theme);
+            }
+        }
+        
+        if (data.type === 'PRIVACY_UPDATED' && data.source !== this._moduleId) {
+            const event = new CustomEvent('privacyUpdated', {
+                detail: { privacy: data.privacy, source: 'broadcast' }
             });
             window.dispatchEvent(event);
         }
@@ -3935,7 +4698,8 @@ const MultiModuleCoordinator = {
             lastSeen: Date.now(),
             ready: currentState === LifecycleState.ACTIVE,
             handshakeComplete: registrationCompleted,
-            sessionValid: isSessionValid()
+            sessionValid: isSessionValid(),
+            authenticated: isAuthenticated
         });
         
         this._broadcast({
@@ -3960,7 +4724,8 @@ const MultiModuleCoordinator = {
                     lastSeen: Date.now(),
                     ready: data.ready || false,
                     handshakeComplete: data.handshakeComplete || false,
-                    sessionValid: data.sessionValid || false
+                    sessionValid: data.sessionValid || false,
+                    authenticated: data.authenticated || false
                 });
                 break;
                 
@@ -3973,6 +4738,7 @@ const MultiModuleCoordinator = {
                     ready: currentState === LifecycleState.ACTIVE,
                     handshakeComplete: registrationCompleted,
                     sessionValid: isSessionValid(),
+                    authenticated: isAuthenticated,
                     timestamp: Date.now(),
                     target: sourceId
                 });
@@ -4070,119 +4836,214 @@ const UIBridge = {
     },
     
     _setupDefaultListeners() {
+        this.register('updateSetting', async (data) => {
+            if (currentState !== LifecycleState.ACTIVE || !isAuthenticated) {
+                errorLog('Cannot update setting: auth not ready');
+                return { success: false, error: 'Auth not ready' };
+            }
+            
+            try {
+                const result = await SettingsState.update(data.section, data.key, data.value);
+                return result;
+            } catch (error) {
+                errorLog('Error updating setting:', error);
+                return { success: false, error: error.message };
+            }
+        });
+        
+        this.register('saveSettings', async () => {
+            if (currentState !== LifecycleState.ACTIVE || !isAuthenticated) {
+                return { success: false, error: 'Auth not ready' };
+            }
+            
+            try {
+                await saveSettings();
+                return { success: true };
+            } catch (error) {
+                return { success: false, error: error.message };
+            }
+        });
+        
+        this.register('resetSettings', async () => {
+            if (currentState !== LifecycleState.ACTIVE || !isAuthenticated) {
+                return { success: false, error: 'Auth not ready' };
+            }
+            
+            try {
+                await SettingsState.reset();
+                return { success: true };
+            } catch (error) {
+                return { success: false, error: error.message };
+            }
+        });
+        
+        this.register('loadSettings', async () => {
+            if (currentState !== LifecycleState.ACTIVE) {
+                return { success: false, error: 'Module not active' };
+            }
+            
+            if (!isAuthenticated) {
+                return { success: false, error: 'Auth not ready' };
+            }
+            
+            try {
+                const settings = await SettingsState.load();
+                return { success: true, data: settings };
+            } catch (error) {
+                return { success: false, error: error.message };
+            }
+        });
+        
         this.register('sendMessage', (data) => {
-            if (currentState !== LifecycleState.ACTIVE || !window.session.token) return;
+            if (currentState !== LifecycleState.ACTIVE || !isAuthenticated) return;
             MessageTransport.send('SEND_MESSAGE', data);
         });
         
-        this.register('updateProfile', (data) => {
-            if (currentState !== LifecycleState.ACTIVE || !window.session.token) return;
-            updateSetting('profile', data.key, data.value).catch(() => {});
+        this.register('updateProfile', async (data) => {
+            if (currentState !== LifecycleState.ACTIVE || !isAuthenticated) return;
+            try {
+                await updateSetting('profile', data.key, data.value);
+            } catch (error) {}
         });
         
-        this.register('updatePrivacy', (data) => {
-            if (currentState !== LifecycleState.ACTIVE || !window.session.token) return;
-            updateSetting('privacy', data.key, data.value).catch(() => {});
+        this.register('updatePrivacy', async (data) => {
+            if (currentState !== LifecycleState.ACTIVE || !isAuthenticated) return;
+            try {
+                await updateSetting('privacy', data.key, data.value);
+            } catch (error) {}
         });
         
-        this.register('updateNotifications', (data) => {
-            if (currentState !== LifecycleState.ACTIVE || !window.session.token) return;
-            updateSetting('notifications', data.key, data.value).catch(() => {});
+        this.register('updateNotifications', async (data) => {
+            if (currentState !== LifecycleState.ACTIVE || !isAuthenticated) return;
+            try {
+                await updateSetting('notifications', data.key, data.value);
+            } catch (error) {}
         });
         
-        this.register('updateAppearance', (data) => {
-            if (currentState !== LifecycleState.ACTIVE || !window.session.token) return;
-            updateSetting('appearance', data.key, data.value).catch(() => {});
+        this.register('updateAppearance', async (data) => {
+            if (currentState !== LifecycleState.ACTIVE || !isAuthenticated) return;
+            try {
+                await updateSetting('appearance', data.key, data.value);
+            } catch (error) {}
         });
         
-        this.register('updateSecurity', (data) => {
-            if (currentState !== LifecycleState.ACTIVE || !window.session.token) return;
-            updateSetting('security', data.key, data.value).catch(() => {});
+        this.register('updateSecurity', async (data) => {
+            if (currentState !== LifecycleState.ACTIVE || !isAuthenticated) return;
+            try {
+                await updateSetting('security', data.key, data.value);
+            } catch (error) {}
         });
         
-        this.register('updateChat', (data) => {
-            if (currentState !== LifecycleState.ACTIVE || !window.session.token) return;
-            updateSetting('chat', data.key, data.value).catch(() => {});
+        this.register('updateChat', async (data) => {
+            if (currentState !== LifecycleState.ACTIVE || !isAuthenticated) return;
+            try {
+                await updateSetting('chat', data.key, data.value);
+            } catch (error) {}
         });
         
-        this.register('updateFriends', (data) => {
-            if (currentState !== LifecycleState.ACTIVE || !window.session.token) return;
-            updateSetting('friends', data.key, data.value).catch(() => {});
+        this.register('updateFriends', async (data) => {
+            if (currentState !== LifecycleState.ACTIVE || !isAuthenticated) return;
+            try {
+                await updateSetting('friends', data.key, data.value);
+            } catch (error) {}
         });
         
-        this.register('updateGroups', (data) => {
-            if (currentState !== LifecycleState.ACTIVE || !window.session.token) return;
-            updateSetting('groups', data.key, data.value).catch(() => {});
+        this.register('updateGroups', async (data) => {
+            if (currentState !== LifecycleState.ACTIVE || !isAuthenticated) return;
+            try {
+                await updateSetting('groups', data.key, data.value);
+            } catch (error) {}
         });
         
-        this.register('updateCalls', (data) => {
-            if (currentState !== LifecycleState.ACTIVE || !window.session.token) return;
-            updateSetting('calls', data.key, data.value).catch(() => {});
+        this.register('updateCalls', async (data) => {
+            if (currentState !== LifecycleState.ACTIVE || !isAuthenticated) return;
+            try {
+                await updateSetting('calls', data.key, data.value);
+            } catch (error) {}
         });
         
-        this.register('updateStatus', (data) => {
-            if (currentState !== LifecycleState.ACTIVE || !window.session.token) return;
-            updateSetting('status', data.key, data.value).catch(() => {});
+        this.register('updateStatus', async (data) => {
+            if (currentState !== LifecycleState.ACTIVE || !isAuthenticated) return;
+            try {
+                await updateSetting('status', data.key, data.value);
+            } catch (error) {}
         });
         
-        this.register('updateStorage', (data) => {
-            if (currentState !== LifecycleState.ACTIVE || !window.session.token) return;
-            updateSetting('storage', data.key, data.value).catch(() => {});
+        this.register('updateStorage', async (data) => {
+            if (currentState !== LifecycleState.ACTIVE || !isAuthenticated) return;
+            try {
+                await updateSetting('storage', data.key, data.value);
+            } catch (error) {}
         });
         
-        this.register('updateMood', (data) => {
-            if (currentState !== LifecycleState.ACTIVE || !window.session.token) return;
-            updateSetting('mood', data.key, data.value).catch(() => {});
+        this.register('updateMood', async (data) => {
+            if (currentState !== LifecycleState.ACTIVE || !isAuthenticated) return;
+            try {
+                await updateSetting('mood', data.key, data.value);
+            } catch (error) {}
         });
         
-        this.register('updateAdvanced', (data) => {
-            if (currentState !== LifecycleState.ACTIVE || !window.session.token) return;
-            updateSetting('advanced', data.key, data.value).catch(() => {});
+        this.register('updateAdvanced', async (data) => {
+            if (currentState !== LifecycleState.ACTIVE || !isAuthenticated) return;
+            try {
+                await updateSetting('advanced', data.key, data.value);
+            } catch (error) {}
         });
         
-        this.register('updateBackup', (data) => {
-            if (currentState !== LifecycleState.ACTIVE || !window.session.token) return;
-            updateSetting('backup', data.key, data.value).catch(() => {});
+        this.register('updateBackup', async (data) => {
+            if (currentState !== LifecycleState.ACTIVE || !isAuthenticated) return;
+            try {
+                await updateSetting('backup', data.key, data.value);
+            } catch (error) {}
         });
         
-        this.register('updateDanger', (data) => {
-            if (currentState !== LifecycleState.ACTIVE || !window.session.token) return;
-            updateSetting('danger', data.key, data.value).catch(() => {});
+        this.register('updateDanger', async (data) => {
+            if (currentState !== LifecycleState.ACTIVE || !isAuthenticated) return;
+            try {
+                await updateSetting('danger', data.key, data.value);
+            } catch (error) {}
         });
         
-        this.register('logout', () => {
-            if (currentState !== LifecycleState.ACTIVE || !window.session.token) return;
-            handleLogout().catch(() => {});
+        this.register('logout', async () => {
+            if (currentState !== LifecycleState.ACTIVE || !isAuthenticated) return;
+            try {
+                await handleLogout();
+            } catch (error) {}
         });
         
-        this.register('terminateSession', (data) => {
-            if (currentState !== LifecycleState.ACTIVE || !window.session.token) return;
-            terminateSession(data.sessionId).catch(() => {});
+        this.register('terminateSession', async (data) => {
+            if (currentState !== LifecycleState.ACTIVE || !isAuthenticated) return;
+            try {
+                await terminateSession(data.sessionId);
+            } catch (error) {}
         });
         
-        this.register('terminateAllSessions', () => {
-            if (currentState !== LifecycleState.ACTIVE || !window.session.token) return;
-            terminateAllSessions().catch(() => {});
+        this.register('terminateAllSessions', async () => {
+            if (currentState !== LifecycleState.ACTIVE || !isAuthenticated) return;
+            try {
+                await terminateAllSessions();
+            } catch (error) {}
         });
         
-        this.register('unblockUser', (data) => {
-            if (currentState !== LifecycleState.ACTIVE || !window.session.token) return;
-            unblockUser(data.userId).catch(() => {});
+        this.register('unblockUser', async (data) => {
+            if (currentState !== LifecycleState.ACTIVE || !isAuthenticated) return;
+            try {
+                await unblockUser(data.userId);
+            } catch (error) {}
         });
         
-        this.register('clearChatCache', () => {
-            if (currentState !== LifecycleState.ACTIVE || !window.session.token) return;
-            clearChatCache().catch(() => {});
+        this.register('clearChatCache', async () => {
+            if (currentState !== LifecycleState.ACTIVE || !isAuthenticated) return;
+            try {
+                await clearChatCache();
+            } catch (error) {}
         });
         
-        this.register('clearMediaCache', () => {
-            if (currentState !== LifecycleState.ACTIVE || !window.session.token) return;
-            clearMediaCache().catch(() => {});
-        });
-        
-        this.register('saveSettings', () => {
-            if (currentState !== LifecycleState.ACTIVE || !window.session.token) return;
-            saveSettings().catch(() => {});
+        this.register('clearMediaCache', async () => {
+            if (currentState !== LifecycleState.ACTIVE || !isAuthenticated) return;
+            try {
+                await clearMediaCache();
+            } catch (error) {}
         });
     },
     
@@ -4220,7 +5081,7 @@ const UIBridge = {
         if (!element) return this;
         
         const handler = (domEvent) => {
-            if (currentState !== LifecycleState.ACTIVE || !window.session.token) return;
+            if (currentState !== LifecycleState.ACTIVE || !isAuthenticated) return;
             const data = transform ? transform(domEvent) : { value: domEvent.target.value };
             this.trigger(bridgeEvent, data);
         };
@@ -4312,6 +5173,7 @@ const ModuleCoreController = {
         this._components.set('failsafe', UIFailsafe);
         this._components.set('coordinator', MultiModuleCoordinator);
         this._components.set('reliabilityEngine', ReliabilityEngine);
+        this._components.set('settingsState', SettingsState);
     },
     
     async start() {
@@ -4478,6 +5340,7 @@ const PARENT_MESSAGE_TYPES = {
     CHILD_READY: 'CHILD_READY',
     PARENT_READY: 'PARENT_READY',
     AUTH_READY: 'AUTH_READY',
+    AUTH_ERROR: 'AUTH_ERROR',
     AUTH_LOST: 'AUTH_LOST',
     LOGOUT: 'LOGOUT',
     REFRESH_DATA: 'REFRESH_DATA',
@@ -4509,7 +5372,13 @@ const PARENT_MESSAGE_TYPES = {
     PASSWORD_CHANGED: 'PASSWORD_CHANGED',
     DATA_EXPORT_REQUESTED: 'DATA_EXPORT_REQUESTED',
     ACCOUNT_DELETION_REQUESTED: 'ACCOUNT_DELETION_REQUESTED',
-    CACHE_CLEARED: 'CACHE_CLEARED'
+    CACHE_CLEARED: 'CACHE_CLEARED',
+    SETTINGS_DATA: 'SETTINGS_DATA',
+    SETTINGS_FETCH: 'SETTINGS_FETCH',
+    SETTINGS_FETCH_ERROR: 'SETTINGS_FETCH_ERROR',
+    SETTINGS_UPDATE: 'SETTINGS_UPDATE',
+    SETTINGS_UPDATE_ERROR: 'SETTINGS_UPDATE_ERROR',
+    SETTINGS_GLOBAL_UPDATE: 'SETTINGS_GLOBAL_UPDATE'
 };
 
 // =============================================
@@ -4519,16 +5388,27 @@ async function loadFromLocalStorage() {
     try {
         const cachedUser = SafeStorage.getJSON('current_user', null);
         if (cachedUser) {
-            currentUser = cachedUser;
-            coreData.user = cachedUser;
-            window.session.user = cachedUser;
-            if (DEBUG) console.log('[settings-core] ✅ Loaded cached user:', cachedUser.displayName);
+            const sessionData = {
+                userId: cachedUser.id || cachedUser.userId,
+                token: null,
+                user: cachedUser
+            };
+            if (__isValidSession(sessionData)) {
+                currentUser = cachedUser;
+                coreData.user = cachedUser;
+                window.session.user = cachedUser;
+                if (DEBUG) console.log('[settings-core] ✅ Loaded cached user:', cachedUser.displayName);
+            } else {
+                console.warn('[settings-core] ⚠️ Cached user invalid, not loading');
+            }
         }
         
         const savedSettings = SafeStorage.getJSON('user_settings', null);
         if (savedSettings) {
             userSettings = savedSettings;
             coreData.settings = savedSettings;
+            SettingsState.data = savedSettings;
+            SettingsState.loaded = true;
             
             SettingsStore.load({
                 account: savedSettings.profile || {},
@@ -4539,6 +5419,7 @@ async function loadFromLocalStorage() {
         } else {
             userSettings = JSON.parse(JSON.stringify(DEFAULT_SETTINGS));
             coreData.settings = JSON.parse(JSON.stringify(DEFAULT_SETTINGS));
+            SettingsState.data = JSON.parse(JSON.stringify(DEFAULT_SETTINGS));
             
             SettingsStore.load({
                 account: DEFAULT_SETTINGS.profile || {},
@@ -4560,6 +5441,7 @@ async function loadFromLocalStorage() {
         if (DEBUG) console.log('[settings-core] ⚠️ Error loading from localStorage:', error);
         userSettings = JSON.parse(JSON.stringify(DEFAULT_SETTINGS));
         coreData.settings = JSON.parse(JSON.stringify(DEFAULT_SETTINGS));
+        SettingsState.data = JSON.parse(JSON.stringify(DEFAULT_SETTINGS));
         
         SettingsStore.load({
             account: DEFAULT_SETTINGS.profile || {},
@@ -4684,34 +5566,45 @@ function getMoodColor(mood) {
 }
 
 // =============================================
-// LOAD USER DATA
+// LOAD USER DATA - USES authorizedRequest
 // =============================================
 async function loadUserData() {
-    if (currentState !== LifecycleState.ACTIVE || !isSessionValid()) return;
+    if (currentState !== LifecycleState.ACTIVE || !isAuthenticated) return;
     
     try {
-        const response = await ApiCore.request('/api/user/profile', { method: 'GET' });
+        const response = await authorizedRequest('/api/profile', { method: 'GET' });
         if (response.success && response.data) {
             const user = response.data.user || response.data;
             if (user) {
-                currentUser = user;
-                coreData.user = user;
-                window.session.user = user;
-                SafeStorage.setJSON('current_user', currentUser);
-                updateUserUI();
+                const sessionData = {
+                    userId: user.id || user.userId,
+                    token: null,
+                    user: user
+                };
+                if (__isValidSession(sessionData)) {
+                    currentUser = user;
+                    coreData.user = user;
+                    window.session.user = user;
+                    SafeStorage.setJSON('current_user', currentUser);
+                    updateUserUI();
+                } else {
+                    console.warn('[settings-core] ⚠️ Loaded user data invalid');
+                }
             }
         }
-    } catch (error) {}
+    } catch (error) {
+        console.error('[settings-core] Error loading user data:', error);
+    }
 }
 
 // =============================================
-// LOAD ACTIVE SESSIONS
+// LOAD ACTIVE SESSIONS - USES authorizedRequest
 // =============================================
 async function loadActiveSessions() {
-    if (currentState !== LifecycleState.ACTIVE || !isSessionValid()) return;
+    if (currentState !== LifecycleState.ACTIVE || !isAuthenticated) return;
     
     try {
-        const response = await ApiCore.request('/api/auth/sessions', { method: 'GET' });
+        const response = await authorizedRequest('/api/auth/sessions', { method: 'GET' });
         if (response.success && response.data) {
             activeSessions = response.data.sessions || response.data || [];
             
@@ -4720,17 +5613,19 @@ async function loadActiveSessions() {
             });
             window.dispatchEvent(event);
         }
-    } catch (error) {}
+    } catch (error) {
+        console.error('[settings-core] Error loading active sessions:', error);
+    }
 }
 
 // =============================================
-// LOAD BLOCKED USERS
+// LOAD BLOCKED USERS - USES authorizedRequest
 // =============================================
 async function loadBlockedUsers() {
-    if (currentState !== LifecycleState.ACTIVE || !isSessionValid()) return;
+    if (currentState !== LifecycleState.ACTIVE || !isAuthenticated) return;
     
     try {
-        const response = await ApiCore.request('/api/users/blocked', { method: 'GET' });
+        const response = await authorizedRequest('/api/users/blocked', { method: 'GET' });
         if (response.success && response.data) {
             blockedUsers = response.data.blockedUsers || response.data || [];
             
@@ -4739,17 +5634,19 @@ async function loadBlockedUsers() {
             });
             window.dispatchEvent(event);
         }
-    } catch (error) {}
+    } catch (error) {
+        console.error('[settings-core] Error loading blocked users:', error);
+    }
 }
 
 // =============================================
-// LOAD USER CONTACTS
+// LOAD USER CONTACTS - USES authorizedRequest
 // =============================================
 async function loadUserContacts() {
-    if (currentState !== LifecycleState.ACTIVE || !isSessionValid()) return;
+    if (currentState !== LifecycleState.ACTIVE || !isAuthenticated) return;
     
     try {
-        const response = await ApiCore.request('/api/contacts', { method: 'GET' });
+        const response = await authorizedRequest('/api/friends/contacts', { method: 'GET' });
         if (response.success && response.data) {
             userContacts = response.data.contacts || response.data || [];
             
@@ -4758,17 +5655,19 @@ async function loadUserContacts() {
             });
             window.dispatchEvent(event);
         }
-    } catch (error) {}
+    } catch (error) {
+        console.error('[settings-core] Error loading contacts:', error);
+    }
 }
 
 // =============================================
-// LOAD USER GROUPS
+// LOAD USER GROUPS - USES authorizedRequest
 // =============================================
 async function loadUserGroups() {
-    if (currentState !== LifecycleState.ACTIVE || !isSessionValid()) return;
+    if (currentState !== LifecycleState.ACTIVE || !isAuthenticated) return;
     
     try {
-        const response = await ApiCore.request('/api/group', { method: 'GET' });
+        const response = await authorizedRequest('/api/groups', { method: 'GET' });
         if (response.success && response.data) {
             userGroups = response.data.groups || response.data || [];
             coreData.groupsList = userGroups;
@@ -4778,89 +5677,24 @@ async function loadUserGroups() {
             });
             window.dispatchEvent(event);
         }
-    } catch (error) {}
+    } catch (error) {
+        console.error('[settings-core] Error loading groups:', error);
+    }
 }
 
 // =============================================
-// UPDATE SETTING
+// UPDATE SETTING - REAL BACKEND PERSISTENCE
 // =============================================
 async function updateSetting(section, key, value) {
     if (currentState !== LifecycleState.ACTIVE) {
         throw new Error('Settings not ready');
     }
     
-    if (!isSessionValid()) {
-        throw new Error('No valid session');
+    if (!isAuthenticated) {
+        throw new Error('Authentication not ready');
     }
     
-    const oldValue = userSettings[section]?.[key];
-    if (!userSettings[section]) {
-        userSettings[section] = {};
-    }
-    userSettings[section][key] = value;
-    unsavedChanges = true;
-    
-    SettingsStore.update(section, key, value);
-    
-    const optimisticEvent = new CustomEvent('settingUpdatedOptimistic', {
-        detail: { section, key, value, timestamp: Date.now() }
-    });
-    window.dispatchEvent(optimisticEvent);
-    
-    try {
-        const response = await ApiCore.request('/api/settings', {
-            method: 'POST',
-            body: { settings: userSettings }
-        });
-        
-        if (response.success) {
-            unsavedChanges = false;
-            
-            SafeStorage.setJSON('user_settings', userSettings);
-            coreData.settings = userSettings;
-            
-            if (section === 'appearance' && key === 'theme') {
-                applyTheme(value);
-            }
-            
-            await MessageTransport.send(PARENT_MESSAGE_TYPES.SETTINGS_UPDATED, {
-                section: section,
-                key: key,
-                value: value,
-                settings: userSettings
-            });
-            
-            const successEvent = new CustomEvent('settingUpdated', {
-                detail: { section, key, value, timestamp: Date.now() }
-            });
-            window.dispatchEvent(successEvent);
-            
-            return true;
-        } else {
-            if (userSettings[section]) {
-                userSettings[section][key] = oldValue;
-            }
-            unsavedChanges = false;
-            
-            SettingsStore.update(section, key, oldValue);
-            
-            const rollbackEvent = new CustomEvent('settingUpdateFailed', {
-                detail: { section, key, timestamp: Date.now() }
-            });
-            window.dispatchEvent(rollbackEvent);
-            
-            throw new Error('API update failed');
-        }
-    } catch (error) {
-        if (userSettings[section]) {
-            userSettings[section][key] = oldValue;
-        }
-        unsavedChanges = false;
-        
-        SettingsStore.update(section, key, oldValue);
-        
-        throw error;
-    }
+    return await SettingsState.update(section, key, value);
 }
 
 // =============================================
@@ -4871,20 +5705,56 @@ async function saveSettings() {
         throw new Error('Settings not ready');
     }
     
-    if (!isSessionValid()) {
-        throw new Error('No valid session');
+    if (!isAuthenticated) {
+        throw new Error('Authentication not ready');
     }
     
     try {
         SafeStorage.setJSON('user_settings', userSettings);
         coreData.settings = userSettings;
+        SettingsState._saveToCache();
         
-        const response = await ApiCore.request('/api/settings', {
-            method: 'POST',
-            body: { settings: userSettings }
+        const requestId = `settings_save_${Date.now()}_${Math.random().toString(36).substring(2, 10)}`;
+        
+        const response = await new Promise((resolve, reject) => {
+            const timeoutId = setTimeout(() => {
+                window.removeEventListener('message', handler);
+                reject(new Error('Save timeout'));
+            }, 10000);
+            
+            const handler = (event) => {
+                if (event.data?.type === 'SETTINGS_SAVE_CONFIRMED' && 
+                    event.data?.requestId === requestId) {
+                    clearTimeout(timeoutId);
+                    window.removeEventListener('message', handler);
+                    resolve(event.data);
+                }
+                if (event.data?.type === 'SETTINGS_SAVE_ERROR' && 
+                    event.data?.requestId === requestId) {
+                    clearTimeout(timeoutId);
+                    window.removeEventListener('message', handler);
+                    reject(new Error(event.data?.error || 'Save failed'));
+                }
+            };
+            
+            window.addEventListener('message', handler);
+            
+            if (window.parent && window.parent !== window) {
+                window.parent.postMessage({
+                    type: 'SETTINGS_SAVE',
+                    requestId: requestId,
+                    module: MODULE_NAME,
+                    settings: userSettings,
+                    timestamp: Date.now()
+                }, '*');
+            } else {
+                clearTimeout(timeoutId);
+                window.removeEventListener('message', handler);
+                reject(new Error('No parent window'));
+            }
         });
         
-        if (response.success) {
+        if (response && response.success) {
             unsavedChanges = false;
             
             if (userSettings.appearance) {
@@ -4903,65 +5773,61 @@ async function saveSettings() {
             return true;
         }
         
-        throw new Error('API update failed');
+        throw new Error('Save failed');
     } catch (error) {
         throw error;
     }
 }
 
 // =============================================
-// HANDLE LOGOUT
+// HANDLE LOGOUT - USES authorizedRequest
 // =============================================
 async function handleLogout() {
     if (currentState !== LifecycleState.ACTIVE) {
         return false;
     }
     
-    if (!isSessionValid()) {
+    if (!isAuthenticated) {
         return false;
     }
     
     try {
-        const response = await ApiCore.request('/api/auth/logout', {
-            method: 'POST'
+        await authorizedRequest('/api/auth/logout', { method: 'POST' });
+        
+        await MessageTransport.send('SESSION_INVALIDATED', {});
+        
+        isAuthenticated = false;
+        clearSession();
+        parentSessionReceived = false;
+        sessionValidated = false;
+        
+        HeartbeatClient.stop();
+        disableSettingsControls();
+        
+        setState(LifecycleState.WAITING_AUTH, 'user_logout');
+        
+        const event = new CustomEvent('userLoggedOut', {
+            detail: { timestamp: Date.now() }
         });
+        window.dispatchEvent(event);
         
-        if (response.success) {
-            await MessageTransport.send('SESSION_INVALIDATED', {});
-            
-            clearSession();
-            parentSessionReceived = false;
-            sessionValidated = false;
-            
-            HeartbeatClient.stop();
-            disableSettingsControls();
-            
-            setState(LifecycleState.WAIT_PARENT, 'user_logout');
-            
-            const event = new CustomEvent('userLoggedOut', {
-                detail: { timestamp: Date.now() }
-            });
-            window.dispatchEvent(event);
-            
-            return true;
-        }
-        
-        return false;
+        return true;
     } catch (error) {
+        console.error('[settings-core] Logout error:', error);
         return false;
     }
 }
 
 // =============================================
-// TERMINATE SESSION
+// TERMINATE SESSION - USES authorizedRequest
 // =============================================
 async function terminateSession(sessionId) {
-    if (currentState !== LifecycleState.ACTIVE || !isSessionValid()) {
+    if (currentState !== LifecycleState.ACTIVE || !isAuthenticated) {
         throw new Error('Not ready');
     }
     
     try {
-        const response = await ApiCore.request('/api/auth/terminate-session', {
+        const response = await authorizedRequest('/api/auth/terminate-session', {
             method: 'POST',
             body: { sessionId }
         });
@@ -4988,15 +5854,15 @@ async function terminateSession(sessionId) {
 }
 
 // =============================================
-// TERMINATE ALL SESSIONS
+// TERMINATE ALL SESSIONS - USES authorizedRequest
 // =============================================
 async function terminateAllSessions() {
-    if (currentState !== LifecycleState.ACTIVE || !isSessionValid()) {
+    if (currentState !== LifecycleState.ACTIVE || !isAuthenticated) {
         throw new Error('Not ready');
     }
     
     try {
-        const response = await ApiCore.request('/api/auth/terminate-all-sessions', {
+        const response = await authorizedRequest('/api/auth/terminate-all-sessions', {
             method: 'POST'
         });
         
@@ -5020,15 +5886,15 @@ async function terminateAllSessions() {
 }
 
 // =============================================
-// UNBLOCK USER
+// UNBLOCK USER - USES authorizedRequest
 // =============================================
 async function unblockUser(userId) {
-    if (currentState !== LifecycleState.ACTIVE || !isSessionValid()) {
+    if (currentState !== LifecycleState.ACTIVE || !isAuthenticated) {
         throw new Error('Not ready');
     }
     
     try {
-        const response = await ApiCore.request('/api/users/unblock', {
+        const response = await authorizedRequest('/api/users/unblock', {
             method: 'POST',
             body: { userId }
         });
@@ -5055,15 +5921,15 @@ async function unblockUser(userId) {
 }
 
 // =============================================
-// CLEAR CHAT CACHE
+// CLEAR CHAT CACHE - USES authorizedRequest
 // =============================================
 async function clearChatCache() {
-    if (currentState !== LifecycleState.ACTIVE || !isSessionValid()) {
+    if (currentState !== LifecycleState.ACTIVE || !isAuthenticated) {
         throw new Error('Not ready');
     }
     
     try {
-        const response = await ApiCore.request('/api/storage/clear-chat-cache', {
+        const response = await authorizedRequest('/api/storage/clear-chat-cache', {
             method: 'POST'
         });
         
@@ -5094,15 +5960,15 @@ async function clearChatCache() {
 }
 
 // =============================================
-// CLEAR MEDIA CACHE
+// CLEAR MEDIA CACHE - USES authorizedRequest
 // =============================================
 async function clearMediaCache() {
-    if (currentState !== LifecycleState.ACTIVE || !isSessionValid()) {
+    if (currentState !== LifecycleState.ACTIVE || !isAuthenticated) {
         throw new Error('Not ready');
     }
     
     try {
-        const response = await ApiCore.request('/api/storage/clear-media-cache', {
+        const response = await authorizedRequest('/api/storage/clear-media-cache', {
             method: 'POST'
         });
         
@@ -5160,7 +6026,7 @@ function initializeUI() {
         const event = new CustomEvent('coreUIInitialized', {
             detail: {
                 timestamp: Date.now(),
-                mode: isSessionValid() ? 'authenticated' : 'no_session',
+                mode: isAuthenticated ? 'authenticated' : 'no_session',
                 user: currentUser,
                 environment: IframeEnvironment.getEnvironment()
             }
@@ -5173,7 +6039,7 @@ function initializeUI() {
 }
 
 // =============================================
-// SECURE FETCH WRAPPER
+// SECURE FETCH WRAPPER - USES authorizedRequest
 // =============================================
 async function secureFetchWrapper(endpoint, method = 'GET', data = null, options = {}) {
     if (currentState !== LifecycleState.ACTIVE) {
@@ -5185,38 +6051,28 @@ async function secureFetchWrapper(endpoint, method = 'GET', data = null, options
         };
     }
     
-    if (!window.session.token) {
+    if (!isAuthenticated) {
         return {
             success: false,
             status: 'error',
-            message: 'Session not ready',
+            message: 'Authentication not ready',
             data: null
         };
     }
     
     try {
-        const response = await MessageTransport.send('API_REQUEST', {
-            endpoint: endpoint,
+        const response = await authorizedRequest(endpoint, {
             method: method,
-            data: data,
-            headers: {
-                ...(options.headers || {}),
-                Authorization: `Bearer ${window.session.token}`
-            },
-            options: options
+            body: data,
+            headers: options.headers
         });
         
-        if (response && response.payload) {
-            return response.payload.data || response.payload;
-        }
-        
-        return { success: false, data: null };
-        
+        return response;
     } catch (error) {
         return {
             success: false,
             status: 'error',
-            message: 'Request failed',
+            message: error.message || 'Request failed',
             data: null
         };
     }
@@ -5226,16 +6082,23 @@ async function secureFetchWrapper(endpoint, method = 'GET', data = null, options
 // SAFE LOAD USER DATA
 // =============================================
 async function safeLoadUserData() {
-    if (!isSessionValid() && currentState !== LifecycleState.ACTIVE) {
+    if (!isAuthenticated && currentState !== LifecycleState.ACTIVE) {
         return null;
     }
     
     try {
         if (window.session.user) {
-            currentUser = window.session.user;
-            coreData.user = window.session.user;
-            SafeStorage.setJSON('current_user', currentUser);
-            return currentUser;
+            const sessionData = {
+                userId: window.session.user.id || window.session.user.userId,
+                token: window.session.token,
+                user: window.session.user
+            };
+            if (__isValidSession(sessionData)) {
+                currentUser = window.session.user;
+                coreData.user = window.session.user;
+                SafeStorage.setJSON('current_user', currentUser);
+                return currentUser;
+            }
         }
         return null;
     } catch (error) {
@@ -5247,34 +6110,16 @@ async function safeLoadUserData() {
 // SAFE LOAD SETTINGS
 // =============================================
 async function safeLoadSettings() {
-    if (!isSessionValid() && currentState !== LifecycleState.ACTIVE) {
+    if (!isAuthenticated && currentState !== LifecycleState.ACTIVE) {
         return null;
     }
     
     try {
-        const response = await secureFetchWrapper('/api/settings', 'GET');
-        const settingsData = response?.data || response?.settings || null;
-        
-        if (settingsData) {
-            userSettings = settingsData;
-            coreData.settings = settingsData;
-            
-            SettingsStore.load({
-                account: settingsData.profile || {},
-                privacy: settingsData.privacy || {},
-                notifications: settingsData.notifications || {},
-                appearance: settingsData.appearance || {}
-            });
-            
-            Object.keys(DEFAULT_SETTINGS).forEach(section => {
-                if (!userSettings[section]) {
-                    userSettings[section] = JSON.parse(JSON.stringify(DEFAULT_SETTINGS[section]));
-                }
-            });
-            
-            SafeStorage.setJSON('user_settings', userSettings);
-            calculateStorageUsage();
-            return userSettings;
+        const settings = await SettingsState.load();
+        if (settings) {
+            userSettings = settings;
+            coreData.settings = settings;
+            return settings;
         }
         return null;
     } catch (error) {
@@ -5286,7 +6131,7 @@ async function safeLoadSettings() {
 // SAFE LOAD BLOCKED USERS
 // =============================================
 async function safeLoadBlockedUsers() {
-    if (!isSessionValid() && currentState !== LifecycleState.ACTIVE) return null;
+    if (!isAuthenticated && currentState !== LifecycleState.ACTIVE) return null;
     
     try {
         const response = await secureFetchWrapper('/api/users/blocked', 'GET');
@@ -5305,7 +6150,7 @@ async function safeLoadBlockedUsers() {
 // SAFE LOAD ACTIVE SESSIONS
 // =============================================
 async function safeLoadActiveSessions() {
-    if (!isSessionValid() && currentState !== LifecycleState.ACTIVE) return null;
+    if (!isAuthenticated && currentState !== LifecycleState.ACTIVE) return null;
     
     try {
         const response = await secureFetchWrapper('/api/auth/sessions', 'GET');
@@ -5324,10 +6169,10 @@ async function safeLoadActiveSessions() {
 // SAFE LOAD USER CONTACTS
 // =============================================
 async function safeLoadUserContacts() {
-    if (!isSessionValid() && currentState !== LifecycleState.ACTIVE) return null;
+    if (!isAuthenticated && currentState !== LifecycleState.ACTIVE) return null;
     
     try {
-        const response = await secureFetchWrapper('/api/contacts', 'GET');
+        const response = await secureFetchWrapper('/api/friends/contacts', 'GET');
         const contactsData = response?.data?.contacts || response?.contacts || [];
         if (contactsData) {
             userContacts = contactsData;
@@ -5343,10 +6188,10 @@ async function safeLoadUserContacts() {
 // SAFE LOAD USER GROUPS
 // =============================================
 async function safeLoadUserGroups() {
-    if (!isSessionValid() && currentState !== LifecycleState.ACTIVE) return null;
+    if (!isAuthenticated && currentState !== LifecycleState.ACTIVE) return null;
     
     try {
-        const response = await secureFetchWrapper('/api/group', 'GET');
+        const response = await secureFetchWrapper('/api/groups', 'GET');
         const groupsData = response?.data?.groups || response?.groups || [];
         if (groupsData) {
             userGroups = groupsData;
@@ -5363,7 +6208,7 @@ async function safeLoadUserGroups() {
 // MAKE SAFE REQUEST
 // =============================================
 async function makeSafeRequest(endpoint, method = 'GET', data = null, options = {}) {
-    if (!isSessionValid() && currentState !== LifecycleState.ACTIVE) {
+    if (!isAuthenticated && currentState !== LifecycleState.ACTIVE) {
         throw new Error('Authentication not available');
     }
     return await secureFetchWrapper(endpoint, method, data, options);
@@ -5410,7 +6255,7 @@ function getSecureToken() {
 async function waitForToken(timeout = 10000) {
     const startTime = Date.now();
     while (Date.now() - startTime < timeout) {
-        if (window.session.token) return true;
+        if (isAuthenticated && window.session.token) return true;
         await new Promise(resolve => setTimeout(resolve, 100));
     }
     return false;
@@ -5422,13 +6267,17 @@ async function waitForToken(timeout = 10000) {
 function startPassiveAuthMonitoring() {}
 
 // =============================================
-// START BACKGROUND TASKS
+// START BACKGROUND TASKS - AUTH-GATED
 // =============================================
 function startBackgroundTasks() {
     try {
         if (backgroundTasksStarted) return;
-        if (!isSessionValid() && currentState !== LifecycleState.ACTIVE) return;
+        if (!isAuthenticated && currentState !== LifecycleState.ACTIVE) {
+            console.log(`[${MODULE_NAME}] ⏳ Cannot start background tasks: auth not ready`);
+            return;
+        }
         
+        console.log(`[${MODULE_NAME}] 🚀 Starting background tasks`);
         backgroundTasksStarted = true;
         
         Promise.allSettled([
@@ -5437,9 +6286,14 @@ function startBackgroundTasks() {
             loadBlockedUsers(),
             loadUserContacts(),
             loadUserGroups()
-        ]).then(() => {}).catch(() => {});
+        ]).then(() => {
+            console.log(`[${MODULE_NAME}] ✅ Background tasks completed`);
+        }).catch((error) => {
+            console.error(`[${MODULE_NAME}] ❌ Background tasks error:`, error);
+        });
     } catch (error) {
         backgroundTasksStarted = false;
+        console.error(`[${MODULE_NAME}] ❌ Failed to start background tasks:`, error);
     }
 }
 
@@ -5447,7 +6301,7 @@ function startBackgroundTasks() {
 // CHECK AUTHENTICATION STATE
 // =============================================
 function checkAuthenticationState() {
-    return isSessionValid();
+    return isAuthenticated && isSessionValid();
 }
 
 // =============================================
@@ -5483,6 +6337,7 @@ function sendMessageToParent(message) {
 // =============================================
 function resetUIForLogout() {
     try {
+        isAuthenticated = false;
         clearSession();
         parentSessionReceived = false;
         sessionValidated = false;
@@ -5491,7 +6346,7 @@ function resetUIForLogout() {
         parentCommunicationReady = false;
         
         if (currentState === LifecycleState.ACTIVE) {
-            setState(LifecycleState.WAIT_PARENT, 'ui_logout');
+            setState(LifecycleState.WAITING_AUTH, 'ui_logout');
         }
         
         HeartbeatClient.stop();
@@ -5548,14 +6403,14 @@ async function bootstrapIframe() {
 // =============================================
 async function waitForSession(timeout = 10000) {
     return new Promise((resolve) => {
-        if (isSessionValid()) {
+        if (isAuthenticated && isSessionValid()) {
             resolve(true);
             return;
         }
         const startTime = Date.now();
         const checkInterval = safeSetInterval(() => {
             try {
-                if (isSessionValid()) {
+                if (isAuthenticated && isSessionValid()) {
                     clearInterval(checkInterval);
                     activeIntervals.delete(checkInterval);
                     clearTimeout(timeoutId);
@@ -5595,7 +6450,8 @@ function initializeBasicUI() {
             detail: {
                 timestamp: Date.now(),
                 state: currentState,
-                environment: IframeEnvironment.getEnvironment()
+                environment: IframeEnvironment.getEnvironment(),
+                authenticated: isAuthenticated
             }
         });
         window.dispatchEvent(event);
@@ -5674,11 +6530,13 @@ function getHealthMetrics() {
     return {
         uptime: Date.now() - (stateHistory[0]?.timestamp || Date.now()),
         state: currentState,
+        authenticated: isAuthenticated,
         sessionValid: isSessionValid(),
         heartbeatHealthy: HeartbeatClient.isHealthy(),
         parentVerified: OriginAdapter.isParentVerified(),
         ready: isReady,
-        environment: IframeEnvironment.getEnvironment()
+        environment: IframeEnvironment.getEnvironment(),
+        settingsLoaded: SettingsState.loaded
     };
 }
 
@@ -5703,7 +6561,7 @@ function forceRecovery() {
 const readyCallbacks = [];
 
 function onReady(callback) {
-    if (isReady) {
+    if (isReady && isAuthenticated) {
         callback();
     } else {
         readyCallbacks.push(callback);
@@ -5760,6 +6618,7 @@ function shutdownCore() {
         tokenReady = false;
         tokenAvailable = false;
         backgroundTasksStarted = false;
+        isAuthenticated = false;
         clearSession();
         
         window.__SETTINGS_STATE__ = currentState;
@@ -5793,7 +6652,7 @@ async function initializeCore(options = {}) {
     }
     
     if (currentState !== LifecycleState.BOOT && currentState !== LifecycleState.INITIALIZING) {
-        return { success: true, state: currentState };
+        return { success: true, state: currentState, authenticated: isAuthenticated };
     }
     
     initializationPromise = (async () => {
@@ -5826,7 +6685,7 @@ async function initializeCore(options = {}) {
             return { 
                 success: true, 
                 state: currentState, 
-                authenticated: isSessionValid() 
+                authenticated: isAuthenticated 
             };
             
         } catch (error) {
@@ -5837,7 +6696,8 @@ async function initializeCore(options = {}) {
             return {
                 success: false,
                 state: currentState,
-                error: error.message
+                error: error.message,
+                authenticated: false
             };
         }
     })();
@@ -5849,177 +6709,49 @@ async function initializeCore(options = {}) {
 // SETUP MESSAGE HANDLERS
 // =============================================
 function setupMessageHandlers() {
-    MessageTransport.on('MODULE_REGISTERED', handleModuleRegistered);
+    MessageTransport.on('MODULE_REGISTERED', handleModuleRegisteredMessage);
     MessageTransport.on('PARENT_READY', handleParentReady);
     MessageTransport.on('SESSION_DATA', handleSessionData);
     MessageTransport.on('SESSION_ACTIVE', handleSessionActive);
     MessageTransport.on('SESSION_RESPONSE', handleSessionResponse);
-    MessageTransport.on('SESSION_UPDATE', handleSessionUpdate);
+    MessageTransport.on('SESSION_UPDATE', handleSessionUpdateMessage);
     MessageTransport.on('SESSION_NULL', handleSessionNull);
     MessageTransport.on('SESSION_REFRESHED', handleSessionRefreshed);
-    MessageTransport.on('SESSION_INVALIDATED', handleSessionInvalidated);
-    MessageTransport.on('SETTINGS_LOAD_RESPONSE', handleSettingsLoadResponse);
-    MessageTransport.on('SETTINGS_UPDATE_CONFIRMED', handleSettingsUpdateConfirmed);
-    MessageTransport.on('SETTINGS_UPDATED', handleSettingsUpdatedBroadcast);
-    MessageTransport.on('ERROR', handleErrorMessage);
+    MessageTransport.on('SESSION_INVALIDATED', handleSessionInvalidatedMessage);
+    MessageTransport.on('SETTINGS_LOAD_RESPONSE', handleSettingsLoadResponseMessage);
+    MessageTransport.on('SETTINGS_UPDATE_CONFIRMED', handleSettingsUpdateConfirmedMessage);
+    MessageTransport.on('SETTINGS_UPDATED', handleSettingsUpdatedMessage);
+    MessageTransport.on('ERROR', handleErrorMessageMessage);
+    MessageTransport.on('SETTINGS_DATA', handleSettingsDataResponse);
+    MessageTransport.on('SETTINGS_GLOBAL_UPDATE', handleSettingsGlobalUpdateMessage);
+    MessageTransport.on('AUTH_READY', (message) => {
+        isAuthenticated = true;
+        authCheckComplete = true;
+        processRequestQueue();
+        console.log('[settings-core] ✅ AUTH_READY received');
+    });
+    MessageTransport.on('AUTH_ERROR', (message) => {
+        isAuthenticated = false;
+        console.error('[settings-core] ❌ AUTH_ERROR received');
+    });
     
-    MessageTransport.on('PROFILE_UPDATED', handleProfileUpdated);
-    MessageTransport.on('PRIVACY_UPDATED', handlePrivacyUpdated);
-    MessageTransport.on('NOTIFICATIONS_UPDATED', handleNotificationsUpdated);
-    MessageTransport.on('LANGUAGE_CHANGED', handleLanguageChanged);
-    MessageTransport.on('THEME_CHANGED', handleThemeChanged);
-    MessageTransport.on('ACCOUNT_LOGGED_OUT', handleAccountLoggedOut);
-    MessageTransport.on('BLOCKED_USERS_UPDATED', handleBlockedUsersUpdated);
-    MessageTransport.on('ACTIVE_SESSIONS_UPDATED', handleActiveSessionsUpdated);
-    MessageTransport.on('USER_CONTACTS_UPDATED', handleUserContactsUpdated);
-    MessageTransport.on('USER_GROUPS_UPDATED', handleUserGroupsUpdated);
-    MessageTransport.on('STORAGE_USAGE_UPDATED', handleStorageUsageUpdated);
+    MessageTransport.on('PROFILE_UPDATED', handleProfileUpdatedMessage);
+    MessageTransport.on('PRIVACY_UPDATED', handlePrivacyUpdatedMessage);
+    MessageTransport.on('NOTIFICATIONS_UPDATED', handleNotificationsUpdatedMessage);
+    MessageTransport.on('LANGUAGE_CHANGED', handleLanguageChangedMessage);
+    MessageTransport.on('THEME_CHANGED', handleThemeChangedMessage);
+    MessageTransport.on('ACCOUNT_LOGGED_OUT', handleAccountLoggedOutMessage);
+    MessageTransport.on('BLOCKED_USERS_UPDATED', handleBlockedUsersUpdatedMessage);
+    MessageTransport.on('ACTIVE_SESSIONS_UPDATED', handleActiveSessionsUpdatedMessage);
+    MessageTransport.on('USER_CONTACTS_UPDATED', handleUserContactsUpdatedMessage);
+    MessageTransport.on('USER_GROUPS_UPDATED', handleUserGroupsUpdatedMessage);
+    MessageTransport.on('STORAGE_USAGE_UPDATED', handleStorageUsageUpdatedMessage);
 }
 
-// =============================================
-// MESSAGE HANDLERS
-// =============================================
-function handleModuleRegistered(message) {}
 function handleSessionActive(message) {}
 function handleSessionResponse(message) {}
 function handleSessionNull() {}
 function handleSessionRefreshed(message) {}
-function handleSessionInvalidated(message) {}
-
-function handleSettingsUpdateConfirmed(message) {
-    if (currentState === LifecycleState.ACTIVE && message.payload) {
-        const event = new CustomEvent('settingsUpdateConfirmed', {
-            detail: message.payload
-        });
-        window.dispatchEvent(event);
-    }
-}
-
-function handleSettingsUpdatedBroadcast(message) {
-    if (currentState === LifecycleState.ACTIVE && message.payload) {
-        const event = new CustomEvent('settingsUpdatedBroadcast', {
-            detail: message.payload
-        });
-        window.dispatchEvent(event);
-    }
-}
-
-function handleErrorMessage(message) {
-    errorLog('Error from parent:', message.payload || message);
-}
-
-function handleProfileUpdated(message) {
-    if (currentState === LifecycleState.ACTIVE && message.payload) {
-        const event = new CustomEvent('profileUpdated', {
-            detail: message.payload
-        });
-        window.dispatchEvent(event);
-    }
-}
-
-function handlePrivacyUpdated(message) {
-    if (currentState === LifecycleState.ACTIVE && message.payload) {
-        const event = new CustomEvent('privacyUpdated', {
-            detail: message.payload
-        });
-        window.dispatchEvent(event);
-    }
-}
-
-function handleNotificationsUpdated(message) {
-    if (currentState === LifecycleState.ACTIVE && message.payload) {
-        const event = new CustomEvent('notificationsUpdated', {
-            detail: message.payload
-        });
-        window.dispatchEvent(event);
-    }
-}
-
-function handleLanguageChanged(message) {
-    if (currentState === LifecycleState.ACTIVE && message.payload) {
-        const event = new CustomEvent('languageChanged', {
-            detail: message.payload
-        });
-        window.dispatchEvent(event);
-    }
-}
-
-function handleThemeChanged(message) {
-    if (currentState === LifecycleState.ACTIVE && message.payload) {
-        const event = new CustomEvent('themeChanged', {
-            detail: message.payload
-        });
-        window.dispatchEvent(event);
-    }
-}
-
-function handleAccountLoggedOut(message) {
-    clearSession();
-    const event = new CustomEvent('accountLoggedOut', {
-        detail: message.payload || {}
-    });
-    window.dispatchEvent(event);
-}
-
-function handleBlockedUsersUpdated(message) {
-    if (currentState === LifecycleState.ACTIVE && message.payload) {
-        blockedUsers = message.payload.blockedUsers || blockedUsers;
-        const event = new CustomEvent('blockedUsersUpdated', {
-            detail: message.payload
-        });
-        window.dispatchEvent(event);
-    }
-}
-
-function handleActiveSessionsUpdated(message) {
-    if (currentState === LifecycleState.ACTIVE && message.payload) {
-        activeSessions = message.payload.sessions || activeSessions;
-        const event = new CustomEvent('activeSessionsUpdated', {
-            detail: message.payload
-        });
-        window.dispatchEvent(event);
-    }
-}
-
-function handleUserContactsUpdated(message) {
-    if (currentState === LifecycleState.ACTIVE && message.payload) {
-        userContacts = message.payload.contacts || userContacts;
-        const event = new CustomEvent('userContactsUpdated', {
-            detail: message.payload
-        });
-        window.dispatchEvent(event);
-    }
-}
-
-function handleUserGroupsUpdated(message) {
-    if (currentState === LifecycleState.ACTIVE && message.payload) {
-        userGroups = message.payload.groups || userGroups;
-        coreData.groupsList = userGroups;
-        const event = new CustomEvent('userGroupsUpdated', {
-            detail: message.payload
-        });
-        window.dispatchEvent(event);
-    }
-}
-
-function handleStorageUsageUpdated(message) {
-    if (currentState === LifecycleState.ACTIVE && message.payload && userSettings) {
-        if (message.payload.chatCacheSize !== undefined) {
-            userSettings.storage.chatCacheSize = message.payload.chatCacheSize;
-        }
-        if (message.payload.mediaCacheSize !== undefined) {
-            userSettings.storage.mediaCacheSize = message.payload.mediaCacheSize;
-        }
-        if (message.payload.totalStorageUsed !== undefined) {
-            userSettings.storage.totalStorageUsed = message.payload.totalStorageUsed;
-        }
-        calculateStorageUsage();
-        const event = new CustomEvent('storageUsageUpdated', {
-            detail: message.payload
-        });
-        window.dispatchEvent(event);
-    }
-}
 
 // =============================================
 // DIAGNOSTICS AGENT
@@ -6039,7 +6771,9 @@ const DiagnosticsAgent = {
         pings: 0,
         pongs: 0,
         acks: 0,
-        errors: 0
+        errors: 0,
+        settingsUpdates: 0,
+        settingsUpdateFailures: 0
     },
     _stateSnapshots: [],
     
@@ -6067,7 +6801,8 @@ const DiagnosticsAgent = {
             timestamp: Date.now(),
             timeStr: new Date().toISOString().slice(11, 23),
             state: currentState,
-            environment: IframeEnvironment.getEnvironment()
+            environment: IframeEnvironment.getEnvironment(),
+            authenticated: isAuthenticated
         };
         
         this._logBuffer.push(entry);
@@ -6089,8 +6824,10 @@ const DiagnosticsAgent = {
             details,
             timestamp: Date.now(),
             state: currentState,
+            authenticated: isAuthenticated,
             sessionValid: isSessionValid(),
-            environment: IframeEnvironment.getEnvironment()
+            environment: IframeEnvironment.getEnvironment(),
+            settingsLoaded: SettingsState.loaded
         });
         
         if (this._stateSnapshots.length > 50) {
@@ -6104,7 +6841,8 @@ const DiagnosticsAgent = {
             uptime: Date.now() - this._startTime,
             environment: IframeEnvironment.getEnvironment(),
             compatibility: CompatibilityBridge.isEnabled(),
-            hasToken: !!window.session.token
+            authenticated: isAuthenticated,
+            settingsLoaded: SettingsState.loaded
         };
     },
     
@@ -6114,6 +6852,10 @@ const DiagnosticsAgent = {
             state: {
                 current: currentState,
                 history: stateHistory.slice(-5)
+            },
+            auth: {
+                authenticated: isAuthenticated,
+                sessionValid: isSessionValid()
             },
             environment: {
                 type: IframeEnvironment.getEnvironment(),
@@ -6128,6 +6870,11 @@ const DiagnosticsAgent = {
                 expiresAt: window.session.expiresAt,
                 version: window.session.version
             },
+            settings: {
+                loaded: SettingsState.loaded,
+                lastSynced: SettingsState.lastSynced,
+                pendingUpdates: SettingsState.pendingUpdates.size
+            },
             heartbeat: HeartbeatClient.getDiagnostics(),
             origin: OriginAdapter.getDiagnostics(),
             transport: IframeTransport.getDiagnostics(),
@@ -6135,7 +6882,8 @@ const DiagnosticsAgent = {
             logs: this._logBuffer.slice(-20),
             stateSnapshots: this._stateSnapshots.slice(-10),
             moduleRegistered,
-            parentSessionReceived
+            parentSessionReceived,
+            queueLength: requestQueue.length
         };
     },
     
@@ -6151,7 +6899,9 @@ const DiagnosticsAgent = {
             pings: 0,
             pongs: 0,
             acks: 0,
-            errors: 0
+            errors: 0,
+            settingsUpdates: 0,
+            settingsUpdateFailures: 0
         };
         this._stateSnapshots = [];
         this._startTime = Date.now();
@@ -6183,41 +6933,58 @@ const DEFAULT_SETTINGS = {
     security: {
         twoFactorAuth: false,
         loginNotifications: true,
-        sessionTimeout: '30min'
+        sessionTimeout: '30min',
+        changePassword: false
     },
     notifications: {
         messageNotifications: true,
         groupNotifications: true,
-        callNotifications: true
+        callNotifications: true,
+        mentionNotifications: true,
+        emailNotifications: false
     },
     appearance: {
         theme: 'auto',
         accentColor: '#0084ff',
         fontSize: 16,
-        language: 'en'
+        language: 'en',
+        compactMode: false,
+        animations: true
     },
     chat: {
         enterKeySends: true,
         mediaAutoDownload: 'wifiOnly',
-        messageHistory: 'forever'
+        messageHistory: 'forever',
+        showTimestamps: true,
+        showReadReceipts: true,
+        allowReactions: true
     },
     calls: {
         whoCanCallMe: 'friendsOnly',
         callVibration: true,
-        videoQuality: 'auto'
+        videoQuality: 'auto',
+        voiceQuality: 'high',
+        allowScreenShare: true
     },
     friends: {
         discoverByPhone: true,
         discoverByEmail: true,
-        friendSuggestions: true
+        friendSuggestions: true,
+        autoAcceptFriends: false,
+        friendRequestPrivacy: 'everyone'
     },
     groups: {
         groupInvitations: 'friendsOnly',
-        groupAnnouncements: true
+        groupAnnouncements: true,
+        allowGroupCreation: true,
+        maxGroupSize: 200,
+        groupAdminPermissions: 'moderate'
     },
     status: {
         whoCanViewMyStatus: 'friendsOnly',
-        autoExpireStatus: '24h'
+        autoExpireStatus: '24h',
+        allowStatusReplies: true,
+        showStatusTo: 'friendsOnly'
     },
     storage: {
         totalStorageUsed: 0,
@@ -6225,6 +6992,8 @@ const DEFAULT_SETTINGS = {
         chatCacheSize: 0,
         mediaCacheSize: 0,
         otherCacheSize: 0,
+        autoClearCache: false,
+        clearCacheOnExit: false,
         storageBreakdown: {
             chats: 0,
             media: 0,
@@ -6234,6 +7003,7 @@ const DEFAULT_SETTINGS = {
     mood: {
         autoMoodDetection: true,
         currentMood: 'neutral',
+        showMoodTo: 'friendsOnly',
         moodColors: {
             neutral: '#A9A9A9',
             happy: '#FFD700',
@@ -6248,11 +7018,24 @@ const DEFAULT_SETTINGS = {
     },
     advanced: {
         offlineMode: false,
-        debugMode: false
+        debugMode: false,
+        developerTools: false,
+        experimentalFeatures: false,
+        performanceMode: false,
+        reduceMotion: false
     },
     backup: {
         autoBackup: false,
-        lastBackup: null
+        backupFrequency: 'weekly',
+        lastBackup: null,
+        backupLocation: 'cloud',
+        restoreOnLogin: true
+    },
+    danger: {
+        deleteAccount: false,
+        exportData: false,
+        clearAllData: false,
+        resetAllSettings: false
     }
 };
 
@@ -6284,6 +7067,7 @@ export {
     userGroups,
     
     // Auth state
+    isAuthenticated,
     authReady,
     apiInitialized,
     backgroundTasksStarted,
@@ -6409,9 +7193,15 @@ export {
     initializeCore,
     authorizedFetch,
     
+    // Settings state
+    SettingsState,
+    
     // Expose queue and parentReady for debugging
     messageQueue,
-    parentReadyFlag as parentReady
+    parentReadyFlag as parentReady,
+    
+    // Request queue
+    requestQueue
 };
 
 // =============================================
@@ -6436,6 +7226,8 @@ document.addEventListener('DOMContentLoaded', function() {
             if (result.success) {
                 if (result.state === LifecycleState.ACTIVE) {
                     successLog('Core initialized and active');
+                } else if (result.state === LifecycleState.WAITING_AUTH) {
+                    successLog(`Core initialized, waiting for authentication`);
                 } else {
                     successLog(`Core initialized, state: ${result.state}`);
                 }
@@ -6462,6 +7254,7 @@ window.__getEnvironment = () => IframeEnvironment.getInfo();
 window.__getTransportStatus = () => IframeTransport.getDiagnostics();
 window.__getSessionStatus = () => ({
     valid: isSessionValid(),
+    authenticated: isAuthenticated,
     hasToken: !!window.session.token,
     user: window.session.user,
     expiresAt: window.session.expiresAt,
@@ -6471,6 +7264,15 @@ window.__getLifecycleState = () => currentState;
 window.__getLifecycleHistory = () => stateHistory;
 window.__getParentReady = () => window.parentReady;
 window.__getMessageQueue = () => messageQueue.length;
+window.__getSettingsState = () => ({
+    loaded: SettingsState.loaded,
+    lastSynced: SettingsState.lastSynced,
+    pendingUpdates: SettingsState.pendingUpdates.size
+});
+window.__getAuthState = () => ({
+    authenticated: isAuthenticated,
+    queueLength: requestQueue.length
+});
 
 // =============================================
 // END OF FILE

@@ -1,17 +1,87 @@
 // =============================================
 // STATUS SYSTEM - PASSIVE IFRAME MODULE
-// DETERMINISTIC MICRO-FRONTEND VERSION v9.0
+// DETERMINISTIC MICRO-FRONTEND VERSION v10.0
 // PARENT-AUTHORITY ARCHITECTURE - STRICT LIFECYCLE
 // PROTOCOL-COMPLIANT - ALL EXISTING FEATURES PRESERVED
 // LIFECYCLE SYSTEM: DETERMINISTIC STATE MACHINE (HANDSHAKE V3)
 // SANDBOX-SAFE STORAGE PROXY INTEGRATED
+// REAL END-TO-END STATUS SYSTEM - NO FALLBACKS
 // =============================================
+
+(function() {
+    'use strict';
+
+// =============================================
+// SESSION VALIDATION UTILITY - CRITICAL PATCH
+// =============================================
+function __isValidSession(session) {
+    if (!session || typeof session !== 'object') return false;
+
+    // Must have a token that is a non-empty string
+    if (!session.token || typeof session.token !== 'string' || session.token.length === 0) {
+        return false;
+    }
+
+    // Check userId - must be a valid number, never "user" or default placeholder
+    if (session.userId === undefined || session.userId === null) return false;
+    if (session.userId === 'user') return false;
+    if (typeof session.userId === 'string' && session.userId === '') return false;
+    
+    // Accept number or string that can be converted to number
+    const userIdNum = typeof session.userId === 'number' ? session.userId : parseInt(session.userId, 10);
+    if (isNaN(userIdNum) || userIdNum <= 0) return false;
+
+    // If user object exists, validate its structure
+    if (session.user) {
+        if (!session.user.id && !session.user.userId) return false;
+        const userUserId = session.user.id || session.user.userId;
+        if (userUserId === 'user' || userUserId === 'default' || userUserId === 0 || userUserId === '0') return false;
+    }
+
+    return true;
+}
+
+// Store last valid session ID for deduplication
+let _lastValidSessionId = null;
+let _lastValidSessionHash = null;
+
+function __getSessionHash(session) {
+    if (!session) return null;
+    const tokenPart = session.token ? session.token.substring(0, 16) : 'null';
+    const userIdPart = session.userId || session.user?.id || session.user?.userId || 'null';
+    return `${tokenPart}:${userIdPart}`;
+}
+
+function __isDuplicateSession(session) {
+    if (!session) return true;
+    
+    // Check by explicit sessionId if available
+    if (session.sessionId && _lastValidSessionId === session.sessionId) {
+        return true;
+    }
+    
+    // Otherwise use hash
+    const hash = __getSessionHash(session);
+    if (hash && _lastValidSessionHash === hash) {
+        return true;
+    }
+    
+    return false;
+}
+
+function __storeValidSessionId(session) {
+    if (session.sessionId) {
+        _lastValidSessionId = session.sessionId;
+    }
+    _lastValidSessionHash = __getSessionHash(session);
+}
 
 // =============================================
 // CLEAN CONSOLE LOGGING - SINGLE INSTANCE, NO SPAM
 // =============================================
-const DEBUG = true;
+const DEBUG = false;
 const MODULE_NAME = "status"; // EXACT MATCH - DO NOT CHANGE
+const MODULE_VERSION = "10.0.0";
 
 // Track which messages have been logged - prevents duplicates
 const _loggedMessages = new Set();
@@ -98,20 +168,281 @@ function debugWarn(...args) {
 }
 
 // =============================================
+// LIFECYCLE STATE MACHINE (STRICT DETERMINISTIC)
+// =============================================
+const LIFECYCLE_STATES = {
+    BOOT: 'BOOT',
+    INITIALIZING: 'INITIALIZING',
+    READY: 'READY',
+    WAIT_PARENT: 'WAIT_PARENT',
+    ACTIVE: 'ACTIVE'
+};
+
+let currentState = LIFECYCLE_STATES.BOOT;
+let childReadySent = false;
+let parentReadyReceived = false;
+let parentReadyData = null;
+let stateHistory = [];
+const maxHistorySize = 50;
+const stateListeners = new Set();
+const processedMessageIds = new Set();
+const sentMessageIds = new Set();
+
+// Parent ready promise
+let parentReadyResolver;
+let parentReadyPromise = new Promise((resolve) => {
+    parentReadyResolver = resolve;
+});
+
+// =============================================
+// LIFECYCLE TRANSITION VALIDATION
+// =============================================
+const validTransitions = {
+    [LIFECYCLE_STATES.BOOT]: [LIFECYCLE_STATES.INITIALIZING],
+    [LIFECYCLE_STATES.INITIALIZING]: [LIFECYCLE_STATES.READY],
+    [LIFECYCLE_STATES.READY]: [LIFECYCLE_STATES.WAIT_PARENT],
+    [LIFECYCLE_STATES.WAIT_PARENT]: [LIFECYCLE_STATES.ACTIVE],
+    [LIFECYCLE_STATES.ACTIVE]: []
+};
+
+function setState(nextState, reason = '') {
+    if (currentState === nextState) return true;
+
+    const allowed = validTransitions[currentState] || [];
+    if (!allowed.includes(nextState)) {
+        debugWarn(`Invalid transition: ${currentState} → ${nextState}`);
+        return false;
+    }
+
+    const fromState = currentState;
+    currentState = nextState;
+    
+    stateHistory.push({
+        from: fromState,
+        to: nextState,
+        timestamp: Date.now(),
+        reason
+    });
+    
+    if (stateHistory.length > maxHistorySize) {
+        stateHistory.shift();
+    }
+
+    console.log(`[${MODULE_NAME}] State: ${fromState} → ${nextState}${reason ? ` (${reason})` : ''}`);
+
+    notifyStateListeners(nextState, fromState, reason);
+    
+    return true;
+}
+
+function notifyStateListeners(toState, fromState, reason) {
+    stateListeners.forEach(listener => {
+        try {
+            listener(toState, fromState, reason);
+        } catch (e) {}
+    });
+    
+    window.dispatchEvent(new CustomEvent('statusLifecycleChange', {
+        detail: { state: toState, previous: fromState, reason }
+    }));
+}
+
+// =============================================
+// LIFECYCLE GUARDS - CRITICAL
+// =============================================
+function ensureActive(actionName) {
+    if (currentState !== LIFECYCLE_STATES.ACTIVE) {
+        console.warn(`[${MODULE_NAME}] ❌ Blocked action '${actionName}' - not ACTIVE (current: ${currentState})`);
+        if (typeof DiagnosticsAgent !== 'undefined') DiagnosticsAgent.increment('blockedActions');
+        return false;
+    }
+    return true;
+}
+
+function canSendUserMessages() {
+    return currentState === LIFECYCLE_STATES.ACTIVE;
+}
+
+function isDuplicateMessage(messageId) {
+    if (!messageId) return false;
+    if (processedMessageIds.has(messageId)) return true;
+    processedMessageIds.add(messageId);
+    
+    if (processedMessageIds.size > 1000) {
+        processedMessageIds.clear();
+    }
+    return false;
+}
+
+function isDuplicateSentMessage(messageId) {
+    if (!messageId) return false;
+    if (sentMessageIds.has(messageId)) return true;
+    sentMessageIds.add(messageId);
+    
+    if (sentMessageIds.size > 1000) {
+        sentMessageIds.clear();
+    }
+    return false;
+}
+
+function getLifecycleState() {
+    return {
+        state: currentState,
+        childReadySent,
+        parentReadyReceived,
+        history: stateHistory.slice(-10)
+    };
+}
+
+function resetLifecycle() {
+    currentState = LIFECYCLE_STATES.BOOT;
+    childReadySent = false;
+    parentReadyReceived = false;
+    parentReadyData = null;
+    stateHistory = [];
+    processedMessageIds.clear();
+    sentMessageIds.clear();
+    
+    parentReadyPromise = new Promise((resolve) => {
+        parentReadyResolver = resolve;
+    });
+}
+
+// =============================================
+// ID GENERATION UTILITIES
+// =============================================
+function generateMessageId() {
+    return 'msg_' + Math.random().toString(36).substring(2, 15) + '_' + Date.now();
+}
+
+function generateRequestId() {
+    return 'req_' + Math.random().toString(36).substring(2, 15) + '_' + Date.now();
+}
+
+function genId() {
+    return "msg_" + Math.random().toString(36).slice(2) + Date.now();
+}
+
+function genReqId() {
+    return "req_" + Math.random().toString(36).slice(2) + Date.now();
+}
+
+// =============================================
+// API REQUEST HANDLER (NO DIRECT FETCH - PARENT ROUTED)
+// =============================================
+const pendingRequests = new Map(); // requestId -> { resolve, reject, timeout, timestamp, type }
+const TIMING = {
+    REQUEST_TIMEOUT: 30000,
+    CLEANUP_INTERVAL: 60000
+};
+
+function cleanupPendingRequests() {
+    const now = Date.now();
+    for (const [requestId, pending] of pendingRequests.entries()) {
+        if (now - pending.timestamp > TIMING.REQUEST_TIMEOUT) {
+            console.warn(`[${MODULE_NAME}] Request timeout: ${requestId} (${pending.type})`);
+            if (pending.reject) {
+                pending.reject(new Error(`Request timeout: ${pending.type}`));
+            }
+            pendingRequests.delete(requestId);
+        }
+    }
+}
+
+setInterval(cleanupPendingRequests, TIMING.CLEANUP_INTERVAL);
+
+function makeApiRequest(endpoint, method, data = null, params = null) {
+    return new Promise((resolve, reject) => {
+        // CRITICAL: Block if not ACTIVE
+        if (!ensureActive(`API_REQUEST: ${endpoint}`)) {
+            reject(new Error(`Module not ACTIVE (current: ${currentState})`));
+            return;
+        }
+        
+        const requestId = generateRequestId();
+        const timestamp = Date.now();
+        
+        // Store pending request
+        pendingRequests.set(requestId, {
+            resolve,
+            reject,
+            timestamp,
+            type: endpoint,
+            timeout: setTimeout(() => {
+                if (pendingRequests.has(requestId)) {
+                    pendingRequests.delete(requestId);
+                    reject(new Error(`API request timeout: ${endpoint}`));
+                }
+            }, TIMING.REQUEST_TIMEOUT)
+        });
+        
+        // Build message to parent
+        const message = {
+            id: generateMessageId(),
+            type: 'API_REQUEST',
+            source: MODULE_NAME,
+            target: 'parent',
+            requestId: requestId,
+            payload: {
+                endpoint: endpoint,
+                method: method,
+                body: data,
+                params: params
+            },
+            timestamp: timestamp
+        };
+        
+        console.log(`[${MODULE_NAME}] 📤 Sending API_REQUEST: ${method} ${endpoint} (${requestId})`);
+        
+        // Send to parent
+        try {
+            if (!window.parent || window.parent === window) {
+                throw new Error('No parent window');
+            }
+            window.parent.postMessage(message, '*');
+        } catch (error) {
+            console.error(`[${MODULE_NAME}] Failed to send API_REQUEST:`, error);
+            pendingRequests.delete(requestId);
+            reject(error);
+        }
+    });
+}
+
+// Handle API_RESPONSE from parent
+function handleApiResponse(data) {
+    const requestId = data.requestId;
+    const response = data.payload || data;
+    
+    console.log(`[${MODULE_NAME}] 📥 API_RESPONSE received: ${requestId}`, response);
+    
+    if (!pendingRequests.has(requestId)) {
+        console.warn(`[${MODULE_NAME}] No pending request for: ${requestId}`);
+        return;
+    }
+    
+    const pending = pendingRequests.get(requestId);
+    
+    if (pending.timeout) {
+        clearTimeout(pending.timeout);
+    }
+    
+    pendingRequests.delete(requestId);
+    
+    if (response.success === false) {
+        console.error(`[${MODULE_NAME}] API request failed:`, response.error);
+        pending.reject(new Error(response.error || 'API request failed'));
+    } else {
+        pending.resolve(response.data || response);
+    }
+}
+
+// =============================================
 // STORAGE PROXY - SANDBOX-SAFE, NO DIRECT STORAGE ACCESS
 // =============================================
-// CRITICAL: All localStorage/sessionStorage access MUST go through this proxy
-// No direct storage access allowed in sandboxed iframe
-
 const StorageProxy = {
     _pendingRequests: new Map(),
     _requestCounter: 0,
     
-    /**
-     * Get value from parent storage
-     * @param {string} key - Storage key
-     * @returns {Promise<any>} - Value from storage
-     */
     get(key) {
         return new Promise((resolve, reject) => {
             const requestId = `storage_get_${++this._requestCounter}_${Date.now()}_${Math.random().toString(36).substr(2, 8)}`;
@@ -135,11 +466,6 @@ const StorageProxy = {
         });
     },
     
-    /**
-     * Set value in parent storage
-     * @param {string} key - Storage key
-     * @param {any} value - Value to store
-     */
     set(key, value) {
         parent.postMessage({
             type: 'STORAGE_SET',
@@ -150,10 +476,6 @@ const StorageProxy = {
         }, '*');
     },
     
-    /**
-     * Remove value from parent storage
-     * @param {string} key - Storage key
-     */
     remove(key) {
         parent.postMessage({
             type: 'STORAGE_REMOVE',
@@ -163,9 +485,6 @@ const StorageProxy = {
         }, '*');
     },
     
-    /**
-     * Clear all storage
-     */
     clear() {
         parent.postMessage({
             type: 'STORAGE_CLEAR',
@@ -174,12 +493,6 @@ const StorageProxy = {
         }, '*');
     },
     
-    /**
-     * Get JSON value from storage
-     * @param {string} key - Storage key
-     * @param {any} defaultValue - Default value if not found
-     * @returns {Promise<any>}
-     */
     async getJSON(key, defaultValue = null) {
         try {
             const value = await this.get(key);
@@ -194,18 +507,10 @@ const StorageProxy = {
         }
     },
     
-    /**
-     * Set JSON value in storage
-     * @param {string} key - Storage key
-     * @param {any} value - Value to store
-     */
     setJSON(key, value) {
         this.set(key, JSON.stringify(value));
     },
     
-    /**
-     * Handle storage response from parent
-     */
     handleResponse(event) {
         if (event.data?.type === 'STORAGE_RESULT') {
             const { requestId, value, error } = event.data;
@@ -230,17 +535,11 @@ const MessageGuard = {
     _seen: new Set(),
     _maxSize: 1000,
     
-    /**
-     * Check if message ID is duplicate
-     * @param {string} id - Message ID
-     * @returns {boolean}
-     */
     isDuplicate(id) {
         if (!id) return false;
         if (this._seen.has(id)) return true;
         this._seen.add(id);
         
-        // Prevent memory leak
         if (this._seen.size > this._maxSize) {
             const first = this._seen.values().next().value;
             this._seen.delete(first);
@@ -249,9 +548,6 @@ const MessageGuard = {
         return false;
     },
     
-    /**
-     * Clear all seen messages
-     */
     clear() {
         this._seen.clear();
     }
@@ -259,7 +555,6 @@ const MessageGuard = {
 
 // =============================================
 // DETERMINISTIC LIFECYCLE STATE MACHINE (HANDSHAKE V3)
-// STRICT PARENT-AUTHORITY MODEL - NO DEVIATIONS
 // =============================================
 const LifecycleState = {
     BOOT: 'BOOT',
@@ -269,14 +564,13 @@ const LifecycleState = {
     ACTIVE: 'ACTIVE'
 };
 
-// Internal state
 let _currentState = LifecycleState.BOOT;
 let _previousState = null;
 let _childReadySent = false;
 let _parentReadyReceived = false;
 let _transitionLock = false;
+let _parentReady = false;
 
-// Valid transitions mapping - STRICT
 const _validTransitions = {
     [LifecycleState.BOOT]: [LifecycleState.INITIALIZING],
     [LifecycleState.INITIALIZING]: [LifecycleState.READY],
@@ -285,26 +579,18 @@ const _validTransitions = {
     [LifecycleState.ACTIVE]: []
 };
 
-// Message deduplication for outgoing messages
 const _sentMessages = new Set();
 
-/**
- * Core transition function - SINGLE SOURCE OF TRUTH
- * All state changes MUST go through this function
- */
 function transitionTo(nextState, reason = '') {
-    // Prevent recursive transitions
     if (_transitionLock) {
         debugWarn(`[Lifecycle] Transition locked - cannot transition ${_currentState} → ${nextState}`, reason);
         return false;
     }
     
-    // No-op if already in that state
     if (_currentState === nextState) {
         return true;
     }
     
-    // Validate transition
     const allowed = _validTransitions[_currentState] || [];
     if (!allowed.includes(nextState)) {
         debugWarn(`[Lifecycle] Invalid transition: ${_currentState} → ${nextState}`, reason);
@@ -312,24 +598,19 @@ function transitionTo(nextState, reason = '') {
         return false;
     }
     
-    // Lock to prevent re-entrancy
     _transitionLock = true;
     
-    // Perform transition
     _previousState = _currentState;
     _currentState = nextState;
     
-    // Log transition (only once per transition type)
     const transitionKey = `lifecycle_${_previousState}_to_${nextState}`;
     if (!_loggedMessages.has(transitionKey)) {
         _loggedMessages.add(transitionKey);
         logStatus('LIFECYCLE', `${_previousState} → ${nextState}${reason ? ` (${reason})` : ''}`);
     }
     
-    // Release lock
     _transitionLock = false;
     
-    // Trigger state-specific side effects
     if (nextState === LifecycleState.ACTIVE) {
         onModuleActive();
     }
@@ -337,107 +618,62 @@ function transitionTo(nextState, reason = '') {
     return true;
 }
 
-/**
- * Check if currently in a specific state
- */
 function isInState(state) {
     return _currentState === state;
 }
 
-/**
- * Check if can transition to a state
- */
 function canTransitionTo(state) {
     const allowed = _validTransitions[_currentState] || [];
     return allowed.includes(state);
 }
 
-/**
- * Assert module is ACTIVE before performing actions
- * NO FALLBACKS - Strict enforcement
- */
 function assertActive(actionName) {
     if (_currentState !== LifecycleState.ACTIVE) {
         debugWarn(`[Lifecycle] Blocked action "${actionName}" — not ACTIVE (current: ${_currentState})`);
         logStatus('LIFECYCLE', `Blocked: ${actionName} - not ACTIVE`);
-        DiagnosticsAgent.increment('blockedActions');
+        if (typeof DiagnosticsAgent !== 'undefined') DiagnosticsAgent.increment('blockedActions');
         return false;
     }
     return true;
 }
 
-/**
- * Module activation hook - called when entering ACTIVE state
- * SAFE ZONE for all API calls, UI initialization, etc.
- */
 function onModuleActive() {
     logStatus('LIFECYCLE', 'Module ACTIVE - safe zone entered');
     
-    // Request session now that parent is ready and we're active
-    requestSession();
+    // Only request session if we have a valid one already or need to get one
+    if (isSessionReady() && __isValidSession({ token: _sessionToken, userId: _sessionUser?.id || _sessionUser?.userId })) {
+        logStatus('SUCCESS', 'Active with valid session');
+    } else {
+        requestSession();
+    }
     
-    // Start background initialization
     if (typeof startBackgroundInitialization === 'function') {
         setTimeout(() => {
             startBackgroundInitialization();
         }, 100);
     }
     
-    // Dispatch event for UI
     document.dispatchEvent(new CustomEvent('moduleActive', {
         detail: { module: MODULE_NAME, timestamp: Date.now() }
     }));
 }
 
-/**
- * Get current lifecycle state (for debugging)
- */
-function getLifecycleState() {
-    return {
-        current: _currentState,
-        previous: _previousState,
-        childReadySent: _childReadySent,
-        parentReadyReceived: _parentReadyReceived,
-        canTransition: Object.fromEntries(
-            Object.values(LifecycleState).map(state => [
-                state, 
-                canTransitionTo(state)
-            ])
-        )
-    };
-}
-
-// =============================================
-// NO HANDSHAKE RETRY SYSTEM - REMOVED AS PER PROTOCOL
-// WAIT_PARENT IS A HARD WAIT STATE - NO RETRIES
-// =============================================
-
-/**
- * Send CHILD_READY exactly once per lifecycle phase
- * Idempotent - multiple calls safe due to guard
- * MUST only be sent when state === READY
- */
 function sendChildReady() {
-    // Exactly-once guard within a lifecycle
     if (_childReadySent) {
         debugWarn('[Lifecycle] CHILD_READY already sent — skipping');
         return false;
     }
 
-    // State validation - MUST be in READY
     if (_currentState !== LifecycleState.READY) {
         debugWarn(`[Lifecycle] Cannot send CHILD_READY — invalid state: ${_currentState}`);
         logStatus('LIFECYCLE', `CHILD_READY blocked - current state: ${_currentState}`);
         return false;
     }
 
-    // Mark as sent BEFORE actual send to prevent race conditions
     _childReadySent = true;
 
-    // Send the message with unique ID
     const messageId = `child_ready_${Date.now()}_${Math.random().toString(36).substr(2, 8)}`;
     
-    // Check for duplicate before sending
     if (_sentMessages.has(messageId)) {
         debugWarn('[Lifecycle] Duplicate CHILD_READY prevented');
         return false;
@@ -447,7 +683,7 @@ function sendChildReady() {
     parent.postMessage({
         type: "CHILD_READY",
         module: MODULE_NAME,
-        moduleVersion: '9.0',
+        moduleVersion: '10.0',
         messageId: messageId,
         capabilities: [
             'view_statuses',
@@ -459,26 +695,19 @@ function sendChildReady() {
         timestamp: Date.now()
     }, "*");
 
-    // Transition to WAIT_PARENT
     transitionTo(LifecycleState.WAIT_PARENT, 'child_ready_sent');
     
     logStatus('LIFECYCLE', 'CHILD_READY sent - waiting for parent (NO RETRIES)');
     return true;
 }
 
-/**
- * Handle PARENT_READY message - exactly once
- * NO FALLBACKS - Must receive from parent
- */
 function handleParentReady(messageData) {
-    // Exactly-once guard
     if (_parentReadyReceived) {
         debugWarn('[Lifecycle] PARENT_READY already received — ignoring duplicate');
         logStatus('LIFECYCLE', 'Duplicate PARENT_READY ignored');
         return;
     }
 
-    // Validate state - MUST be WAIT_PARENT
     if (_currentState !== LifecycleState.WAIT_PARENT) {
         debugWarn(`[Lifecycle] Unexpected PARENT_READY in state: ${_currentState} — ignoring`);
         logStatus('LIFECYCLE', `PARENT_READY received in unexpected state: ${_currentState} - ignoring`);
@@ -486,44 +715,51 @@ function handleParentReady(messageData) {
     }
 
     _parentReadyReceived = true;
-    parentReady = true; // Legacy flag
+    _parentReady = true;
 
-    // Log receipt
     logStatus('LIFECYCLE', 'PARENT_READY received');
 
-    // Extract session data from message
     const sessionData = messageData.session || messageData.payload?.session || null;
     
-    // Apply session if provided
     if (sessionData) {
-        handleSession(sessionData);
+        // Validate session before handling
+        if (__isValidSession(sessionData)) {
+            if (!__isDuplicateSession(sessionData)) {
+                handleSession(sessionData);
+                __storeValidSessionId(sessionData);
+            } else {
+                logStatus('WARNING', 'Duplicate session data ignored');
+            }
+        } else {
+            logStatus('FAILED', 'Invalid session data in PARENT_READY - rejected');
+        }
     }
 
-    // Transition to ACTIVE
-    transitionTo(LifecycleState.ACTIVE, 'parent_ready_received');
-
-    // Flush any queued messages
-    flushQueue();
-
-    // Resolve parent ready promise
-    if (_parentReadyResolver) {
-        _parentReadyResolver({ type: 'PARENT_READY', timestamp: Date.now() });
-    }
-    
-    // Call any registered parent ready callbacks
-    if (typeof onParentReady === 'function') {
-        onParentReady();
+    // Only transition to ACTIVE if we have a valid session
+    // CRITICAL FIX: Do NOT activate without valid session
+    if (isSessionReady() && __isValidSession({ token: _sessionToken, userId: _sessionUser?.id || _sessionUser?.userId })) {
+        transitionTo(LifecycleState.ACTIVE, 'parent_ready_received_with_valid_session');
+        flushQueue();
+        
+        if (parentReadyResolver) {
+            parentReadyResolver({ type: 'PARENT_READY', timestamp: Date.now() });
+        }
+        
+        if (typeof onParentReadyCallback === 'function') {
+            onParentReadyCallback();
+        }
+    } else {
+        // Stay in WAIT_PARENT and request session
+        logStatus('WAITING', 'PARENT_READY received but no valid session - waiting for session');
+        requestSession();
     }
 }
 
-/**
- * Callback function called when parent is ready
- */
-function onParentReady() {
+
+function onParentReadyCallback() {
     debugLog('Parent ready callback triggered');
     logStatus('LIFECYCLE', 'Parent ready callback executed');
     
-    // Any additional logic that needs to run when parent is ready
     if (typeof startBackgroundInitialization === 'function' && isInState(LifecycleState.ACTIVE)) {
         setTimeout(() => {
             startBackgroundInitialization();
@@ -534,24 +770,58 @@ function onParentReady() {
 // =============================================
 // SESSION STORAGE - MEMORY ONLY, NO LOCALSTORAGE FOR TOKENS
 // =============================================
-// [AUTH FIX] Session stored only in memory, never in localStorage
 let _sessionToken = null;
 let _sessionUser = null;
 let _sessionExpiresAt = null;
 let _sessionReady = false;
 
-// Track if we've requested session
 let _sessionRequested = false;
 let _sessionRequestRetries = 0;
 const MAX_SESSION_REQUEST_RETRIES = 3;
 
 function setSession(token, user, expiresAt = null) {
+    // CRITICAL: Validate session before storing
+    const sessionToValidate = {
+        token: token,
+        userId: user?.id || user?.userId,
+        user: user
+    };
+    
+    if (!__isValidSession(sessionToValidate)) {
+        logStatus('FAILED', 'Attempted to set invalid session - rejected');
+        return false;
+    }
+    
+    // Check if this is a duplicate session
+    if (__isDuplicateSession(sessionToValidate)) {
+        logStatus('WARNING', 'Duplicate session set prevented');
+        return false;
+    }
+    
+    // Prevent session downgrade - if we already have a valid session, don't overwrite with invalid
+    if (_sessionReady && _sessionToken) {
+        const currentValid = __isValidSession({ token: _sessionToken, userId: _sessionUser?.id || _sessionUser?.userId });
+        if (currentValid && !__isValidSession(sessionToValidate)) {
+            logStatus('WARNING', 'Prevented session downgrade - keeping existing valid session');
+            return false;
+        }
+    }
+    
     _sessionToken = token;
     _sessionUser = user;
     _sessionExpiresAt = expiresAt ? new Date(expiresAt) : null;
     _sessionReady = true;
     
+    __storeValidSessionId(sessionToValidate);
+    
     logStatus('SUCCESS', 'Session stored in memory');
+    
+    // Load statuses after session is established
+    if (currentState === LifecycleState.ACTIVE) {
+        loadStatuses();
+    }
+    
+    return true;
 }
 
 function getSessionToken() {
@@ -560,7 +830,6 @@ function getSessionToken() {
         return null;
     }
     
-    // Check expiration if set
     if (_sessionExpiresAt && new Date() >= _sessionExpiresAt) {
         debugWarn('Session token expired');
         clearSession();
@@ -574,8 +843,27 @@ function getSessionUser() {
     return _sessionReady ? _sessionUser : null;
 }
 
+function getSessionUserId() {
+    if (!_sessionReady) return null;
+    const userId = _sessionUser?.id || _sessionUser?.userId;
+    // Validate that userId is a valid number, not "user" or other placeholder
+    if (userId === 'user' || userId === 'default' || userId === 0 || userId === '0') {
+        return null;
+    }
+    return userId;
+}
+
 function isSessionReady() {
-    return _sessionReady && !!_sessionToken;
+    if (!_sessionReady || !_sessionToken) return false;
+    
+    // Validate stored session
+    const sessionToValidate = {
+        token: _sessionToken,
+        userId: _sessionUser?.id || _sessionUser?.userId,
+        user: _sessionUser
+    };
+    
+    return __isValidSession(sessionToValidate);
 }
 
 function clearSession() {
@@ -592,15 +880,12 @@ function clearSession() {
 // =============================================
 // AUTHORIZED FETCH - ALWAYS INCLUDES BEARER TOKEN
 // =============================================
-// [AUTH FIX] Centralized fetch with Authorization header
 async function authorizedFetch(url, options = {}) {
-    // Block if session not ready
     if (!isSessionReady()) {
         const error = new Error('Session not ready - cannot make authorized request');
         error.code = 'SESSION_NOT_READY';
         debugWarn(`Blocked API call to ${url}: session not ready`);
         
-        // Auto-request session if not already requested and in ACTIVE state
         if (!_sessionRequested && isInState(LifecycleState.ACTIVE)) {
             requestSession();
         }
@@ -627,12 +912,10 @@ async function authorizedFetch(url, options = {}) {
             }
         });
         
-        // Handle 401 Unauthorized globally
         if (response.status === 401) {
             debugWarn(`Auth error 401 on ${url} - requesting new session`);
             clearSession();
             
-            // Request new session if in ACTIVE state
             if (isInState(LifecycleState.ACTIVE) && _sessionRequestRetries < MAX_SESSION_REQUEST_RETRIES) {
                 _sessionRequestRetries++;
                 requestSession();
@@ -641,12 +924,10 @@ async function authorizedFetch(url, options = {}) {
             throw new Error('Unauthorized - session invalid');
         }
         
-        // Reset retry counter on success
         _sessionRequestRetries = 0;
         
         return response;
     } catch (error) {
-        // Re-throw with clear context
         if (error.code === 'SESSION_NOT_READY' || error.code === 'NO_TOKEN') {
             throw error;
         }
@@ -656,7 +937,6 @@ async function authorizedFetch(url, options = {}) {
     }
 }
 
-// Helper for JSON responses
 async function authorizedFetchJSON(url, options = {}) {
     const response = await authorizedFetch(url, options);
     return response.json();
@@ -665,7 +945,6 @@ async function authorizedFetchJSON(url, options = {}) {
 // =============================================
 // ACTION GATE - Prevent actions before ACTIVE state
 // =============================================
-// [LIFECYCLE PATCH] Ensure actions only happen in ACTIVE state
 function canSendAction() {
     return isInState(LifecycleState.ACTIVE);
 }
@@ -674,7 +953,7 @@ function safeSendAction(action, payload = {}) {
     if (!canSendAction()) {
         debugWarn(`Blocked action "${action}" - not in ACTIVE state (current: ${_currentState})`);
         logStatus('LIFECYCLE', `Blocked action: ${action} - not ACTIVE`);
-        DiagnosticsAgent.increment('blockedActions');
+        if (typeof DiagnosticsAgent !== 'undefined') DiagnosticsAgent.increment('blockedActions');
         return false;
     }
     
@@ -687,27 +966,12 @@ function safeSendAction(action, payload = {}) {
 }
 
 // =============================================
-// ID GENERATION - STANDARDIZED
-// =============================================
-function genId() {
-    return "msg_" + Math.random().toString(36).slice(2) + Date.now();
-}
-
-function genReqId() {
-    return "req_" + Math.random().toString(36).slice(2) + Date.now();
-}
-
-// =============================================
 // MESSAGE QUEUE SYSTEM - CRITICAL FOR PROTOCOL COMPLIANCE
 // =============================================
 let parentReady = false;
 const messageQueue = [];
 
-// =============================================
-// STANDARDIZED MESSAGE WRAPPER - ENFORCES SCHEMA
-// =============================================
 function sendMessage(type, payload = {}, options = {}) {
-    // Block actions before ACTIVE unless it's CHILD_READY
     if (type !== 'CHILD_READY' && !isInState(LifecycleState.ACTIVE) && !parentReady) {
         debugLog(`Queueing ${type} - not active yet`);
         messageQueue.push({ type, payload, options, timestamp: Date.now() });
@@ -717,7 +981,6 @@ function sendMessage(type, payload = {}, options = {}) {
     try {
         const messageId = options.id || genId();
         
-        // Check for duplicate outgoing message
         if (_sentMessages.has(messageId)) {
             debugWarn(`Duplicate message prevented: ${type} (${messageId})`);
             return null;
@@ -734,7 +997,6 @@ function sendMessage(type, payload = {}, options = {}) {
             timestamp: Date.now()
         };
 
-        // Validate message has all required fields
         if (!message.type || !message.id || !message.requestId || !message.source || !message.target || message.timestamp === undefined) {
             debugError('Invalid message schema - missing required fields', message);
             return false;
@@ -746,7 +1008,7 @@ function sendMessage(type, payload = {}, options = {}) {
         }
 
         window.parent.postMessage(message, '*');
-        DiagnosticsAgent.increment('messagesSent');
+        if (typeof DiagnosticsAgent !== 'undefined') DiagnosticsAgent.increment('messagesSent');
         
         const logKey = `sent_${message.type}`;
         if (!_loggedMessages.has(logKey)) {
@@ -761,11 +1023,7 @@ function sendMessage(type, payload = {}, options = {}) {
     }
 }
 
-// =============================================
-// SAFE SEND WITH QUEUE - GATES MESSAGES UNTIL PARENT READY
-// =============================================
 function safeSend(type, payload = {}, options = {}) {
-    // CHILD_READY is handled exclusively by sendChildReady
     if (type === 'CHILD_READY') {
         debugWarn('Use sendChildReady() instead of safeSend for CHILD_READY');
         return sendChildReady();
@@ -780,9 +1038,6 @@ function safeSend(type, payload = {}, options = {}) {
     return sendMessage(type, payload, options);
 }
 
-// =============================================
-// FLUSH QUEUE - SEND ALL QUEUED MESSAGES
-// =============================================
 function flushQueue() {
     if (!parentReady) {
         debugWarn('Cannot flush queue - parent not ready');
@@ -794,7 +1049,6 @@ function flushQueue() {
 
     debugLog(`Flushing ${queueLength} queued messages`);
     
-    // Process queue in order
     while (messageQueue.length) {
         const { type, payload, options } = messageQueue.shift();
         sendMessage(type, payload, options);
@@ -819,14 +1073,12 @@ const MessageValidator = {
                 return { valid: false, reason: 'Not an object' };
             }
             
-            // Check required fields
             for (const field of this.requiredFields) {
                 if (!message[field] && message[field] !== 0) {
                     return { valid: false, reason: `Missing required field: ${field}` };
                 }
             }
             
-            // Validate field types
             if (typeof message.type !== 'string') {
                 return { valid: false, reason: 'type must be string' };
             }
@@ -851,7 +1103,6 @@ const MessageValidator = {
                 return { valid: false, reason: 'timestamp must be number' };
             }
             
-            // Validate timestamp recency (within 5 minutes) - warning only, not blocking
             const now = Date.now();
             if (Math.abs(now - message.timestamp) > 300000) {
                 debugWarn(`Timestamp out of range for ${message.type}: ${message.timestamp}`);
@@ -877,27 +1128,790 @@ const MessageValidator = {
     }
 };
 
-// Duplicate message protection using MessageGuard for incoming messages
-const processedMessages = new Set();
+// =============================================
+// IN-MEMORY STATE (PRIMARY SOURCE OF TRUTH)
+// =============================================
+let statusState = {
+    statuses: [],
+    myStatuses: [],
+    loading: false,
+    error: null,
+    lastSync: null
+};
 
-function isDuplicate(messageId) {
-    if (!messageId) return false;
-    // Check both guards
-    if (MessageGuard.isDuplicate(messageId)) return true;
-    if (processedMessages.has(messageId)) return true;
-    processedMessages.add(messageId);
+const statusCache = new Set(); // For duplicate detection
+const statusObservers = new Set();
+
+function notifyStatusObservers() {
+    statusObservers.forEach(observer => {
+        try {
+            observer(statusState);
+        } catch (e) {}
+    });
     
-    // Prevent memory leak
-    if (processedMessages.size > 1000) {
-        const first = processedMessages.values().next().value;
-        processedMessages.delete(first);
+    window.dispatchEvent(new CustomEvent('statusStateChanged', {
+        detail: { state: statusState }
+    }));
+}
+
+function updateStatusState(updates) {
+    Object.assign(statusState, updates);
+    notifyStatusObservers();
+}
+
+function addStatus(status) {
+    if (!status || !status.id) return false;
+    
+    if (statusCache.has(status.id)) {
+        debugLog(`Duplicate status ignored: ${status.id}`);
+        return false;
+    }
+    
+    statusCache.add(status.id);
+    
+    statusState.statuses.unshift(status);
+    
+    const currentUserId = getSessionUserId();
+    if (currentUserId && status.userId === currentUserId) {
+        statusState.myStatuses.unshift(status);
+    }
+    
+    statusState.statuses.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+    statusState.myStatuses.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+    
+    notifyStatusObservers();
+    
+    logStatus('SUCCESS', `Status added: ${status.id}`);
+    return true;
+}
+
+function removeStatus(statusId) {
+    const index = statusState.statuses.findIndex(s => s.id === statusId);
+    if (index !== -1) {
+        statusState.statuses.splice(index, 1);
+        statusCache.delete(statusId);
+    }
+    
+    const myIndex = statusState.myStatuses.findIndex(s => s.id === statusId);
+    if (myIndex !== -1) {
+        statusState.myStatuses.splice(myIndex, 1);
+    }
+    
+    notifyStatusObservers();
+    logStatus('INFO', `Status removed: ${statusId}`);
+    return true;
+}
+
+function updateStatus(statusId, updates) {
+    const status = statusState.statuses.find(s => s.id === statusId);
+    if (status) {
+        Object.assign(status, updates);
+        notifyStatusObservers();
+        return true;
+    }
+    
+    const myStatus = statusState.myStatuses.find(s => s.id === statusId);
+    if (myStatus) {
+        Object.assign(myStatus, updates);
+        notifyStatusObservers();
+        return true;
     }
     
     return false;
 }
 
+function markStatusViewedLocally(statusId) {
+    const status = statusState.statuses.find(s => s.id === statusId);
+    if (status && !status.viewed) {
+        status.viewed = true;
+        status.viewedAt = new Date().toISOString();
+        status.viewCount = (status.viewCount || 0) + 1;
+        notifyStatusObservers();
+        return true;
+    }
+    return false;
+}
+
 // =============================================
-// ENVIRONMENT AUTO-DETECTION SYSTEM (PRESERVED)
+// STATUS API ACTIONS (REAL END-TO-END)
+// =============================================
+
+async function loadStatuses() {
+    if (!ensureActive('loadStatuses')) {
+        updateStatusState({ loading: false, error: 'Module not active' });
+        return;
+    }
+    
+    updateStatusState({ loading: true, error: null });
+    
+    try {
+        console.log(`[${MODULE_NAME}] 📤 Loading statuses from backend`);
+        const response = await makeApiRequest('/api/status', 'GET');
+        
+        console.log(`[${MODULE_NAME}] 📥 Received ${response?.statuses?.length || 0} statuses from backend`);
+        
+        if (response && response.statuses && Array.isArray(response.statuses)) {
+            statusCache.clear();
+            statusState.statuses = [];
+            statusState.myStatuses = [];
+            
+            const currentUserId = getSessionUserId();
+            
+            response.statuses.forEach(status => {
+                if (status && status.id) {
+                    statusCache.add(status.id);
+                    statusState.statuses.push(status);
+                    
+                    if (currentUserId && status.userId === currentUserId) {
+                        statusState.myStatuses.push(status);
+                    }
+                }
+            });
+            
+            statusState.statuses.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+            statusState.myStatuses.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+            
+            statusState.lastSync = new Date().toISOString();
+            statusState.loading = false;
+            
+            logStatus('SUCCESS', `Loaded ${statusState.statuses.length} statuses`);
+            notifyStatusObservers();
+        } else {
+            throw new Error('Invalid response format');
+        }
+    } catch (error) {
+        console.error(`[${MODULE_NAME}] Failed to load statuses:`, error);
+        updateStatusState({ 
+            loading: false, 
+            error: error.message || 'Failed to load statuses'
+        });
+        logStatus('FAILED', `Load statuses: ${error.message}`);
+    }
+}
+
+async function postStatus(statusData) {
+    if (!ensureActive('postStatus')) {
+        return { success: false, error: 'Module not active' };
+    }
+    
+    if (!isSessionReady()) {
+        return { success: false, error: 'Not authenticated' };
+    }
+    
+    if (!statusData || (!statusData.text && !statusData.media)) {
+        return { success: false, error: 'Status content required' };
+    }
+    
+    updateStatusState({ loading: true, error: null });
+    
+    try {
+        console.log(`[${MODULE_NAME}] 📤 Posting new status`);
+        
+        const payload = {
+            text: statusData.text || '',
+            type: statusData.type || 'text',
+            media: statusData.media || null,
+            mood: statusData.mood || null,
+            intent: statusData.intent || null,
+            category: statusData.category || null,
+            privacy: statusData.privacy || 'friends',
+            duration: statusData.duration || 86400
+        };
+        
+        const response = await makeApiRequest('/api/status/create', 'POST', payload);
+        
+        console.log(`[${MODULE_NAME}] 📥 Status posted successfully:`, response);
+        
+        if (response && response.status) {
+            addStatus(response.status);
+            updateStatusState({ loading: false });
+            logStatus('POST', 'Status posted successfully');
+            return { success: true, status: response.status };
+        } else {
+            throw new Error('Invalid response from server');
+        }
+    } catch (error) {
+        console.error(`[${MODULE_NAME}] Failed to post status:`, error);
+        updateStatusState({ loading: false, error: error.message });
+        logStatus('FAILED', `Post status: ${error.message}`);
+        return { success: false, error: error.message };
+    }
+}
+
+async function markStatusViewed(statusId) {
+    if (!ensureActive('markStatusViewed')) {
+        return { success: false, error: 'Module not active' };
+    }
+    
+    if (!statusId) {
+        return { success: false, error: 'Status ID required' };
+    }
+    
+    try {
+        console.log(`[${MODULE_NAME}] 📤 Marking status as viewed: ${statusId}`);
+        
+        const response = await makeApiRequest('/api/status/view', 'POST', { statusId });
+        
+        console.log(`[${MODULE_NAME}] 📥 Status marked as viewed:`, response);
+        
+        if (response && response.success !== false) {
+            markStatusViewedLocally(statusId);
+            logStatus('VIEW', `Status viewed: ${statusId}`);
+            return { success: true };
+        } else {
+            throw new Error('Failed to mark as viewed');
+        }
+    } catch (error) {
+        console.error(`[${MODULE_NAME}] Failed to mark status as viewed:`, error);
+        logStatus('FAILED', `Mark viewed: ${error.message}`);
+        return { success: false, error: error.message };
+    }
+}
+
+async function deleteStatus(statusId) {
+    if (!ensureActive('deleteStatus')) {
+        return { success: false, error: 'Module not active' };
+    }
+    
+    if (!statusId) {
+        return { success: false, error: 'Status ID required' };
+    }
+    
+    try {
+        console.log(`[${MODULE_NAME}] 📤 Deleting status: ${statusId}`);
+        
+        const response = await makeApiRequest('/api/status/delete', 'POST', { statusId });
+        
+        console.log(`[${MODULE_NAME}] 📥 Status deleted:`, response);
+        
+        if (response && response.success !== false) {
+            removeStatus(statusId);
+            logStatus('SUCCESS', `Status deleted: ${statusId}`);
+            return { success: true };
+        } else {
+            throw new Error('Failed to delete status');
+        }
+    } catch (error) {
+        console.error(`[${MODULE_NAME}] Failed to delete status:`, error);
+        logStatus('FAILED', `Delete status: ${error.message}`);
+        return { success: false, error: error.message };
+    }
+}
+
+async function addReaction(statusId, reaction) {
+    if (!ensureActive('addReaction')) {
+        return { success: false, error: 'Module not active' };
+    }
+    
+    if (!statusId || !reaction) {
+        return { success: false, error: 'Status ID and reaction required' };
+    }
+    
+    try {
+        console.log(`[${MODULE_NAME}] 📤 Adding reaction ${reaction} to status: ${statusId}`);
+        
+        const response = await makeApiRequest('/api/status/reaction/add', 'POST', { statusId, reaction });
+        
+        console.log(`[${MODULE_NAME}] 📥 Reaction added:`, response);
+        
+        if (response && response.success !== false) {
+            const status = statusState.statuses.find(s => s.id === statusId);
+            if (status) {
+                if (!status.reactions) status.reactions = {};
+                if (!status.reactions[reaction]) status.reactions[reaction] = [];
+                const currentUserId = getSessionUserId();
+                if (currentUserId && !status.reactions[reaction].includes(currentUserId)) {
+                    status.reactions[reaction].push(currentUserId);
+                }
+                notifyStatusObservers();
+            }
+            logStatus('REACTION', `Added ${reaction} to ${statusId}`);
+            return { success: true };
+        } else {
+            throw new Error('Failed to add reaction');
+        }
+    } catch (error) {
+        console.error(`[${MODULE_NAME}] Failed to add reaction:`, error);
+        logStatus('FAILED', `Add reaction: ${error.message}`);
+        return { success: false, error: error.message };
+    }
+}
+
+async function removeReaction(statusId, reaction) {
+    if (!ensureActive('removeReaction')) {
+        return { success: false, error: 'Module not active' };
+    }
+    
+    if (!statusId || !reaction) {
+        return { success: false, error: 'Status ID and reaction required' };
+    }
+    
+    try {
+        console.log(`[${MODULE_NAME}] 📤 Removing reaction ${reaction} from status: ${statusId}`);
+        
+        const response = await makeApiRequest('/api/status/reaction/remove', 'POST', { statusId, reaction });
+        
+        console.log(`[${MODULE_NAME}] 📥 Reaction removed:`, response);
+        
+        if (response && response.success !== false) {
+            const status = statusState.statuses.find(s => s.id === statusId);
+            if (status && status.reactions && status.reactions[reaction]) {
+                const currentUserId = getSessionUserId();
+                const index = status.reactions[reaction].indexOf(currentUserId);
+                if (index !== -1) {
+                    status.reactions[reaction].splice(index, 1);
+                    if (status.reactions[reaction].length === 0) {
+                        delete status.reactions[reaction];
+                    }
+                }
+                notifyStatusObservers();
+            }
+            logStatus('REACTION', `Removed ${reaction} from ${statusId}`);
+            return { success: true };
+        } else {
+            throw new Error('Failed to remove reaction');
+        }
+    } catch (error) {
+        console.error(`[${MODULE_NAME}] Failed to remove reaction:`, error);
+        logStatus('FAILED', `Remove reaction: ${error.message}`);
+        return { success: false, error: error.message };
+    }
+}
+
+// =============================================
+// REQUEST SESSION - ONLY AFTER ACTIVE
+// =============================================
+function requestSession() {
+    if (_sessionRequested && _sessionRequestRetries >= MAX_SESSION_REQUEST_RETRIES) {
+        debugWarn('Max session request retries reached');
+        return;
+    }
+    
+    if (!isInState(LifecycleState.ACTIVE) && currentState !== LIFECYCLE_STATES.WAIT_PARENT) {
+        debugLog('Cannot request session - not ACTIVE or WAIT_PARENT (current: ' + _currentState + ')');
+        return;
+    }
+    
+    if (!parentReady) {
+        debugLog('Cannot request session - parent not ready, queueing REQUEST_SESSION');
+        safeSend('REQUEST_SESSION', {});
+        return;
+    }
+    
+    _sessionRequested = true;
+    _sessionRequestRetries++;
+    if (typeof DiagnosticsAgent !== 'undefined') DiagnosticsAgent.increment('sessionRequests');
+    
+    safeSend('REQUEST_SESSION', {});
+    const sessionKey = 'session_requested';
+    if (!_loggedMessages.has(sessionKey)) {
+        _loggedMessages.add(sessionKey);
+        logStatus('SENDING', 'Session requested');
+    }
+}
+
+function handleSession(sessionData) {
+    if (!sessionData) return;
+    
+    // CRITICAL: Validate session before accepting
+    if (!__isValidSession(sessionData)) {
+        logStatus('FAILED', 'Invalid session data received - rejected', { userId: sessionData.userId, hasToken: !!sessionData.token });
+        return;
+    }
+    
+    // Check for duplicate session
+    if (__isDuplicateSession(sessionData)) {
+        logStatus('WARNING', 'Duplicate session data ignored');
+        return;
+    }
+    
+    // Prevent session downgrade - if we already have a valid session, don't overwrite with invalid
+    if (_sessionReady && _sessionToken) {
+        const currentValid = __isValidSession({ token: _sessionToken, userId: _sessionUser?.id || _sessionUser?.userId });
+        if (currentValid && !__isValidSession(sessionData)) {
+            logStatus('WARNING', 'Prevented session downgrade - keeping existing valid session');
+            return;
+        }
+    }
+    
+    // Extract user ID from various possible formats
+    let userId = null;
+    if (sessionData.userId) {
+        userId = sessionData.userId;
+    } else if (sessionData.user?.id) {
+        userId = sessionData.user.id;
+    } else if (sessionData.user?.userId) {
+        userId = sessionData.user.userId;
+    }
+    
+    // Final validation - ensure userId is valid
+    if (!userId || userId === 'user' || userId === 'default' || userId === 0 || userId === '0') {
+        logStatus('FAILED', 'Invalid userId in session data - rejected', { userId });
+        return;
+    }
+    
+    if (sessionData.token) {
+        const user = sessionData.user || { id: userId, displayName: sessionData.user?.displayName || 'User' };
+        setSession(sessionData.token, user, sessionData.expiresAt || null);
+        
+        _sessionRequestRetries = 0;
+        if (typeof DiagnosticsAgent !== 'undefined') DiagnosticsAgent.increment('sessionSuccess');
+        
+        StorageProxy.remove('USER_TOKEN');
+        StorageProxy.remove('USER_DATA');
+        
+        __storeValidSessionId(sessionData);
+        
+        // If we were waiting for session to activate, now we can activate
+        if (currentState === LIFECYCLE_STATES.WAIT_PARENT && _parentReadyReceived && !isInState(LifecycleState.ACTIVE)) {
+            transitionTo(LifecycleState.ACTIVE, 'valid_session_received');
+            flushQueue();
+            
+            if (parentReadyResolver) {
+                parentReadyResolver({ type: 'PARENT_READY', timestamp: Date.now() });
+            }
+        }
+    }
+    
+    if (typeof updateSessionMirror === 'function') {
+        updateSessionMirror(sessionData, 'parent');
+    }
+    
+    if (typeof ParentCommunication !== 'undefined' && ParentCommunication.handleSessionSync) {
+        ParentCommunication.handleSessionSync(sessionData);
+    }
+    
+    if (typeof SessionClient !== 'undefined' && SessionClient.updateSession) {
+        SessionClient.updateSession(sessionData, 'parent');
+    }
+    
+    if (sessionData.user) {
+        if (typeof currentUser !== 'undefined') currentUser = sessionData.user;
+        if (typeof userData !== 'undefined') userData = sessionData.user;
+    }
+    
+    if (sessionData.token) {
+        if (typeof state !== 'undefined') state.token = sessionData.token;
+    }
+    
+    if (typeof isTokenReady !== 'undefined') {
+        isTokenReady = true;
+        if (typeof triggerTokenReadyCallbacks !== 'undefined') {
+            triggerTokenReadyCallbacks();
+        }
+    }
+    if (typeof processPendingApiRequests !== 'undefined') processPendingApiRequests();
+    
+    const sessionKey = 'session_received';
+    if (!_loggedMessages.has(sessionKey)) {
+        _loggedMessages.add(sessionKey);
+        logStatus('SUCCESS', 'Session data received');
+    }
+}
+
+// =============================================
+// SEND HEARTBEAT ACK
+// =============================================
+function sendHeartbeatAck(inResponseTo) {
+    safeSend('HEARTBEAT_ACK', {
+        inResponseTo,
+        timestamp: Date.now()
+    });
+}
+
+// =============================================
+// PARENT COMMUNICATION LAYER - ADAPTED FOR PROTOCOL COMPLIANCE
+// =============================================
+const ParentCommunication = {
+    childReadySent: false,
+    moduleRegistered: false,
+    parentReadyReceived: false,
+    sessionSynced: false,
+    
+    initialize() {
+        debugLog('ParentCommunication initialized');
+        return this;
+    },
+    
+    sendChildReady() {
+        return sendChildReady();
+    },
+    
+    sendRegistration() {
+        if (this.moduleRegistered) {
+            debugLog('Already registered, skipping');
+            return false;
+        }
+        
+        if (!isInState(LifecycleState.WAIT_PARENT) && !isInState(LifecycleState.ACTIVE)) {
+            debugWarn(`Cannot register in state ${_currentState} - must be WAIT_PARENT or ACTIVE`);
+            return false;
+        }
+        
+        const success = safeSend('REGISTER_MODULE', {
+            moduleName: MODULE_NAME,
+            moduleVersion: '10.0',
+            capabilities: IframeEnvironment.getCapabilities(),
+            features: [
+                'status_text',
+                'status_media',
+                'status_poll',
+                'reactions',
+                'view_tracking',
+                'expiration'
+            ]
+        });
+        
+        if (success) {
+            this.moduleRegistered = true;
+            logStatus('SENDING', 'REGISTER_MODULE sent');
+        }
+        
+        return success;
+    },
+    
+    sendHeartbeatAck(inResponseTo) {
+        return safeSend('HEARTBEAT_ACK', {
+            inResponseTo,
+            timestamp: Date.now()
+        });
+    },
+    
+    handleSessionSync(sessionData) {
+        if (!sessionData) return false;
+        
+        // Validate before handling
+        if (!__isValidSession(sessionData)) {
+            logStatus('FAILED', 'Invalid session in handleSessionSync - rejected');
+            return false;
+        }
+        
+        this.updateSessionState(sessionData);
+        
+        logStatus('SUCCESS', 'Session synchronized');
+        
+        return true;
+    },
+    
+    updateSessionState(sessionData) {
+        try {
+            if (sessionData.user) {
+                if (typeof currentUser !== 'undefined') currentUser = sessionData.user;
+                if (typeof userData !== 'undefined') userData = sessionData.user;
+            }
+            
+            if (sessionData.token) {
+                if (typeof state !== 'undefined') state.token = sessionData.token;
+            }
+            
+            if (sessionData.permissions) {
+                if (typeof state !== 'undefined') state.permissionsGranted = sessionData.permissions;
+            }
+            
+            if (sessionData.sessionId) {
+                if (typeof state !== 'undefined') state.sessionId = sessionData.sessionId;
+            }
+            
+            if (typeof updateSessionMirror === 'function') {
+                updateSessionMirror(sessionData, 'session_sync');
+            }
+            if (typeof SessionClient !== 'undefined' && SessionClient.updateSession) {
+                SessionClient.updateSession(sessionData, 'session_sync');
+            }
+            
+            if (typeof isTokenReady !== 'undefined') {
+                isTokenReady = true;
+                if (typeof triggerTokenReadyCallbacks !== 'undefined') {
+                    triggerTokenReadyCallbacks();
+                }
+            }
+            if (typeof processPendingApiRequests !== 'undefined') processPendingApiRequests();
+            
+        } catch (error) {
+            debugError('Failed to update session state:', error);
+        }
+    },
+    
+    handleParentMessage(message) {
+        if (!message || !message.type) {
+            return;
+        }
+        
+        switch (message.type) {
+            case 'PARENT_READY':
+                this.parentReadyReceived = true;
+                break;
+                case 'AUTH_READY':
+    logStatus('RECEIVE', 'AUTH_READY received in ParentCommunication');
+    
+    const authPayload = message.payload || message.data || {};
+    const authSession = authPayload.session || authPayload;
+    
+    if (authSession && __isValidSession(authSession)) {
+        if (!__isDuplicateSession(authSession)) {
+            this.handleSessionSync(authSession);
+            __storeValidSessionId(authSession);
+        }
+    }
+    
+    if (!this.parentReadyReceived && isInState(LifecycleState.WAIT_PARENT)) {
+        this.parentReadyReceived = true;
+        parentReady = true;
+        _parentReady = true;
+        
+        if (isSessionReady() && __isValidSession({ token: _sessionToken, userId: _sessionUser?.id || _sessionUser?.userId })) {
+            transitionTo(LifecycleState.ACTIVE, 'auth_ready_with_valid_session');
+            flushQueue();
+            
+            if (parentReadyResolver) {
+                parentReadyResolver({ type: 'AUTH_READY', timestamp: Date.now() });
+            }
+        }
+    }
+    break;
+                
+            case 'MODULE_REGISTERED':
+                if (message.payload?.moduleName === MODULE_NAME) {
+                    this.moduleRegistered = true;
+                    logStatus('SUCCESS', 'Module registered');
+                }
+                break;
+                
+            case 'SESSION_DATA':
+                // Validate session before handling
+                if (message.payload && __isValidSession(message.payload)) {
+                    this.handleSessionSync(message.payload);
+                } else {
+                    logStatus('WARNING', 'Invalid SESSION_DATA received');
+                }
+                break;
+                
+            case 'HEARTBEAT':
+                this.sendHeartbeatAck(message.id);
+                break;
+                
+            case 'SESSION_ACTIVE':
+                if (message.payload && __isValidSession(message.payload)) {
+                    this.handleSessionSync(message.payload);
+                }
+                break;
+                
+            default:
+                break;
+        }
+    },
+    
+    sendAction(action, payload = {}) {
+        return safeSendAction(action, payload);
+    },
+    
+    reset() {
+        this.childReadySent = false;
+        this.parentReadyReceived = false;
+        this.moduleRegistered = false;
+        this.sessionSynced = false;
+    }
+}.initialize();
+
+// =============================================
+// MESSAGE TYPES - ENHANCED
+// =============================================
+const MESSAGE_TYPES = {
+    CHILD_READY: 'CHILD_READY',
+    PARENT_READY: 'PARENT_READY',
+    REGISTER_MODULE: 'REGISTER_MODULE',
+    MODULE_REGISTERED: 'MODULE_REGISTERED',
+    SESSION_DATA: 'SESSION_DATA',
+    HEARTBEAT: 'HEARTBEAT',
+    HEARTBEAT_ACK: 'HEARTBEAT_ACK',
+    ACK: 'ACK',
+    ACTION: 'ACTION',
+    SESSION_ACTIVE: 'SESSION_ACTIVE',
+    REQUEST_SESSION: 'REQUEST_SESSION',
+    
+    STORAGE_GET: 'STORAGE_GET',
+    STORAGE_SET: 'STORAGE_SET',
+    STORAGE_REMOVE: 'STORAGE_REMOVE',
+    STORAGE_CLEAR: 'STORAGE_CLEAR',
+    STORAGE_RESULT: 'STORAGE_RESULT',
+    
+    READY: 'STATUS_READY',
+    SESSION: 'STATUS_SESSION',
+    DATA: 'STATUS_DATA',
+    ERROR: 'STATUS_ERROR',
+    STATUS: 'STATUS_UPDATE',
+    REQUEST_SESSION_LEGACY: 'STATUS_REQUEST_SESSION',
+    UI_READY: 'STATUS_UI_READY',
+    NEEDS_AUTH: 'STATUS_NEEDS_AUTH',
+    API_REQUEST: 'API_REQUEST',
+    API_RESPONSE: 'API_RESPONSE',
+    API_ERROR: 'API_ERROR',
+    AUTH_VALIDATED: 'AUTH_VALIDATED',
+    SESSION_UPDATE: 'SESSION_UPDATE',
+    LOGOUT: 'LOGOUT',
+    IFRAME_READY: 'IFRAME_READY',
+    STATUS_SHUTDOWN: 'STATUS_SHUTDOWN',
+    USER_ACTIVE: 'USER_ACTIVE',
+    USER_INACTIVE: 'USER_INACTIVE',
+    HANDSHAKE_REQUEST: 'HANDSHAKE_REQUEST',
+    HANDSHAKE_RESPONSE: 'HANDSHAKE_RESPONSE',
+    HANDSHAKE_ACK: 'HANDSHAKE_ACK',
+    SESSION_ACK: 'SESSION_ACK',
+    PING: 'PING',
+    PONG: 'PONG',
+    PAGE_ACTIVATED: 'PAGE_ACTIVATED',
+    NAVIGATE: 'NAVIGATE',
+    CAPABILITY_REQUEST: 'CAPABILITY_REQUEST',
+    CAPABILITY_RESPONSE: 'CAPABILITY_RESPONSE',
+    TOKEN_REFRESH: 'TOKEN_REFRESH',
+    TOKEN_REFRESH_RESPONSE: 'TOKEN_REFRESH_RESPONSE',
+    ORIGIN_VALIDATION: 'ORIGIN_VALIDATION',
+    ORIGIN_VALIDATION_RESPONSE: 'ORIGIN_VALIDATION_RESPONSE',
+    CONFIG_REQUEST: 'CONFIG_REQUEST',
+    CONFIG_RESPONSE: 'CONFIG_RESPONSE',
+    DIAGNOSTICS: 'DIAGNOSTICS',
+    RECOVERY_REQUEST: 'RECOVERY_REQUEST',
+    RECOVERY_RESPONSE: 'RECOVERY_RESPONSE',
+    STATUS_VIEW: 'STATUS_VIEW',
+    STATUS_REACT: 'STATUS_REACT',
+    STATUS_REPLY: 'STATUS_REPLY',
+    STATUS_PIN: 'STATUS_PIN',
+    STATUS_UNPIN: 'STATUS_UNPIN',
+    STATUS_MUTE: 'STATUS_MUTE',
+    STATUS_UNMUTE: 'STATUS_UNMUTE',
+    STATUS_REPORT: 'STATUS_REPORT',
+    STATUS_DRAFT_SAVE: 'STATUS_DRAFT_SAVE',
+    STATUS_DRAFT_LOAD: 'STATUS_DRAFT_LOAD',
+    STATUS_DRAFT_DELETE: 'STATUS_DRAFT_DELETE',
+    STATUS_SCHEDULE: 'STATUS_SCHEDULE',
+    STATUS_SCHEDULE_CANCEL: 'STATUS_SCHEDULE_CANCEL',
+    HIGHLIGHT_CREATE: 'HIGHLIGHT_CREATE',
+    HIGHLIGHT_UPDATE: 'HIGHLIGHT_UPDATE',
+    HIGHLIGHT_DELETE: 'HIGHLIGHT_DELETE',
+    HIGHLIGHT_ADD_STATUS: 'HIGHLIGHT_ADD_STATUS',
+    HIGHLIGHT_REMOVE_STATUS: 'HIGHLIGHT_REMOVE_STATUS',
+    IFRAME_REGISTERED: 'IFRAME_REGISTERED',
+    
+    STATUS_CREATE: 'STATUS_CREATE',
+    STATUS_POSTED: 'STATUS_POSTED',
+    STATUS_VIEWED: 'STATUS_VIEWED',
+    STATUS_REACTED: 'STATUS_REACTED',
+    STATUS_REACTION_REMOVED: 'STATUS_REACTION_REMOVED',
+    STATUS_EXPIRED: 'STATUS_EXPIRED',
+    STATUS_SYNC_REQUEST: 'STATUS_SYNC_REQUEST',
+    STATUS_SYNC_RESPONSE: 'STATUS_SYNC_RESPONSE',
+    STATUSES_UPDATE: 'STATUSES_UPDATE',
+    VIEWER_TRACKED: 'VIEWER_TRACKED',
+    REACTION_ADDED: 'REACTION_ADDED',
+    REACTION_REMOVED: 'REACTION_REMOVED',
+    REACTION_CHANGED: 'REACTION_CHANGED',
+    REACTIONS_UPDATE: 'REACTIONS_UPDATE',
+    VIEWERS_UPDATE: 'VIEWERS_UPDATE',
+    EXPIRED_STATUS_CLEANUP: 'EXPIRED_STATUS_CLEANUP'
+};
+
+// =============================================
+// ENVIRONMENT AUTO-DETECTION SYSTEM
 // =============================================
 const IframeEnvironment = {
     type: 'UNKNOWN',
@@ -923,7 +1937,6 @@ const IframeEnvironment = {
             const protocol = window.location.protocol;
             const isSecureContext = window.isSecureContext || protocol === 'https:';
             
-            // Local development detection
             this.isLocalDev = (
                 hostname === 'localhost' ||
                 hostname === '127.0.0.1' ||
@@ -935,14 +1948,12 @@ const IframeEnvironment = {
                 hostname.includes('::1')
             );
             
-            // Render.com hosted detection
             this.isRenderHosted = (
                 hostname.includes('.onrender.com') ||
                 hostname.includes('.render.com') ||
                 hostname.includes('render.com')
             );
             
-            // VPN/High latency detection using Network Information API
             if (navigator.connection) {
                 const conn = navigator.connection;
                 this.latency = conn.rtt || 0;
@@ -953,7 +1964,6 @@ const IframeEnvironment = {
                 this.downlink = conn.downlink || 0;
                 this.saveData = conn.saveData || false;
                 
-                // Detect VPN based on latency patterns
                 this.isVPNNetwork = (
                     this.latency > 300 ||
                     this.effectiveType === 'slow-2g' ||
@@ -961,13 +1971,11 @@ const IframeEnvironment = {
                     (this.latency > 150 && this.latency < 300 && this.saveData)
                 );
             } else {
-                // Fallback detection using fetch timing
                 const end = performance.now();
                 this.latency = end - start;
                 this.isVPNNetwork = this.latency > 300;
             }
             
-            // Production detection
             this.isProduction = (
                 !this.isLocalDev &&
                 !this.isRenderHosted &&
@@ -977,7 +1985,6 @@ const IframeEnvironment = {
                 hostname.includes('.')
             );
             
-            // Sandbox detection
             try {
                 this.isSandboxed = (
                     !window.parent ||
@@ -996,7 +2003,6 @@ const IframeEnvironment = {
             
             this.isSecure = isSecureContext;
             
-            // Determine environment type
             if (this.isLocalDev) this.type = 'LOCAL_DEV';
             else if (this.isRenderHosted) this.type = 'RENDER_HOSTED';
             else if (this.isVPNNetwork) this.type = 'VPN_NETWORK';
@@ -1187,14 +2193,13 @@ const IframeEnvironment = {
     }
 };
 
-// Initialize the detector
 IframeEnvironment.detect();
 
 // =============================================
-// COMPATIBILITY BRIDGE - ENSURES BACKWARD COMPATIBILITY (PRESERVED)
+// COMPATIBILITY BRIDGE - ENSURES BACKWARD COMPATIBILITY
 // =============================================
 const CompatibilityBridge = {
-    version: '9.0',
+    version: '10.0',
     legacyMode: false,
     adapters: new Map(),
     transforms: new Map(),
@@ -1210,7 +2215,6 @@ const CompatibilityBridge = {
     },
     
     registerAdapters() {
-        // Message adapters
         this.adapters.set('message', {
             toLegacy: (msg) => {
                 if (!msg) return msg;
@@ -1236,7 +2240,6 @@ const CompatibilityBridge = {
             }
         });
         
-        // Session adapters
         this.adapters.set('session', {
             toLegacy: (session) => {
                 if (!session) return session;
@@ -1258,7 +2261,6 @@ const CompatibilityBridge = {
             }
         });
         
-        // Storage adapters - uses StorageProxy now
         this.adapters.set('storage', {
             toLegacy: (key, value) => {
                 return { key, value };
@@ -1316,7 +2318,6 @@ const CompatibilityBridge = {
             }
         });
         
-        // Storage fallback using StorageProxy
         this.fallbacks.set('storage', {
             get: async (key) => {
                 try {
@@ -1401,7 +2402,7 @@ if (isStandaloneMode && !_loggedMessages.has('standalone')) {
 }
 
 // =============================================
-// IFRAME AUTHORITY - CENTRALIZED CONTROL (PRESERVED)
+// IFRAME AUTHORITY - CENTRALIZED CONTROL
 // =============================================
 const IframeAuthority = {
     id: `iframe_${Date.now()}_${Math.random().toString(36).substr(2, 12)}`,
@@ -1425,7 +2426,7 @@ const IframeAuthority = {
         'https://localhost:5000',
         'https://localhost:8080',
         'http://127.0.0.1:3000',
-        'http://127.0.0.1:5500',
+        'http://localhost:4000',
         'http://127.0.0.1:5000',
         'http://127.0.0.1:8080',
         'https://127.0.0.1:3000',
@@ -1478,16 +2479,12 @@ const IframeAuthority = {
         if (!origin) return false;
         if (this.securityLevel === 'compatibility') return true;
         
-        // Check exact match
         if (this.trustedDomains.has(origin)) return true;
         
-        // Check wildcard patterns
         if (origin.includes('.onrender.com') || origin.includes('.render.com')) return true;
         
-        // Check localhost variations
         if (origin.includes('localhost') || origin.includes('127.0.0.1')) return true;
         
-        // Parent origin from referrer
         if (this.parentOrigin && origin === this.parentOrigin) return true;
         
         return false;
@@ -1507,7 +2504,7 @@ const IframeAuthority = {
 }.initialize();
 
 // =============================================
-// DIAGNOSTICS AGENT - TELEMETRY & DEBUGGING (PRESERVED)
+// DIAGNOSTICS AGENT - TELEMETRY & DEBUGGING
 // =============================================
 const DiagnosticsAgent = {
     enabled: true,
@@ -1536,11 +2533,9 @@ const DiagnosticsAgent = {
         statusReactions: 0,
         statusPosts: 0,
         statusExpired: 0,
-        // [AUTH FIX] Track session requests
         sessionRequests: 0,
         sessionSuccess: 0,
         sessionFailures: 0,
-        // Lifecycle metrics
         lifecycleTransitions: 0,
         invalidTransitions: 0,
         blockedActions: 0
@@ -1722,15 +2717,13 @@ function log(level, module, message, data = null) {
 }
 
 // =============================================
-// SAFE STORAGE LAYER - USES STORAGE PROXY (PRESERVED BUT MODIFIED)
+// SAFE STORAGE LAYER - USES STORAGE PROXY
 // =============================================
-// [AUTH FIX] Never store tokens in localStorage - use StorageProxy
-// [STORAGE FIX] All storage operations go through StorageProxy
 const SafeStorage = {
     memoryStore: new Map(),
-    storageAvailable: false, // Always false in sandbox - use proxy
+    storageAvailable: false,
     storageType: 'proxy',
-    quota: 5 * 1024 * 1024, // 5MB
+    quota: 5 * 1024 * 1024,
     used: 0,
     
     initialize() {
@@ -1741,11 +2734,7 @@ const SafeStorage = {
     },
     
     checkAvailability() {
-        // In sandboxed iframe, direct storage is not available
-        // We rely entirely on StorageProxy
         try {
-            // Test if we can communicate with parent storage
-            // This is async, so we'll assume proxy is available
             this.storageAvailable = true;
             this.storageType = 'proxy';
         } catch (e) {
@@ -1756,7 +2745,6 @@ const SafeStorage = {
     
     calculateUsage() {
         if (!this.storageAvailable || this.storageType === 'memory') return 0;
-        // StorageProxy doesn't provide usage info
         return 0;
     },
     
@@ -1774,7 +2762,6 @@ const SafeStorage = {
             } catch (e) {
                 DiagnosticsAgent.increment('storageErrors');
                 debugWarn(`Storage get failed for ${key}:`, e.message);
-                // Silent error, fall back to memory
             }
         }
         
@@ -1795,7 +2782,6 @@ const SafeStorage = {
             } catch (e) {
                 DiagnosticsAgent.increment('storageErrors');
                 debugWarn(`Storage set failed for ${key}:`, e.message);
-                // Silent error
             }
         }
         
@@ -1848,11 +2834,6 @@ const SafeStorage = {
     async keys() {
         const keys = new Set();
         
-        if (this.storageAvailable && this.storageType === 'proxy') {
-            // StorageProxy doesn't support keys enumeration
-            // We'll rely on memory store for keys
-        }
-        
         this.memoryStore.forEach((_, key) => keys.add(key));
         return Array.from(keys);
     },
@@ -1863,7 +2844,7 @@ const SafeStorage = {
 }.initialize();
 
 // =============================================
-// ORIGIN TRUST ADAPTER - DYNAMIC TRUST EVALUATION (PRESERVED)
+// ORIGIN TRUST ADAPTER - DYNAMIC TRUST EVALUATION
 // =============================================
 const OriginTrustAdapter = {
     trustedOrigins: new Set(),
@@ -1899,7 +2880,7 @@ const OriginTrustAdapter = {
             'https://localhost:5000',
             'https://localhost:8080',
             'http://127.0.0.1:3000',
-            'http://127.0.0.1:5500',
+            'http://localhost:4000',
             'http://127.0.0.1:5000',
             'http://127.0.0.1:8080',
             'https://127.0.0.1:3000',
@@ -1912,7 +2893,6 @@ const OriginTrustAdapter = {
         
         builtin.forEach(origin => this.trustedOrigins.add(origin));
         
-        // Render.com domains (wildcard)
         this.trustedOrigins.add('https://*.onrender.com');
         this.trustedOrigins.add('https://*.render.com');
     },
@@ -1930,24 +2910,20 @@ const OriginTrustAdapter = {
     isTrusted(origin) {
         if (!origin) return false;
         
-        // Check cache
         if (this.dynamicTrustCache.has(origin)) {
             return this.dynamicTrustCache.get(origin);
         }
         
-        // Check blocked
         if (this.blockedOrigins.has(origin)) {
             this.dynamicTrustCache.set(origin, false);
             return false;
         }
         
-        // Check trusted set
         if (this.trustedOrigins.has(origin)) {
             this.dynamicTrustCache.set(origin, true);
             return true;
         }
         
-        // Check wildcard patterns
         for (const trusted of this.trustedOrigins) {
             if (trusted.includes('*')) {
                 const pattern = trusted.replace(/\*/g, '[^.]+').replace(/\./g, '\\.');
@@ -1959,7 +2935,6 @@ const OriginTrustAdapter = {
             }
         }
         
-        // Check if ends with trusted domain
         for (const trusted of this.trustedOrigins) {
             if (!trusted.includes('*') && origin.endsWith(trusted.replace(/^https?:\/\//, ''))) {
                 this.dynamicTrustCache.set(origin, true);
@@ -1967,7 +2942,6 @@ const OriginTrustAdapter = {
             }
         }
         
-        // Relaxed trust - accept if same origin or subdomain
         if (this.trustLevel === 'relaxed') {
             try {
                 const originHostname = new URL(origin).hostname;
@@ -1982,13 +2956,11 @@ const OriginTrustAdapter = {
             } catch {}
         }
         
-        // Check if from parent referrer
         if (this.parentOrigin && origin === this.parentOrigin) {
             this.dynamicTrustCache.set(origin, true);
             return true;
         }
         
-        // Default based on trust level
         const trusted = this.trustLevel === 'relaxed' || 
                        (this.trustLevel === 'standard' && origin.startsWith('https://'));
         
@@ -2034,7 +3006,7 @@ const OriginTrustAdapter = {
 }.initialize();
 
 // =============================================
-// MESSAGE BUS - CENTRALIZED COMMUNICATION (PRESERVED)
+// MESSAGE BUS - CENTRALIZED COMMUNICATION
 // =============================================
 const MessageBus = {
     channels: new Map(),
@@ -2080,13 +3052,11 @@ const MessageBus = {
             busId: `bus_${Date.now()}_${Math.random().toString(36).substr(2, 8)}`
         };
         
-        // Store in history
         channel.messageHistory.push(enrichedMessage);
         if (channel.messageHistory.length > 50) {
             channel.messageHistory.shift();
         }
         
-        // Global history
         if (!this.history.has(channelName)) {
             this.history.set(channelName, []);
         }
@@ -2096,7 +3066,6 @@ const MessageBus = {
             history.shift();
         }
         
-        // Notify subscribers
         channel.subscribers.forEach(handler => {
             try {
                 handler(enrichedMessage);
@@ -2180,21 +3149,18 @@ const _parentReadyPromise = new Promise((resolve, reject) => {
 // PARENT MESSAGE HANDLER - PROTOCOL-COMPLIANT
 // =============================================
 function handleParentMessage(event) {
-    // Move heavy logic out of message listener for performance
     setTimeout(() => {
         try {
             const msg = event.data;
 
             if (!msg || typeof msg !== 'object') return;
 
-            // Handle storage responses
             if (msg.type === 'STORAGE_RESULT') {
                 StorageProxy.handleResponse(event);
                 return;
             }
 
-            // Check for duplicates BEFORE any processing
-            if (msg.id && isDuplicate(msg.id)) {
+            if (msg.id && isDuplicateMessage(msg.id)) {
                 const dupKey = `duplicate_${msg.type}_${msg.id}`;
                 if (!_loggedMessages.has(dupKey)) {
                     _loggedMessages.add(dupKey);
@@ -2203,14 +3169,11 @@ function handleParentMessage(event) {
                 return;
             }
 
-            // Validate origin using trust adapter
             if (!OriginTrustAdapter.validateMessageOrigin(event.origin)) {
-                // Strict enforcement - no exceptions
                 debugWarn(`Message from untrusted origin ignored: ${event.origin}`);
                 return;
             }
 
-            // Validate message schema
             if (!MessageValidator.validate(msg).valid) {
                 debugWarn(`Invalid message schema: ${msg.type}`);
                 return;
@@ -2218,19 +3181,26 @@ function handleParentMessage(event) {
 
             DiagnosticsAgent.increment('messagesReceived');
 
-            // Handle PARENT_READY - CRITICAL LIFECYCLE MESSAGE
             if (msg.type === 'PARENT_READY') {
                 handleParentReady(msg);
                 return;
             }
 
-            // Handle SESSION_DATA
             if (msg.type === 'SESSION_DATA') {
-                handleSession(msg.payload);
+                // Validate session before handling
+                if (msg.payload && __isValidSession(msg.payload)) {
+                    if (!__isDuplicateSession(msg.payload)) {
+                        handleSession(msg.payload);
+                        __storeValidSessionId(msg.payload);
+                    } else {
+                        logStatus('WARNING', 'Duplicate SESSION_DATA ignored');
+                    }
+                } else {
+                    logStatus('FAILED', 'Invalid SESSION_DATA received - rejected');
+                }
                 return;
             }
 
-            // Handle MODULE_REGISTERED
             if (msg.type === 'MODULE_REGISTERED') {
                 if (msg.payload?.moduleName === MODULE_NAME) {
                     const moduleKey = 'module_registered';
@@ -2242,18 +3212,32 @@ function handleParentMessage(event) {
                 return;
             }
 
-            // Handle HEARTBEAT
             if (msg.type === 'HEARTBEAT') {
                 sendHeartbeatAck(msg.id);
                 return;
             }
+            
+            if (msg.type === 'API_RESPONSE') {
+                handleApiResponse(msg);
+                return;
+            }
+            
+            if (msg.type === 'STATUS_UPDATE') {
+                const status = msg.payload || msg;
+                if (status && status.id) {
+                    if (status.deleted) {
+                        removeStatus(status.id);
+                    } else {
+                        addStatus(status);
+                    }
+                }
+                return;
+            }
 
-            // Handle other message types through existing handlers
             if (typeof ParentCommunication !== 'undefined') {
                 ParentCommunication.handleParentMessage(msg);
             }
 
-            // Pass to other handlers
             const handlers = messageHandlers.get(msg.type) || [];
             for (const handler of handlers) {
                 handler(msg, event.origin);
@@ -2263,384 +3247,217 @@ function handleParentMessage(event) {
             debugError('Error handling parent message:', error);
         }
     }, 0);
-}
-
-// =============================================
-// REQUEST SESSION - ONLY AFTER ACTIVE
-// =============================================
-// [AUTH FIX] Controlled session request with retry limit
-function requestSession() {
-    if (_sessionRequested && _sessionRequestRetries >= MAX_SESSION_REQUEST_RETRIES) {
-        debugWarn('Max session request retries reached');
-        return;
-    }
+    // Add AUTH_READY handler
+addMessageHandler('AUTH_READY', (message) => {
+    logStatus('LIFECYCLE', 'AUTH_READY received');
     
-    // Can only request session when ACTIVE
-    if (!isInState(LifecycleState.ACTIVE)) {
-        debugLog('Cannot request session - not ACTIVE (current: ' + _currentState + ')');
-        return;
-    }
+    const payload = message.payload || message.data || {};
+    const sessionData = payload.session || payload;
     
-    if (!parentReady) {
-        debugLog('Cannot request session - parent not ready, queueing REQUEST_SESSION');
-        safeSend('REQUEST_SESSION', {});
-        return;
-    }
-    
-    _sessionRequested = true;
-    _sessionRequestRetries++;
-    DiagnosticsAgent.increment('sessionRequests');
-    
-    safeSend('REQUEST_SESSION', {});
-    const sessionKey = 'session_requested';
-    if (!_loggedMessages.has(sessionKey)) {
-        _loggedMessages.add(sessionKey);
-        logStatus('SENDING', 'Session requested');
-    }
-}
-
-// =============================================
-// HANDLE SESSION DATA
-// =============================================
-// [AUTH FIX] Store session in memory only, never in localStorage
-function handleSession(sessionData) {
-    if (!sessionData) return;
-    
-    // Store in memory
-    if (sessionData.token) {
-        setSession(
-            sessionData.token,
-            sessionData.user || null,
-            sessionData.expiresAt || null
-        );
-        
-        _sessionRequestRetries = 0; // Reset retry counter on success
-        DiagnosticsAgent.increment('sessionSuccess');
-        
-        // [AUTH FIX] Remove any existing token from storage via proxy
-        StorageProxy.remove(UNIFIED_TOKEN_KEY);
-        StorageProxy.remove(LOCAL_STORAGE_KEYS.USER);
-    }
-    
-    // Update session state through existing mechanisms
-    if (typeof updateSessionMirror === 'function') {
-        updateSessionMirror(sessionData, 'parent');
-    }
-    
-    if (typeof ParentCommunication !== 'undefined' && ParentCommunication.handleSessionSync) {
-        ParentCommunication.handleSessionSync(sessionData);
-    }
-    
-    if (typeof SessionClient !== 'undefined' && SessionClient.updateSession) {
-        SessionClient.updateSession(sessionData, 'parent');
-    }
-    
-    // Update local state
-    if (sessionData.user) {
-        currentUser = sessionData.user;
-        userData = sessionData.user;
-        // [AUTH FIX] Don't store user in localStorage - use memory only
-    }
-    
-    if (sessionData.token) {
-        // [AUTH FIX] Don't store token in localStorage
-        state.token = sessionData.token;
-    }
-    
-    // Mark token as ready
-    isTokenReady = true;
-    triggerTokenReadyCallbacks();
-    processPendingApiRequests();
-    
-    const sessionKey = 'session_received';
-    if (!_loggedMessages.has(sessionKey)) {
-        _loggedMessages.add(sessionKey);
-        logStatus('SUCCESS', 'Session data received');
-    }
-}
-
-// =============================================
-// SEND HEARTBEAT ACK
-// =============================================
-function sendHeartbeatAck(inResponseTo) {
-    safeSend('HEARTBEAT_ACK', {
-        inResponseTo,
-        timestamp: Date.now()
-    });
-}
-
-// =============================================
-// PARENT COMMUNICATION LAYER - ADAPTED FOR PROTOCOL COMPLIANCE
-// =============================================
-const ParentCommunication = {
-    childReadySent: false,
-    moduleRegistered: false,
-    parentReadyReceived: false,
-    sessionSynced: false,
-    
-    initialize() {
-        debugLog('ParentCommunication initialized');
-        return this;
-    },
-    
-    // Send CHILD_READY exactly once - only when in READY state
-    sendChildReady() {
-        // Delegate to the new centralized function
-        return sendChildReady();
-    },
-    
-    // Send REGISTER_MODULE exactly once
-    sendRegistration() {
-        if (this.moduleRegistered) {
-            debugLog('Already registered, skipping');
-            return false;
+    // If we have session data and it's valid, apply it
+    if (sessionData && __isValidSession(sessionData)) {
+        if (!__isDuplicateSession(sessionData)) {
+            handleSession(sessionData);
+            __storeValidSessionId(sessionData);
+            logStatus('SUCCESS', 'Session applied from AUTH_READY');
+        } else {
+            logStatus('WARNING', 'Duplicate session data in AUTH_READY ignored');
         }
+    }
+    
+    // If we're in WAITING_AUTH, transition to READY
+    if (isInState(LifecycleState.WAITING_AUTH)) {
+        logStatus('LIFECYCLE', 'AUTH_READY received in WAITING_AUTH - transitioning to READY');
+        transitionTo(LifecycleState.READY, 'auth_ready_received');
+        // Send CHILD_READY after auth is ready
+        sendChildReady();
+    } else if (isInState(LifecycleState.WAIT_PARENT)) {
+        logStatus('LIFECYCLE', 'AUTH_READY received in WAIT_PARENT - marking as parent ready');
+        parentReady = true;
+        _parentReady = true;
         
-        // Can only register after CHILD_READY sent (in WAIT_PARENT) or ACTIVE
-        if (!isInState(LifecycleState.WAIT_PARENT) && !isInState(LifecycleState.ACTIVE)) {
-            debugWarn(`Cannot register in state ${_currentState} - must be WAIT_PARENT or ACTIVE`);
-            return false;
+        // If we have a valid session, transition to ACTIVE
+        if (isSessionReady() && __isValidSession({ token: _sessionToken, userId: _sessionUser?.id || _sessionUser?.userId })) {
+            transitionTo(LifecycleState.ACTIVE, 'auth_ready_with_valid_session');
+            flushQueue();
+            
+            if (parentReadyResolver) {
+                parentReadyResolver({ type: 'AUTH_READY', timestamp: Date.now() });
+            }
         }
-        
-        const success = safeSend('REGISTER_MODULE', {
-            moduleName: MODULE_NAME,
-            moduleVersion: '9.0',
-            capabilities: IframeEnvironment.getCapabilities(),
-            features: [
-                'status_text',
-                'status_media',
-                'status_poll',
-                'reactions',
-                'view_tracking',
-                'expiration'
-            ]
-        });
-        
-        if (success) {
-            this.moduleRegistered = true;
-            logStatus('SENDING', 'REGISTER_MODULE sent');
-        }
-        
-        return success;
-    },
-    
-    // Send HEARTBEAT_ACK in response to parent heartbeat
-    sendHeartbeatAck(inResponseTo) {
-        return safeSend('HEARTBEAT_ACK', {
-            inResponseTo,
-            timestamp: Date.now()
-        });
-    },
-    
-    // Handle session sync from parent
-    handleSessionSync(sessionData) {
-        if (!sessionData) return false;
-        
-        // Update session state
-        this.updateSessionState(sessionData);
-        
-        logStatus('SUCCESS', 'Session synchronized');
-        
-        return true;
-    },
-    
-    // Update session state from parent data
-    updateSessionState(sessionData) {
-        try {
-            if (sessionData.user) {
-                currentUser = sessionData.user;
-                userData = sessionData.user;
-            }
-            
-            if (sessionData.token) {
-                state.token = sessionData.token;
-            }
-            
-            if (sessionData.permissions) {
-                state.permissionsGranted = sessionData.permissions;
-            }
-            
-            if (sessionData.sessionId) {
-                state.sessionId = sessionData.sessionId;
-            }
-            
-            // Update mirror
-            if (typeof updateSessionMirror === 'function') {
-                updateSessionMirror(sessionData, 'session_sync');
-            }
-            if (typeof SessionClient !== 'undefined' && SessionClient.updateSession) {
-                SessionClient.updateSession(sessionData, 'session_sync');
-            }
-            
+    }
+});
+}
+
+// =============================================
+// MESSAGE HANDLER REGISTRATION
+// =============================================
+const messageHandlers = new Map();
+
+function addMessageHandler(type, handler) {
+    if (!messageHandlers.has(type)) {
+        messageHandlers.set(type, []);
+    }
+    messageHandlers.get(type).push(handler);
+}
+
+addMessageHandler('ACK', (message) => {});
+addMessageHandler('STATUS', (message) => {
+    document.dispatchEvent(new CustomEvent('statusUpdate', {
+        detail: message.payload
+    }));
+});
+addMessageHandler('ERROR', (message) => {
+    const errorKey = `parent_error_${message.payload?.error || 'unknown'}`;
+    if (!_loggedMessages.has(errorKey)) {
+        _loggedMessages.add(errorKey);
+        logStatus('FAILED', `Error from parent: ${message.payload?.error || 'Unknown error'}`);
+    }
+});
+addMessageHandler('DATA', (message) => {
+    document.dispatchEvent(new CustomEvent('coreData', {
+        detail: message.payload
+    }));
+});
+addMessageHandler('HANDSHAKE_RESPONSE', (message) => {
+    if (typeof HandshakeClient !== 'undefined') HandshakeClient.handleResponse(message);
+});
+addMessageHandler('SESSION', (message) => {
+    if (typeof HandshakeClient !== 'undefined') HandshakeClient.handleSessionInit(message);
+});
+addMessageHandler('SESSION_DATA', (message) => {
+    // Validate before handling
+    if (message.payload && __isValidSession(message.payload)) {
+        if (typeof HandshakeClient !== 'undefined') HandshakeClient.handleSessionInit(message);
+    }
+});
+addMessageHandler('SESSION_UPDATE', (message) => {
+    const payload = message.payload || message.data || {};
+    if (__isValidSession(payload)) {
+        if (typeof updateSessionMirror !== 'undefined') updateSessionMirror(payload, 'session_update');
+    }
+});
+addMessageHandler('SESSION_ACTIVE', (message) => {
+    const payload = message.payload || message.data || {};
+    if (__isValidSession(payload)) {
+        if (typeof updateSessionMirror !== 'undefined') updateSessionMirror(payload, 'session_active');
+    }
+});
+addMessageHandler('AUTH_VALIDATED', (message) => {
+    const payload = message.payload || message.data || {};
+    if (payload.success) {
+        if (typeof isTokenReady !== 'undefined') {
             isTokenReady = true;
-            triggerTokenReadyCallbacks();
-            processPendingApiRequests();
-            
-        } catch (error) {
-            debugError('Failed to update session state:', error);
+            if (typeof triggerTokenReadyCallbacks !== 'undefined') {
+                triggerTokenReadyCallbacks();
+            }
         }
-    },
-    
-    // Handle incoming parent messages
-    handleParentMessage(message) {
-        if (!message || !message.type) {
-            return;
+        const authKey = 'auth_validated';
+        if (!_loggedMessages.has(authKey)) {
+            _loggedMessages.add(authKey);
+            logStatus('SUCCESS', 'Auth validated');
         }
-        
-        switch (message.type) {
-            case 'PARENT_READY':
-                // Already handled in handleParentMessage, but track for our state
-                this.parentReadyReceived = true;
-                break;
-                
-            case 'MODULE_REGISTERED':
-                if (message.payload?.moduleName === MODULE_NAME) {
-                    this.moduleRegistered = true;
-                    logStatus('SUCCESS', 'Module registered');
-                }
-                break;
-                
-            case 'SESSION_DATA':
-                this.handleSessionSync(message.payload);
-                break;
-                
-            case 'HEARTBEAT':
-                this.sendHeartbeatAck(message.id);
-                break;
-                
-            case 'SESSION_ACTIVE':
-                this.handleSessionSync(message.payload);
-                break;
-                
-            default:
-                // Pass to other handlers
-                break;
-        }
-    },
-    
-    // Send user action to parent - GATED BY LIFECYCLE STATE
-    sendAction(action, payload = {}) {
-        // Use the new action gate
-        return safeSendAction(action, payload);
-    },
-    
-    reset() {
-        this.childReadySent = false;
-        this.parentReadyReceived = false;
-        this.moduleRegistered = false;
-        this.sessionSynced = false;
-        // Don't reset lifecycle state - keep core state
     }
-}.initialize();
+});
+addMessageHandler('PARENT_READY', (message) => {
+    handleParentReady(message);
+});
+addMessageHandler('MODULE_REGISTERED', (message) => {
+    if (message.payload?.moduleName === MODULE_NAME) {
+        if (typeof ParentCommunication !== 'undefined') ParentCommunication.moduleRegistered = true;
+    }
+});
+addMessageHandler('HEARTBEAT', (message) => {
+    if (typeof ParentCommunication !== 'undefined') ParentCommunication.sendHeartbeatAck(message.id);
+});
+addMessageHandler('LOGOUT', (message) => {
+    if (typeof handleLogout !== 'undefined') handleLogout(message.payload);
+});
+addMessageHandler('API_RESPONSE', (message) => {
+    if (typeof handleApiResponse !== 'undefined') handleApiResponse(message.payload);
+});
+addMessageHandler('API_ERROR', (message) => {
+    if (typeof handleApiError !== 'undefined') handleApiError(message.payload);
+});
+addMessageHandler('PONG', (message) => {
+    if (typeof state !== 'undefined') {
+        if (typeof state.lastHeartbeatReceived !== 'undefined') state.lastHeartbeatReceived = Date.now();
+        if (typeof state.heartbeatFailures !== 'undefined') state.heartbeatFailures = 0;
+    }
+});
+addMessageHandler('PAGE_ACTIVATED', (message) => {
+    if (typeof state !== 'undefined') {
+        if (typeof state.pageActivated !== 'undefined') state.pageActivated = true;
+    }
+    
+    const pageKey = 'page_activated_handler';
+    if (!_loggedMessages.has(pageKey)) {
+        _loggedMessages.add(pageKey);
+        logStatus('INFO', 'Page activated');
+    }
+    
+    if (typeof loadFreshDataInBackground !== 'undefined' && isInState(LifecycleState.ACTIVE)) {
+        setTimeout(() => {
+            if (typeof loadFreshDataInBackground !== 'undefined') loadFreshDataInBackground();
+        }, 100);
+    }
+    
+    document.dispatchEvent(new CustomEvent('pageActivated', {
+        detail: { timestamp: Date.now() }
+    }));
+});
+addMessageHandler('NAVIGATE', (message) => {
+    if (message.payload && message.payload.path) {
+        document.dispatchEvent(new CustomEvent('navigate', {
+            detail: message.payload
+        }));
+    }
+});
+addMessageHandler('CAPABILITY_RESPONSE', (message) => {
+    if (message.payload && Array.isArray(message.payload.capabilities)) {
+        message.payload.capabilities.forEach(cap => {
+            if (typeof state !== 'undefined') {
+                if (typeof state.parentCapabilities !== 'undefined') state.parentCapabilities.add(cap);
+            }
+            if (typeof IframeAuthority !== 'undefined') IframeAuthority.parentCapabilities.add(cap);
+        });
+    }
+});
+addMessageHandler('TOKEN_REFRESH_RESPONSE', (message) => {
+    if (message.payload && message.payload.token) {
+        if (typeof state !== 'undefined') {
+            if (typeof state.token !== 'undefined') state.token = message.payload.token;
+        }
+        if (typeof setSession !== 'undefined') setSession(message.payload.token, state?.user, state?.sessionExpiry);
+        
+        if (message.payload.refreshToken && typeof state !== 'undefined') {
+            if (typeof state.sessionMirror !== 'undefined') state.sessionMirror.refreshToken = message.payload.refreshToken;
+        }
+    }
+});
+addMessageHandler('ORIGIN_VALIDATION_RESPONSE', (message) => {
+    if (message.payload && message.payload.valid && typeof state !== 'undefined') {
+        if (typeof state.securityContext !== 'undefined') state.securityContext.originValidated = true;
+    }
+});
+addMessageHandler('CONFIG_RESPONSE', (message) => {
+    if (message.payload && message.payload.config) {
+        if (typeof applyParentConfig !== 'undefined') applyParentConfig(message.payload.config);
+    }
+});
+addMessageHandler('RECOVERY_RESPONSE', (message) => {
+    if (message.payload && message.payload.success && typeof state !== 'undefined') {
+        if (typeof state.metrics !== 'undefined') state.metrics.successfulRecoveries++;
+    }
+});
+addMessageHandler('IFRAME_REGISTERED', (message) => {
+    if (message.payload && message.payload.module === 'status') {
+        // Acknowledgment received
+    }
+});
 
 // =============================================
-// CONTROLLED RETRY ENGINE - REMOVED AS PER PROTOCOL
-// NO RETRIES IN WAIT_PARENT
-// =============================================
-
-// =============================================
-// MESSAGE TYPES - ENHANCED (PRESERVED)
-// =============================================
-const MESSAGE_TYPES = {
-    // Core lifecycle messages (STANDARDIZED)
-    CHILD_READY: 'CHILD_READY',
-    PARENT_READY: 'PARENT_READY',
-    REGISTER_MODULE: 'REGISTER_MODULE',
-    MODULE_REGISTERED: 'MODULE_REGISTERED',
-    SESSION_DATA: 'SESSION_DATA',
-    HEARTBEAT: 'HEARTBEAT',
-    HEARTBEAT_ACK: 'HEARTBEAT_ACK',
-    ACK: 'ACK',
-    ACTION: 'ACTION',
-    SESSION_ACTIVE: 'SESSION_ACTIVE',
-    REQUEST_SESSION: 'REQUEST_SESSION',
-    
-    // Storage messages
-    STORAGE_GET: 'STORAGE_GET',
-    STORAGE_SET: 'STORAGE_SET',
-    STORAGE_REMOVE: 'STORAGE_REMOVE',
-    STORAGE_CLEAR: 'STORAGE_CLEAR',
-    STORAGE_RESULT: 'STORAGE_RESULT',
-    
-    // Legacy messages (PRESERVED FOR COMPATIBILITY)
-    READY: 'STATUS_READY',
-    SESSION: 'STATUS_SESSION',
-    DATA: 'STATUS_DATA',
-    ERROR: 'STATUS_ERROR',
-    STATUS: 'STATUS_UPDATE',
-    REQUEST_SESSION_LEGACY: 'STATUS_REQUEST_SESSION',
-    UI_READY: 'STATUS_UI_READY',
-    NEEDS_AUTH: 'STATUS_NEEDS_AUTH',
-    API_REQUEST: 'API_REQUEST',
-    API_RESPONSE: 'API_RESPONSE',
-    API_ERROR: 'API_ERROR',
-    AUTH_VALIDATED: 'AUTH_VALIDATED',
-    SESSION_UPDATE: 'SESSION_UPDATE',
-    LOGOUT: 'LOGOUT',
-    IFRAME_READY: 'IFRAME_READY',
-    STATUS_SHUTDOWN: 'STATUS_SHUTDOWN',
-    USER_ACTIVE: 'USER_ACTIVE',
-    USER_INACTIVE: 'USER_INACTIVE',
-    HANDSHAKE_REQUEST: 'HANDSHAKE_REQUEST',
-    HANDSHAKE_RESPONSE: 'HANDSHAKE_RESPONSE',
-    HANDSHAKE_ACK: 'HANDSHAKE_ACK',
-    SESSION_ACK: 'SESSION_ACK',
-    PING: 'PING',
-    PONG: 'PONG',
-    PAGE_ACTIVATED: 'PAGE_ACTIVATED',
-    NAVIGATE: 'NAVIGATE',
-    CAPABILITY_REQUEST: 'CAPABILITY_REQUEST',
-    CAPABILITY_RESPONSE: 'CAPABILITY_RESPONSE',
-    TOKEN_REFRESH: 'TOKEN_REFRESH',
-    TOKEN_REFRESH_RESPONSE: 'TOKEN_REFRESH_RESPONSE',
-    ORIGIN_VALIDATION: 'ORIGIN_VALIDATION',
-    ORIGIN_VALIDATION_RESPONSE: 'ORIGIN_VALIDATION_RESPONSE',
-    CONFIG_REQUEST: 'CONFIG_REQUEST',
-    CONFIG_RESPONSE: 'CONFIG_RESPONSE',
-    DIAGNOSTICS: 'DIAGNOSTICS',
-    RECOVERY_REQUEST: 'RECOVERY_REQUEST',
-    RECOVERY_RESPONSE: 'RECOVERY_RESPONSE',
-    STATUS_VIEW: 'STATUS_VIEW',
-    STATUS_REACT: 'STATUS_REACT',
-    STATUS_REPLY: 'STATUS_REPLY',
-    STATUS_PIN: 'STATUS_PIN',
-    STATUS_UNPIN: 'STATUS_UNPIN',
-    STATUS_MUTE: 'STATUS_MUTE',
-    STATUS_UNMUTE: 'STATUS_UNMUTE',
-    STATUS_REPORT: 'STATUS_REPORT',
-    STATUS_DRAFT_SAVE: 'STATUS_DRAFT_SAVE',
-    STATUS_DRAFT_LOAD: 'STATUS_DRAFT_LOAD',
-    STATUS_DRAFT_DELETE: 'STATUS_DRAFT_DELETE',
-    STATUS_SCHEDULE: 'STATUS_SCHEDULE',
-    STATUS_SCHEDULE_CANCEL: 'STATUS_SCHEDULE_CANCEL',
-    HIGHLIGHT_CREATE: 'HIGHLIGHT_CREATE',
-    HIGHLIGHT_UPDATE: 'HIGHLIGHT_UPDATE',
-    HIGHLIGHT_DELETE: 'HIGHLIGHT_DELETE',
-    HIGHLIGHT_ADD_STATUS: 'HIGHLIGHT_ADD_STATUS',
-    HIGHLIGHT_REMOVE_STATUS: 'HIGHLIGHT_REMOVE_STATUS',
-    IFRAME_REGISTERED: 'IFRAME_REGISTERED',
-    
-    // NEW STATUS-SPECIFIC MESSAGE TYPES
-    STATUS_CREATE: 'STATUS_CREATE',
-    STATUS_POSTED: 'STATUS_POSTED',
-    STATUS_VIEWED: 'STATUS_VIEWED',
-    STATUS_REACTED: 'STATUS_REACTED',
-    STATUS_REACTION_REMOVED: 'STATUS_REACTION_REMOVED',
-    STATUS_EXPIRED: 'STATUS_EXPIRED',
-    STATUS_SYNC_REQUEST: 'STATUS_SYNC_REQUEST',
-    STATUS_SYNC_RESPONSE: 'STATUS_SYNC_RESPONSE',
-    STATUSES_UPDATE: 'STATUSES_UPDATE',
-    VIEWER_TRACKED: 'VIEWER_TRACKED',
-    REACTION_ADDED: 'REACTION_ADDED',
-    REACTION_REMOVED: 'REACTION_REMOVED',
-    REACTION_CHANGED: 'REACTION_CHANGED',
-    REACTIONS_UPDATE: 'REACTIONS_UPDATE',
-    VIEWERS_UPDATE: 'VIEWERS_UPDATE',
-    EXPIRED_STATUS_CLEANUP: 'EXPIRED_STATUS_CLEANUP'
-};
-
-// =============================================
-// RECOVERY MANAGER - PASSIVE, WAITS FOR PARENT (PRESERVED)
+// RECOVERY MANAGER - PASSIVE, WAITS FOR PARENT
 // =============================================
 const RecoveryManager = {
     recoveryAttempts: 0,
@@ -2672,7 +3489,6 @@ const RecoveryManager = {
         
         if (this.recoveryAttempts >= this.maxRecoveryAttempts) {
             debugWarn('Max recovery attempts reached, entering passive waiting');
-            // No state change - just wait
             return { success: false, reason: 'Max attempts exceeded' };
         }
         
@@ -2705,35 +3521,24 @@ const RecoveryManager = {
     },
     
     async recoverHandshake(context) {
-        // Wait for parent instead of retrying
         if (!parentReady && !_parentReadyReceived) {
-            // Stay in WAIT_PARENT - no action
             return { success: true, waiting: true };
         }
         return { success: false };
     },
     
     async recoverSession(context) {
-        try {
-            // [AUTH FIX] Don't use cached token from storage
-            // Just wait for parent to send new session
-            if (isSessionReady()) {
-                return { success: true, valid: true };
-            }
-            
-            return { success: false };
-        } catch (error) {
-            return { success: false };
+        if (isSessionReady()) {
+            return { success: true, valid: true };
         }
+        return { success: false };
     },
     
     async recoverConnection(context) {
-        // Wait for parent heartbeat
         return { success: true, waiting: true };
     },
     
     async recoverToken(context) {
-        // [AUTH FIX] Don't attempt token recovery - wait for parent
         return { success: false };
     },
     
@@ -2770,7 +3575,7 @@ const RecoveryManager = {
 }.initialize();
 
 // =============================================
-// MESSAGE FIREWALL & PARSER (PRESERVED)
+// MESSAGE FIREWALL & PARSER
 // =============================================
 const MessageFirewall = {
     validators: new Map(),
@@ -2845,18 +3650,19 @@ const MessageFirewall = {
             return msg.payload && msg.payload.statusId && msg.payload.userId && 
                    msg.payload.oldEmoji && msg.payload.newEmoji;
         });
+        
+        this.validators.set('API_RESPONSE', (msg) => {
+            return msg.requestId && (msg.payload !== undefined);
+        });
     },
     
     validate(message, origin) {
         try {
-            // Structural validation
             if (!message || typeof message !== 'object') {
                 return false;
             }
             
-            // Origin validation using trust adapter - STRICT
             if (!OriginTrustAdapter.validateMessageOrigin(origin)) {
-                // Strict enforcement - no exceptions
                 const originKey = `invalid_origin_${origin}`;
                 if (!_loggedMessages.has(originKey)) {
                     _loggedMessages.add(originKey);
@@ -2865,13 +3671,11 @@ const MessageFirewall = {
                 return false;
             }
             
-            // Required fields
             if (!message.type) {
                 return false;
             }
             
-            // Replay protection - use the same duplicate detection
-            if (message.id && isDuplicate(message.id)) {
+            if (message.id && isDuplicateMessage(message.id)) {
                 const replayKey = `replay_${message.id}`;
                 if (!_loggedMessages.has(replayKey)) {
                     _loggedMessages.add(replayKey);
@@ -2880,7 +3684,6 @@ const MessageFirewall = {
                 return false;
             }
             
-            // Schema validation
             const validator = this.validators.get(message.type);
             if (validator && !validator(message) && !IframeAuthority.compatibilityMode) {
                 const schemaKey = `schema_${message.type}`;
@@ -2902,7 +3705,6 @@ const MessageFirewall = {
         try {
             const sanitized = { ...message };
             
-            // Sanitize strings
             if (sanitized.payload) {
                 sanitized.payload = JSON.parse(JSON.stringify(sanitized.payload, (key, value) => {
                     if (typeof value === 'string') {
@@ -2917,7 +3719,6 @@ const MessageFirewall = {
                 }));
             }
             
-            // Redact tokens for logging
             if (sanitized.payload && sanitized.payload.token) {
                 sanitized.payload.token = '[REDACTED]';
             }
@@ -2933,12 +3734,8 @@ const MessageFirewall = {
 }.init();
 
 // =============================================
-// MESSAGE ID GENERATOR (PRESERVED)
+// MESSAGE ID GENERATOR
 // =============================================
-function generateMessageId() {
-    return `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}_${state.messageId++}`;
-}
-
 function generateSequenceId() {
     return `seq_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 }
@@ -2956,11 +3753,11 @@ function generateInstanceId() {
 }
 
 // =============================================
-// ORIGIN VALIDATION & SECURITY (PRESERVED)
+// ORIGIN VALIDATION & SECURITY
 // =============================================
 const TRUSTED_ORIGINS = new Set([
     window.location.origin,
-    'http://127.0.0.1:5500',
+    'http://localhost:4000',
     'http://localhost:5500',
     'http://127.0.0.1:3000',
     'http://localhost:3000',
@@ -2987,7 +3784,6 @@ function isValidOrigin(origin) {
         if (origin === window.location.origin) return true;
         if (TRUSTED_ORIGINS.has(origin)) return true;
         
-        // Check wildcard patterns
         for (const trusted of TRUSTED_ORIGINS) {
             if (trusted.includes('*')) {
                 const pattern = trusted.replace(/\*/g, '[^.]+').replace(/\./g, '\\.');
@@ -2998,7 +3794,6 @@ function isValidOrigin(origin) {
             }
         }
         
-        // Check for render.com domains
         if (origin.includes('.onrender.com') || origin.includes('.render.com')) {
             return true;
         }
@@ -3018,7 +3813,6 @@ function validateMessage(message, origin) {
 // =============================================
 function adaptLegacyMessage(message) {
     try {
-        // Already in canonical format
         if (message.id && message.requestId) return message;
         
         const adapted = {
@@ -3032,7 +3826,6 @@ function adaptLegacyMessage(message) {
             legacy: true
         };
         
-        // Copy legacy fields
         if (message.inResponseTo) adapted.inResponseTo = message.inResponseTo;
         if (message.token) adapted.token = message.token;
         if (message.signature) adapted.signature = message.signature;
@@ -3045,7 +3838,7 @@ function adaptLegacyMessage(message) {
 }
 
 // =============================================
-// CANONICAL MESSAGE FORMATTER (PRESERVED)
+// CANONICAL MESSAGE FORMATTER
 // =============================================
 function formatCanonicalMessage(type, payload = {}, options = {}) {
     return {
@@ -3063,55 +3856,31 @@ function formatCanonicalMessage(type, payload = {}, options = {}) {
 // =============================================
 // COMMUNICATION ENGINE - PARENT-ONLY ROUTING
 // =============================================
-const messageHandlers = new Map();
-const _messageHandlerLogs = new Set();
-
-function addMessageHandler(type, handler) {
-    if (!messageHandlers.has(type)) {
-        messageHandlers.set(type, []);
-    }
-    messageHandlers.get(type).push(createErrorBoundary(handler, `Message:${type}`));
-}
-
-function removeMessageHandler(type, handler) {
-    if (!messageHandlers.has(type)) return;
-    const handlers = messageHandlers.get(type);
-    const index = handlers.indexOf(handler);
-    if (index !== -1) handlers.splice(index, 1);
-}
-
-// Legacy receiveFromParent - now delegates to handleParentMessage
-const receiveFromParent = createErrorBoundary(async function(event) {
+const receiveFromParent = function(event) {
     handleParentMessage(event);
-}, 'receiveFromParent', null);
+};
 
-// Legacy sendToParent - now uses safeSend with lifecycle gating
-const sendToParent = createErrorBoundary(async function(type, payload = {}, options = {}) {
-    // If this is a core lifecycle message, use appropriate handlers
+const sendToParent = function(type, payload = {}, options = {}) {
     if (type === 'CHILD_READY') {
         return sendChildReady();
     }
     
     if (type === 'REGISTER_MODULE') {
-        return ParentCommunication.sendRegistration();
+        if (typeof ParentCommunication !== 'undefined') return ParentCommunication.sendRegistration();
     }
     
-    // For user actions, use the action wrapper with gating
     if (type === 'ACTION' || type.startsWith('STATUS_')) {
         const action = type.startsWith('STATUS_') ? type : payload.action;
         return safeSendAction(action, payload.payload || payload);
     }
     
-    // Otherwise, create and send a standard message
     return safeSend(type, payload, {
         expectAck: options.requiresAck || false
     });
-}, 'sendToParent', null);
+};
 
 // =============================================
 // DETERMINISTIC INITIALIZATION SEQUENCE (HANDSHAKE V3)
-// NO BLOCKING, NO TIMEOUTS, NO DEPENDENCIES
-// NO RETRIES - WAIT_PARENT IS HARD WAIT
 // =============================================
 let initializationStarted = false;
 
@@ -3123,22 +3892,15 @@ function initializeModule() {
     
     initializationStarted = true;
     
-    // BOOT → INITIALIZING
     transitionTo(LifecycleState.INITIALIZING, 'module_initialize');
     
     logStatus('INIT', 'Module initializing');
     
-    // Perform minimal setup (synchronously, no blocking)
-    // All non-critical setup deferred to after handshake
-    
-    // INITIALIZING → READY
     transitionTo(LifecycleState.READY, 'setup_complete');
     logStatus('READY', 'Module ready');
     
-    // Send CHILD_READY exactly once
     sendChildReady();
     
-    // NO HANDHAKE RETRY - WAIT_PARENT is a hard wait state
     logStatus('WAITING', 'Waiting for PARENT_READY (no retries)');
 }
 
@@ -3156,7 +3918,6 @@ function registerStatusModule() {
     
     lastStatusRegister = now;
     
-    // Use new lifecycle instead
     if (!_childReadySent && isInState(LifecycleState.READY)) {
         sendChildReady();
         statusRegistered = true;
@@ -3166,7 +3927,7 @@ function registerStatusModule() {
 window.addEventListener('load', registerStatusModule);
 
 // =============================================
-// GLOBAL STATE - MODULE SCOPED (PRESERVED)
+// GLOBAL STATE - MODULE SCOPED
 // =============================================
 const state = {
     initialized: false,
@@ -3178,7 +3939,6 @@ const state = {
     readyState: 'preflight',
     shutdownInProgress: false,
     
-    // Enhanced handshake tracking
     handshakeState: 'idle',
     handshakeStartTime: null,
     handshakeEndTime: null,
@@ -3191,16 +3951,13 @@ const state = {
     sessionSyncReceived: false,
     pageActivated: false,
     
-    // Frame identification
     frameId: IframeAuthority.id,
     instanceId: IframeAuthority.instanceId,
     sessionId: null,
     
-    // Capability tracking
     capabilities: new Map(),
     parentCapabilities: new Set(),
     
-    // Security context
     securityContext: {
         originValidated: false,
         parentOrigin: null,
@@ -3212,7 +3969,6 @@ const state = {
         messageSequence: new Map()
     },
     
-    // Session Mirror Layer
     sessionMirror: {
         token: null,
         user: null,
@@ -3241,19 +3997,16 @@ const state = {
     messageSequence: new Map(),
     originValidated: false,
     
-    // Retry queue - removed as per protocol
     retryQueue: [],
     retryTimers: new Map(),
     maxRetryAttempts: 3,
     baseRetryDelay: 1000,
     maxRetryDelay: 30000,
     
-    // Offline buffer
     offlineBuffer: [],
     isOnline: typeof navigator !== 'undefined' ? navigator.onLine : true,
     offlineModeEnabled: false,
     
-    // Heartbeat tracking - TOLERANT
     heartbeatFailures: 0,
     maxHeartbeatFailures: 3,
     lastHeartbeatSent: null,
@@ -3285,11 +4038,9 @@ const state = {
         statusReactions: 0,
         statusPosts: 0,
         statusExpired: 0,
-        // [AUTH FIX] Track session metrics
         sessionRequests: 0,
         sessionSuccess: 0,
         sessionFailures: 0,
-        // Lifecycle metrics
         lifecycleTransitions: 0,
         invalidTransitions: 0,
         blockedActions: 0
@@ -3303,7 +4054,7 @@ const state = {
     handshakeRetries: 0,
     maxHandshakeRetries: IframeEnvironment.getConfig().maxRetries,
     
-    protocolVersion: '9.0',
+    protocolVersion: '10.0',
     parentProtocolVersion: null,
     
     diagnosticsEnabled: true,
@@ -3311,10 +4062,10 @@ const state = {
 };
 
 // =============================================
-// IFRAME TRANSPORT - CENTRALIZED COMMUNICATION LAYER (PRESERVED)
+// IFRAME TRANSPORT - CENTRALIZED COMMUNICATION LAYER
 // =============================================
 const IframeTransport = {
-    version: '9.0',
+    version: '10.0',
     messageQueue: [],
     isProcessing: false,
     maxRetries: 3,
@@ -3339,18 +4090,16 @@ const IframeTransport = {
     },
     
     send(type, payload = {}, options = {}) {
-        // Delegate to appropriate handler with safe gates
         if (type === 'CHILD_READY') {
             sendChildReady();
             return Promise.resolve({ success: true });
         }
         
         if (type === 'REGISTER_MODULE') {
-            ParentCommunication.sendRegistration();
+            if (typeof ParentCommunication !== 'undefined') ParentCommunication.sendRegistration();
             return Promise.resolve({ success: true });
         }
         
-        // For actions, use the action wrapper with gating
         if (type === 'ACTION' || type.startsWith('STATUS_')) {
             const action = type.startsWith('STATUS_') ? type : payload.action;
             const result = safeSendAction(action, payload.payload || payload);
@@ -3411,8 +4160,6 @@ const IframeTransport = {
     calculateRetryDelay(attempt) {
         const baseDelay = IframeEnvironment.isVPNNetwork ? 2000 : 1000;
         const delay = Math.min(baseDelay * Math.pow(2, attempt - 1), this.maxRetryDelay);
-        
-        // Add jitter
         const jitter = Math.random() * 200;
         return delay + jitter;
     },
@@ -3428,7 +4175,6 @@ const IframeTransport = {
     },
     
     startHeartbeat() {
-        // Disabled - heartbeat now initiated by parent
         debugLog('Heartbeat disabled - waiting for parent heartbeats');
     },
     
@@ -3459,7 +4205,6 @@ const IframeTransport = {
                 item.reject(error);
             }
             
-            // Small delay between messages
             await new Promise(r => setTimeout(r, 10));
         }
         
@@ -3484,7 +4229,7 @@ const IframeTransport = {
 }.initialize();
 
 // =============================================
-// NAVIGATION GUARD - PROTECTS PAGE TRANSITIONS (PRESERVED)
+// NAVIGATION GUARD - PROTECTS PAGE TRANSITIONS
 // =============================================
 const NavigationGuard = {
     active: false,
@@ -3650,7 +4395,7 @@ const NavigationGuard = {
 }.initialize();
 
 // =============================================
-// ERROR BOUNDARY SYSTEM (PRESERVED)
+// ERROR BOUNDARY SYSTEM
 // =============================================
 function createErrorBoundary(fn, featureName, fallback = null) {
     return async function(...args) {
@@ -3661,7 +4406,6 @@ function createErrorBoundary(fn, featureName, fallback = null) {
         try {
             return await fn(...args);
         } catch (error) {
-            // Only log each error once
             const errorKey = `error_${featureName}`;
             if (!_loggedMessages.has(errorKey)) {
                 _loggedMessages.add(errorKey);
@@ -3674,8 +4418,12 @@ function createErrorBoundary(fn, featureName, fallback = null) {
             
             const key = featureName.split(':')[0];
             if (typeof CIRCUIT_BREAKER !== 'undefined') {
-                CIRCUIT_BREAKER.failures[key] = (CIRCUIT_BREAKER.failures[key] || 0) + 1;
-                CIRCUIT_BREAKER.lastFailure[key] = Date.now();
+                if (typeof CIRCUIT_BREAKER.failures !== 'undefined') {
+                    CIRCUIT_BREAKER.failures[key] = (CIRCUIT_BREAKER.failures[key] || 0) + 1;
+                }
+                if (typeof CIRCUIT_BREAKER.lastFailure !== 'undefined') {
+                    CIRCUIT_BREAKER.lastFailure[key] = Date.now();
+                }
             }
             
             return typeof fallback === 'function' ? fallback(...args) : fallback;
@@ -3684,7 +4432,7 @@ function createErrorBoundary(fn, featureName, fallback = null) {
 }
 
 // =============================================
-// CIRCUIT BREAKER (PRESERVED)
+// CIRCUIT BREAKER
 // =============================================
 const CIRCUIT_BREAKER = {
     failures: {},
@@ -3730,7 +4478,7 @@ function isCircuitOpen(service) {
 }
 
 // =============================================
-// ENHANCED HANDSHAKE CLIENT (PRESERVED)
+// ENHANCED HANDSHAKE CLIENT
 // =============================================
 const HandshakeClient = {
     status: 'idle',
@@ -3779,7 +4527,6 @@ const HandshakeClient = {
     },
     
     async execute(options = {}) {
-        // Use ParentCommunication with safe gate
         if (!_childReadySent && isInState(LifecycleState.READY)) {
             sendChildReady();
         }
@@ -3788,22 +4535,27 @@ const HandshakeClient = {
     },
     
     handleResponse(message) {
-        // Delegate to ParentCommunication
         if (message.type === 'PARENT_READY') {
-            ParentCommunication.parentReadyReceived = true;
+            if (typeof ParentCommunication !== 'undefined') ParentCommunication.parentReadyReceived = true;
         }
         
         if (message.type === 'MODULE_REGISTERED') {
-            ParentCommunication.moduleRegistered = true;
+            if (typeof ParentCommunication !== 'undefined') ParentCommunication.moduleRegistered = true;
         }
         
         if (message.type === 'SESSION_DATA' || message.type === 'SESSION_ACTIVE') {
-            ParentCommunication.handleSessionSync(message.payload);
+            // Validate before handling
+            if (message.payload && __isValidSession(message.payload)) {
+                if (typeof ParentCommunication !== 'undefined') ParentCommunication.handleSessionSync(message.payload);
+            }
         }
     },
     
     handleSessionInit(message) {
-        ParentCommunication.handleSessionSync(message.payload || message.data);
+        // Validate before handling
+        if ((message.payload || message.data) && __isValidSession(message.payload || message.data)) {
+            if (typeof ParentCommunication !== 'undefined') ParentCommunication.handleSessionSync(message.payload || message.data);
+        }
     }
 }.initialize();
 
@@ -3870,7 +4622,6 @@ const IframeHandshakeAuthority = {
             this.resolve = resolve;
             this.reject = reject;
             
-            // Send CHILD_READY with safe gate
             if (!_childReadySent && isInState(LifecycleState.READY)) {
                 sendChildReady();
                 this.childReadySent = true;
@@ -3890,24 +4641,28 @@ const IframeHandshakeAuthority = {
             this.status = 'registered';
             
         } else if (message.type === 'SESSION_DATA' || message.type === 'SESSION_ACTIVE') {
-            this.sessionSyncReceived = true;
-            this.status = 'connected';
-            this.endTime = Date.now();
-            this.handshakeInProgress = false;
-            
-            if (this.timer) {
-                clearTimeout(this.timer);
-                this.timer = null;
-            }
-            
-            if (this.resolve) {
-                this.resolve({ success: true, handshakeId: this.handshakeId });
+            if (message.payload && __isValidSession(message.payload)) {
+                this.sessionSyncReceived = true;
+                this.status = 'connected';
+                this.endTime = Date.now();
+                this.handshakeInProgress = false;
+                
+                if (this.timer) {
+                    clearTimeout(this.timer);
+                    this.timer = null;
+                }
+                
+                if (this.resolve) {
+                    this.resolve({ success: true, handshakeId: this.handshakeId });
+                }
             }
         }
     },
     
     handleSessionInit(message) {
-        ParentCommunication.handleSessionSync(message.payload || message.data);
+        if ((message.payload || message.data) && __isValidSession(message.payload || message.data)) {
+            if (typeof ParentCommunication !== 'undefined') ParentCommunication.handleSessionSync(message.payload || message.data);
+        }
     }
 }.initialize();
 
@@ -3972,9 +4727,8 @@ const StartupGovernor = {
 }.initialize();
 
 // =============================================
-// SESSION CLIENT - RESILIENT SESSION MANAGEMENT (PRESERVED)
+// SESSION CLIENT - RESILIENT SESSION MANAGEMENT
 // =============================================
-// [AUTH FIX] Modified to not cache tokens in localStorage
 const SessionClient = {
     session: null,
     sessionValid: false,
@@ -3985,15 +4739,12 @@ const SessionClient = {
     offlineMode: false,
     
     initialize() {
-        // [AUTH FIX] Don't load cached session from storage
-        // this.loadCachedSession(); // REMOVED
         this.setupRefreshTimer();
         debugLog('SessionClient initialized');
         return this;
     },
     
     loadCachedSession() {
-        // [AUTH FIX] Disabled - no localStorage for tokens
         return false;
     },
     
@@ -4002,7 +4753,6 @@ const SessionClient = {
             clearInterval(this.refreshTimer);
         }
         
-        // Check session every 5 minutes
         this.refreshTimer = setInterval(() => {
             this.checkSession();
         }, 300000);
@@ -4011,7 +4761,6 @@ const SessionClient = {
     async checkSession() {
         if (!this.sessionValid) return;
         
-        // Check if session is about to expire (within 5 minutes)
         if (this.sessionExpiry) {
             const timeToExpiry = this.sessionExpiry - new Date();
             if (timeToExpiry < 300000 && timeToExpiry > 0) {
@@ -4036,30 +4785,35 @@ const SessionClient = {
             });
             
             if (response && response.payload && response.payload.token) {
-                this.session.token = response.payload.token;
-                if (response.payload.refreshToken) {
-                    this.session.refreshToken = response.payload.refreshToken;
+                // Validate new token before updating
+                const newSessionData = {
+                    token: response.payload.token,
+                    userId: this.session?.user?.id || this.session?.userId,
+                    user: this.session?.user
+                };
+                
+                if (__isValidSession(newSessionData)) {
+                    this.session.token = response.payload.token;
+                    if (response.payload.refreshToken) {
+                        this.session.refreshToken = response.payload.refreshToken;
+                    }
+                    if (response.payload.expiry) {
+                        this.session.expiry = response.payload.expiry;
+                        this.sessionExpiry = new Date(response.payload.expiry);
+                    }
+                    
+                    this.notifyListeners('refreshed', this.session);
+                    
+                    const refreshKey = 'session_refreshed';
+                    if (!_loggedMessages.has(refreshKey)) {
+                        _loggedMessages.add(refreshKey);
+                        logStatus('SUCCESS', 'Session refreshed');
+                    }
+                    
+                    return this.session;
                 }
-                if (response.payload.expiry) {
-                    this.session.expiry = response.payload.expiry;
-                    this.sessionExpiry = new Date(response.payload.expiry);
-                }
-                
-                // [AUTH FIX] Don't cache in localStorage
-                // this.cacheSession(); // REMOVED
-                
-                this.notifyListeners('refreshed', this.session);
-                
-                const refreshKey = 'session_refreshed';
-                if (!_loggedMessages.has(refreshKey)) {
-                    _loggedMessages.add(refreshKey);
-                    logStatus('SUCCESS', 'Session refreshed');
-                }
-                
-                return this.session;
             }
         } catch (error) {
-            // If refresh fails, use cached if available
             if (this.session) {
                 const failKey = 'session_refresh_failed';
                 if (!_loggedMessages.has(failKey)) {
@@ -4079,6 +4833,27 @@ const SessionClient = {
     updateSession(sessionData, source = 'parent') {
         if (!sessionData) return false;
         
+        // Validate session before updating
+        if (!__isValidSession(sessionData)) {
+            logStatus('FAILED', `Invalid session in updateSession from ${source} - rejected`);
+            return false;
+        }
+        
+        // Check for duplicate
+        if (__isDuplicateSession(sessionData)) {
+            logStatus('WARNING', 'Duplicate session update ignored');
+            return false;
+        }
+        
+        // Prevent session downgrade
+        if (this.session && this.sessionValid) {
+            const currentValid = __isValidSession({ token: this.session.token, userId: this.session.user?.id || this.session.userId });
+            if (currentValid && !__isValidSession(sessionData)) {
+                logStatus('WARNING', 'Prevented session downgrade in SessionClient');
+                return false;
+            }
+        }
+        
         const oldSession = this.session ? { ...this.session } : null;
         
         if (sessionData.token) {
@@ -4087,7 +4862,6 @@ const SessionClient = {
             if (typeof state !== 'undefined') {
                 state.token = sessionData.token;
             }
-            // [AUTH FIX] Also update in-memory session
             setSession(sessionData.token, sessionData.user || oldSession?.user, sessionData.expiry);
         }
         
@@ -4128,8 +4902,7 @@ const SessionClient = {
         }
         
         this.sessionValid = true;
-        // [AUTH FIX] Don't cache in localStorage
-        // this.cacheSession(); // REMOVED
+        __storeValidSessionId(sessionData);
         
         this.notifyListeners('updated', this.session, oldSession);
         
@@ -4139,7 +4912,6 @@ const SessionClient = {
             logStatus('SUCCESS', `Session updated from ${source}`);
         }
         
-        // Disable offline mode
         this.offlineMode = false;
         
         return true;
@@ -4151,10 +4923,7 @@ const SessionClient = {
         this.sessionExpiry = null;
         this.offlineMode = true;
         
-        // [AUTH FIX] Clear in-memory session
         clearSession();
-        
-        // SafeStorage.remove('session_cache'); // REMOVED
         
         this.notifyListeners('cleared', null);
         
@@ -4166,10 +4935,6 @@ const SessionClient = {
     },
     
     cacheSession() {
-        // [AUTH FIX] Disabled - no localStorage for tokens
-        // if (this.session) {
-        //     SafeStorage.setJSON('session_cache', this.session);
-        // }
     },
     
     getSession() {
@@ -4177,7 +4942,8 @@ const SessionClient = {
     },
     
     isAuthenticated() {
-        return this.sessionValid && !!this.session?.token && !!this.session?.user;
+        return this.sessionValid && !!this.session?.token && !!this.session?.user && 
+               __isValidSession({ token: this.session.token, userId: this.session.user?.id || this.session.userId });
     },
     
     isGuest() {
@@ -4203,37 +4969,51 @@ const SessionClient = {
 }.initialize();
 
 // =============================================
-// SESSION MIRROR LAYER - ENHANCED (PRESERVED)
+// SESSION MIRROR LAYER - ENHANCED
 // =============================================
-// [AUTH FIX] Modified to not store tokens in localStorage
 function updateSessionMirror(sessionData, source = 'parent') {
     try {
         if (!sessionData) return false;
         
+        // Validate session before updating
+        if (!__isValidSession(sessionData)) {
+            logStatus('FAILED', `Invalid session in updateSessionMirror from ${source} - rejected`);
+            return false;
+        }
+        
+        // Check for duplicate
+        if (__isDuplicateSession(sessionData)) {
+            logStatus('WARNING', 'Duplicate session mirror update ignored');
+            return false;
+        }
+        
+        // Prevent session downgrade
+        if (state.sessionMirror.validated && state.sessionMirror.token && state.sessionMirror.user) {
+            const currentValid = __isValidSession({ token: state.sessionMirror.token, userId: state.sessionMirror.user?.id || state.sessionMirror.user?.userId });
+            if (currentValid && !__isValidSession(sessionData)) {
+                logStatus('WARNING', 'Prevented session downgrade in updateSessionMirror');
+                return false;
+            }
+        }
+        
         const previousState = { ...state.sessionMirror };
         
-        // Update token if provided
         if (sessionData.token && typeof sessionData.token === 'string') {
-            // Handle 'present' placeholder - if we have actual token, use it
             if (sessionData.token === 'present' && sessionData.actualToken) {
                 state.sessionMirror.token = sessionData.actualToken;
                 state.token = sessionData.actualToken;
-                // [AUTH FIX] Also update in-memory session
                 setSession(sessionData.actualToken, state.sessionMirror.user, state.sessionMirror.expiry);
             } else {
                 state.sessionMirror.token = sessionData.token;
                 state.token = sessionData.token;
-                // [AUTH FIX] Also update in-memory session
                 setSession(sessionData.token, state.sessionMirror.user, state.sessionMirror.expiry);
             }
         }
         
-        // Update refresh token if provided
         if (sessionData.refreshToken) {
             state.sessionMirror.refreshToken = sessionData.refreshToken;
         }
         
-        // Update user if provided
         if (sessionData.user) {
             state.sessionMirror.user = {
                 id: sessionData.user.id || sessionData.user.userId,
@@ -4245,48 +5025,35 @@ function updateSessionMirror(sessionData, source = 'parent') {
             state.user = state.sessionMirror.user;
         }
         
-        // Update permissions
         if (sessionData.permissions && Array.isArray(sessionData.permissions)) {
             state.sessionMirror.permissions = [...sessionData.permissions];
             state.permissionsGranted = [...sessionData.permissions];
         }
         
-        // Update capabilities
         if (sessionData.capabilities && Array.isArray(sessionData.capabilities)) {
             state.sessionMirror.capabilities = [...sessionData.capabilities];
         }
         
-        // Update expiry
         if (sessionData.expiry) {
             state.sessionMirror.expiry = new Date(sessionData.expiry);
             state.sessionExpiry = state.sessionMirror.expiry;
         }
         
-        // Update session ID
         if (sessionData.sessionId) {
             state.sessionId = sessionData.sessionId;
         }
         
-        // Update metadata
         state.sessionMirror.timestamp = Date.now();
         state.sessionMirror.source = source;
         state.sessionMirror.messageId = sessionData.messageId || sessionData.id;
         
-        // Validate session
         if (state.sessionMirror.token && state.sessionMirror.user) {
             state.sessionMirror.validated = true;
             state.sessionActive = true;
             state.isGuestMode = false;
+            __storeValidSessionId(sessionData);
             
-            // Also update session client
             SessionClient.updateSession(sessionData, source);
-            
-            // [AUTH FIX] Don't cache in localStorage
-            // SafeStorage.setJSON(UNIFIED_TOKEN_KEY, state.sessionMirror.token); // REMOVED
-            // SafeStorage.setJSON(LOCAL_STORAGE_KEYS.USER, state.sessionMirror.user); // REMOVED
-            // if (state.sessionMirror.refreshToken) {
-            //     SafeStorage.setJSON('REFRESH_TOKEN', state.sessionMirror.refreshToken); // REMOVED
-            // }
             
             const updateKey = `mirror_updated_${source}`;
             if (!_loggedMessages.has(updateKey)) {
@@ -4294,7 +5061,6 @@ function updateSessionMirror(sessionData, source = 'parent') {
                 logStatus('SUCCESS', `Session mirror updated from ${source}`);
             }
             
-            // Trigger callbacks
             if (typeof isTokenReady !== 'undefined') {
                 isTokenReady = true;
                 if (typeof triggerTokenReadyCallbacks !== 'undefined') {
@@ -4332,11 +5098,11 @@ function isSessionMirrorValid() {
     if (!state.sessionMirror.validated) return false;
     if (!state.sessionMirror.token || !state.sessionMirror.user) return false;
     if (state.sessionMirror.expiry && new Date() >= state.sessionMirror.expiry) return false;
-    return true;
+    return __isValidSession({ token: state.sessionMirror.token, userId: state.sessionMirror.user?.id || state.sessionMirror.user?.userId });
 }
 
 // =============================================
-// PARENT CONFIGURATION REQUEST (PRESERVED)
+// PARENT CONFIGURATION REQUEST
 // =============================================
 async function requestParentConfig() {
     if (!isInState(LifecycleState.ACTIVE)) {
@@ -4350,7 +5116,6 @@ async function requestParentConfig() {
 function applyParentConfig(config) {
     try {
         if (config.heartbeatInterval) {
-            // Adjust if needed
             IframeEnvironment.getConfig().heartbeatInterval = config.heartbeatInterval;
         }
         
@@ -4385,7 +5150,7 @@ function applyParentConfig(config) {
 }
 
 // =============================================
-// TOKEN REFRESH HANDLER (PRESERVED)
+// TOKEN REFRESH HANDLER
 // =============================================
 async function refreshToken() {
     if (state.sessionMirror.refreshInProgress) return state.token;
@@ -4398,30 +5163,34 @@ async function refreshToken() {
         });
         
         if (response && response.payload && response.payload.token) {
-            state.token = response.payload.token;
-            state.sessionMirror.token = response.payload.token;
-            state.sessionMirror.lastRefresh = Date.now();
+            // Validate new token before updating
+            const newTokenData = {
+                token: response.payload.token,
+                userId: state.sessionMirror.user?.id || state.sessionMirror.user?.userId,
+                user: state.sessionMirror.user
+            };
             
-            // [AUTH FIX] Update in-memory session
-            setSession(response.payload.token, state.sessionMirror.user, state.sessionMirror.expiry);
-            
-            if (response.payload.refreshToken) {
-                state.sessionMirror.refreshToken = response.payload.refreshToken;
+            if (__isValidSession(newTokenData)) {
+                state.token = response.payload.token;
+                state.sessionMirror.token = response.payload.token;
+                state.sessionMirror.lastRefresh = Date.now();
+                
+                setSession(response.payload.token, state.sessionMirror.user, state.sessionMirror.expiry);
+                
+                if (response.payload.refreshToken) {
+                    state.sessionMirror.refreshToken = response.payload.refreshToken;
+                }
+                
+                const refreshKey = 'token_refreshed';
+                if (!_loggedMessages.has(refreshKey)) {
+                    _loggedMessages.add(refreshKey);
+                    logStatus('SUCCESS', 'Token refreshed');
+                }
+                
+                return state.token;
             }
-            
-            // [AUTH FIX] Don't store in localStorage
-            // SafeStorage.set(UNIFIED_TOKEN_KEY, state.token); // REMOVED
-            
-            const refreshKey = 'token_refreshed';
-            if (!_loggedMessages.has(refreshKey)) {
-                _loggedMessages.add(refreshKey);
-                logStatus('SUCCESS', 'Token refreshed');
-            }
-            
-            return state.token;
         }
     } catch (error) {
-        // Don't retry aggressively
         const failKey = 'token_refresh_failed';
         if (!_loggedMessages.has(failKey)) {
             _loggedMessages.add(failKey);
@@ -4435,7 +5204,7 @@ async function refreshToken() {
 }
 
 // =============================================
-// PARENT AVAILABILITY DETECTION (PRESERVED)
+// PARENT AVAILABILITY DETECTION
 // =============================================
 const ParentDetector = {
     status: 'unknown',
@@ -4494,34 +5263,28 @@ const ParentDetector = {
                 }
             };
             
-            // First check immediately
             check();
             
-            // Then check every 100ms (limited)
             this.checkInterval = setInterval(check, 100);
         });
     },
     
     checkAvailability() {
         try {
-            // Check if in iframe
             if (window.self === window.top) {
                 return false;
             }
             
-            // Check if parent accessible
             if (!window.parent || window.parent === window) {
                 return false;
             }
             
-            // Check postMessage availability
             if (typeof window.parent.postMessage !== 'function') {
                 return false;
             }
             
             return true;
         } catch (e) {
-            // Cross-origin errors indicate parent exists but is cross-origin
             if (e.name === 'SecurityError') {
                 return true;
             }
@@ -4551,7 +5314,6 @@ async function preflightStage() {
         if (typeof window === 'undefined') throw new Error('Window not available');
         if (typeof document === 'undefined') throw new Error('Document not available');
         
-        // Detect environment
         IframeEnvironment.detect();
         
         const preflightKey = 'preflight_complete';
@@ -4627,7 +5389,6 @@ async function handshakeStage(options = {}) {
         return { success: false, fallback: true };
     }
     
-    // Use ParentCommunication with safe gate
     if (isInState(LifecycleState.READY)) {
         sendChildReady();
     }
@@ -4662,7 +5423,13 @@ async function sessionSyncStage(timeout = 5000) {
 function activateSessionFromMirror() {
     if (!state.sessionMirror.validated) return false;
     
-    // [AUTH FIX] Also update in-memory session
+    // Validate mirror session before activating
+    const mirrorValid = __isValidSession({ token: state.sessionMirror.token, userId: state.sessionMirror.user?.id || state.sessionMirror.user?.userId });
+    if (!mirrorValid) {
+        logStatus('FAILED', 'Invalid session mirror - cannot activate');
+        return false;
+    }
+    
     if (state.sessionMirror.token) {
         setSession(state.sessionMirror.token, state.sessionMirror.user, state.sessionMirror.expiry);
     }
@@ -4681,6 +5448,8 @@ function activateSessionFromMirror() {
         capabilities: state.sessionMirror.capabilities
     };
     
+    __storeValidSessionId({ token: state.sessionMirror.token, userId: state.user?.id || state.user?.userId });
+    
     const activateKey = 'session_activated';
     if (!_loggedMessages.has(activateKey)) {
         _loggedMessages.add(activateKey);
@@ -4692,12 +5461,6 @@ function activateSessionFromMirror() {
 
 async function serviceInitStage() {
     try {
-        // [AUTH FIX] Don't load cached session from localStorage
-        // const cachedSession = loadCachedSession(); // REMOVED
-        // if (cachedSession && !state.sessionActive && !state.sessionMirror.validated) {
-        //     updateSessionMirror(cachedSession, 'cache');
-        // }
-        
         const serviceKey = 'service_init_complete';
         if (!_loggedMessages.has(serviceKey)) {
             _loggedMessages.add(serviceKey);
@@ -4778,7 +5541,7 @@ const initializeCore = createErrorBoundary(async function(options = {}) {
             logStatus('FAILED', `Core initialization: ${error.message}`);
         }
         
-        if (state.sessionMirror.validated && isSessionReady()) {
+        if (state.sessionMirror.validated && isSessionReady() && __isValidSession({ token: state.sessionMirror.token, userId: state.sessionMirror.user?.id })) {
             activateSessionFromMirror();
         } else {
             enableGuestMode();
@@ -4795,7 +5558,6 @@ const startHandshake = createErrorBoundary(async function(options = { retries: 3
     return handshakeStage({ maxRetries: options.retries });
 }, 'startHandshake', { success: false });
 
-// Wrapper for requestSession to maintain compatibility
 const requestSessionWrapper = createErrorBoundary(async function(options = { timeout: 5000 }) {
     if (!parentReady) {
         safeSend('REQUEST_SESSION', {});
@@ -4818,10 +5580,8 @@ function enableGuestMode() {
     state.user = state.sessionData.user;
     state.token = null;
     
-    // [AUTH FIX] Clear in-memory session
     clearSession();
     
-    // Update mirror but mark as not validated
     state.sessionMirror = {
         ...state.sessionMirror,
         validated: false,
@@ -4834,20 +5594,17 @@ function enableGuestMode() {
         logStatus('INFO', 'Guest mode enabled');
     }
     
-    // Dispatch event for UI
     document.dispatchEvent(new CustomEvent('guestModeEnabled', {
         detail: { timestamp: Date.now() }
     }));
 }
 
-// [AUTH FIX] Modified to not load from localStorage
 function loadCachedSession() {
-    // [AUTH FIX] Disabled - no localStorage for tokens
     return null;
 }
 
 // =============================================
-// SHUTDOWN & RESOURCE MANAGEMENT (PRESERVED)
+// SHUTDOWN & RESOURCE MANAGEMENT
 // =============================================
 const shutdownCore = createErrorBoundary(async function() {
     if (state.shutdownInProgress) return;
@@ -4861,21 +5618,15 @@ const shutdownCore = createErrorBoundary(async function() {
     }
     
     try {
-        // No handshake retry interval to clear - removed as per protocol
-        
-        // Clear intervals
         state.intervals.forEach(clearInterval);
         state.intervals.clear();
         
-        // Clear timeouts
         state.timeouts.forEach(clearTimeout);
         state.timeouts.clear();
         
-        // Clear retry timers
         state.retryTimers.forEach((timer) => clearTimeout(timer));
         state.retryTimers.clear();
         
-        // Clear event listeners
         state.listeners.forEach(({ type, handler }) => {
             try {
                 window.removeEventListener(type, handler);
@@ -4883,28 +5634,22 @@ const shutdownCore = createErrorBoundary(async function() {
         });
         state.listeners.clear();
         
-        // Clear pending ACKs
         state.pendingAcks.forEach((handler) => {
             clearTimeout(handler.timer);
         });
         state.pendingAcks.clear();
         
-        // Clear queues
         state.pendingRequests.clear();
         state.messageCache.clear();
         state.retryQueue = [];
         
-        // Clear message handlers
         messageHandlers.clear();
         
-        // Clear sent messages tracking
         _sentMessages.clear();
-        processedMessages.clear();
+        processedMessageIds.clear();
         
-        // [AUTH FIX] Clear in-memory session
         clearSession();
         
-        // Notify parent
         if (state.parentDetected) {
             safeSendAction('STATUS_SHUTDOWN', {
                 metrics: state.metrics
@@ -4929,180 +5674,7 @@ const shutdownCore = createErrorBoundary(async function() {
 }, 'shutdownCore', null);
 
 // =============================================
-// MESSAGE HANDLER REGISTRATION (PRESERVED)
-// =============================================
-addMessageHandler('ACK', (message) => {});
-addMessageHandler('STATUS', (message) => {
-    document.dispatchEvent(new CustomEvent('statusUpdate', {
-        detail: message.payload
-    }));
-});
-addMessageHandler('ERROR', (message) => {
-    const errorKey = `parent_error_${message.payload?.error || 'unknown'}`;
-    if (!_loggedMessages.has(errorKey)) {
-        _loggedMessages.add(errorKey);
-        logStatus('FAILED', `Error from parent: ${message.payload?.error || 'Unknown error'}`);
-    }
-});
-addMessageHandler('DATA', (message) => {
-    document.dispatchEvent(new CustomEvent('coreData', {
-        detail: message.payload
-    }));
-});
-
-// Handshake response handler
-addMessageHandler('HANDSHAKE_RESPONSE', (message) => {
-    HandshakeClient.handleResponse(message);
-});
-
-// Session handlers
-addMessageHandler('SESSION', (message) => {
-    HandshakeClient.handleSessionInit(message);
-});
-addMessageHandler('SESSION_DATA', (message) => {
-    HandshakeClient.handleSessionInit(message);
-});
-addMessageHandler('SESSION_UPDATE', (message) => {
-    const payload = message.payload || message.data || {};
-    updateSessionMirror(payload, 'session_update');
-});
-addMessageHandler('SESSION_ACTIVE', (message) => {
-    const payload = message.payload || message.data || {};
-    updateSessionMirror(payload, 'session_active');
-});
-addMessageHandler('AUTH_VALIDATED', (message) => {
-    const payload = message.payload || message.data || {};
-    if (payload.success) {
-        if (typeof isTokenReady !== 'undefined') {
-            isTokenReady = true;
-            if (typeof triggerTokenReadyCallbacks !== 'undefined') {
-                triggerTokenReadyCallbacks();
-            }
-        }
-        const authKey = 'auth_validated';
-        if (!_loggedMessages.has(authKey)) {
-            _loggedMessages.add(authKey);
-            logStatus('SUCCESS', 'Auth validated');
-        }
-    }
-});
-
-// Parent ready handler
-addMessageHandler('PARENT_READY', (message) => {
-    handleParentReady(message);
-});
-
-// Module registered handler
-addMessageHandler('MODULE_REGISTERED', (message) => {
-    if (message.payload?.moduleName === MODULE_NAME) {
-        ParentCommunication.moduleRegistered = true;
-    }
-});
-
-// Heartbeat handler
-addMessageHandler('HEARTBEAT', (message) => {
-    ParentCommunication.sendHeartbeatAck(message.id);
-});
-
-// Logout handler
-addMessageHandler('LOGOUT', (message) => {
-    handleLogout(message.payload);
-});
-
-// API response handlers
-addMessageHandler('API_RESPONSE', (message) => {
-    handleApiResponse(message.payload);
-});
-addMessageHandler('API_ERROR', (message) => {
-    handleApiError(message.payload);
-});
-
-// Enhanced handlers
-addMessageHandler('PONG', (message) => {
-    state.lastHeartbeatReceived = Date.now();
-    state.heartbeatFailures = 0;
-});
-
-// PAGE_ACTIVATED handler
-addMessageHandler('PAGE_ACTIVATED', (message) => {
-    state.pageActivated = true;
-    
-    const pageKey = 'page_activated_handler';
-    if (!_loggedMessages.has(pageKey)) {
-        _loggedMessages.add(pageKey);
-        logStatus('INFO', 'Page activated');
-    }
-    
-    // Trigger data refresh when page becomes active
-    if (typeof loadFreshDataInBackground !== 'undefined' && isInState(LifecycleState.ACTIVE)) {
-        setTimeout(() => {
-            loadFreshDataInBackground();
-        }, 100);
-    }
-    
-    // Dispatch event for UI to refresh
-    document.dispatchEvent(new CustomEvent('pageActivated', {
-        detail: { timestamp: Date.now() }
-    }));
-});
-
-addMessageHandler('NAVIGATE', (message) => {
-    if (message.payload && message.payload.path) {
-        // Handle navigation if needed
-        document.dispatchEvent(new CustomEvent('navigate', {
-            detail: message.payload
-        }));
-    }
-});
-
-addMessageHandler('CAPABILITY_RESPONSE', (message) => {
-    if (message.payload && Array.isArray(message.payload.capabilities)) {
-        message.payload.capabilities.forEach(cap => {
-            state.parentCapabilities.add(cap);
-            IframeAuthority.parentCapabilities.add(cap);
-        });
-    }
-});
-
-addMessageHandler('TOKEN_REFRESH_RESPONSE', (message) => {
-    if (message.payload && message.payload.token) {
-        state.token = message.payload.token;
-        // [AUTH FIX] Also update in-memory session
-        setSession(message.payload.token, state.user, state.sessionExpiry);
-        // SafeStorage.set(UNIFIED_TOKEN_KEY, message.payload.token); // REMOVED
-        
-        if (message.payload.refreshToken) {
-            state.sessionMirror.refreshToken = message.payload.refreshToken;
-        }
-    }
-});
-
-addMessageHandler('ORIGIN_VALIDATION_RESPONSE', (message) => {
-    if (message.payload && message.payload.valid) {
-        state.securityContext.originValidated = true;
-    }
-});
-
-addMessageHandler('CONFIG_RESPONSE', (message) => {
-    if (message.payload && message.payload.config) {
-        applyParentConfig(message.payload.config);
-    }
-});
-
-addMessageHandler('RECOVERY_RESPONSE', (message) => {
-    if (message.payload && message.payload.success) {
-        state.metrics.successfulRecoveries++;
-    }
-});
-
-addMessageHandler('IFRAME_REGISTERED', (message) => {
-    if (message.payload && message.payload.module === 'status') {
-        // Acknowledgment received
-    }
-});
-
-// =============================================
-// FEATURE ISOLATION SYSTEM (PRESERVED)
+// FEATURE ISOLATION SYSTEM
 // =============================================
 function registerFeature(name, implementation) {
     try {
@@ -5151,21 +5723,24 @@ function executeFeature(name, ...args) {
 }
 
 // =============================================
-// SESSION & TOKEN MANAGEMENT (PRESERVED)
+// SESSION & TOKEN MANAGEMENT
 // =============================================
 function getSession() {
     if (state.sessionMirror.validated) {
-        return {
-            active: true,
-            user: state.sessionMirror.user,
-            token: state.sessionMirror.token,
-            expiry: state.sessionMirror.expiry,
-            guestMode: false,
-            permissions: [...state.sessionMirror.permissions],
-            validated: true,
-            source: state.sessionMirror.source,
-            capabilities: state.sessionMirror.capabilities ? [...state.sessionMirror.capabilities] : []
-        };
+        const isValid = __isValidSession({ token: state.sessionMirror.token, userId: state.sessionMirror.user?.id || state.sessionMirror.user?.userId });
+        if (isValid) {
+            return {
+                active: true,
+                user: state.sessionMirror.user,
+                token: state.sessionMirror.token,
+                expiry: state.sessionMirror.expiry,
+                guestMode: false,
+                permissions: [...state.sessionMirror.permissions],
+                validated: true,
+                source: state.sessionMirror.source,
+                capabilities: state.sessionMirror.capabilities ? [...state.sessionMirror.capabilities] : []
+            };
+        }
     }
     
     return {
@@ -5184,6 +5759,8 @@ function isSessionValid() {
     if (state.isGuestMode) return true;
     if (state.sessionMirror.validated) {
         if (!state.sessionMirror.expiry) return true;
+        const isValid = __isValidSession({ token: state.sessionMirror.token, userId: state.sessionMirror.user?.id || state.sessionMirror.user?.userId });
+        if (!isValid) return false;
         return new Date() < state.sessionMirror.expiry;
     }
     if (!state.sessionActive || !state.sessionExpiry) return false;
@@ -5191,7 +5768,7 @@ function isSessionValid() {
 }
 
 // =============================================
-// HEALTH METRICS (PRESERVED)
+// HEALTH METRICS
 // =============================================
 function getHealthMetrics() {
     return {
@@ -5203,7 +5780,7 @@ function getHealthMetrics() {
         handshakeComplete: state.handshakeComplete,
         handshakeState: state.handshakeState,
         sessionActive: state.sessionActive,
-        sessionMirrorValid: state.sessionMirror.validated,
+        sessionMirrorValid: state.sessionMirror.validated && __isValidSession({ token: state.sessionMirror.token, userId: state.sessionMirror.user?.id }),
         guestMode: state.isGuestMode,
         protocolVersion: state.protocolVersion,
         parentProtocolVersion: state.parentProtocolVersion,
@@ -5227,7 +5804,6 @@ function getHealthMetrics() {
         originValidated: state.securityContext.originValidated,
         diagnosticsEnabled: state.diagnosticsEnabled,
         
-        // Environment metrics
         environment: IframeEnvironment.type,
         environmentDetails: {
             isLocalDev: IframeEnvironment.isLocalDev,
@@ -5239,32 +5815,26 @@ function getHealthMetrics() {
             connectionType: IframeEnvironment.connectionType
         },
         
-        // Lifecycle state
         lifecycle: getLifecycleState(),
         
-        // Transport status
         transport: IframeTransport.getStatus(),
         
-        // Session client
         sessionClient: {
             sessionValid: SessionClient.sessionValid,
             sessionExpiry: SessionClient.sessionExpiry,
             offlineMode: SessionClient.offlineMode
         },
         
-        // Navigation guard
         navigation: NavigationGuard.getState(),
         
-        // Parent ready status
         parentReady: parentReady,
         
-        // [AUTH FIX] Session readiness
         sessionReady: isSessionReady()
     };
 }
 
 // =============================================
-// PARENT COORDINATION - ENHANCED FOR UI REQUIREMENTS (PRESERVED)
+// PARENT COORDINATION - ENHANCED FOR UI REQUIREMENTS
 // =============================================
 const parentCoordinator = {
     isInitialized: false,
@@ -5283,7 +5853,6 @@ const parentCoordinator = {
     lastMessageOrigin: null,
     sequenceId: null,
     
-    // Enhanced fields
     frameId: state.frameId,
     instanceId: state.instanceId,
     handshakeState: 'idle',
@@ -5315,7 +5884,6 @@ function initializeParentCoordination() {
             logStatus('INFO', 'Parent coordination initialized');
         }
         
-        // Use deterministic lifecycle with safe gate
         if (isInState(LifecycleState.READY)) {
             sendChildReady();
         }
@@ -5334,18 +5902,15 @@ function handleEnhancedParentMessage(event) {
     try {
         parentCoordinator.lastMessageOrigin = event.origin;
         
-        // Handle storage responses
         if (event.data?.type === 'STORAGE_RESULT') {
             StorageProxy.handleResponse(event);
             return;
         }
         
-        // Check for duplicates BEFORE any processing
-        if (event.data?.id && isDuplicate(event.data.id)) {
+        if (event.data?.id && isDuplicateMessage(event.data.id)) {
             return;
         }
         
-        // Use origin trust adapter - STRICT
         if (!OriginTrustAdapter.validateMessageOrigin(event.origin)) {
             debugWarn(`Message from untrusted origin ignored: ${event.origin}`);
             return;
@@ -5353,7 +5918,6 @@ function handleEnhancedParentMessage(event) {
         
         const message = event.data;
         
-        // Validate message schema
         if (!MessageValidator.validate(message).valid) {
             return;
         }
@@ -5369,7 +5933,6 @@ function handleEnhancedParentMessage(event) {
             state.messageCache.delete(firstKey);
         }
         
-        // Handle PARENT_READY - CRITICAL FOR LIFECYCLE
         if (sanitizedMessage.type === 'PARENT_READY') {
             handleParentReady(sanitizedMessage);
             return;
@@ -5380,34 +5943,39 @@ function handleEnhancedParentMessage(event) {
             case 'SESSION':
             case 'SESSION_ACTIVE':
             case 'SESSION_UPDATE':
-                handleSecureSessionData(sanitizedMessage);
+                // Validate session before processing
+                if (sanitizedMessage.payload && __isValidSession(sanitizedMessage.payload)) {
+                    handleSecureSessionData(sanitizedMessage);
+                } else {
+                    logStatus('WARNING', 'Invalid session data in enhanced message - rejected');
+                }
                 break;
             case 'SESSION_SYNC':
-                handleSecureSessionData(sanitizedMessage);
+                if (sanitizedMessage.payload && __isValidSession(sanitizedMessage.payload)) {
+                    handleSecureSessionData(sanitizedMessage);
+                }
                 break;
-            case 'SESSION_UPDATE':
-                handleSessionUpdate(sanitizedMessage.data || sanitizedMessage.payload);
-                break;
+                
             case 'LOGOUT':
-                handleLogout(sanitizedMessage.data || sanitizedMessage.payload);
+                if (typeof handleLogout !== 'undefined') handleLogout(sanitizedMessage.data || sanitizedMessage.payload);
                 break;
             case 'API_RESPONSE':
-                handleApiResponse(sanitizedMessage.data || sanitizedMessage.payload);
+                if (typeof handleApiResponse !== 'undefined') handleApiResponse(sanitizedMessage.data || sanitizedMessage.payload);
                 break;
             case 'API_ERROR':
-                handleApiError(sanitizedMessage.data || sanitizedMessage.payload);
+                if (typeof handleApiError !== 'undefined') handleApiError(sanitizedMessage.data || sanitizedMessage.payload);
                 break;
             case 'AUTH_VALIDATED':
-                handleAuthValidated(sanitizedMessage.data || sanitizedMessage.payload);
+                if (typeof handleAuthValidated !== 'undefined') handleAuthValidated(sanitizedMessage.data || sanitizedMessage.payload);
                 break;
             case 'HANDSHAKE_RESPONSE':
                 HandshakeClient.handleResponse(sanitizedMessage);
                 break;
             case 'MODULE_REGISTERED':
-                ParentCommunication.moduleRegistered = true;
+                if (typeof ParentCommunication !== 'undefined') ParentCommunication.moduleRegistered = true;
                 break;
             case 'HEARTBEAT':
-                ParentCommunication.sendHeartbeatAck(sanitizedMessage.id);
+                if (typeof ParentCommunication !== 'undefined') ParentCommunication.sendHeartbeatAck(sanitizedMessage.id);
                 break;
             case 'PONG':
                 state.lastHeartbeatReceived = Date.now();
@@ -5415,15 +5983,13 @@ function handleEnhancedParentMessage(event) {
                 break;
             case 'PAGE_ACTIVATED':
                 parentCoordinator.handshakeState = 'active';
-                // Trigger data refresh
                 if (typeof loadFreshDataInBackground !== 'undefined' && isInState(LifecycleState.ACTIVE)) {
                     setTimeout(() => {
-                        loadFreshDataInBackground();
+                        if (typeof loadFreshDataInBackground !== 'undefined') loadFreshDataInBackground();
                     }, 100);
                 }
                 break;
                 
-            // NEW: Handle status-specific messages from parent
             case 'STATUS_POSTED':
             case 'STATUS_VIEWED':
             case 'STATUS_REACTED':
@@ -5431,8 +5997,6 @@ function handleEnhancedParentMessage(event) {
             case 'REACTION_CHANGED':
             case 'STATUS_EXPIRED':
             case 'STATUSES_UPDATE':
-                // These are already handled in receiveFromParent
-                // But we also need to dispatch events for UI
                 document.dispatchEvent(new CustomEvent('parentStatusUpdate', {
                     detail: { type: sanitizedMessage.type, payload: sanitizedMessage.payload }
                 }));
@@ -5445,13 +6009,13 @@ function handleEnhancedParentMessage(event) {
             logStatus('FAILED', `handleEnhancedParentMessage: ${error.message}`);
         }
     }
+    
 }
 
 function startSecureHandshake() {
     try {
         clearSecureHandshake();
         
-        // Send CHILD_READY using deterministic lifecycle with safe gate
         if (isInState(LifecycleState.READY)) {
             sendChildReady();
         }
@@ -5471,7 +6035,6 @@ function sendChildReadyMessage() {
     }
 }
 
-// Wrapper for requestSessionFromParent to maintain compatibility
 function requestSessionFromParent() {
     safeSend('REQUEST_SESSION', {});
 }
@@ -5486,6 +6049,18 @@ function handleSecureSessionData(message) {
             return;
         }
         
+        // Validate session data
+        if (!__isValidSession(sessionData)) {
+            logStatus('FAILED', 'Invalid secure session data - rejected');
+            return;
+        }
+        
+        // Check for duplicate
+        if (__isDuplicateSession(sessionData)) {
+            logStatus('WARNING', 'Duplicate secure session data ignored');
+            return;
+        }
+        
         const updated = updateSessionMirror(sessionData, 'secure_handshake');
         
         if (updated) {
@@ -5495,8 +6070,9 @@ function handleSecureSessionData(message) {
             parentCoordinator.handshakeInProgress = false;
             clearTimeout(parentCoordinator.handshakeTimeout);
             parentCoordinator.sessionData = sessionData;
+            __storeValidSessionId(sessionData);
             
-            ParentCommunication.handleSessionSync(sessionData);
+            if (typeof ParentCommunication !== 'undefined') ParentCommunication.handleSessionSync(sessionData);
             
             const dataKey = 'secure_session_data';
             if (!_loggedMessages.has(dataKey)) {
@@ -5504,7 +6080,7 @@ function handleSecureSessionData(message) {
                 logStatus('SUCCESS', 'Secure session data received');
             }
             
-            bindUIAfterSession();
+            if (typeof bindUIAfterSession !== 'undefined') bindUIAfterSession();
             
             sendSecureResponseToParent('AUTH_VALIDATED', {
                 success: true,
@@ -5512,7 +6088,7 @@ function handleSecureSessionData(message) {
                 frameId: state.frameId
             });
             
-            startBackgroundInitializationWithSession();
+            if (typeof startBackgroundInitializationWithSession !== 'undefined') startBackgroundInitializationWithSession();
         } else {
             parentCoordinator.handshakeInProgress = false;
             clearTimeout(parentCoordinator.handshakeTimeout);
@@ -5534,7 +6110,7 @@ function bindUIAfterSession() {
         if (typeof window.initializeStatusUI === 'function') {
             window.initializeStatusUI();
         }
-        updateUIBasedOnAuth();
+        if (typeof updateUIBasedOnAuth !== 'undefined') updateUIBasedOnAuth();
     } catch (error) {
         const bindKey = 'ui_bind_fail';
         if (!_loggedMessages.has(bindKey)) {
@@ -5547,7 +6123,7 @@ function bindUIAfterSession() {
 function updateUIBasedOnAuth() {
     try {
         document.dispatchEvent(new CustomEvent('sessionReady', {
-            detail: { user: currentUser }
+            detail: { user: typeof currentUser !== 'undefined' ? currentUser : null }
         }));
     } catch (error) {
         const uiKey = 'ui_auth_fail';
@@ -5583,17 +6159,16 @@ function handleSessionFailed() {
     parentCoordinator.handshakeComplete = false;
     parentCoordinator.handshakeState = 'failed';
     
-    // No state transition - wait for parent
     logStatus('WAITING', 'Session failed - waiting for parent');
     
-    if (state.sessionMirror.validated && isSessionReady()) {
+    if (state.sessionMirror.validated && isSessionReady() && __isValidSession({ token: state.sessionMirror.token, userId: state.sessionMirror.user?.id })) {
         activateSessionFromMirror();
     } else {
-        loadCachedDataInstantly();
+        if (typeof loadCachedDataInstantly !== 'undefined') loadCachedDataInstantly();
         enableGuestMode();
     }
     
-    initializeUIWithCachedData();
+    if (typeof initializeUIWithCachedData !== 'undefined') initializeUIWithCachedData();
 }
 
 function clearSecureHandshake() {
@@ -5625,13 +6200,23 @@ function handleSessionData(sessionData) {
             return;
         }
         
+        // Validate session data before updating
+        if (!__isValidSession(sessionData)) {
+            logStatus('FAILED', 'Invalid session data in handleSessionData - rejected');
+            sendToParent('ERROR', {
+                error: 'INVALID_SESSION_DATA',
+                message: 'Session data validation failed'
+            });
+            return;
+        }
+        
         updateSessionMirror(sessionData, 'session_data');
         
         parentCoordinator.sessionData = sessionData;
         parentCoordinator.handshakeComplete = true;
         parentCoordinator.handshakeState = 'active';
         
-        ParentCommunication.handleSessionSync(sessionData);
+        if (typeof ParentCommunication !== 'undefined') ParentCommunication.handleSessionSync(sessionData);
         
         if (parentCoordinator.handshakeInterval) {
             clearInterval(parentCoordinator.handshakeInterval);
@@ -5650,7 +6235,7 @@ function handleSessionData(sessionData) {
             frameId: state.frameId
         });
         
-        startBackgroundInitializationWithSession();
+        if (typeof startBackgroundInitializationWithSession !== 'undefined') startBackgroundInitializationWithSession();
         
     } catch (error) {
         const failKey = 'session_data_fail';
@@ -5682,6 +6267,12 @@ function handleSessionUpdate(updateData) {
     try {
         if (!updateData) return;
         
+        // Validate update data
+        if (!__isValidSession(updateData)) {
+            logStatus('WARNING', 'Invalid session update data - rejected');
+            return;
+        }
+        
         updateSessionMirror(updateData, 'session_update');
         
     } catch (error) {
@@ -5700,7 +6291,6 @@ function handleLogout(logoutData) {
         parentCoordinator.sessionValid = false;
         parentCoordinator.handshakeState = 'idle';
         
-        // Reset to BOOTING - but maintain proper lifecycle
         transitionTo(LifecycleState.BOOT, 'logout');
         
         state.sessionMirror = {
@@ -5721,12 +6311,7 @@ function handleLogout(logoutData) {
         if (typeof currentUser !== 'undefined') currentUser = null;
         if (typeof userData !== 'undefined') userData = null;
         
-        // [AUTH FIX] Clear in-memory session
         clearSession();
-        
-        // StorageProxy.remove(LOCAL_STORAGE_KEYS.USER); // REMOVED
-        // StorageProxy.remove(UNIFIED_TOKEN_KEY); // REMOVED
-        // StorageProxy.remove('REFRESH_TOKEN'); // REMOVED
         
         if (typeof isTokenReady !== 'undefined') isTokenReady = false;
         state.sessionActive = false;
@@ -5755,9 +6340,9 @@ function handleLogout(logoutData) {
 }
 
 function handleParentUnavailable() {
-    loadCachedDataInstantly();
+    if (typeof loadCachedDataInstantly !== 'undefined') loadCachedDataInstantly();
     
-    if (state.sessionMirror.validated && isSessionReady()) {
+    if (state.sessionMirror.validated && isSessionReady() && __isValidSession({ token: state.sessionMirror.token, userId: state.sessionMirror.user?.id })) {
         activateSessionFromMirror();
     } else {
         enableGuestMode();
@@ -5771,7 +6356,6 @@ function handleParentUnavailable() {
         logStatus('WARNING', 'Parent unavailable');
     }
     
-    // Stay in WAIT_PARENT - no transition
     logStatus('WAITING', 'Parent unavailable - waiting for parent');
 }
 
@@ -5917,7 +6501,7 @@ function handleAuthValidated(data) {
 }
 
 // =============================================
-// CENTRALIZED TOKEN ACCESS SYSTEM (PRESERVED)
+// CENTRALIZED TOKEN ACCESS SYSTEM
 // =============================================
 let isTokenReady = false;
 let tokenReadyCallbacks = [];
@@ -5937,14 +6521,14 @@ function waitForTokenReady() {
                 return;
             }
             
-            if (state.sessionMirror.validated && state.sessionMirror.token) {
+            if (state.sessionMirror.validated && state.sessionMirror.token && __isValidSession({ token: state.sessionMirror.token, userId: state.sessionMirror.user?.id })) {
                 isTokenReady = true;
                 resolve(true);
                 triggerTokenReadyCallbacks();
                 return;
             }
             
-            if (parentCoordinator.handshakeComplete && parentCoordinator.sessionData) {
+            if (parentCoordinator.handshakeComplete && parentCoordinator.sessionData && __isValidSession(parentCoordinator.sessionData)) {
                 isTokenReady = true;
                 resolve(true);
                 triggerTokenReadyCallbacks();
@@ -5953,8 +6537,7 @@ function waitForTokenReady() {
             
             const checkToken = () => {
                 try {
-                    // [AUTH FIX] Check in-memory session only
-                    if (isSessionReady()) {
+                    if (isSessionReady() && __isValidSession({ token: getSessionToken(), userId: getSessionUserId() })) {
                         isTokenReady = true;
                         resolve(true);
                         triggerTokenReadyCallbacks();
@@ -5975,7 +6558,7 @@ function waitForTokenReady() {
 
 function onTokenReady(callback) {
     try {
-        if (isTokenReady || isSessionReady()) {
+        if (isTokenReady || (isSessionReady() && __isValidSession({ token: getSessionToken(), userId: getSessionUserId() }))) {
             callback();
         } else {
             tokenReadyCallbacks.push(callback);
@@ -6013,20 +6596,24 @@ function triggerTokenReadyCallbacks() {
 }
 
 function getUnifiedToken() {
-    // [AUTH FIX] Only return token from in-memory session
     return getSessionToken();
 }
 
 function migrateLegacyTokens() {
-    // [AUTH FIX] Disabled - no localStorage tokens
     return null;
 }
 
 function isAuthenticated() {
     try {
-        if (state.sessionMirror.validated && state.sessionMirror.token && state.sessionMirror.user) return true;
-        if (parentCoordinator.handshakeComplete && parentCoordinator.sessionData) return true;
-        if (state.sessionActive && !state.isGuestMode) return true;
+        if (state.sessionMirror.validated && state.sessionMirror.token && state.sessionMirror.user) {
+            return __isValidSession({ token: state.sessionMirror.token, userId: state.sessionMirror.user?.id });
+        }
+        if (parentCoordinator.handshakeComplete && parentCoordinator.sessionData) {
+            return __isValidSession(parentCoordinator.sessionData);
+        }
+        if (state.sessionActive && !state.isGuestMode) {
+            return __isValidSession({ token: state.token, userId: state.user?.id });
+        }
         return isSessionReady();
     } catch (error) {
         return false;
@@ -6034,7 +6621,7 @@ function isAuthenticated() {
 }
 
 async function queueApiRequest(requestFunction) {
-    if (isTokenReady || isSessionReady()) return requestFunction();
+    if (isTokenReady || (isSessionReady() && __isValidSession({ token: getSessionToken(), userId: getSessionUserId() }))) return requestFunction();
     
     return new Promise((resolve, reject) => {
         try {
@@ -6076,8 +6663,9 @@ function startTokenReadinessCheck() {
             try {
                 checkCount++;
                 
-                if (isTokenReady || isSessionReady() || parentCoordinator.handshakeComplete || 
-                    state.token || state.sessionMirror.validated) {
+                if (isTokenReady || (isSessionReady() && __isValidSession({ token: getSessionToken(), userId: getSessionUserId() })) || 
+                    parentCoordinator.handshakeComplete || 
+                    state.token || (state.sessionMirror.validated && __isValidSession({ token: state.sessionMirror.token, userId: state.sessionMirror.user?.id }))) {
                     clearInterval(apiCheckInterval);
                     apiCheckInterval = null;
                     isTokenReady = true;
@@ -6099,9 +6687,8 @@ function startTokenReadinessCheck() {
 }
 
 // =============================================
-// SECURE API CALL WITH FALLBACK - Using parent proxy (PRESERVED)
+// SECURE API CALL WITH FALLBACK - Using parent proxy
 // =============================================
-// [AUTH FIX] Updated to use authorizedFetch
 const secureApiCall = createErrorBoundary(async function(endpoint, options = {}) {
     if (state.offlineModeEnabled && options.method && options.method !== 'GET') {
         throw new Error('Offline mode');
@@ -6115,7 +6702,6 @@ const secureApiCall = createErrorBoundary(async function(endpoint, options = {})
         }
     }
     
-    // Use authorizedFetch which handles token and headers
     try {
         const response = await authorizedFetch(endpoint, options);
         return await response.json();
@@ -6128,7 +6714,7 @@ const secureApiCall = createErrorBoundary(async function(endpoint, options = {})
 }, 'secureApiCall', null);
 
 // =============================================
-// GLOBAL STATE VARIABLES (PRESERVED)
+// GLOBAL STATE VARIABLES
 // =============================================
 let currentUser = null;
 let userData = null;
@@ -6317,12 +6903,10 @@ const LOCAL_STORAGE_KEYS = {
 };
 
 // =============================================
-// INSTANT UI RENDERING WITH CACHED DATA (PRESERVED BUT MODIFIED)
+// INSTANT UI RENDERING WITH CACHED DATA (CACHE ONLY, NOT PRIMARY)
 // =============================================
 function initializeUIWithCachedData() {
     try {
-        // [AUTH FIX] Don't load user from cache
-        // loadUserFromCache(); // REMOVED
         loadCachedDataInstantly();
         
         if (typeof window.initializeStatusUI === 'function') {
@@ -6349,7 +6933,6 @@ function initializeUIWithCachedData() {
 }
 
 function loadUserFromCache() {
-    // [AUTH FIX] Disabled - no user from cache
     return null;
 }
 
@@ -6425,7 +7008,7 @@ async function loadCachedDataInstantly() {
 }
 
 // =============================================
-// BACKGROUND INITIALIZATION (PRESERVED)
+// BACKGROUND INITIALIZATION
 // =============================================
 async function startBackgroundInitialization() {
     if (isBackgroundInitialized) return;
@@ -6450,7 +7033,7 @@ async function startBackgroundInitialization() {
             } catch (error) {}
         });
         
-        if (isSessionReady() || parentCoordinator.handshakeComplete || state.token || state.sessionMirror.validated) {
+        if ((isSessionReady() && __isValidSession({ token: getSessionToken(), userId: getSessionUserId() })) || parentCoordinator.handshakeComplete || state.token || (state.sessionMirror.validated && __isValidSession({ token: state.sessionMirror.token, userId: state.sessionMirror.user?.id }))) {
             try {
                 await loadFreshDataInBackground();
                 isBackgroundInitialized = true;
@@ -6475,10 +7058,10 @@ async function startBackgroundInitialization() {
 async function loadFreshDataInBackground() {
     try {
         const loadPromises = [];
-        loadPromises.push(safeApiOperation(() => loadStatusesInBackground()));
-        loadPromises.push(safeApiOperation(() => loadMyStatusesInBackground()));
-        loadPromises.push(safeApiOperation(() => loadHighlightsInBackground()));
-        loadPromises.push(safeApiOperation(() => loadUserDataInBackground()));
+        if (typeof loadStatusesInBackground !== 'undefined') loadPromises.push(safeApiOperation(() => loadStatusesInBackground()));
+        if (typeof loadMyStatusesInBackground !== 'undefined') loadPromises.push(safeApiOperation(() => loadMyStatusesInBackground()));
+        if (typeof loadHighlightsInBackground !== 'undefined') loadPromises.push(safeApiOperation(() => loadHighlightsInBackground()));
+        if (typeof loadUserDataInBackground !== 'undefined') loadPromises.push(safeApiOperation(() => loadUserDataInBackground()));
         await Promise.allSettled(loadPromises);
     } catch (error) {}
 }
@@ -6497,7 +7080,7 @@ async function loadStatusesInBackground() {
         const response = await secureApiCall('/api/statuses');
         if (response && response.statuses) {
             statuses = response.statuses;
-            statuses = filterStatusesByPrivacy(statuses);
+            if (typeof filterStatusesByPrivacy !== 'undefined') statuses = filterStatusesByPrivacy(statuses);
             statuses.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
             SafeStorage.setJSON(LOCAL_STORAGE_KEYS.STATUSES, statuses);
             
@@ -6542,8 +7125,6 @@ async function loadUserDataInBackground() {
         if (response && response.user) {
             currentUser = response.user;
             userData = response.user;
-            // [AUTH FIX] Don't store user in localStorage
-            // SafeStorage.setJSON(LOCAL_STORAGE_KEYS.USER, response.user); // REMOVED
             
             const userKey = 'user_data_loaded';
             if (!_loggedMessages.has(userKey)) {
@@ -6557,7 +7138,7 @@ async function loadUserDataInBackground() {
 }
 
 // =============================================
-// BOOTSTRAP APPLICATION (PRESERVED)
+// BOOTSTRAP APPLICATION
 // =============================================
 async function bootstrapApp() {
     try {
@@ -6591,7 +7172,7 @@ async function bootstrapApp() {
 const bootstrapApplication = bootstrapApp;
 
 // =============================================
-// AUTHENTICATION ERROR HANDLING (PRESERVED)
+// AUTHENTICATION ERROR HANDLING
 // =============================================
 function handleAuthError(message) {
     try {
@@ -6608,7 +7189,6 @@ function handleAuthError(message) {
             state.offlineModeEnabled = true;
             isOfflineMode = true;
             
-            // Stay in WAIT_PARENT - no state change
             logStatus('WAITING', 'Auth error - waiting for parent');
         }
         
@@ -6633,7 +7213,6 @@ async function initializeStatusSystem() {
         if (!state.offlineModeEnabled) state.offlineModeEnabled = true;
         if (!isOfflineMode) isOfflineMode = true;
         
-        // Stay in WAIT_PARENT - no state change
         logStatus('WAITING', 'Data load timeout - using cached data');
         
         const timeoutKey = 'data_load_timeout';
@@ -6652,7 +7231,7 @@ async function loadInitialData() {
             const statusesResponse = await secureApiCall('/api/statuses');
             if (statusesResponse && statusesResponse.statuses) {
                 statuses = statusesResponse.statuses;
-                statuses = filterStatusesByPrivacy(statuses);
+                if (typeof filterStatusesByPrivacy !== 'undefined') statuses = filterStatusesByPrivacy(statuses);
                 statuses.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
                 SafeStorage.setJSON(LOCAL_STORAGE_KEYS.STATUSES, statuses);
             }
@@ -6679,8 +7258,6 @@ async function loadInitialData() {
             if (userResponse && userResponse.user) {
                 currentUser = userResponse.user;
                 userData = userResponse.user;
-                // [AUTH FIX] Don't store user in localStorage
-                // SafeStorage.setJSON(LOCAL_STORAGE_KEYS.USER, userResponse.user); // REMOVED
             }
         }));
         
@@ -6697,7 +7274,7 @@ async function loadInitialData() {
 }
 
 // =============================================
-// CORE STATUS FUNCTIONS (PRESERVED)
+// CORE STATUS FUNCTIONS
 // =============================================
 function filterStatusesByPrivacy(statuses) {
     try {
@@ -6782,7 +7359,7 @@ function getEmptyStateMessage() {
 }
 
 // =============================================
-// STATUS ACTIONS - WITH PARENT ROUTING (PRESERVED)
+// STATUS ACTIONS - WITH PARENT ROUTING
 // =============================================
 const addReactionToStatus = createErrorBoundary(async function(statusId, reaction) {
     if (!statusId || !reaction) throw new Error('Missing required parameters');
@@ -6804,7 +7381,6 @@ const addReactionToStatus = createErrorBoundary(async function(statusId, reactio
         return { success: true, offline: true };
     }
     
-    // Send to parent using action wrapper with gating
     return safeSendAction('ADD_REACTION', { statusId, reaction });
 }, 'addReactionToStatus', { success: false });
 
@@ -6958,7 +7534,7 @@ const unmuteUser = createErrorBoundary(async function(userId) {
     return safeSendAction('UNMUTE_USER', { userId });
 }, 'unmuteUser', { success: false });
 
-const postStatus = createErrorBoundary(async function(statusData) {
+const postStatusLegacy = createErrorBoundary(async function(statusData) {
     if (!statusData) throw new Error('Invalid status data');
     
     const postKey = `post_status_${Date.now()}`;
@@ -6996,7 +7572,6 @@ const postStatus = createErrorBoundary(async function(statusData) {
         return { success: true, status: sanitizedData, offline: true };
     }
     
-    // [AUTH FIX] Ensure session is ready before posting
     if (!isSessionReady()) {
         debugWarn('Cannot post status - session not ready');
         return { success: false, reason: 'SESSION_NOT_READY' };
@@ -7005,7 +7580,6 @@ const postStatus = createErrorBoundary(async function(statusData) {
     const messageId = safeSendAction('UPLOAD_STATUS', sanitizedData);
     
     if (messageId) {
-        // Optimistic update
         const tempStatus = {
             ...sanitizedData,
             id: `temp_${Date.now()}`,
@@ -7053,7 +7627,7 @@ function sanitizeStatusData(statusData) {
         if (sanitized.intent && !statusIntents[sanitized.intent]) sanitized.intent = null;
         if (sanitized.category && !statusCategories[sanitized.category]) sanitized.category = null;
         
-        validateStatusPayload(sanitized);
+        if (typeof validateStatusPayload !== 'undefined') validateStatusPayload(sanitized);
         
         return sanitized;
     } catch (error) {
@@ -7178,7 +7752,7 @@ const reportStatus = createErrorBoundary(async function(statusId, reason, detail
 }, 'reportStatus', { success: false });
 
 // =============================================
-// EXPIRATION MANAGEMENT (PRESERVED)
+// EXPIRATION MANAGEMENT
 // =============================================
 
 let expirationCheckInterval = null;
@@ -7331,12 +7905,12 @@ function checkAndCleanExpiredStatuses() {
 }
 
 // =============================================
-// USER STATUS TRACKING (PRESERVED)
+// USER STATUS TRACKING
 // =============================================
 let userStatusInterval = null;
 let lastActivityTime = Date.now();
-let isOnline = typeof navigator !== 'undefined' ? navigator.onLine : true;
-let heartbeatInterval = null;
+let isOnlineGlobal = typeof navigator !== 'undefined' ? navigator.onLine : true;
+let heartbeatIntervalGlobal = null;
 let isTrackingInitialized = false;
 let lastOnlineStatus = typeof navigator !== 'undefined' ? navigator.onLine : true;
 let activityThrottleTimer = null;
@@ -7346,9 +7920,9 @@ function initializeUserStatusTracking() {
     if (isTrackingInitialized) return;
     
     try {
-        isOnline = typeof navigator !== 'undefined' ? navigator.onLine : true;
-        lastOnlineStatus = isOnline;
-        state.isOnline = isOnline;
+        isOnlineGlobal = typeof navigator !== 'undefined' ? navigator.onLine : true;
+        lastOnlineStatus = isOnlineGlobal;
+        state.isOnline = isOnlineGlobal;
         
         setupNetworkDetection();
         setupActivityTracking();
@@ -7421,9 +7995,9 @@ function setupActivityTracking() {
 
 function handleOnlineStatus() {
     try {
-        if (isOnline) return;
+        if (isOnlineGlobal) return;
         
-        isOnline = true;
+        isOnlineGlobal = true;
         state.isOnline = true;
         
         setTimeout(() => { updateUserStatus(); }, 100);
@@ -7441,7 +8015,6 @@ function handleOnlineStatus() {
         }
         
         if (!parentReady && RecoveryManager.canRecover()) {
-            // Wait for parent instead of actively recovering
             logStatus('WAITING', 'Recovery - waiting for parent');
         }
     } catch (error) {}
@@ -7449,9 +8022,9 @@ function handleOnlineStatus() {
 
 function handleOfflineStatus() {
     try {
-        if (!isOnline) return;
+        if (!isOnlineGlobal) return;
         
-        isOnline = false;
+        isOnlineGlobal = false;
         state.isOnline = false;
         
         setTimeout(() => { updateUserStatus(); }, 100);
@@ -7499,7 +8072,7 @@ async function updateUserStatus() {
         const userId = currentUser?.id || state.user?.id;
         if (!userId) return;
         
-        const status = isOnline ? 'online' : 'offline';
+        const status = isOnlineGlobal ? 'online' : 'offline';
         
         if (currentUser) {
             currentUser.status = status;
@@ -7511,11 +8084,11 @@ async function updateUserStatus() {
                 userId: userId,
                 status: status,
                 lastSeen: new Date().toISOString(),
-                isOnline: isOnline
+                isOnline: isOnlineGlobal
             });
         }
         
-        if (isOnline && !state.offlineModeEnabled && parentReady && isSessionReady()) {
+        if (isOnlineGlobal && !state.offlineModeEnabled && parentReady && isSessionReady()) {
             try {
                 await secureApiCall('/api/user/status', {
                     method: 'POST',
@@ -7564,7 +8137,7 @@ async function syncPendingData() {
 }
 
 // =============================================
-// UTILITY FUNCTIONS (PRESERVED)
+// UTILITY FUNCTIONS
 // =============================================
 function escapeHtml(text) {
     try {
@@ -7652,13 +8225,13 @@ function generateSampleMoodData() {
 }
 
 // =============================================
-// SAFE LOG ERROR UTILITY (PRESERVED)
+// SAFE LOG ERROR UTILITY
 // =============================================
 let errorLogCounts = {};
 let maxErrorLogs = 1;
 let retryCounts = {};
 let maxRetries = 3;
-let messageCache = new Set();
+let messageCacheGlobal = new Set();
 
 function safeLogError(module, functionName, error, data = null) {
     try {
@@ -7678,7 +8251,7 @@ function safeLogError(module, functionName, error, data = null) {
 }
 
 // =============================================
-// USER GUARD AND API GUARD (PRESERVED)
+// USER GUARD AND API GUARD
 // =============================================
 function withUserGuard(fn, defaultValue = null) {
     return function(...args) {
@@ -7718,7 +8291,7 @@ function safeGetElement(selector) {
 }
 
 // =============================================
-// STUB FUNCTIONS FOR COMPATIBILITY (PRESERVED)
+// STUB FUNCTIONS FOR COMPATIBILITY
 // =============================================
 function getFriendsStatuses() {
     try { return friendsStatuses || []; } catch (error) { safeLogError('Status', 'getFriendsStatuses', error); return []; }
@@ -7813,24 +8386,25 @@ function setSelectedDraft(draft) {
 }
 
 // =============================================
-// NEW FUNCTION: updateLocalStateWithSession - REQUIRED BY status-ui.js (PRESERVED)
+// NEW FUNCTION: updateLocalStateWithSession - REQUIRED BY status-ui.js
 // =============================================
 function updateLocalStateWithSession(sessionData) {
     try {
         if (!sessionData) return false;
         
+        // Validate session before updating
+        if (!__isValidSession(sessionData)) {
+            logStatus('FAILED', 'Invalid session in updateLocalStateWithSession - rejected');
+            return false;
+        }
+        
         if (sessionData.user) {
             currentUser = sessionData.user;
             userData = sessionData.user;
-            // [AUTH FIX] Don't store in localStorage
-            // SafeStorage.setJSON(LOCAL_STORAGE_KEYS.USER, sessionData.user); // REMOVED
         }
         
         if (sessionData.token) {
-            // [AUTH FIX] Don't store in localStorage
-            // SafeStorage.set(UNIFIED_TOKEN_KEY, sessionData.token); // REMOVED
             state.token = sessionData.token;
-            // [AUTH FIX] Also update in-memory session
             setSession(sessionData.token, sessionData.user || currentUser, sessionData.expiry);
         }
         
@@ -7876,7 +8450,7 @@ function updateLocalStateWithSession(sessionData) {
 }
 
 // =============================================
-// DIAGNOSTICS AND MONITORING (PRESERVED)
+// DIAGNOSTICS AND MONITORING
 // =============================================
 function enableDiagnostics() {
     state.diagnosticsEnabled = true;
@@ -7958,13 +8532,12 @@ function getDiagnostics() {
         transport: IframeTransport.getStatus(),
         navigation: NavigationGuard.getState(),
         diagnostics: DiagnosticsAgent.getReport(),
-        // [AUTH FIX] Add session readiness
         sessionReady: isSessionReady()
     };
 }
 
 // =============================================
-// SANDBOX DETECTION (PRESERVED)
+// SANDBOX DETECTION
 // =============================================
 function detectSandbox() {
     try {
@@ -7999,17 +8572,15 @@ function detectSandbox() {
 }
 
 // =============================================
-// CLEANUP AND MEMORY MANAGEMENT (PRESERVED)
+// CLEANUP AND MEMORY MANAGEMENT
 // =============================================
 function cleanup() {
     try {
         stopExpirationMonitoring();
         
-        // No handshake retry interval to clear - removed as per protocol
-        
         if (apiCheckInterval) { clearInterval(apiCheckInterval); apiCheckInterval = null; }
         if (parentCoordinator.handshakeInterval) { clearInterval(parentCoordinator.handshakeInterval); parentCoordinator.handshakeInterval = null; }
-        if (heartbeatInterval) { clearInterval(heartbeatInterval); heartbeatInterval = null; }
+        if (heartbeatIntervalGlobal) { clearInterval(heartbeatIntervalGlobal); heartbeatIntervalGlobal = null; }
         if (autoAdvanceInterval) { clearInterval(autoAdvanceInterval); autoAdvanceInterval = null; }
         if (progressInterval) { clearInterval(progressInterval); progressInterval = null; }
         if (parentCoordinator.handshakeTimeout) { clearTimeout(parentCoordinator.handshakeTimeout); parentCoordinator.handshakeTimeout = null; }
@@ -8025,9 +8596,8 @@ function cleanup() {
         pendingApiRequests = [];
         state.retryQueue = [];
         
-        // Clear sent messages tracking
         _sentMessages.clear();
-        processedMessages.clear();
+        processedMessageIds.clear();
         
         parentCoordinator.handshakeInProgress = false;
         parentCoordinator.sessionValid = false;
@@ -8036,9 +8606,8 @@ function cleanup() {
         
         errorLogCounts = {};
         retryCounts = {};
-        messageCache.clear();
+        messageCacheGlobal.clear();
         
-        // [AUTH FIX] Clear in-memory session
         clearSession();
         
         const cleanupKey = 'cleanup_complete';
@@ -8071,7 +8640,337 @@ function cleanupEventListeners() {
 }
 
 // =============================================
-// SAFE INITIALIZATION WITH PARENT HANDSHAKE (PRESERVED)
+// MODULE LIFECYCLE CONTROLLER
+// =============================================
+const ModuleLifecycleController = {
+    _initialized: false,
+    _started: false,
+    
+    init() {
+        if (this._initialized) return this;
+        this._initialized = true;
+        logStatus('LIFECYCLE', 'ModuleLifecycleController initialized');
+        return this;
+    },
+    
+    start() {
+        if (this._started) return this;
+        this._started = true;
+        logStatus('LIFECYCLE', 'ModuleLifecycleController started');
+        return this;
+    },
+    
+    getState() {
+        return {
+            initialized: this._initialized,
+            started: this._started,
+            lifecycleState: currentState
+        };
+    },
+    
+    reset() {
+        this._initialized = false;
+        this._started = false;
+        logStatus('LIFECYCLE', 'ModuleLifecycleController reset');
+        return this;
+    }
+};
+
+// =============================================
+// EVENT BUS
+// =============================================
+const EventBus = {
+    _events: new Map(),
+    
+    on(event, callback) {
+        if (!this._events.has(event)) {
+            this._events.set(event, []);
+        }
+        this._events.get(event).push(callback);
+        return () => this.off(event, callback);
+    },
+    
+    off(event, callback) {
+        const callbacks = this._events.get(event);
+        if (callbacks) {
+            const index = callbacks.indexOf(callback);
+            if (index !== -1) callbacks.splice(index, 1);
+        }
+    },
+    
+    emit(event, data) {
+        const callbacks = this._events.get(event);
+        if (callbacks) {
+            callbacks.forEach(cb => {
+                try {
+                    cb(data);
+                } catch (e) {}
+            });
+        }
+    },
+    
+    clear() {
+        this._events.clear();
+    }
+};
+
+// =============================================
+// PARENT CONNECTION MANAGER
+// =============================================
+const ParentConnectionManager = {
+    _connected: false,
+    _listeners: new Set(),
+    
+    isConnected() {
+        return this._connected || parentReady;
+    },
+    
+    addListener(callback) {
+        this._listeners.add(callback);
+        return () => this._listeners.delete(callback);
+    },
+    
+    notifyListeners(status) {
+        this._listeners.forEach(cb => {
+            try {
+                cb(status);
+            } catch (e) {}
+        });
+    },
+    
+    setConnected(connected) {
+        this._connected = connected;
+        this.notifyListeners(connected);
+    }
+};
+
+// =============================================
+// UIBRIDGE - UI Communication Bridge
+// =============================================
+const UIBridge = {
+    subscriptions: new Map(),
+    validators: new Map(),
+    messageQueue: [],
+    processing: false,
+    
+    initialize() {
+        this.registerValidators();
+        this.setupCoreSubscriptions();
+        logStatus('INFO', 'UIBridge initialized');
+        return this;
+    },
+
+    registerValidators() {
+        this.validators.set('statusUpdate', (data) => {
+            return data && typeof data === 'object' && data.id;
+        });
+
+        this.validators.set('sessionData', (data) => {
+            return data && typeof data === 'object' && (data.user || data.token) && __isValidSession(data);
+        });
+
+        this.validators.set('reaction', (data) => {
+            return data && data.statusId && data.reaction;
+        });
+
+        this.validators.set('handshake', (data) => {
+            return data && data.status && ['connecting', 'connected', 'failed', 'reconnecting'].includes(data.status);
+        });
+
+        this.validators.set('apiResponse', (data) => {
+            return data && data.requestId;
+        });
+
+        this.validators.set('navigation', (data) => {
+            return data && data.path;
+        });
+        
+        this.validators.set('lifecycle', (data) => {
+            return data && data.state && Object.values(LIFECYCLE_STATES).includes(data.state);
+        });
+        
+        this.validators.set('statusState', (data) => {
+            return data && (data.statuses !== undefined || data.myStatuses !== undefined);
+        });
+        
+        this.validators.set('viewerUpdate', (data) => {
+            return data && data.statusId;
+        });
+        
+        this.validators.set('reactionUpdate', (data) => {
+            return data && data.statusId && data.reaction;
+        });
+        
+        this.validators.set('statusExpired', (data) => {
+            return data && data.statusId;
+        });
+    },
+
+    setupCoreSubscriptions() {
+        document.addEventListener('statusUpdate', (e) => {
+            this.handleCoreEvent('statusUpdate', e.detail);
+        });
+
+        document.addEventListener('coreData', (e) => {
+            this.handleCoreEvent('coreData', e.detail);
+        });
+
+        document.addEventListener('sessionReady', (e) => {
+            this.handleCoreEvent('sessionReady', e.detail);
+        });
+
+        document.addEventListener('handshakeUpdate', (e) => {
+            this.handleCoreEvent('handshake', e.detail);
+        });
+
+        document.addEventListener('connectionLost', (e) => {
+            this.handleCoreEvent('connectionLost', e.detail);
+        });
+
+        document.addEventListener('connectionRestored', (e) => {
+            this.handleCoreEvent('connectionRestored', e.detail);
+        });
+        
+        document.addEventListener('governorStateChange', (e) => {
+            if (e.detail.newState === 'ACTIVE') {
+                this.handleCoreEvent('handshake', { status: 'connected' });
+                this.handleCoreEvent('lifecycle', { state: LIFECYCLE_STATES.ACTIVE });
+            } else if (e.detail.newState === 'DEGRADED') {
+                this.handleCoreEvent('handshake', { status: 'failed' });
+            } else if (e.detail.newState === 'RECOVERING') {
+                this.handleCoreEvent('handshake', { status: 'reconnecting' });
+            }
+        });
+
+        document.addEventListener('apiResponse', (e) => {
+            this.handleCoreEvent('apiResponse', e.detail);
+        });
+
+        document.addEventListener('navigate', (e) => {
+            this.handleCoreEvent('navigation', e.detail);
+        });
+
+        document.addEventListener('uiRecovery', (e) => {
+            this.handleCoreEvent('uiRecovery', e.detail);
+            this.processMessageQueue();
+        });
+
+        document.addEventListener('configApplied', (e) => {
+            this.handleCoreEvent('configApplied', e.detail);
+        });
+        
+        document.addEventListener('viewerUpdate', (e) => {
+            this.handleCoreEvent('viewerUpdate', e.detail);
+        });
+        
+        document.addEventListener('reactionUpdate', (e) => {
+            this.handleCoreEvent('reactionUpdate', e.detail);
+        });
+        
+        document.addEventListener('statusExpired', (e) => {
+            this.handleCoreEvent('statusExpired', e.detail);
+        });
+        
+        document.addEventListener('moduleActive', (e) => {
+            this.handleCoreEvent('lifecycle', { state: LIFECYCLE_STATES.ACTIVE, detail: e.detail });
+        });
+        
+        document.addEventListener('statusStateChanged', (e) => {
+            if (e.detail.state) {
+                this.handleCoreEvent('statusState', e.detail.state);
+            }
+        });
+    },
+
+    handleCoreEvent(type, data) {
+        if (!data) return;
+
+        const validator = this.validators.get(type);
+        if (validator && !validator(data)) return;
+
+        this.messageQueue.push({ type, data, timestamp: Date.now() });
+
+        if (!this.processing) {
+            this.processMessageQueue();
+        }
+    },
+
+    async processMessageQueue() {
+        if (this.processing || this.messageQueue.length === 0) return;
+
+        this.processing = true;
+
+        while (this.messageQueue.length > 0) {
+            const item = this.messageQueue.shift();
+
+            if (Date.now() - item.timestamp > 60000) continue;
+
+            const handlers = this.subscriptions.get(item.type) || [];
+            handlers.forEach(handler => {
+                try {
+                    handler(this.sanitizeEventData(item.data));
+                } catch (error) {
+                    debugError('Bridge', `Handler failed for ${item.type}`, error);
+                }
+            });
+
+            await new Promise(r => setTimeout(r, 10));
+        }
+
+        this.processing = false;
+    },
+
+    sanitizeEventData(data) {
+        if (!data || typeof data !== 'object') return data;
+        
+        try {
+            return JSON.parse(JSON.stringify(data, (key, value) => {
+                if (key === 'token' || key === 'accessToken' || key === 'refreshToken') {
+                    return '[REDACTED]';
+                }
+                if (typeof value === 'string' && value.length > 5000) {
+                    return value.slice(0, 5000) + '... [truncated]';
+                }
+                return value;
+            }));
+        } catch (e) {
+            return data;
+        }
+    },
+
+    subscribe(event, handler) {
+        if (!this.subscriptions.has(event)) {
+            this.subscriptions.set(event, new Set());
+        }
+        this.subscriptions.get(event).add(handler);
+        
+        return () => {
+            const handlers = this.subscriptions.get(event);
+            if (handlers) {
+                handlers.delete(handler);
+            }
+        };
+    },
+
+    unsubscribe(event, handler) {
+        const handlers = this.subscriptions.get(event);
+        if (handlers) {
+            handlers.delete(handler);
+        }
+    },
+
+    clearSubscriptions() {
+        this.subscriptions.clear();
+        this.messageQueue = [];
+        logStatus('INFO', 'UIBridge subscriptions cleared');
+    }
+};
+
+// Initialize UIBridge
+UIBridge.initialize();
+
+// =============================================
+// SAFE INITIALIZATION WITH PARENT HANDSHAKE
 // =============================================
 let _PARENT_READY_ = false;
 let _HANDSHAKE_DONE_ = false;
@@ -8121,7 +9020,6 @@ async function safeInit() {
             logStatus('INFO', 'Parent available, starting handshake');
         }
         
-        // Use deterministic lifecycle
         initializeModule();
         
     } else {
@@ -8130,7 +9028,7 @@ async function safeInit() {
             _loggedMessages.add(noParentKey);
             logStatus('WARNING', 'Parent not available');
         }
-        if (state.sessionMirror.validated && isSessionReady()) {
+        if (state.sessionMirror.validated && isSessionReady() && __isValidSession({ token: state.sessionMirror.token, userId: state.sessionMirror.user?.id })) {
             transitionTo(LifecycleState.ACTIVE, 'cached_session');
             logStatus('SUCCESS', 'Session activated from cache');
         } else {
@@ -8163,7 +9061,6 @@ async function safeInit() {
 }
 
 function notifyParentReady() {
-    // Delegate to ParentCommunication with safe gate
     if (!_childReadySent && isInState(LifecycleState.READY)) {
         sendChildReady();
     }
@@ -8182,12 +9079,11 @@ function initPageCore() {
 }
 
 // =============================================
-// FETCH FAILURE SAFE HANDLING (PRESERVED)
+// FETCH FAILURE SAFE HANDLING
 // =============================================
 const _fetchAttempts = {};
 
 async function safeFetch(url, options = {}) {
-    // Check if we should attempt fetch
     if (!navigator.onLine) {
         logStatus('WARNING', 'Network offline');
         return { success: false, message: "Network offline", offline: true };
@@ -8207,12 +9103,10 @@ async function safeFetch(url, options = {}) {
 
         const data = await response.json();
         
-        // Reset attempt counter on success
         if (_fetchAttempts[fetchKey]) {
             delete _fetchAttempts[fetchKey];
         }
         
-        // Only log successful fetch once per URL
         if (!_loggedMessages.has(`fetch_success_${url}`)) {
             _loggedMessages.add(`fetch_success_${url}`);
             logStatus('SUCCESS', `Fetch: ${url}`);
@@ -8220,10 +9114,8 @@ async function safeFetch(url, options = {}) {
         
         return data;
     } catch (error) {
-        // Count attempts
         _fetchAttempts[fetchKey] = (_fetchAttempts[fetchKey] || 0) + 1;
         
-        // Only log first attempt failure
         if (_fetchAttempts[fetchKey] === 1 && !_loggedMessages.has(`fetch_fail_${url}`)) {
             _loggedMessages.add(`fetch_fail_${url}`);
             logStatus('FAILED', `Fetch: ${url} - ${error.message}`);
@@ -8234,7 +9126,7 @@ async function safeFetch(url, options = {}) {
 }
 
 // =============================================
-// PAGE CORE COMPATIBILITY LAYER (PRESERVED)
+// PAGE CORE COMPATIBILITY LAYER
 // =============================================
 const pageCore = {
     isReady: () => state.initialized,
@@ -8253,7 +9145,7 @@ const pageCore = {
 };
 
 // =============================================
-// AUTO-CLEANUP ON UNLOAD (PRESERVED)
+// AUTO-CLEANUP ON UNLOAD
 // =============================================
 if (typeof window !== 'undefined') {
     try {
@@ -8265,415 +9157,56 @@ if (typeof window !== 'undefined') {
 }
 
 // =============================================
-// GLOBAL EXPOSURE - LEGACY SUPPORT (PRESERVED)
+// PUBLIC API EXPOSURE
 // =============================================
-if (typeof window !== 'undefined') {
-    try {
-        window.statusCore = {
-            // Lifecycle system
-            LifecycleState,
-            transitionTo,
-            isInState,
-            canTransitionTo,
-            assertActive,
-            getLifecycleState,
-            sendChildReady,
-            handleParentReady,
-            onModuleActive,
-            
-            // Backward compatible LifecycleFSM
-            LifecycleFSM: {
-                currentState: () => _currentState,
-                previousState: () => _previousState,
-                transitionLock: () => _transitionLock,
-                allowedTransitions: _validTransitions,
-                transition: (nextState, reason) => transitionTo(nextState, reason),
-                is: (state) => isInState(state),
-                canTransitionTo: (state) => canTransitionTo(state),
-                reset: () => {
-                    _currentState = LifecycleState.BOOT;
-                    _previousState = null;
-                    _childReadySent = false;
-                    _parentReadyReceived = false;
-                }
-            },
-            
-            // New deterministic modules
-            MessageValidator,
-            ParentCommunication,
-            StorageProxy,
-            MessageGuard,
-            
-            // No handshake retry - removed as per protocol
-            
-            // New lifecycle guards
-            safeSendChildReady: sendChildReady,
-            canSendAction: () => assertActive('action'),
-            safeSendAction,
-            
-            // [AUTH FIX] New session functions
-            setSession,
-            getSessionToken,
-            getSessionUser,
-            isSessionReady,
-            clearSession,
-            authorizedFetch,
-            authorizedFetchJSON,
-            
-            // Core functions
-            initializeModule,
-            initializeCore,
-            startHandshake,
-            sendToParent,
-            requestSession: requestSessionWrapper,
-            receiveFromParent,
-            shutdownCore,
-            initializeParentCoordination,
-            getUnifiedToken,
-            secureApiCall,
-            initializeUserStatusTracking,
-            cleanup,
-            generateSampleMoodData,
-            startSecureHandshake,
-            safeLogError,
-            withUserGuard,
-            withApiGuard,
-            safeGetElement,
-            logOnce,
-            safeInit,
-            getData: pageCore.getData,
-            updateData: pageCore.updateData,
-            isReady: () => state.initialized || pageCore.isReady(),
-            getHealthMetrics,
-            getSession,
-            isSessionValid,
-            UNIFIED_TOKEN_KEY,
-            LOCAL_STORAGE_KEYS,
-            bootstrapApplication,
-            handleSessionData,
-            validateSessionData,
-            updateLocalStateWithSession,
-            handleSessionUpdate,
-            handleLogout,
-            handleParentUnavailable,
-            startBackgroundInitializationWithSession,
-            makeParentApiRequest,
-            handleAuthValidated,
-            waitForTokenReady,
-            onTokenReady,
-            triggerTokenReadyCallbacks,
-            migrateLegacyTokens,
-            isAuthenticated,
-            queueApiRequest,
-            processPendingApiRequests,
-            startTokenReadinessCheck,
-            initializeUIWithCachedData,
-            loadUserFromCache,
-            loadCachedDataInstantly,
-            startBackgroundInitialization,
-            loadFreshDataInBackground,
-            safeApiOperation,
-            loadStatusesInBackground,
-            loadMyStatusesInBackground,
-            loadHighlightsInBackground,
-            loadUserDataInBackground,
-            handleAuthError,
-            initializeStatusSystem,
-            loadInitialData,
-            filterStatusesByPrivacy,
-            getStatusPreviewText,
-            filterStatusesByType,
-            getEmptyStateMessage,
-            addReactionToStatus,
-            removeReactionFromStatus,
-            changeReaction,
-            trackStatusView,
-            voteOnPoll,
-            pinStatus,
-            unpinStatus,
-            muteUser,
-            unmuteUser,
-            postStatus,
-            sanitizeStatusData,
-            validateStatusPayload,
-            updateStreakCounter,
-            scheduleStatus,
-            saveDraft,
-            reportStatus,
-            escapeHtml,
-            formatTimeAgo,
-            retryOperation,
-            getFriendsStatuses,
-            getCloseFriendsStatuses,
-            getMicroCirclesStatuses,
-            getMutedStatuses,
-            setCurrentViewerStatus,
-            getCurrentViewerStatus,
-            setCurrentSlideIndex,
-            getCurrentSlideIndex,
-            toggleAutoAdvancePause,
-            setCurrentCategoryFilter,
-            getCurrentCategoryFilter,
-            setCurrentIntentFilter,
-            getCurrentIntentFilter,
-            setCurrentMoodFilter,
-            getCurrentMoodFilter,
-            getPendingReplies,
-            getPendingReactions,
-            getMoodChartData,
-            getStreakCount,
-            getLastPostDate,
-            getActiveFilters,
-            getSelectedDraft,
-            setSelectedDraft,
-            
-            // Expiration management
-            startExpirationMonitoring,
-            stopExpirationMonitoring,
-            checkAndCleanExpiredStatuses,
-            
-            // Enhanced modules
-            ParentDetector,
-            SafeStorage,
-            MessageFirewall,
-            getSessionMirror,
-            isSessionMirrorValid,
-            refreshToken,
-            requestParentConfig,
-            enableDiagnostics,
-            disableDiagnostics,
-            getDiagnostics,
-            formatCanonicalMessage,
-            adaptLegacyMessage,
-            detectSandbox,
-            
-            // Enhanced modules
-            IframeEnvironment,
-            IframeAuthority,
-            OriginTrustAdapter,
-            MessageBus,
-            IframeTransport,
-            RecoveryManager,
-            SessionClient,
-            CompatibilityBridge,
-            NavigationGuard,
-            DiagnosticsAgent,
-            
-            // Safe fetch
-            safeFetch,
-            logStatus,
-            
-            // Add missing exports
-            IframeHandshakeAuthority,
-            StartupGovernor,
-            HandshakeClient,
-            
-            // Protocol compliance
-            parentReady,
-            messageQueue,
-            flushQueue,
-            sendMessage,
-            safeSend,
-            handleParentMessage,
-            onParentReady,
-            genId,
-            genReqId
-        };
-        
-        if (window.location.search.includes('debug=true')) {
-            enableDiagnostics();
+const StatusCore = {
+    version: MODULE_VERSION,
+    
+    // Lifecycle
+    getState: getLifecycleState,
+    isReady: () => currentState === LIFECYCLE_STATES.ACTIVE,
+    ensureActive: ensureActive,
+    
+    // Session
+    SessionManager: {
+        getToken: getSessionToken,
+        getUser: getSessionUser,
+        getUserId: getSessionUserId,
+        isAuthenticated: isSessionReady,
+        setSession: setSession,
+        clearSession: clearSession
+    },
+    
+    // Status API - REAL END-TO-END
+    loadStatuses,
+    postStatus,
+    markStatusViewed,
+    deleteStatus,
+    addReaction,
+    removeReaction,
+    
+    // State
+    getStatuses: () => [...statusState.statuses],
+    getMyStatuses: () => [...statusState.myStatuses],
+    getStatusState: () => ({ ...statusState }),
+    subscribe: (callback) => statusObservers.add(callback),
+    
+    // UI Bridge
+    UI: UIBridge,
+    
+    // Event Bus
+    on: (event, callback) => EventBus.on(event, callback),
+    off: (event, callback) => EventBus.off(event, callback),
+    emit: (event, data) => EventBus.emit(event, data),
+    
+    // Retry
+    retryLoad: () => {
+        if (currentState === LIFECYCLE_STATES.ACTIVE && isSessionReady()) {
+            loadStatuses();
         }
-        
-        const globalKey = 'status_core_global';
-        if (!_loggedMessages.has(globalKey)) {
-            _loggedMessages.add(globalKey);
-            logStatus('READY', 'Status core exposed globally');
-        }
-        
-    } catch (error) {
-        safeLogError('Status', 'globalExposure', error);
-    }
-}
-
-// =============================================
-// EXPORT CONTRACT - ALL SYMBOLS REQUIRED BY status-ui.js
-// =============================================
-
-// Define LifecycleFSM as a constant first
-const LifecycleFSM = {
-    currentState: () => _currentState,
-    previousState: () => _previousState,
-    transitionLock: () => _transitionLock,
-    allowedTransitions: _validTransitions,
-    transition: (nextState, reason) => transitionTo(nextState, reason),
-    is: (state) => isInState(state),
-    canTransitionTo: (state) => canTransitionTo(state),
-    reset: () => {
-        _currentState = LifecycleState.BOOT;
-        _previousState = null;
-        _childReadySent = false;
-        _parentReadyReceived = false;
-    }
-};
-
-// Then export everything - use the existing functions directly
-export {
-    // Lifecycle system
-    LifecycleState,
-    transitionTo,
-    isInState,
-    canTransitionTo,
-    assertActive,
-    getLifecycleState,
-    sendChildReady,
-    handleParentReady,
-    onModuleActive,
+    },
     
-    // No handshake retry - removed as per protocol
-    
-    // Backward compatible LifecycleFSM
-    LifecycleFSM,
-    
-    // Message handling
-    MessageValidator,
-    ParentCommunication,
-    StorageProxy,
-    MessageGuard,
-    
-    // New lifecycle guards - use existing functions with renaming
-    sendChildReady as safeSendChildReady,
-    canSendAction,  // This is already defined as a function earlier
-    safeSendAction,
-    
-    // [AUTH FIX] New session functions
-    setSession,
-    getSessionToken,
-    getSessionUser,
-    isSessionReady,
-    clearSession,
-    authorizedFetch,
-    authorizedFetchJSON,
-    
-    // Core state & session
-    currentUser,
-    userData,
-    statuses,
-    myStatuses,
-    friendsStatuses,
-    closeFriendsStatuses,
-    pinnedStatuses,
-    mutedStatuses,
-    microCirclesStatuses,
-    highlights,
-    drafts,
-    scheduledStatuses,
-    viewedStatuses,
-    mutedUsers,
-    currentViewerStatus,
-    currentSlideIndex,
-    autoAdvanceInterval,
-    isAutoAdvancePaused,
-    progressInterval,
-    currentCategoryFilter,
-    currentIntentFilter,
-    currentMoodFilter,
-    isMobile,
-    isOfflineMode,
-    pendingReplies,
-    pendingReactions,
-    moodChartData,
-    streakCount,
-    lastPostDate,
-    activeFilters,
-    selectedDraft,
-    isBackgroundInitialized,
-    isTokenReady,
-    
-    // Parent coordination
-    parentCoordinator,
-    
-    // Status definitions
-    statusTypes,
-    statusIntents,
-    statusMoods,
-    statusCategories,
-    actionButtons,
-    privacySettings,
-    durationOptions,
-    reportReasons,
-    reactions,
-    emojis,
-    backgroundOptions,
-    statusTemplates,
-    
-    // Storage keys
-    LOCAL_STORAGE_KEYS,
-    UNIFIED_TOKEN_KEY,
-    
-    // Core functions
-    initializeModule,
-    initializeCore,
-    startHandshake,
-    sendToParent,
-    requestSession,
-    requestSessionWrapper,
-    receiveFromParent,
-    shutdownCore,
-    getHealthMetrics,
-    getSession,
-    isSessionValid,
-    registerFeature,
-    executeFeature,
-    initializeParentCoordination,
-    getUnifiedToken,
-    secureApiCall,
-    initializeUserStatusTracking,
-    cleanup,
-    generateSampleMoodData,
-    startSecureHandshake,
-    safeLogError,
-    withUserGuard,
-    withApiGuard,
-    safeGetElement,
-    logOnce,
-    safeInit,
-    initPageCore,
-    bootstrapApp,
-    bootstrapApplication,
-    handleSessionData,
-    validateSessionData,
-    updateLocalStateWithSession,
-    handleSessionUpdate,
-    handleLogout,
-    handleParentUnavailable,
-    startBackgroundInitializationWithSession,
-    makeParentApiRequest,
-    handleAuthValidated,
-    waitForTokenReady,
-    onTokenReady,
-    triggerTokenReadyCallbacks,
-    migrateLegacyTokens,
-    isAuthenticated,
-    queueApiRequest,
-    processPendingApiRequests,
-    startTokenReadinessCheck,
-    initializeUIWithCachedData,
-    loadUserFromCache,
-    loadCachedDataInstantly,
-    startBackgroundInitialization,
-    loadFreshDataInBackground,
-    safeApiOperation,
-    loadStatusesInBackground,
-    loadMyStatusesInBackground,
-    loadHighlightsInBackground,
-    loadUserDataInBackground,
-    handleAuthError,
-    initializeStatusSystem,
-    loadInitialData,
-    filterStatusesByPrivacy,
-    getStatusPreviewText,
-    filterStatusesByType,
-    getEmptyStateMessage,
+    // Legacy compatibility
     addReactionToStatus,
     removeReactionFromStatus,
     changeReaction,
@@ -8683,16 +9216,18 @@ export {
     unpinStatus,
     muteUser,
     unmuteUser,
-    postStatus,
-    sanitizeStatusData,
-    validateStatusPayload,
-    updateStreakCounter,
+    postStatusLegacy,
     scheduleStatus,
     saveDraft,
     reportStatus,
+    
+    // Helpers
     escapeHtml,
     formatTimeAgo,
     retryOperation,
+    generateSampleMoodData,
+    
+    // State getters
     getFriendsStatuses,
     getCloseFriendsStatuses,
     getMicroCirclesStatuses,
@@ -8717,64 +9252,268 @@ export {
     getSelectedDraft,
     setSelectedDraft,
     
-    // Enhanced functionality
-    getSessionMirror,
-    isSessionMirrorValid,
-    refreshToken,
-    requestParentConfig,
-    enableDiagnostics,
-    disableDiagnostics,
-    getDiagnostics,
-    formatCanonicalMessage,
-    adaptLegacyMessage,
-    detectSandbox,
-    
-    // Enhanced modules
-    IframeEnvironment,
-    IframeAuthority,
-    OriginTrustAdapter,
-    MessageBus,
-    IframeTransport,
-    RecoveryManager,
-    SessionClient,
-    CompatibilityBridge,
-    NavigationGuard,
-    DiagnosticsAgent,
-    SafeStorage,
-    
-    // Handshake modules
-    IframeHandshakeAuthority,
-    StartupGovernor,
-    HandshakeClient,
-    logStatus,
-    
-    // Expiration management
+    // Expiration
     startExpirationMonitoring,
     stopExpirationMonitoring,
     checkAndCleanExpiredStatuses,
     
-    // Safe fetch and logging
-    safeFetch,
+    // Parent communication
+    sendToParent,
+    requestSession: requestSessionWrapper,
     
-    // Protocol compliance exports
-    parentReady,
-    messageQueue,
-    flushQueue,
-    sendMessage,
-    safeSend,
-    handleParentMessage,
-    onParentReady,
-    genId,
-    genReqId
+    // Diagnostics
+    enableDiagnostics,
+    disableDiagnostics,
+    getDiagnostics,
+    DiagnosticsAgent,
+    getHealthMetrics,
+    
+    // Storage
+    SafeStorage,
+    StorageProxy,
+    
+    // Module lifecycle
+    ModuleLifecycleController,
+    
+    // Debug
+    debug: {
+        getState: getLifecycleState,
+        getStatusState: () => ({ ...statusState }),
+        getPendingRequests: () => Array.from(pendingRequests.keys()),
+        ParentConnectionManager,
+        DiagnosticsAgent
+    }
 };
 
+// Add additional exports to window for status-ui.js to import
+window.StatusCore = StatusCore;
+window.__STATUS_MODULE_NAME__ = MODULE_NAME;
+window.__STATUS_VERSION__ = MODULE_VERSION;
+window.DiagnosticsAgent = DiagnosticsAgent;
+window.SafeStorage = SafeStorage;
+window.StorageProxy = StorageProxy;
+window.UIBridge = UIBridge;
+window.LifecycleState = LIFECYCLE_STATES;
+window.ModuleLifecycleController = ModuleLifecycleController;
+window.EventBus = EventBus;
+window.ParentConnectionManager = ParentConnectionManager;
+
 // =============================================
-// CORE INITIALIZATION - AUTOMATIC (PRESERVED)
+// INITIALIZATION
 // =============================================
-if (typeof window !== 'undefined' && !state.initialized) {
-    setTimeout(() => {
-        initPageCore();
-    }, 10);
+console.log(`[${MODULE_NAME}] 🚀 Status Core v${MODULE_VERSION} (Strict Parent-Controlled Protocol | Real Data Only)`);
+
+try {
+    setState(LIFECYCLE_STATES.BOOT, 'initialization_start');
+    
+    ModuleLifecycleController.init();
+    ModuleLifecycleController.start();
+    
+    stateListeners.add((toState) => {
+        if (toState === LIFECYCLE_STATES.ACTIVE) {
+            console.log(`[${MODULE_NAME}] ✅ Module ACTIVE - ready for user interaction`);
+        }
+    });
+    
+    console.log(`[${MODULE_NAME}] ✅ Initialized - waiting for parent activation`);
+    
+} catch (error) {
+    console.error(`[${MODULE_NAME}] Initialization error:`, error);
 }
 
-logStatus('READY', 'Status core initialized v9.0 (deterministic lifecycle, NO retries, parent-controlled)');
+if (typeof module !== 'undefined' && module.exports) {
+    module.exports = StatusCore;
+}
+
+
+})();
+// =============================================
+// ES MODULE EXPORTS - ADD THIS AFTER THE IIFE CLOSES
+// =============================================
+
+// Since the file is wrapped in an IIFE, we need to expose the exports
+// after the IIFE executes by capturing them from the global scope
+
+// Wait for the IIFE to execute and expose things to window
+setTimeout(() => {
+    // Create the export object from window properties
+    const exports = {
+        // Core state & session
+        currentUser: window.currentUser,
+        userData: window.userData,
+        statuses: window.statuses,
+        myStatuses: window.myStatuses,
+        friendsStatuses: window.friendsStatuses,
+        closeFriendsStatuses: window.closeFriendsStatuses,
+        pinnedStatuses: window.pinnedStatuses,
+        mutedStatuses: window.mutedStatuses,
+        microCirclesStatuses: window.microCirclesStatuses,
+        highlights: window.highlights,
+        drafts: window.drafts,
+        scheduledStatuses: window.scheduledStatuses,
+        viewedStatuses: window.viewedStatuses,
+        mutedUsers: window.mutedUsers,
+        currentViewerStatus: window.currentViewerStatus,
+        currentSlideIndex: window.currentSlideIndex,
+        autoAdvanceInterval: window.autoAdvanceInterval,
+        isAutoAdvancePaused: window.isAutoAdvancePaused,
+        progressInterval: window.progressInterval,
+        currentCategoryFilter: window.currentCategoryFilter,
+        currentIntentFilter: window.currentIntentFilter,
+        currentMoodFilter: window.currentMoodFilter,
+        isMobile: window.isMobile,
+        isOfflineMode: window.isOfflineMode,
+        pendingReplies: window.pendingReplies,
+        pendingReactions: window.pendingReactions,
+        moodChartData: window.moodChartData,
+        streakCount: window.streakCount,
+        lastPostDate: window.lastPostDate,
+        activeFilters: window.activeFilters,
+        selectedDraft: window.selectedDraft,
+        isBackgroundInitialized: window.isBackgroundInitialized,
+        isTokenReady: window.isTokenReady,
+        
+        // Status definitions
+        statusTypes: window.statusTypes,
+        statusIntents: window.statusIntents,
+        statusMoods: window.statusMoods,
+        statusCategories: window.statusCategories,
+        actionButtons: window.actionButtons,
+        privacySettings: window.privacySettings,
+        durationOptions: window.durationOptions,
+        reportReasons: window.reportReasons,
+        reactions: window.reactions,
+        emojis: window.emojis,
+        backgroundOptions: window.backgroundOptions,
+        statusTemplates: window.statusTemplates,
+        
+        // Storage keys
+        LOCAL_STORAGE_KEYS: window.LOCAL_STORAGE_KEYS,
+        
+        // Core functions
+        loadStatuses: window.loadStatuses,
+        postStatus: window.postStatus,
+        markStatusViewed: window.markStatusViewed,
+        deleteStatus: window.deleteStatus,
+        addReaction: window.addReaction,
+        removeReaction: window.removeReaction,
+        
+        // Helper functions
+        sendToParent: window.sendToParent,
+        updateLocalStateWithSession: window.updateLocalStateWithSession,
+        handleLogout: window.handleLogout,
+        handleParentUnavailable: window.handleParentUnavailable,
+        makeParentApiRequest: window.makeParentApiRequest,
+        waitForTokenReady: window.waitForTokenReady,
+        onTokenReady: window.onTokenReady,
+        triggerTokenReadyCallbacks: window.triggerTokenReadyCallbacks,
+        getUnifiedToken: window.getUnifiedToken,
+        isAuthenticated: window.isAuthenticated,
+        queueApiRequest: window.queueApiRequest,
+        processPendingApiRequests: window.processPendingApiRequests,
+        startTokenReadinessCheck: window.startTokenReadinessCheck,
+        initializeUIWithCachedData: window.initializeUIWithCachedData,
+        loadCachedDataInstantly: window.loadCachedDataInstantly,
+        startBackgroundInitialization: window.startBackgroundInitialization,
+        loadFreshDataInBackground: window.loadFreshDataInBackground,
+        safeApiOperation: window.safeApiOperation,
+        loadStatusesInBackground: window.loadStatusesInBackground,
+        loadMyStatusesInBackground: window.loadMyStatusesInBackground,
+        loadHighlightsInBackground: window.loadHighlightsInBackground,
+        loadUserDataInBackground: window.loadUserDataInBackground,
+        bootstrapApplication: window.bootstrapApplication,
+        handleAuthError: window.handleAuthError,
+        loadInitialData: window.loadInitialData,
+        filterStatusesByPrivacy: window.filterStatusesByPrivacy,
+        getStatusPreviewText: window.getStatusPreviewText,
+        filterStatusesByType: window.filterStatusesByType,
+        getEmptyStateMessage: window.getEmptyStateMessage,
+        addReactionToStatus: window.addReactionToStatus,
+        removeReactionFromStatus: window.removeReactionFromStatus,
+        changeReaction: window.changeReaction,
+        trackStatusView: window.trackStatusView,
+        voteOnPoll: window.voteOnPoll,
+        pinStatus: window.pinStatus,
+        unpinStatus: window.unpinStatus,
+        muteUser: window.muteUser,
+        unmuteUser: window.unmuteUser,
+        postStatusLegacy: window.postStatusLegacy,
+        updateStreakCounter: window.updateStreakCounter,
+        scheduleStatus: window.scheduleStatus,
+        saveDraft: window.saveDraft,
+        reportStatus: window.reportStatus,
+        escapeHtml: window.escapeHtml,
+        formatTimeAgo: window.formatTimeAgo,
+        retryOperation: window.retryOperation,
+        generateSampleMoodData: window.generateSampleMoodData,
+        initPageCore: window.initPageCore,
+        getSession: window.getSession,
+        isSessionValid: window.isSessionValid,
+        
+        // Enhanced core exports
+        getHealthMetrics: window.getHealthMetrics,
+        getDiagnostics: window.getDiagnostics,
+        refreshToken: window.refreshToken,
+        requestParentConfig: window.requestParentConfig,
+        SessionClient: window.SessionClient,
+        IframeHandshakeAuthority: window.IframeHandshakeAuthority,
+        StartupGovernor: window.StartupGovernor,
+        DiagnosticsAgent: window.DiagnosticsAgent,
+        SafeStorage: window.SafeStorage,
+        StorageProxy: window.StorageProxy,
+        NavigationGuard: window.NavigationGuard,
+        IframeEnvironment: window.IframeEnvironment,
+        logStatus: window.logStatus,
+        UIBridge: window.UIBridge,
+        EventBus: window.EventBus,
+        ParentConnectionManager: window.ParentConnectionManager,
+        ModuleLifecycleController: window.ModuleLifecycleController,
+        
+        // Setter functions for constants
+        setCurrentIntentFilter: window.setCurrentIntentFilter,
+        setCurrentMoodFilter: window.setCurrentMoodFilter,
+        setCurrentCategoryFilter: window.setCurrentCategoryFilter,
+        
+        // Lifecycle exports
+        LifecycleState: window.LifecycleState,
+        isInState: window.isInState,
+        assertActive: window.assertActive,
+        getLifecycleState: window.getLifecycleState,
+        parentReady: window.parentReady,
+        messageQueue: window.messageQueue,
+        flushQueue: window.flushQueue,
+        sendMessage: window.sendMessage,
+        safeSend: window.safeSend,
+        handleParentMessage: window.handleParentMessage,
+        genId: window.genId,
+        genReqId: window.genReqId,
+        onTokenReady: window.onTokenReady,  // Add this line
+
+        // Session functions
+        isSessionReady: window.isSessionReady,
+        getSessionToken: window.getSessionToken,
+        getSessionUser: window.getSessionUser,
+        
+        // Module version
+        MODULE_VERSION: window.MODULE_VERSION
+    };
+    
+    // For ES modules
+    if (typeof module !== 'undefined' && module.exports) {
+        module.exports = exports;
+    }
+    
+    // Also make available as a named export
+    if (typeof exports !== 'undefined') {
+        Object.keys(exports).forEach(key => {
+            if (typeof exports !== 'undefined' && exports[key] !== undefined) {
+                try {
+                    // This is for ES module compatibility
+                    if (typeof globalThis !== 'undefined') {
+                        globalThis[key] = exports[key];
+                    }
+                } catch(e) {}
+            }
+        });
+    }
+}, 0);

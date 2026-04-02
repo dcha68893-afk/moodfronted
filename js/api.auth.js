@@ -1,17 +1,26 @@
 // api.auth.js - Modular Authentication Service with IIFE Protection
-// Version: 22.0.0 - CRITICAL FIX: Enhanced session persistence and token management
-// Date: 2024-01-09
+// Version: 22.0.1 - CRITICAL FIX: Fixed getBaseUrl undefined error, centralized API integration
+// Date: 2026-04-02
+// 🔧 FIXED: getBaseUrl is not defined error
+// 🔧 FIXED: Centralized API request integration
 // 🔧 FIXED: Session persistence with kynecta_auth storage key
 // 🔧 FIXED: Token restoration on reload
 // 🔧 FIXED: Consistent session state management
+// 🔧 CRITICAL FIX: AUTH_TOKEN variable scope issue resolved
 
 (function() {
+    // ============================================================================
+    // CRITICAL FIX: Token storage variables - MUST BE IN SCOPE
+    // ============================================================================
+    let AUTH_TOKEN = null;
+    let TOKEN_READY = false;
+    
     // ============================================================================
     // SINGLETON GUARD - MUST BE FIRST EXECUTION
     // ============================================================================
     
     // CRITICAL: Ultimate singleton guard - prevents ANY possibility of multiple initialization
-    const VERSION = '22.0.0';
+    const VERSION = '22.0.1';
     const GUARD_KEY = '__API_AUTH_SINGLETON_GUARD__';
     
     // Check if we already have a fully initialized instance
@@ -41,7 +50,7 @@
     
     // CRITICAL: Prevent duplicate loading with immediate detection
     if (window._API_AUTH_V22_LOADED_ && window._API_AUTH_V22_LOADED_.initialized === true) {
-        console.warn('⚠️ [API-AUTH] api.auth.js v22.0.0 already fully initialized, skipping');
+        console.warn('⚠️ [API-AUTH] api.auth.js v22.0.1 already fully initialized, skipping');
         return;
     }
     
@@ -713,6 +722,52 @@
         return null;
     }
     
+    function _getBaseUrl() {
+        // CRITICAL FIX: Centralized base URL detection
+        try {
+            // Priority 1: API core
+            if (window.__API_CORE && window.__API_CORE.getBaseUrl) {
+                let url = window.__API_CORE.getBaseUrl();
+                if (url) {
+                    // Remove trailing /api if present to avoid double /api
+                    url = url.replace(/\/api$/, '');
+                    console.log('[AUTH] Base URL from __API_CORE:', url);
+                    return url;
+                }
+            }
+            
+            // Priority 2: API_CONFIG
+            if (window.API_CONFIG && window.API_CONFIG.baseUrl) {
+                let url = window.API_CONFIG.baseUrl;
+                url = url.replace(/\/api$/, '');
+                console.log('[AUTH] Base URL from API_CONFIG:', url);
+                return url;
+            }
+            
+            // Priority 3: API_BASE_URL
+            if (window.API_BASE_URL) {
+                let url = window.API_BASE_URL;
+                url = url.replace(/\/api$/, '');
+                console.log('[AUTH] Base URL from API_BASE_URL:', url);
+                return url;
+            }
+            
+            // Priority 4: Environment detection
+            const hostname = window.location.hostname;
+            if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '') {
+                console.log('[AUTH] Base URL from localhost detection: http://localhost:4000');
+                return 'http://localhost:4000';
+            }
+            
+            // Priority 5: Production default
+            console.log('[AUTH] Base URL from production default: https://moodchat-fy56.onrender.com');
+            return 'https://moodchat-fy56.onrender.com';
+        } catch (error) {
+            console.error('[AUTH] Error getting base URL:', error);
+            return 'http://localhost:4000';
+        }
+    }
+    
     function _getApiEndpoint(endpoint) {
         if (!endpoint || typeof endpoint !== 'string') {
             return '/api/auth/login';
@@ -1329,7 +1384,7 @@
             normalized.identifier = first.trim();
             normalized.password = second;
             normalized._source = 'two_string_args';
-            console.log('🔧 [AUTH] Normalized from two string arguments:', normalized);
+            console.log('🔧 [AUTH] Normalized from two string arguments:', { identifier: normalized.identifier, password: '***' });
             return normalized;
         }
         
@@ -1773,49 +1828,43 @@
         return null;
     }
     
+    // CRITICAL FIX: FIXED getUserToken with proper AUTH_TOKEN access
     function getUserToken() {
         try {
-            // Try core system first
-            if (window.__API_CORE && typeof window.__API_CORE.getUserToken === 'function') {
-                const coreToken = window.__API_CORE.getUserToken();
-                if (_isValid(coreToken)) {
-                    console.log('✅ [AUTH] Token retrieved from core system');
-                    return coreToken;
-                }
+            // Priority 1: Memory token (using the closure variable)
+            if (AUTH_TOKEN && typeof AUTH_TOKEN === 'string' && AUTH_TOKEN.length > 20) {
+                return AUTH_TOKEN;
             }
             
-            // CRITICAL: Try unified storage key first
+            // Priority 2: Unified auth storage
             const unifiedAuth = _loadPersistedAuthData();
-            if (unifiedAuth && unifiedAuth.token) {
-                console.log('✅ [AUTH] Token retrieved from unified storage');
-                return unifiedAuth.token;
+            if (unifiedAuth && unifiedAuth.token && unifiedAuth.token.length > 20) {
+                AUTH_TOKEN = unifiedAuth.token;
+                TOKEN_READY = true;
+                return AUTH_TOKEN;
             }
             
-            // Try localStorage legacy keys
-            for (const key of CONFIG.TOKEN_KEYS) {
-                const token = _safeStorageGet(key);
-                if (_isValid(token)) {
-                    if (token.trim() === '' || token === 'undefined' || token === 'null') {
-                        _safeStorageRemove(key);
-                        continue;
-                    }
-                    
-                    const expiry = _safeStorageGet(CONFIG.TOKEN_EXPIRY_KEY);
-                    if (expiry && Date.now() > parseInt(expiry, 10)) {
-                        console.log('⚠️ [AUTH] Token expired, clearing');
-                        clearUserToken();
-                        return null;
-                    }
-                    
-                    console.log(`✅ [AUTH] Token retrieved from localStorage key: ${key}`);
+            // Priority 3: Direct localStorage keys (in order)
+            const keys = ['token', 'accessToken', 'moodchat_token', 'USER_TOKEN', 'jwt'];
+            for (const key of keys) {
+                const token = localStorage.getItem(key);
+                if (token && token.length > 20 && token !== 'undefined' && token !== 'null') {
+                    AUTH_TOKEN = token;
+                    TOKEN_READY = true;
                     return token;
                 }
             }
             
-            console.log('⚠️ [AUTH] No token found in any location');
+            // Priority 4: Check window object
+            if (window.token && window.token.length > 20) {
+                AUTH_TOKEN = window.token;
+                TOKEN_READY = true;
+                return window.token;
+            }
+            
             return null;
         } catch (error) {
-            console.error('❌ [AUTH] Error getting user token:', error);
+            console.error('❌ Error getting token:', error);
             return null;
         }
     }
@@ -1845,6 +1894,10 @@
             }
             
             console.log('🔐 [AUTH] Setting user token...');
+            
+            // Update memory token (CRITICAL FIX)
+            AUTH_TOKEN = token;
+            TOKEN_READY = true;
             
             // Register with core systems FIRST
             _registerTokenWithCoreSystem(token);
@@ -1913,6 +1966,10 @@
     function clearUserToken() {
         try {
             console.log('🔐 [AUTH] Clearing user token...');
+            
+            // Clear memory token (CRITICAL FIX)
+            AUTH_TOKEN = null;
+            TOKEN_READY = false;
             
             // Clear from core systems
             if (window.__API_CORE && typeof window.__API_CORE.clearAllAuthData === 'function') {
@@ -2592,11 +2649,11 @@
     }
     
     // ============================================================================
-    // CRITICAL FIX: PUBLIC API FUNCTIONS - ENHANCED TOKEN EXTRACTION
+    // CRITICAL FIX: PUBLIC API FUNCTIONS - ENHANCED TOKEN EXTRACTION & BASE URL FIX
     // ============================================================================
     
     /**
-     * PUBLIC: Login with credentials - ENHANCED TOKEN EXTRACTION
+     * PUBLIC: Login with credentials - ENHANCED TOKEN EXTRACTION & FIXED BASE URL
      */
     async function login(...args) {
         console.log('🔐 [AUTH] Login attempt - ENHANCED TOKEN EXTRACTION');
@@ -2628,12 +2685,112 @@
             const payload = validation.payload;
             console.log('🔧 [AUTH] Final login payload:', payload);
             
-            // CRITICAL FIX: Use DIRECT FETCH like the browser console test
-            // This ensures 100% compatibility with the backend
-            try {
-                console.log('🔐 [AUTH] Making direct fetch to:', 'http://localhost:4000/api/auth/login');
+            // ========== CRITICAL FIX: Use centralized API request if available ==========
+            let response;
+            
+            // Try using centralized API request first (preferred method)
+            if (window.api && window.api.request && window.api.request.post) {
+                console.log('🔐 [AUTH] Using centralized API request for login');
                 
-                const response = await fetch('http://localhost:4000/api/auth/login', {
+                try {
+                    const apiResponse = await window.api.request.post('/auth/login', payload);
+                    console.log('🔐 [AUTH] Centralized API response:', apiResponse);
+                    
+                    // Check if response indicates success
+                    if (apiResponse.success && (apiResponse.data || apiResponse.token)) {
+                        const data = apiResponse.data || apiResponse;
+                        const token = _extractTokenFromResponse(data);
+                        
+                        if (token) {
+                            console.log('✅ [AUTH] Token extracted from centralized response');
+                            
+                            // Extract user data
+                            let user = data.user || data.data?.user || data.data;
+                            if (!user && token) {
+                                user = {
+                                    email: normalized.identifier.includes('@') ? normalized.identifier : null,
+                                    username: normalized.identifier.includes('@') ? normalized.identifier.split('@')[0] : normalized.identifier,
+                                    id: 'user_' + Date.now()
+                                };
+                            }
+                            
+                            const refreshToken = data.refreshToken || data.data?.refreshToken || null;
+                            const expiresIn = data.expiresIn || data.data?.expiresIn || CONFIG.DEFAULT_TOKEN_EXPIRY;
+                            
+                            // Persist auth data
+                            const persisted = _persistAuthData(token, user, refreshToken, expiresIn);
+                            if (!persisted) {
+                                console.error('❌ [AUTH] Failed to persist auth data');
+                                return {
+                                    success: false,
+                                    error: 'Failed to store authentication data',
+                                    code: 'STORAGE_ERROR'
+                                };
+                            }
+                            
+                            setUserToken(token, expiresIn);
+                            
+                            if (refreshToken) {
+                                _safeStorageSet(CONFIG.REFRESH_TOKEN_KEY, refreshToken);
+                            }
+                            
+                            if (user) {
+                                window.currentUser = user;
+                            }
+                            
+                            _initCrossTabSync();
+                            _initIframeSync();
+                            
+                            _emitEvent('login', { user, token });
+                            
+                            try {
+                                window.dispatchEvent(new CustomEvent('user-logged-in', {
+                                    detail: { user, token, timestamp: Date.now(), source: 'api.auth.js' }
+                                }));
+                                window.dispatchEvent(new CustomEvent('auth:token:ready', { detail: { token, timestamp: Date.now() } }));
+                                window.dispatchEvent(new CustomEvent('session:ready', { detail: { token, user, timestamp: Date.now() } }));
+                            } catch (error) {}
+                            
+                            return {
+                                success: true,
+                                user: user,
+                                token: token,
+                                expiresIn: expiresIn,
+                                message: 'Login successful'
+                            };
+                        }
+                    }
+                    
+                    // If centralized API returned failure, use response data for error
+                    if (!apiResponse.success) {
+                        response = {
+                            ok: false,
+                            status: apiResponse.status || 401,
+                            json: async () => ({ message: apiResponse.message || 'Login failed' })
+                        };
+                    } else {
+                        // If no token but success, treat as failure
+                        response = {
+                            ok: false,
+                            status: 401,
+                            json: async () => ({ message: 'No token received from server' })
+                        };
+                    }
+                } catch (error) {
+                    console.error('🔐 [AUTH] Centralized API request error:', error);
+                    // Fall through to direct fetch
+                    response = null;
+                }
+            }
+            
+            // ========== FALLBACK: Use direct fetch with dynamic base URL ==========
+            if (!response) {
+                // Get base URL using centralized function
+                const baseUrl = _getBaseUrl();
+                const fullUrl = `${baseUrl}/api/auth/login`;
+                console.log('🔐 [AUTH] Making direct fetch to:', fullUrl);
+                
+                const fetchResponse = await fetch(fullUrl, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
@@ -2641,184 +2798,164 @@
                     body: JSON.stringify(payload)
                 });
                 
-                console.log('🔐 [AUTH] Response status:', response.status);
-                
-                // Check if response is OK
-                if (!response.ok) {
-                    const text = await response.text();
-                    console.error('🔐 [AUTH] Error response text:', text);
-                    
-                    // Try to parse as JSON if possible
-                    try {
-                        const errorJson = JSON.parse(text);
-                        return {
-                            success: false,
-                            error: errorJson.message || 'Login failed',
-                            code: response.status === 401 ? 'INVALID_CREDENTIALS' : 'LOGIN_FAILED',
-                            status: response.status,
-                            message: errorJson.message || 'Invalid email/username or password',
-                            payload: payload
-                        };
-                    } catch (e) {
-                        // Not JSON, return text
-                        return {
-                            success: false,
-                            error: text || 'Login failed',
-                            code: 'LOGIN_FAILED',
-                            status: response.status,
-                            message: text || 'Login failed',
-                            payload: payload
-                        };
-                    }
-                }
-                
-                // Parse successful response
-                const data = await response.json();
-                console.log('🔐 [AUTH] Login successful response:', data);
-                
-                // ========== CRITICAL FIX: ENHANCED TOKEN EXTRACTION ==========
-                const token = _extractTokenFromResponse(data);
-                
-                if (token) {
-                    const expiresIn = data.expiresIn || data.data?.expiresIn || CONFIG.DEFAULT_TOKEN_EXPIRY;
-                    
-                    console.log('✅ [AUTH] Token extracted successfully:', token.substring(0, 20) + '...');
-                    
-                    // Extract user data from various possible locations
-                    let user = data.user || data.data?.user || data.data;
-                    
-                    // If user is still not found but we have a token, create minimal user
-                    if (!user && token) {
-                        console.warn('⚠️ [AUTH] No user data in response, creating minimal user from identifier');
-                        user = {
-                            email: normalized.identifier.includes('@') ? normalized.identifier : null,
-                            username: normalized.identifier.includes('@') ? normalized.identifier.split('@')[0] : normalized.identifier,
-                            id: 'user_' + Date.now()
-                        };
-                    }
-                    
-                    const refreshToken = data.refreshToken || data.data?.refreshToken || null;
-                    
-                    // CRITICAL: Persist auth data to unified storage
-                    const persisted = _persistAuthData(token, user, refreshToken, expiresIn);
-                    
-                    if (!persisted) {
-                        console.error('❌ [AUTH] Failed to persist auth data');
-                        return {
-                            success: false,
-                            error: 'Failed to store authentication data',
-                            code: 'STORAGE_ERROR',
-                            status: 500,
-                            message: 'Authentication succeeded but data could not be stored'
-                        };
-                    }
-                    
-                    // Store tokens with enhanced method
-                    const tokenStored = setUserToken(token, expiresIn);
-                    
-                    if (!tokenStored) {
-                        console.error('❌ [AUTH] Failed to store token');
-                        return {
-                            success: false,
-                            error: 'Failed to store authentication token',
-                            code: 'TOKEN_STORAGE_ERROR',
-                            status: 500,
-                            message: 'Authentication succeeded but token could not be stored'
-                        };
-                    }
-                    
-                    if (refreshToken) {
-                        _safeStorageSet(CONFIG.REFRESH_TOKEN_KEY, refreshToken);
-                        console.log('✅ [AUTH] Refresh token stored');
-                    }
-                    
-                    // Store user data in legacy locations
-                    if (user) {
-                        const userData = JSON.stringify(user);
-                        _safeStorageSet('USER_DATA', userData);
-                        window.currentUser = user;
-                        console.log('✅ [AUTH] User data stored');
-                    }
-                    
-                    // Initialize synchronization
-                    _initCrossTabSync();
-                    _initIframeSync();
-                    
-                    // Dispatch login event with token
-                    _emitEvent('login', {
-                        user: user,
-                        token: token,
-                        timestamp: new Date().toISOString(),
-                        payloadType: args.length > 1 ? 'legacy-args' : 'object',
-                        backendPayload: payload
-                    });
-                    
-                    try {
-                        window.dispatchEvent(new CustomEvent('user-logged-in', {
-                            detail: {
-                                user: user,
-                                token: token,
-                                timestamp: new Date().toISOString(),
-                                source: 'api.auth.js',
-                                version: VERSION,
-                                payloadType: args.length > 1 ? 'legacy-args' : 'object'
-                            }
-                        }));
-                        
-                        // Dispatch token-ready event for other modules
-                        window.dispatchEvent(new CustomEvent('auth:token:ready', {
-                            detail: {
-                                token: token,
-                                timestamp: Date.now()
-                            }
-                        }));
-                        
-                        // Dispatch session-ready event for sync manager
-                        window.dispatchEvent(new CustomEvent('session:ready', {
-                            detail: {
-                                token: token,
-                                user: user,
-                                timestamp: Date.now()
-                            }
-                        }));
-                    } catch (error) {
-                        console.warn('⚠️ [AUTH] Failed to dispatch login events:', error);
-                    }
-                    
-                    console.log('✅ [AUTH] Login successful with token storage');
-                    
-                    // Return success with token and user
-                    return {
-                        success: true,
-                        user: user,
-                        token: token,
-                        expiresIn: expiresIn,
-                        message: 'Login successful',
-                        payloadType: args.length > 1 ? 'legacy-args' : 'object',
-                        identifierUsed: normalized.identifier
-                    };
-                } else {
-                    console.error('❌ [AUTH] No token found in response:', data);
-                    return {
-                        success: false,
-                        error: 'Login failed - no token received from server',
-                        code: 'NO_TOKEN',
-                        status: response.status,
-                        message: 'Authentication succeeded but no token was provided',
-                        payload: payload,
-                        data: data
-                    };
-                }
-            } catch (fetchError) {
-                console.error('🔐 [AUTH] Fetch error:', fetchError);
-                
+                console.log('🔐 [AUTH] Direct fetch response status:', fetchResponse.status);
+                response = fetchResponse;
+            }
+            
+            // Parse response
+            let data;
+            try {
+                data = await response.json();
+                console.log('🔐 [AUTH] Response data:', data);
+            } catch (e) {
+                const text = await response.text();
+                console.error('🔐 [AUTH] Error response text:', text);
+                data = { message: text || 'Login failed' };
+            }
+            
+            // Check if response is OK
+            if (!response.ok) {
                 return {
                     success: false,
-                    error: fetchError.message || 'Network error',
-                    code: 'NETWORK_ERROR',
-                    message: 'Unable to connect to authentication service',
-                    status: 0,
-                    args: args
+                    error: data.message || 'Login failed',
+                    code: response.status === 401 ? 'INVALID_CREDENTIALS' : 'LOGIN_FAILED',
+                    status: response.status,
+                    message: data.message || 'Invalid email/username or password',
+                    payload: payload
+                };
+            }
+            
+            // ========== CRITICAL FIX: ENHANCED TOKEN EXTRACTION ==========
+            const token = _extractTokenFromResponse(data);
+            
+            if (token) {
+                const expiresIn = data.expiresIn || data.data?.expiresIn || CONFIG.DEFAULT_TOKEN_EXPIRY;
+                
+                console.log('✅ [AUTH] Token extracted successfully:', token.substring(0, 20) + '...');
+                
+                // Extract user data from various possible locations
+                let user = data.user || data.data?.user || data.data;
+                
+                // If user is still not found but we have a token, create minimal user
+                if (!user && token) {
+                    console.warn('⚠️ [AUTH] No user data in response, creating minimal user from identifier');
+                    user = {
+                        email: normalized.identifier.includes('@') ? normalized.identifier : null,
+                        username: normalized.identifier.includes('@') ? normalized.identifier.split('@')[0] : normalized.identifier,
+                        id: 'user_' + Date.now()
+                    };
+                }
+                
+                const refreshToken = data.refreshToken || data.data?.refreshToken || null;
+                
+                // CRITICAL: Persist auth data to unified storage
+                const persisted = _persistAuthData(token, user, refreshToken, expiresIn);
+                
+                if (!persisted) {
+                    console.error('❌ [AUTH] Failed to persist auth data');
+                    return {
+                        success: false,
+                        error: 'Failed to store authentication data',
+                        code: 'STORAGE_ERROR',
+                        status: 500,
+                        message: 'Authentication succeeded but data could not be stored'
+                    };
+                }
+                
+                // Store tokens with enhanced method
+                const tokenStored = setUserToken(token, expiresIn);
+                
+                if (!tokenStored) {
+                    console.error('❌ [AUTH] Failed to store token');
+                    return {
+                        success: false,
+                        error: 'Failed to store authentication token',
+                        code: 'TOKEN_STORAGE_ERROR',
+                        status: 500,
+                        message: 'Authentication succeeded but token could not be stored'
+                    };
+                }
+                
+                if (refreshToken) {
+                    _safeStorageSet(CONFIG.REFRESH_TOKEN_KEY, refreshToken);
+                    console.log('✅ [AUTH] Refresh token stored');
+                }
+                
+                // Store user data in legacy locations
+                if (user) {
+                    const userData = JSON.stringify(user);
+                    _safeStorageSet('USER_DATA', userData);
+                    window.currentUser = user;
+                    console.log('✅ [AUTH] User data stored');
+                }
+                
+                // Initialize synchronization
+                _initCrossTabSync();
+                _initIframeSync();
+                
+                // Dispatch login event with token
+                _emitEvent('login', {
+                    user: user,
+                    token: token,
+                    timestamp: new Date().toISOString(),
+                    payloadType: args.length > 1 ? 'legacy-args' : 'object',
+                    backendPayload: payload
+                });
+                
+                try {
+                    window.dispatchEvent(new CustomEvent('user-logged-in', {
+                        detail: {
+                            user: user,
+                            token: token,
+                            timestamp: new Date().toISOString(),
+                            source: 'api.auth.js',
+                            version: VERSION,
+                            payloadType: args.length > 1 ? 'legacy-args' : 'object'
+                        }
+                    }));
+                    
+                    // Dispatch token-ready event for other modules
+                    window.dispatchEvent(new CustomEvent('auth:token:ready', {
+                        detail: {
+                            token: token,
+                            timestamp: Date.now()
+                        }
+                    }));
+                    
+                    // Dispatch session-ready event for sync manager
+                    window.dispatchEvent(new CustomEvent('session:ready', {
+                        detail: {
+                            token: token,
+                            user: user,
+                            timestamp: Date.now()
+                        }
+                    }));
+                } catch (error) {
+                    console.warn('⚠️ [AUTH] Failed to dispatch login events:', error);
+                }
+                
+                console.log('✅ [AUTH] Login successful with token storage');
+                
+                // Return success with token and user
+                return {
+                    success: true,
+                    user: user,
+                    token: token,
+                    expiresIn: expiresIn,
+                    message: 'Login successful',
+                    payloadType: args.length > 1 ? 'legacy-args' : 'object',
+                    identifierUsed: normalized.identifier
+                };
+            } else {
+                console.error('❌ [AUTH] No token found in response:', data);
+                return {
+                    success: false,
+                    error: 'Login failed - no token received from server',
+                    code: 'NO_TOKEN',
+                    status: response.status,
+                    message: 'Authentication succeeded but no token was provided',
+                    payload: payload,
+                    data: data
                 };
             }
         } catch (error) {
@@ -2866,112 +3003,107 @@
             
             const payload = validation.payload;
             
-            const apiRequest = _getApiRequest();
-            if (!apiRequest || !apiRequest.post) {
-                return {
-                    success: false,
-                    error: 'API request module not available',
-                    code: 'MODULE_ERROR',
-                    message: 'Registration service temporarily unavailable'
-                };
-            }
+            // Get base URL
+            const baseUrl = _getBaseUrl();
+            const fullUrl = `${baseUrl}/api/auth/register`;
             
-            const endpoint = _getApiEndpoint(CONFIG.API_ENDPOINTS.REGISTER);
+            console.log('🔐 [AUTH] Sending registration request to:', fullUrl);
+            console.log('🔐 [AUTH] Registration payload:', { email: payload.email, username: payload.username });
             
-            const response = await _withRetry(async () => {
-                const result = await _safeApiCall(
-                    apiRequest.post.bind(apiRequest),
-                    endpoint,
-                    payload,
-                    { skipAuth: true }
-                );
-                
-                if (!result.success) {
-                    throw result;
-                }
-                
-                return result;
-            }, operation, CONFIG.RETRY.MAX_ATTEMPTS);
+            // Use centralized API if available, otherwise direct fetch
+            let response;
             
-            if (response.success && response.data?.accessToken) {
-                const expiresIn = response.data.expiresIn || CONFIG.DEFAULT_TOKEN_EXPIRY;
-                const user = response.data.user;
-                const refreshToken = response.data.refreshToken || null;
-                
-                // CRITICAL: Persist auth data to unified storage
-                _persistAuthData(response.data.accessToken, user, refreshToken, expiresIn);
-                setUserToken(response.data.accessToken, expiresIn);
-                
-                if (refreshToken) {
-                    _safeStorageSet(CONFIG.REFRESH_TOKEN_KEY, refreshToken);
-                }
-                
-                if (user) {
-                    const userData = JSON.stringify(user);
-                    _safeStorageSet('USER_DATA', userData);
-                    window.currentUser = user;
-                }
-                
-                _initCrossTabSync();
-                _initIframeSync();
-                
-                _emitEvent('registration-complete', {
-                    user: response.data.user,
-                    timestamp: new Date().toISOString(),
-                    payloadType: args.length > 1 ? 'legacy-args' : 'object'
-                });
-                
+            if (window.api && window.api.request && window.api.request.post) {
                 try {
-                    window.dispatchEvent(new CustomEvent('user-registered', {
-                        detail: {
-                            user: response.data.user,
-                            timestamp: new Date().toISOString(),
-                            source: 'api.auth.js',
-                            version: VERSION,
-                            payloadType: args.length > 1 ? 'legacy-args' : 'object'
-                        }
-                    }));
-                    
-                    window.dispatchEvent(new CustomEvent('session:ready', {
-                        detail: {
-                            token: response.data.accessToken,
-                            user: response.data.user,
-                            timestamp: Date.now()
-                        }
-                    }));
-                } catch (error) {}
-                
-                return {
-                    success: true,
-                    user: response.data.user,
-                    token: response.data.accessToken,
-                    expiresIn: expiresIn,
-                    message: 'Registration successful',
-                    payloadType: args.length > 1 ? 'legacy-args' : 'object'
-                };
-            } else {
+                    const apiResponse = await window.api.request.post('/auth/register', payload);
+                    response = {
+                        ok: apiResponse.success,
+                        status: apiResponse.status || (apiResponse.success ? 200 : 400),
+                        json: async () => apiResponse.data || {}
+                    };
+                } catch (error) {
+                    console.error('❌ [AUTH] Centralized API error:', error);
+                    // Fall through to direct fetch
+                    response = null;
+                }
+            }
+            
+            if (!response) {
+                const fetchResponse = await fetch(fullUrl, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        email: payload.email,
+                        username: payload.username,
+                        password: payload.password
+                    })
+                });
+                response = fetchResponse;
+            }
+            
+            console.log('🔐 [AUTH] Registration response status:', response.status);
+            
+            let data;
+            try {
+                data = await response.json();
+            } catch (e) {
+                data = { message: await response.text() };
+            }
+            
+            console.log('🔐 [AUTH] Registration response data:', data);
+            
+            if (!response.ok) {
                 return {
                     success: false,
-                    error: response.data?.message || 'Registration failed',
-                    code: response.status === 409 ? 'USER_EXISTS' : 'REGISTRATION_FAILED',
+                    error: data.message || 'Registration failed',
+                    code: data.code || 'REGISTRATION_FAILED',
                     status: response.status,
-                    message: response.data?.message || 'Unable to complete registration',
-                    payload: payload
+                    message: data.message || 'Registration failed'
                 };
             }
-        } catch (error) {
-            _safeLogError('REGISTER', 'Registration error', {
-                error: error.message || error.error,
-                argsCount: args.length
-            }, false, operation);
             
+            // Extract token correctly
+            const token = data.token || data.accessToken || _extractTokenFromResponse(data);
+            const user = data.user || data.data?.user || data.data;
+            
+            console.log('✅ [AUTH] Registration successful, token:', token ? 'present' : 'missing');
+            console.log('✅ [AUTH] User data:', user);
+            
+            if (token) {
+                // Store token in multiple locations
+                try {
+                    localStorage.setItem('token', token);
+                    localStorage.setItem('accessToken', token);
+                    localStorage.setItem('USER_TOKEN', token);
+                    localStorage.setItem('moodchat_token', token);
+                    localStorage.setItem('kynecta_auth', JSON.stringify({ token, user, timestamp: Date.now() }));
+                    window.token = token;
+                    window.accessToken = token;
+                    if (user) window.currentUser = user;
+                    console.log('✅ [AUTH] Token stored in all locations');
+                } catch (e) {
+                    console.warn('⚠️ [AUTH] Failed to store token:', e);
+                }
+            }
+            
+            // Return in format that app.ui.auth.js expects
+            return {
+                success: true,
+                token: token,
+                user: user,
+                message: data.message || 'Registration successful',
+                data: data
+            };
+            
+        } catch (error) {
+            console.error('❌ [AUTH] Registration error:', error);
             return {
                 success: false,
-                error: error.error || error.message || 'Registration failed',
-                code: error.code || 'NETWORK_ERROR',
-                message: error.message || error.error || 'Unable to connect to registration service',
-                status: error.status || 0,
-                args: args
+                error: error.message || 'Registration failed',
+                code: 'REGISTRATION_ERROR',
+                message: error.message || 'Registration failed'
             };
         }
     }
@@ -3454,20 +3586,6 @@
         };
     }
     
-    /**
-     * PUBLIC: Wait for auth module to be ready
-     */
-    async function waitForReady() {
-        return _readinessState.readyPromise;
-    }
-    
-    /**
-     * PUBLIC: Wait with timeout
-     */
-    async function waitFor(timeoutMs = 30000) {
-        return waitFor(timeoutMs);
-    }
-    
     // ============================================================================
     // MODULE INITIALIZATION
     // ============================================================================
@@ -3925,4 +4043,4 @@
     
 })(); // End of IIFE
 
-console.log('✅ [API-AUTH] Modular authentication service v22.0.0 loaded with session persistence fix (IIFE Protected)');
+console.log('✅ [API-AUTH] Modular authentication service v22.0.1 loaded with session persistence fix (IIFE Protected)');

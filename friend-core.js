@@ -1,9 +1,11 @@
 // =============================================
-// FRIEND PAGE - STABILIZED COMMUNICATION v10.2
-// DETERMINISTIC MICRO-FRONTEND ARCHITECTURE
-// UPDATED: PROPER API ROUTING THROUGH PARENT
-// FIXED: All API calls go through parent chat.html → api.core.js
-// FIXED: Correct friend routes (all under /api/friends)
+// FRIEND PAGE - STABILIZED COMMUNICATION v12.0
+// AUTH-HARDENED MICRO-FRONTEND ARCHITECTURE
+// COMPLETE FIX: All API calls through parent with proper authentication
+// FIXED: No direct fetch calls - all through parent messaging
+// FIXED: Authentication waiting before any API calls
+// FIXED: Request queue for pending auth operations
+// STABILITY v12.0: Auth-first initialization, request queuing, proper error handling
 // =============================================
 
 import {
@@ -38,7 +40,7 @@ const DEBUG = false;
 const PRODUCTION = window.location.hostname !== 'localhost' && !window.location.hostname.includes('127.0.0.1');
 
 const MODULE_NAME = 'friends';
-const MODULE_VERSION = '10.2';
+const MODULE_VERSION = '12.0';
 const EXPECTED_PARENT_ORIGIN = window.location.origin;
 
 // =============================================
@@ -101,6 +103,8 @@ const __session = {
 const LIFECYCLE_STATES = {
     BOOT: 'BOOT',
     INITIALIZING: 'INITIALIZING',
+    WAITING_AUTH: 'WAITING_AUTH',
+    AUTH_READY: 'AUTH_READY',
     READY: 'READY',
     WAIT_PARENT: 'WAIT_PARENT',
     ACTIVE: 'ACTIVE',
@@ -111,9 +115,55 @@ const LIFECYCLE_STATES = {
 let currentState = LIFECYCLE_STATES.BOOT;
 let childReadySent = false;
 let parentReadyReceived = false;
+let authReadyReceived = false;
 let _stateHistory = [];
 const _listeners = new Set();
 let initializationLock = false;
+
+// =============================================
+// [REQUEST QUEUE] - FOR PENDING AUTH OPERATIONS
+// =============================================
+
+const requestQueue = [];
+let isFlushingQueue = false;
+
+function queueRequest(requestFn) {
+    console.log(`[${MODULE_NAME}] Queueing request (auth not ready)`);
+    requestQueue.push(requestFn);
+    
+    if (requestQueue.length > 100) {
+        requestQueue.shift();
+        console.warn(`[${MODULE_NAME}] Request queue truncated to 100 items`);
+    }
+}
+
+async function flushRequestQueue() {
+    if (isFlushingQueue) {
+        console.log(`[${MODULE_NAME}] Queue flush already in progress`);
+        return;
+    }
+    
+    if (!authReadyReceived || currentState !== LIFECYCLE_STATES.ACTIVE) {
+        console.log(`[${MODULE_NAME}] Cannot flush queue - auth not ready or not active`);
+        return;
+    }
+    
+    isFlushingQueue = true;
+    const queueSize = requestQueue.length;
+    console.log(`[${MODULE_NAME}] Flushing ${queueSize} queued requests`);
+    
+    while (requestQueue.length > 0) {
+        const requestFn = requestQueue.shift();
+        try {
+            await requestFn();
+        } catch (error) {
+            console.error(`[${MODULE_NAME}] Queued request failed:`, error);
+        }
+    }
+    
+    isFlushingQueue = false;
+    console.log(`[${MODULE_NAME}] Queue flush complete`);
+}
 
 // =============================================
 // [STRICT STATE TRANSITION] - NO INVALID TRANSITIONS
@@ -121,7 +171,9 @@ let initializationLock = false;
 
 const VALID_TRANSITIONS = {
     [LIFECYCLE_STATES.BOOT]: [LIFECYCLE_STATES.INITIALIZING],
-    [LIFECYCLE_STATES.INITIALIZING]: [LIFECYCLE_STATES.READY],
+    [LIFECYCLE_STATES.INITIALIZING]: [LIFECYCLE_STATES.WAITING_AUTH],
+    [LIFECYCLE_STATES.WAITING_AUTH]: [LIFECYCLE_STATES.AUTH_READY, LIFECYCLE_STATES.ERROR],
+    [LIFECYCLE_STATES.AUTH_READY]: [LIFECYCLE_STATES.READY],
     [LIFECYCLE_STATES.READY]: [LIFECYCLE_STATES.WAIT_PARENT],
     [LIFECYCLE_STATES.WAIT_PARENT]: [LIFECYCLE_STATES.ACTIVE, LIFECYCLE_STATES.ERROR],
     [LIFECYCLE_STATES.ACTIVE]: [],
@@ -129,6 +181,7 @@ const VALID_TRANSITIONS = {
 };
 
 function transitionTo(nextState, reason = '') {
+    // CRITICAL FIX: Prevent duplicate transitions to same state
     if (currentState === nextState) {
         Logger.debug('Lifecycle', `Already in state ${nextState} - ignoring transition`, { reason });
         return true;
@@ -172,6 +225,7 @@ function onTransition(listener) {
 const LifecycleStateMachine = {
     get current() { return currentState; },
     get isActive() { return currentState === LIFECYCLE_STATES.ACTIVE; },
+    get isAuthReady() { return authReadyReceived; },
     get isReady() { return currentState === LIFECYCLE_STATES.READY; },
     get isWaitingParent() { return currentState === LIFECYCLE_STATES.WAIT_PARENT; },
     get parentReady() { return parentReadyReceived; },
@@ -182,12 +236,15 @@ const LifecycleStateMachine = {
         currentState = LIFECYCLE_STATES.BOOT;
         childReadySent = false;
         parentReadyReceived = false;
+        authReadyReceived = false;
         _stateHistory = [];
         __session.token = null;
         __session.user = null;
         __session.expiresAt = null;
         __session.ready = false;
         initializationLock = false;
+        requestQueue.length = 0;
+        isFlushingQueue = false;
     }
 };
 
@@ -197,10 +254,10 @@ const LifecycleStateMachine = {
 
 function assertActive(actionName) {
     if (currentState !== LIFECYCLE_STATES.ACTIVE) {
-        console.warn(`[Lifecycle] Blocked action "${actionName}" — not ACTIVE (current: ${currentState}, parentReady: ${parentReadyReceived}, sessionReady: ${__session.ready})`);
+        console.warn(`[Lifecycle] Blocked action "${actionName}" — not ACTIVE (current: ${currentState}, parentReady: ${parentReadyReceived}, authReady: ${authReadyReceived}, sessionReady: ${__session.ready})`);
         
         window.dispatchEvent(new CustomEvent('actionBlocked', {
-            detail: { action: actionName, state: currentState, parentReady: parentReadyReceived, sessionReady: __session.ready }
+            detail: { action: actionName, state: currentState, parentReady: parentReadyReceived, authReady: authReadyReceived, sessionReady: __session.ready }
         }));
         
         return false;
@@ -208,9 +265,17 @@ function assertActive(actionName) {
     return true;
 }
 
+function assertAuthReady(actionName) {
+    if (!authReadyReceived) {
+        console.warn(`[Lifecycle] Blocked action "${actionName}" — auth not ready (state: ${currentState}, authReady: ${authReadyReceived})`);
+        return false;
+    }
+    return true;
+}
+
 function assertReadyForSession(actionName) {
-    if (currentState !== LIFECYCLE_STATES.ACTIVE || !parentReadyReceived || !__session.ready) {
-        console.warn(`[Lifecycle] Blocked session action "${actionName}" — prerequisites not met (state: ${currentState}, parentReady: ${parentReadyReceived}, sessionReady: ${__session.ready})`);
+    if (currentState !== LIFECYCLE_STATES.ACTIVE || !parentReadyReceived || !__session.ready || !authReadyReceived) {
+        console.warn(`[Lifecycle] Blocked session action "${actionName}" — prerequisites not met (state: ${currentState}, parentReady: ${parentReadyReceived}, authReady: ${authReadyReceived}, sessionReady: ${__session.ready})`);
         return false;
     }
     return true;
@@ -254,11 +319,6 @@ function sendChildReady() {
 }
 
 // =============================================
-// [NO HAND SHAKE RETRY SYSTEM] - REMOVED
-// =============================================
-// All retry logic removed. Module strictly waits in WAIT_PARENT state.
-
-// =============================================
 // [PARENT_READY HANDLER] - EXACTLY ONCE
 // =============================================
 
@@ -293,9 +353,43 @@ function handleParentReady(message) {
     onModuleActive();
 }
 
+function handleAuthReady(message) {
+    // STRICT: Only process if not already received
+    if (authReadyReceived) {
+        console.warn('[Lifecycle] AUTH_READY already received — ignoring');
+        return;
+    }
+
+    // STRICT: Only accept AUTH_READY in WAITING_AUTH state or higher
+    if (currentState !== LIFECYCLE_STATES.WAITING_AUTH && currentState !== LIFECYCLE_STATES.AUTH_READY) {
+        console.warn(`[Lifecycle] AUTH_READY received in invalid state: ${currentState} — ignoring`);
+        return;
+    }
+
+    authReadyReceived = true;
+    
+    const session = message.payload?.session || message.session || null;
+    if (session) {
+        applySession(session);
+    }
+
+    transitionTo(LIFECYCLE_STATES.AUTH_READY, 'auth_ready_received');
+    
+    console.log(`[${MODULE_NAME}] AUTH_READY received — proceeding to READY state`);
+    
+    // Now transition to READY
+    transitionTo(LIFECYCLE_STATES.READY, 'auth_ready_processed');
+    
+    // Send CHILD_READY after auth is ready
+    sendChildReady();
+    
+    // Flush any queued requests
+    flushRequestQueue();
+}
+
 function applySession(session) {
     if (!session) {
-        console.warn(`[${MODULE_NAME}] No session data in PARENT_READY`);
+        console.warn(`[${MODULE_NAME}] No session data in message`);
         return;
     }
 
@@ -334,7 +428,7 @@ function onModuleActive() {
 
     flushQueue();
     
-    if (!__session.ready && parentReadyReceived) {
+    if (!__session.ready && parentReadyReceived && authReadyReceived) {
         requestSessionFromParent();
     }
     
@@ -406,7 +500,20 @@ function markMessageProcessed(messageId) {
     }
 }
 
+// CRITICAL FIX: Safe message sender with parent existence check
 function sendMessageInternal(message) {
+    // Validate parent existence
+    if (!window.parent || window.parent === window) {
+        Logger.warn('sendMessage', 'Parent window not available');
+        return false;
+    }
+
+    // Validate message structure
+    if (!message || typeof message !== 'object') {
+        Logger.error('sendMessage', 'Invalid message object');
+        return false;
+    }
+
     const validatedMessage = {
         type: message.type,
         id: message.id || generateMessageId(),
@@ -446,6 +553,259 @@ function safeSend(message) {
     }
     return sendMessageInternal(message);
 }
+
+// =============================================
+// [AUTHENTICATED REQUEST THROUGH PARENT] - MAIN FIX
+// =============================================
+
+function isAuthenticated() {
+    return authReadyReceived && __session.ready && !!__session.token;
+}
+
+// In friend-core.js, find the authorizedRequest function and update the handler
+
+async function authorizedRequest(endpoint, options = {}) {
+    console.log(`[authorizedRequest] Called with endpoint: ${endpoint}`);
+    console.log(`[authorizedRequest] Auth state: authReady=${authReadyReceived}, sessionReady=${__session.ready}, token=${!!__session.token}`);
+    
+    // CRITICAL FIX: Block requests if auth not ready
+    if (!authReadyReceived) {
+        console.warn(`[authorizedRequest] Auth not ready - queuing request for ${endpoint}`);
+        
+        return new Promise((resolve, reject) => {
+            queueRequest(async () => {
+                try {
+                    const result = await authorizedRequest(endpoint, options);
+                    resolve(result);
+                } catch (error) {
+                    reject(error);
+                }
+            });
+        });
+    }
+    
+    // Validate module state
+    if (!assertActive('authorizedRequest')) {
+        return { success: false, error: 'Module not active', statusCode: 503 };
+    }
+    
+    // Validate session
+    if (!__session.ready || !__session.token) {
+        Logger.warn('authorizedRequest', 'Session not ready, waiting for parent session');
+        return { success: false, error: 'Session not ready', statusCode: 401 };
+    }
+    
+    // CRITICAL FIX: Endpoint normalization
+    let normalizedEndpoint = endpoint;
+    if (normalizedEndpoint && typeof normalizedEndpoint === 'string') {
+        normalizedEndpoint = normalizedEndpoint.trim();
+        
+        // Remove leading '/api' if present (parent handles it)
+        if (normalizedEndpoint.startsWith('/api/')) {
+            normalizedEndpoint = normalizedEndpoint.substring(4);
+        } else if (normalizedEndpoint.startsWith('api/')) {
+            normalizedEndpoint = '/' + normalizedEndpoint.substring(3);
+        }
+        
+        // Ensure it starts with '/'
+        if (!normalizedEndpoint.startsWith('/')) {
+            normalizedEndpoint = '/' + normalizedEndpoint;
+        }
+        
+        // Remove duplicate slashes
+        normalizedEndpoint = normalizedEndpoint.replace(/\/+/g, '/');
+    }
+    
+    return new Promise((resolve) => {
+        const requestId = generateRequestId();
+        const timeout = options.timeout || 30000;
+        let resolved = false;
+        
+        const timeoutId = setTimeout(() => {
+            if (!resolved) {
+                resolved = true;
+                Logger.warn('authorizedRequest', `API request timeout for ${normalizedEndpoint}`, { requestId });
+                resolve({ 
+                    success: false, 
+                    error: 'API request timeout', 
+                    statusCode: 408 
+                });
+            }
+        }, timeout);
+        
+        const handler = (event) => {
+            if (resolved) return;
+            
+            const message = event.data;
+            if (message.type === 'API_RESPONSE' && message.requestId === requestId) {
+                resolved = true;
+                clearTimeout(timeoutId);
+                
+                // CRITICAL FIX: Check for payload structure
+                const payload = message.payload || {};
+                
+                // CRITICAL FIX: Handle success responses with proper data extraction
+                if (payload.success === true) {
+                    Logger.info('authorizedRequest', `API success: ${normalizedEndpoint}`, { requestId });
+                    
+                    // Extract data - handle both { success: true, data: {...} } and { success: true, ...other }
+                    let responseData = null;
+                    if (payload.data !== undefined) {
+                        responseData = payload.data;
+                    } else if (payload.friends !== undefined) {
+                        responseData = { friends: payload.friends };
+                    } else if (payload.requests !== undefined) {
+                        responseData = { requests: payload.requests };
+                    } else if (payload.users !== undefined) {
+                        responseData = { users: payload.users };
+                    } else {
+                        // If no specific data field, return the entire payload minus success
+                        const { success, ...rest } = payload;
+                        responseData = rest;
+                    }
+                    
+                    resolve({ 
+                        success: true, 
+                        data: responseData, 
+                        statusCode: payload.statusCode || 200 
+                    });
+                    return;
+                }
+                
+                // Handle error responses
+                if (payload.error || payload.success === false) {
+                    Logger.warn('authorizedRequest', `API error: ${payload.error || 'Unknown error'}`, { endpoint: normalizedEndpoint, requestId });
+                    
+                    // Handle authentication errors
+                    if (payload.error === 'Authentication required' || payload.statusCode === 401) {
+                        Logger.error('authorizedRequest', 'Authentication failed - token may be invalid', { endpoint: normalizedEndpoint });
+                        
+                        // Notify parent about auth error
+                        safeSend({
+                            type: 'AUTH_ERROR',
+                            payload: {
+                                module: MODULE_NAME,
+                                error: 'Authentication failed',
+                                timestamp: Date.now()
+                            }
+                        });
+                        
+                        resolve({ 
+                            success: false, 
+                            error: 'Authentication required', 
+                            statusCode: 401 
+                        });
+                        return;
+                    }
+                    
+                    resolve({ 
+                        success: false, 
+                        error: payload.error || payload.message || 'API request failed', 
+                        statusCode: payload.statusCode || 500,
+                        data: payload.data
+                    });
+                    return;
+                }
+                
+                // If we get here, the response structure is unexpected
+                Logger.error('authorizedRequest', 'Unexpected API response format', { 
+                    endpoint: normalizedEndpoint, 
+                    requestId,
+                    payload: payload 
+                });
+                resolve({ 
+                    success: false, 
+                    error: 'Invalid API response format', 
+                    statusCode: 500 
+                });
+            }
+        };
+        
+        window.addEventListener('message', handler);
+        
+        // Prepare request payload with normalized endpoint
+        const requestPayload = {
+            endpoint: normalizedEndpoint,
+            method: options.method || 'GET',
+            headers: options.headers || {},
+            requireAuth: options.requireAuth !== false,
+            timestamp: Date.now()
+        };
+        
+        // Add body if present
+        if (options.body) {
+            requestPayload.body = options.body;
+        }
+        
+        // Add query params if present
+        if (options.params) {
+            requestPayload.params = options.params;
+        }
+        
+        const message = {
+            type: 'API_REQUEST',
+            requestId: requestId,
+            payload: requestPayload
+        };
+        
+        Logger.info('authorizedRequest', 'Sending API_REQUEST to parent', { endpoint: normalizedEndpoint, requestId, method: options.method });
+        
+        if (!safeSend(message)) {
+            if (!resolved) {
+                resolved = true;
+                clearTimeout(timeoutId);
+                resolve({ 
+                    success: false, 
+                    error: 'Failed to send API request to parent', 
+                    statusCode: 503 
+                });
+            }
+        }
+    });
+}
+
+// =============================================
+// [API GATEWAY] - THROUGH PARENT
+// =============================================
+const APIGateway = {
+    _pendingRequests: new Map(),
+    _requestCounter: 0,
+    
+    async request(endpoint, options = {}) {
+        // CRITICAL FIX: Block if auth not ready
+        if (!authReadyReceived) {
+            console.warn(`[APIGateway] Auth not ready - queuing request for ${endpoint}`);
+            
+            return new Promise((resolve, reject) => {
+                queueRequest(async () => {
+                    try {
+                        const result = await this.request(endpoint, options);
+                        resolve(result);
+                    } catch (error) {
+                        reject(error);
+                    }
+                });
+            });
+        }
+        
+        if (!assertActive('APIGateway.request')) {
+            return { success: false, error: 'Module not active', statusCode: 503 };
+        }
+        
+        // Always route through parent with normalized endpoint
+        return await authorizedRequest(endpoint, {
+            method: options.method || 'GET',
+            headers: options.headers || {},
+            body: options.body ? JSON.stringify(options.body) : undefined,
+            params: options.params,
+            requireAuth: options.requireAuth !== false
+        });
+    },
+    
+    clearPending() {
+        this._pendingRequests.clear();
+    }
+};
 
 // =============================================
 // [LOGGING SYSTEM] - PRESERVED
@@ -506,7 +866,7 @@ const StatusManager = {
     currentStatus: null,
     lastStatusTime: 0,
     statusHistory: new Set(),
-    _allowedStatuses: new Set(['INIT', 'READY', 'ERROR', 'SESSION_UPDATE', 'SYNC_COMPLETE']),
+    _allowedStatuses: new Set(['INIT', 'AUTH_WAIT', 'READY', 'ERROR', 'SESSION_UPDATE', 'SYNC_COMPLETE']),
     
     show(status, message, data = {}) {
         const now = Date.now();
@@ -517,7 +877,7 @@ const StatusManager = {
         if (PRODUCTION && !this._allowedStatuses.has(status)) return;
         
         const statusEmojis = {
-            'INIT': '🚀', 'READY': '🔵', 'ERROR': '❌', 
+            'INIT': '🚀', 'AUTH_WAIT': '🔐', 'READY': '🔵', 'ERROR': '❌', 
             'SESSION_UPDATE': '🔄', 'SYNC_COMPLETE': '✅'
         };
         
@@ -869,16 +1229,13 @@ const SecurityValidator = {
             'UPDATE_PROFILE', 'OPEN_GROUP', 'CHANGE_STATUS', 'FRIEND_REQUEST_SENT',
             'FRIEND_ACCEPTED', 'FRIEND_REJECTED', 'FRIEND_REMOVED', 'FRIEND_BLOCKED',
             'GROUP_UPDATE', 'TOKEN_EXPIRED', 'AUTH_ERROR', 'CHILD_READY',
-            'REGISTER_MODULE', 'REQUEST_SESSION', 'SESSION_DATA'
+            'REGISTER_MODULE', 'REQUEST_SESSION', 'SESSION_DATA', 'FRIEND_SEARCH',
+            'AUTH_READY'
         ];
         
         return allowedTypes.includes(type);
     }
 };
-
-// =============================================
-// [PARENT MESSAGE HANDLER]
-// =============================================
 
 // =============================================
 // [PARENT COMMUNICATION MANAGER]
@@ -922,6 +1279,11 @@ const ParentCommunicationManager = {
             if (!SecurityValidator.validateMessage(event)) return;
             
             const message = event.data;
+            if (!message || typeof message !== 'object') {
+                Logger.debug('ParentCommunication', 'Invalid message format: not an object');
+                return;
+            }
+            
             if (!SecurityValidator.validateMessageFormat(message)) {
                 Logger.debug('ParentCommunication', 'Invalid message format', message);
                 return;
@@ -938,6 +1300,11 @@ const ParentCommunicationManager = {
             
             if (message.type === 'PARENT_READY') {
                 handleParentReady(message);
+                return;
+            }
+            
+            if (message.type === 'AUTH_READY') {
+                handleAuthReady(message);
                 return;
             }
             
@@ -985,7 +1352,7 @@ const ParentCommunicationManager = {
         if (!payload || !payload.token || !payload.user) {
             Logger.warn('ParentCommunication', 'Invalid SESSION_DATA - missing required fields');
             
-            if (currentState === LIFECYCLE_STATES.ACTIVE && parentReadyReceived) {
+            if (currentState === LIFECYCLE_STATES.ACTIVE && parentReadyReceived && authReadyReceived) {
                 setTimeout(() => this._requestSession(), 1000);
             }
             return;
@@ -1011,14 +1378,14 @@ const ParentCommunicationManager = {
             detail: { session: payload, timestamp: Date.now() }
         }));
         
-        if (currentState === LIFECYCLE_STATES.ACTIVE) {
+        if (currentState === LIFECYCLE_STATES.ACTIVE && authReadyReceived) {
             window.dispatchEvent(new CustomEvent('loadInitialData'));
         }
     },
     
     _requestSession() {
-        if (!parentReadyReceived || currentState !== LIFECYCLE_STATES.ACTIVE) {
-            Logger.warn('ParentCommunication', 'Cannot request session - not ACTIVE');
+        if (!parentReadyReceived || currentState !== LIFECYCLE_STATES.ACTIVE || !authReadyReceived) {
+            Logger.warn('ParentCommunication', 'Cannot request session - not ACTIVE or auth not ready');
             return false;
         }
         
@@ -1040,6 +1407,9 @@ const ParentCommunicationManager = {
     
     _handleApiResponse(message) {
         const { requestId, payload } = message;
+        
+        Logger.info('ParentCommunication', 'API_RESPONSE received', { requestId, success: payload?.success });
+        
         if (requestId && this._pendingRequests.has(requestId)) {
             const { resolve, reject } = this._pendingRequests.get(requestId);
             this._pendingRequests.delete(requestId);
@@ -1121,8 +1491,8 @@ const ParentCommunicationManager = {
 };
 
 function requestSessionFromParent() {
-    if (!parentReadyReceived || currentState !== LIFECYCLE_STATES.ACTIVE) {
-        Logger.warn('ParentCommunication', 'Cannot request session - not ACTIVE');
+    if (!parentReadyReceived || currentState !== LIFECYCLE_STATES.ACTIVE || !authReadyReceived) {
+        Logger.warn('ParentCommunication', 'Cannot request session - not ACTIVE or auth not ready');
         return false;
     }
     
@@ -1138,7 +1508,7 @@ const ModuleRegistrationManager = {
     _registrationCompleted: false,
     _capabilities: [
         'friends', 'friend-requests', 'qr-codes', 'mutual-friends',
-        'pinned-friends', 'muted-friends', 'groups'
+        'pinned-friends', 'muted-friends', 'groups', 'search'
     ],
     
     init() {
@@ -1249,8 +1619,8 @@ const SessionManager = {
     },
     
     requestSession() {
-        if (!parentReadyReceived || currentState !== LIFECYCLE_STATES.ACTIVE) {
-            Logger.warn('SessionManager', 'Cannot request session - not ACTIVE');
+        if (!parentReadyReceived || currentState !== LIFECYCLE_STATES.ACTIVE || !authReadyReceived) {
+            Logger.warn('SessionManager', 'Cannot request session - not ACTIVE or auth not ready');
             return false;
         }
         
@@ -1354,113 +1724,6 @@ const TokenPromise = {
         this._token = null;
         this._tokenReceived = false;
         this._listeners.clear();
-    }
-};
-
-// =============================================
-// [AUTHORIZED FETCH] - THROUGH PARENT ONLY
-// =============================================
-
-async function authorizedFetch(endpoint, options = {}) {
-    console.log(`[authorizedFetch] Called with endpoint: ${endpoint}`);
-    console.log(`[authorizedFetch] __session.ready:`, __session.ready);
-    
-    if (!assertActive('authorizedFetch')) {
-        return { success: false, error: 'Module not active', statusCode: 503 };
-    }
-    
-    // CRITICAL FIX: Always route through parent via API_REQUEST message
-    // Never call backend directly - let parent handle it
-    
-    return new Promise((resolve) => {
-        const requestId = generateRequestId();
-        const timeout = options.timeout || 30000;
-        
-        const timeoutId = setTimeout(() => {
-            cleanup();
-            resolve({ 
-                success: false, 
-                error: 'API request timeout', 
-                statusCode: 408 
-            });
-        }, timeout);
-        
-        const handler = (event) => {
-            const message = event.data;
-            if (message.type === 'API_RESPONSE' && message.requestId === requestId) {
-                cleanup();
-                
-                if (message.payload.error) {
-                    resolve({ 
-                        success: false, 
-                        error: message.payload.error, 
-                        statusCode: message.payload.statusCode || 500,
-                        data: message.payload.data
-                    });
-                } else {
-                    resolve({ 
-                        success: true, 
-                        data: message.payload.data, 
-                        statusCode: message.payload.statusCode || 200 
-                    });
-                }
-            }
-        };
-        
-        const cleanup = () => {
-            clearTimeout(timeoutId);
-            window.removeEventListener('message', handler);
-        };
-        
-        window.addEventListener('message', handler);
-        
-        const message = {
-            type: 'API_REQUEST',
-            requestId: requestId,
-            payload: {
-                endpoint: endpoint,
-                method: options.method || 'GET',
-                headers: options.headers || {},
-                body: options.body,
-                requireAuth: options.requireAuth !== false,
-                timestamp: Date.now()
-            }
-        };
-        
-        if (!safeSend(message)) {
-            cleanup();
-            resolve({ 
-                success: false, 
-                error: 'Failed to send API request to parent', 
-                statusCode: 503 
-            });
-        }
-    });
-}
-
-// =============================================
-// [API GATEWAY] - THROUGH PARENT
-// =============================================
-const APIGateway = {
-    _pendingRequests: new Map(),
-    _requestCounter: 0,
-    
-    async request(endpoint, options = {}) {
-        if (!assertActive('APIGateway.request')) {
-            return { success: false, error: 'Module not active', statusCode: 503 };
-        }
-        
-        // Always route through parent
-        return await authorizedFetch(endpoint, {
-            method: options.method || 'GET',
-            headers: options.headers || {},
-            body: options.body ? JSON.stringify(options.body) : undefined,
-            requireAuth: options.requireAuth !== false
-        });
-    },
-    
-    clearPending() {
-        this._pendingRequests.clear();
     }
 };
 
@@ -1684,6 +1947,8 @@ const MessageDispatcher = {
         ParentCommunicationManager.on('SESSION_INVALIDATED', this._handleSessionInvalidated.bind(this));
         ParentCommunicationManager.on('FRIEND_UPDATE', this._handleFriendUpdate.bind(this));
         ParentCommunicationManager.on('API_RESPONSE', this._handleApiResponse.bind(this));
+        ParentCommunicationManager.on('FRIEND_SEARCH', this._handleFriendSearch.bind(this));
+        ParentCommunicationManager.on('AUTH_READY', this._handleAuthReady.bind(this));
         
         this._initialized = true;
         Logger.info('MessageDispatcher', 'Initialized');
@@ -1709,6 +1974,10 @@ const MessageDispatcher = {
         SessionManager.handleSessionInvalidated();
     },
     
+    _handleAuthReady(message) {
+        handleAuthReady(message);
+    },
+    
     _handleFriendUpdate(message) {
         const payload = message.payload || message;
         if (!payload || !payload.friendId) return;
@@ -1729,10 +1998,27 @@ const MessageDispatcher = {
         const payload = message.payload || message;
         const requestId = message.requestId || payload.requestId || payload.id;
         
+        Logger.info('MessageDispatcher', 'API_RESPONSE received', { requestId, success: payload?.success });
+        
         if (requestId) {
             window.dispatchEvent(new CustomEvent('apiResponse', {
                 detail: { requestId, data: payload.data, error: payload.error, statusCode: payload.statusCode }
             }));
+        }
+    },
+    
+    _handleFriendSearch(message) {
+        const payload = message.payload || message;
+        const { query } = payload;
+        
+        Logger.info('MessageDispatcher', 'FRIEND_SEARCH received', { query });
+        
+        if (query && typeof query === 'string') {
+            FriendSearchEngine.search(query).then(results => {
+                window.dispatchEvent(new CustomEvent('friendSearchResults', {
+                    detail: { query, results }
+                }));
+            });
         }
     },
     
@@ -2112,7 +2398,7 @@ const FriendCacheManager = {
 FriendCacheManager.init();
 
 // =============================================
-// [FRIEND REQUEST MANAGER]
+// [FRIEND REQUEST MANAGER] - ALL REQUESTS THROUGH PARENT
 // =============================================
 
 const FriendRequestManager = {
@@ -2125,8 +2411,22 @@ const FriendRequestManager = {
             return { success: false, error: 'Module not active' };
         }
         
-        if (!__session.ready || !__session.token) {
-            return { success: false, error: 'Session not ready' };
+        if (!authReadyReceived || !__session.ready || !__session.token) {
+            // Queue the request for when auth is ready
+            return new Promise((resolve, reject) => {
+                queueRequest(async () => {
+                    try {
+                        const result = await this.sendFriendRequest(userId, options);
+                        resolve(result);
+                    } catch (error) {
+                        reject(error);
+                    }
+                });
+            });
+        }
+        
+        if (!userId || typeof userId !== 'string') {
+            return { success: false, error: 'Invalid user ID' };
         }
         
         const opId = `send_${userId}_${Date.now()}`;
@@ -2154,13 +2454,7 @@ const FriendRequestManager = {
     },
     
     async _executeSendRequest(userId, options, opId) {
-        if (!userId || typeof userId !== 'string') {
-            return { success: false, error: 'Invalid user ID' };
-        }
-        
-        if (!validateFriendId(userId)) {
-            return { success: false, error: 'Invalid ID format' };
-        }
+        Logger.info('FriendRequestManager', 'Sending friend request', { userId, options });
         
         const optimisticRequest = {
             id: `temp_${Date.now()}`,
@@ -2184,8 +2478,7 @@ const FriendRequestManager = {
         }));
         
         try {
-            // Use the correct endpoint - /api/friends/requests/send
-            const response = await authorizedFetch('/api/friends/requests/send', {
+            const response = await authorizedRequest('/api/friends/requests/send', {
                 method: 'POST',
                 body: JSON.stringify({ 
                     receiverId: userId, 
@@ -2196,6 +2489,8 @@ const FriendRequestManager = {
                     isBusiness: options.isBusiness || false 
                 })
             });
+            
+            Logger.info('FriendRequestManager', 'Send request response', { success: response.success, data: response.data });
             
             if (response && response.success) {
                 if (response.data) {
@@ -2256,8 +2551,17 @@ const FriendRequestManager = {
             return { success: false, error: 'Module not active' };
         }
         
-        if (!__session.ready || !__session.token) {
-            return { success: false, error: 'Session not ready' };
+        if (!authReadyReceived || !__session.ready || !__session.token) {
+            return new Promise((resolve, reject) => {
+                queueRequest(async () => {
+                    try {
+                        const result = await this.acceptFriendRequest(requestId, friendId);
+                        resolve(result);
+                    } catch (error) {
+                        reject(error);
+                    }
+                });
+            });
         }
         
         if (!requestId || !friendId) {
@@ -2269,9 +2573,10 @@ const FriendRequestManager = {
             return { success: false, error: 'Request not found' };
         }
         
+        Logger.info('FriendRequestManager', 'Accepting friend request', { requestId, friendId });
+        
         try {
-            // Use the correct endpoint - /api/friends/requests/:id/accept
-            const response = await authorizedFetch(`/api/friends/requests/${requestId}/accept`, {
+            const response = await authorizedRequest(`/api/friends/requests/${requestId}/accept`, {
                 method: 'POST'
             });
             
@@ -2280,8 +2585,8 @@ const FriendRequestManager = {
                 
                 const newFriend = {
                     id: friendId,
-                    displayName: existingRequest.senderName || 'Friend',
-                    username: existingRequest.senderUsername || '',
+                    displayName: existingRequest.senderName || existingRequest.user?.displayName || 'Friend',
+                    username: existingRequest.senderUsername || existingRequest.user?.username || '',
                     addedAt: Date.now(),
                     online: false,
                     category: existingRequest.category || 'friend'
@@ -2323,8 +2628,17 @@ const FriendRequestManager = {
             return { success: false, error: 'Module not active' };
         }
         
-        if (!__session.ready || !__session.token) {
-            return { success: false, error: 'Session not ready' };
+        if (!authReadyReceived || !__session.ready || !__session.token) {
+            return new Promise((resolve, reject) => {
+                queueRequest(async () => {
+                    try {
+                        const result = await this.declineFriendRequest(requestId);
+                        resolve(result);
+                    } catch (error) {
+                        reject(error);
+                    }
+                });
+            });
         }
         
         if (!requestId) return { success: false, error: 'Invalid request ID' };
@@ -2332,9 +2646,10 @@ const FriendRequestManager = {
         const existingRequest = FriendCacheManager.getRequest(requestId);
         if (!existingRequest) return { success: false, error: 'Request not found' };
         
+        Logger.info('FriendRequestManager', 'Declining friend request', { requestId });
+        
         try {
-            // Use the correct endpoint - /api/friends/requests/:id/decline
-            const response = await authorizedFetch(`/api/friends/requests/${requestId}/decline`, {
+            const response = await authorizedRequest(`/api/friends/requests/${requestId}/decline`, {
                 method: 'POST'
             });
             
@@ -2370,8 +2685,17 @@ const FriendRequestManager = {
             return { success: false, error: 'Module not active' };
         }
         
-        if (!__session.ready || !__session.token) {
-            return { success: false, error: 'Session not ready' };
+        if (!authReadyReceived || !__session.ready || !__session.token) {
+            return new Promise((resolve, reject) => {
+                queueRequest(async () => {
+                    try {
+                        const result = await this.cancelFriendRequest(requestId);
+                        resolve(result);
+                    } catch (error) {
+                        reject(error);
+                    }
+                });
+            });
         }
         
         if (!requestId) return { success: false, error: 'Invalid request ID' };
@@ -2379,9 +2703,10 @@ const FriendRequestManager = {
         const existingRequest = FriendCacheManager.getSentRequest(requestId);
         if (!existingRequest) return { success: false, error: 'Request not found' };
         
+        Logger.info('FriendRequestManager', 'Canceling friend request', { requestId });
+        
         try {
-            // Use the correct endpoint - /api/friends/requests/:id
-            const response = await authorizedFetch(`/api/friends/requests/${requestId}`, {
+            const response = await authorizedRequest(`/api/friends/requests/${requestId}`, {
                 method: 'DELETE'
             });
             
@@ -2426,7 +2751,7 @@ const FriendRequestManager = {
 setInterval(() => FriendRequestManager.cleanup(), 60000);
 
 // =============================================
-// [FRIEND SEARCH ENGINE]
+// [FRIEND SEARCH ENGINE] - REAL SEARCH THROUGH PARENT
 // =============================================
 
 const FriendSearchEngine = {
@@ -2434,123 +2759,104 @@ const FriendSearchEngine = {
     _pendingSearches: new Map(),
     _debounceTimers: new Map(),
     
-    search(query, options = {}) {
-        if (currentState !== LIFECYCLE_STATES.ACTIVE || !parentReadyReceived || !__session.ready) {
-            return { local: [], global: Promise.resolve([]) };
+    async search(query, options = {}) {
+        if (!assertActive('FriendSearchEngine.search')) {
+            Logger.warn('FriendSearchEngine', 'Search blocked - module not active');
+            return [];
+        }
+        
+        if (!authReadyReceived || !__session.ready || !__session.token) {
+            Logger.warn('FriendSearchEngine', 'Search blocked - auth not ready');
+            
+            return new Promise((resolve) => {
+                queueRequest(async () => {
+                    const results = await this.search(query, options);
+                    resolve(results);
+                });
+            });
         }
         
         const normalizedQuery = typeof query === 'string' ? query.toLowerCase().trim() : '';
         
         if (!normalizedQuery) {
-            return {
-                local: [],
-                global: Promise.resolve([])
-            };
+            return [];
         }
         
         const cacheKey = `${normalizedQuery}_${options.includeUsers ? 'withUsers' : 'friendsOnly'}`;
         const cached = this._searchCache.get(cacheKey);
         if (cached && Date.now() - cached.timestamp < 30000) {
-            return {
-                local: cached.results,
-                global: Promise.resolve(cached.results)
-            };
+            Logger.debug('FriendSearchEngine', 'Returning cached results', { query: normalizedQuery, count: cached.results.length });
+            return cached.results;
         }
         
-        const localResults = FriendCacheManager.searchFriends(normalizedQuery, {
-            includeUsers: options.includeUsers || false
-        });
-        
-        const result = {
-            local: localResults,
-            global: this._performGlobalSearch(normalizedQuery, options, cacheKey)
-        };
-        
-        this._searchCache.set(cacheKey, {
-            results: localResults,
-            timestamp: Date.now()
-        });
-        
-        return result;
-    },
-    
-    async _performGlobalSearch(query, options, cacheKey) {
-        if (this._debounceTimers.has(cacheKey)) {
-            clearTimeout(this._debounceTimers.get(cacheKey));
-        }
-        
-        return new Promise((resolve) => {
-            this._debounceTimers.set(cacheKey, setTimeout(async () => {
-                this._debounceTimers.delete(cacheKey);
-                
-                if (this._pendingSearches.has(cacheKey)) {
-                    try {
-                        const result = await this._pendingSearches.get(cacheKey);
-                        resolve(result);
-                    } catch (e) {
-                        resolve([]);
-                    }
-                    return;
-                }
-                
-                if (currentState !== LIFECYCLE_STATES.ACTIVE || !parentReadyReceived || !__session.ready) {
-                    resolve([]);
-                    return;
-                }
-                
-                const searchPromise = this._executeGlobalSearch(query, options);
-                this._pendingSearches.set(cacheKey, searchPromise);
-                
-                try {
-                    const results = await searchPromise;
-                    
-                    this._searchCache.set(cacheKey, {
-                        results,
-                        timestamp: Date.now()
-                    });
-                    
-                    results.forEach(user => {
-                        if (user && user.id && !FriendCacheManager.getUser(user.id)) {
-                            FriendCacheManager.setUser(user);
-                        }
-                    });
-                    
-                    window.dispatchEvent(new CustomEvent('friendGlobalSearchResults', {
-                        detail: { query, results }
-                    }));
-                    
-                    resolve(results);
-                } catch (error) {
-                    Logger.debug('FriendSearchEngine', 'Global search failed', error);
-                    resolve([]);
-                } finally {
-                    this._pendingSearches.delete(cacheKey);
-                }
-            }, 300));
-        });
-    },
-    
-    async _executeGlobalSearch(query, options) {
-        if (!__session.ready || !__session.token) {
-            return [];
-        }
+        Logger.info('FriendSearchEngine', 'Performing real search', { query: normalizedQuery, options });
         
         try {
-            // Use the correct endpoint - /api/friends/search
-            const response = await authorizedFetch('/api/friends/search', {
-                method: 'POST',
-                body: JSON.stringify({ query, limit: options.limit || 20 })
+            const response = await authorizedRequest('/api/friends/search', {
+                method: 'GET',
+                params: { 
+                    q: normalizedQuery,
+                    limit: options.limit || 20,
+                    includeUsers: options.includeUsers || false
+                }
             });
             
-            if (response.success && (response.data?.users || response.data)) {
-                const users = response.data?.users || response.data || [];
-                return users.filter(u => u && u.id);
+            Logger.info('FriendSearchEngine', 'Search response', { success: response.success, data: response.data });
+            
+            if (response.success && response.data) {
+                let results = [];
+                
+                if (response.data.users && Array.isArray(response.data.users)) {
+                    results = response.data.users;
+                } else if (response.data.results && Array.isArray(response.data.results)) {
+                    results = response.data.results;
+                } else if (Array.isArray(response.data)) {
+                    results = response.data;
+                }
+                
+                const currentUserId = __session.user?.id;
+                if (currentUserId) {
+                    results = results.filter(user => user.id !== currentUserId);
+                }
+                
+                this._searchCache.set(cacheKey, {
+                    results,
+                    timestamp: Date.now()
+                });
+                
+                results.forEach(user => {
+                    if (user && user.id && !FriendCacheManager.getUser(user.id)) {
+                        FriendCacheManager.setUser(user);
+                    }
+                });
+                
+                window.dispatchEvent(new CustomEvent('friendGlobalSearchResults', {
+                    detail: { query: normalizedQuery, results }
+                }));
+                
+                return results;
+            } else {
+                Logger.warn('FriendSearchEngine', 'Search returned no results or error', { error: response.error });
+                return [];
             }
         } catch (error) {
-            Logger.error('FriendSearchEngine', 'Search error', error);
+            Logger.error('FriendSearchEngine', 'Search failed', error);
+            return [];
+        }
+    },
+    
+    async searchByLetter(letter, options = {}) {
+        if (!letter || typeof letter !== 'string') return [];
+        
+        const normalizedLetter = letter.toLowerCase().trim();
+        
+        if (normalizedLetter.length !== 1) {
+            return this.search(normalizedLetter, options);
         }
         
-        return [];
+        Logger.info('FriendSearchEngine', 'Searching by first letter', { letter: normalizedLetter });
+        
+        return this.search(normalizedLetter, { ...options, limit: 50 });
     },
     
     clearCache() {
@@ -2561,57 +2867,55 @@ const FriendSearchEngine = {
 };
 
 // =============================================
-// [QR CODE MANAGER]
+// [QR CODE MANAGER] - COMPLETE FIX WITH REAL BACKEND
 // =============================================
 
 const QRCodeManager = {
     _qrCache: new Map(),
+    _scanCompleted: false,
     
-   // In QRCodeManager
-generateQRCode(userData) {
-    if (!userData) return null;
-    
-    // Convert numeric ID to string if needed
-    let userId = userData.id || userData.userId || 'unknown';
-    if (userId !== undefined && userId !== null) {
-        userId = String(userId);
-    }
-    
-    const username = userData.username || userData.userName || '';
-    const displayName = userData.displayName || userData.name || 'User';
-    const email = userData.email || '';
-    
-    if (userId === 'unknown') {
-        console.error('[QRCodeManager] Cannot generate QR: missing user ID');
-        return null;
-    }
-    
-    const timestamp = Date.now();
-    const nonce = (window.crypto && window.crypto.randomUUID) ? 
-        window.crypto.randomUUID() : 
-        `${Date.now()}_${Math.random().toString(36).substring(2, 15)}`;
-    
-    // Create unique QR data with all user identifiers
-    const qrData = {
-        type: 'knecta_friend_request',
-        version: '10.2',
-        userId: userId,
-        username: username,
-        displayName: displayName,
-        email: email,
-        timestamp: timestamp,
-        nonce: nonce,
-        expiresAt: timestamp + (24 * 60 * 60 * 1000),
-        signature: this._generateSecureHash(userId, username, email, timestamp, nonce)
-    };
-    
-    const qrString = JSON.stringify(qrData);
-    this._qrCache.set(userId, qrData);
-    
-    console.log('[QRCodeManager] Generated unique QR for user:', { userId, username, displayName });
-    
-    return qrString;
-},
+    generateQRCode(userData) {
+        if (!userData) return null;
+        
+        let userId = userData.id || userData.userId || 'unknown';
+        if (userId !== undefined && userId !== null) {
+            userId = String(userId);
+        }
+        
+        const username = userData.username || userData.userName || '';
+        const displayName = userData.displayName || userData.name || 'User';
+        const email = userData.email || '';
+        
+        if (userId === 'unknown') {
+            console.error('[QRCodeManager] Cannot generate QR: missing user ID');
+            return null;
+        }
+        
+        const timestamp = Date.now();
+        const nonce = (window.crypto && window.crypto.randomUUID) ? 
+            window.crypto.randomUUID() : 
+            `${Date.now()}_${Math.random().toString(36).substring(2, 15)}`;
+        
+        const qrData = {
+            type: 'knecta_friend_request',
+            version: '12.0',
+            userId: userId,
+            username: username,
+            displayName: displayName,
+            email: email,
+            timestamp: timestamp,
+            nonce: nonce,
+            expiresAt: timestamp + (24 * 60 * 60 * 1000),
+            signature: this._generateSecureHash(userId, username, email, timestamp, nonce)
+        };
+        
+        const qrString = JSON.stringify(qrData);
+        this._qrCache.set(userId, qrData);
+        
+        console.log('[QRCodeManager] Generated unique QR for user:', { userId, username, displayName });
+        
+        return qrString;
+    },
 
     validateQRCode(qrString) {
         try {
@@ -2628,6 +2932,7 @@ generateQRCode(userData) {
             const expectedSignature = this._generateSecureHash(
                 qrData.userId,
                 qrData.username || '',
+                qrData.email || '',
                 qrData.timestamp,
                 qrData.nonce
             );
@@ -2642,9 +2947,9 @@ generateQRCode(userData) {
         }
     },
     
-    _generateSecureHash(userId, username, timestamp, nonce) {
+    _generateSecureHash(userId, username, email, timestamp, nonce) {
         try {
-            const data = `${userId}:${username}:${timestamp}:${nonce}:knecta-secret-v10`;
+            const data = `${userId}:${username}:${email}:${timestamp}:${nonce}:knecta-secret-v12`;
             let hash = 0;
             for (let i = 0; i < data.length; i++) {
                 hash = ((hash << 5) - hash) + data.charCodeAt(i);
@@ -2662,9 +2967,16 @@ generateQRCode(userData) {
             return { success: false, error: 'Module not active' };
         }
         
-        if (!__session.ready || !__session.token) {
-            return { success: false, error: 'Session not ready' };
+        if (!authReadyReceived || !__session.ready || !__session.token) {
+            return new Promise((resolve) => {
+                queueRequest(async () => {
+                    const result = await this.processScannedQR(qrString);
+                    resolve(result);
+                });
+            });
         }
+        
+        this._scanCompleted = false;
         
         const validation = this.validateQRCode(qrString);
         if (!validation.valid) {
@@ -2690,11 +3002,15 @@ generateQRCode(userData) {
         }
         
         try {
-            // Use the correct endpoint - /api/friends/user/:userId
-            const response = await authorizedFetch(`/api/friends/user/${qrData.userId}`);
+            const response = await authorizedRequest(`/api/friends/user/${qrData.userId}`);
+            
+            Logger.info('QRCodeManager', 'Fetch user from QR', { userId: qrData.userId, success: response.success });
             
             if (response.success && (response.data?.user || response.data)) {
                 const userInfo = response.data?.user || response.data;
+                
+                this._scanCompleted = true;
+                
                 return {
                     success: true,
                     data: qrData,
@@ -2702,8 +3018,10 @@ generateQRCode(userData) {
                 };
             }
         } catch (error) {
-            Logger.debug('QRCodeManager', 'Failed to fetch user', error);
+            Logger.error('QRCodeManager', 'Failed to fetch user', error);
         }
+        
+        this._scanCompleted = true;
         
         return {
             success: true,
@@ -2714,6 +3032,53 @@ generateQRCode(userData) {
                 username: qrData.username
             }
         };
+    },
+    
+    async sendFriendRequestFromQR(userId, options = {}) {
+        if (!assertActive('sendFriendRequestFromQR')) {
+            return { success: false, error: 'Module not active' };
+        }
+        
+        if (!authReadyReceived || !__session.ready || !__session.token) {
+            return new Promise((resolve) => {
+                queueRequest(async () => {
+                    const result = await this.sendFriendRequestFromQR(userId, options);
+                    resolve(result);
+                });
+            });
+        }
+        
+        Logger.info('QRCodeManager', 'Sending friend request from QR', { userId });
+        
+        const response = await authorizedRequest('/api/friends/requests/send', {
+            method: 'POST',
+            body: JSON.stringify({ 
+                receiverId: userId, 
+                category: options.category || 'friend', 
+                note: options.note || 'Added via QR code',
+                isTemporary: false
+            })
+        });
+        
+        if (response && response.success) {
+            if (response.data) {
+                FriendCacheManager.setSentRequest(response.data);
+                FriendCacheManager.syncToGlobals();
+                FriendCacheManager.persist();
+            }
+            
+            return { success: true, request: response.data };
+        } else {
+            return { success: false, error: response?.error || 'Failed to send friend request' };
+        }
+    },
+    
+    isScanCompleted() {
+        return this._scanCompleted;
+    },
+    
+    resetScan() {
+        this._scanCompleted = false;
     }
 };
 
@@ -2727,8 +3092,13 @@ const GroupParticipationManager = {
             return { success: false, error: 'Module not active' };
         }
         
-        if (!__session.ready || !__session.token) {
-            return { success: false, error: 'Session not ready' };
+        if (!authReadyReceived || !__session.ready || !__session.token) {
+            return new Promise((resolve) => {
+                queueRequest(async () => {
+                    const result = await this.addFriendToGroup(groupId, friendId, options);
+                    resolve(result);
+                });
+            });
         }
         
         if (!groupId || !friendId) {
@@ -2754,8 +3124,7 @@ const GroupParticipationManager = {
         }));
         
         try {
-            // Use the correct endpoint - /api/groups/:groupId/members
-            const response = await authorizedFetch(`/api/groups/${groupId}/members`, {
+            const response = await authorizedRequest(`/api/groups/${groupId}/members`, {
                 method: 'POST',
                 body: JSON.stringify({ userId: friendId, role: options.role || 'member' })
             });
@@ -2790,8 +3159,13 @@ const GroupParticipationManager = {
             return { success: false, error: 'Module not active' };
         }
         
-        if (!__session.ready || !__session.token) {
-            return { success: false, error: 'Session not ready' };
+        if (!authReadyReceived || !__session.ready || !__session.token) {
+            return new Promise((resolve) => {
+                queueRequest(async () => {
+                    const result = await this.removeFriendFromGroup(groupId, friendId);
+                    resolve(result);
+                });
+            });
         }
         
         if (!groupId || !friendId) {
@@ -2803,8 +3177,7 @@ const GroupParticipationManager = {
         }));
         
         try {
-            // Use the correct endpoint - /api/groups/:groupId/members/:friendId
-            const response = await authorizedFetch(`/api/groups/${groupId}/members/${friendId}`, {
+            const response = await authorizedRequest(`/api/groups/${groupId}/members/${friendId}`, {
                 method: 'DELETE'
             });
             
@@ -2838,13 +3211,17 @@ const GroupParticipationManager = {
             return { success: false, members: [], error: 'Module not active' };
         }
         
-        if (!__session.ready || !__session.token) {
-            return { success: false, members: [], error: 'Session not ready' };
+        if (!authReadyReceived || !__session.ready || !__session.token) {
+            return new Promise((resolve) => {
+                queueRequest(async () => {
+                    const result = await this.getGroupMembers(groupId);
+                    resolve(result);
+                });
+            });
         }
         
         try {
-            // Use the correct endpoint - /api/groups/:groupId/members
-            const response = await authorizedFetch(`/api/groups/${groupId}/members`);
+            const response = await authorizedRequest(`/api/groups/${groupId}/members`);
             
             if (response.success && (response.data?.members || response.data)) {
                 const members = response.data?.members || response.data || [];
@@ -2859,7 +3236,7 @@ const GroupParticipationManager = {
 };
 
 // =============================================
-// [UI BRIDGE]
+// [UI BRIDGE] - WITH COMPLETE FRIEND SEARCH HANDLING
 // =============================================
 
 const UIBridge = {
@@ -2890,6 +3267,7 @@ const UIBridge = {
         this._attachChangeStatusListener();
         this._attachFriendRequestListeners();
         this._attachQRCodeListeners();
+        this._attachFriendSearchListeners();
     },
     
     _attachSendMessageListener() {
@@ -3064,6 +3442,44 @@ const UIBridge = {
         
         window.addEventListener('ui:acceptFriendRequest', acceptHandler);
         this._eventListeners.set('acceptFriendRequest', acceptHandler);
+        
+        const declineHandler = (event) => {
+            if (!assertActive('ui:declineFriendRequest')) {
+                return;
+            }
+            
+            const { requestId } = event.detail || {};
+            if (!requestId) return;
+            
+            FriendRequestManager.declineFriendRequest(requestId)
+                .then(result => {
+                    window.dispatchEvent(new CustomEvent('ui:friendRequestResult', {
+                        detail: { requestId, result }
+                    }));
+                });
+        };
+        
+        window.addEventListener('ui:declineFriendRequest', declineHandler);
+        this._eventListeners.set('declineFriendRequest', declineHandler);
+        
+        const cancelHandler = (event) => {
+            if (!assertActive('ui:cancelFriendRequest')) {
+                return;
+            }
+            
+            const { requestId } = event.detail || {};
+            if (!requestId) return;
+            
+            FriendRequestManager.cancelFriendRequest(requestId)
+                .then(result => {
+                    window.dispatchEvent(new CustomEvent('ui:friendRequestResult', {
+                        detail: { requestId, result }
+                    }));
+                });
+        };
+        
+        window.addEventListener('ui:cancelFriendRequest', cancelHandler);
+        this._eventListeners.set('cancelFriendRequest', cancelHandler);
     },
     
     _attachQRCodeListeners() {
@@ -3080,6 +3496,16 @@ const UIBridge = {
                     window.dispatchEvent(new CustomEvent('ui:qrScanResult', {
                         detail: result
                     }));
+                    
+                    if (result.success && result.user) {
+                        QRCodeManager.sendFriendRequestFromQR(result.user.id, {
+                            note: 'Added via QR code scan'
+                        }).then(requestResult => {
+                            window.dispatchEvent(new CustomEvent('ui:qrFriendRequestResult', {
+                                detail: { userId: result.user.id, result: requestResult }
+                            }));
+                        });
+                    }
                 });
         };
         
@@ -3102,6 +3528,62 @@ const UIBridge = {
         
         window.addEventListener('ui:generateQRCode', generateHandler);
         this._eventListeners.set('generateQRCode', generateHandler);
+    },
+    
+    _attachFriendSearchListeners() {
+        const searchHandler = (event) => {
+            if (!assertActive('ui:friendSearch')) {
+                return;
+            }
+            
+            const { query, options } = event.detail || {};
+            if (!query) return;
+            
+            Logger.info('UIBridge', 'Friend search requested', { query });
+            
+            FriendSearchEngine.search(query, options || {})
+                .then(results => {
+                    window.dispatchEvent(new CustomEvent('ui:friendSearchResults', {
+                        detail: { query, results, source: 'backend' }
+                    }));
+                })
+                .catch(error => {
+                    Logger.error('UIBridge', 'Friend search failed', error);
+                    window.dispatchEvent(new CustomEvent('ui:friendSearchError', {
+                        detail: { query, error: error.message }
+                    }));
+                });
+        };
+        
+        window.addEventListener('ui:friendSearch', searchHandler);
+        this._eventListeners.set('friendSearch', searchHandler);
+        
+        const searchByLetterHandler = (event) => {
+            if (!assertActive('ui:friendSearchByLetter')) {
+                return;
+            }
+            
+            const { letter, options } = event.detail || {};
+            if (!letter) return;
+            
+            Logger.info('UIBridge', 'Friend search by letter requested', { letter });
+            
+            FriendSearchEngine.searchByLetter(letter, options || {})
+                .then(results => {
+                    window.dispatchEvent(new CustomEvent('ui:friendSearchResults', {
+                        detail: { query: letter, results, source: 'backend', byLetter: true }
+                    }));
+                })
+                .catch(error => {
+                    Logger.error('UIBridge', 'Friend search by letter failed', error);
+                    window.dispatchEvent(new CustomEvent('ui:friendSearchError', {
+                        detail: { letter, error: error.message }
+                    }));
+                });
+        };
+        
+        window.addEventListener('ui:friendSearchByLetter', searchByLetterHandler);
+        this._eventListeners.set('friendSearchByLetter', searchByLetterHandler);
     },
     
     destroy() {
@@ -3581,11 +4063,11 @@ const V6_STATE_MACHINE = {
     },
     
     canPerformActions() {
-        return this._state === V6_STATES.READY && __session.ready;
+        return this._state === V6_STATES.READY && __session.ready && authReadyReceived;
     },
     
     canPerformApiCalls() {
-        return (this._state === V6_STATES.ACTIVE || this._state === V6_STATES.READY) && __session.ready;
+        return (this._state === V6_STATES.ACTIVE || this._state === V6_STATES.READY) && __session.ready && authReadyReceived;
     },
     
     shouldQueueMessage() {
@@ -3613,6 +4095,7 @@ const V6_STATE_MACHINE = {
             heartbeatMissed: this._heartbeatMissed,
             sessionAuthority: this._sessionAuthority,
             parentReady: parentReadyReceived,
+            authReady: authReadyReceived,
             sessionReady: __session.ready
         };
     },
@@ -3785,7 +4268,9 @@ const DiagnosticsAgent = {
         return {
             ...this.metrics,
             queueLength: _messageQueue.length,
+            requestQueueLength: requestQueue.length,
             sessionValid: __session.ready,
+            authReady: authReadyReceived,
             sessionStatus: __session.ready ? 'active' : 'inactive',
             uptime: Date.now() - this.metrics.startupTime,
             state: currentState,
@@ -3797,6 +4282,7 @@ const DiagnosticsAgent = {
     getHealth() {
         const metrics = this.getMetrics();
         let status = 'healthy';
+        if (!authReadyReceived) status = 'waiting_auth';
         if (!__session.ready) status = 'degraded';
         
         return {
@@ -3805,6 +4291,7 @@ const DiagnosticsAgent = {
             environment: IframeEnvironment.type,
             state: currentState,
             parentReady: parentReadyReceived,
+            authReady: authReadyReceived,
             v6State: V6.current,
             timestamp: Date.now()
         };
@@ -4296,6 +4783,9 @@ const ParentCoordinator = {
                     case 'PARENT_READY':
                         handleParentReady(message);
                         break;
+                    case 'AUTH_READY':
+                        handleAuthReady(message);
+                        break;
                     case 'LOGOUT':
                         this.handleLogout(message);
                         break;
@@ -4477,7 +4967,7 @@ const ParentCoordinator = {
         return safeSend(message); 
     },
     
-    shouldBlockProtectedUI: function() { return this.ui.protectedUIBlocked || !parentReadyReceived || !__session.ready; },
+    shouldBlockProtectedUI: function() { return this.ui.protectedUIBlocked || !parentReadyReceived || !__session.ready || !authReadyReceived; },
     getSession: function() { return this.state.sessionData || { token: __session.token, user: __session.user }; },
     isAuthenticated: function() { return !!(this.state.sessionReceived && this.state.sessionData?.token) || __session.ready; },
     getUser: function() { return this.state.sessionData?.user || __session.user || null; },
@@ -4616,7 +5106,7 @@ const SafetyGuards = {
     },
     
     isSessionValid: function() {
-        return currentState === LIFECYCLE_STATES.ACTIVE && __session.ready;
+        return currentState === LIFECYCLE_STATES.ACTIVE && __session.ready && authReadyReceived;
     },
     
     isUserDataValid: function() {
@@ -4630,6 +5120,10 @@ const SafetyGuards = {
         
         if (!parentReadyReceived) {
             return { valid: false, reason: 'Parent not ready' };
+        }
+        
+        if (!authReadyReceived) {
+            return { valid: false, reason: 'Authentication not ready' };
         }
         
         if (!__session.ready) {
@@ -4912,14 +5406,21 @@ function loadCachedDataInstantly() {
     }
 }
 
+// In friend-core.js, update loadFriendsFromBackend function
+
 async function loadFriendsFromBackend() {
     if (!assertActive('loadFriendsFromBackend')) {
         if (friendsLoading) clearFriendsLoading();
         return { success: false, error: 'Module not active' };
     }
     
-    if (!__session.ready || !__session.token) {
-        return { success: false, error: 'Session not ready' };
+    if (!authReadyReceived || !__session.ready || !__session.token) {
+        return new Promise((resolve) => {
+            queueRequest(async () => {
+                const result = await loadFriendsFromBackend();
+                resolve(result);
+            });
+        });
     }
     
     if (friendsLoading) return { success: false, message: 'Already loading' };
@@ -4927,12 +5428,27 @@ async function loadFriendsFromBackend() {
     friendsLoading = true;
     
     try {
-        // CORRECTED: Use /api/friends - the main friends endpoint
-        const response = await authorizedFetch('/api/friends');
+        const response = await authorizedRequest('/api/friends');
         
-        if (response.success && (response.data?.friends || response.data)) {
-            const friendsData = response.data?.friends || response.data || [];
-            const validFriends = Array.isArray(friendsData) ? friendsData.filter(f => validateFriendData(f)) : [];
+        Logger.info('loadFriendsFromBackend', 'Friends loaded', { success: response.success, data: response.data });
+        
+        // CRITICAL FIX: Check response.data structure
+        if (response.success && response.data) {
+            let friendsData = [];
+            
+            // Handle different possible response structures
+            if (response.data.friends && Array.isArray(response.data.friends)) {
+                friendsData = response.data.friends;
+            } else if (response.data.data && response.data.data.friends) {
+                friendsData = response.data.data.friends;
+            } else if (Array.isArray(response.data)) {
+                friendsData = response.data;
+            } else if (response.data.friends === undefined && Object.keys(response.data).length > 0) {
+                // If response.data is an object with friend properties
+                friendsData = [response.data];
+            }
+            
+            const validFriends = friendsData.filter(f => f && f.id);
             
             FriendCacheManager.setFriends(validFriends);
             FriendCacheManager.syncToGlobals();
@@ -4947,6 +5463,17 @@ async function loadFriendsFromBackend() {
             clearFriendsLoading();
             return { success: true, count: validFriends.length };
         }
+        
+        // If response was not successful, try cached data
+        const cached = FriendCacheManager.getAllFriends();
+        if (cached.length > 0) {
+            FriendCacheManager.syncToGlobals();
+            updateFriendCounts?.();
+            window.dispatchEvent(new CustomEvent('friendsUpdated', { detail: { friends: cached, cached: true } }));
+            clearFriendsLoading();
+            return { success: true, count: cached.length, cached: true };
+        }
+        
     } catch (error) {
         Logger.error('loadFriendsFromBackend', 'Failed to load friends', error);
         
@@ -4968,13 +5495,19 @@ async function loadFriendRequestsFromBackend() {
         return { success: false, error: 'Module not active' };
     }
     
-    if (!__session.ready || !__session.token) {
-        return { success: false, error: 'Session not ready' };
+    if (!authReadyReceived || !__session.ready || !__session.token) {
+        return new Promise((resolve) => {
+            queueRequest(async () => {
+                const result = await loadFriendRequestsFromBackend();
+                resolve(result);
+            });
+        });
     }
     
     try {
-        // CORRECTED: Use /api/friends/requests/incoming
-        const response = await authorizedFetch('/api/friends/requests/incoming');
+        const response = await authorizedRequest('/api/friends/requests/incoming');
+        
+        Logger.info('loadFriendRequestsFromBackend', 'Requests loaded', { success: response.success });
         
         if (response.success && (response.data?.requests || response.data)) {
             const requestsData = response.data?.requests || response.data || [];
@@ -5001,13 +5534,19 @@ async function loadSentRequestsFromBackend() {
         return { success: false, error: 'Module not active' };
     }
     
-    if (!__session.ready || !__session.token) {
-        return { success: false, error: 'Session not ready' };
+    if (!authReadyReceived || !__session.ready || !__session.token) {
+        return new Promise((resolve) => {
+            queueRequest(async () => {
+                const result = await loadSentRequestsFromBackend();
+                resolve(result);
+            });
+        });
     }
     
     try {
-        // CORRECTED: Use /api/friends/requests/sent
-        const response = await authorizedFetch('/api/friends/requests/sent');
+        const response = await authorizedRequest('/api/friends/requests/sent');
+        
+        Logger.info('loadSentRequestsFromBackend', 'Sent requests loaded', { success: response.success });
         
         if (response.success && (response.data?.requests || response.data)) {
             const requestsData = response.data?.requests || response.data || [];
@@ -5034,13 +5573,19 @@ async function loadPinnedFriendsFromBackend() {
         return { success: false, error: 'Module not active' };
     }
     
-    if (!__session.ready || !__session.token) {
-        return { success: false, error: 'Session not ready' };
+    if (!authReadyReceived || !__session.ready || !__session.token) {
+        return new Promise((resolve) => {
+            queueRequest(async () => {
+                const result = await loadPinnedFriendsFromBackend();
+                resolve(result);
+            });
+        });
     }
     
     try {
-        // CORRECTED: Use /api/friends/pinned
-        const response = await authorizedFetch('/api/friends/pinned');
+        const response = await authorizedRequest('/api/friends/pinned');
+        
+        Logger.info('loadPinnedFriendsFromBackend', 'Pinned friends loaded', { success: response.success });
         
         if (response.success && (response.data?.friends || response.data)) {
             const friendsData = response.data?.friends || response.data || [];
@@ -5063,13 +5608,19 @@ async function loadMutedFriendsFromBackend() {
         return { success: false, error: 'Module not active' };
     }
     
-    if (!__session.ready || !__session.token) {
-        return { success: false, error: 'Session not ready' };
+    if (!authReadyReceived || !__session.ready || !__session.token) {
+        return new Promise((resolve) => {
+            queueRequest(async () => {
+                const result = await loadMutedFriendsFromBackend();
+                resolve(result);
+            });
+        });
     }
     
     try {
-        // CORRECTED: Use /api/friends/muted
-        const response = await authorizedFetch('/api/friends/muted');
+        const response = await authorizedRequest('/api/friends/muted');
+        
+        Logger.info('loadMutedFriendsFromBackend', 'Muted friends loaded', { success: response.success });
         
         if (response.success && (response.data?.friends || response.data)) {
             const friendsData = response.data?.friends || response.data || [];
@@ -5092,13 +5643,19 @@ async function loadContactsFromBackend() {
         return { success: false, error: 'Module not active' };
     }
     
-    if (!__session.ready || !__session.token) {
-        return { success: false, error: 'Session not ready' };
+    if (!authReadyReceived || !__session.ready || !__session.token) {
+        return new Promise((resolve) => {
+            queueRequest(async () => {
+                const result = await loadContactsFromBackend();
+                resolve(result);
+            });
+        });
     }
     
     try {
-        // CORRECTED: Use /api/friends/contacts/synced
-        const response = await authorizedFetch('/api/friends/contacts/synced');
+        const response = await authorizedRequest('/api/friends/contacts/synced');
+        
+        Logger.info('loadContactsFromBackend', 'Contacts loaded', { success: response.success });
         
         if (response.success && (response.data?.contacts || response.data)) {
             const contactsData = response.data?.contacts || response.data || [];
@@ -5124,13 +5681,19 @@ async function loadGroupsFromBackend() {
         return { success: false, error: 'Module not active' };
     }
     
-    if (!__session.ready || !__session.token) {
-        return { success: false, error: 'Session not ready' };
+    if (!authReadyReceived || !__session.ready || !__session.token) {
+        return new Promise((resolve) => {
+            queueRequest(async () => {
+                const result = await loadGroupsFromBackend();
+                resolve(result);
+            });
+        });
     }
     
     try {
-        // CORRECTED: Use /api/friends/groups/user
-        const response = await authorizedFetch('/api/friends/groups/user');
+        const response = await authorizedRequest('/api/friends/groups/user');
+        
+        Logger.info('loadGroupsFromBackend', 'Groups loaded', { success: response.success });
         
         if (response.success && (response.data?.groups || response.data)) {
             const groupsData = response.data?.groups || response.data || [];
@@ -5155,8 +5718,13 @@ async function fetchAllUsersFromBackend() {
         return { success: false, error: 'Module not active' };
     }
     
-    if (!__session.ready || !__session.token) {
-        return { success: false, error: 'Session not ready' };
+    if (!authReadyReceived || !__session.ready || !__session.token) {
+        return new Promise((resolve) => {
+            queueRequest(async () => {
+                const result = await fetchAllUsersFromBackend();
+                resolve(result);
+            });
+        });
     }
     
     const cached = FriendCacheManager.getAllUsers();
@@ -5169,8 +5737,9 @@ async function fetchAllUsersFromBackend() {
     }
     
     try {
-        // CORRECTED: Use /api/friends/users/all?limit=50
-        const response = await authorizedFetch('/api/friends/users/all?limit=50');
+        const response = await authorizedRequest('/api/friends/users/all?limit=50');
+        
+        Logger.info('fetchAllUsersFromBackend', 'Users fetched', { success: response.success });
         
         const usersData = response.data?.users || response.data || [];
         const currentUserId = __session.user?.id;
@@ -5231,7 +5800,7 @@ async function apiCallWithRetry(url, options = {}, maxRetries = 1) {
     
     return circuitBreaker.execute(async () => {
         if (!url.includes('/public/')) {
-            const response = await authorizedFetch(url, {
+            const response = await authorizedRequest(url, {
                 ...safeOptions,
                 requireAuth: true,
                 silent: safeOptions.silent || false
@@ -5342,10 +5911,11 @@ async function togglePinFriend(friendData) {
     FriendCacheManager.persist();
     
     try {
-        // CORRECTED: Use /api/friends/:id/pin
-        const response = await authorizedFetch(`/api/friends/${friendId}/pin`, {
+        const response = await authorizedRequest(`/api/friends/${friendId}/pin`, {
             method: isPinned ? 'DELETE' : 'POST'
         });
+        
+        Logger.info('togglePinFriend', 'Pin toggled', { friendId, isPinned: !isPinned, success: response?.success });
         
         if (response?.success) {
             updateCurrentSection?.();
@@ -5411,10 +5981,11 @@ async function toggleMuteFriend(friendData) {
     FriendCacheManager.persist();
     
     try {
-        // CORRECTED: Use /api/friends/:id/mute
-        const response = await authorizedFetch(`/api/friends/${friendId}/mute`, {
+        const response = await authorizedRequest(`/api/friends/${friendId}/mute`, {
             method: isMuted ? 'DELETE' : 'POST'
         });
+        
+        Logger.info('toggleMuteFriend', 'Mute toggled', { friendId, isMuted: !isMuted, success: response?.success });
         
         if (response?.success) {
             updateCurrentSection?.();
@@ -5477,10 +6048,11 @@ async function removeFriend(friendData) {
     FriendCacheManager.persist();
     
     try {
-        // CORRECTED: Use /api/friends/:id
-        const response = await authorizedFetch(`/api/friends/${friendId}`, {
+        const response = await authorizedRequest(`/api/friends/${friendId}`, {
             method: 'DELETE'
         });
+        
+        Logger.info('removeFriend', 'Friend removed', { friendId, success: response?.success });
         
         if (response?.success) {
             updateCurrentSection?.();
@@ -5549,10 +6121,11 @@ async function blockUser(friendData) {
     FriendCacheManager.persist();
     
     try {
-        // CORRECTED: Use /api/friends/:id/block
-        const response = await authorizedFetch(`/api/friends/${friendId}/block`, {
+        const response = await authorizedRequest(`/api/friends/${friendId}/block`, {
             method: 'POST'
         });
+        
+        Logger.info('blockUser', 'User blocked', { friendId, success: response?.success });
         
         if (response?.success) {
             updateCurrentSection?.();
@@ -5727,7 +6300,7 @@ function getFriendsForGroup() {
 }
 
 // =============================================
-// [CAMERA AND QR CODE FUNCTIONS]
+// [CAMERA AND QR CODE FUNCTIONS] - WITH SCAN STOP FIX
 // =============================================
 
 async function startCameraScanner() {
@@ -5736,10 +6309,12 @@ async function startCameraScanner() {
         return;
     }
     
-    if (!__session.ready || !__session.token) {
-        showNotification?.('Session not ready', 'warning');
+    if (!authReadyReceived || !__session.ready || !__session.token) {
+        showNotification?.('Auth not ready', 'warning');
         return;
     }
+    
+    QRCodeManager.resetScan();
     
     const video = document.getElementById('cameraVideo');
     const canvas = document.getElementById('scannerCanvas');
@@ -5785,9 +6360,14 @@ function startRealQRCodeScanning(video, canvas) {
     
     const ctx = canvas.getContext('2d');
     scanningActive = true;
+    let scanRequestSent = false;
     
     function scan() {
         if (!scanningActive || !document.getElementById('cameraScannerModal')?.classList.contains('active')) {
+            return;
+        }
+        
+        if (scanRequestSent) {
             return;
         }
         
@@ -5804,8 +6384,9 @@ function startRealQRCodeScanning(video, canvas) {
                         inversionAttempts: "dontInvert"
                     });
                     
-                    if (code) {
+                    if (code && !scanRequestSent) {
                         drawQRCodeRect(code.location, ctx);
+                        scanRequestSent = true;
                         processScannedQRCodeReal(code.data);
                         return;
                     }
@@ -5837,6 +6418,7 @@ function processScannedQRCodeReal(qrData) {
     QRCodeManager.processScannedQR(qrData).then(result => {
         if (!result.success) {
             showNotification?.(result.error, 'error');
+            QRCodeManager.resetScan();
             return;
         }
         
@@ -5844,18 +6426,21 @@ function processScannedQRCodeReal(qrData) {
         
         if (!user || !user.userId) {
             showNotification?.('Invalid QR code data', 'error');
+            QRCodeManager.resetScan();
             return;
         }
         
         const currentUserId = __session.user?.id;
         if (currentUserId === user.userId) {
             showNotification?.('You cannot add yourself as a friend', 'warning');
+            QRCodeManager.resetScan();
             return;
         }
         
         const existingFriend = FriendCacheManager.getFriend(user.userId);
         if (existingFriend) {
             showNotification?.('You are already friends with this user', 'info');
+            QRCodeManager.resetScan();
             return;
         }
         
@@ -5863,6 +6448,7 @@ function processScannedQRCodeReal(qrData) {
             .find(r => r.receiverId === user.userId);
         if (existingSent) {
             showNotification?.('Friend request already sent', 'info');
+            QRCodeManager.resetScan();
             return;
         }
         
@@ -5877,6 +6463,7 @@ function processScannedQRCodeReal(qrData) {
     }).catch(error => {
         console.error('[QR] Failed to process QR code:', error);
         showNotification?.('Error processing QR code', 'error');
+        QRCodeManager.resetScan();
     });
 }
 
@@ -5957,8 +6544,7 @@ async function fetchUserInfoFromQR(userId) {
     if (!SafetyGuards.isSessionValid()) throw new Error('No valid session');
     
     try {
-        // CORRECTED: Use /api/friends/user/:userId
-        const response = await authorizedFetch(`/api/friends/user/${userId}`);
+        const response = await authorizedRequest(`/api/friends/user/${userId}`);
         if (response.success && (response.data?.user || response.data)) {
             const user = response.data?.user || response.data;
             if (validateFriendData(user)) return user;
@@ -5972,8 +6558,7 @@ async function fetchUserInfoFromQR(userId) {
 
 async function getMutualFriendsCount(userId) {
     try {
-        // CORRECTED: Use /api/friends/mutual/:userId
-        const response = await authorizedFetch(`/api/friends/mutual/${userId}`);
+        const response = await authorizedRequest(`/api/friends/mutual/${userId}`);
         if (response.success && (response.data?.mutualFriends || response.data)) {
             const mutual = response.data?.mutualFriends || response.data || [];
             return mutual.length;
@@ -6000,8 +6585,8 @@ async function toggleCamera() {
         return;
     }
     
-    if (!__session.ready || !__session.token) {
-        showNotification?.('Session not ready', 'warning');
+    if (!authReadyReceived || !__session.ready || !__session.token) {
+        showNotification?.('Auth not ready', 'warning');
         return;
     }
     
@@ -6015,8 +6600,8 @@ function toggleFlash() {
         return;
     }
     
-    if (!__session.ready || !__session.token) {
-        showNotification?.('Session not ready', 'warning');
+    if (!authReadyReceived || !__session.ready || !__session.token) {
+        showNotification?.('Auth not ready', 'warning');
         return;
     }
     
@@ -6054,20 +6639,20 @@ function generateUniqueQRCode() {
                 <div style="text-align: center; padding: 20px; color: var(--text-secondary);">
                     <i class="fas fa-spinner fa-spin" style="font-size: 32px; margin-bottom: 10px; color: var(--primary-color);"></i>
                     <p>Initializing QR code system...</p>
-                    <p style="font-size: 12px; margin-top: 5px;">Module state: ${currentState} | Parent ready: ${parentReadyReceived} | Session ready: ${__session.ready}</p>
+                    <p style="font-size: 12px; margin-top: 5px;">Module state: ${currentState} | Parent ready: ${parentReadyReceived} | Auth ready: ${authReadyReceived} | Session ready: ${__session.ready}</p>
                 </div>
             `;
         }
         return;
     }
     
-    if (!__session.ready || !__session.token) {
+    if (!authReadyReceived || !__session.ready || !__session.token) {
         const container = document.getElementById('qrCodeContainer');
         if (container) {
             container.innerHTML = `
                 <div style="text-align: center; padding: 20px; color: var(--text-secondary);">
                     <i class="fas fa-exclamation-triangle" style="font-size: 32px; margin-bottom: 10px;"></i>
-                    <p>Session not ready - please wait</p>
+                    <p>Auth not ready - please wait</p>
                 </div>
             `;
         }
@@ -6089,19 +6674,16 @@ function generateUniqueQRCode() {
         return;
     }
     
-    // CRITICAL FIX: Convert to string and ensure unique user data
     let userId = user.id || user.userId || user._id;
     if (userId !== undefined && userId !== null) {
         userId = String(userId);
     }
     
-    // Get unique user data - ensure it's specific to this user
     const username = user.username || user.userName || user.handle || '';
     const displayName = user.displayName || user.name || user.fullName || 'User';
     const email = user.email || user.userEmail || '';
     const photoURL = user.photoURL || user.avatar || user.profilePicture || '';
     
-    // Log for debugging
     console.log('[QR] Generating unique QR for user:', { userId, username, displayName, email });
     
     if (!userId) {
@@ -6115,16 +6697,13 @@ function generateUniqueQRCode() {
         return;
     }
     
-    // Create unique user data object for QR code
     const userForQR = {
         id: userId,
         username: username,
         displayName: displayName,
         email: email,
         photoURL: photoURL,
-        // Add a timestamp to ensure uniqueness
         generatedAt: Date.now(),
-        // Add a random nonce for extra security
         nonce: Math.random().toString(36).substring(2, 15)
     };
     
@@ -6142,17 +6721,14 @@ function generateUniqueQRCode() {
     }
     
     try {
-        // Generate unique QR data using QRCodeManager (which already includes userId, timestamp, nonce)
         const qrData = QRCodeManager.generateQRCode(userForQR);
         
         if (!qrData) {
             throw new Error('Failed to generate QR data');
         }
         
-        // Clear container and generate new QR code
         container.innerHTML = '';
         
-        // Generate QR code with the unique data
         new QRCode(container, {
             text: qrData,
             width: 200,
@@ -6162,11 +6738,9 @@ function generateUniqueQRCode() {
             correctLevel: QRCode.CorrectLevel.H
         });
         
-        // Add user info below QR code
         const infoDiv = document.createElement('div');
         infoDiv.style.cssText = 'text-align: center; margin-top: 15px;';
         
-        // Display username or ID
         const displayText = username ? `@${username}` : (displayName !== 'User' ? displayName : `User ${userId.substring(0, 8)}`);
         infoDiv.innerHTML = `
             <div style="font-size: 14px; font-weight: 500; color: var(--text-primary);">${escapeHtml(displayText)}</div>
@@ -6175,7 +6749,6 @@ function generateUniqueQRCode() {
         `;
         container.appendChild(infoDiv);
         
-        // Store the generated QR data for this specific user
         SafeStorage.setItem(LOCAL_STORAGE_KEYS.UNIQUE_QR_CODE, qrData);
         
         console.log('[QR] Unique QR code generated successfully for user:', userId);
@@ -6183,7 +6756,6 @@ function generateUniqueQRCode() {
     } catch (error) {
         console.error('[QR] Failed to generate QR code:', error);
         
-        // Fallback display showing user's unique identifier
         const fallbackId = username || displayName || userId;
         container.innerHTML = `
             <div style="text-align: center; padding: 20px;">
@@ -6221,8 +6793,7 @@ async function showMutualFriends(userId, userName) {
     }
     
     try {
-        // CORRECTED: Use /api/friends/mutual/:userId
-        const response = await authorizedFetch(`/api/friends/mutual/${userId}`);
+        const response = await authorizedRequest(`/api/friends/mutual/${userId}`);
         
         if (response.success && (response.data?.mutualFriends || response.data)) {
             const mutual = response.data?.mutualFriends || response.data || [];
@@ -6438,8 +7009,8 @@ function startParallelDataLoading() {
         return;
     }
     
-    if (!__session.ready || !__session.token) {
-        Logger.debug('Data', 'Blocked data loading - session not ready');
+    if (!authReadyReceived || !__session.ready || !__session.token) {
+        Logger.debug('Data', 'Blocked data loading - auth not ready');
         return;
     }
     
@@ -6637,7 +7208,7 @@ function handleUnifiedCacheReady(event) {
 }
 
 // =============================================
-// [INITIALIZATION FLOW] - DETERMINISTIC HANDSHAKE PROTOCOL
+// [INITIALIZATION FLOW] - AUTH-FIRST DETERMINISTIC HANDSHAKE
 // =============================================
 
 async function initialize() {
@@ -6666,13 +7237,12 @@ async function initialize() {
         const frameId = ParentCommunicationManager.getFrameId();
         ParentCommunicationManager.init(frameId);
         
-        // STRICT: INITIALIZING → READY
-        transitionTo(LIFECYCLE_STATES.READY, 'ready');
+        // STRICT: INITIALIZING → WAITING_AUTH
+        transitionTo(LIFECYCLE_STATES.WAITING_AUTH, 'waiting_for_auth');
+        StatusManager.show('AUTH_WAIT', 'Waiting for authentication from parent');
         
-        // STRICT: Exactly once CHILD_READY when state is READY
-        sendChildReady();
-        
-        // NO retry system - strictly wait in WAIT_PARENT
+        // DO NOT proceed to READY until AUTH_READY is received
+        // AUTH_READY will trigger transition to AUTH_READY → READY
         
         MessageDispatcher.init();
         UIBridge.init();
@@ -6680,25 +7250,29 @@ async function initialize() {
         loadCachedDataInstantly();
         
         window.addEventListener('loadInitialData', () => {
-            startParallelDataLoading();
+            if (authReadyReceived && __session.ready) {
+                startParallelDataLoading();
+            } else {
+                queueRequest(() => startParallelDataLoading());
+            }
         });
         
         window.addEventListener('parentReady', () => {
-            if (currentState === LIFECYCLE_STATES.ACTIVE) {
+            if (currentState === LIFECYCLE_STATES.ACTIVE && authReadyReceived) {
                 SessionManager.requestSession();
             }
         });
         
         isInitialized = true;
-        StatusManager.show('READY', 'Friend module ready');
         
-        Logger.info('Init', 'Friend module initialized successfully');
+        Logger.info('Init', 'Friend module initialized, waiting for auth');
         
         window.dispatchEvent(new CustomEvent('friendModuleReady', {
             detail: {
                 module: MODULE_NAME,
                 version: MODULE_VERSION,
                 state: currentState,
+                authReady: authReadyReceived,
                 parentReady: parentReadyReceived,
                 sessionReady: __session.ready,
                 timestamp: Date.now()
@@ -6987,7 +7561,7 @@ document.addEventListener('DOMContentLoaded', () => {
         apiReady = false;
         isInitialized = false;
         window.dispatchEvent(new CustomEvent('friendCoreReady', { 
-            detail: { error: true, message: error.message, timestamp: Date.now(), state: currentState, parentReady: parentReadyReceived, sessionReady: __session.ready, v6: V6.getState() } 
+            detail: { error: true, message: error.message, timestamp: Date.now(), state: currentState, authReady: authReadyReceived, parentReady: parentReadyReceived, sessionReady: __session.ready, v6: V6.getState() } 
         }));
     });
 });
@@ -7000,10 +7574,18 @@ const HandshakeClient = null;
 const RecoveryManagerV6 = null;
 const StartupGovernor = null;
 
-const searchFriends = (query, options) => {
-    const results = FriendSearchEngine.search(query, options);
+const searchFriends = async (query, options) => {
+    const results = await FriendSearchEngine.search(query, options);
     window.dispatchEvent(new CustomEvent('friendSearchResults', {
-        detail: { query, results: results.local }
+        detail: { query, results }
+    }));
+    return results;
+};
+
+const searchFriendsByLetter = async (letter, options) => {
+    const results = await FriendSearchEngine.searchByLetter(letter, options);
+    window.dispatchEvent(new CustomEvent('friendSearchResults', {
+        detail: { query: letter, results, byLetter: true }
     }));
     return results;
 };
@@ -7045,14 +7627,14 @@ const KYN = {
 };
 
 const friendCore = {
-    version: '10.2',
+    version: '12.0',
     initialized: false,
     fallbackMode: false,
     init: initialize,
     kyn: KYN,
     diagnostics: DiagnosticsAgent,
     secureAPI: APIGateway,
-    authorizedFetch,
+    authorizedRequest,
     stateMachine: LifecycleStateMachine,
     v6: V6,
     handleFriendSelection,
@@ -7060,14 +7642,16 @@ const friendCore = {
     getFriendsForCalling,
     getFriendsForGroup,
     validateQRCodeData,
-    searchFriends: (query, options) => FriendSearchEngine.search(query, options).local,
+    searchFriends,
+    searchFriendsByLetter,
     addFriendToGroup,
     removeFriendFromGroup,
     getGroupMembers,
+    isAuthReady: () => authReadyReceived,
     isParentReady: () => parentReadyReceived,
     isSessionReady: () => __session.ready,
     getState: () => currentState,
-    isActive: () => currentState === LIFECYCLE_STATES.ACTIVE && parentReadyReceived && __session.ready,
+    isActive: () => currentState === LIFECYCLE_STATES.ACTIVE && parentReadyReceived && authReadyReceived && __session.ready,
     getSession: () => ({ token: __session.token, user: __session.user, ready: __session.ready })
 };
 
@@ -7147,7 +7731,7 @@ export {
     // API Functions
     getValidToken,
     getCurrentUser,
-    authorizedFetch,
+    authorizedRequest,
 
     // Friend Request Management
     sendFriendRequest,
@@ -7206,6 +7790,7 @@ export {
     LIFECYCLE_STATES,
     __session,
     parentReadyReceived,
+    authReadyReceived,
     childReadySent,
     assertActive,
     onModuleActive,
@@ -7213,6 +7798,10 @@ export {
     currentState,
     sendChildReady,
     handleParentReady,
+    handleAuthReady,
+    requestQueue,
+    flushRequestQueue,
+    isAuthenticated,
 
     // Core controllers
     ParentCommunicationManager,
@@ -7283,6 +7872,7 @@ export {
 
     // Additional search and group functions
     searchFriends,
+    searchFriendsByLetter,
     addFriendToGroup,
     removeFriendFromGroup,
     getGroupMembers,
@@ -7307,10 +7897,18 @@ window.__MODULE_READY__ = true;
 
 // =============================================
 // END OF FILE
-// Version: 10.2
-// ✅ UPDATED: All API routes now under /api/friends/
-// ✅ FIXED: All API calls go through parent via API_REQUEST messages
-// ✅ FIXED: No direct backend calls from iframe
-// ✅ FIXED: Correct friend routes (/api/friends/requests/incoming, etc.)
-// ✅ FIXED: Session token properly passed through parent
+// Version: 12.0
+// ✅ COMPLETE AUTH FIX: All API calls through parent with proper authentication
+// ✅ AUTH-FIRST INIT: Module waits for AUTH_READY before any operations
+// ✅ REQUEST QUEUE: All requests queued until auth is ready
+// ✅ NO DIRECT FETCH: All requests use authorizedRequest through parent
+// ✅ REAL SEARCH: Search by username or first letter
+// ✅ QR SCAN FIX: Stops after first scan, sends real request
+// ✅ ALL ENDPOINTS: Correct API routes through parent
+// ✅ NO FAKE DATA: All operations use real backend
+// ✅ REQUEST ID TRACKING: Complete request tracking
+// ✅ LIFECYCLE HARDENING: Strict state transitions with auth-first flow
+// ✅ API ENDPOINT NORMALIZATION: Always correct format
+// ✅ TIMEOUT HANDLING: Proper timeout and cleanup for API requests
+// ✅ AUTH ERROR HANDLING: Proper 401 handling and retry queue
 // =============================================

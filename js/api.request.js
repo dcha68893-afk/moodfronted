@@ -3436,7 +3436,7 @@
                 }
                 
                 if (_apiCache) {
-                    _apiCache.delete('get_/api/group');
+                    _apiCache.delete('get_/api/groups');
                 }
                 
                 trackRequestEnd(normalizedEndpoint, functionName, true);
@@ -5000,7 +5000,7 @@
     
     async function getChats() {
         const functionName = 'getChats';
-        const endpoint = '/chats';
+        const endpoint = '/api/chats';
         
         try {
             const normalizedEndpoint = normalizeEndpoint(endpoint);
@@ -5798,7 +5798,7 @@
                 ['/auth/login', '/api/auth/login'],
                 ['/api/auth/login', '/api/auth/login'],
                 ['auth/register', '/api/auth/register'],
-                ['user/profile', '/api/user/profile'],
+                ['user/profile', '/api/profile'],
                 ['status', '/api/status'],
                 ['', '/api/'],
                 [null, '/api/'],
@@ -5926,8 +5926,7 @@
                 const isBootstrapComplete = 
                     (window.AppState && window.AppState.bootstrapComplete) ||
                     (window.__APP_BOOTSTRAP_COMPLETE__) ||
-                    (document.readyState === 'complete' && window._API_CORE_LOADED_);
-                
+(document.readyState === 'complete' && window.__API_CORE_LOADED_V24);                
                 if (isBootstrapComplete) {
                     _gatewayState.gates.bootstrapReady = true;
                     _gatewayState.initialization.steps.bootstrapWaited = true;

@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+﻿﻿<!DOCTYPE html>
 <html lang="en">
 <head>
 <script>
@@ -1362,22 +1362,11 @@
         }
 
         /* =============================================
-           ERROR MESSAGES
+           ERROR MESSAGES - HIDDEN BY DEFAULT
            ============================================= */
         
         .error-message {
-            color: var(--danger-color);
-            font-size: 12px;
-            margin-top: 5px;
-            padding: 5px;
-            background: rgba(255, 59, 48, 0.1);
-            border-radius: 4px;
             display: none;
-        }
-
-        .error-message.visible {
-            display: block;
-            animation: shake 0.5s;
         }
 
         /* =============================================
@@ -1385,25 +1374,7 @@
            ============================================= */
         
         .loading-spinner {
-            display: inline-block;
-            width: 20px;
-            height: 20px;
-            border: 2px solid var(--border-color);
-            border-top-color: var(--primary-color);
-            border-radius: 50%;
-            animation: spin 0.6s linear infinite;
-        }
-
-        .loading-spinner.large {
-            width: 40px;
-            height: 40px;
-            border-width: 3px;
-        }
-
-        .loading-spinner.small {
-            width: 16px;
-            height: 16px;
-            border-width: 2px;
+            display: none;
         }
 
         /* Loading container - hidden by default */
@@ -1445,64 +1416,19 @@
         }
 
         /* =============================================
-           SANDBOX WARNING BANNER
+           SANDBOX WARNING BANNER - HIDDEN
            ============================================= */
         
         .sandbox-warning {
-            background: var(--warning-color);
-            color: white;
-            padding: 8px 16px;
-            text-align: center;
-            font-size: 12px;
-            position: sticky;
-            top: 0;
-            z-index: 1000;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 10px;
-            animation: slideDown 0.3s ease;
-        }
-
-        @keyframes slideDown {
-            from { transform: translateY(-100%); }
-            to { transform: translateY(0); }
-        }
-
-        .sandbox-warning i {
-            font-size: 14px;
-        }
-
-        .sandbox-warning button {
-            background: none;
-            border: none;
-            color: white;
-            cursor: pointer;
-            padding: 4px 8px;
-            border-radius: 4px;
-            transition: background 0.2s;
-        }
-
-        .sandbox-warning button:hover {
-            background: rgba(255,255,255,0.2);
+            display: none;
         }
 
         /* =============================================
-           COMPATIBILITY MODE BADGE
+           COMPATIBILITY MODE BADGE - HIDDEN
            ============================================= */
         
         .compatibility-badge {
-            position: fixed;
-            bottom: 10px;
-            left: 10px;
-            background: var(--text-secondary);
-            color: white;
-            padding: 4px 8px;
-            border-radius: 4px;
-            font-size: 10px;
-            opacity: 0.7;
-            z-index: 999;
-            animation: float 3s ease-in-out infinite;
+            display: none;
         }
 
         /* =============================================
@@ -1807,6 +1733,35 @@
         .menu-loading {
             display: none;
         }
+
+        /* Settings saved indicator animation */
+        @keyframes savedPulse {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.05); background: var(--success-color); }
+            100% { transform: scale(1); }
+        }
+
+        .saved-animation {
+            animation: savedPulse 0.5s ease;
+        }
+
+        /* Setting update pending indicator */
+        .setting-pending {
+            opacity: 0.7;
+            position: relative;
+        }
+
+        .setting-pending::after {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 132, 255, 0.1);
+            border-radius: 8px;
+            pointer-events: none;
+        }
     </style>
 
     <!-- Exposed flags for parent inspection -->
@@ -1835,7 +1790,7 @@
 
     <!-- Keyboard shortcut hint - Hidden by default, appears on hover -->
     <div class="shortcut-hint">
-        <kbd>Ctrl</kbd> + <kbd>S</kbd> save â€¢ <kbd>Esc</kbd> close â€¢ <kbd>Ctrl</kbd> + <kbd>F</kbd> search
+        <kbd>Ctrl</kbd> + <kbd>S</kbd> save • <kbd>Esc</kbd> close • <kbd>Ctrl</kbd> + <kbd>F</kbd> search
     </div>
 
     <!-- =============================================
@@ -2173,7 +2128,7 @@
             <!-- Version info and connection mode - Minimal, no console noise -->
             <div style="padding: 15px 20px; border-top: 1px solid var(--border-color); font-size: 11px; color: var(--text-secondary); text-align: center;">
                 <span>Knecta Chat</span>
-                <span style="margin: 0 5px;">â€¢</span>
+                <span style="margin: 0 5px;">•</span>
                 <span id="connectionMode">Ready</span>
                 <div id="environmentBadge" style="margin-top: 5px; font-size: 10px; opacity: 0.7;"></div>
             </div>
@@ -2187,10 +2142,10 @@
                     <div class="content-subtitle" id="contentSubtitle">Manage your preferences</div>
                 </div>
                 <div class="content-actions">
-                    <button class="action-btn secondary" id="resetSectionBtn" disabled>
+                    <button class="action-btn secondary" id="resetSectionBtn">
                         <i class="fas fa-undo"></i> Reset
                     </button>
-                    <button class="action-btn primary" id="saveSectionBtn" disabled>
+                    <button class="action-btn primary" id="saveSectionBtn">
                         <i class="fas fa-save"></i> Save
                     </button>
                 </div>
@@ -2241,6 +2196,7 @@
                             <div class="setting-control">
                                 <textarea class="setting-textarea" id="bioInput" 
                                           placeholder="About you..."></textarea>
+                                <div class="input-hint"><span id="bioCounter">0</span>/150</div>
                             </div>
                         </div>
                         
@@ -2365,12 +2321,6 @@
                     ...errorData
                 });
                 
-                // Show retry button only if in debug mode
-                const retryBtn = document.getElementById('retryInitBtn');
-                if (retryBtn && isDebug) {
-                    retryBtn.style.display = 'inline-flex';
-                }
-                
                 return false;
             });
             
@@ -2406,6 +2356,23 @@
                         searchInput.dispatchEvent(new Event('input'));
                         searchInput.focus();
                     });
+                }
+                
+                // Bio counter
+                const bioInput = document.getElementById('bioInput');
+                const bioCounter = document.getElementById('bioCounter');
+                if (bioInput && bioCounter) {
+                    const updateBioCounter = () => {
+                        const length = bioInput.value.length;
+                        bioCounter.textContent = length;
+                        if (length > 150) {
+                            bioCounter.style.color = 'var(--danger-color)';
+                        } else {
+                            bioCounter.style.color = 'var(--primary-color)';
+                        }
+                    };
+                    bioInput.addEventListener('input', updateBioCounter);
+                    updateBioCounter();
                 }
                 
                 // Update connection mode based on URL - silent
@@ -2556,7 +2523,3 @@
     </script>
 </body>
 </html>
-
-
-
-

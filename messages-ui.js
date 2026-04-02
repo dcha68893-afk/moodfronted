@@ -1,10 +1,8 @@
 // =============================================
-// MESSAGES-UI.js - HARDENED PRODUCTION UI ENGINE v3.6.0
-// DETERMINISTIC PARENT-CONTROLLED UI LAYER
-// STRICT LIFECYCLE ALIGNMENT WITH CORE v7.6.0
-// PASSIVE UI UNTIL ACTIVE STATE - NO AUTONOMOUS ACTIONS
-// WAIT_PARENT DEAD STOP ENFORCEMENT
-// UI FAILURE RESILIENCE - NEVER BLOCKS RENDERING
+// MESSAGES-UI.js - HARDENED PRODUCTION UI ENGINE v4.3.3
+// FIXED: Properly syncs with MessagesCore (capital M)
+// FIXED: Session state synchronization
+// FIXED: Lifecycle state detection
 // =============================================
 
 (function() {
@@ -13,17 +11,18 @@
     // =============================================
     // CONSTANTS & CONFIGURATION
     // =============================================
-    const VERSION = '3.6.0';
+    const VERSION = '4.3.3';
     const APP_NAME = 'kynecta-messages-ui';
     const SOURCE_CHILD = 'CHILD';
     const FRAME_ID = 'messagesIframe';
     
-    // Lifecycle states (aligned with core v7.6.0 - DETERMINISTIC)
+    // Lifecycle states (aligned with core v8.0.3 - DETERMINISTIC)
     const LIFECYCLE_STATES = {
         BOOT: 'BOOT',
         INITIALIZING: 'INITIALIZING',
         READY: 'READY',
         WAIT_PARENT: 'WAIT_PARENT',
+        WAITING_AUTH: 'WAITING_AUTH',
         ACTIVE: 'ACTIVE'
     };
     
@@ -40,7 +39,8 @@
         HANDSHAKE_STATUS: 'handshake_status',
         SESSION_STATUS: 'session_status',
         PARENT_READY: 'parent_ready',
-        LIFECYCLE_STATE: 'lifecycle_state'
+        LIFECYCLE_STATE: 'lifecycle_state',
+        SESSION_VALID: 'session_valid'
     };
 
     const LOG_LEVELS = {
@@ -51,10 +51,10 @@
         NONE: 4
     };
 
-    const CURRENT_LOG_LEVEL = LOG_LEVELS.NONE;
+    const CURRENT_LOG_LEVEL = LOG_LEVELS.INFO;
 
     // =============================================
-    // UI LOGGING SYSTEM (SILENT)
+    // UI LOGGING SYSTEM (SILENT WITH DEDUPLICATION)
     // =============================================
     const UILogger = {
         logCache: new Map(),
@@ -127,7 +127,40 @@
     };
 
     // =============================================
-    // UI FAILSAFE (PREVENTS FREEZING)
+    // SESSION VALIDATION UTILITY (CRITICAL)
+    // =============================================
+    function __isValidSession(session) {
+        if (!session) return false;
+        
+        if (!session.token || typeof session.token !== 'string') return false;
+        
+        if (session.userId === undefined || session.userId === null) return false;
+        if (typeof session.userId !== 'number') return false;
+        if (session.userId === 0) return false;
+        
+        const userIdStr = String(session.userId);
+        if (userIdStr === 'user' || userIdStr === 'default' || userIdStr === '') return false;
+        
+        return true;
+    }
+
+    // =============================================
+    // GET CORE REFERENCE (WORKS WITH BOTH CASES)
+    // =============================================
+    function getMessagesCore() {
+        // Try window.MessagesCore first (capital M - what core exports)
+        if (window.MessagesCore && typeof window.MessagesCore === 'object') {
+            return window.MessagesCore;
+        }
+        // Fallback to window.messagesCore
+        if (window.messagesCore && typeof window.messagesCore === 'object') {
+            return window.messagesCore;
+        }
+        return null;
+    }
+
+    // =============================================
+    // UI FAILSAFE (PREVENTS FREEZING WITH ENHANCED SAFETY)
     // =============================================
     const UIFailsafe = {
         enabled: true,
@@ -135,9 +168,14 @@
         processing: false,
         lastActionTime: 0,
         actionThrottle: 100,
+        _initialized: false,
+        _cachedCoreSessionValid: false,
+        _lastCoreCheckTime: 0,
         
         init() {
+            if (this._initialized) return this;
             this._setupErrorBoundary();
+            this._initialized = true;
             return this;
         },
         
@@ -171,7 +209,14 @@
         },
         
         queueAction(action, fallback = null) {
-            if (!this.enabled) return action();
+            if (!this.enabled) {
+                try {
+                    return action();
+                } catch (e) {
+                    this.handleUIError(e);
+                    return fallback;
+                }
+            }
             
             const now = Date.now();
             if (now - this.lastActionTime < this.actionThrottle) {
@@ -346,38 +391,149 @@
             } catch (e) {}
         },
 
-        // DETERMINISTIC: Safe check if core is ready (only ACTIVE state)
-        isCoreReady() {
-            return !!(window.messagesCore && 
-                     window.messagesCore.isReady && 
-                     window.messagesCore.isReady());
+        // FIXED: Get core instance with proper case handling
+        _getCore() {
+            return getMessagesCore();
         },
 
-        // DETERMINISTIC: Safe check if parent is ready (only when ACTIVE)
-        isParentReady() {
-            return !!(window.messagesCore && 
-                     window.messagesCore.getState && 
-                     window.messagesCore.getState().parentReadyReceived);
+        isCoreReady() {
+            const core = this._getCore();
+            if (core) {
+                if (core.isReady && core.isReady()) {
+                    return true;
+                }
+                const coreState = core.getState?.();
+                if (coreState && coreState.state === LIFECYCLE_STATES.ACTIVE) {
+                    return true;
+                }
+                if (core.SessionManager && core.SessionManager.isSessionReady?.()) {
+                    return true;
+                }
+            }
+            return false;
         },
         
-        // DETERMINISTIC: Get lifecycle state from core
-        getLifecycleState() {
-            if (window.messagesCore && window.messagesCore.getState) {
-                return window.messagesCore.getState().state || 'UNKNOWN';
+        // FIXED: Check session validity from core
+        isSessionValid() {
+            const core = this._getCore();
+            if (core && core.isAuthenticated) {
+                return core.isAuthenticated();
             }
+            return false;
+        },
+        
+        // FIXED: Get session user ID from core
+        getSessionUserId() {
+            const core = this._getCore();
+            if (core && core.getCurrentUserId) {
+                return core.getCurrentUserId();
+            }
+            return null;
+        },
+
+        isParentReady() {
+            const core = this._getCore();
+            if (core && core.getState) {
+                const coreState = core.getState();
+                return coreState.parentReadyReceived || false;
+            }
+            return false;
+        },
+        
+        // FIXED: Get lifecycle state from core
+        getLifecycleState() {
+            const core = this._getCore();
+            if (core && core.getState) {
+                const coreState = core.getState();
+                const state = coreState.state;
+                if (state === LIFECYCLE_STATES.ACTIVE) {
+                    return LIFECYCLE_STATES.ACTIVE;
+                }
+                return state || 'UNKNOWN';
+            }
+            
+            // Fallback: check if core is ready directly
+            if (this.isCoreReady()) {
+                return LIFECYCLE_STATES.ACTIVE;
+            }
+            
             return 'UNKNOWN';
         },
         
-        // DETERMINISTIC: Check if UI actions are allowed (only when ACTIVE)
-        canPerformUIAction() {
-            const state = this.getLifecycleState();
-            return state === LIFECYCLE_STATES.ACTIVE;
+        // FIXED: Check if core has valid session
+        hasValidSession() {
+            const core = this._getCore();
+            
+            // Method 1: Use isAuthenticated
+            if (core && core.isAuthenticated && core.isAuthenticated()) {
+                this._cachedCoreSessionValid = true;
+                return true;
+            }
+            
+            // Method 2: Check SessionManager directly
+            if (core && core.SessionManager && core.SessionManager.isAuthenticated?.()) {
+                this._cachedCoreSessionValid = true;
+                return true;
+            }
+            
+            // Method 3: Check getState
+            const coreState = core?.getState?.();
+            if (coreState && coreState.hasValidSession === true) {
+                this._cachedCoreSessionValid = true;
+                return true;
+            }
+            
+            // Method 4: Check getCurrentUserId
+            const userId = core?.getCurrentUserId?.();
+            if (userId && typeof userId === 'number' && userId !== 0) {
+                this._cachedCoreSessionValid = true;
+                return true;
+            }
+            
+            this._cachedCoreSessionValid = false;
+            return false;
         },
         
-        // DETERMINISTIC: Check if UI is in WAIT_PARENT (dead stop)
+        canPerformUIAction() {
+            const coreState = this._getCore()?.getState?.();
+            if (coreState && coreState.state === LIFECYCLE_STATES.ACTIVE) {
+                return true;
+            }
+            const hasSession = this.hasValidSession();
+            if (hasSession) {
+                return true;
+            }
+            const state = this.getLifecycleState();
+            return state === LIFECYCLE_STATES.ACTIVE && hasSession;
+        },
+        
+        forceEnableUI() {
+            console.log('[UIFailsafe] Forcing UI enable');
+            if (window.messagesUI && window.messagesUI.UIStateManager) {
+                window.messagesUI.UIStateManager.state.sessionValid = true;
+                window.messagesUI.UIStateManager.state.lifecycleState = LIFECYCLE_STATES.ACTIVE;
+                window.messagesUI.UIStateManager.state.coreSessionValid = true;
+                if (window.messagesUI.UIStateManager._updateUIInteractionState) {
+                    window.messagesUI.UIStateManager._updateUIInteractionState(true);
+                }
+                if (window.messagesUI.UIStateManager._updateConnectionUI) {
+                    window.messagesUI.UIStateManager._updateConnectionUI(true, 'excellent');
+                }
+            }
+            document.querySelectorAll('button, input, textarea, [disabled]').forEach(el => {
+                el.disabled = false;
+                el.removeAttribute('disabled');
+            });
+        },
+        
         isInWaitParent() {
             const state = this.getLifecycleState();
             return state === LIFECYCLE_STATES.WAIT_PARENT;
+        },
+        
+        isInWaitingAuth() {
+            const state = this.getLifecycleState();
+            return state === LIFECYCLE_STATES.WAITING_AUTH;
         }
     }.init();
 
@@ -405,26 +561,34 @@
             recoveryMode: false,
             handshakeStatus: 'pending',
             sessionStatus: 'pending',
+            sessionValid: false,
+            coreSessionValid: false,
             offlineMode: !navigator.onLine,
             syncInProgress: false,
             startupState: 'INIT',
             parentReady: false,
-            lifecycleState: 'BOOT'  // DETERMINISTIC: Track lifecycle state
+            lifecycleState: 'BOOT'
         },
         
         listeners: new Map(),
+        _initialized: false,
+        _eventListenersSetup: false,
 
         init() {
+            if (this._initialized) return this;
+            
             this._loadSavedState();
             this._setupEventListeners();
             this._startPeriodicSync();
             this._checkParentReady();
             this._checkLifecycleState();
+            this._checkSessionValidity();
+            this._initialized = true;
             
+            UILogger.info('UIStateManager', 'Initialized');
             return this;
         },
 
-        // DETERMINISTIC: Check parent ready state from core
         _checkParentReady() {
             if (UIFailsafe.isParentReady()) {
                 this.state.parentReady = true;
@@ -433,17 +597,129 @@
             }
         },
         
-        // DETERMINISTIC: Check lifecycle state from core
+        _checkSessionValidity() {
+            const coreValid = UIFailsafe.hasValidSession();
+            this.state.coreSessionValid = coreValid;
+            
+            let isValid = coreValid;
+            let userId = null;
+            
+            const core = getMessagesCore();
+            if (core) {
+                if (core.isAuthenticated && core.isAuthenticated()) {
+                    isValid = true;
+                    userId = core.getCurrentUserId?.();
+                }
+                const coreState = core.getState?.();
+                if (coreState && coreState.hasValidSession === true) {
+                    isValid = true;
+                    if (!userId) userId = coreState.userId;
+                }
+                if (core.SessionManager && core.SessionManager.isAuthenticated?.()) {
+                    isValid = true;
+                }
+                // Check direct userId
+                const directUserId = core.getCurrentUserId?.();
+                if (directUserId && typeof directUserId === 'number' && directUserId !== 0) {
+                    isValid = true;
+                    userId = directUserId;
+                }
+            }
+            
+            if (userId && (typeof userId !== 'number' || userId === 0)) {
+                isValid = false;
+            }
+            
+            // CRITICAL FIX: If core has valid session, force state to be valid
+            if (coreValid && !this.state.sessionValid) {
+                console.log('[UIStateManager] Force setting sessionValid true - core has valid session');
+                isValid = true;
+            }
+            
+            if (isValid !== this.state.sessionValid) {
+                console.log('[UIStateManager] Session validity changed:', { 
+                    was: this.state.sessionValid, 
+                    now: isValid,
+                    coreValid: coreValid,
+                    userId: userId
+                });
+                this.state.sessionValid = isValid;
+                this.state.sessionStatus = isValid ? 'authenticated' : 'pending';
+                this._notifyListeners('sessionValid', isValid);
+                this._notifyListeners('sessionStatus', this.state.sessionStatus);
+                
+                if (isValid && (this.state.lifecycleState === LIFECYCLE_STATES.WAITING_AUTH || 
+                                this.state.lifecycleState === LIFECYCLE_STATES.WAIT_PARENT ||
+                                this.state.lifecycleState === 'UNKNOWN')) {
+                    this.state.lifecycleState = LIFECYCLE_STATES.ACTIVE;
+                    this._notifyListeners('lifecycleState', LIFECYCLE_STATES.ACTIVE);
+                    this._updateLifecycleUI(LIFECYCLE_STATES.ACTIVE);
+                    this._updateUIInteractionState(true);
+                    this._triggerRealDataFetch();
+                }
+                
+                if (isValid && this.state.lifecycleState === LIFECYCLE_STATES.ACTIVE) {
+                    this._updateUIInteractionState(true);
+                    this._updateConnectionUI(true, 'excellent');
+                    this._triggerRealDataFetch();
+                }
+            }
+            
+            return isValid;
+        },
+        
+        _forceSyncSessionState() {
+            // Force a direct check and sync with core
+            const coreHasSession = UIFailsafe.hasValidSession();
+            const coreUserId = getMessagesCore()?.getCurrentUserId?.();
+            
+            if (coreHasSession && coreUserId && typeof coreUserId === 'number' && coreUserId !== 0) {
+                if (!this.state.sessionValid || this.state.lifecycleState !== LIFECYCLE_STATES.ACTIVE) {
+                    console.log('[UIStateManager] Force syncing session state - core has valid session');
+                    this.state.sessionValid = true;
+                    this.state.coreSessionValid = true;
+                    this.state.lifecycleState = LIFECYCLE_STATES.ACTIVE;
+                    this.state.sessionStatus = 'authenticated';
+                    this._notifyListeners('sessionValid', true);
+                    this._notifyListeners('lifecycleState', LIFECYCLE_STATES.ACTIVE);
+                    this._updateLifecycleUI(LIFECYCLE_STATES.ACTIVE);
+                    this._updateUIInteractionState(true);
+                    this._updateConnectionUI(true, 'excellent');
+                    this._triggerRealDataFetch();
+                    return true;
+                } else if (this.state.sessionValid === false && coreHasSession) {
+                    // Fix: if core has session but UI state says false
+                    console.log('[UIStateManager] Fixing mismatched session state - core has session but UI says false');
+                    this.state.sessionValid = true;
+                    this.state.coreSessionValid = true;
+                    this.state.lifecycleState = LIFECYCLE_STATES.ACTIVE;
+                    this.state.sessionStatus = 'authenticated';
+                    this._notifyListeners('sessionValid', true);
+                    this._notifyListeners('lifecycleState', LIFECYCLE_STATES.ACTIVE);
+                    this._updateLifecycleUI(LIFECYCLE_STATES.ACTIVE);
+                    this._updateUIInteractionState(true);
+                    this._updateConnectionUI(true, 'excellent');
+                    this._triggerRealDataFetch();
+                    return true;
+                }
+            }
+            return false;
+        },
+        
         _checkLifecycleState() {
             const lifecycleState = UIFailsafe.getLifecycleState();
-            if (lifecycleState !== this.state.lifecycleState) {
+            if (lifecycleState !== this.state.lifecycleState && lifecycleState !== 'UNKNOWN') {
                 this.state.lifecycleState = lifecycleState;
                 this._notifyListeners('lifecycleState', lifecycleState);
                 this._updateLifecycleUI(lifecycleState);
+            } else if (lifecycleState === 'UNKNOWN' && this.state.coreSessionValid) {
+                // Fix: If core has session but lifecycle is UNKNOWN, set to ACTIVE
+                this.state.lifecycleState = LIFECYCLE_STATES.ACTIVE;
+                this._notifyListeners('lifecycleState', LIFECYCLE_STATES.ACTIVE);
+                this._updateLifecycleUI(LIFECYCLE_STATES.ACTIVE);
             }
         },
         
-        // DETERMINISTIC: Update UI based on lifecycle state
         _updateLifecycleUI(lifecycleState) {
             const statusEl = UIFailsafe.safeGetElement('handshakeStatus');
             if (!statusEl) return;
@@ -455,14 +731,20 @@
                 'INITIALIZING': { text: 'Loading module...', icon: 'fa-cog fa-spin', color: '#ff9800', action: false },
                 'READY': { text: 'Ready...', icon: 'fa-circle', color: '#ff9800', action: false },
                 'WAIT_PARENT': { text: '', icon: '', color: 'transparent', action: false, hidden: true },
+                'WAITING_AUTH': { text: 'Waiting for session...', icon: 'fa-circle', color: '#ff9800', action: false },
                 'ACTIVE': { text: 'Connected', icon: 'fa-check-circle', color: '#4caf50', action: true }
             };
             
             const info = lifecycleMessages[lifecycleState] || { text: '', icon: '', color: 'transparent', action: false, hidden: true };
             
-            // For WAIT_PARENT, hide the status indicator completely
             if (lifecycleState === 'WAIT_PARENT') {
                 UIFailsafe.safeSetStyle(statusEl, 'display', 'none');
+            } else if (lifecycleState === 'WAITING_AUTH') {
+                UIFailsafe.safeSetStyle(statusEl, 'display', 'flex');
+                UIFailsafe.safeSetHTML(statusEl, `
+                    <i class="fas ${info.icon}" style="color: ${info.color};"></i>
+                    <span>${info.text}</span>
+                `);
             } else {
                 UIFailsafe.safeSetStyle(statusEl, 'display', 'flex');
                 UIFailsafe.safeSetHTML(statusEl, `
@@ -473,21 +755,46 @@
             
             console.log(`[messagesUI] Lifecycle: ${lifecycleState}`);
             
-            // Update UI interaction based on lifecycle state
-            this._updateUIInteractionState(info.action);
+            const hasSession = UIFailsafe.hasValidSession();
+            this._updateUIInteractionState(info.action && hasSession);
             
-            // Update connection status based on lifecycle
-            if (lifecycleState === 'ACTIVE') {
+            if (lifecycleState === 'ACTIVE' && hasSession) {
                 this._updateConnectionUI(true, 'excellent');
+                this._triggerRealDataFetch();
             } else if (lifecycleState === 'WAIT_PARENT') {
                 this._updateConnectionUI(false, 'unknown');
-                // Background connection only - no visual loading state
+            } else if (lifecycleState === 'WAITING_AUTH') {
+                this._updateConnectionUI(false, 'unknown');
+                this._showWaitingAuthState();
             } else {
                 this._updateConnectionUI(false, 'unknown');
             }
         },
         
-        // DETERMINISTIC: Update UI interaction state (disable when not ACTIVE)
+        _showWaitingAuthState() {
+            const statusEl = UIFailsafe.safeGetElement('sessionStatus');
+            if (statusEl) {
+                UIFailsafe.safeSetText(statusEl, 'Waiting for authentication...');
+                UIFailsafe.safeSetStyle(statusEl, 'display', 'block');
+            }
+        },
+        
+        _triggerRealDataFetch() {
+            const core = getMessagesCore();
+            if (!UIFailsafe.hasValidSession()) {
+                console.log('[messagesUI] No valid session, skipping data fetch');
+                return;
+            }
+            
+            if (core && core.fetchConversations) {
+                console.log('[messagesUI] Triggering real data fetch from backend');
+                core.fetchConversations();
+            }
+            if (core && core.FriendManager && core.FriendManager.fetchFriends) {
+                core.FriendManager.fetchFriends();
+            }
+        },
+        
         _updateUIInteractionState(isActive) {
             const messageInput = UIFailsafe.safeGetElement('messageInput');
             const sendButton = UIFailsafe.safeGetElement('sendButton');
@@ -498,9 +805,9 @@
             const videoCallBtn = UIFailsafe.safeGetElement('videoCallBtn');
             const chatOptionsBtn = UIFailsafe.safeGetElement('chatOptionsBtn');
             const multiSendToggle = UIFailsafe.safeGetElement('multiSendToggleBtn');
+            const newChatBtn = UIFailsafe.safeGetElement('newChatBtn');
             
             if (!isActive) {
-                // Disable all interactive elements
                 if (messageInput) UIFailsafe.safeSetProperty(messageInput, 'disabled', true);
                 if (sendButton) UIFailsafe.safeSetProperty(sendButton, 'disabled', true);
                 if (attachBtn) UIFailsafe.safeSetProperty(attachBtn, 'disabled', true);
@@ -510,11 +817,10 @@
                 if (videoCallBtn) UIFailsafe.safeSetProperty(videoCallBtn, 'disabled', true);
                 if (chatOptionsBtn) UIFailsafe.safeSetProperty(chatOptionsBtn, 'disabled', true);
                 if (multiSendToggle) UIFailsafe.safeSetProperty(multiSendToggle, 'disabled', true);
+                if (newChatBtn) UIFailsafe.safeSetProperty(newChatBtn, 'disabled', true);
                 
-                // Add disabled class for styling
                 if (messageInput) UIFailsafe.safeAddClass(messageInput, 'ui-disabled');
             } else {
-                // Enable interactive elements
                 if (messageInput) UIFailsafe.safeSetProperty(messageInput, 'disabled', false);
                 if (sendButton) UIFailsafe.safeSetProperty(sendButton, 'disabled', false);
                 if (attachBtn) UIFailsafe.safeSetProperty(attachBtn, 'disabled', false);
@@ -524,32 +830,26 @@
                 if (videoCallBtn) UIFailsafe.safeSetProperty(videoCallBtn, 'disabled', false);
                 if (chatOptionsBtn) UIFailsafe.safeSetProperty(chatOptionsBtn, 'disabled', false);
                 if (multiSendToggle) UIFailsafe.safeSetProperty(multiSendToggle, 'disabled', false);
+                if (newChatBtn) UIFailsafe.safeSetProperty(newChatBtn, 'disabled', false);
                 
-                // Remove disabled class
                 if (messageInput) UIFailsafe.safeRemoveClass(messageInput, 'ui-disabled');
             }
         },
         
-        // DETERMINISTIC: Show WAIT_PARENT state in UI (BACKGROUND ONLY - NO VISIBLE LOADING)
         _showWaitParentState() {
-            // DO NOT SHOW VISIBLE LOADING STATE IN FOREGROUND
-            // Connection happens silently in background
-            // Remove any existing wait-parent-state elements if they exist
             const waitParentElements = UIFailsafe.safeQuerySelectorAll('.wait-parent-state');
             UIFailsafe.safeForEach(waitParentElements, (el) => {
                 if (el && el.remove) {
                     el.remove();
                 }
             });
-            
-            // Keep UI clean - no loading overlays or connection messages
-            // The user sees a clean interface while connection happens in background
         },
 
         _loadSavedState() {
+            const core = getMessagesCore();
             UIFailsafe.queueAction(() => {
-                if (window.messagesCore && window.messagesCore.SafeStorage) {
-                    const saved = window.messagesCore.SafeStorage.getJSON('ui_state', {});
+                if (core && core.SafeStorage) {
+                    const saved = core.SafeStorage.getJSON('ui_state', {});
                     if (saved.theme) this.state.currentTheme = saved.theme;
                     if (saved.fontSize) this.state.fontSize = saved.fontSize;
                     if (saved.sidebarVisible !== undefined) this.state.sidebarVisible = saved.sidebarVisible;
@@ -558,7 +858,8 @@
         },
 
         _setupEventListeners() {
-            // DETERMINISTIC: Listen for messagesLifecycleChange from core
+            if (this._eventListenersSetup) return;
+            
             window.addEventListener('messagesLifecycleChange', (e) => {
                 UIFailsafe.queueAction(() => {
                     const newState = e.detail.state;
@@ -575,10 +876,10 @@
                         this.state.parentReady = false;
                         this._notifyListeners('parentReady', false);
                         this._updateConnectionUI(false, 'unknown');
-                        // Background connection - no UI blocking
-                    } else if (newState === LIFECYCLE_STATES.READY) {
+                    } else if (newState === LIFECYCLE_STATES.WAITING_AUTH) {
                         this.state.parentReady = false;
                         this._notifyListeners('parentReady', false);
+                        this._updateConnectionUI(false, 'unknown');
                     }
                 });
             });
@@ -588,8 +889,47 @@
                     if (e.detail.user) {
                         this._updateUserUI(e.detail.user);
                     }
-                    this.state.sessionStatus = e.detail.authenticated ? 'authenticated' : 'anonymous';
+                    
+                    let isValid = false;
+                    
+                    if (e.detail.authenticated === true) {
+                        isValid = true;
+                    }
+                    
+                    const userId = e.detail.userId;
+                    if (userId && typeof userId === 'number' && userId !== 0) {
+                        isValid = true;
+                    }
+                    
+                    if (e.detail.user && e.detail.user.id && typeof e.detail.user.id === 'number' && e.detail.user.id !== 0) {
+                        isValid = true;
+                    }
+                    
+                    console.log('[UIStateManager] SessionUpdated event:', { 
+                        detail: e.detail,
+                        isValid: isValid,
+                        userId: e.detail.userId,
+                        authenticated: e.detail.authenticated
+                    });
+                    
+                    this.state.sessionValid = isValid;
+                    this.state.coreSessionValid = isValid;
+                    this.state.sessionStatus = isValid ? 'authenticated' : 'pending';
+                    this._notifyListeners('sessionValid', isValid);
                     this._notifyListeners('sessionStatus', this.state.sessionStatus);
+                    
+                    if (isValid && this.state.lifecycleState !== LIFECYCLE_STATES.ACTIVE) {
+                        this.state.lifecycleState = LIFECYCLE_STATES.ACTIVE;
+                        this._notifyListeners('lifecycleState', LIFECYCLE_STATES.ACTIVE);
+                        this._updateLifecycleUI(LIFECYCLE_STATES.ACTIVE);
+                        this._updateUIInteractionState(true);
+                        this._updateConnectionUI(true, 'excellent');
+                        this._triggerRealDataFetch();
+                    } else if (isValid && this.state.lifecycleState === LIFECYCLE_STATES.ACTIVE) {
+                        this._updateUIInteractionState(true);
+                        this._updateConnectionUI(true, 'excellent');
+                        this._triggerRealDataFetch();
+                    }
                 });
             });
 
@@ -642,17 +982,68 @@
                     this._showOfflineUI();
                 });
             });
+            
+            window.addEventListener('newMessage', (e) => {
+                UIFailsafe.queueAction(() => {
+                    if (e.detail && e.detail.message) {
+                        this._notifyListeners('newMessage', e.detail.message);
+                    }
+                });
+            });
+            
+            window.addEventListener('conversationsUpdated', (e) => {
+                UIFailsafe.queueAction(() => {
+                    if (e.detail && e.detail.conversations) {
+                        this._notifyListeners('conversationsUpdated', e.detail.conversations);
+                    }
+                });
+            });
+            
+            this._eventListenersSetup = true;
         },
 
         _startPeriodicSync() {
             setInterval(() => {
                 UIFailsafe.queueAction(() => {
-                    // Only sync lifecycle state periodically
+                    // First, force sync session state from core
+                    this._forceSyncSessionState();
+                    
                     const lifecycleState = UIFailsafe.getLifecycleState();
-                    if (lifecycleState !== this.state.lifecycleState) {
+                    if (lifecycleState !== this.state.lifecycleState && lifecycleState !== 'UNKNOWN') {
                         this.state.lifecycleState = lifecycleState;
                         this._notifyListeners('lifecycleState', lifecycleState);
                         this._updateLifecycleUI(lifecycleState);
+                    } else if (lifecycleState === 'UNKNOWN' && this.state.coreSessionValid) {
+                        // Fix: If core has session but lifecycle is UNKNOWN, set to ACTIVE
+                        this.state.lifecycleState = LIFECYCLE_STATES.ACTIVE;
+                        this._notifyListeners('lifecycleState', LIFECYCLE_STATES.ACTIVE);
+                        this._updateLifecycleUI(LIFECYCLE_STATES.ACTIVE);
+                    }
+                    
+                    const sessionValid = UIFailsafe.hasValidSession();
+                    if (sessionValid !== this.state.sessionValid) {
+                        console.log('[UIStateManager] Periodic sync - session valid changed:', { was: this.state.sessionValid, now: sessionValid });
+                        this.state.sessionValid = sessionValid;
+                        this._notifyListeners('sessionValid', sessionValid);
+                        if (sessionValid && this.state.lifecycleState !== LIFECYCLE_STATES.ACTIVE) {
+                            this.state.lifecycleState = LIFECYCLE_STATES.ACTIVE;
+                            this._notifyListeners('lifecycleState', LIFECYCLE_STATES.ACTIVE);
+                            this._updateLifecycleUI(LIFECYCLE_STATES.ACTIVE);
+                            this._updateUIInteractionState(true);
+                            this._triggerRealDataFetch();
+                        }
+                    } else if (sessionValid && !this.state.sessionValid) {
+                        // Fix: If sessionValid from core is true but UI state says false
+                        console.log('[UIStateManager] Periodic sync - fixing mismatched session state');
+                        this.state.sessionValid = true;
+                        this._notifyListeners('sessionValid', true);
+                        if (this.state.lifecycleState !== LIFECYCLE_STATES.ACTIVE) {
+                            this.state.lifecycleState = LIFECYCLE_STATES.ACTIVE;
+                            this._notifyListeners('lifecycleState', LIFECYCLE_STATES.ACTIVE);
+                            this._updateLifecycleUI(LIFECYCLE_STATES.ACTIVE);
+                            this._updateUIInteractionState(true);
+                            this._triggerRealDataFetch();
+                        }
                     }
                     
                     if (UIFailsafe.isParentReady() && !this.state.parentReady) {
@@ -660,28 +1051,35 @@
                         this._notifyListeners('parentReady', true);
                     }
                 });
-            }, 10000);
+            }, 2000); // Check every 2 seconds
         },
         
-        // DETERMINISTIC: Initialize UI when ACTIVE
         _initializeActiveUI() {
-            // Trigger initial data load
-            if (window.messagesCore && window.messagesCore.fetchConversations) {
-                window.messagesCore.fetchConversations();
+            const core = getMessagesCore();
+            if (!UIFailsafe.hasValidSession()) {
+                console.log('[messagesUI] No valid session, waiting for authentication');
+                return;
             }
             
-            // Load user data
-            if (window.messagesCore && window.messagesCore.getCurrentUser) {
-                const user = window.messagesCore.getCurrentUser();
+            if (core && core.fetchConversations) {
+                core.fetchConversations();
+            }
+            
+            if (core && core.getCurrentUser) {
+                const user = core.getCurrentUser();
                 if (user) {
                     this._updateUserUI(user);
                 }
             }
             
-            // Remove any leftover wait-parent-state elements if present
             const waitParentState = UIFailsafe.safeQuerySelector('.wait-parent-state');
             if (waitParentState) {
                 waitParentState.remove();
+            }
+            
+            const waitingAuthState = UIFailsafe.safeQuerySelector('.waiting-auth-state');
+            if (waitingAuthState) {
+                waitingAuthState.remove();
             }
         },
 
@@ -732,9 +1130,10 @@
         },
 
         _saveState() {
+            const core = getMessagesCore();
             UIFailsafe.queueAction(() => {
-                if (window.messagesCore && window.messagesCore.SafeStorage) {
-                    window.messagesCore.SafeStorage.setJSON('ui_state', {
+                if (core && core.SafeStorage) {
+                    core.SafeStorage.setJSON('ui_state', {
                         theme: this.state.currentTheme,
                         fontSize: this.state.fontSize,
                         sidebarVisible: this.state.sidebarVisible,
@@ -772,7 +1171,7 @@
                 UIFailsafe.safeRemoveClass(indicator, 'authenticated');
                 UIFailsafe.safeRemoveClass(indicator, 'error');
                 
-                if (user) {
+                if (user && user.id && typeof user.id === 'number') {
                     UIFailsafe.safeAddClass(indicator, 'authenticated');
                     UIFailsafe.safeSetText(text, `Logged in as ${user.displayName || user.username || 'User'}`);
                     UIFailsafe.safeSetStyle(indicator, 'display', 'flex');
@@ -800,9 +1199,10 @@
                     if (lifecycleState === 'READY') {
                         message = 'Ready...';
                     } else if (lifecycleState === 'WAIT_PARENT') {
-                        // No visible message for WAIT_PARENT - hide status
                         UIFailsafe.safeSetStyle(tokenStatus, 'display', 'none');
                         return;
+                    } else if (lifecycleState === 'WAITING_AUTH') {
+                        message = 'Waiting for authentication...';
                     }
                     UIFailsafe.safeSetText(tokenStatus, message);
                     UIFailsafe.safeSetStyle(tokenStatus, 'display', 'block');
@@ -865,7 +1265,6 @@
                     <span>Handshake: ${handshakeInfo.version || 'legacy'} (${Math.round(handshakeInfo.duration)}ms)</span>
                 `);
             } else if (handshakeInfo.state === 'IN_PROGRESS') {
-                // Hide in-progress handshake for WAIT_PARENT
                 if (this.state.lifecycleState === 'WAIT_PARENT') {
                     UIFailsafe.safeSetStyle(statusEl, 'display', 'none');
                 } else {
@@ -904,7 +1303,7 @@
     }.init();
 
     // =============================================
-    // UI RENDERER (ENHANCED WITH DETERMINISTIC LIFECYCLE)
+    // UI RENDERER (ENHANCED WITH DETERMINISTIC LIFECYCLE & REAL DATA)
     // =============================================
     const UIRenderer = {
         messageTemplates: new Map(),
@@ -995,15 +1394,59 @@
                     }
                 });
             });
+            
+            window.addEventListener('conversationsUpdated', (e) => {
+                UIFailsafe.queueAction(() => {
+                    if (e.detail && e.detail.conversations) {
+                        const core = getMessagesCore();
+                        const currentChat = core?.getCurrentConversation?.();
+                        const currentCategory = core?.getCurrentCategory?.() || 'all';
+                        const drafts = core?.UI?.getDrafts?.() || {};
+                        this.renderChatsList(e.detail.conversations, currentChat, currentCategory, drafts);
+                    }
+                });
+            });
+            
+            window.addEventListener('newMessage', (e) => {
+                UIFailsafe.queueAction(() => {
+                    if (e.detail && e.detail.message) {
+                        const core = getMessagesCore();
+                        const currentChat = core?.getCurrentConversation?.();
+                        const currentUser = core?.getCurrentUser?.();
+                        const messages = core?.getMessages?.() || [];
+                        this.renderMessages(messages, currentChat, currentUser);
+                    }
+                });
+            });
+            
+            window.addEventListener('messageStatusUpdated', (e) => {
+                UIFailsafe.queueAction(() => {
+                    const messageEl = UIFailsafe.safeQuerySelector(`[data-message-id="${e.detail.messageId}"]`);
+                    if (messageEl) {
+                        const statusIcon = messageEl.querySelector('.message-status i');
+                        if (statusIcon) {
+                            const status = e.detail.status;
+                            const iconClass = status === 'sending' ? 'fa-clock' :
+                                            status === 'failed' ? 'fa-exclamation-circle' :
+                                            status === 'read' ? 'fa-check-double' : 'fa-check';
+                            statusIcon.className = `fas ${iconClass}`;
+                        }
+                        if (e.detail.status === 'failed') {
+                            UIFailsafe.safeAddClass(messageEl, 'message-failed');
+                        }
+                    }
+                });
+            });
         },
 
-        // DETERMINISTIC: Check if UI can render (only when ACTIVE)
         _canRender() {
             const lifecycleState = UIStateManager.getState('lifecycleState');
-            return lifecycleState === LIFECYCLE_STATES.ACTIVE;
+            const sessionValid = UIStateManager.getState('sessionValid');
+            // If core has valid session but UI state is not yet updated, still allow render
+            const coreHasSession = UIFailsafe.hasValidSession();
+            return (lifecycleState === LIFECYCLE_STATES.ACTIVE && sessionValid) || coreHasSession;
         },
 
-        // DETERMINISTIC: Get passive loading state for initial rendering
         _getPassiveLoadingState() {
             const lifecycleState = UIStateManager.getState('lifecycleState');
             let message = 'Loading...';
@@ -1013,8 +1456,9 @@
             } else if (lifecycleState === 'READY') {
                 message = 'Ready...';
             } else if (lifecycleState === 'WAIT_PARENT') {
-                // Return minimal content for WAIT_PARENT - no visible loading
                 return `<div class="passive-loading-state" data-lifecycle="${lifecycleState}" style="opacity:0; height:0; overflow:hidden;"></div>`;
+            } else if (lifecycleState === 'WAITING_AUTH') {
+                message = 'Waiting for authentication...';
             } else if (lifecycleState === 'ACTIVE') {
                 message = 'Ready';
             }
@@ -1028,14 +1472,10 @@
             `;
         },
 
-        // =========================================
-        // MESSAGE RENDERING (WITH DETERMINISTIC LIFECYCLE CHECK)
-        // =========================================
         renderMessages(messages, currentChat, currentUser) {
             const container = UIFailsafe.safeGetElement('messagesContainer');
             if (!container) return;
 
-            // DETERMINISTIC: If not active, show passive loading state - NO ACTIONS
             if (!this._canRender()) {
                 UIFailsafe.safeSetHTML(container, this._getPassiveLoadingState());
                 return;
@@ -1088,10 +1528,11 @@
 
         _groupMessagesByDate(messages) {
             const groups = {};
+            const core = getMessagesCore();
             
             messages.forEach(message => {
-                const date = window.messagesCore?.formatDate ? 
-                    window.messagesCore.formatDate(message.timestamp) : 
+                const date = core?.formatDate ? 
+                    core.formatDate(message.timestamp) : 
                     new Date(message.timestamp).toLocaleDateString();
                 if (!groups[date]) {
                     groups[date] = [];
@@ -1103,7 +1544,9 @@
         },
 
         _createTextMessageTemplate(message, currentUser) {
-            const isSent = message.senderId === currentUser?.id;
+            const core = getMessagesCore();
+            const currentUserId = core?.getCurrentUserId?.();
+            const isSent = message.senderId === currentUserId;
             const status = message.status || 'sent';
             const statusIcon = status === 'sending' ? 'fa-clock' :
                               status === 'failed' ? 'fa-exclamation-circle' :
@@ -1115,18 +1558,18 @@
             const deletedClass = message.deleted ? 'deleted-message' : '';
             const failedClass = status === 'failed' ? 'message-failed' : '';
             const sendingClass = status === 'sending' ? 'message-sending' : '';
-            const content = window.messagesCore?.formatMessageText ? 
-                window.messagesCore.formatMessageText(message.content) : 
+            const content = core?.formatMessageText ? 
+                core.formatMessageText(message.content) : 
                 message.content;
-            const time = window.messagesCore?.formatTime ? 
-                window.messagesCore.formatTime(message.timestamp) : 
+            const time = core?.formatTime ? 
+                core.formatTime(message.timestamp) : 
                 new Date(message.timestamp).toLocaleTimeString();
             
             const safeMessage = JSON.stringify(message).replace(/"/g, '&quot;');
             
             return `
                 <div class="message ${isSent ? 'sent' : 'received'} ${deletedClass} ${failedClass} ${sendingClass}" data-message-id="${message.id}" data-message-type="text" data-status="${status}">
-                    <div class="message-bubble" onclick="window.messagesCore?.showMessageActions(${safeMessage}, event.clientX, event.clientY)">
+                    <div class="message-bubble" onclick="window.messagesUI?.showMessageActions(${safeMessage}, event.clientX, event.clientY)">
                         ${replyIndicator}
                         <div class="message-content">${content}</div>
                         <div class="message-meta">
@@ -1141,26 +1584,28 @@
         },
 
         _createImageMessageTemplate(message, currentUser) {
-            const isSent = message.senderId === currentUser?.id;
+            const core = getMessagesCore();
+            const currentUserId = core?.getCurrentUserId?.();
+            const isSent = message.senderId === currentUserId;
             const status = message.status || 'sent';
             const statusIcon = status === 'sending' ? 'fa-clock' :
                               status === 'failed' ? 'fa-exclamation-circle' :
                               status === 'read' ? 'fa-check-double' : 'fa-check';
             
             const reactions = this._renderReactions(message.reactions);
-            const time = window.messagesCore?.formatTime ? 
-                window.messagesCore.formatTime(message.timestamp) : 
+            const time = core?.formatTime ? 
+                core.formatTime(message.timestamp) : 
                 new Date(message.timestamp).toLocaleTimeString();
             
             const safeMessage = JSON.stringify(message).replace(/"/g, '&quot;');
             
             return `
                 <div class="message ${isSent ? 'sent' : 'received'}" data-message-id="${message.id}" data-message-type="image" data-status="${status}">
-                    <div class="message-bubble" onclick="window.messagesCore?.showMessageActions(${safeMessage}, event.clientX, event.clientY)">
-                        <div class="message-image" onclick="window.messagesCore?.viewMedia('${message.content}', '${message.fileName || 'image'}')">
+                    <div class="message-bubble" onclick="window.messagesUI?.showMessageActions(${safeMessage}, event.clientX, event.clientY)">
+                        <div class="message-image" onclick="window.messagesUI?.viewMedia('${message.content}', '${message.fileName || 'image'}')">
                             <img src="${message.content}" alt="${message.fileName || 'Image'}" loading="lazy">
                         </div>
-                        ${message.caption ? `<div class="message-caption">${window.messagesCore?.escapeHtml ? window.messagesCore.escapeHtml(message.caption) : message.caption}</div>` : ''}
+                        ${message.caption ? `<div class="message-caption">${core?.escapeHtml ? core.escapeHtml(message.caption) : message.caption}</div>` : ''}
                         <div class="message-meta">
                             <span class="message-time">${time}</span>
                             ${isSent ? `<span class="message-status"><i class="fas ${statusIcon}"></i></span>` : ''}
@@ -1172,26 +1617,28 @@
         },
 
         _createVideoMessageTemplate(message, currentUser) {
-            const isSent = message.senderId === currentUser?.id;
+            const core = getMessagesCore();
+            const currentUserId = core?.getCurrentUserId?.();
+            const isSent = message.senderId === currentUserId;
             const status = message.status || 'sent';
             const statusIcon = status === 'sending' ? 'fa-clock' :
                               status === 'failed' ? 'fa-exclamation-circle' :
                               status === 'read' ? 'fa-check-double' : 'fa-check';
             
             const reactions = this._renderReactions(message.reactions);
-            const time = window.messagesCore?.formatTime ? 
-                window.messagesCore.formatTime(message.timestamp) : 
+            const time = core?.formatTime ? 
+                core.formatTime(message.timestamp) : 
                 new Date(message.timestamp).toLocaleTimeString();
             
             const safeMessage = JSON.stringify(message).replace(/"/g, '&quot;');
             
             return `
                 <div class="message ${isSent ? 'sent' : 'received'}" data-message-id="${message.id}" data-message-type="video" data-status="${status}">
-                    <div class="message-bubble" onclick="window.messagesCore?.showMessageActions(${safeMessage}, event.clientX, event.clientY)">
-                        <div class="message-video" onclick="window.messagesCore?.playVideo('${message.content}')">
+                    <div class="message-bubble" onclick="window.messagesUI?.showMessageActions(${safeMessage}, event.clientX, event.clientY)">
+                        <div class="message-video" onclick="window.messagesUI?.playVideo('${message.content}')">
                             <video src="${message.content}" poster="${message.thumbnail || ''}" controls></video>
                         </div>
-                        ${message.caption ? `<div class="message-caption">${window.messagesCore?.escapeHtml ? window.messagesCore.escapeHtml(message.caption) : message.caption}</div>` : ''}
+                        ${message.caption ? `<div class="message-caption">${core?.escapeHtml ? core.escapeHtml(message.caption) : message.caption}</div>` : ''}
                         <div class="message-meta">
                             <span class="message-time">${time}</span>
                             ${isSent ? `<span class="message-status"><i class="fas ${statusIcon}"></i></span>` : ''}
@@ -1203,7 +1650,9 @@
         },
 
         _createAudioMessageTemplate(message, currentUser) {
-            const isSent = message.senderId === currentUser?.id;
+            const core = getMessagesCore();
+            const currentUserId = core?.getCurrentUserId?.();
+            const isSent = message.senderId === currentUserId;
             const status = message.status || 'sent';
             const statusIcon = status === 'sending' ? 'fa-clock' :
                               status === 'failed' ? 'fa-exclamation-circle' :
@@ -1211,17 +1660,17 @@
             
             const reactions = this._renderReactions(message.reactions);
             const duration = message.duration ? this._formatDuration(message.duration) : '';
-            const time = window.messagesCore?.formatTime ? 
-                window.messagesCore.formatTime(message.timestamp) : 
+            const time = core?.formatTime ? 
+                core.formatTime(message.timestamp) : 
                 new Date(message.timestamp).toLocaleTimeString();
             
             const safeMessage = JSON.stringify(message).replace(/"/g, '&quot;');
             
             return `
                 <div class="message ${isSent ? 'sent' : 'received'}" data-message-id="${message.id}" data-message-type="audio" data-status="${status}">
-                    <div class="message-bubble" onclick="window.messagesCore?.showMessageActions(${safeMessage}, event.clientX, event.clientY)">
+                    <div class="message-bubble" onclick="window.messagesUI?.showMessageActions(${safeMessage}, event.clientX, event.clientY)">
                         <div class="message-audio">
-                            <button class="audio-play-btn" onclick="this.classList.toggle('playing'); window.messagesCore?.playAudio('${message.id}', '${message.content}', ${message.duration || 0})">
+                            <button class="audio-play-btn" onclick="this.classList.toggle('playing'); window.messagesUI?.playAudio('${message.id}', '${message.content}', ${message.duration || 0})">
                                 <i class="fas fa-play"></i>
                             </button>
                             <div class="audio-waveform" id="waveform-${message.id}"></div>
@@ -1238,26 +1687,28 @@
         },
 
         _createFileMessageTemplate(message, currentUser) {
-            const isSent = message.senderId === currentUser?.id;
+            const core = getMessagesCore();
+            const currentUserId = core?.getCurrentUserId?.();
+            const isSent = message.senderId === currentUserId;
             const status = message.status || 'sent';
             const statusIcon = status === 'sending' ? 'fa-clock' :
                               status === 'failed' ? 'fa-exclamation-circle' :
                               status === 'read' ? 'fa-check-double' : 'fa-check';
             
             const reactions = this._renderReactions(message.reactions);
-            const fileSize = message.fileSize && window.messagesCore?.formatFileSize ? 
-                window.messagesCore.formatFileSize(message.fileSize) : '';
+            const fileSize = message.fileSize && core?.formatFileSize ? 
+                core.formatFileSize(message.fileSize) : '';
             const fileIcon = this._getFileIcon(message.fileName || '');
-            const time = window.messagesCore?.formatTime ? 
-                window.messagesCore.formatTime(message.timestamp) : 
+            const time = core?.formatTime ? 
+                core.formatTime(message.timestamp) : 
                 new Date(message.timestamp).toLocaleTimeString();
             
             const safeMessage = JSON.stringify(message).replace(/"/g, '&quot;');
             
             return `
                 <div class="message ${isSent ? 'sent' : 'received'}" data-message-id="${message.id}" data-message-type="file" data-status="${status}">
-                    <div class="message-bubble" onclick="window.messagesCore?.showMessageActions(${safeMessage}, event.clientX, event.clientY)">
-                        <div class="message-file" onclick="window.messagesCore?.downloadFile('${message.content}', '${message.fileName || 'file'}')">
+                    <div class="message-bubble" onclick="window.messagesUI?.showMessageActions(${safeMessage}, event.clientX, event.clientY)">
+                        <div class="message-file" onclick="window.messagesUI?.downloadFile('${message.content}', '${message.fileName || 'file'}')">
                             <i class="fas ${fileIcon} file-icon"></i>
                             <div class="file-info">
                                 <div class="file-name">${message.fileName || 'File'}</div>
@@ -1276,23 +1727,25 @@
         },
 
         _createLocationMessageTemplate(message, currentUser) {
-            const isSent = message.senderId === currentUser?.id;
+            const core = getMessagesCore();
+            const currentUserId = core?.getCurrentUserId?.();
+            const isSent = message.senderId === currentUserId;
             const status = message.status || 'sent';
             const statusIcon = status === 'sending' ? 'fa-clock' :
                               status === 'failed' ? 'fa-exclamation-circle' :
                               status === 'read' ? 'fa-check-double' : 'fa-check';
             
             const reactions = this._renderReactions(message.reactions);
-            const time = window.messagesCore?.formatTime ? 
-                window.messagesCore.formatTime(message.timestamp) : 
+            const time = core?.formatTime ? 
+                core.formatTime(message.timestamp) : 
                 new Date(message.timestamp).toLocaleTimeString();
             
             const safeMessage = JSON.stringify(message).replace(/"/g, '&quot;');
             
             return `
                 <div class="message ${isSent ? 'sent' : 'received'}" data-message-id="${message.id}" data-message-type="location" data-status="${status}">
-                    <div class="message-bubble" onclick="window.messagesCore?.showMessageActions(${safeMessage}, event.clientX, event.clientY)">
-                        <div class="message-location" onclick="window.messagesCore?.openLocation(${message.latitude || 0}, ${message.longitude || 0})">
+                    <div class="message-bubble" onclick="window.messagesUI?.showMessageActions(${safeMessage}, event.clientX, event.clientY)">
+                        <div class="message-location" onclick="window.messagesUI?.openLocation(${message.latitude || 0}, ${message.longitude || 0})">
                             <iframe src="${message.content}" frameborder="0" style="width:100%; height:200px;" allowfullscreen loading="lazy"></iframe>
                             <div class="location-name">${message.name || 'Location'}</div>
                         </div>
@@ -1307,7 +1760,9 @@
         },
 
         _createPollMessageTemplate(message, currentUser) {
-            const isSent = message.senderId === currentUser?.id;
+            const core = getMessagesCore();
+            const currentUserId = core?.getCurrentUserId?.();
+            const isSent = message.senderId === currentUserId;
             const status = message.status || 'sent';
             const statusIcon = status === 'sending' ? 'fa-clock' :
                               status === 'failed' ? 'fa-exclamation-circle' :
@@ -1315,8 +1770,8 @@
             
             const reactions = this._renderReactions(message.reactions);
             const totalVotes = message.options?.reduce((sum, opt) => sum + (opt.votes || 0), 0) || 0;
-            const time = window.messagesCore?.formatTime ? 
-                window.messagesCore.formatTime(message.timestamp) : 
+            const time = core?.formatTime ? 
+                core.formatTime(message.timestamp) : 
                 new Date(message.timestamp).toLocaleTimeString();
             
             const safeMessage = JSON.stringify(message).replace(/"/g, '&quot;');
@@ -1326,7 +1781,7 @@
                 message.options.forEach((option, index) => {
                     const percentage = totalVotes > 0 ? Math.round((option.votes || 0) / totalVotes * 100) : 0;
                     optionsHTML += `
-                        <div class="poll-option" onclick="window.messagesCore?.voteInPoll('${message.id}', ${index})">
+                        <div class="poll-option" onclick="window.messagesUI?.voteInPoll('${message.id}', ${index})">
                             <div class="poll-option-text">${option.text}</div>
                             <div class="poll-option-bar" style="width: ${percentage}%"></div>
                             <div class="poll-option-stats">${option.votes || 0} (${percentage}%)</div>
@@ -1337,7 +1792,7 @@
             
             return `
                 <div class="message ${isSent ? 'sent' : 'received'}" data-message-id="${message.id}" data-message-type="poll" data-status="${status}">
-                    <div class="message-bubble" onclick="window.messagesCore?.showMessageActions(${safeMessage}, event.clientX, event.clientY)">
+                    <div class="message-bubble" onclick="window.messagesUI?.showMessageActions(${safeMessage}, event.clientX, event.clientY)">
                         <div class="poll-question">${message.question || 'Poll'}</div>
                         <div class="poll-options">
                             ${optionsHTML}
@@ -1354,25 +1809,27 @@
         },
 
         _createNoteMessageTemplate(message, currentUser) {
-            const isSent = message.senderId === currentUser?.id;
+            const core = getMessagesCore();
+            const currentUserId = core?.getCurrentUserId?.();
+            const isSent = message.senderId === currentUserId;
             const status = message.status || 'sent';
             const statusIcon = status === 'sending' ? 'fa-clock' :
                               status === 'failed' ? 'fa-exclamation-circle' :
                               status === 'read' ? 'fa-check-double' : 'fa-check';
             
             const reactions = this._renderReactions(message.reactions);
-            const content = window.messagesCore?.formatMessageText ? 
-                window.messagesCore.formatMessageText(message.content) : 
+            const content = core?.formatMessageText ? 
+                core.formatMessageText(message.content) : 
                 message.content;
-            const time = window.messagesCore?.formatTime ? 
-                window.messagesCore.formatTime(message.timestamp) : 
+            const time = core?.formatTime ? 
+                core.formatTime(message.timestamp) : 
                 new Date(message.timestamp).toLocaleTimeString();
             
             const safeMessage = JSON.stringify(message).replace(/"/g, '&quot;');
             
             return `
                 <div class="message note-message ${isSent ? 'sent' : 'received'}" data-message-id="${message.id}" data-message-type="note" data-status="${status}">
-                    <div class="message-bubble" onclick="window.messagesCore?.showMessageActions(${safeMessage}, event.clientX, event.clientY)">
+                    <div class="message-bubble" onclick="window.messagesUI?.showMessageActions(${safeMessage}, event.clientX, event.clientY)">
                         <div class="note-icon"><i class="fas fa-sticky-note"></i></div>
                         <div class="message-content">${content}</div>
                         <div class="message-meta">
@@ -1448,14 +1905,10 @@
             `;
         },
 
-        // =========================================
-        // CHATS LIST RENDERING (WITH DETERMINISTIC LIFECYCLE CHECK)
-        // =========================================
         renderChatsList(chats, currentChat, category, messageDrafts) {
             const container = UIFailsafe.safeGetElement('chatsList');
             if (!container) return;
 
-            // DETERMINISTIC: If not active, show passive loading state
             if (!this._canRender()) {
                 UIFailsafe.safeSetHTML(container, this._getPassiveLoadingState());
                 return;
@@ -1496,14 +1949,15 @@
                 const unreadBadge = chat.unreadCount > 0 ? `<span class="unread-badge">${chat.unreadCount}</span>` : '';
                 const draftBadge = hasDraft ? '<span class="draft-badge">Draft</span>' : '';
                 const status = chat.online ? 'online' : 'offline';
-                const time = window.messagesCore?.formatTime ? 
-                    window.messagesCore.formatTime(chat.lastMessageAt) : 
+                const core = getMessagesCore();
+                const time = core?.formatTime ? 
+                    core.formatTime(chat.lastMessageAt) : 
                     chat.lastMessageAt ? new Date(chat.lastMessageAt).toLocaleTimeString() : '';
                 
                 const safeChat = JSON.stringify(chat).replace(/"/g, '&quot;');
                 
                 html += `
-                    <div class="chat-item ${isSelected ? 'selected' : ''}" data-chat-id="${chat.id}" onclick="window.messagesCore?.openChat(${safeChat})">
+                    <div class="chat-item ${isSelected ? 'selected' : ''}" data-chat-id="${chat.id}" onclick="window.messagesUI?.openChat(${safeChat})">
                         <div class="chat-avatar">
                             ${chat.friendAvatar ? `<img src="${chat.friendAvatar}" alt="${chat.friendName}" loading="lazy">` : `<i class="fas fa-user"></i>`}
                             <div class="chat-status ${status}"></div>
@@ -1542,14 +1996,10 @@
             if (notesBadge) UIFailsafe.safeSetText(notesBadge, chats.filter(c => c.type === 'note').length);
         },
 
-        // =========================================
-        // CONTACTS LIST RENDERING (WITH DETERMINISTIC LIFECYCLE CHECK)
-        // =========================================
         renderContactsList(contacts) {
             const container = UIFailsafe.safeGetElement('contactsList');
             if (!container) return;
 
-            // DETERMINISTIC: If not active, show passive loading state
             if (!this._canRender()) {
                 UIFailsafe.safeSetHTML(container, this._getPassiveLoadingState());
                 return;
@@ -1595,7 +2045,7 @@
             const statusText = contact.status || (contact.online ? 'Online' : 'Offline');
             
             return `
-                <div class="contact-item" data-contact-id="${contact.id}" onclick="window.messagesCore?.loadChatByFriendId('${contact.id}')">
+                <div class="contact-item" data-contact-id="${contact.id}" onclick="window.messagesUI?.loadChatByFriendId('${contact.id}')">
                     <div class="contact-avatar">
                         ${contact.photoURL ? `<img src="${contact.photoURL}" alt="${contact.displayName}" loading="lazy">` : `<i class="fas fa-user"></i>`}
                         <div class="contact-status ${status}"></div>
@@ -1608,9 +2058,6 @@
             `;
         },
 
-        // =========================================
-        // UI UPDATES
-        // =========================================
         _updateChatHeader(chat) {
             const nameEl = UIFailsafe.safeGetElement('chatFriendName');
             const avatarEl = UIFailsafe.safeGetElement('chatFriendAvatar');
@@ -1669,20 +2116,22 @@
             UIFailsafe.safeSetStyle(menu, 'top', Math.max(10, top) + 'px');
 
             const starItem = menu.querySelector('[data-action="star"] i');
-            if (starItem && window.messagesCore?.SafeStorage) {
-                const starred = window.messagesCore.SafeStorage.getJSON('starred_messages', {})[message.id];
+            const core = getMessagesCore();
+            if (starItem && core?.SafeStorage) {
+                const starred = core.SafeStorage.getJSON('starred_messages', {})[message.id];
                 UIFailsafe.safeSetAttribute(starItem, 'class', starred ? 'fas fa-star' : 'far fa-star');
             }
 
             const editItem = menu.querySelector('[data-action="edit"]');
             const deleteItem = menu.querySelector('[data-action="delete"]');
+            const currentUserId = core?.getCurrentUserId?.();
             
             if (editItem) {
-                UIFailsafe.safeSetStyle(editItem, 'display', message.senderId === window.messagesCore?.getCurrentUser()?.id ? 'flex' : 'none');
+                UIFailsafe.safeSetStyle(editItem, 'display', message.senderId === currentUserId ? 'flex' : 'none');
             }
             
             if (deleteItem) {
-                UIFailsafe.safeSetStyle(deleteItem, 'display', message.senderId === window.messagesCore?.getCurrentUser()?.id ? 'flex' : 'flex');
+                UIFailsafe.safeSetStyle(deleteItem, 'display', 'flex');
             }
 
             UIStateManager.setState('messageActionsVisible', true);
@@ -1704,24 +2153,25 @@
                 return;
             }
             
+            const core = getMessagesCore();
             switch (action) {
                 case 'reply':
-                    if (window.messagesCore) {
-                        window.messagesCore.setReplyToMessage(message);
+                    if (core) {
+                        core.setReplyToMessage?.(message);
                         document.getElementById('messageInput')?.focus();
                     }
                     break;
                     
                 case 'edit':
-                    if (window.messagesCore) {
-                        window.messagesCore.setEditingMessageId(message.id);
+                    if (core) {
+                        core.setEditingMessageId?.(message.id);
                         this._showEditInput(message);
                     }
                     break;
                     
                 case 'forward':
-                    if (window.messagesCore) {
-                        window.messagesCore.showForwardMessage(message);
+                    if (core) {
+                        core.showForwardMessage?.(message);
                         this.showNotification('Message copied for forwarding');
                     }
                     break;
@@ -1732,47 +2182,47 @@
                     break;
                     
                 case 'star':
-                    if (window.messagesCore) {
-                        const starred = window.messagesCore.toggleStarMessage(message.id);
+                    if (core) {
+                        const starred = core.toggleStarMessage?.(message.id);
                         this.showNotification(starred ? 'Message starred' : 'Message unstarred');
                     }
                     break;
                     
                 case 'report':
-                    if (window.messagesCore) {
-                        window.messagesCore.showReportModal(message);
+                    if (core) {
+                        core.showReportModal?.(message);
                         document.getElementById('reportModal')?.classList.add('active');
                     }
                     break;
                     
                 case 'react-like':
-                    if (window.messagesCore) {
-                        window.messagesCore.addReaction(message.id, '👍', true);
+                    if (core) {
+                        core.addReaction?.(message.id, '👍', true);
                     }
                     break;
                     
                 case 'react-love':
-                    if (window.messagesCore) {
-                        window.messagesCore.addReaction(message.id, '❤️', true);
+                    if (core) {
+                        core.addReaction?.(message.id, '❤️', true);
                     }
                     break;
                     
                 case 'react-laugh':
-                    if (window.messagesCore) {
-                        window.messagesCore.addReaction(message.id, '😂', true);
+                    if (core) {
+                        core.addReaction?.(message.id, '😂', true);
                     }
                     break;
                     
                 case 'delete':
-                    if (window.messagesCore && confirm('Delete this message?')) {
-                        window.messagesCore.deleteMessage(message.id, false);
+                    if (core && confirm('Delete this message?')) {
+                        core.deleteMessage?.(message.id, false);
                         this.showNotification('Message deleted');
                     }
                     break;
                     
                 case 'info':
-                    if (window.messagesCore) {
-                        const info = window.messagesCore.showMessageInfo(message);
+                    if (core) {
+                        const info = core.showMessageInfo?.(message);
                         alert(info);
                     }
                     break;
@@ -1787,15 +2237,16 @@
 
             const originalContent = message.content;
             const inputId = `editMessageInput_${message.id}`;
-            const escaped = window.messagesCore?.escapeHtml ? 
-                window.messagesCore.escapeHtml(originalContent) : originalContent;
+            const core = getMessagesCore();
+            const escaped = core?.escapeHtml ? 
+                core.escapeHtml(originalContent) : originalContent;
             
             UIFailsafe.safeSetHTML(messageEl, `
                 <input type="text" id="${inputId}" class="edit-message-input" value="${escaped}" 
-                       onkeydown="if(event.key==='Enter' && !event.shiftKey) { event.preventDefault(); window.messagesCore?.saveEditedMessage('${message.id}') }">
+                       onkeydown="if(event.key==='Enter' && !event.shiftKey) { event.preventDefault(); window.messagesUI?.saveEditedMessage('${message.id}') }">
                 <div class="edit-actions">
-                    <button class="edit-btn cancel" onclick="window.messagesCore?.cancelEditMessage()">Cancel</button>
-                    <button class="edit-btn save" onclick="window.messagesCore?.saveEditedMessage('${message.id}')">Save</button>
+                    <button class="edit-btn cancel" onclick="window.messagesUI?.cancelEditMessage()">Cancel</button>
+                    <button class="edit-btn save" onclick="window.messagesUI?.saveEditedMessage('${message.id}')">Save</button>
                 </div>
             `);
 
@@ -1831,40 +2282,41 @@
                 return;
             }
             
+            const core = getMessagesCore();
             let attachment = null;
             
             switch (type) {
                 case 'image':
-                    if (window.messagesCore) attachment = await window.messagesCore.selectImage();
+                    if (core) attachment = await core.selectImage?.();
                     break;
                 case 'video':
-                    if (window.messagesCore) attachment = await window.messagesCore.selectVideo();
+                    if (core) attachment = await core.selectVideo?.();
                     break;
                 case 'audio':
-                    if (window.messagesCore) {
-                        attachment = await window.messagesCore.startRecording();
+                    if (core) {
+                        attachment = await core.startRecording?.();
                         if (attachment) {
                             UIStateManager.setState('recordingActive', true);
                         }
                     }
                     break;
                 case 'file':
-                    if (window.messagesCore) attachment = await window.messagesCore.selectFile();
+                    if (core) attachment = await core.selectFile?.();
                     break;
                 case 'location':
-                    if (window.messagesCore) attachment = await window.messagesCore.shareLocation();
+                    if (core) attachment = await core.shareLocation?.();
                     break;
                 case 'poll':
-                    if (window.messagesCore) attachment = window.messagesCore.createPoll();
+                    if (core) attachment = core.createPoll?.();
                     break;
                 case 'note':
-                    if (window.messagesCore) await window.messagesCore.createNote();
+                    if (core) await core.createNote?.();
                     return;
             }
 
-            if (attachment && window.messagesCore) {
-                window.messagesCore.setCurrentAttachment(attachment);
-                window.messagesCore.showAttachmentPreview(attachment);
+            if (attachment && core) {
+                core.setCurrentAttachment?.(attachment);
+                core.showAttachmentPreview?.(attachment);
                 
                 document.getElementById('attachmentOptions')?.classList.remove('active');
                 UIStateManager.setState('attachmentOptionsActive', false);
@@ -1894,9 +2346,6 @@
             }, 100);
         },
 
-        // =========================================
-        // MULTI-SEND RENDERING (WITH DETERMINISTIC LIFECYCLE CHECK)
-        // =========================================
         renderMultiSendChats(chats) {
             const container = UIFailsafe.safeGetElement('multiSendChatsList');
             if (!container) return;
@@ -1913,7 +2362,8 @@
 
             let html = '';
             chats.forEach(chat => {
-                const isSelected = window.messagesCore?.multiSendSelectedChats?.has(chat.id);
+                const core = getMessagesCore();
+                const isSelected = core?.multiSendSelectedChats?.has(chat.id);
                 
                 html += `
                     <div class="chat-item ${isSelected ? 'selected' : ''}" data-chat-id="${chat.id}">
@@ -1925,7 +2375,7 @@
                             <div class="chat-last-message">${chat.lastMessage || 'No messages'}</div>
                         </div>
                         <input type="checkbox" class="multi-send-checkbox" ${isSelected ? 'checked' : ''} 
-                               onchange="window.messagesCore?.updateMultiSendSelection('${chat.id}', this.checked); window.messagesUI?.updateSelectedCount()">
+                               onchange="window.messagesUI?.updateMultiSendSelection('${chat.id}', this.checked); window.messagesUI?.updateSelectedCount()">
                     </div>
                 `;
             });
@@ -1937,7 +2387,8 @@
         updateSelectedCount() {
             const countEl = UIFailsafe.safeGetElement('selectedCount');
             if (countEl) {
-                const count = window.messagesCore?.multiSendSelectedChats?.size || 0;
+                const core = getMessagesCore();
+                const count = core?.multiSendSelectedChats?.size || 0;
                 UIFailsafe.safeSetText(countEl, `${count} selected`);
             }
         }
@@ -1947,7 +2398,10 @@
     // UI EVENT HANDLERS (ENHANCED WITH DETERMINISTIC LIFECYCLE CHECKS)
     // =============================================
     const UIEventHandlers = {
+        _initialized: false,
+        
         init() {
+            if (this._initialized) return this;
             this._setupDOMEventListeners();
             this._setupInputHandlers();
             this._setupClickOutsideHandlers();
@@ -1955,21 +2409,27 @@
             this._setupResizeHandler();
             this._setupOnlineOfflineHandlers();
             this._setupDragAndDropHandlers();
+            this._initialized = true;
             return this;
         },
 
-        // DETERMINISTIC: Check if action is allowed (only when ACTIVE)
         _canPerformAction(actionName) {
+            // First check if core has valid session directly
+            if (UIFailsafe.hasValidSession()) {
+                return true;
+            }
+            
             const lifecycleState = UIStateManager.getState('lifecycleState');
-            if (lifecycleState !== LIFECYCLE_STATES.ACTIVE) {
-                UILogger.warn('UIEventHandlers', `Action '${actionName}' blocked - not ACTIVE (state: ${lifecycleState})`);
+            const sessionValid = UIStateManager.getState('sessionValid');
+            
+            if (lifecycleState !== LIFECYCLE_STATES.ACTIVE || !sessionValid) {
+                UILogger.warn('UIEventHandlers', `Action '${actionName}' blocked - not ACTIVE or no valid session (state: ${lifecycleState}, sessionValid: ${sessionValid})`);
                 this._showPassiveNotification(`Please wait while connection is established...`);
                 return false;
             }
             return true;
         },
         
-        // DETERMINISTIC: Show passive notification for blocked actions
         _showPassiveNotification(message) {
             const notification = UIFailsafe.safeGetElement('notification');
             const text = UIFailsafe.safeGetElement('notificationText');
@@ -2011,8 +2471,16 @@
                         if (contactsSidebar) UIFailsafe.safeRemoveClass(contactsSidebar, 'hidden');
                         UIStateManager.setState('contactsVisible', true);
                         
-                        if (window.messagesCore?.contacts?.length === 0) {
-                            window.messagesCore.loadContacts();
+                        const core = getMessagesCore();
+                        if (core && core.createConversation) {
+                            core.createConversation([core.getCurrentUserId()], {
+                                type: 'note',
+                                name: 'My Notes'
+                            });
+                        }
+                        
+                        if (core?.contacts?.length === 0) {
+                            core?.loadContacts?.();
                         }
                     });
                 });
@@ -2047,7 +2515,8 @@
                 emojiBtn.addEventListener('click', () => {
                     UIFailsafe.queueAction(() => {
                         if (!this._canPerformAction('emojiPicker')) return;
-                        if (window.messagesCore) window.messagesCore.toggleEmojiPicker();
+                        const core = getMessagesCore();
+                        if (core) core.toggleEmojiPicker?.();
                         UIStateManager.toggleState('emojiPickerActive');
                     });
                 });
@@ -2058,7 +2527,8 @@
                 formatBtn.addEventListener('click', () => {
                     UIFailsafe.queueAction(() => {
                         if (!this._canPerformAction('formatting')) return;
-                        if (window.messagesCore) window.messagesCore.toggleFormattingToolbar();
+                        const core = getMessagesCore();
+                        if (core) core.toggleFormattingToolbar?.();
                         UIStateManager.toggleState('formattingToolbarActive');
                     });
                 });
@@ -2070,8 +2540,9 @@
                     UIFailsafe.queueAction(() => {
                         if (!this._canPerformAction('formatting')) return;
                         const tag = e.currentTarget.dataset.tag;
-                        if (tag && window.messagesCore) {
-                            window.messagesCore.applyFormatting(tag);
+                        const core = getMessagesCore();
+                        if (tag && core) {
+                            core.applyFormatting?.(tag);
                         }
                     });
                 });
@@ -2082,7 +2553,8 @@
                 attachBtn.addEventListener('click', () => {
                     UIFailsafe.queueAction(() => {
                         if (!this._canPerformAction('attachment')) return;
-                        if (window.messagesCore) window.messagesCore.toggleAttachmentOptions();
+                        const core = getMessagesCore();
+                        if (core) core.toggleAttachmentOptions?.();
                         UIStateManager.toggleState('attachmentOptionsActive');
                     });
                 });
@@ -2094,9 +2566,10 @@
                     UIFailsafe.queueAction(() => {
                         if (!this._canPerformAction('attachment')) return;
                         const type = e.currentTarget.dataset.type;
-                        if (type && window.messagesCore) {
-                            window.messagesCore.handleAttachment(type);
-                            if (window.messagesCore) window.messagesCore.closeAttachmentOptionsOnClickOutside(e);
+                        const core = getMessagesCore();
+                        if (type && core) {
+                            core.handleAttachment?.(type);
+                            core.closeAttachmentOptionsOnClickOutside?.(e);
                             UIStateManager.setState('attachmentOptionsActive', false);
                         }
                     });
@@ -2108,7 +2581,8 @@
                 jumpBtn.addEventListener('click', () => {
                     UIFailsafe.queueAction(() => {
                         if (!this._canPerformAction('jumpToLatest')) return;
-                        if (window.messagesCore) window.messagesCore.jumpToLatest();
+                        const core = getMessagesCore();
+                        if (core) core.jumpToLatest?.();
                     });
                 });
             }
@@ -2134,7 +2608,8 @@
                         const searchResults = UIFailsafe.safeGetElement('searchResults');
                         if (chatSearchBar) UIFailsafe.safeRemoveClass(chatSearchBar, 'active');
                         if (searchResults) UIFailsafe.safeRemoveClass(searchResults, 'active');
-                        if (window.messagesCore) window.messagesCore.removeSearchHighlights();
+                        const core = getMessagesCore();
+                        if (core) core.removeSearchHighlights?.();
                     });
                 });
             }
@@ -2191,9 +2666,10 @@
                         UIFailsafe.safeAddClass(e.currentTarget, 'active');
                         
                         const category = e.currentTarget.dataset.category;
-                        if (window.messagesCore) {
-                            window.messagesCore.setCurrentCategory(category);
-                            window.messagesCore.renderChatsList();
+                        const core = getMessagesCore();
+                        if (core) {
+                            core.setCurrentCategory?.(category);
+                            core.renderChatsList?.();
                         }
                     });
                 });
@@ -2323,9 +2799,10 @@
                 chatOptionsBtn.addEventListener('click', () => {
                     UIFailsafe.queueAction(() => {
                         if (!this._canPerformAction('chatOptions')) return;
-                        const chat = window.messagesCore?.currentChat;
-                        if (chat && window.messagesCore) {
-                            const info = window.messagesCore.showChatInfo(chat);
+                        const core = getMessagesCore();
+                        const chat = core?.currentChat;
+                        if (chat && core) {
+                            const info = core.showChatInfo?.(chat);
                             this._showChatInfoModal(info);
                         }
                     });
@@ -2386,7 +2863,8 @@
                 submitReport.addEventListener('click', () => {
                     UIFailsafe.queueAction(() => {
                         if (!this._canPerformAction('report')) return;
-                        if (window.messagesCore?.submitReport()) {
+                        const core = getMessagesCore();
+                        if (core?.submitReport?.()) {
                             const reportModal = UIFailsafe.safeGetElement('reportModal');
                             if (reportModal) UIFailsafe.safeRemoveClass(reportModal, 'active');
                             UIRenderer.showNotification('Report submitted');
@@ -2399,8 +2877,9 @@
             if (cancelRecording) {
                 cancelRecording.addEventListener('click', () => {
                     UIFailsafe.queueAction(() => {
-                        if (window.messagesCore) {
-                            window.messagesCore.cancelRecording();
+                        const core = getMessagesCore();
+                        if (core) {
+                            core.cancelRecording?.();
                             UIStateManager.setState('recordingActive', false);
                             const recordingIndicator = UIFailsafe.safeGetElement('recordingIndicator');
                             if (recordingIndicator) UIFailsafe.safeSetStyle(recordingIndicator, 'display', 'none');
@@ -2413,8 +2892,9 @@
             if (cancelRecordingOverlay) {
                 cancelRecordingOverlay.addEventListener('click', () => {
                     UIFailsafe.queueAction(() => {
-                        if (window.messagesCore) {
-                            window.messagesCore.cancelRecording();
+                        const core = getMessagesCore();
+                        if (core) {
+                            core.cancelRecording?.();
                             const recordingCancelOverlay = UIFailsafe.safeGetElement('recordingCancelOverlay');
                             if (recordingCancelOverlay) UIFailsafe.safeRemoveClass(recordingCancelOverlay, 'active');
                             UIStateManager.setState('recordingActive', false);
@@ -2440,7 +2920,8 @@
             if (retryBtn) {
                 retryBtn.addEventListener('click', () => {
                     UIFailsafe.queueAction(() => {
-                        if (window.messagesCore) window.messagesCore.retryConnection();
+                        const core = getMessagesCore();
+                        if (core) core.retryConnection?.();
                     });
                 });
             }
@@ -2458,8 +2939,9 @@
                     
                     this._handleTypingIndicator();
                     
-                    if (window.messagesCore?.saveMessageDraft) {
-                        window.messagesCore.saveMessageDraft();
+                    const core = getMessagesCore();
+                    if (core?.saveMessageDraft) {
+                        core.saveMessageDraft();
                     }
                 });
             });
@@ -2514,24 +2996,27 @@
         _setupClickOutsideHandlers() {
             document.addEventListener('click', (e) => {
                 UIFailsafe.queueAction(() => {
-                    if (UIStateManager.getState('emojiPickerActive') && window.messagesCore) {
-                        window.messagesCore.closeEmojiPickerOnClickOutside(e);
+                    if (UIStateManager.getState('emojiPickerActive')) {
+                        const core = getMessagesCore();
+                        if (core) core.closeEmojiPickerOnClickOutside?.(e);
                     }
                 });
             });
 
             document.addEventListener('click', (e) => {
                 UIFailsafe.queueAction(() => {
-                    if (UIStateManager.getState('formattingToolbarActive') && window.messagesCore) {
-                        window.messagesCore.closeFormattingToolbarOnClickOutside(e);
+                    if (UIStateManager.getState('formattingToolbarActive')) {
+                        const core = getMessagesCore();
+                        if (core) core.closeFormattingToolbarOnClickOutside?.(e);
                     }
                 });
             });
 
             document.addEventListener('click', (e) => {
                 UIFailsafe.queueAction(() => {
-                    if (UIStateManager.getState('attachmentOptionsActive') && window.messagesCore) {
-                        window.messagesCore.closeAttachmentOptionsOnClickOutside(e);
+                    if (UIStateManager.getState('attachmentOptionsActive')) {
+                        const core = getMessagesCore();
+                        if (core) core.closeAttachmentOptionsOnClickOutside?.(e);
                     }
                 });
             });
@@ -2620,7 +3105,8 @@
                     if ((e.ctrlKey || e.metaKey) && e.key === 'f') {
                         e.preventDefault();
                         if (!this._canPerformAction('searchInChat')) return;
-                        if (window.messagesCore?.currentChat) {
+                        const core = getMessagesCore();
+                        if (core?.currentChat) {
                             const chatSearchBar = UIFailsafe.safeGetElement('chatSearchBar');
                             if (chatSearchBar) UIFailsafe.safeAddClass(chatSearchBar, 'active');
                             const inChatSearch = UIFailsafe.safeGetElement('inChatSearch');
@@ -2666,12 +3152,13 @@
                     if (offlineOverlay) UIFailsafe.safeRemoveClass(offlineOverlay, 'active');
                     UIRenderer.showNotification('Back online', 'success');
                     
-                    if (window.messagesCore?.checkOfflineQueue) {
-                        window.messagesCore.checkOfflineQueue();
+                    const core = getMessagesCore();
+                    if (core?.checkOfflineQueue) {
+                        core.checkOfflineQueue();
                     }
                     
-                    if (window.messagesCore?.fetchConversations) {
-                        window.messagesCore.fetchConversations();
+                    if (core?.fetchConversations) {
+                        core.fetchConversations();
                     }
                 });
             });
@@ -2694,18 +3181,19 @@
             recordingIndicator.addEventListener('mousedown', (e) => {
                 if (!UIStateManager.getState('recordingActive')) return;
                 dragStartY = e.clientY;
-                if (window.messagesCore) window.messagesCore.setDragStartY(dragStartY);
+                const core = getMessagesCore();
+                if (core) core.setDragStartY?.(dragStartY);
                 
                 const handleDrag = (e) => {
                     const deltaY = e.clientY - dragStartY;
                     if (deltaY < -50) {
                         const recordingCancelOverlay = UIFailsafe.safeGetElement('recordingCancelOverlay');
                         if (recordingCancelOverlay) UIFailsafe.safeAddClass(recordingCancelOverlay, 'active');
-                        if (window.messagesCore) window.messagesCore.setIsDraggingToCancel(true);
+                        if (core) core.setIsDraggingToCancel?.(true);
                     } else {
                         const recordingCancelOverlay = UIFailsafe.safeGetElement('recordingCancelOverlay');
                         if (recordingCancelOverlay) UIFailsafe.safeRemoveClass(recordingCancelOverlay, 'active');
-                        if (window.messagesCore) window.messagesCore.setIsDraggingToCancel(false);
+                        if (core) core.setIsDraggingToCancel?.(false);
                     }
                 };
                 
@@ -2713,9 +3201,10 @@
                     document.removeEventListener('mousemove', handleDrag);
                     document.removeEventListener('mouseup', handleDragEnd);
                     
-                    if (window.messagesCore?.isDraggingToCancel) {
-                        if (window.messagesCore) {
-                            window.messagesCore.cancelRecording();
+                    const core = getMessagesCore();
+                    if (core?.isDraggingToCancel) {
+                        if (core) {
+                            core.cancelRecording?.();
                             UIStateManager.setState('recordingActive', false);
                             const recordingIndicator = UIFailsafe.safeGetElement('recordingIndicator');
                             if (recordingIndicator) UIFailsafe.safeSetStyle(recordingIndicator, 'display', 'none');
@@ -2724,7 +3213,7 @@
                     
                     const recordingCancelOverlay = UIFailsafe.safeGetElement('recordingCancelOverlay');
                     if (recordingCancelOverlay) UIFailsafe.safeRemoveClass(recordingCancelOverlay, 'active');
-                    if (window.messagesCore) window.messagesCore.setIsDraggingToCancel(false);
+                    if (core) core.setIsDraggingToCancel?.(false);
                 };
                 
                 document.addEventListener('mousemove', handleDrag);
@@ -2737,11 +3226,12 @@
             if (!input) return;
 
             const content = input.value.trim();
-            const attachment = window.messagesCore?.currentAttachment;
+            const core = getMessagesCore();
+            const attachment = core?.currentAttachment;
             
             if (!content && !attachment) return;
 
-            const result = window.messagesCore?.sendMessage(content, {
+            const result = core?.sendMessage(content, {
                 type: attachment?.type || 'text',
                 attachment: attachment
             });
@@ -2751,10 +3241,10 @@
                     if (response && response.success) {
                         input.value = '';
                         input.style.height = 'auto';
-                        if (window.messagesCore) {
-                            window.messagesCore.removeAttachment();
-                            if (window.messagesCore.replyToMessage) {
-                                window.messagesCore.setReplyToMessage(null);
+                        if (core) {
+                            core.removeAttachment?.();
+                            if (core.replyToMessage) {
+                                core.setReplyToMessage?.(null);
                             }
                         }
                         UIRenderer.showNotification('Message sent');
@@ -2767,10 +3257,10 @@
             } else if (result && result.success) {
                 input.value = '';
                 input.style.height = 'auto';
-                if (window.messagesCore) {
-                    window.messagesCore.removeAttachment();
-                    if (window.messagesCore.replyToMessage) {
-                        window.messagesCore.setReplyToMessage(null);
+                if (core) {
+                    core.removeAttachment?.();
+                    if (core.replyToMessage) {
+                        core.setReplyToMessage?.(null);
                     }
                 }
                 UIRenderer.showNotification('Message sent');
@@ -2780,20 +3270,21 @@
         },
 
         _handleTypingIndicator() {
-            if (!window.messagesCore?.currentChat) return;
+            const core = getMessagesCore();
+            if (!core?.currentChat) return;
 
-            if (!window.messagesCore.isTyping) {
-                window.messagesCore.setIsTyping(true);
-                window.messagesCore.sendTyping(window.messagesCore.currentChat.id, true);
+            if (!core.isTyping) {
+                core.setIsTyping?.(true);
+                core.sendTyping?.(core.currentChat.id, true);
 
-                if (window.messagesCore.typingTimeout) {
-                    clearTimeout(window.messagesCore.typingTimeout);
+                if (core.typingTimeout) {
+                    clearTimeout(core.typingTimeout);
                 }
 
-                window.messagesCore.setTypingTimeout(setTimeout(() => {
-                    if (window.messagesCore) {
-                        window.messagesCore.setIsTyping(false);
-                        window.messagesCore.sendTyping(window.messagesCore.currentChat.id, false);
+                core.setTypingTimeout?.(setTimeout(() => {
+                    if (core) {
+                        core.setIsTyping?.(false);
+                        core.sendTyping?.(core.currentChat.id, false);
                     }
                 }, 3000));
             }
@@ -2817,9 +3308,10 @@
                         name: file.name,
                         size: file.size
                     };
-                    if (window.messagesCore) {
-                        window.messagesCore.setCurrentAttachment(attachment);
-                        window.messagesCore.showAttachmentPreview(attachment);
+                    const core = getMessagesCore();
+                    if (core) {
+                        core.setCurrentAttachment?.(attachment);
+                        core.showAttachmentPreview?.(attachment);
                     }
                 });
             };
@@ -2853,15 +3345,17 @@
                         const audio = new Audio(reader.result);
                         audio.onloadedmetadata = () => {
                             attachment.duration = Math.floor(audio.duration);
-                            if (window.messagesCore) {
-                                window.messagesCore.setCurrentAttachment(attachment);
-                                window.messagesCore.showAttachmentPreview(attachment);
+                            const core = getMessagesCore();
+                            if (core) {
+                                core.setCurrentAttachment?.(attachment);
+                                core.showAttachmentPreview?.(attachment);
                             }
                         };
                     } else {
-                        if (window.messagesCore) {
-                            window.messagesCore.setCurrentAttachment(attachment);
-                            window.messagesCore.showAttachmentPreview(attachment);
+                        const core = getMessagesCore();
+                        if (core) {
+                            core.setCurrentAttachment?.(attachment);
+                            core.showAttachmentPreview?.(attachment);
                         }
                     }
                 });
@@ -2873,11 +3367,13 @@
             if (!query.trim()) {
                 const searchResults = UIFailsafe.safeGetElement('searchResults');
                 if (searchResults) UIFailsafe.safeRemoveClass(searchResults, 'active');
-                if (window.messagesCore) window.messagesCore.removeSearchHighlights();
+                const core = getMessagesCore();
+                if (core) core.removeSearchHighlights?.();
                 return;
             }
 
-            const results = window.messagesCore?.searchInChat(query);
+            const core = getMessagesCore();
+            const results = core?.searchInChat?.(query);
             const container = UIFailsafe.safeGetElement('searchResults');
             
             if (container) {
@@ -2893,10 +3389,10 @@
                     `);
                     UIFailsafe.safeAddClass(container, 'active');
                     
-                    if (window.messagesCore) {
-                        window.messagesCore.highlightSearchResults(query);
-                        window.messagesCore.setCurrentSearchIndex(0);
-                        window.messagesCore.navigateToSearchResult(0);
+                    if (core) {
+                        core.highlightSearchResults?.(query);
+                        core.setCurrentSearchIndex?.(0);
+                        core.navigateToSearchResult?.(0);
                     }
                     
                     const prevBtn = UIFailsafe.safeGetElement('prevSearchResult');
@@ -2904,10 +3400,10 @@
                         prevBtn.addEventListener('click', () => {
                             UIFailsafe.queueAction(() => {
                                 if (!this._canPerformAction('searchNavigation')) return;
-                                const current = window.messagesCore?.currentSearchIndex;
-                                if (current > 0 && window.messagesCore) {
-                                    window.messagesCore.setCurrentSearchIndex(current - 1);
-                                    window.messagesCore.navigateToSearchResult(current - 1);
+                                const current = core?.currentSearchIndex;
+                                if (current > 0 && core) {
+                                    core.setCurrentSearchIndex?.(current - 1);
+                                    core.navigateToSearchResult?.(current - 1);
                                     const span = UIFailsafe.safeGetElement('searchResultIndex');
                                     if (span) UIFailsafe.safeSetText(span, `${current}/${results.length}`);
                                 }
@@ -2920,10 +3416,10 @@
                         nextBtn.addEventListener('click', () => {
                             UIFailsafe.queueAction(() => {
                                 if (!this._canPerformAction('searchNavigation')) return;
-                                const current = window.messagesCore?.currentSearchIndex;
-                                if (current < results.length - 1 && window.messagesCore) {
-                                    window.messagesCore.setCurrentSearchIndex(current + 1);
-                                    window.messagesCore.navigateToSearchResult(current + 1);
+                                const current = core?.currentSearchIndex;
+                                if (current < results.length - 1 && core) {
+                                    core.setCurrentSearchIndex?.(current + 1);
+                                    core.navigateToSearchResult?.(current + 1);
                                     const span = UIFailsafe.safeGetElement('searchResultIndex');
                                     if (span) UIFailsafe.safeSetText(span, `${current + 2}/${results.length}`);
                                 }
@@ -2978,7 +3474,8 @@
                 UIFailsafe.safeRemoveClass(panel, 'active');
                 UIStateManager.setState('multiSendVisible', false);
             } else {
-                const chats = window.messagesCore?.loadMultiSendChats?.() || [];
+                const core = getMessagesCore();
+                const chats = core?.loadMultiSendChats?.() || [];
                 UIRenderer.renderMultiSendChats(chats);
                 UIFailsafe.safeAddClass(panel, 'active');
                 UIStateManager.setState('multiSendVisible', true);
@@ -2992,23 +3489,25 @@
             if (panel) {
                 UIFailsafe.safeRemoveClass(panel, 'active');
             }
-            if (window.messagesCore) window.messagesCore.setMultiSendSelectedChats(new Set());
+            const core = getMessagesCore();
+            if (core) core.setMultiSendSelectedChats?.(new Set());
             UIStateManager.setState('multiSendVisible', false);
         },
 
         async _handleMultiSend() {
             const input = UIFailsafe.safeGetElement('multiSendInput');
             const content = input?.value?.trim() || '';
-            const selectedChats = window.messagesCore?.multiSendSelectedChats;
+            const core = getMessagesCore();
+            const selectedChats = core?.multiSendSelectedChats;
             
-            if ((!content && !window.messagesCore?.currentAttachment) || !selectedChats || selectedChats.size === 0) {
+            if ((!content && !core?.currentAttachment) || !selectedChats || selectedChats.size === 0) {
                 UIRenderer.showNotification('No content or chats selected', 'error');
                 return;
             }
 
             const chatIds = Array.from(selectedChats);
             const promises = chatIds.map(chatId => 
-                window.messagesCore?.forwardMessage(window.messagesCore?.currentAttachment?.id || content, [chatId])
+                core?.forwardMessage?.(core?.currentAttachment?.id || content, [chatId])
             );
             
             try {
@@ -3019,7 +3518,7 @@
                     UIRenderer.showNotification(`Message sent to ${successCount} chats`);
                     this._closeMultiSend();
                     if (input) input.value = '';
-                    if (window.messagesCore) window.messagesCore.removeAttachment();
+                    if (core) core.removeAttachment?.();
                 } else {
                     UIRenderer.showNotification('Failed to send messages', 'error');
                 }
@@ -3064,9 +3563,10 @@
 
             if (!dateInput || !timeInput || !messageInput) return;
 
+            const core = getMessagesCore();
             if (sendNow?.checked) {
-                if (window.messagesCore) {
-                    const result = window.messagesCore.sendMessage(messageInput.value);
+                if (core) {
+                    const result = core.sendMessage?.(messageInput.value);
                     if (result && typeof result.then === 'function') {
                         result.then(() => {
                             const scheduleModal = UIFailsafe.safeGetElement('scheduleModal');
@@ -3100,22 +3600,22 @@
             }
 
             const scheduledMessage = {
-                id: window.messagesCore?.SecurityUtils?.generateMessageId?.() || 'msg_' + Date.now(),
-                chatId: window.messagesCore?.currentChat?.id,
+                id: core?.SecurityUtils?.generateMessageId?.() || 'msg_' + Date.now(),
+                chatId: core?.currentChat?.id,
                 content: messageInput.value,
-                attachment: window.messagesCore?.currentAttachment,
+                attachment: core?.currentAttachment,
                 scheduleTime: scheduleDateTime,
                 status: 'scheduled',
                 createdAt: Date.now()
             };
 
-            const scheduled = window.messagesCore?.scheduledMessages || [];
+            const scheduled = core?.scheduledMessages || [];
             scheduled.push(scheduledMessage);
-            if (window.messagesCore) window.messagesCore.setScheduledMessages(scheduled);
+            if (core) core.setScheduledMessages?.(scheduled);
             
-            if (window.messagesCore?.SafeStorage) {
-                window.messagesCore.SafeStorage.setJSON(
-                    window.messagesCore.LOCAL_STORAGE_KEYS.SCHEDULED_MESSAGES,
+            if (core?.SafeStorage) {
+                core.SafeStorage.setJSON(
+                    core.LOCAL_STORAGE_KEYS?.SCHEDULED_MESSAGES,
                     scheduled
                 );
             }
@@ -3123,18 +3623,19 @@
             const scheduleModal = UIFailsafe.safeGetElement('scheduleModal');
             if (scheduleModal) UIFailsafe.safeRemoveClass(scheduleModal, 'active');
             UIRenderer.showNotification('Message scheduled');
-            if (window.messagesCore) window.messagesCore.updateScheduleBadge?.();
+            if (core) core.updateScheduleBadge?.();
         },
 
         async _handleThreadReply() {
             const input = UIFailsafe.safeGetElement('threadInput');
             const content = input?.value?.trim();
+            const core = getMessagesCore();
             
-            if (!content || !window.messagesCore?.currentThread) return;
+            if (!content || !core?.currentThread) return;
 
-            const result = window.messagesCore.sendMessage(content, {
-                conversationId: window.messagesCore.currentThread.id,
-                replyTo: window.messagesCore.currentThread.messageId
+            const result = core.sendMessage?.(content, {
+                conversationId: core.currentThread.id,
+                replyTo: core.currentThread.messageId
             });
 
             if (result && typeof result.then === 'function') {
@@ -3226,75 +3727,106 @@
         _ensureStatusIndicators();
         _removeLoadingOverlays();
         
-        // No visible WAIT_PARENT state - connection happens in background
-        // UI remains clean until ACTIVE
-
+        let checkCount = 0;
         const checkCore = setInterval(() => {
+            checkCount++;
             const lifecycleState = UIFailsafe.getLifecycleState();
-            if (lifecycleState === LIFECYCLE_STATES.ACTIVE) {
+            const hasValidSession = UIFailsafe.hasValidSession();
+            
+            console.log('[UI] CheckCore:', { lifecycleState, hasValidSession, checkCount });
+            
+            if ((lifecycleState === LIFECYCLE_STATES.ACTIVE && hasValidSession) || hasValidSession) {
                 clearInterval(checkCore);
                 
                 setTimeout(() => {
+                    const core = getMessagesCore();
                     UIFailsafe.queueAction(() => {
-                        // Initialize UI features only when ACTIVE
-                        if (window.messagesCore?.initEmojiPicker) {
-                            window.messagesCore.initEmojiPicker();
+                        if (core?.initEmojiPicker) {
+                            core.initEmojiPicker();
                         }
                         
-                        if (window.messagesCore?.loadUserSettings) {
-                            window.messagesCore.loadUserSettings();
+                        if (core?.loadUserSettings) {
+                            core.loadUserSettings();
                         }
                         
-                        if (window.messagesCore?.loadChatThemes) {
-                            window.messagesCore.loadChatThemes();
+                        if (core?.loadChatThemes) {
+                            core.loadChatThemes();
                         }
                         
-                        if (window.messagesCore?.loadMessageDrafts) {
-                            window.messagesCore.loadMessageDrafts();
+                        if (core?.loadMessageDrafts) {
+                            core.loadMessageDrafts();
                         }
                         
-                        if (window.messagesCore?.loadScheduledMessages) {
-                            window.messagesCore.loadScheduledMessages();
+                        if (core?.loadScheduledMessages) {
+                            core.loadScheduledMessages();
                         }
                         
-                        if (window.messagesCore?.loadOfflineQueue) {
-                            window.messagesCore.loadOfflineQueue();
+                        if (core?.loadOfflineQueue) {
+                            core.loadOfflineQueue();
                         }
                         
-                        if (window.messagesCore?.setupScrollDetection) {
-                            window.messagesCore.setupScrollDetection();
+                        if (core?.setupScrollDetection) {
+                            core.setupScrollDetection();
                         }
 
-                        if (window.messagesCore?.startBackgroundSync) {
-                            window.messagesCore.startBackgroundSync();
+                        if (core?.startBackgroundSync) {
+                            core.startBackgroundSync();
                         }
 
-                        if (window.messagesCore) {
-                            window.messagesCore.renderChatsList();
-                            window.messagesCore.renderContactsList();
+                        if (core) {
+                            core.renderChatsList?.();
+                            core.renderContactsList?.();
                         }
                         
                         UIStateManager._initializeActiveUI();
                     });
                 }, 0);
+            } else if (hasValidSession) {
+                console.log('[UI] Force enabling UI - valid session detected');
+                UIFailsafe.forceEnableUI();
+                clearInterval(checkCore);
+                const core = getMessagesCore();
+                if (core && core.fetchConversations) {
+                    core.fetchConversations();
+                }
+                if (core && core.FriendManager && core.FriendManager.fetchFriends) {
+                    core.FriendManager.fetchFriends();
+                }
             } else if (lifecycleState === LIFECYCLE_STATES.WAIT_PARENT) {
-                // Ensure no visible WAIT_PARENT UI is shown - background only
                 const waitParentElements = UIFailsafe.safeQuerySelectorAll('.wait-parent-state, .connecting-overlay, .connection-waiting');
                 UIFailsafe.safeForEach(waitParentElements, (el) => {
-                    if (el && el.remove) {
-                        el.remove();
-                    }
+                    if (el && el.remove) el.remove();
                 });
+            } else if (lifecycleState === LIFECYCLE_STATES.WAITING_AUTH) {
+                const statusEl = UIFailsafe.safeGetElement('sessionStatus');
+                if (statusEl && statusEl.style.display !== 'block') {
+                    UIFailsafe.safeSetText(statusEl, 'Waiting for authentication...');
+                    UIFailsafe.safeSetStyle(statusEl, 'display', 'block');
+                }
             }
-        }, 100);
+            
+            if (checkCount > 20) {
+                if (UIFailsafe.hasValidSession()) {
+                    console.log('[UI] Timeout but session valid - forcing UI enable');
+                    UIFailsafe.forceEnableUI();
+                } else {
+                    console.log('[UI] Timeout - no session, showing fallback');
+                    _updateFallbackUI();
+                }
+                clearInterval(checkCore);
+            }
+        }, 500);
 
         setTimeout(() => {
-            clearInterval(checkCore);
-            const lifecycleState = UIFailsafe.getLifecycleState();
-            if (lifecycleState !== LIFECYCLE_STATES.ACTIVE) {
-                _updateFallbackUI();
+            if (UIFailsafe.hasValidSession() && UIStateManager.getState('sessionValid') !== true) {
+                console.log('[UI] 3s timeout - forcing UI enable');
+                UIFailsafe.forceEnableUI();
+                const core = getMessagesCore();
+                if (core && core.fetchConversations) {
+                    core.fetchConversations();
+                }
             }
-        }, 10000);
+        }, 3000);
     }
 
     function _ensureStatusIndicators() {
@@ -3346,9 +3878,15 @@
             }
         });
         
-        // Remove any wait-parent-state elements
         const waitParentElements = UIFailsafe.safeQuerySelectorAll('.wait-parent-state');
         UIFailsafe.safeForEach(waitParentElements, (el) => {
+            if (el && el.remove) {
+                el.remove();
+            }
+        });
+        
+        const waitingAuthElements = UIFailsafe.safeQuerySelectorAll('.waiting-auth-state');
+        UIFailsafe.safeForEach(waitingAuthElements, (el) => {
             if (el && el.remove) {
                 el.remove();
             }
@@ -3378,8 +3916,9 @@
     }
 
     window.addEventListener('beforeunload', () => {
-        if (window.messagesCore && window.messagesCore.saveUIState) {
-            window.messagesCore.saveUIState();
+        const core = getMessagesCore();
+        if (core && core.saveUIState) {
+            core.saveUIState();
         }
         
         if (UIRenderer.notificationTimeout) {
@@ -3393,6 +3932,7 @@
         UIRenderer,
         UIEventHandlers,
         UIFailsafe,
+        LIFECYCLE_STATES,
         
         getUIState: (key) => UIStateManager.getState(key),
         setUIState: (key, value) => UIStateManager.setState(key, value),
@@ -3417,9 +3957,15 @@
         isOfflineMode: () => UIStateManager.getState('offlineMode'),
         isParentReady: () => UIStateManager.getState('parentReady'),
         getLifecycleState: () => UIStateManager.getState('lifecycleState'),
+        hasValidSession: () => UIStateManager.getState('sessionValid'),
         
-        LIFECYCLE_STATES,
-        MESSAGE_TYPES: window.messagesCore?.MESSAGE_TYPES || {}
+        MESSAGE_TYPES: getMessagesCore()?.MESSAGE_TYPES || {},
+        
+        // Helper to force sync with core
+        forceSyncWithCore: () => UIStateManager._forceSyncSessionState(),
+        
+        // Helper to get core instance
+        getCore: getMessagesCore
     };
 
     window.messagesUI = messagesUI;

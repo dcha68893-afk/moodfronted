@@ -1,72 +1,4 @@
-﻿<script>
-// Prevent session clearing in friend module
-(function() {
-    const originalRemoveItem = localStorage.removeItem;
-    localStorage.removeItem = function(key) {
-        if (key === 'kynecta_auth' || key === 'token' || key === 'moodchat_token' || key === 'accessToken') {
-            console.warn('🔒 Friend module blocked clearing:', key);
-            return;
-        }
-        originalRemoveItem.call(this, key);
-    };
-})();
-</script><script>
-// ===== PREVENT SESSION CLEARING =====
-(function preventSessionClear() {
-    const originalRemoveItem = localStorage.removeItem;
-    localStorage.removeItem = function(key) {
-        if (key === 'kynecta_auth' || key === 'token' || key === 'moodchat_token' || 
-            key === 'accessToken' || key === 'USER_TOKEN') {
-            console.warn('🔒 Module blocked clearing of:', key);
-            return;
-        }
-        originalRemoveItem.call(this, key);
-    };
-    
-    const originalClear = localStorage.clear;
-    localStorage.clear = function() {
-        console.warn('🔒 Module blocked localStorage.clear()');
-        return;
-    };
-})();
-</script>
-<script>
-// ===== PREVENT SESSION CLEARING IN FRIEND MODULE =====
-(function preventSessionClear() {
-    console.log('🛡️ Friend module: Preventing session clearing');
-    
-    // Override localStorage.removeItem to block clearing auth tokens
-    const originalRemoveItem = localStorage.removeItem;
-    localStorage.removeItem = function(key) {
-        // Block clearing of authentication keys
-        if (key === 'kynecta_auth' || key === 'token' || key === 'moodchat_token' || 
-            key === 'accessToken' || key === 'USER_TOKEN') {
-            console.warn('🔒 Friend module blocked clearing of:', key);
-            return;
-        }
-        originalRemoveItem.call(this, key);
-    };
-    
-    // Override localStorage.clear
-    const originalClear = localStorage.clear;
-    localStorage.clear = function() {
-        console.warn('🔒 Friend module blocked localStorage.clear()');
-        // Don't clear, just return
-        return;
-    };
-    
-    // Also block any attempts to set test tokens
-    const originalSetItem = localStorage.setItem;
-    localStorage.setItem = function(key, value) {
-        if (value === 'test.token.123' || (value && value.includes('test.token.123'))) {
-            console.warn('🔒 Friend module blocked test token for:', key);
-            return;
-        }
-        originalSetItem.call(this, key, value);
-    };
-})();
-</script>
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 <head>
 <script>
@@ -2852,5 +2784,3 @@
     </script>
 </body>
 </html>
-
-

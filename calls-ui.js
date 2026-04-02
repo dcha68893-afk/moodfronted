@@ -1,8 +1,7 @@
 // calls-ui.js
 // ==================== RESILIENT UI CONTROLLER - DETERMINISTIC LIFECYCLE ====================
-// Version: 4.2.0 - Updated to integrate with calls-core v8.2.2 deterministic lifecycle
-// Purpose: Fault-tolerant, responsive UI layer for calls iframe
-// Dependencies: calls-core.js v8.2.2
+// Version: 5.0.1 - STABILITY FIXES: Event-driven core sync, session validation, error resilience
+// Dependencies: calls-core.js v9.0.1
 // =======================================================================================
 
 (function() {
@@ -18,6 +17,7 @@
     window[MODULE_INIT_FLAG] = true;
 
     // Session cache - memory only, no localStorage persistence
+    // CRITICAL: Call state is in-memory only - no storage dependency
     window.__CHILD_SESSION__ = window.__CHILD_SESSION__ || {
         token: null,
         userId: null,
@@ -32,6 +32,7 @@
     let coreInstance = null;
     let coreReady = false;
     let coreInitializationStartTime = Date.now();
+    let _coreListenersInitialized = false;
 
     // ==================== LIFECYCLE STATE TRACKING ====================
     // These are now synced from core events, not set by UI
@@ -41,9 +42,9 @@
     let fallbackModeActive = false;
     let inPassiveMode = false;
     let coreLifecycleState = 'BOOT';
+    let _sessionInvalid = false;
     
     // No polling - rely on core events
-    // No coreCheckAttempts or MAX_CORE_CHECK_ATTEMPTS
 
     // ==================== ERROR CACHE FOR ONCE LOGGING ====================
     const _onceErrors = new Map();
@@ -93,6 +94,12 @@
             return true;
         }
         
+        // Check if there's an active call blocking actions
+        if (coreInstance.isInCall && coreInstance.isInCall()) {
+            logOnce('warn', `Cannot perform ${actionName} - already in a call`);
+            return false;
+        }
+        
         // Last resort fallback
         return coreReady && parentReady && sessionReady;
     }
@@ -122,7 +129,7 @@
                 
                 // Use modern message format as fallback
                 const message = {
-                    protocol: 'KYN-8.2',
+                    protocol: 'KYN-9.0',
                     type: type,
                     source: CURRENT_MODULE_NAME,
                     target: 'parent',
@@ -131,7 +138,7 @@
                         'msg-' + Date.now() + '-' + Math.random().toString(36).substring(2, 9),
                     timestamp: Date.now(),
                     payload: payload || {},
-                    version: '4.2.0'
+                    version: '5.0.1'
                 };
                 window.parent.postMessage(message, '*');
                 return true;
@@ -157,7 +164,7 @@
         
         if (coreInstance && coreInstance.getSession) {
             const session = coreInstance.getSession();
-            if (session && session.token) {
+            if (session && session.token && session.authenticated !== false) {
                 return true;
             }
         }
@@ -204,11 +211,27 @@
             return false;
         }
         
+        // Check if already in a call for actions that require call context
+        const callRequiredActions = ['sendReaction', 'sendChatMessage', 'saveNotes'];
+        if (callRequiredActions.includes(actionName)) {
+            if (coreInstance && coreInstance.isInCall && !coreInstance.isInCall()) {
+                showNotification('Join a call to use this feature', 'info');
+                return false;
+            }
+        }
+        
         return true;
     }
 
     // ==================== EVENT-DRIVEN CORE READINESS ====================
     function setupCoreReadyListener() {
+        if (_coreListenersInitialized) {
+            if (DEBUG) {
+                logOnce('info', 'Core ready listeners already initialized');
+            }
+            return;
+        }
+        
         if (DEBUG) {
             logOnce('info', 'Setting up core ready listeners');
         }
@@ -260,12 +283,18 @@
                     coreReady = true;
                     parentReady = true;
                     handshakeComplete = true;
-                    RenderingPipeline.updateSyncIndicator();
+                    if (RenderingPipeline && RenderingPipeline.updateSyncIndicator) {
+                        RenderingPipeline.updateSyncIndicator();
+                    }
                 } else if (detail.to === 'WAIT_PARENT') {
-                    RenderingPipeline.updateSyncIndicator();
+                    if (RenderingPipeline && RenderingPipeline.updateSyncIndicator) {
+                        RenderingPipeline.updateSyncIndicator();
+                    }
                 } else if (detail.to === 'ERROR') {
                     fallbackModeActive = true;
-                    RenderingPipeline.updateSyncIndicator();
+                    if (RenderingPipeline && RenderingPipeline.updateSyncIndicator) {
+                        RenderingPipeline.updateSyncIndicator();
+                    }
                 }
             }
         });
@@ -273,9 +302,13 @@
         // Listen for parent ready from core
         window.addEventListener('parent_ready', function() {
             parentReady = true;
-            RenderingPipeline.updateSyncIndicator();
+            if (RenderingPipeline && RenderingPipeline.updateSyncIndicator) {
+                RenderingPipeline.updateSyncIndicator();
+            }
         });
 
+        _coreListenersInitialized = true;
+        
         if (DEBUG) {
             logOnce('info', 'Core ready listeners established');
         }
@@ -308,10 +341,13 @@
                 coreLifecycleState = state.lifecycleState || coreInstance.getLifecycleState?.() || 'UNKNOWN';
                 
                 // Update session cache from core
-                if (state.session && state.session.token) {
+                if (state.session && state.session.token && state.session.authenticated !== false) {
                     window.__CHILD_SESSION__.token = state.session.token;
                     window.__CHILD_SESSION__.userId = state.session.userId;
                     window.__CHILD_SESSION__.expires = state.session.expiresAt;
+                    _sessionInvalid = false;
+                } else if (state.session && !state.session.authenticated) {
+                    _sessionInvalid = true;
                 }
             }
             
@@ -321,10 +357,6 @@
                 if (lifecycleState === 'ACTIVE') {
                     parentReady = true;
                 }
-            }
-            
-            if (coreInstance.isInPassiveMode) {
-                inPassiveMode = coreInstance.isInPassiveMode();
             }
             
             // Get parent ready status
@@ -340,10 +372,14 @@
             // Get session directly
             if (coreInstance.getSession) {
                 const session = coreInstance.getSession();
-                if (session && session.token) {
+                if (session && session.token && session.authenticated !== false) {
                     window.__CHILD_SESSION__.token = session.token;
                     window.__CHILD_SESSION__.userId = session.userId;
                     window.__CHILD_SESSION__.expires = session.expiresAt;
+                    sessionReady = true;
+                    _sessionInvalid = false;
+                } else if (session && !session.authenticated) {
+                    _sessionInvalid = true;
                 }
             }
         }
@@ -361,21 +397,17 @@
                 coreReady = true;
                 coreInstance = window.callCore;
                 coreLifecycleState = 'ACTIVE';
+                parentReady = true;
                 
-                // Check passive mode
-                if (window.callCore.isInPassiveMode) {
-                    inPassiveMode = window.callCore.isInPassiveMode();
-                } else if (window.callCore.getState) {
-                    const state = window.callCore.getState();
-                    inPassiveMode = state.inPassiveMode || false;
-                    parentReady = state.parentReady || false;
-                    sessionReady = state.sessionStatus === 'valid';
-                    
-                    // Update session cache
-                    if (state.session && state.session.token) {
-                        window.__CHILD_SESSION__.token = state.session.token;
-                        window.__CHILD_SESSION__.userId = state.session.userId;
-                        window.__CHILD_SESSION__.expires = state.session.expiresAt;
+                // Get session
+                if (window.callCore.getSession) {
+                    const session = window.callCore.getSession();
+                    if (session && session.token && session.authenticated !== false) {
+                        window.__CHILD_SESSION__.token = session.token;
+                        window.__CHILD_SESSION__.userId = session.userId;
+                        window.__CHILD_SESSION__.expires = session.expiresAt;
+                        sessionReady = true;
+                        _sessionInvalid = false;
                     }
                 }
                 
@@ -391,18 +423,16 @@
                     coreReady = true;
                     coreInstance = window.callCore;
                     
-                    if (window.callCore.isInPassiveMode) {
-                        inPassiveMode = window.callCore.isInPassiveMode();
-                    } else if (window.callCore.getState) {
+                    if (window.callCore.getState) {
                         const state = window.callCore.getState();
-                        inPassiveMode = state.inPassiveMode || false;
                         parentReady = state.parentReady || false;
                         sessionReady = state.sessionStatus === 'valid';
                         
-                        if (state.session && state.session.token) {
+                        if (state.session && state.session.token && state.session.authenticated !== false) {
                             window.__CHILD_SESSION__.token = state.session.token;
                             window.__CHILD_SESSION__.userId = state.session.userId;
                             window.__CHILD_SESSION__.expires = state.session.expiresAt;
+                            _sessionInvalid = false;
                         }
                     }
                     
@@ -421,10 +451,7 @@
                 }
                 coreReady = true;
                 coreInstance = window.callCore;
-                
-                if (window.callCore.isInPassiveMode) {
-                    inPassiveMode = window.callCore.isInPassiveMode();
-                }
+                sessionReady = true;
                 
                 if (window.callCore.getParentReady) {
                     parentReady = window.callCore.getParentReady();
@@ -436,6 +463,7 @@
                     window.__CHILD_SESSION__.token = session.token;
                     window.__CHILD_SESSION__.userId = session.userId;
                     window.__CHILD_SESSION__.expires = session.expiresAt;
+                    _sessionInvalid = false;
                 }
                 
                 if (window.callCore.getLifecycleState) {
@@ -453,16 +481,16 @@
                     }
                     coreReady = true;
                     coreInstance = window.callCore;
-                    inPassiveMode = state.inPassiveMode || false;
                     parentReady = state.parentReady || false;
                     sessionReady = state.sessionStatus === 'valid';
                     coreLifecycleState = state.lifecycleState || 'UNKNOWN';
                     
                     // Update session cache
-                    if (state.session && state.session.token) {
+                    if (state.session && state.session.token && state.session.authenticated !== false) {
                         window.__CHILD_SESSION__.token = state.session.token;
                         window.__CHILD_SESSION__.userId = state.session.userId;
                         window.__CHILD_SESSION__.expires = state.session.expiresAt;
+                        _sessionInvalid = false;
                     }
                     
                     return true;
@@ -478,15 +506,19 @@
                     }
                     coreReady = lifecycleState === 'ACTIVE';
                     coreInstance = window.callCore;
+                    if (lifecycleState === 'ACTIVE') {
+                        parentReady = true;
+                    }
                     
                     // Try to get session
                     if (window.callCore.getSession) {
                         const session = window.callCore.getSession();
-                        if (session && session.token) {
+                        if (session && session.token && session.authenticated !== false) {
                             window.__CHILD_SESSION__.token = session.token;
                             window.__CHILD_SESSION__.userId = session.userId;
                             window.__CHILD_SESSION__.expires = session.expiresAt;
                             sessionReady = true;
+                            _sessionInvalid = false;
                         }
                     }
                     
@@ -529,19 +561,17 @@
                 if (coreInstance) {
                     if (coreInstance.getState) {
                         const state = coreInstance.getState();
-                        inPassiveMode = state.inPassiveMode || false;
                         parentReady = state.parentReady || false;
                         coreLifecycleState = state.lifecycleState || 'UNKNOWN';
                         
                         // Update session cache
-                        if (state.session && state.session.token) {
+                        if (state.session && state.session.token && state.session.authenticated !== false) {
                             window.__CHILD_SESSION__.token = state.session.token;
                             window.__CHILD_SESSION__.userId = state.session.userId;
                             window.__CHILD_SESSION__.expires = state.session.expiresAt;
+                            sessionReady = true;
+                            _sessionInvalid = false;
                         }
-                    }
-                    if (coreInstance.isInPassiveMode) {
-                        inPassiveMode = coreInstance.isInPassiveMode();
                     }
                     if (coreInstance.getLifecycleState) {
                         coreLifecycleState = coreInstance.getLifecycleState();
@@ -568,19 +598,16 @@
                     if (coreInstance) {
                         if (coreInstance.getState) {
                             const state = coreInstance.getState();
-                            inPassiveMode = state.inPassiveMode || false;
                             parentReady = state.parentReady || false;
                             coreLifecycleState = state.lifecycleState || 'UNKNOWN';
                             
-                            // Update session cache
-                            if (state.session && state.session.token) {
+                            if (state.session && state.session.token && state.session.authenticated !== false) {
                                 window.__CHILD_SESSION__.token = state.session.token;
                                 window.__CHILD_SESSION__.userId = state.session.userId;
                                 window.__CHILD_SESSION__.expires = state.session.expiresAt;
+                                sessionReady = true;
+                                _sessionInvalid = false;
                             }
-                        }
-                        if (coreInstance.isInPassiveMode) {
-                            inPassiveMode = coreInstance.isInPassiveMode();
                         }
                         if (coreInstance.getLifecycleState) {
                             coreLifecycleState = coreInstance.getLifecycleState();
@@ -608,19 +635,16 @@
                     if (coreInstance) {
                         if (coreInstance.getState) {
                             const state = coreInstance.getState();
-                            inPassiveMode = state.inPassiveMode || false;
                             parentReady = state.parentReady || false;
                             coreLifecycleState = state.lifecycleState || 'UNKNOWN';
                             
-                            // Update session cache
-                            if (state.session && state.session.token) {
+                            if (state.session && state.session.token && state.session.authenticated !== false) {
                                 window.__CHILD_SESSION__.token = state.session.token;
                                 window.__CHILD_SESSION__.userId = state.session.userId;
                                 window.__CHILD_SESSION__.expires = state.session.expiresAt;
+                                sessionReady = true;
+                                _sessionInvalid = false;
                             }
-                        }
-                        if (coreInstance.isInPassiveMode) {
-                            inPassiveMode = coreInstance.isInPassiveMode();
                         }
                         if (coreInstance.getLifecycleState) {
                             coreLifecycleState = coreInstance.getLifecycleState();
@@ -647,19 +671,16 @@
                 if (coreInstance) {
                     if (coreInstance.getState) {
                         const state = coreInstance.getState();
-                        inPassiveMode = state.inPassiveMode || false;
                         parentReady = state.parentReady || false;
                         coreLifecycleState = state.lifecycleState || 'UNKNOWN';
                         
-                        // Update session cache
-                        if (state.session && state.session.token) {
+                        if (state.session && state.session.token && state.session.authenticated !== false) {
                             window.__CHILD_SESSION__.token = state.session.token;
                             window.__CHILD_SESSION__.userId = state.session.userId;
                             window.__CHILD_SESSION__.expires = state.session.expiresAt;
+                            sessionReady = true;
+                            _sessionInvalid = false;
                         }
-                    }
-                    if (coreInstance.isInPassiveMode) {
-                        inPassiveMode = coreInstance.isInPassiveMode();
                     }
                     if (coreInstance.getLifecycleState) {
                         coreLifecycleState = coreInstance.getLifecycleState();
@@ -1083,7 +1104,7 @@
             elements.appContainer.appendChild(fallbackEl);
             
             setTimeout(() => {
-                fallbackEl.remove();
+                if (fallbackEl.parentNode) fallbackEl.remove();
             }, 5000);
         },
         
@@ -1148,10 +1169,15 @@
                 },
                 session: {
                     valid: isSessionValid(),
-                    hasToken: !!(window.__CHILD_SESSION__ && window.__CHILD_SESSION__.token)
+                    hasToken: !!(window.__CHILD_SESSION__ && window.__CHILD_SESSION__.token),
+                    invalid: _sessionInvalid
                 },
                 coreAvailable: !!coreInstance,
-                coreLifecycle: coreLifecycleState
+                coreLifecycle: coreLifecycleState,
+                activeCall: {
+                    active: coreInstance ? coreInstance.isInCall ? coreInstance.isInCall() : false : false,
+                    callId: coreInstance ? coreInstance.getActiveCallId ? coreInstance.getActiveCallId() : null : null
+                }
             };
         },
         
@@ -1408,8 +1434,8 @@
         // Storage methods - warn but allow for non-auth data
         safeLocalStorageGet: function(key, fallback = null) {
             // Warn about auth tokens
-            if (key === 'token' || key.includes('token') || key.includes('auth') || key === 'session') {
-                logOnce('warn', `Attempted to read '${key}' from localStorage - use session cache instead`);
+            if (key === 'token' || key.includes('token') || key.includes('auth') || key === 'session' || key.includes('call')) {
+                logOnce('warn', `Attempted to read '${key}' from localStorage - use session/call memory instead`);
                 return fallback;
             }
             
@@ -1425,9 +1451,9 @@
         },
         
         safeLocalStorageSet: function(key, value) {
-            // Block auth tokens
-            if (key === 'token' || key.includes('token') || key.includes('auth') || key === 'session') {
-                logOnce('warn', `Blocked storing '${key}' in localStorage - use session cache only`);
+            // Block auth tokens and call state
+            if (key === 'token' || key.includes('token') || key.includes('auth') || key === 'session' || key.includes('call')) {
+                logOnce('warn', `Blocked storing '${key}' in localStorage - use session/call memory only`);
                 return false;
             }
             
@@ -1444,8 +1470,8 @@
         
         safeSessionStorageGet: function(key, fallback = null) {
             // Warn about auth tokens
-            if (key === 'token' || key.includes('token') || key.includes('auth') || key === 'session') {
-                logOnce('warn', `Attempted to read '${key}' from sessionStorage - use session cache instead`);
+            if (key === 'token' || key.includes('token') || key.includes('auth') || key === 'session' || key.includes('call')) {
+                logOnce('warn', `Attempted to read '${key}' from sessionStorage - use session/call memory instead`);
                 return fallback;
             }
             
@@ -1461,9 +1487,9 @@
         },
         
         safeSessionStorageSet: function(key, value) {
-            // Block auth tokens
-            if (key === 'token' || key.includes('token') || key.includes('auth') || key === 'session') {
-                logOnce('warn', `Blocked storing '${key}' in sessionStorage - use session cache only`);
+            // Block auth tokens and call state
+            if (key === 'token' || key.includes('token') || key.includes('auth') || key === 'session' || key.includes('call')) {
+                logOnce('warn', `Blocked storing '${key}' in sessionStorage - use session/call memory only`);
                 return false;
             }
             
@@ -1685,9 +1711,12 @@
             } else if (!parentReady) {
                 elements.syncIndicator.innerHTML = '<i class="fas fa-handshake"></i><span>Connecting...</span>';
                 elements.syncIndicator.className = 'sync-indicator connecting';
-            } else if (!sessionReady) {
+            } else if (!sessionReady && !_sessionInvalid) {
                 elements.syncIndicator.innerHTML = '<i class="fas fa-sync-alt fa-spin"></i><span>Syncing...</span>';
                 elements.syncIndicator.className = 'sync-indicator syncing';
+            } else if (_sessionInvalid) {
+                elements.syncIndicator.innerHTML = '<i class="fas fa-exclamation-circle"></i><span>Login Required</span>';
+                elements.syncIndicator.className = 'sync-indicator error';
             } else {
                 elements.syncIndicator.innerHTML = '<i class="fas fa-check-circle"></i><span>Ready</span>';
                 elements.syncIndicator.className = 'sync-indicator synced';
@@ -1903,8 +1932,16 @@
     // ==================== CORE INTEGRATION BRIDGE ====================
     const CoreIntegration = {
         _subscriptions: new Set(),
+        _initialized: false,
         
         subscribeToCore: function() {
+            if (this._initialized) {
+                if (DEBUG) {
+                    logOnce('info', 'Core integration already initialized');
+                }
+                return;
+            }
+            
             if (DEBUG) {
                 logOnce('info', 'Subscribing to core events');
             }
@@ -1930,6 +1967,8 @@
             
             // Update initial state from core if available
             this.updateStateFromCore();
+            
+            this._initialized = true;
         },
         
         updateStateFromCore: function() {
@@ -1946,10 +1985,13 @@
                     coreLifecycleState = state.lifecycleState || coreInstance.getLifecycleState?.() || 'UNKNOWN';
                     
                     // Update session cache
-                    if (state.session && state.session.token) {
+                    if (state.session && state.session.token && state.session.authenticated !== false) {
                         window.__CHILD_SESSION__.token = state.session.token;
                         window.__CHILD_SESSION__.userId = state.session.userId;
                         window.__CHILD_SESSION__.expires = state.session.expiresAt;
+                        _sessionInvalid = false;
+                    } else if (state.session && !state.session.authenticated) {
+                        _sessionInvalid = true;
                     }
                     
                     // Update UI preferences from core
@@ -1957,7 +1999,15 @@
                     if (state.currentIntention) UIState.selectedIntention = state.currentIntention;
                     if (state.currentFocusMode !== undefined) UIState.currentFocusMode = state.currentFocusMode;
                     
-                    RenderingPipeline.updateSyncIndicator();
+                    // Update call state from core
+                    UIState.activeCallId = state.activeCallId;
+                    UIState.callType = state.callType;
+                    UIState.callParticipants = state.callParticipants || [];
+                    UIState.callStartTime = state.callStartTime;
+                    
+                    if (RenderingPipeline && RenderingPipeline.updateSyncIndicator) {
+                        RenderingPipeline.updateSyncIndicator();
+                    }
                 }
             }
             
@@ -1967,12 +2017,16 @@
                 if (lifecycleState === 'ACTIVE') {
                     parentReady = true;
                 }
-                RenderingPipeline.updateSyncIndicator();
+                if (RenderingPipeline && RenderingPipeline.updateSyncIndicator) {
+                    RenderingPipeline.updateSyncIndicator();
+                }
             }
             
             if (coreInstance.isInPassiveMode) {
                 inPassiveMode = coreInstance.isInPassiveMode();
-                RenderingPipeline.updateSyncIndicator();
+                if (RenderingPipeline && RenderingPipeline.updateSyncIndicator) {
+                    RenderingPipeline.updateSyncIndicator();
+                }
             }
             
             if (coreInstance.getParentReady) {
@@ -1982,11 +2036,14 @@
             // Get session directly
             if (coreInstance.getSession) {
                 const session = coreInstance.getSession();
-                if (session && session.token) {
+                if (session && session.token && session.authenticated !== false) {
                     window.__CHILD_SESSION__.token = session.token;
                     window.__CHILD_SESSION__.userId = session.userId;
                     window.__CHILD_SESSION__.expires = session.expiresAt;
                     sessionReady = true;
+                    _sessionInvalid = false;
+                } else if (session && !session.authenticated) {
+                    _sessionInvalid = true;
                 }
             }
         },
@@ -1999,25 +2056,32 @@
             switch (event) {
                 case 'session_update':
                 case 'session_valid':
-                    sessionReady = true;
-                    if (data && data.token) {
-                        window.__CHILD_SESSION__.token = data.token;
-                        window.__CHILD_SESSION__.userId = data.userId;
-                        window.__CHILD_SESSION__.expires = data.expiresAt;
-                    }
-                    RenderingPipeline.updateSyncIndicator();
-                    break;
                 case 'session_updated':
                     sessionReady = true;
+                    _sessionInvalid = false;
                     if (data && data.token) {
                         window.__CHILD_SESSION__.token = data.token;
                         window.__CHILD_SESSION__.userId = data.userId;
                         window.__CHILD_SESSION__.expires = data.expiresAt;
                     }
-                    RenderingPipeline.updateSyncIndicator();
+                    if (RenderingPipeline && RenderingPipeline.updateSyncIndicator) {
+                        RenderingPipeline.updateSyncIndicator();
+                    }
+                    break;
+                case 'session_invalid':
+                    sessionReady = false;
+                    _sessionInvalid = true;
+                    window.__CHILD_SESSION__.token = null;
+                    window.__CHILD_SESSION__.userId = null;
+                    if (RenderingPipeline && RenderingPipeline.updateSyncIndicator) {
+                        RenderingPipeline.updateSyncIndicator();
+                    }
                     break;
                 case 'incoming_call':
                     this.handleIncomingCall(data);
+                    break;
+                case 'call_initiated':
+                    this.handleCallInitiated(data);
                     break;
                 case 'call_started':
                     this.handleCallStarted(data);
@@ -2028,6 +2092,7 @@
                 case 'call_ended':
                 case 'call_rejected':
                 case 'call_failed':
+                case 'call_timeout':
                     this.handleCallEnded(data);
                     break;
                 case 'logout':
@@ -2080,20 +2145,27 @@
                     break;
                 case 'passive_mode_entered':
                     inPassiveMode = true;
-                    RenderingPipeline.updateSyncIndicator();
+                    if (RenderingPipeline && RenderingPipeline.updateSyncIndicator) {
+                        RenderingPipeline.updateSyncIndicator();
+                    }
                     break;
                 case 'parent_ready':
                     parentReady = true;
-                    RenderingPipeline.updateSyncIndicator();
+                    if (RenderingPipeline && RenderingPipeline.updateSyncIndicator) {
+                        RenderingPipeline.updateSyncIndicator();
+                    }
                     break;
                 case 'session_sync':
                     sessionReady = true;
+                    _sessionInvalid = false;
                     if (data && data.token) {
                         window.__CHILD_SESSION__.token = data.token;
                         window.__CHILD_SESSION__.userId = data.userId;
                         window.__CHILD_SESSION__.expires = data.expiresAt;
                     }
-                    RenderingPipeline.updateSyncIndicator();
+                    if (RenderingPipeline && RenderingPipeline.updateSyncIndicator) {
+                        RenderingPipeline.updateSyncIndicator();
+                    }
                     break;
                 case 'auth_error':
                 case 'unauthorized':
@@ -2104,16 +2176,42 @@
                     if (data && data.newState) {
                         if (data.newState === 'ACTIVE') {
                             parentReady = true;
-                            RenderingPipeline.updateSyncIndicator();
+                            if (RenderingPipeline && RenderingPipeline.updateSyncIndicator) {
+                                RenderingPipeline.updateSyncIndicator();
+                            }
                         }
                         coreLifecycleState = data.newState;
-                        RenderingPipeline.updateSyncIndicator();
+                        if (RenderingPipeline && RenderingPipeline.updateSyncIndicator) {
+                            RenderingPipeline.updateSyncIndicator();
+                        }
                     }
                     break;
                 case 'module_state_change':
                     if (data && data.to) {
                         coreLifecycleState = data.to;
-                        RenderingPipeline.updateSyncIndicator();
+                        if (RenderingPipeline && RenderingPipeline.updateSyncIndicator) {
+                            RenderingPipeline.updateSyncIndicator();
+                        }
+                    }
+                    break;
+                case 'call_ready':
+                    if (elements.callStatusText) {
+                        elements.callStatusText.textContent = 'Ready';
+                    }
+                    break;
+                case 'call_connecting':
+                    if (elements.callStatusText) {
+                        elements.callStatusText.textContent = 'Connecting...';
+                    }
+                    break;
+                case 'call_connected':
+                    if (elements.callStatusText) {
+                        elements.callStatusText.textContent = 'Connected';
+                    }
+                    break;
+                case 'call_blocked':
+                    if (data && data.reason === 'call_active') {
+                        showNotification('You are already in a call', 'warning');
                     }
                     break;
             }
@@ -2201,6 +2299,16 @@
                         }
                     }
                     break;
+                case 'ice_connected':
+                    if (elements.callStatusText) {
+                        elements.callStatusText.textContent = 'Connected';
+                    }
+                    break;
+                case 'call_connected':
+                    if (elements.callStatusText) {
+                        elements.callStatusText.textContent = 'In call';
+                    }
+                    break;
                 case 'data_message':
                     if (data && data.type === 'chat' && data.message) {
                         this.addChatMessage(data.sender, data.message, data.timestamp);
@@ -2209,7 +2317,12 @@
                 case 'call_failed':
                     if (data && data.reason === 'ice_failed') {
                         showNotification('Call connection failed', 'error');
+                    } else if (data && data.reason === 'connection_failed') {
+                        showNotification('Connection failed', 'error');
                     }
+                    break;
+                case 'call_timeout':
+                    showNotification('Call connection timeout', 'error');
                     break;
             }
         },
@@ -2302,7 +2415,7 @@
             }
         },
         
-        handleCallStarted: function(callData) {
+        handleCallInitiated: function(callData) {
             UIState.activeCallId = callData.callId;
             UIState.callParticipants = callData.participants || [];
             UIState.callStartTime = Date.now();
@@ -2320,7 +2433,7 @@
                 elements.callWithName.textContent = SecuritySanitizer.sanitizeString(participantNames);
             }
             if (elements.callStatusText) {
-                elements.callStatusText.textContent = 'Connecting...';
+                elements.callStatusText.textContent = 'Initiating...';
             }
             
             const icon = UIState.callType === 'video' ? 'fa-video' : 'fa-phone';
@@ -2335,6 +2448,12 @@
             UIState.currentView = 'call';
             
             this.startCallTimer();
+        },
+        
+        handleCallStarted: function(callData) {
+            if (elements.callStatusText) {
+                elements.callStatusText.textContent = 'Starting...';
+            }
         },
         
         handleCallConnected: function(callData) {
@@ -2411,6 +2530,7 @@
             sessionReady = false;
             parentReady = false;
             handshakeComplete = false;
+            _sessionInvalid = true;
             
             const protectedButtons = [
                 elements.newCallBtn,
@@ -2425,7 +2545,9 @@
                 }
             });
             
-            RenderingPipeline.updateSyncIndicator();
+            if (RenderingPipeline && RenderingPipeline.updateSyncIndicator) {
+                RenderingPipeline.updateSyncIndicator();
+            }
             
             showNotification('Logged out', 'info');
         },
@@ -2440,9 +2562,12 @@
             window.__CHILD_SESSION__.userId = null;
             window.__CHILD_SESSION__.expires = null;
             sessionReady = false;
+            _sessionInvalid = true;
             
             showNotification('Session expired - please log in again', 'error');
-            RenderingPipeline.updateSyncIndicator();
+            if (RenderingPipeline && RenderingPipeline.updateSyncIndicator) {
+                RenderingPipeline.updateSyncIndicator();
+            }
         },
         
         startCallTimer: function() {
@@ -2501,16 +2626,23 @@
                         break;
                     case 'PARENT_READY':
                         parentReady = true;
-                        RenderingPipeline.updateSyncIndicator();
+                        if (RenderingPipeline && RenderingPipeline.updateSyncIndicator) {
+                            RenderingPipeline.updateSyncIndicator();
+                        }
                         break;
                     case 'MODULE_REGISTERED':
                         handshakeComplete = true;
-                        RenderingPipeline.updateSyncIndicator();
+                        if (RenderingPipeline && RenderingPipeline.updateSyncIndicator) {
+                            RenderingPipeline.updateSyncIndicator();
+                        }
                         break;
                     case 'SESSION_SYNC':
                         sessionReady = true;
+                        _sessionInvalid = false;
                         this.handleSessionUpdate(data.payload || data);
-                        RenderingPipeline.updateSyncIndicator();
+                        if (RenderingPipeline && RenderingPipeline.updateSyncIndicator) {
+                            RenderingPipeline.updateSyncIndicator();
+                        }
                         break;
                     case 'AUTH_ERROR':
                     case 'UNAUTHORIZED':
@@ -2564,6 +2696,7 @@
             
             if (data.token) {
                 window.__CHILD_SESSION__.token = data.token;
+                _sessionInvalid = false;
             }
             if (data.userId) {
                 window.__CHILD_SESSION__.userId = data.userId;
@@ -2573,7 +2706,9 @@
             }
             
             sessionReady = true;
-            RenderingPipeline.updateSyncIndicator();
+            if (RenderingPipeline && RenderingPipeline.updateSyncIndicator) {
+                RenderingPipeline.updateSyncIndicator();
+            }
         },
         
         handleTokenUpdate: function(data) {
@@ -2584,8 +2719,11 @@
                 window.__CHILD_SESSION__.expires = data.expiry;
             }
             sessionReady = true;
+            _sessionInvalid = false;
             
-            RenderingPipeline.updateSyncIndicator();
+            if (RenderingPipeline && RenderingPipeline.updateSyncIndicator) {
+                RenderingPipeline.updateSyncIndicator();
+            }
         },
         
         handleContactsUpdate: function(data) {
@@ -2626,7 +2764,9 @@
                 `;
             }
             
-            RenderingPipeline.updateSyncIndicator();
+            if (RenderingPipeline && RenderingPipeline.updateSyncIndicator) {
+                RenderingPipeline.updateSyncIndicator();
+            }
         },
         
         observeAppState: function() {
@@ -2684,7 +2824,9 @@
                 }
             });
             
-            RenderingPipeline.updateSyncIndicator();
+            if (RenderingPipeline && RenderingPipeline.updateSyncIndicator) {
+                RenderingPipeline.updateSyncIndicator();
+            }
         },
         
         handleConnectivityChange: function(isOnline) {
@@ -2706,6 +2848,7 @@
                 }
             });
             this._subscriptions.clear();
+            this._initialized = false;
             
             const handler = UIState.cachedElements.get('parentMessageHandler');
             if (handler) {
@@ -3426,7 +3569,15 @@
                 return;
             }
             
+            // Check for active call
+            if (coreInstance && coreInstance.isInCall && coreInstance.isInCall()) {
+                showNotification('You are already in a call', 'warning');
+                return;
+            }
+            
             if (coreInstance && coreInstance.initCall) {
+                showNotification(`Starting ${type} call...`, 'info');
+                
                 coreInstance.initCall(type, selectedContacts)
                     .then(result => {
                         if (result.success) {
@@ -3440,7 +3591,6 @@
                         UILogger.error('Call failed', error);
                     });
             } else {
-                // Show error instead of simulating
                 showNotification('Call system not ready', 'error');
             }
             
@@ -3448,7 +3598,7 @@
         },
         
         startGroupCall: function() {
-            if (!canPerformAction('startCall')) return;
+            if (!canPerformAction('startGroupCall')) return;
             
             if (!UIState.groupCallOption) {
                 showNotification('Please select a group call option', 'warning');
@@ -3462,7 +3612,15 @@
                 return;
             }
             
+            // Check for active call
+            if (coreInstance && coreInstance.isInCall && coreInstance.isInCall()) {
+                showNotification('You are already in a call', 'warning');
+                return;
+            }
+            
             if (coreInstance && coreInstance.startGroupCall) {
+                showNotification('Starting group call...', 'info');
+                
                 coreInstance.startGroupCall(selectedContacts, 'voice')
                     .then(result => {
                         if (result.success) {
@@ -3488,7 +3646,7 @@
             
             const participantNames = UIState.callParticipants?.map(p => p.name).join(', ') || 'Call';
             if (elements.callWithName) elements.callWithName.textContent = SecuritySanitizer.sanitizeString(participantNames);
-            if (elements.callStatusText) elements.callStatusText.textContent = 'In call';
+            if (elements.callStatusText) elements.callStatusText.textContent = 'Connecting...';
             
             const icon = UIState.callType === 'video' ? 'fa-video' : 'fa-phone';
             if (elements.callTypeIcon) elements.callTypeIcon.innerHTML = `<i class="fas ${icon}"></i>`;
@@ -3579,50 +3737,56 @@
                 return;
             }
             
-            navigator.mediaDevices.getDisplayMedia({ video: true, audio: true })
-                .then(stream => {
-                    UIState.screenStream = stream;
-                    UIState.isScreenSharing = true;
-                    
-                    if (window.AppState) {
-                        window.AppState.screenStream = stream;
-                        window.AppState.isScreenSharing = true;
-                    }
-                    
-                    if (elements.screenShareBtn) {
-                        elements.screenShareBtn.classList.add('active');
-                    }
-                    
-                    if (coreInstance && coreInstance.startScreenShare) {
-                        coreInstance.startScreenShare().catch(() => {});
-                    }
-                    
-                    showNotification('Screen sharing started', 'success');
-                })
-                .catch(error => {
-                    UILogger.error('Error starting screen share', error);
-                    showNotification('Failed to start screen sharing', 'error');
-                });
+            if (coreInstance && coreInstance.startScreenShare) {
+                coreInstance.startScreenShare()
+                    .then(result => {
+                        if (result.success) {
+                            UIState.isScreenSharing = true;
+                            if (elements.screenShareBtn) {
+                                elements.screenShareBtn.classList.add('active');
+                            }
+                            showNotification('Screen sharing started', 'success');
+                        } else {
+                            showNotification(result.error || 'Failed to start screen sharing', 'error');
+                        }
+                    })
+                    .catch(error => {
+                        UILogger.error('Error starting screen share', error);
+                        showNotification('Failed to start screen sharing', 'error');
+                    });
+            } else {
+                navigator.mediaDevices.getDisplayMedia({ video: true, audio: true })
+                    .then(stream => {
+                        UIState.screenStream = stream;
+                        UIState.isScreenSharing = true;
+                        
+                        if (elements.screenShareBtn) {
+                            elements.screenShareBtn.classList.add('active');
+                        }
+                        
+                        showNotification('Screen sharing started', 'success');
+                    })
+                    .catch(error => {
+                        UILogger.error('Error starting screen share', error);
+                        showNotification('Failed to start screen sharing', 'error');
+                    });
+            }
         },
         
         stopScreenShare: function() {
-            if (!UIState.screenStream) return;
-            
-            UIState.screenStream.getTracks().forEach(track => track.stop());
-            UIState.screenStream = null;
-            UIState.isScreenSharing = false;
-            
-            if (window.AppState) {
-                window.AppState.screenStream = null;
-                window.AppState.isScreenSharing = false;
+            if (coreInstance && coreInstance.stopScreenShare) {
+                coreInstance.stopScreenShare();
             }
+            
+            if (UIState.screenStream) {
+                UIState.screenStream.getTracks().forEach(track => track.stop());
+                UIState.screenStream = null;
+            }
+            
+            UIState.isScreenSharing = false;
             
             if (elements.screenShareBtn) {
                 elements.screenShareBtn.classList.remove('active');
-            }
-            
-            if (coreInstance && coreInstance.stopScreenShare) {
-                coreInstance.stopScreenShare();
             }
             
             showNotification('Screen sharing stopped', 'info');
@@ -3640,9 +3804,16 @@
         },
         
         endCall: function() {
-            if (!UIState.activeCallId) return;
+            if (!UIState.activeCallId && !coreInstance?.isInCall?.()) {
+                showNotification('No active call to end', 'info');
+                return;
+            }
             
             if (confirm('End the call?')) {
+                if (coreInstance && coreInstance.endCall) {
+                    coreInstance.endCall(UIState.activeCallId);
+                }
+                
                 if (UIState.localStream) {
                     UIState.localStream.getTracks().forEach(track => track.stop());
                     UIState.localStream = null;
@@ -3653,24 +3824,9 @@
                     UIState.screenStream = null;
                 }
                 
-                if (coreInstance && typeof coreInstance.endCall === 'function') {
-                    coreInstance.endCall(UIState.activeCallId).catch(() => {});
-                }
-                
                 if (UIState.callDurationInterval) {
                     clearInterval(UIState.callDurationInterval);
                     UIState.callDurationInterval = null;
-                }
-                
-                if (window.AppState?.callDurationInterval) {
-                    clearInterval(window.AppState.callDurationInterval);
-                }
-                
-                if (window.AppState) {
-                    window.AppState.isInCall = false;
-                    window.AppState.activeCallId = null;
-                    window.AppState.callParticipants = [];
-                    window.AppState.callStartTime = null;
                 }
                 
                 UIState.activeCallId = null;
@@ -3737,7 +3893,7 @@
                 const newMood = selectedOption.dataset.mood;
                 UIState.selectedMood = newMood;
                 
-                // Don't use localStorage - send to core
+                // Send to core
                 if (coreInstance && coreInstance.setMood) {
                     coreInstance.setMood(newMood);
                 }
@@ -3782,7 +3938,7 @@
                 const newIntention = selectedOption.dataset.intention;
                 UIState.selectedIntention = newIntention;
                 
-                // Don't use localStorage - send to core
+                // Send to core
                 if (coreInstance && coreInstance.setIntention) {
                     coreInstance.setIntention(newIntention);
                 }
@@ -3985,6 +4141,12 @@
         acceptIncomingCallGeneric: function(asVideo) {
             if (!canPerformAction('answerCall')) return;
             
+            // Check for active call
+            if (coreInstance && coreInstance.isInCall && coreInstance.isInCall()) {
+                showNotification('You are already in a call', 'warning');
+                return;
+            }
+            
             if (elements.incomingCallModal.dataset.timer) {
                 clearInterval(parseInt(elements.incomingCallModal.dataset.timer));
             }
@@ -4001,7 +4163,6 @@
             if (coreInstance && coreInstance.answerCall) {
                 coreInstance.answerCall(callType);
             } else {
-                // Don't simulate - show error
                 showNotification('Call system not ready', 'error');
             }
         },
@@ -4185,7 +4346,7 @@
         sendReaction: function(e) {
             if (!canPerformAction('sendReaction')) return;
             
-            if (!UIState.activeCallId) {
+            if (!UIState.activeCallId && !coreInstance?.isInCall?.()) {
                 showNotification('Join a call to send reactions', 'info');
                 return;
             }
@@ -4236,6 +4397,7 @@
             sessionReady = false;
             parentReady = false;
             handshakeComplete = false;
+            _sessionInvalid = true;
             
             if (window.AppState) {
                 window.AppState.isAuthenticated = false;
@@ -4256,7 +4418,9 @@
                 }
             });
             
-            RenderingPipeline.updateSyncIndicator();
+            if (RenderingPipeline && RenderingPipeline.updateSyncIndicator) {
+                RenderingPipeline.updateSyncIndicator();
+            }
             
             showNotification('Logged out', 'info');
         }
@@ -4265,7 +4429,7 @@
     // ==================== UI PANEL HANDLERS ====================
     const UIPanelHandlers = {
         openParticipantsPanel: function() {
-            if (!UIState.activeCallId) {
+            if (!UIState.activeCallId && !coreInstance?.isInCall?.()) {
                 showNotification('Join a call to see participants', 'info');
                 return;
             }
@@ -4274,7 +4438,7 @@
         },
         
         openChatPanel: function() {
-            if (!UIState.activeCallId) {
+            if (!UIState.activeCallId && !coreInstance?.isInCall?.()) {
                 showNotification('Join a call to use chat', 'info');
                 return;
             }
@@ -4283,7 +4447,7 @@
         },
         
         openWhiteboardPanel: function() {
-            if (!UIState.activeCallId) {
+            if (!UIState.activeCallId && !coreInstance?.isInCall?.()) {
                 showNotification('Join a call to use whiteboard', 'info');
                 return;
             }
@@ -4292,7 +4456,7 @@
         },
         
         openNotesPanel: function() {
-            if (!UIState.activeCallId) {
+            if (!UIState.activeCallId && !coreInstance?.isInCall?.()) {
                 showNotification('Join a call to use notes', 'info');
                 return;
             }
@@ -4301,7 +4465,7 @@
         },
         
         openPollsPanel: function() {
-            if (!UIState.activeCallId) {
+            if (!UIState.activeCallId && !coreInstance?.isInCall?.()) {
                 showNotification('Join a call to create polls', 'info');
                 return;
             }
@@ -5019,7 +5183,8 @@
                     coreLifecycleState
                 },
                 session: {
-                    valid: isSessionValid()
+                    valid: isSessionValid(),
+                    invalid: _sessionInvalid
                 },
                 coreLifecycle: coreLifecycleState
             });
@@ -5201,7 +5366,8 @@
             fallbackModeActive,
             inPassiveMode,
             coreReady,
-            coreLifecycleState
+            coreLifecycleState,
+            sessionInvalid: _sessionInvalid
         }),
         // Added session validation helper
         isSessionValid,
@@ -5219,7 +5385,20 @@
             return coreReady && parentReady;
         },
         // Get core lifecycle state
-        getCoreLifecycleState: () => coreLifecycleState
+        getCoreLifecycleState: () => coreLifecycleState,
+        // Check if in a call
+        isInCall: () => {
+            if (coreInstance && coreInstance.isInCall) {
+                return coreInstance.isInCall();
+            }
+            return UIState.activeCallId !== null;
+        },
+        // Refresh session sync indicator
+        refreshSyncIndicator: () => {
+            if (RenderingPipeline && RenderingPipeline.updateSyncIndicator) {
+                RenderingPipeline.updateSyncIndicator();
+            }
+        }
     };
 
     // ==================== BOOTSTRAP ====================
