@@ -2364,12 +2364,29 @@ const FriendCacheManager = {
     },
     
     syncToGlobals() {
-        window.friends = this.getAllFriends();
-        window.friendRequests = this.getAllRequests();
-        window.sentRequests = this.getAllSentRequests();
-        window.pinnedFriends = Array.from(this._cache.pinnedFriends.values());
-        window.mutedFriends = Array.from(this._cache.mutedFriends.values());
-        window.allUsers = this.getAllUsers();
+        // Reassign module-level `let` variables so ES module live bindings
+        // imported by friend-ui.js always see the latest data.
+        const _f = this.getAllFriends();
+        const _r = this.getAllRequests();
+        const _s = this.getAllSentRequests();
+        const _p = Array.from(this._cache.pinnedFriends.values());
+        const _m = Array.from(this._cache.mutedFriends.values());
+        const _u = this.getAllUsers();
+
+        friends = _f;
+        friendRequests = _r;
+        sentRequests = _s;
+        pinnedFriends = _p;
+        mutedFriends = _m;
+        allUsers = _u;
+
+        // Also keep window.* for legacy consumers
+        window.friends = _f;
+        window.friendRequests = _r;
+        window.sentRequests = _s;
+        window.pinnedFriends = _p;
+        window.mutedFriends = _m;
+        window.allUsers = _u;
     },
     
     persist() {
@@ -5387,6 +5404,56 @@ function loadCachedDataInstantly() {
             userData = currentUser;
         }
         
+        // ── INSTANT DEMO FRIENDS ──────────────────────────────────────────────
+        // If the cache has no real friends, seed two demo contacts immediately
+        // so the UI can render something useful before the API responds.
+        // They are cleared automatically when real friends arrive (validFriends.length > 0).
+        const cachedFriends = FriendCacheManager.getAllFriends();
+        const hasRealFriends = cachedFriends.length > 0 && cachedFriends.some(f => !f.isDemo);
+        if (!hasRealFriends) {
+            const demoFriends = [
+                {
+                    id: 'demo_1',
+                    isDemo: true,
+                    username: 'alex_demo',
+                    displayName: 'Alex (Demo)',
+                    firstName: 'Alex',
+                    lastName: 'Demo',
+                    avatar: 'https://ui-avatars.com/api/?name=Alex+Demo&background=6C63FF&color=fff&size=80',
+                    status: 'online',
+                    online: true,
+                    bio: '👋 This is a demo contact to show you how friends work.',
+                    category: 'friend',
+                    closenessLevel: 3,
+                    isPinned: false,
+                    isMuted: false,
+                    mutualFriends: 0,
+                    createdAt: new Date().toISOString()
+                },
+                {
+                    id: 'demo_2',
+                    isDemo: true,
+                    username: 'sam_demo',
+                    displayName: 'Sam (Demo)',
+                    firstName: 'Sam',
+                    lastName: 'Demo',
+                    avatar: 'https://ui-avatars.com/api/?name=Sam+Demo&background=FF6584&color=fff&size=80',
+                    status: 'offline',
+                    online: false,
+                    bio: '🎉 Add real friends using the "Add Friend" button above!',
+                    category: 'acquaintance',
+                    closenessLevel: 1,
+                    isPinned: false,
+                    isMuted: false,
+                    mutualFriends: 0,
+                    createdAt: new Date().toISOString()
+                }
+            ];
+            FriendCacheManager.setFriends(demoFriends);
+            Logger.info('loadCachedDataInstantly', 'Seeded 2 demo friends (no real friends in cache)');
+        }
+        // ── END INSTANT DEMO FRIENDS ──────────────────────────────────────────
+        
         FriendCacheManager.syncToGlobals();
         
         const contactsData = SafeStorage.getItem(LOCAL_STORAGE_KEYS.CONTACTS);
@@ -5449,6 +5516,20 @@ async function loadFriendsFromBackend() {
             }
             
             const validFriends = friendsData.filter(f => f && f.id);
+
+            // If real friends arrived, replace demo placeholders with real data.
+            // If still 0 real friends, keep the demo friends already seeded by
+            // loadCachedDataInstantly() — don't overwrite them with an empty array.
+            if (validFriends.length > 0) {
+                FriendCacheManager.setFriends(validFriends);
+            } else {
+                Logger.info('loadFriendsFromBackend', 'No real friends from backend — keeping demo contacts');
+                FriendCacheManager.syncToGlobals();
+                updateFriendCounts?.();
+                window.dispatchEvent(new CustomEvent('friendsUpdated', { detail: { friends: FriendCacheManager.getAllFriends(), demo: true } }));
+                clearFriendsLoading();
+                return { success: true, count: 0, demo: true };
+            }
             
             FriendCacheManager.setFriends(validFriends);
             FriendCacheManager.syncToGlobals();

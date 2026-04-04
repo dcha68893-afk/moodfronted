@@ -1,8 +1,9 @@
 // =============================================
-// MESSAGES-UI.js - HARDENED PRODUCTION UI ENGINE v4.3.3
+// MESSAGES-UI.js - HARDENED PRODUCTION UI ENGINE v4.3.4
 // FIXED: Properly syncs with MessagesCore (capital M)
 // FIXED: Session state synchronization
 // FIXED: Lifecycle state detection
+// FIXED: Chat panel display and message input box
 // =============================================
 
 (function() {
@@ -11,7 +12,7 @@
     // =============================================
     // CONSTANTS & CONFIGURATION
     // =============================================
-    const VERSION = '4.3.3';
+    const VERSION = '4.3.4';
     const APP_NAME = 'kynecta-messages-ui';
     const SOURCE_CHILD = 'CHILD';
     const FRAME_ID = 'messagesIframe';
@@ -524,6 +525,12 @@
                 el.disabled = false;
                 el.removeAttribute('disabled');
             });
+            
+            // Also enable chat panel input specifically
+            const messageInput = document.getElementById('messageInput');
+            if (messageInput) messageInput.disabled = false;
+            const sendButton = document.getElementById('sendButton');
+            if (sendButton) sendButton.disabled = false;
         },
         
         isInWaitParent() {
@@ -781,6 +788,23 @@
         
         _triggerRealDataFetch() {
             const core = getMessagesCore();
+            
+            // Check if core is actually ACTIVE before triggering fetch
+            const coreState = core?.getState?.();
+            const coreIsActive = coreState?.state === 'ACTIVE';
+            
+            if (!coreIsActive) {
+                console.log('[messagesUI] Core not ACTIVE yet, scheduling retry for data fetch');
+                // Retry after a short delay
+                setTimeout(() => {
+                    const coreStateRetry = getMessagesCore()?.getState?.();
+                    if (coreStateRetry?.state === 'ACTIVE') {
+                        this._triggerRealDataFetch();
+                    }
+                }, 500);
+                return;
+            }
+            
             if (!UIFailsafe.hasValidSession()) {
                 console.log('[messagesUI] No valid session, skipping data fetch');
                 return;
@@ -1444,7 +1468,10 @@
             const sessionValid = UIStateManager.getState('sessionValid');
             // If core has valid session but UI state is not yet updated, still allow render
             const coreHasSession = UIFailsafe.hasValidSession();
-            return (lifecycleState === LIFECYCLE_STATES.ACTIVE && sessionValid) || coreHasSession;
+            // Also allow render if core itself reports ACTIVE state
+            const core = typeof getMessagesCore === 'function' ? getMessagesCore() : null;
+            const coreIsActive = core?.getState?.()?.state === 'ACTIVE';
+            return (lifecycleState === LIFECYCLE_STATES.ACTIVE && sessionValid) || coreHasSession || coreIsActive;
         },
 
         _getPassiveLoadingState() {
@@ -3727,6 +3754,54 @@
         _ensureStatusIndicators();
         _removeLoadingOverlays();
         
+        // Subscribe to core data events to re-render UI when real data arrives
+        const setupCoreSubscriptions = () => {
+            const core = getMessagesCore();
+            if (!core) return false;
+            
+            // Listen for conversations updated (from real backend or demo)
+            window.addEventListener('conversationsUpdated', (e) => {
+                const conversations = e.detail?.conversations || core.getConversations?.() || [];
+                if (UIRenderer._canRender()) {
+                    const currentChat = core.getCurrentConversation?.();
+                    const drafts = core.UI?.getDraft ? {} : {};
+                    UIRenderer.renderChatsList(conversations, currentChat, 'all', drafts);
+                }
+            });
+            
+            // Listen for friends updated
+            window.addEventListener('friendsUpdated', (e) => {
+                const friends = e.detail?.friends || core.getFriends?.() || [];
+                if (UIRenderer._canRender()) {
+                    UIRenderer.renderContactsList(friends);
+                }
+            });
+            
+            // Subscribe to ChatManager via core subscribers
+            if (core.ChatManager && core.ChatManager.subscribe) {
+                core.ChatManager.subscribe((conversations, activeChat, messages) => {
+                    if (UIRenderer._canRender()) {
+                        UIRenderer.renderChatsList(conversations || [], activeChat, 'all', {});
+                        if (activeChat && messages) {
+                            const user = core.getCurrentUser?.();
+                            UIRenderer.renderMessages(messages, activeChat, user);
+                        }
+                    }
+                });
+            }
+            
+            // Subscribe to FriendManager via core subscribers  
+            if (core.FriendManager && core.FriendManager.subscribe) {
+                core.FriendManager.subscribe((friends) => {
+                    if (UIRenderer._canRender()) {
+                        UIRenderer.renderContactsList(friends || []);
+                    }
+                });
+            }
+            
+            return true;
+        };
+        
         let checkCount = 0;
         const checkCore = setInterval(() => {
             checkCount++;
@@ -3737,6 +3812,9 @@
             
             if ((lifecycleState === LIFECYCLE_STATES.ACTIVE && hasValidSession) || hasValidSession) {
                 clearInterval(checkCore);
+                
+                // Setup core subscriptions now that core is ready
+                setupCoreSubscriptions();
                 
                 setTimeout(() => {
                     const core = getMessagesCore();
@@ -3778,6 +3856,18 @@
                             core.renderContactsList?.();
                         }
                         
+                        // Immediately render any existing conversations from core
+                        if (core) {
+                            const conversations = core.getConversations?.() || [];
+                            const friends = core.getFriends?.() || [];
+                            if (conversations.length > 0 && UIRenderer._canRender()) {
+                                UIRenderer.renderChatsList(conversations, core.getCurrentConversation?.(), 'all', {});
+                            }
+                            if (friends.length > 0 && UIRenderer._canRender()) {
+                                UIRenderer.renderContactsList(friends);
+                            }
+                        }
+                        
                         UIStateManager._initializeActiveUI();
                     });
                 }, 0);
@@ -3785,6 +3875,7 @@
                 console.log('[UI] Force enabling UI - valid session detected');
                 UIFailsafe.forceEnableUI();
                 clearInterval(checkCore);
+                setupCoreSubscriptions();
                 const core = getMessagesCore();
                 if (core && core.fetchConversations) {
                     core.fetchConversations();
@@ -3809,6 +3900,7 @@
                 if (UIFailsafe.hasValidSession()) {
                     console.log('[UI] Timeout but session valid - forcing UI enable');
                     UIFailsafe.forceEnableUI();
+                    setupCoreSubscriptions();
                 } else {
                     console.log('[UI] Timeout - no session, showing fallback');
                     _updateFallbackUI();
@@ -3965,10 +4057,122 @@
         forceSyncWithCore: () => UIStateManager._forceSyncSessionState(),
         
         // Helper to get core instance
-        getCore: getMessagesCore
+        getCore: getMessagesCore,
+        
+        // Helper to open chat programmatically
+        openChat: (chat) => {
+            const core = getMessagesCore();
+            if (core && core.openConversation) {
+                core.openConversation(chat.id || chat);
+            }
+        },
+        
+        // Helper to load chat by friend ID
+        loadChatByFriendId: (friendId) => {
+            const core = getMessagesCore();
+            if (core && core.createConversation) {
+                core.createConversation([parseInt(friendId)]);
+            }
+        },
+        
+        // Helper to view media
+        viewMedia: (url, name) => {
+            const viewer = document.getElementById('mediaViewer');
+            const img = document.getElementById('mediaViewerImage');
+            const fileName = document.getElementById('mediaFileName');
+            if (viewer && img) {
+                img.src = url;
+                if (fileName) fileName.textContent = name || 'Media';
+                viewer.classList.add('active');
+            }
+        },
+        
+        // Helper to close media viewer
+        closeMediaViewer: () => {
+            const viewer = document.getElementById('mediaViewer');
+            if (viewer) viewer.classList.remove('active');
+        },
+        
+        // Helper to play video
+        playVideo: (url) => {
+            window.open(url, '_blank');
+        },
+        
+        // Helper to download file
+        downloadFile: (url, name) => {
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = name;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+        },
+        
+        // Helper to open location
+        openLocation: (lat, lng) => {
+            window.open(`https://www.google.com/maps?q=${lat},${lng}`, '_blank');
+        },
+        
+        // Helper to play audio
+        playAudio: (id, url, duration) => {
+            const audio = new Audio(url);
+            audio.play();
+            const btn = document.querySelector(`#waveform-${id}`).parentElement.querySelector('.audio-play-btn i');
+            if (btn) {
+                btn.classList.remove('fa-play');
+                btn.classList.add('fa-pause');
+            }
+            audio.onended = () => {
+                if (btn) {
+                    btn.classList.remove('fa-pause');
+                    btn.classList.add('fa-play');
+                }
+            };
+        },
+        
+        // Helper to vote in poll
+        voteInPoll: (messageId, optionIndex) => {
+            const core = getMessagesCore();
+            if (core && core.addReaction) {
+                core.addReaction(messageId, `poll_${optionIndex}`, true);
+            }
+        },
+        
+        // Helper to save edited message
+        saveEditedMessage: (messageId) => {
+            const input = document.querySelector(`#editMessageInput_${messageId}`);
+            if (input) {
+                const newContent = input.value;
+                const core = getMessagesCore();
+                if (core && core.editMessage) {
+                    core.editMessage(messageId, newContent);
+                }
+            }
+        },
+        
+        // Helper to cancel edit
+        cancelEditMessage: () => {
+            // Reload messages to revert
+            const core = getMessagesCore();
+            if (core && core.fetchMessages) {
+                const currentChat = core.getCurrentConversation();
+                if (currentChat) {
+                    core.fetchMessages(currentChat.id);
+                }
+            }
+        }
     };
 
     window.messagesUI = messagesUI;
+    
+    // Add media viewer close handler
+    const closeMediaViewer = document.getElementById('closeMediaViewer');
+    if (closeMediaViewer) {
+        closeMediaViewer.addEventListener('click', () => {
+            const viewer = document.getElementById('mediaViewer');
+            if (viewer) viewer.classList.remove('active');
+        });
+    }
 
     if (typeof module !== 'undefined' && module.exports) {
         module.exports = messagesUI;

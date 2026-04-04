@@ -191,6 +191,14 @@ let _cachedUIActive = false;
 let _lastUIActiveCheck = 0;
 
 function isUIActive() {
+    // DEMO BYPASS: if the current friends array is entirely demo contacts,
+    // allow rendering immediately regardless of lifecycle state so users see
+    // the demo friends instead of the "please wait" spinner.
+    const friendArr = Array.isArray(friends) ? friends : [];
+    if (friendArr.length > 0 && friendArr.every(f => f && f.isDemo)) {
+        return true;
+    }
+
     // Cache result for 100ms to avoid excessive checks
     const now = Date.now();
     if (now - _lastUIActiveCheck < 100) {
@@ -1562,6 +1570,42 @@ export const renderFriends = function() {
             return;
         }
 
+        // DEMO BANNER: shown when all friends are demo contacts
+        const allDemo = friendArray.length > 0 && friendArray.every(f => f && f.isDemo);
+        if (allDemo) {
+            const banner = document.createElement('div');
+            banner.className = 'demo-friends-banner';
+            banner.style.cssText = [
+                'background:linear-gradient(135deg,rgba(108,99,255,.12),rgba(255,101,132,.12))',
+                'border:1px dashed rgba(108,99,255,.4)',
+                'border-radius:12px',
+                'padding:14px 16px',
+                'margin-bottom:12px',
+                'font-size:13px',
+                'color:var(--text-secondary,#888)',
+                'text-align:center',
+                'display:flex',
+                'align-items:center',
+                'gap:10px',
+                'justify-content:center'
+            ].join(';');
+            banner.innerHTML = [
+                '<i class="fas fa-magic" style="color:#6C63FF;font-size:16px;flex-shrink:0"></i>',
+                '<span>',
+                '<strong style="color:var(--text-primary,#333)">Welcome!</strong> ',
+                'These are demo contacts showing how the friends feature works. ',
+                '<button id="demoBannerAddBtn" style="background:none;border:none;padding:0;cursor:pointer;color:#6C63FF;font-weight:600;text-decoration:underline;font-size:13px">Add a real friend</button> to get started.',
+                '</span>'
+            ].join('');
+            domElements.friendsList.appendChild(banner);
+            const addBtn = banner.querySelector('#demoBannerAddBtn');
+            if (addBtn) {
+                addBtn.addEventListener('click', () => {
+                    if (domElements.addFriendModal) domElements.addFriendModal.classList.add('active');
+                });
+            }
+        }
+
         const sortedFriends = [...friendArray].sort((a, b) => {
             if (!a || !b) return 0;
             const aPinned = pinnedArray.some(f => f && f.id === a.id);
@@ -1917,7 +1961,10 @@ function createFriendItemElement(friendData, type, instantMode = false) {
 
         const displayName = escapeHtml(friendData.displayName || 'Unknown User');
         const username = friendData.username ? escapeHtml(friendData.username) : null;
-        const photoURL = friendData.photoURL ? escapeHtml(friendData.photoURL) : null;
+        // Support both photoURL (real users) and avatar (demo / backend avatar field)
+        const photoURL = friendData.photoURL
+            ? escapeHtml(friendData.photoURL)
+            : (friendData.avatar ? escapeHtml(friendData.avatar) : null);
 
         const initials = displayName
             .split(' ')
@@ -1970,7 +2017,10 @@ function createFriendItemElement(friendData, type, instantMode = false) {
             avatarHtml = `<div class="friend-avatar"><span>${initials}</span></div>`;
         }
 
+        const isDemo = friendData.isDemo === true;
+
         let badgesHtml = '';
+        if (isDemo) badgesHtml += '<span class="temp-friend-badge" style="background:rgba(108,99,255,.15);color:#6C63FF;border:1px solid rgba(108,99,255,.3)"><i class="fas fa-flask"></i> Demo</span>';
         if (isTemporary) badgesHtml += '<span class="temp-friend-badge"><i class="fas fa-clock"></i> Temp</span>';
         if (isBusiness) badgesHtml += '<span class="business-badge"><i class="fas fa-briefcase"></i> Business</span>';
         if (isPinned) badgesHtml += '<span class="temp-friend-badge"><i class="fas fa-thumbtack"></i> Pinned</span>';
@@ -2053,6 +2103,10 @@ function createFriendItemElement(friendData, type, instantMode = false) {
             }
             if (!e.target.closest('.friend-actions') && !e.target.closest('.mutual-friends')) {
                 logUI(`Friend item clicked: ${friendId}`);
+                if (isDemo) {
+                    showNotification('This is a demo contact. Add real friends to start chatting!', 'info', 3000);
+                    return;
+                }
                 showFriendDetails(friendData, type);
             }
         });
@@ -2066,6 +2120,10 @@ function createFriendItemElement(friendData, type, instantMode = false) {
                     return;
                 }
                 e.stopPropagation();
+                if (isDemo) {
+                    showNotification('Add real friends to use this feature!', 'info', 3000);
+                    return;
+                }
                 const action = btn.dataset.action;
                 logUI(`Friend action: ${action} for ${friendId}`);
                 handleFriendAction(action, friendData, type, btn);
