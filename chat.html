@@ -453,23 +453,35 @@ function sendSessionToModule(iframe, moduleName) {
 
 window.addEventListener('message', async function(event) {
     const data = event.data || {};
-    
-    // Handle CHILD_READY - send session only to the module that just became ready
+ 
+    // Handle CHILD_READY - send session to the module that just became ready
     if (data.type === 'CHILD_READY') {
-        const moduleName = data.module || data.source;
-        console.log(`📡 CHILD_READY from ${moduleName || 'unknown module'}`);
-        if (moduleName && moduleToIframeId[moduleName]) {
-            // Only send to this specific module, not all modules
-            const iframe = document.getElementById(moduleToIframeId[moduleName]);
-            if (iframe && iframe.contentWindow && cachedToken && cachedUserId) {
-                sendSessionToModule(iframe, moduleName);
+        // Resolve module name from all possible fields in order of reliability
+        const targetModule = data.module || data.source || data.payload?.module || null;
+        console.log(`📡 CHILD_READY from ${targetModule || 'unknown'}`);
+
+        if (targetModule && moduleToIframeId[targetModule]) {
+            const iframe = document.getElementById(moduleToIframeId[targetModule]);
+            if (iframe && iframe.contentWindow) {
+                if (cachedToken && cachedUserId) {
+                    console.log(`📡 Sending session to ${targetModule} (from CHILD_READY)`);
+                    sendSessionToModule(iframe, targetModule);
+                } else {
+                    // Session not cached yet — update cache then send
+                    updateSessionCache();
+                    if (cachedToken && cachedUserId) {
+                        console.log(`📡 Sending session to ${targetModule} (from CHILD_READY, cache refreshed)`);
+                        sendSessionToModule(iframe, targetModule);
+                    } else {
+                        console.warn(`📡 No session available for ${targetModule} — will retry on next broadcast`);
+                    }
+                }
             }
         } else {
-            // Unknown module - send to all as fallback
-            setTimeout(() => sendToAllModulesIfNeeded(false), 100);
+            console.log(`📡 Unrecognised module "${targetModule}" — broadcasting to all`);
+            sendToAllModulesIfNeeded(true);
         }
     }
-    
     // Handle API REQUESTS - NOW USING API GATEWAY WITH CORRECT RESPONSE FORMAT
     if (data.type === 'API_REQUEST') {
         let endpoint = data.payload?.endpoint || data.endpoint;

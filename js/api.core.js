@@ -1110,21 +1110,23 @@ if (url.startsWith('http://') || url.startsWith('https://')) {
                 referrerPolicy: options.referrerPolicy || 'strict-origin-when-cross-origin'
             };
             
-            // For local development, use token-based auth; for production, use cookies
             if (requiresAuth) {
-                const token = getUserToken('coreFetch');
-                if (token && !isProduction()) {
-                    fetchOptions.headers['Authorization'] = `Bearer ${token}`;
-                    
-                    if (!_authHeaderLogged) {
-                        console.log(`[API] ðŸ” Auth header attached for: ${endpointPath} (token length: ${token.length})`);
-                        _authHeaderLogged = true;
-                        setTimeout(() => { _authHeaderLogged = false; }, 60000);
-                    }
-                } else if (isProduction()) {
-                    console.log(`[API] ðŸ” Production mode - using cookie-based auth for: ${endpointPath}`);
-                }
-            }
+    const token = getUserToken('coreFetch');
+    
+    // CRITICAL FIX: ALWAYS use Bearer token, even in production
+    // Cookie-based auth doesn't work because cookies aren't set
+    if (token && typeof token === 'string' && token.length > 20) {
+        fetchOptions.headers['Authorization'] = `Bearer ${token}`;
+        
+        if (!_authHeaderLogged) {
+            console.log(`[API] 🔐 Auth header attached for: ${endpointPath} (token length: ${token.length}) - Mode: ${isProduction() ? 'PRODUCTION' : 'DEVELOPMENT'}`);
+            _authHeaderLogged = true;
+            setTimeout(() => { _authHeaderLogged = false; }, 60000);
+        }
+    } else if (!token) {
+        console.warn(`[API] ⚠️ No token available for protected endpoint: ${endpointPath}`);
+    }
+}
             
             if (options.body) {
                 if (options.body instanceof FormData) {

@@ -1,11 +1,12 @@
 // =============================================
-// FRIEND PAGE - STABILIZED COMMUNICATION v12.0
+// FRIEND PAGE - STABILIZED COMMUNICATION v12.1
 // AUTH-HARDENED MICRO-FRONTEND ARCHITECTURE
 // COMPLETE FIX: All API calls through parent with proper authentication
 // FIXED: No direct fetch calls - all through parent messaging
 // FIXED: Authentication waiting before any API calls
 // FIXED: Request queue for pending auth operations
-// STABILITY v12.0: Auth-first initialization, request queuing, proper error handling
+// FIXED: Proper parent message format handling for AUTH_READY and PARENT_READY
+// STABILITY v12.1: Auth-first initialization, request queuing, proper error handling
 // =============================================
 
 import {
@@ -40,7 +41,7 @@ const DEBUG = false;
 const PRODUCTION = window.location.hostname !== 'localhost' && !window.location.hostname.includes('127.0.0.1');
 
 const MODULE_NAME = 'friends';
-const MODULE_VERSION = '12.0';
+const MODULE_VERSION = '12.1';
 const EXPECTED_PARENT_ORIGIN = window.location.origin;
 
 // =============================================
@@ -181,7 +182,6 @@ const VALID_TRANSITIONS = {
 };
 
 function transitionTo(nextState, reason = '') {
-    // CRITICAL FIX: Prevent duplicate transitions to same state
     if (currentState === nextState) {
         Logger.debug('Lifecycle', `Already in state ${nextState} - ignoring transition`, { reason });
         return true;
@@ -285,22 +285,22 @@ function assertReadyForSession(actionName) {
 // [EXACTLY-ONCE CHILD_READY SENDER] - NO RETRIES
 // =============================================
 function sendChildReady() {
-    // STRICT: Only send if state is READY and not already sent
     if (childReadySent) {
-        console.warn('[Lifecycle] CHILD_READY already sent — skipping');
+        console.warn('[Lifecycle] CHILD_READY already sent');
         return false;
     }
 
     if (currentState !== LIFECYCLE_STATES.READY) {
-        console.warn(`[Lifecycle] Cannot send CHILD_READY — invalid state: ${currentState}`);
+        console.warn(`[Lifecycle] Cannot send CHILD_READY - state: ${currentState}`);
         return false;
     }
 
-    // Use the parent's expected format
+    // CRITICAL: Send module name at root level for parent detection
     const sent = sendMessageInternal({
         type: 'CHILD_READY',
-        module: MODULE_NAME,  // Parent looks for this
-        source: MODULE_NAME,  // Also this
+        module: MODULE_NAME,      // ← This is what parent looks for
+        source: MODULE_NAME,      // ← Also this
+        target: 'parent',
         payload: {
             module: MODULE_NAME,
             version: MODULE_VERSION,
@@ -311,86 +311,65 @@ function sendChildReady() {
 
     if (sent) {
         childReadySent = true;
-        console.log(`[${MODULE_NAME}] CHILD_READY sent`);
+        console.log(`[${MODULE_NAME}] CHILD_READY sent with module=${MODULE_NAME}`);
         transitionTo(LIFECYCLE_STATES.WAIT_PARENT, 'child_ready_sent');
         return true;
-    } else {
-        console.error(`[${MODULE_NAME}] Failed to send CHILD_READY`);
-        return false;
     }
+    return false;
 }
-
 // =============================================
-// [PARENT_READY HANDLER] - EXACTLY ONCE
+// [PARENT_READY HANDLER] - EXACTLY ONCE WITH PROPER SESSION EXTRACTION
 // =============================================
 function handleParentReady(message) {
-    // STRICT: Only process if not already received
     if (parentReadyReceived) {
         console.warn('[Lifecycle] PARENT_READY already received — ignoring');
         return;
     }
 
-    // STRICT: Only accept PARENT_READY in WAIT_PARENT state
     if (currentState !== LIFECYCLE_STATES.WAIT_PARENT) {
         console.warn(`[Lifecycle] PARENT_READY received in invalid state: ${currentState} — ignoring`);
         return;
     }
 
-    console.log('[Lifecycle] PARENT_READY received, structure:', {
-        hasPayload: !!message.payload,
-        hasPayloadSession: !!message.payload?.session,
-        hasRootSession: !!message.session
-    });
+    console.log('[Lifecycle] PARENT_READY received - extracting session');
 
-    // Extract session from parent's format
+    // Parent sends: PARENT_READY.payload = { protocol, state, message, session: { token, user, ... }, userId }
     let session = null;
-    
-    // METHOD 1: Parent sends session in payload.session
+
     if (message.payload?.session) {
         session = message.payload.session;
-        console.log('[Lifecycle] ✓ Extracted session from payload.session');
-    }
-    
-    // METHOD 2: Parent sends session at root
-    if (!session && message.session) {
+        console.log('[Lifecycle] PARENT_READY: extracted session from payload.session');
+    } else if (message.session) {
         session = message.session;
-        console.log('[Lifecycle] ✓ Extracted session from root session');
+        console.log('[Lifecycle] PARENT_READY: extracted session from root session');
     }
-    
-    // METHOD 3: Parent sends token and user separately
-    if (!session && message.payload?.token && message.payload?.user) {
-        session = { token: message.payload.token, user: message.payload.user };
-        console.log('[Lifecycle] ✓ Created session from payload token/user');
-    }
-    
+
     if (session) {
         applySession(session);
     } else if (__session.user) {
-        // Already have session from AUTH_READY
-        console.log('[Lifecycle] Using existing session from AUTH_READY');
+        console.log('[Lifecycle] PARENT_READY: using existing session from AUTH_READY');
+    } else {
+        console.warn('[Lifecycle] PARENT_READY: no session data available');
     }
 
     parentReadyReceived = true;
-
-    // STRICT: Transition to ACTIVE exactly once
     transitionTo(LIFECYCLE_STATES.ACTIVE, 'parent_ready_received');
-
-    window.__PARENT_READY__ = true;
+    window.__PARENT_READY__    = true;
     window.__HANDSHAKE_COMPLETE__ = true;
-
-    console.log(`[${MODULE_NAME}] PARENT_READY received — ACTIVE state entered`);
-
+    console.log(`[${MODULE_NAME}] ✅ ACTIVE`);
     onModuleActive();
 }
 
+// =============================================
+// [AUTH_READY HANDLER] - PROPER SESSION EXTRACTION FROM PARENT
+// =============================================
+
 function handleAuthReady(message) {
-    // STRICT: Only process if not already received
     if (authReadyReceived) {
         console.warn('[Lifecycle] AUTH_READY already received — ignoring');
         return;
     }
 
-    // STRICT: Only accept AUTH_READY in WAITING_AUTH state or higher
     if (currentState !== LIFECYCLE_STATES.WAITING_AUTH && 
         currentState !== LIFECYCLE_STATES.AUTH_READY && 
         currentState !== LIFECYCLE_STATES.INITIALIZING) {
@@ -398,161 +377,102 @@ function handleAuthReady(message) {
         return;
     }
 
-    console.log('[Lifecycle] AUTH_READY received, structure:', {
-        hasPayload: !!message.payload,
-        hasPayloadSession: !!message.payload?.session,
-        hasPayloadUser: !!message.payload?.user,
-        hasRootUserId: !!message.userId,
-        payloadKeys: message.payload ? Object.keys(message.payload) : []
-    });
+    console.log('[Lifecycle] AUTH_READY received - extracting session');
 
-    // CRITICAL FIX: Parent sends session in payload.session
-    let session = null;
-    let user = null;
+    // Parent sends: AUTH_READY.payload = { authenticated, session: { token, user, userId, ... }, user, userId }
     let token = null;
-    
-    // METHOD 1: Parent's actual format - payload.session
+    let user  = null;
+
+    // Primary: session object inside payload (parent's standard format)
     if (message.payload?.session) {
-        session = message.payload.session;
-        token = session.token;
-        user = session.user;
-        console.log('[Lifecycle] ✓ Extracted session from payload.session');
+        const s = message.payload.session;
+        token = s.token || null;
+        user  = s.user  || null;
     }
-    
-    // METHOD 2: Parent's fallback - payload directly
-    if (!session && message.payload?.token && message.payload?.user) {
-        token = message.payload.token;
-        user = message.payload.user;
-        session = { token, user };
-        console.log('[Lifecycle] ✓ Extracted session from payload directly');
-    }
-    
-    // METHOD 3: Root level user data from parent
-    if (!user && message.payload?.user) {
-        user = message.payload.user;
-        console.log('[Lifecycle] ✓ Extracted user from payload.user');
-    }
-    
-    // METHOD 4: Root level userId from parent
-    if (!user && message.userId) {
+
+    // Secondary: user / token at payload root (also sent by parent as convenience fields)
+    if (!token && message.payload?.token)  token = message.payload.token;
+    if (!user  && message.payload?.user)   user  = message.payload.user;
+
+    // Tertiary: userId at payload root — build a user object from it
+    if (!user && message.payload?.userId) {
+        const uid = message.payload.userId;
         user = {
-            id: message.userId,
-            userId: message.userId,
-            username: message.payload?.username || message.username || 'User',
-            displayName: message.payload?.displayName || message.displayName || 'User'
+            id:          uid,
+            userId:      uid,
+            username:    message.payload.session?.username    || message.payload.username    || String(uid),
+            email:       message.payload.session?.email       || message.payload.email       || '',
+            displayName: message.payload.session?.displayName || message.payload.displayName || String(uid)
         };
-        console.log('[Lifecycle] ✓ Created user from root userId:', message.userId);
     }
-    
-    // METHOD 5: Root level user from parent's PARENT_READY format
-    if (!user && message.user) {
-        user = message.user;
-        console.log('[Lifecycle] ✓ Extracted user from root user');
+
+    // Final guard: userId at message root
+    if (!user && message.userId) {
+        const uid = message.userId;
+        user = { id: uid, userId: uid, username: String(uid), email: '', displayName: String(uid) };
     }
+    if (!token && message.token) token = message.token;
     
-    // Apply the session if we have at least user info
     if (user) {
-        // Ensure user has id property
-        if (!user.id && user.userId) {
-            user.id = user.userId;
-        }
-        if (!user.userId && user.id) {
-            user.userId = user.id;
-        }
-        
-        // Store token from anywhere we can find it
-        const finalToken = token || message.payload?.token || message.token || message.accessToken;
-        
-        const finalSession = {
-            token: finalToken,
-            user: user,
-            expiresAt: message.payload?.expiresAt || message.expiresAt || Date.now() + 3600000,
-            ready: !!(user && (finalToken || true))  // Allow session without token for now
-        };
-        
-        console.log('[Lifecycle] Applying session:', {
-            hasToken: !!finalToken,
-            userId: user.id,
-            username: user.username
+        // Ensure both id and userId are always set
+        if (!user.id   && user.userId) user.id     = user.userId;
+        if (!user.userId && user.id)   user.userId = user.id;
+
+        console.log('[Lifecycle] Applying AUTH_READY session:', { userId: user.id, username: user.username });
+
+        applySession({
+            token:         token,
+            user:          user,
+            expiresAt:     message.payload?.expiresAt || Date.now() + 3600000,
+            ready:         true,
+            authenticated: true
         });
-        
-        applySession(finalSession);
+
         authReadyReceived = true;
-        
         transitionTo(LIFECYCLE_STATES.AUTH_READY, 'auth_ready_received');
-        console.log(`[${MODULE_NAME}] AUTH_READY received — proceeding to READY state`);
-        
-        // Now transition to READY
-        transitionTo(LIFECYCLE_STATES.READY, 'auth_ready_processed');
-        
-        // Send CHILD_READY after auth is ready
+        transitionTo(LIFECYCLE_STATES.READY,      'auth_ready_complete');
         sendChildReady();
-        
-        // Flush any queued requests
         flushRequestQueue();
+
     } else {
-        console.error('[Lifecycle] AUTH_READY received but no user data found', {
-            messageKeys: Object.keys(message),
-            payloadKeys: message.payload ? Object.keys(message.payload) : [],
+        console.error('[Lifecycle] AUTH_READY received but could not extract user.', {
             hasPayloadSession: !!message.payload?.session,
-            hasPayloadUser: !!message.payload?.user,
-            hasRootUserId: !!message.userId
+            hasPayloadUser:    !!message.payload?.user,
+            hasPayloadUserId:  !!message.payload?.userId,
+            hasRootUserId:     !!message.userId,
+            payloadKeys:       message.payload ? Object.keys(message.payload) : []
         });
     }
 }
 
 function applySession(session) {
     if (!session) {
-        console.warn(`[${MODULE_NAME}] No session data in message`);
+        console.warn(`[${MODULE_NAME}] No session data`);
         return;
     }
 
-    console.log(`[${MODULE_NAME}] applySession called with:`, {
+    console.log(`[${MODULE_NAME}] applySession:`, {
         hasToken: !!session.token,
-        tokenPrefix: session.token ? session.token.substring(0, 20) + '...' : 'none',
         hasUser: !!session.user,
-        userId: session.user?.id || session.userId,
-        sessionKeys: Object.keys(session)
+        userId: session.user?.id || session.userId
     });
 
-    // Handle different session structures
     let token = session.token || session.accessToken || null;
     let user = session.user || null;
     
-    // If user is missing but we have user data at root
+    // Create user from root data if needed
     if (!user && (session.id || session.userId)) {
         user = {
             id: session.id || session.userId,
             userId: session.userId || session.id,
             username: session.username || session.displayName || 'User',
-            displayName: session.displayName || session.username || 'User',
-            email: session.email || ''
+            displayName: session.displayName || session.username || 'User'
         };
-        console.log(`[${MODULE_NAME}] Created user object from root:`, user.id);
-    }
-    
-    // If user is missing but we have user data in payload
-    if (!user && session.payload?.user) {
-        user = session.payload.user;
-        console.log(`[${MODULE_NAME}] Extracted user from payload.user`);
-    }
-    
-    // Ensure user has both id and userId
-    if (user) {
-        if (!user.id && user.userId) user.id = user.userId;
-        if (!user.userId && user.id) user.userId = user.id;
     }
 
     __session.token = token;
     __session.user = user;
-    __session.expiresAt = session.expiresAt || session.payload?.expiresAt || null;
-    __session.ready = !!(user);  // Don't require token for readiness (token can be null in dev)
-
-    console.log(`[${MODULE_NAME}] __session after apply:`, {
-        token: __session.token ? 'present' : 'none',
-        user: __session.user?.id,
-        ready: __session.ready
-    });
+    __session.ready = !!user;
 
     if (__session.user) {
         currentUser = __session.user;
@@ -560,20 +480,14 @@ function applySession(session) {
         window.currentUser = __session.user;
         window.userData = __session.user;
         
-        // Dispatch event that user data is available
         window.dispatchEvent(new CustomEvent('userDataLoaded', {
             detail: { user: __session.user, source: 'session' }
         }));
     }
 }
 
-// =============================================
-// [MODULE ACTIVATION HOOK]
-// =============================================
-
 function onModuleActive() {
     console.log(`[${MODULE_NAME}] Module ACTIVE — safe to perform API calls`);
-
     flushQueue();
     
     if (!__session.ready && parentReadyReceived && authReadyReceived) {
@@ -648,15 +562,12 @@ function markMessageProcessed(messageId) {
     }
 }
 
-// CRITICAL FIX: Safe message sender with parent existence check
 function sendMessageInternal(message) {
-    // Validate parent existence
     if (!window.parent || window.parent === window) {
         Logger.warn('sendMessage', 'Parent window not available');
         return false;
     }
 
-    // Validate message structure
     if (!message || typeof message !== 'object') {
         Logger.error('sendMessage', 'Invalid message object');
         return false;
@@ -664,6 +575,7 @@ function sendMessageInternal(message) {
 
     const validatedMessage = {
         type: message.type,
+        module: message.module || MODULE_NAME,
         id: message.id || generateMessageId(),
         requestId: message.requestId || (message.type.includes('REQUEST') ? generateRequestId() : null),
         source: MODULE_NAME,
@@ -694,7 +606,6 @@ function sendMessageInternal(message) {
 }
 
 function safeSend(message) {
-    // STRICT: No sending before ACTIVE
     if (currentState !== LIFECYCLE_STATES.ACTIVE) {
         Logger.debug('safeSend', 'Not ACTIVE, queueing', { type: message.type, state: currentState });
         return queueMessage(message);
@@ -710,13 +621,10 @@ function isAuthenticated() {
     return authReadyReceived && __session.ready && !!__session.token;
 }
 
-// In friend-core.js, find the authorizedRequest function and update the handler
-
 async function authorizedRequest(endpoint, options = {}) {
     console.log(`[authorizedRequest] Called with endpoint: ${endpoint}`);
     console.log(`[authorizedRequest] Auth state: authReady=${authReadyReceived}, sessionReady=${__session.ready}, token=${!!__session.token}`);
     
-    // CRITICAL FIX: Block requests if auth not ready
     if (!authReadyReceived) {
         console.warn(`[authorizedRequest] Auth not ready - queuing request for ${endpoint}`);
         
@@ -732,35 +640,29 @@ async function authorizedRequest(endpoint, options = {}) {
         });
     }
     
-    // Validate module state
     if (!assertActive('authorizedRequest')) {
         return { success: false, error: 'Module not active', statusCode: 503 };
     }
     
-    // Validate session
     if (!__session.ready || !__session.token) {
         Logger.warn('authorizedRequest', 'Session not ready, waiting for parent session');
         return { success: false, error: 'Session not ready', statusCode: 401 };
     }
     
-    // CRITICAL FIX: Endpoint normalization
     let normalizedEndpoint = endpoint;
     if (normalizedEndpoint && typeof normalizedEndpoint === 'string') {
         normalizedEndpoint = normalizedEndpoint.trim();
         
-        // Remove leading '/api' if present (parent handles it)
         if (normalizedEndpoint.startsWith('/api/')) {
             normalizedEndpoint = normalizedEndpoint.substring(4);
         } else if (normalizedEndpoint.startsWith('api/')) {
             normalizedEndpoint = '/' + normalizedEndpoint.substring(3);
         }
         
-        // Ensure it starts with '/'
         if (!normalizedEndpoint.startsWith('/')) {
             normalizedEndpoint = '/' + normalizedEndpoint;
         }
         
-        // Remove duplicate slashes
         normalizedEndpoint = normalizedEndpoint.replace(/\/+/g, '/');
     }
     
@@ -773,11 +675,7 @@ async function authorizedRequest(endpoint, options = {}) {
             if (!resolved) {
                 resolved = true;
                 Logger.warn('authorizedRequest', `API request timeout for ${normalizedEndpoint}`, { requestId });
-                resolve({ 
-                    success: false, 
-                    error: 'API request timeout', 
-                    statusCode: 408 
-                });
+                resolve({ success: false, error: 'API request timeout', statusCode: 408 });
             }
         }, timeout);
         
@@ -789,14 +687,11 @@ async function authorizedRequest(endpoint, options = {}) {
                 resolved = true;
                 clearTimeout(timeoutId);
                 
-                // CRITICAL FIX: Check for payload structure
                 const payload = message.payload || {};
                 
-                // CRITICAL FIX: Handle success responses with proper data extraction
                 if (payload.success === true) {
                     Logger.info('authorizedRequest', `API success: ${normalizedEndpoint}`, { requestId });
                     
-                    // Extract data - handle both { success: true, data: {...} } and { success: true, ...other }
                     let responseData = null;
                     if (payload.data !== undefined) {
                         responseData = payload.data;
@@ -807,28 +702,20 @@ async function authorizedRequest(endpoint, options = {}) {
                     } else if (payload.users !== undefined) {
                         responseData = { users: payload.users };
                     } else {
-                        // If no specific data field, return the entire payload minus success
                         const { success, ...rest } = payload;
                         responseData = rest;
                     }
                     
-                    resolve({ 
-                        success: true, 
-                        data: responseData, 
-                        statusCode: payload.statusCode || 200 
-                    });
+                    resolve({ success: true, data: responseData, statusCode: payload.statusCode || 200 });
                     return;
                 }
                 
-                // Handle error responses
                 if (payload.error || payload.success === false) {
                     Logger.warn('authorizedRequest', `API error: ${payload.error || 'Unknown error'}`, { endpoint: normalizedEndpoint, requestId });
                     
-                    // Handle authentication errors
                     if (payload.error === 'Authentication required' || payload.statusCode === 401) {
                         Logger.error('authorizedRequest', 'Authentication failed - token may be invalid', { endpoint: normalizedEndpoint });
                         
-                        // Notify parent about auth error
                         safeSend({
                             type: 'AUTH_ERROR',
                             payload: {
@@ -838,40 +725,21 @@ async function authorizedRequest(endpoint, options = {}) {
                             }
                         });
                         
-                        resolve({ 
-                            success: false, 
-                            error: 'Authentication required', 
-                            statusCode: 401 
-                        });
+                        resolve({ success: false, error: 'Authentication required', statusCode: 401 });
                         return;
                     }
                     
-                    resolve({ 
-                        success: false, 
-                        error: payload.error || payload.message || 'API request failed', 
-                        statusCode: payload.statusCode || 500,
-                        data: payload.data
-                    });
+                    resolve({ success: false, error: payload.error || payload.message || 'API request failed', statusCode: payload.statusCode || 500, data: payload.data });
                     return;
                 }
                 
-                // If we get here, the response structure is unexpected
-                Logger.error('authorizedRequest', 'Unexpected API response format', { 
-                    endpoint: normalizedEndpoint, 
-                    requestId,
-                    payload: payload 
-                });
-                resolve({ 
-                    success: false, 
-                    error: 'Invalid API response format', 
-                    statusCode: 500 
-                });
+                Logger.error('authorizedRequest', 'Unexpected API response format', { endpoint: normalizedEndpoint, requestId, payload: payload });
+                resolve({ success: false, error: 'Invalid API response format', statusCode: 500 });
             }
         };
         
         window.addEventListener('message', handler);
         
-        // Prepare request payload with normalized endpoint
         const requestPayload = {
             endpoint: normalizedEndpoint,
             method: options.method || 'GET',
@@ -880,12 +748,10 @@ async function authorizedRequest(endpoint, options = {}) {
             timestamp: Date.now()
         };
         
-        // Add body if present
         if (options.body) {
             requestPayload.body = options.body;
         }
         
-        // Add query params if present
         if (options.params) {
             requestPayload.params = options.params;
         }
@@ -902,11 +768,7 @@ async function authorizedRequest(endpoint, options = {}) {
             if (!resolved) {
                 resolved = true;
                 clearTimeout(timeoutId);
-                resolve({ 
-                    success: false, 
-                    error: 'Failed to send API request to parent', 
-                    statusCode: 503 
-                });
+                resolve({ success: false, error: 'Failed to send API request to parent', statusCode: 503 });
             }
         }
     });
@@ -920,7 +782,6 @@ const APIGateway = {
     _requestCounter: 0,
     
     async request(endpoint, options = {}) {
-        // CRITICAL FIX: Block if auth not ready
         if (!authReadyReceived) {
             console.warn(`[APIGateway] Auth not ready - queuing request for ${endpoint}`);
             
@@ -940,7 +801,6 @@ const APIGateway = {
             return { success: false, error: 'Module not active', statusCode: 503 };
         }
         
-        // Always route through parent with normalized endpoint
         return await authorizedRequest(endpoint, {
             method: options.method || 'GET',
             headers: options.headers || {},
@@ -1329,20 +1189,16 @@ const SecurityValidator = {
     
     validateMessageFormat(message) {
         if (!message || typeof message !== 'object') return false;
-        
-        const requiredFields = ['type', 'source', 'target', 'id', 'timestamp'];
-        for (const field of requiredFields) {
-            if (!message[field] && message[field] !== 0) return false;
-        }
-        
-        if (message.source !== MODULE_NAME && message.source !== 'parent') {
+        if (!message.type || typeof message.type !== 'string') return false;
+
+        // Accept messages originating from parent, targeting this module or broadcast
+        if (message.source && message.source !== 'parent' && message.source !== MODULE_NAME) {
             return false;
         }
-        
-        if (message.target !== MODULE_NAME && message.target !== 'parent') {
+        if (message.target && message.target !== MODULE_NAME && message.target !== 'parent' && message.target !== '*') {
             return false;
         }
-        
+
         return true;
     },
     
@@ -1437,7 +1293,6 @@ const ParentCommunicationManager = {
                 return;
             }
             
-            // STRICT: Deduplicate incoming messages
             if (isMessageProcessed(message.id)) {
                 Logger.debug('ParentCommunication', 'Duplicate message ignored', { id: message.id });
                 return;
@@ -2512,8 +2367,6 @@ const FriendCacheManager = {
     },
     
     syncToGlobals() {
-        // Reassign module-level `let` variables so ES module live bindings
-        // imported by friend-ui.js always see the latest data.
         const _f = this.getAllFriends();
         const _r = this.getAllRequests();
         const _s = this.getAllSentRequests();
@@ -2528,7 +2381,6 @@ const FriendCacheManager = {
         mutedFriends = _m;
         allUsers = _u;
 
-        // Also keep window.* for legacy consumers
         window.friends = _f;
         window.friendRequests = _r;
         window.sentRequests = _s;
@@ -2577,7 +2429,6 @@ const FriendRequestManager = {
         }
         
         if (!authReadyReceived || !__session.ready || !__session.token) {
-            // Queue the request for when auth is ready
             return new Promise((resolve, reject) => {
                 queueRequest(async () => {
                     try {
@@ -5552,10 +5403,6 @@ function loadCachedDataInstantly() {
             userData = currentUser;
         }
         
-        // ── INSTANT DEMO FRIENDS ──────────────────────────────────────────────
-        // If the cache has no real friends, seed two demo contacts immediately
-        // so the UI can render something useful before the API responds.
-        // They are cleared automatically when real friends arrive (validFriends.length > 0).
         const cachedFriends = FriendCacheManager.getAllFriends();
         const hasRealFriends = cachedFriends.length > 0 && cachedFriends.some(f => !f.isDemo);
         if (!hasRealFriends) {
@@ -5600,7 +5447,6 @@ function loadCachedDataInstantly() {
             FriendCacheManager.setFriends(demoFriends);
             Logger.info('loadCachedDataInstantly', 'Seeded 2 demo friends (no real friends in cache)');
         }
-        // ── END INSTANT DEMO FRIENDS ──────────────────────────────────────────
         
         FriendCacheManager.syncToGlobals();
         
@@ -5620,8 +5466,6 @@ function loadCachedDataInstantly() {
         Logger.error('Cache', 'Failed to load cached data', error);
     }
 }
-
-// In friend-core.js, update loadFriendsFromBackend function
 
 async function loadFriendsFromBackend() {
     if (!assertActive('loadFriendsFromBackend')) {
@@ -5647,11 +5491,9 @@ async function loadFriendsFromBackend() {
         
         Logger.info('loadFriendsFromBackend', 'Friends loaded', { success: response.success, data: response.data });
         
-        // CRITICAL FIX: Check response.data structure
         if (response.success && response.data) {
             let friendsData = [];
             
-            // Handle different possible response structures
             if (response.data.friends && Array.isArray(response.data.friends)) {
                 friendsData = response.data.friends;
             } else if (response.data.data && response.data.data.friends) {
@@ -5659,15 +5501,11 @@ async function loadFriendsFromBackend() {
             } else if (Array.isArray(response.data)) {
                 friendsData = response.data;
             } else if (response.data.friends === undefined && Object.keys(response.data).length > 0) {
-                // If response.data is an object with friend properties
                 friendsData = [response.data];
             }
             
             const validFriends = friendsData.filter(f => f && f.id);
 
-            // If real friends arrived, replace demo placeholders with real data.
-            // If still 0 real friends, keep the demo friends already seeded by
-            // loadCachedDataInstantly() — don't overwrite them with an empty array.
             if (validFriends.length > 0) {
                 FriendCacheManager.setFriends(validFriends);
             } else {
@@ -5693,7 +5531,6 @@ async function loadFriendsFromBackend() {
             return { success: true, count: validFriends.length };
         }
         
-        // If response was not successful, try cached data
         const cached = FriendCacheManager.getAllFriends();
         if (cached.length > 0) {
             FriendCacheManager.syncToGlobals();
@@ -7457,7 +7294,6 @@ async function initialize() {
     StatusManager.show('INIT', 'Friend module initializing');
     
     try {
-        // STRICT: BOOT → INITIALIZING
         transitionTo(LIFECYCLE_STATES.INITIALIZING, 'start');
         
         SafeStorage.init();
@@ -7466,12 +7302,8 @@ async function initialize() {
         const frameId = ParentCommunicationManager.getFrameId();
         ParentCommunicationManager.init(frameId);
         
-        // STRICT: INITIALIZING → WAITING_AUTH
         transitionTo(LIFECYCLE_STATES.WAITING_AUTH, 'waiting_for_auth');
         StatusManager.show('AUTH_WAIT', 'Waiting for authentication from parent');
-        
-        // DO NOT proceed to READY until AUTH_READY is received
-        // AUTH_READY will trigger transition to AUTH_READY → READY
         
         MessageDispatcher.init();
         UIBridge.init();
@@ -7856,7 +7688,7 @@ const KYN = {
 };
 
 const friendCore = {
-    version: '12.0',
+    version: '12.1',
     initialized: false,
     fallbackMode: false,
     init: initialize,
@@ -7884,7 +7716,6 @@ const friendCore = {
     getSession: () => ({ token: __session.token, user: __session.user, ready: __session.ready })
 };
 
-// Export everything that might be needed by friend-ui.js
 export {
     // Core State
     currentUser,
@@ -8120,13 +7951,12 @@ export {
     ENV_CONFIG
 };
 
-// Set ready flags
 window.__FRIEND_MODULE_READY__ = true;
 window.__MODULE_READY__ = true;
 
 // =============================================
 // END OF FILE
-// Version: 12.0
+// Version: 12.1
 // ✅ COMPLETE AUTH FIX: All API calls through parent with proper authentication
 // ✅ AUTH-FIRST INIT: Module waits for AUTH_READY before any operations
 // ✅ REQUEST QUEUE: All requests queued until auth is ready
@@ -8140,4 +7970,5 @@ window.__MODULE_READY__ = true;
 // ✅ API ENDPOINT NORMALIZATION: Always correct format
 // ✅ TIMEOUT HANDLING: Proper timeout and cleanup for API requests
 // ✅ AUTH ERROR HANDLING: Proper 401 handling and retry queue
+// ✅ PARENT MESSAGE HANDLING: Proper extraction from payload.session format
 // =============================================
