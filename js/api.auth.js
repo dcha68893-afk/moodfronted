@@ -2655,12 +2655,17 @@
     /**
      * PUBLIC: Login with credentials - ENHANCED TOKEN EXTRACTION & FIXED BASE URL
      */
-    async function login(...args) {
-        console.log('🔐 [AUTH] Login attempt - ENHANCED TOKEN EXTRACTION');
-        
-        const operation = 'login';
-        
-        try {
+   async function login(...args) {
+    console.log('🔐 [AUTH] Login attempt - ENHANCED TOKEN EXTRACTION');
+    
+    // ADD THIS at the very beginning of the function
+    // Check if we're in production and log the backend URL
+    const baseUrl = _getBaseUrl();
+    console.log(`🔐 [AUTH] Using backend URL: ${baseUrl}`);
+    
+    const operation = 'login';
+    
+    try {
             // Wait for api.core to be ready
             const coreReady = await _waitForApiCore();
             if (!coreReady) {
@@ -2958,23 +2963,36 @@
                     data: data
                 };
             }
-        } catch (error) {
-            _safeLogError('LOGIN', 'Login error', {
-                error: error.message || error.error,
-                argsCount: args.length
-            }, false, operation);
-            
+       
+                } catch (error) {
+        _safeLogError('LOGIN', 'Login error', {
+            error: error.message || error.error,
+            argsCount: args.length,
+            baseUrl: _getBaseUrl()  // ADD THIS LINE - log the base URL
+        }, false, operation);
+        
+        // ADD THIS: Check for CORS/network errors
+        if (error.message === 'Failed to fetch' || error.message.includes('NetworkError')) {
             return {
                 success: false,
-                error: error.error || error.message || 'Login failed',
-                code: error.code || 'NETWORK_ERROR',
-                message: error.message || error.error || 'Unable to connect to authentication service',
-                status: error.status || 0,
-                args: args
+                error: 'Cannot connect to authentication server',
+                code: 'CORS_OR_NETWORK_ERROR',
+                message: 'Unable to reach the server. Please check your connection and try again.',
+                status: 0,
+                isCorsError: true
             };
         }
+        
+        return {
+            success: false,
+            error: error.error || error.message || 'Login failed',
+            code: error.code || 'NETWORK_ERROR',
+            message: error.message || error.error || 'Unable to connect to authentication service',
+            status: error.status || 0,
+            args: args
+        };
     }
-    
+}
     /**
      * PUBLIC: Register new user
      */

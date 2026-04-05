@@ -2451,65 +2451,102 @@ async login(credentials) {
                     code: response.code || 'LOGIN_FAILED'
                 };
             }
-        } catch (error) {
-            console.error('Login error:', error);
-            this._recordLoginAttempt(email, false);
-            this._loginInProgress = false;
-            this._pendingLoginResolvers.delete(loginKey);
-            
-            // Check if it's a network timeout but auth state was updated
-            if (error.message && (error.message.includes('timeout') || error.message.includes('Timeout'))) {
-                console.warn('Login request timed out, checking if auth state was updated');
-                if (this._state.status === 'authenticated' && this._state.user && this._state.token) {
-                    console.log('Auth state indicates successful login despite timeout');
-                    
-                    // Show success message and redirect
-                    try {
-                        if (window.CoreUtils && window.CoreUtils.showNotification) {
-                            window.CoreUtils.showNotification('Success', 'Login successful! Redirecting...', 'success');
-                        }
-                    } catch (notifError) {}
-                    
-                    setTimeout(() => {
-                        window.location.href = 'chat.html';
-                    }, 200);
-                    
-                    return {
-                        success: true,
-                        user: this._state.user,
-                        token: this._state.token,
-                        message: 'Login successful (recovered from timeout)'
-                    };
-                }
+      } catch (error) {
+    console.error('Login error:', error);
+    this._recordLoginAttempt(email, false);
+    this._loginInProgress = false;
+    this._pendingLoginResolvers.delete(loginKey);
+    
+    // Check for CORS/Fetch errors specifically
+    if (error.message === 'Failed to fetch' || 
+        error.message.includes('NetworkError') ||
+        error.message.includes('network') ||
+        error.name === 'TypeError') {
+        
+        console.error('🔴 CORS or Network Error detected');
+        
+        // Try to diagnose the issue
+        let diagnosticMessage = 'Cannot connect to server. ';
+        
+        // Check if it's likely a CORS issue
+        if (window.location.hostname !== 'localhost') {
+            diagnosticMessage += 'This may be a CORS configuration issue. ';
+            diagnosticMessage += 'Please ensure the backend CORS settings allow requests from this domain.';
+        } else {
+            diagnosticMessage += 'Please check if the backend server is running and CORS is properly configured.';
+        }
+        
+        // Show error notification
+        try {
+            if (window.CoreUtils && window.CoreUtils.showNotification) {
+                window.CoreUtils.showNotification('Connection Error', diagnosticMessage, 'error');
+            } else if (window.showNotification) {
+                window.showNotification(diagnosticMessage, 'error');
             }
+        } catch (notifError) {}
+        
+        return {
+            success: false,
+            message: diagnosticMessage,
+            code: 'CORS_OR_NETWORK_ERROR',
+            retryable: true
+        };
+    }
+    
+    // Check if it's a network timeout but auth state was updated
+    if (error.message && (error.message.includes('timeout') || error.message.includes('Timeout'))) {
+        console.warn('Login request timed out, checking if auth state was updated');
+        if (this._state.status === 'authenticated' && this._state.user && this._state.token) {
+            console.log('Auth state indicates successful login despite timeout');
             
-            // Check if it's a "module not ready" error
-            if (error.message && error.message.includes('not ready')) {
-                console.warn('Login failed: Authentication module not ready');
-                return {
-                    success: false,
-                    message: 'Authentication service is still initializing. Please try again in a moment.',
-                    retryable: true,
-                    fallback: true
-                };
-            }
-            
-            // Show error notification
-            const errorMessage = this._getUserFriendlyErrorMessage(error);
+            // Show success message and redirect
             try {
                 if (window.CoreUtils && window.CoreUtils.showNotification) {
-                    window.CoreUtils.showNotification('Error', errorMessage, 'error');
-                } else if (window.showNotification) {
-                    window.showNotification(errorMessage, 'error');
+                    window.CoreUtils.showNotification('Success', 'Login successful! Redirecting...', 'success');
                 }
             } catch (notifError) {}
             
+            setTimeout(() => {
+                window.location.href = 'chat.html';
+            }, 200);
+            
             return {
-                success: false,
-                message: errorMessage,
-                code: error.code || 'LOGIN_ERROR'
+                success: true,
+                user: this._state.user,
+                token: this._state.token,
+                message: 'Login successful (recovered from timeout)'
             };
         }
+    }
+    
+    // Check if it's a "module not ready" error
+    if (error.message && error.message.includes('not ready')) {
+        console.warn('Login failed: Authentication module not ready');
+        return {
+            success: false,
+            message: 'Authentication service is still initializing. Please try again in a moment.',
+            retryable: true,
+            fallback: true
+        };
+    }
+    
+    // Show error notification
+    const errorMessage = this._getUserFriendlyErrorMessage(error);
+    try {
+        if (window.CoreUtils && window.CoreUtils.showNotification) {
+            window.CoreUtils.showNotification('Error', errorMessage, 'error');
+        } else if (window.showNotification) {
+            window.showNotification(errorMessage, 'error');
+        }
+    } catch (notifError) {}
+    
+    return {
+        success: false,
+        message: errorMessage,
+        code: error.code || 'LOGIN_ERROR'
+    };
+}
+
     } catch (error) {
         console.error('❌ [AuthGateway] Login method failed:', error);
         

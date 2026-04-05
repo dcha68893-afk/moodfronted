@@ -178,6 +178,7 @@
     '/group/user': '/groups/user',           // ✅ This works
     '/group/user/': '/groups/user',          // ✅ This works
     '/group/invites': '/groups/invites',      // ✅ This exists (returns empty array)
+    '/invites': '/groups/invites/user',       // ✅ Fix: /api/invites → /groups/invites/user
     '/group/moods': '/groups/moods',          // ✅ This exists (returns mood list)
     '/group/purposes': '/groups/purposes',    // ✅ This exists (returns purpose list)
     '/group/notes': '/groups/notes',          // ✅ This exists (returns note types)
@@ -185,6 +186,8 @@
     // Chat endpoints
     '/chats': '/chats',                       // ✅ This exists
     '/chats/': '/chats',                      // ✅ This exists
+    '/messages': '/messages',                 // ✅ Fix: messages endpoint
+    '/messages/send': '/messages',            // ✅ Fix: send message → POST /messages
     
     // Friend endpoints - FIX THESE
     '/friends': '/friends',                   // ✅ This exists
@@ -451,11 +454,20 @@ function sendSessionToModule(iframe, moduleName) {
 window.addEventListener('message', async function(event) {
     const data = event.data || {};
     
-    // Handle CHILD_READY
+    // Handle CHILD_READY - send session only to the module that just became ready
     if (data.type === 'CHILD_READY') {
         const moduleName = data.module || data.source;
         console.log(`📡 CHILD_READY from ${moduleName || 'unknown module'}`);
-        setTimeout(() => sendToAllModulesIfNeeded(true), 100);
+        if (moduleName && moduleToIframeId[moduleName]) {
+            // Only send to this specific module, not all modules
+            const iframe = document.getElementById(moduleToIframeId[moduleName]);
+            if (iframe && iframe.contentWindow && cachedToken && cachedUserId) {
+                sendSessionToModule(iframe, moduleName);
+            }
+        } else {
+            // Unknown module - send to all as fallback
+            setTimeout(() => sendToAllModulesIfNeeded(false), 100);
+        }
     }
     
     // Handle API REQUESTS - NOW USING API GATEWAY WITH CORRECT RESPONSE FORMAT
@@ -486,6 +498,7 @@ window.addEventListener('message', async function(event) {
         const requestId = data.payload?.requestId || data.requestId;
         const method = data.payload?.method || data.method || 'GET';
         const body = data.payload?.body || data.body;
+        const params = data.payload?.params || data.params || null;
         
         console.log(`[Parent] API: ${method} ${endpoint} (${requestId})`);
         
@@ -500,7 +513,7 @@ window.addEventListener('message', async function(event) {
             
             // Make request through API gateway
             if (method === 'GET') {
-                response = await window.api.get(endpoint);
+                response = await window.api.get(endpoint, params || {});
             } else if (method === 'POST') {
                 response = await window.api.post(endpoint, body);
             } else if (method === 'PUT') {

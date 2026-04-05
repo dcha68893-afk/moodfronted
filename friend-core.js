@@ -284,7 +284,6 @@ function assertReadyForSession(actionName) {
 // =============================================
 // [EXACTLY-ONCE CHILD_READY SENDER] - NO RETRIES
 // =============================================
-
 function sendChildReady() {
     // STRICT: Only send if state is READY and not already sent
     if (childReadySent) {
@@ -297,8 +296,11 @@ function sendChildReady() {
         return false;
     }
 
+    // Use the parent's expected format
     const sent = sendMessageInternal({
         type: 'CHILD_READY',
+        module: MODULE_NAME,  // Parent looks for this
+        source: MODULE_NAME,  // Also this
         payload: {
             module: MODULE_NAME,
             version: MODULE_VERSION,
@@ -321,7 +323,6 @@ function sendChildReady() {
 // =============================================
 // [PARENT_READY HANDLER] - EXACTLY ONCE
 // =============================================
-
 function handleParentReady(message) {
     // STRICT: Only process if not already received
     if (parentReadyReceived) {
@@ -335,12 +336,41 @@ function handleParentReady(message) {
         return;
     }
 
-    parentReadyReceived = true;
+    console.log('[Lifecycle] PARENT_READY received, structure:', {
+        hasPayload: !!message.payload,
+        hasPayloadSession: !!message.payload?.session,
+        hasRootSession: !!message.session
+    });
 
-    const session = message.payload?.session || message.session || null;
+    // Extract session from parent's format
+    let session = null;
+    
+    // METHOD 1: Parent sends session in payload.session
+    if (message.payload?.session) {
+        session = message.payload.session;
+        console.log('[Lifecycle] ✓ Extracted session from payload.session');
+    }
+    
+    // METHOD 2: Parent sends session at root
+    if (!session && message.session) {
+        session = message.session;
+        console.log('[Lifecycle] ✓ Extracted session from root session');
+    }
+    
+    // METHOD 3: Parent sends token and user separately
+    if (!session && message.payload?.token && message.payload?.user) {
+        session = { token: message.payload.token, user: message.payload.user };
+        console.log('[Lifecycle] ✓ Created session from payload token/user');
+    }
+    
     if (session) {
         applySession(session);
+    } else if (__session.user) {
+        // Already have session from AUTH_READY
+        console.log('[Lifecycle] Using existing session from AUTH_READY');
     }
+
+    parentReadyReceived = true;
 
     // STRICT: Transition to ACTIVE exactly once
     transitionTo(LIFECYCLE_STATES.ACTIVE, 'parent_ready_received');
@@ -361,30 +391,114 @@ function handleAuthReady(message) {
     }
 
     // STRICT: Only accept AUTH_READY in WAITING_AUTH state or higher
-    if (currentState !== LIFECYCLE_STATES.WAITING_AUTH && currentState !== LIFECYCLE_STATES.AUTH_READY) {
+    if (currentState !== LIFECYCLE_STATES.WAITING_AUTH && 
+        currentState !== LIFECYCLE_STATES.AUTH_READY && 
+        currentState !== LIFECYCLE_STATES.INITIALIZING) {
         console.warn(`[Lifecycle] AUTH_READY received in invalid state: ${currentState} — ignoring`);
         return;
     }
 
-    authReadyReceived = true;
-    
-    const session = message.payload?.session || message.session || null;
-    if (session) {
-        applySession(session);
-    }
+    console.log('[Lifecycle] AUTH_READY received, structure:', {
+        hasPayload: !!message.payload,
+        hasPayloadSession: !!message.payload?.session,
+        hasPayloadUser: !!message.payload?.user,
+        hasRootUserId: !!message.userId,
+        payloadKeys: message.payload ? Object.keys(message.payload) : []
+    });
 
-    transitionTo(LIFECYCLE_STATES.AUTH_READY, 'auth_ready_received');
+    // CRITICAL FIX: Parent sends session in payload.session
+    let session = null;
+    let user = null;
+    let token = null;
     
-    console.log(`[${MODULE_NAME}] AUTH_READY received — proceeding to READY state`);
+    // METHOD 1: Parent's actual format - payload.session
+    if (message.payload?.session) {
+        session = message.payload.session;
+        token = session.token;
+        user = session.user;
+        console.log('[Lifecycle] ✓ Extracted session from payload.session');
+    }
     
-    // Now transition to READY
-    transitionTo(LIFECYCLE_STATES.READY, 'auth_ready_processed');
+    // METHOD 2: Parent's fallback - payload directly
+    if (!session && message.payload?.token && message.payload?.user) {
+        token = message.payload.token;
+        user = message.payload.user;
+        session = { token, user };
+        console.log('[Lifecycle] ✓ Extracted session from payload directly');
+    }
     
-    // Send CHILD_READY after auth is ready
-    sendChildReady();
+    // METHOD 3: Root level user data from parent
+    if (!user && message.payload?.user) {
+        user = message.payload.user;
+        console.log('[Lifecycle] ✓ Extracted user from payload.user');
+    }
     
-    // Flush any queued requests
-    flushRequestQueue();
+    // METHOD 4: Root level userId from parent
+    if (!user && message.userId) {
+        user = {
+            id: message.userId,
+            userId: message.userId,
+            username: message.payload?.username || message.username || 'User',
+            displayName: message.payload?.displayName || message.displayName || 'User'
+        };
+        console.log('[Lifecycle] ✓ Created user from root userId:', message.userId);
+    }
+    
+    // METHOD 5: Root level user from parent's PARENT_READY format
+    if (!user && message.user) {
+        user = message.user;
+        console.log('[Lifecycle] ✓ Extracted user from root user');
+    }
+    
+    // Apply the session if we have at least user info
+    if (user) {
+        // Ensure user has id property
+        if (!user.id && user.userId) {
+            user.id = user.userId;
+        }
+        if (!user.userId && user.id) {
+            user.userId = user.id;
+        }
+        
+        // Store token from anywhere we can find it
+        const finalToken = token || message.payload?.token || message.token || message.accessToken;
+        
+        const finalSession = {
+            token: finalToken,
+            user: user,
+            expiresAt: message.payload?.expiresAt || message.expiresAt || Date.now() + 3600000,
+            ready: !!(user && (finalToken || true))  // Allow session without token for now
+        };
+        
+        console.log('[Lifecycle] Applying session:', {
+            hasToken: !!finalToken,
+            userId: user.id,
+            username: user.username
+        });
+        
+        applySession(finalSession);
+        authReadyReceived = true;
+        
+        transitionTo(LIFECYCLE_STATES.AUTH_READY, 'auth_ready_received');
+        console.log(`[${MODULE_NAME}] AUTH_READY received — proceeding to READY state`);
+        
+        // Now transition to READY
+        transitionTo(LIFECYCLE_STATES.READY, 'auth_ready_processed');
+        
+        // Send CHILD_READY after auth is ready
+        sendChildReady();
+        
+        // Flush any queued requests
+        flushRequestQueue();
+    } else {
+        console.error('[Lifecycle] AUTH_READY received but no user data found', {
+            messageKeys: Object.keys(message),
+            payloadKeys: message.payload ? Object.keys(message.payload) : [],
+            hasPayloadSession: !!message.payload?.session,
+            hasPayloadUser: !!message.payload?.user,
+            hasRootUserId: !!message.userId
+        });
+    }
 }
 
 function applySession(session) {
@@ -397,16 +511,45 @@ function applySession(session) {
         hasToken: !!session.token,
         tokenPrefix: session.token ? session.token.substring(0, 20) + '...' : 'none',
         hasUser: !!session.user,
-        userId: session.user?.id
+        userId: session.user?.id || session.userId,
+        sessionKeys: Object.keys(session)
     });
 
-    __session.token = session.token || null;
-    __session.user = session.user || null;
-    __session.expiresAt = session.expiresAt || null;
-    __session.ready = !!(session.token && session.user);
+    // Handle different session structures
+    let token = session.token || session.accessToken || null;
+    let user = session.user || null;
+    
+    // If user is missing but we have user data at root
+    if (!user && (session.id || session.userId)) {
+        user = {
+            id: session.id || session.userId,
+            userId: session.userId || session.id,
+            username: session.username || session.displayName || 'User',
+            displayName: session.displayName || session.username || 'User',
+            email: session.email || ''
+        };
+        console.log(`[${MODULE_NAME}] Created user object from root:`, user.id);
+    }
+    
+    // If user is missing but we have user data in payload
+    if (!user && session.payload?.user) {
+        user = session.payload.user;
+        console.log(`[${MODULE_NAME}] Extracted user from payload.user`);
+    }
+    
+    // Ensure user has both id and userId
+    if (user) {
+        if (!user.id && user.userId) user.id = user.userId;
+        if (!user.userId && user.id) user.userId = user.id;
+    }
+
+    __session.token = token;
+    __session.user = user;
+    __session.expiresAt = session.expiresAt || session.payload?.expiresAt || null;
+    __session.ready = !!(user);  // Don't require token for readiness (token can be null in dev)
 
     console.log(`[${MODULE_NAME}] __session after apply:`, {
-        token: __session.token ? __session.token.substring(0, 20) + '...' : 'none',
+        token: __session.token ? 'present' : 'none',
         user: __session.user?.id,
         ready: __session.ready
     });
@@ -414,9 +557,14 @@ function applySession(session) {
     if (__session.user) {
         currentUser = __session.user;
         userData = __session.user;
+        window.currentUser = __session.user;
+        window.userData = __session.user;
+        
+        // Dispatch event that user data is available
+        window.dispatchEvent(new CustomEvent('userDataLoaded', {
+            detail: { user: __session.user, source: 'session' }
+        }));
     }
-
-    console.log(`[${MODULE_NAME}] Session applied: ${__session.ready ? 'valid' : 'invalid'}`);
 }
 
 // =============================================

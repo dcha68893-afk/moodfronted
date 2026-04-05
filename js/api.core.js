@@ -1028,33 +1028,38 @@ async function coreFetch(url, options = {}) {
                 console.debug('[API] Deduplicating request:', requestKey);
                 return activeRequests.get(requestKey);
             }
-            
+        
             let fullUrl;
-            let endpointPath;
-            
-            if (url.startsWith('http://') || url.startsWith('https://')) {
-                fullUrl = url;
-                try {
-                    const urlObj = new URL(url);
-                    endpointPath = urlObj.pathname;
-                } catch (e) {
-                    endpointPath = url;
-                }
-            } else {
-                const baseUrl = getBaseUrl();
-                const cleanBase = baseUrl.endsWith('/') ? baseUrl.slice(0, -1) : baseUrl;
-                let cleanEndpoint = url.startsWith('/') ? url : '/' + url;
-                // Fix: strip duplicate /api prefix if baseUrl already ends with /api
-                const baseSuffix = cleanBase.match(/\/api\/?$/)?.[0]?.replace(/\/$/, '');
-                if (baseSuffix && cleanEndpoint.toLowerCase().startsWith(baseSuffix.toLowerCase() + '/')) {
-                    cleanEndpoint = cleanEndpoint.slice(baseSuffix.length);
-                }
-                fullUrl = cleanBase + cleanEndpoint;
-                endpointPath = cleanEndpoint;
-                
-                console.log(`[API] ðŸš€ Building request URL: ${fullUrl} (base: ${baseUrl}, endpoint: ${url})`);
-                console.log(`[API CORE] ENV: ${CURRENT_ENVIRONMENT} | BASE_URL: ${baseUrl} | ENDPOINT: ${endpointPath}`);
-            }
+let endpointPath;
+
+if (url.startsWith('http://') || url.startsWith('https://')) {
+    fullUrl = url;
+    try {
+        const urlObj = new URL(url);
+        endpointPath = urlObj.pathname;
+    } catch (e) {
+        endpointPath = url;
+    }
+} else {
+    const baseUrl = getBaseUrl();
+    const cleanBase = baseUrl.endsWith('/') ? baseUrl.slice(0, -1) : baseUrl;
+    let cleanEndpoint = url.startsWith('/') ? url : '/' + url;
+    
+    // CRITICAL FIX: Remove duplicate /api prefix
+    if (cleanBase.endsWith('/api') && cleanEndpoint.startsWith('/api')) {
+        cleanEndpoint = cleanEndpoint.substring(4); // Remove '/api' prefix
+        if (!cleanEndpoint.startsWith('/')) {
+            cleanEndpoint = '/' + cleanEndpoint;
+        }
+        console.log(`[API] 🔧 Fixed duplicate /api: ${cleanBase} + ${cleanEndpoint}`);
+    }
+    
+    fullUrl = cleanBase + cleanEndpoint;
+    endpointPath = cleanEndpoint;
+    
+    console.log(`[API] 🚀 Building request URL: ${fullUrl} (base: ${baseUrl}, endpoint: ${url})`);
+    console.log(`[API CORE] ENV: ${CURRENT_ENVIRONMENT} | BASE_URL: ${baseUrl} | ENDPOINT: ${endpointPath}`);
+}
             
             const baseUrl = getBaseUrl();
             if (!isValidEndpoint(fullUrl, baseUrl)) {
