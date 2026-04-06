@@ -590,6 +590,8 @@
             left: 0;
             width: 100%;
             height: 100%;
+            /* Account for parent iframe bottom nav bar (60px) + safe area */
+            padding-bottom: max(0px, env(safe-area-inset-bottom, 0px));
             background: #000;
             z-index: 100000;
             display: none;
@@ -604,6 +606,8 @@
             flex: 1;
             position: relative;
             overflow: hidden;
+            /* Ensure video never overlaps the controls */
+            min-height: 0;
         }
 
         .scanner-container {
@@ -615,6 +619,8 @@
         #cameraVideo {
             width: 100%;
             height: 100%;
+            /* Reserve space for controls + parent bottom nav */
+            max-height: calc(100dvh - 160px);
             object-fit: cover;
         }
 
@@ -658,8 +664,13 @@
         .camera-controls {
             display: flex;
             justify-content: space-around;
-            padding: 20px;
+            padding: 16px 20px;
+            /* Push controls above the parent's 60px mobile nav bar */
+            padding-bottom: max(20px, calc(70px + env(safe-area-inset-bottom, 0px)));
             background: #111;
+            flex-shrink: 0;
+            position: relative;
+            z-index: 100001;
         }
 
         .camera-btn {
@@ -2857,5 +2868,3 @@
     </script>
 </body>
 </html>
-
-

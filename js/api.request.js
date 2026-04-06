@@ -1,6 +1,6 @@
 // api.request.js - Enhanced API Request Methods with Centralized Token Handling
-// Version: 21.0.0 - COMPLETE REWRITE WITH SESSION INTEGRATION - FULL FEATURE PRESERVATION
-// Date: 2026-03-20
+// Version: 22.0.0 - COMPLETE REWRITE WITH SESSION INTEGRATION - FULL FEATURE PRESERVATION
+// Date: 2026-04-06
 // 🔧 CRITICAL: Full rewrite to use centralized session management
 // 🔧 CRITICAL: All requests go through unified request() function
 // 🔧 CRITICAL: Token fetched ONLY from window.Session.getToken()
@@ -10,6 +10,10 @@
 // 🔧 CRITICAL: ALL original features preserved - no summarization
 // 🔒 SAFETY: Preserve all existing anti-pattern prevention
 // 🔒 SAFETY: Maintain backward compatibility with all modules
+// 🔧 FIXED: addFriend uses POST /api/friends/requests/send with receiverId
+// 🔧 ADDED: acceptFriendRequest, rejectFriendRequest, getIncomingFriendRequests, getSentFriendRequests
+// 🔧 ADDED: getChats, startDirectChat, getUnreadCounts, markMessagesRead, blockFriend, unblockFriend, unfriend
+// 🔧 FIXED: sendMessage uses { chatId, receiverId, content, type, replyToId }
 
 // Wrap in IIFE to prevent global scope pollution
 (function() {
@@ -2723,6 +2727,7 @@
         }
     }
     
+    // 🔧 FIXED sendMessage with correct body structure
     async function sendMessage(messageData) {
         const functionName = 'sendMessage';
         const endpoint = '/messages';
@@ -2736,6 +2741,20 @@
                     status: 400,
                     statusText: 'Bad Request',
                     data: { message: 'Message data is required' },
+                    headers: {},
+                    validationError: true
+                };
+            }
+            
+            // Validate required fields
+            if (!messageData.content && !messageData.chatId && !messageData.receiverId) {
+                console.error("[API] ❌ sendMessage missing required fields");
+                return {
+                    ok: false,
+                    success: false,
+                    status: 400,
+                    statusText: 'Bad Request',
+                    data: { message: 'content, chatId, or receiverId is required' },
                     headers: {},
                     validationError: true
                 };
@@ -2765,10 +2784,26 @@
             
             trackRequestStart(normalizedEndpoint, functionName);
             
+            // Build request body exactly as required by backend
+            const requestBody = {
+                chatId: messageData.chatId || null,
+                receiverId: messageData.receiverId || null,
+                content: messageData.content || '',
+                type: messageData.type || 'text',
+                replyToId: messageData.replyToId || null
+            };
+            
+            // Remove null values
+            Object.keys(requestBody).forEach(key => {
+                if (requestBody[key] === null) {
+                    delete requestBody[key];
+                }
+            });
+            
             try {
                 const result = await enhancedSecureFetch(endpoint, {
                     method: 'POST',
-                    body: messageData
+                    body: requestBody
                 });
                 
                 if (!result.success) {
@@ -2970,9 +3005,10 @@
         }
     }
     
+    // 🔧 FIXED addFriend with correct endpoint and body
     async function addFriend(userId) {
         const functionName = 'addFriend';
-        const endpoint = '/friends/add';
+        const endpoint = '/friends/requests/send';
         
         try {
             if (!userId) {
@@ -3015,7 +3051,7 @@
             try {
                 const result = await enhancedSecureFetch(endpoint, {
                     method: 'POST',
-                    body: { userId: userId }
+                    body: { receiverId: userId }
                 });
                 
                 if (!result.success) {
@@ -3045,6 +3081,8 @@
                 
                 if (_apiCache) {
                     _apiCache.delete('get_/api/friends/list');
+                    _apiCache.delete('get_/api/friends/requests/incoming');
+                    _apiCache.delete('get_/api/friends/requests/sent');
                 }
                 
                 trackRequestEnd(normalizedEndpoint, functionName, true);
@@ -3074,6 +3112,1198 @@
             
         } catch (error) {
             console.error("[API] ❌ addFriend critical error:", error);
+            return getSafeDefaultResponse(endpoint, functionName, error);
+        }
+    }
+    
+    // 🔧 NEW: acceptFriendRequest
+    async function acceptFriendRequest(requestId) {
+        const functionName = 'acceptFriendRequest';
+        const endpoint = `/friends/requests/${requestId}/accept`;
+        
+        try {
+            if (!requestId) {
+                console.error("[API] ❌ acceptFriendRequest called without requestId");
+                return {
+                    ok: false,
+                    success: false,
+                    status: 400,
+                    statusText: 'Bad Request',
+                    data: { message: 'Request ID is required' },
+                    headers: {},
+                    validationError: true
+                };
+            }
+            
+            const normalizedEndpoint = normalizeEndpoint(endpoint);
+            const isPublic = isPublicEndpointCheck(normalizedEndpoint);
+            
+            if (!isPublic && !isSessionReady()) {
+                const reqId = generateRequestId(endpoint, 'POST');
+                logRequest(reqId, `⏳ Protected endpoint waiting for session ready: ${normalizedEndpoint}`);
+                await waitForSessionReady();
+            }
+            
+            const reqId = generateRequestId(endpoint, 'POST');
+            if (!checkDependencyGates(reqId, normalizedEndpoint)) {
+                return queueRequest(
+                    () => acceptFriendRequest(requestId),
+                    `POST accept friend request ${requestId}`,
+                    endpoint
+                );
+            }
+            
+            if (!shouldAllowRequest(normalizedEndpoint, functionName)) {
+                return getSafeDefaultResponse(normalizedEndpoint, functionName);
+            }
+            
+            trackRequestStart(normalizedEndpoint, functionName);
+            
+            try {
+                const result = await enhancedSecureFetch(endpoint, { method: 'POST' });
+                
+                if (!result.success) {
+                    if (shouldLogError(normalizedEndpoint, 'accept_friend_request_failed')) {
+                        console.error("[API] ❌ acceptFriendRequest failed: ${result.status} - ${result.message}");
+                    }
+                    
+                    if (!result.data) {
+                        result.data = { message: result.message || 'Request failed' };
+                    }
+                    
+                    trackRequestEnd(normalizedEndpoint, functionName, false);
+                    trackError(normalizedEndpoint, functionName, `accept_friend_request_failed_${result.status}`);
+                    return result;
+                }
+                
+                if (_apiCache) {
+                    _apiCache.delete('get_/api/friends/list');
+                    _apiCache.delete('get_/api/friends/requests/incoming');
+                }
+                
+                trackRequestEnd(normalizedEndpoint, functionName, true);
+                return result;
+                
+            } catch (error) {
+                trackRequestEnd(normalizedEndpoint, functionName, false);
+                const errorCount = trackError(normalizedEndpoint, functionName, 'accept_friend_request_error');
+                
+                if (shouldLogError(normalizedEndpoint, 'accept_friend_request_error')) {
+                    console.error("[API] ❌ acceptFriendRequest error:", error.message);
+                }
+                
+                const errorObj = {
+                    ok: false,
+                    success: false,
+                    status: error.status || 0,
+                    statusText: error.message || 'Network Error',
+                    data: { message: error.message || 'Request failed' },
+                    headers: {},
+                    error: true,
+                    message: error.message || 'Request failed'
+                };
+                
+                return errorObj;
+            }
+            
+        } catch (error) {
+            console.error("[API] ❌ acceptFriendRequest critical error:", error);
+            return getSafeDefaultResponse(endpoint, functionName, error);
+        }
+    }
+    
+    // 🔧 NEW: rejectFriendRequest
+    async function rejectFriendRequest(requestId) {
+        const functionName = 'rejectFriendRequest';
+        const endpoint = `/friends/requests/${requestId}/reject`;
+        
+        try {
+            if (!requestId) {
+                console.error("[API] ❌ rejectFriendRequest called without requestId");
+                return {
+                    ok: false,
+                    success: false,
+                    status: 400,
+                    statusText: 'Bad Request',
+                    data: { message: 'Request ID is required' },
+                    headers: {},
+                    validationError: true
+                };
+            }
+            
+            const normalizedEndpoint = normalizeEndpoint(endpoint);
+            const isPublic = isPublicEndpointCheck(normalizedEndpoint);
+            
+            if (!isPublic && !isSessionReady()) {
+                const reqId = generateRequestId(endpoint, 'POST');
+                logRequest(reqId, `⏳ Protected endpoint waiting for session ready: ${normalizedEndpoint}`);
+                await waitForSessionReady();
+            }
+            
+            const reqId = generateRequestId(endpoint, 'POST');
+            if (!checkDependencyGates(reqId, normalizedEndpoint)) {
+                return queueRequest(
+                    () => rejectFriendRequest(requestId),
+                    `POST reject friend request ${requestId}`,
+                    endpoint
+                );
+            }
+            
+            if (!shouldAllowRequest(normalizedEndpoint, functionName)) {
+                return getSafeDefaultResponse(normalizedEndpoint, functionName);
+            }
+            
+            trackRequestStart(normalizedEndpoint, functionName);
+            
+            try {
+                const result = await enhancedSecureFetch(endpoint, { method: 'POST' });
+                
+                if (!result.success) {
+                    if (shouldLogError(normalizedEndpoint, 'reject_friend_request_failed')) {
+                        console.error("[API] ❌ rejectFriendRequest failed: ${result.status} - ${result.message}");
+                    }
+                    
+                    if (!result.data) {
+                        result.data = { message: result.message || 'Request failed' };
+                    }
+                    
+                    trackRequestEnd(normalizedEndpoint, functionName, false);
+                    trackError(normalizedEndpoint, functionName, `reject_friend_request_failed_${result.status}`);
+                    return result;
+                }
+                
+                if (_apiCache) {
+                    _apiCache.delete('get_/api/friends/requests/incoming');
+                }
+                
+                trackRequestEnd(normalizedEndpoint, functionName, true);
+                return result;
+                
+            } catch (error) {
+                trackRequestEnd(normalizedEndpoint, functionName, false);
+                const errorCount = trackError(normalizedEndpoint, functionName, 'reject_friend_request_error');
+                
+                if (shouldLogError(normalizedEndpoint, 'reject_friend_request_error')) {
+                    console.error("[API] ❌ rejectFriendRequest error:", error.message);
+                }
+                
+                const errorObj = {
+                    ok: false,
+                    success: false,
+                    status: error.status || 0,
+                    statusText: error.message || 'Network Error',
+                    data: { message: error.message || 'Request failed' },
+                    headers: {},
+                    error: true,
+                    message: error.message || 'Request failed'
+                };
+                
+                return errorObj;
+            }
+            
+        } catch (error) {
+            console.error("[API] ❌ rejectFriendRequest critical error:", error);
+            return getSafeDefaultResponse(endpoint, functionName, error);
+        }
+    }
+    
+    // 🔧 NEW: getIncomingFriendRequests
+    async function getIncomingFriendRequests() {
+        const functionName = 'getIncomingFriendRequests';
+        const endpoint = '/friends/requests/incoming';
+        
+        try {
+            const normalizedEndpoint = normalizeEndpoint(endpoint);
+            const isPublic = isPublicEndpointCheck(normalizedEndpoint);
+            
+            if (!isPublic && !isSessionReady()) {
+                const requestId = generateRequestId(endpoint, 'GET');
+                logRequest(requestId, `⏳ Protected endpoint waiting for session ready: ${normalizedEndpoint}`);
+                await waitForSessionReady();
+            }
+            
+            const requestId = generateRequestId(endpoint, 'GET');
+            if (!checkDependencyGates(requestId, normalizedEndpoint)) {
+                return queueRequest(
+                    () => getIncomingFriendRequests(),
+                    `GET incoming friend requests`,
+                    endpoint
+                );
+            }
+            
+            if (!shouldAllowRequest(normalizedEndpoint, functionName)) {
+                return getSafeDefaultResponse(normalizedEndpoint, functionName);
+            }
+            
+            trackRequestStart(normalizedEndpoint, functionName);
+            
+            const cacheKey = `get_${normalizedEndpoint}`;
+            const cachedData = _apiCache ? _apiCache.get(cacheKey) : null;
+            
+            if (cachedData && window.AppNetwork && !window.AppNetwork.isOnline) {
+                console.log("[API] ✅ Returning cached incoming friend requests");
+                trackRequestEnd(normalizedEndpoint, functionName, true);
+                return {
+                    ok: true,
+                    success: true,
+                    status: 200,
+                    statusText: 'OK (cached)',
+                    data: cachedData,
+                    headers: {},
+                    cached: true,
+                    offline: true
+                };
+            }
+            
+            try {
+                const result = await enhancedSecureFetch(endpoint, { method: 'GET' });
+                
+                if (!result.success) {
+                    if (shouldLogError(normalizedEndpoint, 'get_incoming_requests_failed')) {
+                        console.error("[API] ❌ getIncomingFriendRequests failed: ${result.status} - ${result.message}");
+                    }
+                    
+                    if (!result.data) {
+                        result.data = { message: result.message || 'Request failed' };
+                    }
+                    
+                    if (cachedData) {
+                        console.log("[API] ✅ getIncomingFriendRequests failed, returning cached data");
+                        trackRequestEnd(normalizedEndpoint, functionName, false);
+                        return {
+                            ok: true,
+                            success: true,
+                            status: 200,
+                            statusText: 'OK (cached)',
+                            data: cachedData,
+                            headers: {},
+                            cached: true,
+                            message: 'Using cached incoming requests'
+                        };
+                    }
+                    
+                    trackRequestEnd(normalizedEndpoint, functionName, false);
+                    trackError(normalizedEndpoint, functionName, `get_incoming_requests_failed_${result.status}`);
+                    return result;
+                }
+                
+                if (result.success && result.data && _apiCache) {
+                    _apiCache.set(cacheKey, result.data);
+                }
+                
+                trackRequestEnd(normalizedEndpoint, functionName, true);
+                return result;
+                
+            } catch (error) {
+                trackRequestEnd(normalizedEndpoint, functionName, false);
+                const errorCount = trackError(normalizedEndpoint, functionName, 'get_incoming_requests_error');
+                
+                if (shouldLogError(normalizedEndpoint, 'get_incoming_requests_error')) {
+                    console.error("[API] ❌ getIncomingFriendRequests error:", error.message);
+                }
+                
+                if (cachedData) {
+                    console.log("[API] ✅ getIncomingFriendRequests error, returning cached data");
+                    return {
+                        ok: true,
+                        success: true,
+                        status: 200,
+                        statusText: 'OK (cached)',
+                        data: cachedData,
+                        headers: {},
+                        cached: true,
+                        message: 'Using cached incoming requests',
+                        error: error.message
+                    };
+                }
+                
+                return {
+                    ok: false,
+                    success: false,
+                    status: 0,
+                    statusText: 'Network Error',
+                    data: { message: 'Failed to fetch incoming friend requests' },
+                    headers: {},
+                    networkError: true,
+                    message: 'Failed to fetch incoming friend requests',
+                    error: error.message
+                };
+            }
+            
+        } catch (error) {
+            console.error("[API] ❌ getIncomingFriendRequests critical error:", error);
+            return getSafeDefaultResponse(endpoint, functionName, error);
+        }
+    }
+    
+    // 🔧 NEW: getSentFriendRequests
+    async function getSentFriendRequests() {
+        const functionName = 'getSentFriendRequests';
+        const endpoint = '/friends/requests/sent';
+        
+        try {
+            const normalizedEndpoint = normalizeEndpoint(endpoint);
+            const isPublic = isPublicEndpointCheck(normalizedEndpoint);
+            
+            if (!isPublic && !isSessionReady()) {
+                const requestId = generateRequestId(endpoint, 'GET');
+                logRequest(requestId, `⏳ Protected endpoint waiting for session ready: ${normalizedEndpoint}`);
+                await waitForSessionReady();
+            }
+            
+            const requestId = generateRequestId(endpoint, 'GET');
+            if (!checkDependencyGates(requestId, normalizedEndpoint)) {
+                return queueRequest(
+                    () => getSentFriendRequests(),
+                    `GET sent friend requests`,
+                    endpoint
+                );
+            }
+            
+            if (!shouldAllowRequest(normalizedEndpoint, functionName)) {
+                return getSafeDefaultResponse(normalizedEndpoint, functionName);
+            }
+            
+            trackRequestStart(normalizedEndpoint, functionName);
+            
+            const cacheKey = `get_${normalizedEndpoint}`;
+            const cachedData = _apiCache ? _apiCache.get(cacheKey) : null;
+            
+            if (cachedData && window.AppNetwork && !window.AppNetwork.isOnline) {
+                console.log("[API] ✅ Returning cached sent friend requests");
+                trackRequestEnd(normalizedEndpoint, functionName, true);
+                return {
+                    ok: true,
+                    success: true,
+                    status: 200,
+                    statusText: 'OK (cached)',
+                    data: cachedData,
+                    headers: {},
+                    cached: true,
+                    offline: true
+                };
+            }
+            
+            try {
+                const result = await enhancedSecureFetch(endpoint, { method: 'GET' });
+                
+                if (!result.success) {
+                    if (shouldLogError(normalizedEndpoint, 'get_sent_requests_failed')) {
+                        console.error("[API] ❌ getSentFriendRequests failed: ${result.status} - ${result.message}");
+                    }
+                    
+                    if (!result.data) {
+                        result.data = { message: result.message || 'Request failed' };
+                    }
+                    
+                    if (cachedData) {
+                        console.log("[API] ✅ getSentFriendRequests failed, returning cached data");
+                        trackRequestEnd(normalizedEndpoint, functionName, false);
+                        return {
+                            ok: true,
+                            success: true,
+                            status: 200,
+                            statusText: 'OK (cached)',
+                            data: cachedData,
+                            headers: {},
+                            cached: true,
+                            message: 'Using cached sent requests'
+                        };
+                    }
+                    
+                    trackRequestEnd(normalizedEndpoint, functionName, false);
+                    trackError(normalizedEndpoint, functionName, `get_sent_requests_failed_${result.status}`);
+                    return result;
+                }
+                
+                if (result.success && result.data && _apiCache) {
+                    _apiCache.set(cacheKey, result.data);
+                }
+                
+                trackRequestEnd(normalizedEndpoint, functionName, true);
+                return result;
+                
+            } catch (error) {
+                trackRequestEnd(normalizedEndpoint, functionName, false);
+                const errorCount = trackError(normalizedEndpoint, functionName, 'get_sent_requests_error');
+                
+                if (shouldLogError(normalizedEndpoint, 'get_sent_requests_error')) {
+                    console.error("[API] ❌ getSentFriendRequests error:", error.message);
+                }
+                
+                if (cachedData) {
+                    console.log("[API] ✅ getSentFriendRequests error, returning cached data");
+                    return {
+                        ok: true,
+                        success: true,
+                        status: 200,
+                        statusText: 'OK (cached)',
+                        data: cachedData,
+                        headers: {},
+                        cached: true,
+                        message: 'Using cached sent requests',
+                        error: error.message
+                    };
+                }
+                
+                return {
+                    ok: false,
+                    success: false,
+                    status: 0,
+                    statusText: 'Network Error',
+                    data: { message: 'Failed to fetch sent friend requests' },
+                    headers: {},
+                    networkError: true,
+                    message: 'Failed to fetch sent friend requests',
+                    error: error.message
+                };
+            }
+            
+        } catch (error) {
+            console.error("[API] ❌ getSentFriendRequests critical error:", error);
+            return getSafeDefaultResponse(endpoint, functionName, error);
+        }
+    }
+    
+    // 🔧 NEW: getChats
+    async function getChats() {
+        const functionName = 'getChats';
+        const endpoint = '/chats';
+        
+        try {
+            const normalizedEndpoint = normalizeEndpoint(endpoint);
+            const isPublic = isPublicEndpointCheck(normalizedEndpoint);
+            
+            if (!isPublic && !isSessionReady()) {
+                const requestId = generateRequestId(endpoint, 'GET');
+                logRequest(requestId, `⏳ Protected endpoint waiting for session ready: ${normalizedEndpoint}`);
+                await waitForSessionReady();
+            }
+            
+            const requestId = generateRequestId(endpoint, 'GET');
+            if (!checkDependencyGates(requestId, normalizedEndpoint)) {
+                return queueRequest(
+                    () => getChats(),
+                    `GET chats`,
+                    endpoint
+                );
+            }
+            
+            if (!shouldAllowRequest(normalizedEndpoint, functionName)) {
+                return getSafeDefaultResponse(normalizedEndpoint, functionName);
+            }
+            
+            trackRequestStart(normalizedEndpoint, functionName);
+            
+            const cacheKey = `get_${normalizedEndpoint}`;
+            const cachedData = _apiCache ? _apiCache.get(cacheKey) : null;
+            
+            if (cachedData && window.AppNetwork && !window.AppNetwork.isOnline) {
+                console.log("[API] ✅ Returning cached chats");
+                trackRequestEnd(normalizedEndpoint, functionName, true);
+                return {
+                    ok: true,
+                    success: true,
+                    status: 200,
+                    statusText: 'OK (cached)',
+                    data: cachedData,
+                    headers: {},
+                    cached: true,
+                    offline: true
+                };
+            }
+            
+            try {
+                const result = await enhancedSecureFetch(endpoint, { method: 'GET' });
+                
+                if (!result.success) {
+                    if (shouldLogError(normalizedEndpoint, 'get_chats_failed')) {
+                        console.error("[API] ❌ getChats failed: ${result.status} - ${result.message}");
+                    }
+                    
+                    if (!result.data) {
+                        result.data = { message: result.message || 'Request failed' };
+                    }
+                    
+                    if (cachedData) {
+                        console.log("[API] ✅ getChats failed, returning cached data");
+                        trackRequestEnd(normalizedEndpoint, functionName, false);
+                        return {
+                            ok: true,
+                            success: true,
+                            status: 200,
+                            statusText: 'OK (cached)',
+                            data: cachedData,
+                            headers: {},
+                            cached: true,
+                            message: 'Using cached chats'
+                        };
+                    }
+                    
+                    trackRequestEnd(normalizedEndpoint, functionName, false);
+                    trackError(normalizedEndpoint, functionName, `get_chats_failed_${result.status}`);
+                    return result;
+                }
+                
+                if (result.success && result.data && _apiCache) {
+                    _apiCache.set(cacheKey, result.data);
+                }
+                
+                trackRequestEnd(normalizedEndpoint, functionName, true);
+                return result;
+                
+            } catch (error) {
+                trackRequestEnd(normalizedEndpoint, functionName, false);
+                const errorCount = trackError(normalizedEndpoint, functionName, 'get_chats_error');
+                
+                if (shouldLogError(normalizedEndpoint, 'get_chats_error')) {
+                    console.error("[API] ❌ getChats error:", error.message);
+                }
+                
+                if (cachedData) {
+                    console.log("[API] ✅ getChats error, returning cached data");
+                    return {
+                        ok: true,
+                        success: true,
+                        status: 200,
+                        statusText: 'OK (cached)',
+                        data: cachedData,
+                        headers: {},
+                        cached: true,
+                        message: 'Using cached chats',
+                        error: error.message
+                    };
+                }
+                
+                return {
+                    ok: false,
+                    success: false,
+                    status: 0,
+                    statusText: 'Network Error',
+                    data: { message: 'Failed to fetch chats' },
+                    headers: {},
+                    networkError: true,
+                    message: 'Failed to fetch chats',
+                    error: error.message
+                };
+            }
+            
+        } catch (error) {
+            console.error("[API] ❌ getChats critical error:", error);
+            return getSafeDefaultResponse(endpoint, functionName, error);
+        }
+    }
+    
+    // 🔧 NEW: startDirectChat
+    async function startDirectChat(userId) {
+        const functionName = 'startDirectChat';
+        const endpoint = '/chats/direct';
+        
+        try {
+            if (!userId) {
+                console.error("[API] ❌ startDirectChat called without userId");
+                return {
+                    ok: false,
+                    success: false,
+                    status: 400,
+                    statusText: 'Bad Request',
+                    data: { message: 'User ID is required' },
+                    headers: {},
+                    validationError: true
+                };
+            }
+            
+            const normalizedEndpoint = normalizeEndpoint(endpoint);
+            const isPublic = isPublicEndpointCheck(normalizedEndpoint);
+            
+            if (!isPublic && !isSessionReady()) {
+                const requestId = generateRequestId(endpoint, 'POST');
+                logRequest(requestId, `⏳ Protected endpoint waiting for session ready: ${normalizedEndpoint}`);
+                await waitForSessionReady();
+            }
+            
+            const requestId = generateRequestId(endpoint, 'POST');
+            if (!checkDependencyGates(requestId, normalizedEndpoint)) {
+                return queueRequest(
+                    () => startDirectChat(userId),
+                    `POST start direct chat with ${userId}`,
+                    endpoint
+                );
+            }
+            
+            if (!shouldAllowRequest(normalizedEndpoint, functionName)) {
+                return getSafeDefaultResponse(normalizedEndpoint, functionName);
+            }
+            
+            trackRequestStart(normalizedEndpoint, functionName);
+            
+            try {
+                const result = await enhancedSecureFetch(endpoint, {
+                    method: 'POST',
+                    body: { userId: userId }
+                });
+                
+                if (!result.success) {
+                    if (shouldLogError(normalizedEndpoint, 'start_direct_chat_failed')) {
+                        console.error("[API] ❌ startDirectChat failed: ${result.status} - ${result.message}");
+                    }
+                    
+                    if (!result.data) {
+                        result.data = { message: result.message || 'Request failed' };
+                    }
+                    
+                    trackRequestEnd(normalizedEndpoint, functionName, false);
+                    trackError(normalizedEndpoint, functionName, `start_direct_chat_failed_${result.status}`);
+                    return result;
+                }
+                
+                if (_apiCache) {
+                    _apiCache.delete('get_/api/chats');
+                }
+                
+                trackRequestEnd(normalizedEndpoint, functionName, true);
+                return result;
+                
+            } catch (error) {
+                trackRequestEnd(normalizedEndpoint, functionName, false);
+                const errorCount = trackError(normalizedEndpoint, functionName, 'start_direct_chat_error');
+                
+                if (shouldLogError(normalizedEndpoint, 'start_direct_chat_error')) {
+                    console.error("[API] ❌ startDirectChat error:", error.message);
+                }
+                
+                const errorObj = {
+                    ok: false,
+                    success: false,
+                    status: error.status || 0,
+                    statusText: error.message || 'Network Error',
+                    data: { message: error.message || 'Request failed' },
+                    headers: {},
+                    error: true,
+                    message: error.message || 'Request failed'
+                };
+                
+                return errorObj;
+            }
+            
+        } catch (error) {
+            console.error("[API] ❌ startDirectChat critical error:", error);
+            return getSafeDefaultResponse(endpoint, functionName, error);
+        }
+    }
+    
+    // 🔧 NEW: getUnreadCounts
+    async function getUnreadCounts() {
+        const functionName = 'getUnreadCounts';
+        const endpoint = '/messages/unread/counts';
+        
+        try {
+            const normalizedEndpoint = normalizeEndpoint(endpoint);
+            const isPublic = isPublicEndpointCheck(normalizedEndpoint);
+            
+            if (!isPublic && !isSessionReady()) {
+                const requestId = generateRequestId(endpoint, 'GET');
+                logRequest(requestId, `⏳ Protected endpoint waiting for session ready: ${normalizedEndpoint}`);
+                await waitForSessionReady();
+            }
+            
+            const requestId = generateRequestId(endpoint, 'GET');
+            if (!checkDependencyGates(requestId, normalizedEndpoint)) {
+                return queueRequest(
+                    () => getUnreadCounts(),
+                    `GET unread counts`,
+                    endpoint
+                );
+            }
+            
+            if (!shouldAllowRequest(normalizedEndpoint, functionName)) {
+                return getSafeDefaultResponse(normalizedEndpoint, functionName);
+            }
+            
+            trackRequestStart(normalizedEndpoint, functionName);
+            
+            const cacheKey = `get_${normalizedEndpoint}`;
+            const cachedData = _apiCache ? _apiCache.get(cacheKey) : null;
+            
+            if (cachedData && window.AppNetwork && !window.AppNetwork.isOnline) {
+                console.log("[API] ✅ Returning cached unread counts");
+                trackRequestEnd(normalizedEndpoint, functionName, true);
+                return {
+                    ok: true,
+                    success: true,
+                    status: 200,
+                    statusText: 'OK (cached)',
+                    data: cachedData,
+                    headers: {},
+                    cached: true,
+                    offline: true
+                };
+            }
+            
+            try {
+                const result = await enhancedSecureFetch(endpoint, { method: 'GET' });
+                
+                if (!result.success) {
+                    if (shouldLogError(normalizedEndpoint, 'get_unread_counts_failed')) {
+                        console.error("[API] ❌ getUnreadCounts failed: ${result.status} - ${result.message}");
+                    }
+                    
+                    if (!result.data) {
+                        result.data = { message: result.message || 'Request failed' };
+                    }
+                    
+                    if (cachedData) {
+                        console.log("[API] ✅ getUnreadCounts failed, returning cached data");
+                        trackRequestEnd(normalizedEndpoint, functionName, false);
+                        return {
+                            ok: true,
+                            success: true,
+                            status: 200,
+                            statusText: 'OK (cached)',
+                            data: cachedData,
+                            headers: {},
+                            cached: true,
+                            message: 'Using cached unread counts'
+                        };
+                    }
+                    
+                    trackRequestEnd(normalizedEndpoint, functionName, false);
+                    trackError(normalizedEndpoint, functionName, `get_unread_counts_failed_${result.status}`);
+                    return result;
+                }
+                
+                if (result.success && result.data && _apiCache) {
+                    _apiCache.set(cacheKey, result.data);
+                }
+                
+                trackRequestEnd(normalizedEndpoint, functionName, true);
+                return result;
+                
+            } catch (error) {
+                trackRequestEnd(normalizedEndpoint, functionName, false);
+                const errorCount = trackError(normalizedEndpoint, functionName, 'get_unread_counts_error');
+                
+                if (shouldLogError(normalizedEndpoint, 'get_unread_counts_error')) {
+                    console.error("[API] ❌ getUnreadCounts error:", error.message);
+                }
+                
+                if (cachedData) {
+                    console.log("[API] ✅ getUnreadCounts error, returning cached data");
+                    return {
+                        ok: true,
+                        success: true,
+                        status: 200,
+                        statusText: 'OK (cached)',
+                        data: cachedData,
+                        headers: {},
+                        cached: true,
+                        message: 'Using cached unread counts',
+                        error: error.message
+                    };
+                }
+                
+                return {
+                    ok: false,
+                    success: false,
+                    status: 0,
+                    statusText: 'Network Error',
+                    data: { message: 'Failed to fetch unread counts' },
+                    headers: {},
+                    networkError: true,
+                    message: 'Failed to fetch unread counts',
+                    error: error.message
+                };
+            }
+            
+        } catch (error) {
+            console.error("[API] ❌ getUnreadCounts critical error:", error);
+            return getSafeDefaultResponse(endpoint, functionName, error);
+        }
+    }
+    
+    // 🔧 NEW: markMessagesRead
+    async function markMessagesRead(chatId, messageIds) {
+        const functionName = 'markMessagesRead';
+        const endpoint = `/chats/${chatId}/messages/read`;
+        
+        try {
+            if (!chatId) {
+                console.error("[API] ❌ markMessagesRead called without chatId");
+                return {
+                    ok: false,
+                    success: false,
+                    status: 400,
+                    statusText: 'Bad Request',
+                    data: { message: 'Chat ID is required' },
+                    headers: {},
+                    validationError: true
+                };
+            }
+            
+            const normalizedEndpoint = normalizeEndpoint(endpoint);
+            const isPublic = isPublicEndpointCheck(normalizedEndpoint);
+            
+            if (!isPublic && !isSessionReady()) {
+                const requestId = generateRequestId(endpoint, 'POST');
+                logRequest(requestId, `⏳ Protected endpoint waiting for session ready: ${normalizedEndpoint}`);
+                await waitForSessionReady();
+            }
+            
+            const requestId = generateRequestId(endpoint, 'POST');
+            if (!checkDependencyGates(requestId, normalizedEndpoint)) {
+                return queueRequest(
+                    () => markMessagesRead(chatId, messageIds),
+                    `POST mark messages read in chat ${chatId}`,
+                    endpoint
+                );
+            }
+            
+            if (!shouldAllowRequest(normalizedEndpoint, functionName)) {
+                return getSafeDefaultResponse(normalizedEndpoint, functionName);
+            }
+            
+            trackRequestStart(normalizedEndpoint, functionName);
+            
+            const requestBody = {
+                messageIds: Array.isArray(messageIds) ? messageIds : (messageIds ? [messageIds] : [])
+            };
+            
+            try {
+                const result = await enhancedSecureFetch(endpoint, {
+                    method: 'POST',
+                    body: requestBody
+                });
+                
+                if (!result.success) {
+                    if (shouldLogError(normalizedEndpoint, 'mark_messages_read_failed')) {
+                        console.error("[API] ❌ markMessagesRead failed: ${result.status} - ${result.message}");
+                    }
+                    
+                    if (!result.data) {
+                        result.data = { message: result.message || 'Request failed' };
+                    }
+                    
+                    trackRequestEnd(normalizedEndpoint, functionName, false);
+                    trackError(normalizedEndpoint, functionName, `mark_messages_read_failed_${result.status}`);
+                    return result;
+                }
+                
+                if (_apiCache) {
+                    _apiCache.delete('get_/api/messages/unread/counts');
+                }
+                
+                trackRequestEnd(normalizedEndpoint, functionName, true);
+                return result;
+                
+            } catch (error) {
+                trackRequestEnd(normalizedEndpoint, functionName, false);
+                const errorCount = trackError(normalizedEndpoint, functionName, 'mark_messages_read_error');
+                
+                if (shouldLogError(normalizedEndpoint, 'mark_messages_read_error')) {
+                    console.error("[API] ❌ markMessagesRead error:", error.message);
+                }
+                
+                const errorObj = {
+                    ok: false,
+                    success: false,
+                    status: error.status || 0,
+                    statusText: error.message || 'Network Error',
+                    data: { message: error.message || 'Request failed' },
+                    headers: {},
+                    error: true,
+                    message: error.message || 'Request failed'
+                };
+                
+                return errorObj;
+            }
+            
+        } catch (error) {
+            console.error("[API] ❌ markMessagesRead critical error:", error);
+            return getSafeDefaultResponse(endpoint, functionName, error);
+        }
+    }
+    
+    // 🔧 NEW: blockFriend
+    async function blockFriend(userId) {
+        const functionName = 'blockFriend';
+        const endpoint = `/friends/${userId}/block`;
+        
+        try {
+            if (!userId) {
+                console.error("[API] ❌ blockFriend called without userId");
+                return {
+                    ok: false,
+                    success: false,
+                    status: 400,
+                    statusText: 'Bad Request',
+                    data: { message: 'User ID is required' },
+                    headers: {},
+                    validationError: true
+                };
+            }
+            
+            const normalizedEndpoint = normalizeEndpoint(endpoint);
+            const isPublic = isPublicEndpointCheck(normalizedEndpoint);
+            
+            if (!isPublic && !isSessionReady()) {
+                const requestId = generateRequestId(endpoint, 'POST');
+                logRequest(requestId, `⏳ Protected endpoint waiting for session ready: ${normalizedEndpoint}`);
+                await waitForSessionReady();
+            }
+            
+            const requestId = generateRequestId(endpoint, 'POST');
+            if (!checkDependencyGates(requestId, normalizedEndpoint)) {
+                return queueRequest(
+                    () => blockFriend(userId),
+                    `POST block friend ${userId}`,
+                    endpoint
+                );
+            }
+            
+            if (!shouldAllowRequest(normalizedEndpoint, functionName)) {
+                return getSafeDefaultResponse(normalizedEndpoint, functionName);
+            }
+            
+            trackRequestStart(normalizedEndpoint, functionName);
+            
+            try {
+                const result = await enhancedSecureFetch(endpoint, { method: 'POST' });
+                
+                if (!result.success) {
+                    if (shouldLogError(normalizedEndpoint, 'block_friend_failed')) {
+                        console.error("[API] ❌ blockFriend failed: ${result.status} - ${result.message}");
+                    }
+                    
+                    if (!result.data) {
+                        result.data = { message: result.message || 'Request failed' };
+                    }
+                    
+                    trackRequestEnd(normalizedEndpoint, functionName, false);
+                    trackError(normalizedEndpoint, functionName, `block_friend_failed_${result.status}`);
+                    return result;
+                }
+                
+                if (_apiCache) {
+                    _apiCache.delete('get_/api/friends/list');
+                }
+                
+                trackRequestEnd(normalizedEndpoint, functionName, true);
+                return result;
+                
+            } catch (error) {
+                trackRequestEnd(normalizedEndpoint, functionName, false);
+                const errorCount = trackError(normalizedEndpoint, functionName, 'block_friend_error');
+                
+                if (shouldLogError(normalizedEndpoint, 'block_friend_error')) {
+                    console.error("[API] ❌ blockFriend error:", error.message);
+                }
+                
+                const errorObj = {
+                    ok: false,
+                    success: false,
+                    status: error.status || 0,
+                    statusText: error.message || 'Network Error',
+                    data: { message: error.message || 'Request failed' },
+                    headers: {},
+                    error: true,
+                    message: error.message || 'Request failed'
+                };
+                
+                return errorObj;
+            }
+            
+        } catch (error) {
+            console.error("[API] ❌ blockFriend critical error:", error);
+            return getSafeDefaultResponse(endpoint, functionName, error);
+        }
+    }
+    
+    // 🔧 NEW: unblockFriend
+    async function unblockFriend(userId) {
+        const functionName = 'unblockFriend';
+        const endpoint = `/friends/${userId}/unblock`;
+        
+        try {
+            if (!userId) {
+                console.error("[API] ❌ unblockFriend called without userId");
+                return {
+                    ok: false,
+                    success: false,
+                    status: 400,
+                    statusText: 'Bad Request',
+                    data: { message: 'User ID is required' },
+                    headers: {},
+                    validationError: true
+                };
+            }
+            
+            const normalizedEndpoint = normalizeEndpoint(endpoint);
+            const isPublic = isPublicEndpointCheck(normalizedEndpoint);
+            
+            if (!isPublic && !isSessionReady()) {
+                const requestId = generateRequestId(endpoint, 'POST');
+                logRequest(requestId, `⏳ Protected endpoint waiting for session ready: ${normalizedEndpoint}`);
+                await waitForSessionReady();
+            }
+            
+            const requestId = generateRequestId(endpoint, 'POST');
+            if (!checkDependencyGates(requestId, normalizedEndpoint)) {
+                return queueRequest(
+                    () => unblockFriend(userId),
+                    `POST unblock friend ${userId}`,
+                    endpoint
+                );
+            }
+            
+            if (!shouldAllowRequest(normalizedEndpoint, functionName)) {
+                return getSafeDefaultResponse(normalizedEndpoint, functionName);
+            }
+            
+            trackRequestStart(normalizedEndpoint, functionName);
+            
+            try {
+                const result = await enhancedSecureFetch(endpoint, { method: 'POST' });
+                
+                if (!result.success) {
+                    if (shouldLogError(normalizedEndpoint, 'unblock_friend_failed')) {
+                        console.error("[API] ❌ unblockFriend failed: ${result.status} - ${result.message}");
+                    }
+                    
+                    if (!result.data) {
+                        result.data = { message: result.message || 'Request failed' };
+                    }
+                    
+                    trackRequestEnd(normalizedEndpoint, functionName, false);
+                    trackError(normalizedEndpoint, functionName, `unblock_friend_failed_${result.status}`);
+                    return result;
+                }
+                
+                if (_apiCache) {
+                    _apiCache.delete('get_/api/friends/list');
+                }
+                
+                trackRequestEnd(normalizedEndpoint, functionName, true);
+                return result;
+                
+            } catch (error) {
+                trackRequestEnd(normalizedEndpoint, functionName, false);
+                const errorCount = trackError(normalizedEndpoint, functionName, 'unblock_friend_error');
+                
+                if (shouldLogError(normalizedEndpoint, 'unblock_friend_error')) {
+                    console.error("[API] ❌ unblockFriend error:", error.message);
+                }
+                
+                const errorObj = {
+                    ok: false,
+                    success: false,
+                    status: error.status || 0,
+                    statusText: error.message || 'Network Error',
+                    data: { message: error.message || 'Request failed' },
+                    headers: {},
+                    error: true,
+                    message: error.message || 'Request failed'
+                };
+                
+                return errorObj;
+            }
+            
+        } catch (error) {
+            console.error("[API] ❌ unblockFriend critical error:", error);
+            return getSafeDefaultResponse(endpoint, functionName, error);
+        }
+    }
+    
+    // 🔧 NEW: unfriend
+    async function unfriend(userId) {
+        const functionName = 'unfriend';
+        const endpoint = `/friends/${userId}`;
+        
+        try {
+            if (!userId) {
+                console.error("[API] ❌ unfriend called without userId");
+                return {
+                    ok: false,
+                    success: false,
+                    status: 400,
+                    statusText: 'Bad Request',
+                    data: { message: 'User ID is required' },
+                    headers: {},
+                    validationError: true
+                };
+            }
+            
+            const normalizedEndpoint = normalizeEndpoint(endpoint);
+            const isPublic = isPublicEndpointCheck(normalizedEndpoint);
+            
+            if (!isPublic && !isSessionReady()) {
+                const requestId = generateRequestId(endpoint, 'DELETE');
+                logRequest(requestId, `⏳ Protected endpoint waiting for session ready: ${normalizedEndpoint}`);
+                await waitForSessionReady();
+            }
+            
+            const requestId = generateRequestId(endpoint, 'DELETE');
+            if (!checkDependencyGates(requestId, normalizedEndpoint)) {
+                return queueRequest(
+                    () => unfriend(userId),
+                    `DELETE unfriend ${userId}`,
+                    endpoint
+                );
+            }
+            
+            if (!shouldAllowRequest(normalizedEndpoint, functionName)) {
+                return getSafeDefaultResponse(normalizedEndpoint, functionName);
+            }
+            
+            trackRequestStart(normalizedEndpoint, functionName);
+            
+            try {
+                const result = await enhancedSecureFetch(endpoint, { method: 'DELETE' });
+                
+                if (!result.success) {
+                    if (shouldLogError(normalizedEndpoint, 'unfriend_failed')) {
+                        console.error("[API] ❌ unfriend failed: ${result.status} - ${result.message}");
+                    }
+                    
+                    if (!result.data) {
+                        result.data = { message: result.message || 'Request failed' };
+                    }
+                    
+                    trackRequestEnd(normalizedEndpoint, functionName, false);
+                    trackError(normalizedEndpoint, functionName, `unfriend_failed_${result.status}`);
+                    return result;
+                }
+                
+                if (_apiCache) {
+                    _apiCache.delete('get_/api/friends/list');
+                }
+                
+                trackRequestEnd(normalizedEndpoint, functionName, true);
+                return result;
+                
+            } catch (error) {
+                trackRequestEnd(normalizedEndpoint, functionName, false);
+                const errorCount = trackError(normalizedEndpoint, functionName, 'unfriend_error');
+                
+                if (shouldLogError(normalizedEndpoint, 'unfriend_error')) {
+                    console.error("[API] ❌ unfriend error:", error.message);
+                }
+                
+                const errorObj = {
+                    ok: false,
+                    success: false,
+                    status: error.status || 0,
+                    statusText: error.message || 'Network Error',
+                    data: { message: error.message || 'Request failed' },
+                    headers: {},
+                    error: true,
+                    message: error.message || 'Request failed'
+                };
+                
+                return errorObj;
+            }
+            
+        } catch (error) {
+            console.error("[API] ❌ unfriend critical error:", error);
             return getSafeDefaultResponse(endpoint, functionName, error);
         }
     }
@@ -4998,149 +6228,6 @@
         }
     }
     
-    async function getChats() {
-        const functionName = 'getChats';
-        const endpoint = '/api/chats';
-        
-        try {
-            const normalizedEndpoint = normalizeEndpoint(endpoint);
-            const isPublic = isPublicEndpointCheck(normalizedEndpoint);
-            
-            if (!isPublic && !isSessionReady()) {
-                const requestId = generateRequestId(endpoint, 'GET');
-                logRequest(requestId, `⏳ Protected endpoint waiting for session ready: ${normalizedEndpoint}`);
-                await waitForSessionReady();
-            }
-            
-            const requestId = generateRequestId(endpoint, 'GET');
-            if (!checkDependencyGates(requestId, normalizedEndpoint)) {
-                return queueRequest(
-                    () => getChats(),
-                    `GET chats`,
-                    endpoint
-                );
-            }
-            
-            if (!shouldAllowRequest(normalizedEndpoint, functionName)) {
-                return getSafeDefaultResponse(normalizedEndpoint, functionName);
-            }
-            
-            trackRequestStart(normalizedEndpoint, functionName);
-            
-            const cacheKey = `get_${normalizedEndpoint}`;
-            const cachedData = _apiCache ? _apiCache.get(cacheKey) : null;
-            
-            if (cachedData && window.AppNetwork && !window.AppNetwork.isOnline) {
-                console.log("[API] ✅ Returning cached chats");
-                trackRequestEnd(normalizedEndpoint, functionName, true);
-                return {
-                    ok: true,
-                    success: true,
-                    status: 200,
-                    statusText: 'OK (cached)',
-                    data: cachedData,
-                    headers: {},
-                    cached: true,
-                    offline: true
-                };
-            }
-            
-            try {
-                const result = await enhancedSecureFetch(endpoint, { method: 'GET' });
-                
-                if (!result.success) {
-                    if (shouldLogError(normalizedEndpoint, 'get_chats_failed')) {
-                        console.error("[API] ❌ getChats failed: ${result.status} - ${result.message}");
-                    }
-                    
-                    if (!result.data) {
-                        result.data = { message: result.message || 'Request failed' };
-                    }
-                    
-                    if (cachedData) {
-                        console.log("[API] ✅ getChats failed, returning cached data");
-                        trackRequestEnd(normalizedEndpoint, functionName, false);
-                        return {
-                            ok: true,
-                            success: true,
-                            status: 200,
-                            statusText: 'OK (cached)',
-                            data: cachedData,
-                            headers: {},
-                            cached: true,
-                            message: 'Using cached chats'
-                        };
-                    }
-                    
-                    const token = getAuthToken();
-                    if (result.status === 401 && !token && !isPublic) {
-                        throw {
-                            message: result.message,
-                            status: result.status,
-                            success: result.success,
-                            isRateLimited: result.isRateLimited,
-                            isServerError: result.isServerError
-                        };
-                    }
-                    
-                    trackRequestEnd(normalizedEndpoint, functionName, false);
-                    trackError(normalizedEndpoint, functionName, `get_chats_failed_${result.status}`);
-                    return result;
-                }
-                
-                if (result.success && result.data && _apiCache) {
-                    _apiCache.set(cacheKey, result.data);
-                }
-                
-                trackRequestEnd(normalizedEndpoint, functionName, true);
-                return result;
-                
-            } catch (error) {
-                trackRequestEnd(normalizedEndpoint, functionName, false);
-                const errorCount = trackError(normalizedEndpoint, functionName, 'get_chats_error');
-                
-                if (shouldLogError(normalizedEndpoint, 'get_chats_error')) {
-                    console.error("[API] ❌ getChats error:", error.message);
-                }
-                
-                const cacheKey = `get_${normalizedEndpoint}`;
-                const cachedData = _apiCache ? _apiCache.get(cacheKey) : null;
-                
-                if (cachedData) {
-                    console.log("[API] ✅ getChats error, returning cached data");
-                    return {
-                        ok: true,
-                        success: true,
-                        status: 200,
-                        statusText: 'OK (cached)',
-                        data: cachedData,
-                        headers: {},
-                        cached: true,
-                        message: 'Using cached chats',
-                        error: error.message
-                    };
-                }
-                
-                const errorObj = {
-                    ok: false,
-                    success: false,
-                    status: error.status || 0,
-                    statusText: error.message || 'Network Error',
-                    data: { message: error.message || 'Request failed' },
-                    headers: {},
-                    error: true,
-                    message: error.message || 'Request failed'
-                };
-                
-                return errorObj;
-            }
-            
-        } catch (error) {
-            console.error("[API] ❌ getChats critical error:", error);
-            return getSafeDefaultResponse(endpoint, functionName, error);
-        }
-    }
-    
     async function getChatById(chatId) {
         const functionName = 'getChatById';
         
@@ -5926,7 +7013,7 @@
                 const isBootstrapComplete = 
                     (window.AppState && window.AppState.bootstrapComplete) ||
                     (window.__APP_BOOTSTRAP_COMPLETE__) ||
-(document.readyState === 'complete' && window.__API_CORE_LOADED_V24);                
+                    (document.readyState === 'complete' && window.__API_CORE_LOADED_V24);                
                 if (isBootstrapComplete) {
                     _gatewayState.gates.bootstrapReady = true;
                     _gatewayState.initialization.steps.bootstrapWaited = true;
@@ -6063,6 +7150,7 @@
             setupFailureRecovery();
             
             const publicApi = {
+                // Core methods
                 secureFetch: _secureApiFetch,
                 get: apiGet,
                 post: apiPost,
@@ -6072,6 +7160,7 @@
                 healthCheck: apiHealthCheck,
                 request: requestWrapper,
                 
+                // Utility methods
                 _normalizeEndpoint: normalizeEndpoint,
                 _normalizeAuthPayload: normalizeAuthPayload,
                 _testNormalization: testNormalization,
@@ -6079,38 +7168,68 @@
                 _safeParseResponse: safeParseResponse,
                 _createErrorResponse: createErrorResponse,
                 
+                // Safety state and helpers
                 _safetyState: _safetyState,
                 _getSafeDefaultResponse: getSafeDefaultResponse,
                 
+                // Gateway state
                 _gatewayState: _gatewayState,
                 
+                // Message methods
                 getMessages,
                 getMessageById,
                 sendMessage,
+                
+                // Friend methods
                 getFriends,
                 addFriend,
+                acceptFriendRequest,
+                rejectFriendRequest,
+                getIncomingFriendRequests,
+                getSentFriendRequests,
+                blockFriend,
+                unblockFriend,
+                unfriend,
+                
+                // Group methods
                 getGroups,
                 getGroupById,
                 createGroup,
+                
+                // Status methods
                 getStatuses,
                 getStatus,
                 createStatus,
+                
+                // Call methods
                 getCalls,
                 startCall,
                 
+                // Settings methods
                 getSettings,
                 getFeatures,
                 updateSettings,
                 getTools,
                 
+                // User methods
                 getUsers,
                 getUserById,
+                
+                // Chat methods
                 getChats,
                 getChatById,
+                startDirectChat,
+                getUnreadCounts,
+                markMessagesRead,
+                
+                // Contact methods
                 getContacts,
+                
+                // Notification methods
                 getNotifications,
                 getUserPreferences,
                 
+                // Marker
                 TRUSTED_REQUEST_MARKER
             };
             

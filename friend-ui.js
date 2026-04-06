@@ -153,9 +153,99 @@ import {
     assertActive,
     onModuleActive,
     sendChildReady,
-    handleParentReady
+    handleParentReady,
+
+    // Nearby Discovery
+    NearbyManager,
+
+    // Authorized HTTP request helper
+    authorizedRequest
 
 } from './friend-core.js';
+
+// =============================================
+// HOISTED HELPERS — defined at module scope so tab handlers can call them
+// before bindAllEvents() has finished running
+// =============================================
+
+async function loadGroupsIntoSelect() {
+    const groupSelect = document.getElementById('groupSelect');
+    if (!groupSelect) return;
+    groupSelect.innerHTML = '<option value="">Loading groups\u2026</option>';
+    try {
+        await loadGroupsFromBackend();
+        const groupsArr = Array.isArray(groups) ? groups : [];
+        if (groupsArr.length === 0) {
+            groupSelect.innerHTML = '<option value="">No groups found</option>';
+            return;
+        }
+        groupSelect.innerHTML =
+            '<option value="">\u2014 Select a group \u2014</option>' +
+            groupsArr.map(g => `<option value="${g.id}">${escapeHtml(g.name)}</option>`).join('');
+    } catch (e) {
+        groupSelect.innerHTML = '<option value="">Failed to load groups</option>';
+    }
+}
+
+async function loadGroupMembers(groupId, searchTerm) {
+    const groupMembersList = document.getElementById('groupMembersList');
+    if (!groupMembersList || !groupId) return;
+    groupMembersList.innerHTML =
+        '<div style="text-align:center;padding:20px;"><i class="fas fa-spinner fa-spin"></i> Loading members\u2026</div>';
+    try {
+        const response = await authorizedRequest(`/api/groups/${groupId}/members`);
+        let members = (response && response.data && (response.data.members || response.data)) || [];
+        if (!Array.isArray(members)) members = [];
+        if (searchTerm) {
+            const s = searchTerm.toLowerCase();
+            members = members.filter(m =>
+                (m.username || '').toLowerCase().includes(s) ||
+                (m.displayName || '').toLowerCase().includes(s)
+            );
+        }
+        if (members.length === 0) {
+            groupMembersList.innerHTML =
+                '<div style="text-align:center;padding:20px;color:var(--text-secondary);">No members found</div>';
+            return;
+        }
+        groupMembersList.innerHTML = members.map(m => {
+            const isSelf = m.id === (currentUser && currentUser.id);
+            const avatarInner = m.avatar
+                ? `<img src="${escapeHtml(m.avatar)}" style="width:100%;height:100%;object-fit:cover;" onerror="this.style.display='none'">`
+                : escapeHtml(((m.displayName || m.username || '?')[0]).toUpperCase());
+            return `<div style="display:flex;align-items:center;gap:12px;padding:10px;border-bottom:1px solid var(--border-color);">
+                <div style="width:36px;height:36px;border-radius:50%;background:var(--primary-color);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:bold;flex-shrink:0;overflow:hidden;">${avatarInner}</div>
+                <div style="flex:1;min-width:0;">
+                    <div style="font-weight:600;">${escapeHtml(m.displayName || m.username)}</div>
+                    <div style="font-size:12px;color:var(--text-secondary);">@${escapeHtml(m.username || '')}</div>
+                </div>
+                <button class="action-btn primary group-add-btn" data-user-id="${m.id}" data-username="${escapeHtml(m.username || '')}" style="padding:6px 14px;font-size:13px;"${isSelf ? ' disabled' : ''}>
+                    ${isSelf ? 'You' : '<i class="fas fa-user-plus"></i> Add'}
+                </button>
+            </div>`;
+        }).join('');
+        groupMembersList.querySelectorAll('.group-add-btn').forEach(btn => {
+            btn.addEventListener('click', async function () {
+                const uid = parseInt(this.dataset.userId);
+                const uname = this.dataset.username;
+                this.disabled = true;
+                this.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+                const result = await sendFriendRequest(uid, 'friend', 'Added from group');
+                if (result && result.success) {
+                    this.innerHTML = '<i class="fas fa-check"></i> Sent';
+                    showNotification('Request sent to @' + uname, 'success');
+                } else {
+                    this.disabled = false;
+                    this.innerHTML = '<i class="fas fa-user-plus"></i> Add';
+                    showNotification((result && result.error) || 'Failed to send request', 'error');
+                }
+            });
+        });
+    } catch (e) {
+        groupMembersList.innerHTML =
+            '<div style="text-align:center;padding:20px;color:var(--danger-color);">Failed to load members</div>';
+    }
+}
 
 // =============================================
 // [2] DEBUG HELPER - ENHANCED
@@ -2399,7 +2489,24 @@ function createUserSearchItemElement(user) {
                         navigateToChat(btn.dataset.userId, btn.dataset.userName);
                         break;
                     case 'add':
-                        sendFriendRequest(userId);
+                        btn.disabled = true;
+                        btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+                        sendFriendRequest(userId, 'friend', 'Added via All Users').then(result => {
+                            if (result && result.success) {
+                                btn.innerHTML = '<i class="fas fa-check"></i>';
+                                btn.style.background = 'var(--success-color, #28a745)';
+                                btn.title = 'Request sent';
+                                showNotification(`Friend request sent to ${user.displayName || user.username}`, 'success');
+                            } else {
+                                btn.disabled = false;
+                                btn.innerHTML = '<i class="fas fa-user-plus"></i>';
+                                showNotification((result && result.error) || 'Failed to send friend request', 'error');
+                            }
+                        }).catch(() => {
+                            btn.disabled = false;
+                            btn.innerHTML = '<i class="fas fa-user-plus"></i>';
+                            showNotification('Failed to send friend request', 'error');
+                        });
                         break;
                     case 'more':
                         showFriendOptions(user);
@@ -3653,20 +3760,27 @@ const handleSendFriendRequest = async function() {
 
     if (activeTabName === 'username') {
         const usernameInput = document.getElementById('usernameInput');
-        const username = usernameInput?.value.trim() || '';
+        const raw = usernameInput?.value.trim() || '';
 
-        if (!username) return;
-        if (!username.startsWith('@')) return;
-
-        const searchTerm = username.substring(1);
+        if (!raw) {
+            showNotification('Please enter a username to search', 'warning');
+            return;
+        }
+        // Accept both "@john" and "john"
+        const searchTerm = raw.startsWith('@') ? raw.substring(1) : raw;
+        if (!searchTerm) {
+            showNotification('Please enter a valid username', 'warning');
+            return;
+        }
         
         // Use the searchFriends function from core for REAL search
         if (typeof searchFriends === 'function') {
-            const users = await searchFriends(searchTerm, { includeUsers: true, limit: 10 });
-            const user = users.find(u => u.username === searchTerm);
+            const users = await searchFriends(searchTerm, { includeUsers: true, limit: 20 });
+            // Case-insensitive match
+            const user = users.find(u => u.username?.toLowerCase() === searchTerm.toLowerCase());
             
             if (!user) {
-                showNotification('User not found', 'error');
+                showNotification(`No user found with username "${searchTerm}"`, 'error');
                 return;
             }
 
@@ -4305,13 +4419,26 @@ function bindAllEvents() {
                 tabContent.classList.add('active');
 
                 if (tabName === 'all-users') {
-                    renderAllUsersList();
+                    fetchAllUsersFromBackend().then(() => renderAllUsersList());
                 }
 
                 if (tabName === 'qr' && featureFlags.qrCode) {
                     if (currentUser?.id) {
                         setTimeout(generateUniqueQRCode, 100);
                     }
+                }
+
+                if (tabName === 'groups') {
+                    setTimeout(loadGroupsIntoSelect, 100);
+                }
+
+                if (tabName !== 'nearby') {
+                    // Stop nearby scanning when leaving that tab
+                    NearbyManager && NearbyManager.stop && NearbyManager.stop();
+                    const sBtn = document.getElementById('startNearbyBtn');
+                    const xBtn = document.getElementById('stopNearbyBtn');
+                    if (sBtn) sBtn.disabled = false;
+                    if (xBtn) xBtn.disabled = true;
                 }
             }
         });
@@ -4345,6 +4472,149 @@ function bindAllEvents() {
             }
         });
     });
+
+    // ── Nearby Discovery ──────────────────────────────────────────────────────
+    const startNearbyBtn = document.getElementById('startNearbyBtn');
+    const stopNearbyBtn  = document.getElementById('stopNearbyBtn');
+    const nearbyStatusEl = document.getElementById('nearbyStatusText');
+    const nearbyListEl   = document.getElementById('nearbyFriendsList');
+
+    function renderNearbyUsers(users, mode) {
+        if (!nearbyListEl) return;
+        if (!users || users.length === 0) {
+            nearbyListEl.innerHTML = `<p style="color:var(--text-secondary);text-align:center;padding:20px;">No users found nearby right now.</p>`;
+            return;
+        }
+        nearbyListEl.innerHTML = users.map(u => `
+            <div style="display:flex;align-items:center;gap:12px;padding:10px;border-bottom:1px solid var(--border-color);">
+                <div style="width:40px;height:40px;border-radius:50%;background:var(--primary-color);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:bold;flex-shrink:0;overflow:hidden;">
+                    ${u.avatar ? `<img src="${escapeHtml(u.avatar)}" style="width:100%;height:100%;object-fit:cover;" onerror="this.style.display='none'">` : escapeHtml((u.displayName||u.username||'?')[0].toUpperCase())}
+                </div>
+                <div style="flex:1;min-width:0;">
+                    <div style="font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(u.displayName||u.username)}</div>
+                    <div style="font-size:12px;color:var(--text-secondary);">@${escapeHtml(u.username)} · ${escapeHtml(u.status||'offline')}</div>
+                </div>
+                <button class="action-btn primary nearby-add-btn" data-user-id="${u.id}" data-username="${escapeHtml(u.username)}" style="padding:6px 14px;font-size:13px;">
+                    <i class="fas fa-user-plus"></i> Add
+                </button>
+            </div>
+        `).join('');
+
+        // Wire add buttons
+        nearbyListEl.querySelectorAll('.nearby-add-btn').forEach(btn => {
+            btn.addEventListener('click', async function() {
+                const uid = parseInt(this.dataset.userId);
+                const uname = this.dataset.username;
+                this.disabled = true;
+                this.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+                const result = await sendFriendRequest(uid, 'friend', 'Added via Nearby Discovery');
+                if (result && result.success) {
+                    this.innerHTML = '<i class="fas fa-check"></i> Sent';
+                    showNotification(`Friend request sent to @${uname}`, 'success');
+                } else {
+                    this.disabled = false;
+                    this.innerHTML = '<i class="fas fa-user-plus"></i> Add';
+                    showNotification(result?.error || 'Failed to send request', 'error');
+                }
+            });
+        });
+    }
+
+    if (startNearbyBtn) {
+        startNearbyBtn.addEventListener('click', function() {
+            if (!isUIActive()) { showNotification('Please wait…', 'info'); return; }
+            this.disabled = true;
+            if (stopNearbyBtn) stopNearbyBtn.disabled = false;
+            if (nearbyStatusEl) nearbyStatusEl.textContent = 'Starting…';
+            NearbyManager.start(
+                (users, mode) => {
+                    const modeLabel = mode === 'location' ? 'nearby (GPS)' : 'online users';
+                    if (nearbyStatusEl) nearbyStatusEl.textContent = `Showing ${users.length} ${modeLabel}`;
+                    renderNearbyUsers(users, mode);
+                },
+                (status) => { if (nearbyStatusEl) nearbyStatusEl.textContent = status; }
+            );
+        });
+    }
+
+    if (stopNearbyBtn) {
+        stopNearbyBtn.disabled = true;
+        stopNearbyBtn.addEventListener('click', function() {
+            NearbyManager.stop();
+            this.disabled = true;
+            if (startNearbyBtn) startNearbyBtn.disabled = false;
+            if (nearbyStatusEl) nearbyStatusEl.textContent = 'Stopped';
+            if (nearbyListEl) nearbyListEl.innerHTML = '';
+        });
+    }
+
+    // ── Groups tab: load groups into select, load members on change ────────────
+    const groupSelect       = document.getElementById('groupSelect');
+    const groupMemberSearch = document.getElementById('groupMemberSearch');
+    const groupMembersList  = document.getElementById('groupMembersList');
+
+    if (groupSelect) {
+        groupSelect.addEventListener('change', function() {
+            const gid = this.value;
+            if (!gid) {
+                if (groupMembersList) groupMembersList.innerHTML = '<div style="text-align:center;padding:30px;color:var(--text-secondary);"><i class="fas fa-users" style="font-size:32px;margin-bottom:10px;display:block;"></i>Select a group to view members</div>';
+                return;
+            }
+            loadGroupMembers(gid, groupMemberSearch?.value || '');
+        });
+    }
+
+    if (groupMemberSearch) {
+        let groupSearchTimer;
+        groupMemberSearch.addEventListener('input', function() {
+            clearTimeout(groupSearchTimer);
+            groupSearchTimer = setTimeout(() => {
+                const gid = groupSelect?.value;
+                if (gid) loadGroupMembers(gid, this.value.trim());
+            }, 300);
+        });
+    }
+
+    // Hook groups tab activation to load groups
+    document.querySelectorAll('.add-friend-tab[data-tab="groups"]').forEach(tab => {
+        tab.addEventListener('click', function() {
+            setTimeout(loadGroupsIntoSelect, 100);
+        });
+    });
+    document.querySelectorAll('.method-item[data-method="groups"]').forEach(item => {
+        item.addEventListener('click', function() {
+            setTimeout(loadGroupsIntoSelect, 150);
+        });
+    });
+
+    // ── All Users: wire the "Add" button via event delegation ────────────────
+    const allUsersList = document.getElementById('allUsersList');
+    if (allUsersList) {
+        allUsersList.addEventListener('click', async function(e) {
+            const addBtn = e.target.closest('.all-user-add-btn');
+            if (!addBtn) return;
+            if (!isUIActive()) {
+                showNotification('Please wait while module initializes…', 'info');
+                return;
+            }
+            const uid   = parseInt(addBtn.dataset.userId);
+            const uname = addBtn.dataset.username || '';
+            if (!uid || isNaN(uid)) return;
+            addBtn.disabled = true;
+            const orig = addBtn.innerHTML;
+            addBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+            const result = await sendFriendRequest(uid, 'friend', 'Added from All Users');
+            if (result && result.success) {
+                addBtn.innerHTML = '<i class="fas fa-check"></i>';
+                addBtn.style.background = 'var(--success-color)';
+                showNotification(`Friend request sent to @${uname}`, 'success');
+            } else {
+                addBtn.disabled = false;
+                addBtn.innerHTML = orig;
+                showNotification(result?.error || 'Failed to send friend request', 'error');
+            }
+        });
+    }
 
     logUI('Event binding complete');
 }

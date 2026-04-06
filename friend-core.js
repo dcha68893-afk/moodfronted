@@ -6322,16 +6322,27 @@ function getFriendsForGroup() {
 // =============================================
 
 async function startCameraScanner() {
-    if (!assertActive('startCameraScanner')) {
-        showNotification?.('Module not active', 'warning');
-        return;
-    }
-    
+    // If auth not ready yet, queue and retry — don't silently block
     if (!authReadyReceived || !__session.ready || !__session.token) {
-        showNotification?.('Auth not ready', 'warning');
+        if (!assertActive('startCameraScanner')) {
+            showNotification?.('Module not active, please wait...', 'warning');
+            return;
+        }
+        // Queue with a short retry — camera can start once session is ready
+        let attempts = 0;
+        const waitAndStart = setInterval(() => {
+            attempts++;
+            if (authReadyReceived && __session.ready && __session.token) {
+                clearInterval(waitAndStart);
+                startCameraScanner();
+            } else if (attempts >= 20) {
+                clearInterval(waitAndStart);
+                showNotification?.('Session timed out — please refresh', 'error');
+            }
+        }, 300);
         return;
     }
-    
+
     QRCodeManager.resetScan();
     
     const video = document.getElementById('cameraVideo');
@@ -7678,6 +7689,76 @@ const friendCore = {
     getSession: () => ({ token: __session.token, user: __session.user, ready: __session.ready })
 };
 
+// =============================================
+// [NEARBY MANAGER] - Real geolocation-based discovery
+// =============================================
+const NearbyManager = {
+    _searching:   false,
+    _watchId:     null,
+    _coords:      null,
+    _onResult:    null,
+    _onStatus:    null,
+
+    start(onResult, onStatus) {
+        if (this._searching) return;
+        this._onResult = onResult || (() => {});
+        this._onStatus = onStatus || (() => {});
+        this._searching = true;
+        this._onStatus('Requesting location...');
+
+        if (!navigator.geolocation) {
+            this._onStatus('Geolocation not supported');
+            this._searching = false;
+            return;
+        }
+
+        this._watchId = navigator.geolocation.watchPosition(
+            (position) => {
+                this._coords = { lat: position.coords.latitude, lng: position.coords.longitude };
+                this._onStatus('Searching nearby...');
+                this._fetchNearby();
+            },
+            (err) => {
+                Logger.warn('NearbyManager', 'Geolocation error', err);
+                this._onStatus('Location permission denied — showing online users instead');
+                this._fetchNearby(); // fallback: no coords, server returns online users
+            },
+            { enableHighAccuracy: false, timeout: 10000, maximumAge: 30000 }
+        );
+    },
+
+    stop() {
+        this._searching = false;
+        if (this._watchId !== null) {
+            navigator.geolocation.clearWatch(this._watchId);
+            this._watchId = null;
+        }
+        this._coords  = null;
+        this._onResult = null;
+        this._onStatus = null;
+    },
+
+    async _fetchNearby() {
+        if (!this._searching) return;
+        try {
+            let url = '/api/friends/nearby';
+            if (this._coords) {
+                url += `?lat=${this._coords.lat}&lng=${this._coords.lng}&radius=5000`;
+            }
+            const response = await authorizedRequest(url);
+            if (response.success && this._onResult) {
+                this._onResult(response.data?.users || [], response.data?.mode || 'none');
+            }
+        } catch (err) {
+            Logger.error('NearbyManager', 'Failed to fetch nearby users', err);
+        }
+        // Re-poll every 30 seconds while active
+        if (this._searching) {
+            setTimeout(() => this._fetchNearby(), 30000);
+        }
+    }
+};
+
 export {
     // Core State
     currentUser,
@@ -7910,7 +7991,10 @@ export {
 
     // StatusManager and ENV_CONFIG
     StatusManager,
-    ENV_CONFIG
+    ENV_CONFIG,
+
+    // Nearby Discovery
+    NearbyManager
 };
 
 window.__FRIEND_MODULE_READY__ = true;
