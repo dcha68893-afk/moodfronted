@@ -2164,6 +2164,121 @@ function _registerParentMessageHandler(type, handler) {
 }
 
 // ============================================================================
+// IFRAME API RELAY
+// Fallback relay for API_REQUEST messages from child iframes.
+// NOTE: When loaded inside chat.html (which has its own complete API handler),
+// this relay is intentionally disabled via window.__parentHandlesApiRequests.
+// This prevents double-responses where both chat.html's handler AND this relay
+// respond to the same requestId, causing "No pending request" warnings.
+// ============================================================================
+window.addEventListener('message', async (event) => {
+    // Skip if the parent page (chat.html) already has a dedicated handler
+    if (window.__parentHandlesApiRequests) return;
+
+    try {
+        const msg = event.data;
+        if (!msg || typeof msg !== 'object') return;
+        if (msg.type !== 'API_REQUEST') return;
+
+        // Allow relay for all child iframes, not just 'messages'
+        const allowedSources = ['messages', 'friends', 'groups', 'calls', 'status', 'settings', 'tools'];
+        if (msg.source && !allowedSources.includes(msg.source)) return;
+
+        const { requestId, payload } = msg;
+        if (!requestId || !payload) return;
+
+        const { endpoint, method = 'GET', body, params } = payload;
+        if (!endpoint) return;
+
+        // Build full URL using the backend base URL, NOT the live-server origin.
+        // window.location.origin points to the dev server (e.g. 127.0.0.1:5500)
+        // which does not host the API — the API is always at localhost:4000.
+        const getBackendBase = () => {
+            if (typeof window.__getApiBase === 'function') {
+                return window.__getApiBase().replace(/\/api\/?$/, '');
+            }
+            // Fallback: detect by hostname
+            const h = window.location.hostname;
+            if (h === 'localhost' || h === '127.0.0.1') return 'http://localhost:4000';
+            return window.location.origin; // production: same origin
+        };
+
+        const normalizedEndpoint = endpoint.startsWith('/api/')
+            ? endpoint
+            : '/api' + (endpoint.startsWith('/') ? endpoint : '/' + endpoint);
+
+        let url = getBackendBase() + normalizedEndpoint;
+        if (params && typeof params === 'object') {
+            const filtered = Object.fromEntries(
+                Object.entries(params).filter(([, v]) => v !== undefined && v !== null)
+            );
+            const qs = new URLSearchParams(filtered).toString();
+            if (qs) url += '?' + qs;
+        }
+
+        const token = getAuthToken();
+        const fetchOptions = {
+            method: method.toUpperCase(),
+            headers: {
+                'Content-Type': 'application/json',
+                ...(token ? { 'Authorization': 'Bearer ' + token } : {})
+            }
+        };
+        if (body && method.toUpperCase() !== 'GET') {
+            fetchOptions.body = JSON.stringify(body);
+        }
+
+        let responseData;
+        let statusCode;
+        try {
+            const res = await fetch(url, fetchOptions);
+            statusCode = res.status;
+            responseData = await res.json().catch(() => ({ success: false, message: 'Non-JSON response' }));
+        } catch (fetchErr) {
+            // Network failure — send error back to child
+            // FIXED: wrap in payload so messages-core.js handleApiResponse can read it correctly
+            event.source && event.source.postMessage({
+                type: 'API_RESPONSE',
+                source: 'parent',
+                requestId,
+                payload: {
+                    success: false,
+                    error: fetchErr.message || 'Network error',
+                    statusCode: 0,
+                    data: null
+                },
+                // Also set top-level for backwards compat with other consumers
+                success: false,
+                error: fetchErr.message || 'Network error',
+                status: 0
+            }, event.origin || '*');
+            return;
+        }
+
+        const success = statusCode >= 200 && statusCode < 300;
+        // FIXED: include both a top-level payload wrapper (for messages-core / friend-core which
+        // read data.payload) AND top-level fields (for any legacy consumers).
+        event.source && event.source.postMessage({
+            type: 'API_RESPONSE',
+            source: 'parent',
+            requestId,
+            payload: {
+                success,
+                data: responseData,
+                statusCode
+            },
+            // Legacy top-level fields kept for backward compat
+            success,
+            data: responseData,
+            status: statusCode
+        }, event.origin || '*');
+
+    } catch (err) {
+        console.error('[API-RELAY] Unexpected error handling API_REQUEST:', err);
+    }
+});
+
+// ============================================================================
 // SECURE STORAGE
 // ============================================================================
 

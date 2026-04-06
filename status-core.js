@@ -716,6 +716,7 @@ function handleParentReady(messageData) {
 
     _parentReadyReceived = true;
     _parentReady = true;
+    parentReady = true; // FIX: also set the legacy parentReady flag so flushQueue works
 
     logStatus('LIFECYCLE', 'PARENT_READY received');
 
@@ -817,7 +818,7 @@ function setSession(token, user, expiresAt = null) {
     logStatus('SUCCESS', 'Session stored in memory');
     
     // Load statuses after session is established
-    if (currentState === LifecycleState.ACTIVE) {
+    if (_currentState === LifecycleState.ACTIVE) {
         loadStatuses();
     }
     
@@ -1067,47 +1068,57 @@ function flushQueue() {
 const MessageValidator = {
     requiredFields: ['type', 'id', 'requestId', 'source', 'target', 'timestamp'],
     
+    // For INBOUND messages from parent, only type is truly required.
+    // For OUTBOUND messages (source === MODULE_NAME), full schema is enforced elsewhere.
     validate(message) {
         try {
             if (!message || typeof message !== 'object') {
                 return { valid: false, reason: 'Not an object' };
             }
-            
-            for (const field of this.requiredFields) {
+
+            // Every message must have a type
+            if (!message.type || typeof message.type !== 'string') {
+                return { valid: false, reason: 'Missing or invalid type' };
+            }
+
+            // For messages FROM parent, relax schema — parent controls its own format
+            if (message.source === 'parent') {
+                return { valid: true };
+            }
+
+            // For outbound messages (MODULE_NAME as source), enforce full schema
+            const outboundRequired = ['id', 'requestId', 'source', 'target', 'timestamp'];
+            for (const field of outboundRequired) {
                 if (!message[field] && message[field] !== 0) {
                     return { valid: false, reason: `Missing required field: ${field}` };
                 }
             }
-            
-            if (typeof message.type !== 'string') {
-                return { valid: false, reason: 'type must be string' };
-            }
-            
+
             if (typeof message.source !== 'string') {
                 return { valid: false, reason: 'source must be string' };
             }
-            
-            if (message.target !== 'parent') {
+
+            if (message.source !== 'parent' && message.target !== 'parent') {
                 return { valid: false, reason: `Invalid target: ${message.target} - must be 'parent'` };
             }
-            
+
             if (typeof message.id !== 'string') {
                 return { valid: false, reason: 'id must be string' };
             }
-            
+
             if (typeof message.requestId !== 'string') {
                 return { valid: false, reason: 'requestId must be string' };
             }
-            
+
             if (typeof message.timestamp !== 'number') {
                 return { valid: false, reason: 'timestamp must be number' };
             }
-            
+
             const now = Date.now();
             if (Math.abs(now - message.timestamp) > 300000) {
                 debugWarn(`Timestamp out of range for ${message.type}: ${message.timestamp}`);
             }
-            
+
             return { valid: true };
         } catch (error) {
             return { valid: false, reason: error.message };
@@ -1563,7 +1574,7 @@ function handleSession(sessionData) {
         __storeValidSessionId(sessionData);
         
         // If we were waiting for session to activate, now we can activate
-        if (currentState === LIFECYCLE_STATES.WAIT_PARENT && _parentReadyReceived && !isInState(LifecycleState.ACTIVE)) {
+        if (_currentState === LifecycleState.WAIT_PARENT && (_parentReadyReceived || _parentReady) && !isInState(LifecycleState.ACTIVE)) {
             transitionTo(LifecycleState.ACTIVE, 'valid_session_received');
             flushQueue();
             
@@ -3149,6 +3160,7 @@ const _parentReadyPromise = new Promise((resolve, reject) => {
 // PARENT MESSAGE HANDLER - PROTOCOL-COMPLIANT
 // =============================================
 function handleParentMessage(event) {
+    // Process message asynchronously to avoid blocking
     setTimeout(() => {
         try {
             const msg = event.data;
@@ -3181,13 +3193,50 @@ function handleParentMessage(event) {
 
             DiagnosticsAgent.increment('messagesReceived');
 
+            // Handle PARENT_READY
             if (msg.type === 'PARENT_READY') {
+                console.log('[status] 📥 PARENT_READY received via direct handler');
                 handleParentReady(msg);
                 return;
             }
 
+            // Handle AUTH_READY directly
+            if (msg.type === 'AUTH_READY') {
+                console.log('[status] 📥 AUTH_READY received via direct handler');
+                
+                const payload = msg.payload || {};
+                const sessionData = payload.session || payload;
+                
+                if (sessionData && __isValidSession(sessionData)) {
+                    if (!__isDuplicateSession(sessionData)) {
+                        handleSession(sessionData);
+                        __storeValidSessionId(sessionData);
+                        logStatus('SUCCESS', 'Session applied from AUTH_READY');
+                    } else {
+                        logStatus('WARNING', 'Duplicate session data in AUTH_READY ignored');
+                    }
+                }
+                
+                // Mark parent as ready
+                parentReady = true;
+                _parentReady = true;
+                
+                // If we're in WAIT_PARENT, transition to ACTIVE
+                if (currentState === LIFECYCLE_STATES.WAIT_PARENT) {
+                    if (isSessionReady() && __isValidSession({ token: _sessionToken, userId: _sessionUser?.id })) {
+                        transitionTo(LIFECYCLE_STATES.ACTIVE, 'auth_ready_with_valid_session');
+                        flushQueue();
+                        
+                        if (parentReadyResolver) {
+                            parentReadyResolver({ type: 'AUTH_READY', timestamp: Date.now() });
+                        }
+                    }
+                }
+                return;
+            }
+
+            // Handle SESSION_DATA
             if (msg.type === 'SESSION_DATA') {
-                // Validate session before handling
                 if (msg.payload && __isValidSession(msg.payload)) {
                     if (!__isDuplicateSession(msg.payload)) {
                         handleSession(msg.payload);
@@ -3201,6 +3250,7 @@ function handleParentMessage(event) {
                 return;
             }
 
+            // Handle MODULE_REGISTERED
             if (msg.type === 'MODULE_REGISTERED') {
                 if (msg.payload?.moduleName === MODULE_NAME) {
                     const moduleKey = 'module_registered';
@@ -3212,16 +3262,19 @@ function handleParentMessage(event) {
                 return;
             }
 
+            // Handle HEARTBEAT
             if (msg.type === 'HEARTBEAT') {
                 sendHeartbeatAck(msg.id);
                 return;
             }
             
+            // Handle API_RESPONSE
             if (msg.type === 'API_RESPONSE') {
                 handleApiResponse(msg);
                 return;
             }
             
+            // Handle STATUS_UPDATE
             if (msg.type === 'STATUS_UPDATE') {
                 const status = msg.payload || msg;
                 if (status && status.id) {
@@ -3234,63 +3287,29 @@ function handleParentMessage(event) {
                 return;
             }
 
+            // Pass to ParentCommunication if needed
             if (typeof ParentCommunication !== 'undefined') {
                 ParentCommunication.handleParentMessage(msg);
             }
 
+            // Handle any registered message handlers
             const handlers = messageHandlers.get(msg.type) || [];
             for (const handler of handlers) {
-                handler(msg, event.origin);
+                try {
+                    handler(msg, event.origin);
+                } catch (e) {
+                    debugError(`Handler error for ${msg.type}:`, e);
+                }
             }
 
         } catch (error) {
             debugError('Error handling parent message:', error);
         }
     }, 0);
-    // Add AUTH_READY handler
-addMessageHandler('AUTH_READY', (message) => {
-    logStatus('LIFECYCLE', 'AUTH_READY received');
-    
-    const payload = message.payload || message.data || {};
-    const sessionData = payload.session || payload;
-    
-    // If we have session data and it's valid, apply it
-    if (sessionData && __isValidSession(sessionData)) {
-        if (!__isDuplicateSession(sessionData)) {
-            handleSession(sessionData);
-            __storeValidSessionId(sessionData);
-            logStatus('SUCCESS', 'Session applied from AUTH_READY');
-        } else {
-            logStatus('WARNING', 'Duplicate session data in AUTH_READY ignored');
-        }
-    }
-    
-    // If we're in WAITING_AUTH, transition to READY
-    if (isInState(LifecycleState.WAITING_AUTH)) {
-        logStatus('LIFECYCLE', 'AUTH_READY received in WAITING_AUTH - transitioning to READY');
-        transitionTo(LifecycleState.READY, 'auth_ready_received');
-        // Send CHILD_READY after auth is ready
-        sendChildReady();
-    } else if (isInState(LifecycleState.WAIT_PARENT)) {
-        logStatus('LIFECYCLE', 'AUTH_READY received in WAIT_PARENT - marking as parent ready');
-        parentReady = true;
-        _parentReady = true;
-        
-        // If we have a valid session, transition to ACTIVE
-        if (isSessionReady() && __isValidSession({ token: _sessionToken, userId: _sessionUser?.id || _sessionUser?.userId })) {
-            transitionTo(LifecycleState.ACTIVE, 'auth_ready_with_valid_session');
-            flushQueue();
-            
-            if (parentReadyResolver) {
-                parentReadyResolver({ type: 'AUTH_READY', timestamp: Date.now() });
-            }
-        }
-    }
-});
 }
 
 // =============================================
-// MESSAGE HANDLER REGISTRATION
+// MESSAGE HANDLER REGISTRATION - DEFINED ONCE
 // =============================================
 const messageHandlers = new Map();
 
@@ -3301,12 +3320,15 @@ function addMessageHandler(type, handler) {
     messageHandlers.get(type).push(handler);
 }
 
+// Register all message handlers
 addMessageHandler('ACK', (message) => {});
+
 addMessageHandler('STATUS', (message) => {
     document.dispatchEvent(new CustomEvent('statusUpdate', {
         detail: message.payload
     }));
 });
+
 addMessageHandler('ERROR', (message) => {
     const errorKey = `parent_error_${message.payload?.error || 'unknown'}`;
     if (!_loggedMessages.has(errorKey)) {
@@ -3314,35 +3336,41 @@ addMessageHandler('ERROR', (message) => {
         logStatus('FAILED', `Error from parent: ${message.payload?.error || 'Unknown error'}`);
     }
 });
+
 addMessageHandler('DATA', (message) => {
     document.dispatchEvent(new CustomEvent('coreData', {
         detail: message.payload
     }));
 });
+
 addMessageHandler('HANDSHAKE_RESPONSE', (message) => {
     if (typeof HandshakeClient !== 'undefined') HandshakeClient.handleResponse(message);
 });
+
 addMessageHandler('SESSION', (message) => {
     if (typeof HandshakeClient !== 'undefined') HandshakeClient.handleSessionInit(message);
 });
+
 addMessageHandler('SESSION_DATA', (message) => {
-    // Validate before handling
     if (message.payload && __isValidSession(message.payload)) {
         if (typeof HandshakeClient !== 'undefined') HandshakeClient.handleSessionInit(message);
     }
 });
+
 addMessageHandler('SESSION_UPDATE', (message) => {
     const payload = message.payload || message.data || {};
     if (__isValidSession(payload)) {
         if (typeof updateSessionMirror !== 'undefined') updateSessionMirror(payload, 'session_update');
     }
 });
+
 addMessageHandler('SESSION_ACTIVE', (message) => {
     const payload = message.payload || message.data || {};
     if (__isValidSession(payload)) {
         if (typeof updateSessionMirror !== 'undefined') updateSessionMirror(payload, 'session_active');
     }
 });
+
 addMessageHandler('AUTH_VALIDATED', (message) => {
     const payload = message.payload || message.data || {};
     if (payload.success) {
@@ -3359,32 +3387,80 @@ addMessageHandler('AUTH_VALIDATED', (message) => {
         }
     }
 });
+
 addMessageHandler('PARENT_READY', (message) => {
+    console.log('[status] 📥 PARENT_READY via registered handler');
     handleParentReady(message);
 });
+
+addMessageHandler('AUTH_READY', (message) => {
+    console.log('[status] 📥 AUTH_READY via registered handler');
+    
+    const payload = message.payload || message.data || {};
+    const sessionData = payload.session || payload;
+    
+    if (sessionData && __isValidSession(sessionData)) {
+        if (!__isDuplicateSession(sessionData)) {
+            handleSession(sessionData);
+            __storeValidSessionId(sessionData);
+            logStatus('SUCCESS', 'Session applied from AUTH_READY (registered handler)');
+        } else {
+            logStatus('WARNING', 'Duplicate session data in AUTH_READY ignored');
+        }
+    }
+    
+    // Mark parent as ready
+    parentReady = true;
+    _parentReady = true;
+    
+    // If we're in READY state (haven't sent CHILD_READY yet), send it now
+    if (isInState(LifecycleState.READY)) {
+        logStatus('LIFECYCLE', 'AUTH_READY received in READY - sending CHILD_READY');
+        sendChildReady();
+    } else if (isInState(LifecycleState.WAIT_PARENT)) {
+        logStatus('LIFECYCLE', 'AUTH_READY received in WAIT_PARENT - activating');
+        
+        // If we have a valid session, transition to ACTIVE
+        if (isSessionReady() && __isValidSession({ token: _sessionToken, userId: _sessionUser?.id || _sessionUser?.userId })) {
+            transitionTo(LifecycleState.ACTIVE, 'auth_ready_with_valid_session');
+            flushQueue();
+            
+            if (parentReadyResolver) {
+                parentReadyResolver({ type: 'AUTH_READY', timestamp: Date.now() });
+            }
+        }
+    }
+});
+
 addMessageHandler('MODULE_REGISTERED', (message) => {
     if (message.payload?.moduleName === MODULE_NAME) {
         if (typeof ParentCommunication !== 'undefined') ParentCommunication.moduleRegistered = true;
     }
 });
+
 addMessageHandler('HEARTBEAT', (message) => {
     if (typeof ParentCommunication !== 'undefined') ParentCommunication.sendHeartbeatAck(message.id);
 });
+
 addMessageHandler('LOGOUT', (message) => {
     if (typeof handleLogout !== 'undefined') handleLogout(message.payload);
 });
+
 addMessageHandler('API_RESPONSE', (message) => {
     if (typeof handleApiResponse !== 'undefined') handleApiResponse(message.payload);
 });
+
 addMessageHandler('API_ERROR', (message) => {
     if (typeof handleApiError !== 'undefined') handleApiError(message.payload);
 });
+
 addMessageHandler('PONG', (message) => {
     if (typeof state !== 'undefined') {
         if (typeof state.lastHeartbeatReceived !== 'undefined') state.lastHeartbeatReceived = Date.now();
         if (typeof state.heartbeatFailures !== 'undefined') state.heartbeatFailures = 0;
     }
 });
+
 addMessageHandler('PAGE_ACTIVATED', (message) => {
     if (typeof state !== 'undefined') {
         if (typeof state.pageActivated !== 'undefined') state.pageActivated = true;
@@ -3406,6 +3482,7 @@ addMessageHandler('PAGE_ACTIVATED', (message) => {
         detail: { timestamp: Date.now() }
     }));
 });
+
 addMessageHandler('NAVIGATE', (message) => {
     if (message.payload && message.payload.path) {
         document.dispatchEvent(new CustomEvent('navigate', {
@@ -3413,6 +3490,7 @@ addMessageHandler('NAVIGATE', (message) => {
         }));
     }
 });
+
 addMessageHandler('CAPABILITY_RESPONSE', (message) => {
     if (message.payload && Array.isArray(message.payload.capabilities)) {
         message.payload.capabilities.forEach(cap => {
@@ -3423,6 +3501,7 @@ addMessageHandler('CAPABILITY_RESPONSE', (message) => {
         });
     }
 });
+
 addMessageHandler('TOKEN_REFRESH_RESPONSE', (message) => {
     if (message.payload && message.payload.token) {
         if (typeof state !== 'undefined') {
@@ -3435,24 +3514,29 @@ addMessageHandler('TOKEN_REFRESH_RESPONSE', (message) => {
         }
     }
 });
+
 addMessageHandler('ORIGIN_VALIDATION_RESPONSE', (message) => {
     if (message.payload && message.payload.valid && typeof state !== 'undefined') {
         if (typeof state.securityContext !== 'undefined') state.securityContext.originValidated = true;
     }
 });
+
 addMessageHandler('CONFIG_RESPONSE', (message) => {
     if (message.payload && message.payload.config) {
         if (typeof applyParentConfig !== 'undefined') applyParentConfig(message.payload.config);
     }
 });
+
 addMessageHandler('RECOVERY_RESPONSE', (message) => {
     if (message.payload && message.payload.success && typeof state !== 'undefined') {
         if (typeof state.metrics !== 'undefined') state.metrics.successfulRecoveries++;
     }
 });
+
 addMessageHandler('IFRAME_REGISTERED', (message) => {
     if (message.payload && message.payload.module === 'status') {
         // Acknowledgment received
+        logStatus('SUCCESS', 'IFRAME_REGISTERED received');
     }
 });
 
@@ -3594,11 +3678,12 @@ const MessageFirewall = {
             return msg.payload && 
                    (msg.payload.token || msg.payload.user) &&
                    (!msg.payload.token || typeof msg.payload.token === 'string') &&
-                   (!msg.payload.user || (msg.payload.user.id && msg.payload.user.displayName));
+                   (!msg.payload.user || msg.payload.user.id || msg.payload.user.userId);
         });
         
         this.validators.set('PARENT_READY', (msg) => {
-            return msg.payload && msg.payload.timestamp;
+            // FIX: parent sends payload without timestamp; accept any payload or just a type match
+            return !!msg.type;
         });
         
         this.validators.set('MODULE_REGISTERED', (msg) => {

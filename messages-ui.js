@@ -815,7 +815,16 @@
                 core.fetchConversations();
             }
             if (core && core.FriendManager && core.FriendManager.fetchFriends) {
-                core.FriendManager.fetchFriends();
+                core.FriendManager.fetchFriends().then(() => {
+                    // FIXED: If user has no friends, fall back to fetching all users
+                    // so the "Start Chat" contact picker is never empty.
+                    const friends = core.getFriends ? core.getFriends() : [];
+                    if (!friends || friends.length === 0) {
+                        core.FriendManager._fetchAllUsersAsFallback?.();
+                    }
+                }).catch(() => {
+                    core.FriendManager._fetchAllUsersAsFallback?.();
+                });
             }
         },
         
@@ -1503,6 +1512,11 @@
             const container = UIFailsafe.safeGetElement('messagesContainer');
             if (!container) return;
 
+            // FIXED: Always clear first to prevent duplicate message accumulation.
+            // Previously _renderMessageBatches used innerHTML += in a loop without
+            // clearing, so every re-render appended a full duplicate copy.
+            container.innerHTML = '';
+
             if (!this._canRender()) {
                 UIFailsafe.safeSetHTML(container, this._getPassiveLoadingState());
                 return;
@@ -1573,7 +1587,7 @@
         _createTextMessageTemplate(message, currentUser) {
             const core = getMessagesCore();
             const currentUserId = core?.getCurrentUserId?.();
-            const isSent = message.senderId === currentUserId;
+            const isSent = String(message.senderId) === String(currentUserId);
             const status = message.status || 'sent';
             const statusIcon = status === 'sending' ? 'fa-clock' :
                               status === 'failed' ? 'fa-exclamation-circle' :
@@ -1613,7 +1627,7 @@
         _createImageMessageTemplate(message, currentUser) {
             const core = getMessagesCore();
             const currentUserId = core?.getCurrentUserId?.();
-            const isSent = message.senderId === currentUserId;
+            const isSent = String(message.senderId) === String(currentUserId);
             const status = message.status || 'sent';
             const statusIcon = status === 'sending' ? 'fa-clock' :
                               status === 'failed' ? 'fa-exclamation-circle' :
@@ -1646,7 +1660,7 @@
         _createVideoMessageTemplate(message, currentUser) {
             const core = getMessagesCore();
             const currentUserId = core?.getCurrentUserId?.();
-            const isSent = message.senderId === currentUserId;
+            const isSent = String(message.senderId) === String(currentUserId);
             const status = message.status || 'sent';
             const statusIcon = status === 'sending' ? 'fa-clock' :
                               status === 'failed' ? 'fa-exclamation-circle' :
@@ -1679,7 +1693,7 @@
         _createAudioMessageTemplate(message, currentUser) {
             const core = getMessagesCore();
             const currentUserId = core?.getCurrentUserId?.();
-            const isSent = message.senderId === currentUserId;
+            const isSent = String(message.senderId) === String(currentUserId);
             const status = message.status || 'sent';
             const statusIcon = status === 'sending' ? 'fa-clock' :
                               status === 'failed' ? 'fa-exclamation-circle' :
@@ -1716,7 +1730,7 @@
         _createFileMessageTemplate(message, currentUser) {
             const core = getMessagesCore();
             const currentUserId = core?.getCurrentUserId?.();
-            const isSent = message.senderId === currentUserId;
+            const isSent = String(message.senderId) === String(currentUserId);
             const status = message.status || 'sent';
             const statusIcon = status === 'sending' ? 'fa-clock' :
                               status === 'failed' ? 'fa-exclamation-circle' :
@@ -1756,7 +1770,7 @@
         _createLocationMessageTemplate(message, currentUser) {
             const core = getMessagesCore();
             const currentUserId = core?.getCurrentUserId?.();
-            const isSent = message.senderId === currentUserId;
+            const isSent = String(message.senderId) === String(currentUserId);
             const status = message.status || 'sent';
             const statusIcon = status === 'sending' ? 'fa-clock' :
                               status === 'failed' ? 'fa-exclamation-circle' :
@@ -1789,7 +1803,7 @@
         _createPollMessageTemplate(message, currentUser) {
             const core = getMessagesCore();
             const currentUserId = core?.getCurrentUserId?.();
-            const isSent = message.senderId === currentUserId;
+            const isSent = String(message.senderId) === String(currentUserId);
             const status = message.status || 'sent';
             const statusIcon = status === 'sending' ? 'fa-clock' :
                               status === 'failed' ? 'fa-exclamation-circle' :
@@ -1838,7 +1852,7 @@
         _createNoteMessageTemplate(message, currentUser) {
             const core = getMessagesCore();
             const currentUserId = core?.getCurrentUserId?.();
-            const isSent = message.senderId === currentUserId;
+            const isSent = String(message.senderId) === String(currentUserId);
             const status = message.status || 'sent';
             const statusIcon = status === 'sending' ? 'fa-clock' :
                               status === 'failed' ? 'fa-exclamation-circle' :
@@ -2539,13 +2553,75 @@
 
             const emojiBtn = UIFailsafe.safeGetElement('emojiBtn');
             if (emojiBtn) {
-                emojiBtn.addEventListener('click', () => {
+                // FIXED: Build a real emoji grid the first time the picker opens.
+                // Previously the handler only toggled a state flag; the container
+                // was always empty so the picker never showed any emojis.
+                const _buildEmojiPicker = () => {
+                    const container = UIFailsafe.safeGetElement('emojiPickerContainer');
+                    if (!container || container.dataset.built) return;
+                    const EMOJIS = [
+                        '😀','😂','😅','😊','😍','🥰','😎','🤔','😢','😡',
+                        '🤗','😜','😇','🥳','😤','😴','🤩','😬','🙄','🤭',
+                        '👍','👎','👌','✌️','🤞','🙏','👏','🤝','💪','👀',
+                        '❤️','🧡','💛','💚','💙','💜','🖤','🤍','💔','💯',
+                        '🔥','✅','❌','⚠️','🎉','🎊','🎶','🌟','💫','⭐',
+                        '😈','👻','💀','🤖','🐶','🐱','🍕','🍔','🍩','☕'
+                    ];
+                    const grid = document.createElement('div');
+                    grid.className = 'emoji-grid';
+                    grid.style.cssText = 'display:grid;grid-template-columns:repeat(10,1fr);gap:4px;padding:8px;max-height:180px;overflow-y:auto;';
+                    EMOJIS.forEach(emoji => {
+                        const span = document.createElement('span');
+                        span.className = 'emoji-item';
+                        span.textContent = emoji;
+                        span.title = emoji;
+                        span.style.cssText = 'cursor:pointer;font-size:20px;text-align:center;padding:4px;border-radius:4px;user-select:none;';
+                        span.addEventListener('mouseenter', () => { span.style.background = 'rgba(0,0,0,0.1)'; });
+                        span.addEventListener('mouseleave', () => { span.style.background = ''; });
+                        span.addEventListener('click', (e) => {
+                            e.stopPropagation();
+                            const input = document.getElementById('messageInput');
+                            if (input) {
+                                const start = input.selectionStart ?? input.value.length;
+                                const end = input.selectionEnd ?? input.value.length;
+                                input.value = input.value.slice(0, start) + emoji + input.value.slice(end);
+                                input.selectionStart = input.selectionEnd = start + emoji.length;
+                                input.focus();
+                                // Trigger input event so auto-resize fires
+                                input.dispatchEvent(new Event('input', { bubbles: true }));
+                            }
+                            // Close picker
+                            UIFailsafe.safeRemoveClass(container, 'active');
+                            UIStateManager.setState('emojiPickerActive', false);
+                        });
+                        grid.appendChild(span);
+                    });
+                    container.appendChild(grid);
+                    container.dataset.built = '1';
+                };
+
+                emojiBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
                     UIFailsafe.queueAction(() => {
                         if (!this._canPerformAction('emojiPicker')) return;
-                        const core = getMessagesCore();
-                        if (core) core.toggleEmojiPicker?.();
-                        UIStateManager.toggleState('emojiPickerActive');
+                        const container = UIFailsafe.safeGetElement('emojiPickerContainer');
+                        _buildEmojiPicker();
+                        const isActive = UIStateManager.getState('emojiPickerActive');
+                        UIStateManager.setState('emojiPickerActive', !isActive);
+                        if (container) {
+                            if (!isActive) UIFailsafe.safeAddClass(container, 'active');
+                            else UIFailsafe.safeRemoveClass(container, 'active');
+                        }
                     });
+                });
+
+                // Close picker when clicking outside
+                document.addEventListener('click', (e) => {
+                    if (!e.target.closest('#emojiPickerContainer') && !e.target.closest('#emojiBtn')) {
+                        const container = UIFailsafe.safeGetElement('emojiPickerContainer');
+                        if (container) UIFailsafe.safeRemoveClass(container, 'active');
+                        UIStateManager.setState('emojiPickerActive', false);
+                    }
                 });
             }
 
@@ -2577,28 +2653,90 @@
 
             const attachBtn = UIFailsafe.safeGetElement('attachBtn');
             if (attachBtn) {
+                // FIXED: The old handler called core.toggleAttachmentOptions() and
+                // core.handleAttachment() which do not exist on MessagesCore, so clicking
+                // the attach button did nothing. Replaced with a real <input type="file">
+                // that uploads to /api/messages/:chatId/upload and sends a message.
                 attachBtn.addEventListener('click', () => {
                     UIFailsafe.queueAction(() => {
                         if (!this._canPerformAction('attachment')) return;
                         const core = getMessagesCore();
-                        if (core) core.toggleAttachmentOptions?.();
-                        UIStateManager.toggleState('attachmentOptionsActive');
+                        const chat = core?.getCurrentConversation?.();
+                        if (!chat?.id) {
+                            UIRenderer.showNotification('Open a conversation first', 'error');
+                            return;
+                        }
+
+                        // Create a hidden file input and click it programmatically
+                        const fileInput = document.createElement('input');
+                        fileInput.type = 'file';
+                        fileInput.accept = 'image/*,video/*,audio/*,application/pdf,text/plain,.doc,.docx,.xls,.xlsx,.zip';
+                        fileInput.style.display = 'none';
+                        document.body.appendChild(fileInput);
+
+                        fileInput.onchange = async (e) => {
+                            const file = e.target.files?.[0];
+                            try { document.body.removeChild(fileInput); } catch (_) {}
+                            if (!file) return;
+
+                            // Size guard: match the 10 MB server limit
+                            const MAX_MB = 10;
+                            if (file.size > MAX_MB * 1024 * 1024) {
+                                UIRenderer.showNotification(`File too large (max ${MAX_MB} MB)`, 'error');
+                                return;
+                            }
+
+                            UIRenderer.showNotification('Uploading…', 'info');
+
+                            try {
+                                const token = core?.SessionManager?._session?.token
+                                    || core?.isAuthenticated?.()
+                                    ? core?.SessionManager?._session?.token
+                                    : null;
+
+                                const formData = new FormData();
+                                formData.append('file', file);
+                                if (document.getElementById('messageInput')?.value?.trim()) {
+                                    formData.append('caption', document.getElementById('messageInput').value.trim());
+                                }
+
+                                const res = await fetch(`/api/messages/${chat.id}/upload`, {
+                                    method: 'POST',
+                                    headers: token ? { 'Authorization': 'Bearer ' + token } : {},
+                                    body: formData
+                                });
+
+                                const result = await res.json().catch(() => ({}));
+
+                                if (res.ok) {
+                                    UIRenderer.showNotification('File sent!', 'success');
+                                    // Refresh messages so the uploaded file appears
+                                    core?.fetchMessages?.(chat.id);
+                                } else {
+                                    UIRenderer.showNotification('Upload failed: ' + (result.message || res.statusText), 'error');
+                                }
+                            } catch (uploadErr) {
+                                console.error('[attachBtn] Upload error:', uploadErr);
+                                UIRenderer.showNotification('Upload failed — check connection', 'error');
+                            }
+                        };
+
+                        fileInput.click();
                     });
                 });
             }
 
+            // .attachment-option buttons are now unused (replaced by direct file input above),
+            // but kept wired in case the HTML still renders them, to avoid silent JS errors.
             const attachmentOptions = UIFailsafe.safeQuerySelectorAll('.attachment-option');
             UIFailsafe.safeForEach(attachmentOptions, (btn) => {
                 btn.addEventListener('click', (e) => {
                     UIFailsafe.queueAction(() => {
                         if (!this._canPerformAction('attachment')) return;
-                        const type = e.currentTarget.dataset.type;
-                        const core = getMessagesCore();
-                        if (type && core) {
-                            core.handleAttachment?.(type);
-                            core.closeAttachmentOptionsOnClickOutside?.(e);
-                            UIStateManager.setState('attachmentOptionsActive', false);
-                        }
+                        // Trigger the same file picker as the main attach button
+                        const attachBtnEl = UIFailsafe.safeGetElement('attachBtn');
+                        if (attachBtnEl) attachBtnEl.click();
+                        UIStateManager.setState('attachmentOptionsActive', false);
                     });
                 });
             });

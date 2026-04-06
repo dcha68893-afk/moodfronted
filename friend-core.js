@@ -2441,7 +2441,7 @@ const FriendRequestManager = {
             });
         }
         
-        if (!userId || typeof userId !== 'string') {
+        if (!userId) {
             return { success: false, error: 'Invalid user ID' };
         }
         
@@ -2584,11 +2584,6 @@ const FriendRequestManager = {
             return { success: false, error: 'Invalid request data' };
         }
         
-        const existingRequest = FriendCacheManager.getRequest(requestId);
-        if (!existingRequest) {
-            return { success: false, error: 'Request not found' };
-        }
-        
         Logger.info('FriendRequestManager', 'Accepting friend request', { requestId, friendId });
         
         try {
@@ -2659,13 +2654,10 @@ const FriendRequestManager = {
         
         if (!requestId) return { success: false, error: 'Invalid request ID' };
         
-        const existingRequest = FriendCacheManager.getRequest(requestId);
-        if (!existingRequest) return { success: false, error: 'Request not found' };
-        
         Logger.info('FriendRequestManager', 'Declining friend request', { requestId });
         
         try {
-            const response = await authorizedRequest(`/api/friends/requests/${requestId}/decline`, {
+            const response = await authorizedRequest(`/api/friends/requests/${requestId}/reject`, {
                 method: 'POST'
             });
             
@@ -2715,9 +2707,6 @@ const FriendRequestManager = {
         }
         
         if (!requestId) return { success: false, error: 'Invalid request ID' };
-        
-        const existingRequest = FriendCacheManager.getSentRequest(requestId);
-        if (!existingRequest) return { success: false, error: 'Request not found' };
         
         Logger.info('FriendRequestManager', 'Canceling friend request', { requestId });
         
@@ -5405,47 +5394,8 @@ function loadCachedDataInstantly() {
         
         const cachedFriends = FriendCacheManager.getAllFriends();
         const hasRealFriends = cachedFriends.length > 0 && cachedFriends.some(f => !f.isDemo);
-        if (!hasRealFriends) {
-            const demoFriends = [
-                {
-                    id: 'demo_1',
-                    isDemo: true,
-                    username: 'alex_demo',
-                    displayName: 'Alex (Demo)',
-                    firstName: 'Alex',
-                    lastName: 'Demo',
-                    avatar: 'https://ui-avatars.com/api/?name=Alex+Demo&background=6C63FF&color=fff&size=80',
-                    status: 'online',
-                    online: true,
-                    bio: '👋 This is a demo contact to show you how friends work.',
-                    category: 'friend',
-                    closenessLevel: 3,
-                    isPinned: false,
-                    isMuted: false,
-                    mutualFriends: 0,
-                    createdAt: new Date().toISOString()
-                },
-                {
-                    id: 'demo_2',
-                    isDemo: true,
-                    username: 'sam_demo',
-                    displayName: 'Sam (Demo)',
-                    firstName: 'Sam',
-                    lastName: 'Demo',
-                    avatar: 'https://ui-avatars.com/api/?name=Sam+Demo&background=FF6584&color=fff&size=80',
-                    status: 'offline',
-                    online: false,
-                    bio: '🎉 Add real friends using the "Add Friend" button above!',
-                    category: 'acquaintance',
-                    closenessLevel: 1,
-                    isPinned: false,
-                    isMuted: false,
-                    mutualFriends: 0,
-                    createdAt: new Date().toISOString()
-                }
-            ];
-            FriendCacheManager.setFriends(demoFriends);
-            Logger.info('loadCachedDataInstantly', 'Seeded 2 demo friends (no real friends in cache)');
+        if (hasRealFriends) {
+            // Only sync if we have real friends already cached
         }
         
         FriendCacheManager.syncToGlobals();
@@ -5509,12 +5459,14 @@ async function loadFriendsFromBackend() {
             if (validFriends.length > 0) {
                 FriendCacheManager.setFriends(validFriends);
             } else {
-                Logger.info('loadFriendsFromBackend', 'No real friends from backend — keeping demo contacts');
+                // Backend confirmed 0 friends — clear any stale demo or cached data
+                Logger.info('loadFriendsFromBackend', 'No friends from backend — clearing cache');
+                FriendCacheManager.setFriends([]);
                 FriendCacheManager.syncToGlobals();
                 updateFriendCounts?.();
-                window.dispatchEvent(new CustomEvent('friendsUpdated', { detail: { friends: FriendCacheManager.getAllFriends(), demo: true } }));
+                window.dispatchEvent(new CustomEvent('friendsUpdated', { detail: { friends: [], demo: false } }));
                 clearFriendsLoading();
-                return { success: true, count: 0, demo: true };
+                return { success: true, count: 0 };
             }
             
             FriendCacheManager.setFriends(validFriends);
@@ -5571,7 +5523,7 @@ async function loadFriendRequestsFromBackend() {
     }
     
     try {
-        const response = await authorizedRequest('/api/friends/requests/incoming');
+        const response = await authorizedRequest('/api/friends/incoming');
         
         Logger.info('loadFriendRequestsFromBackend', 'Requests loaded', { success: response.success });
         
@@ -7417,15 +7369,25 @@ function renderFriendsListInstantly() {
     window.dispatchEvent(new CustomEvent('renderFriendsListInstantly'));
 }
 
-function addFriendItem(friendData, container, type) {}
-function addFriendItemInstant(friendData, container, type) {}
+function addFriendItem(friendData, container, type) {
+    window.dispatchEvent(new CustomEvent('ui:addFriendItem', { detail: { friendData, container, type } }));
+}
+function addFriendItemInstant(friendData, container, type) {
+    window.dispatchEvent(new CustomEvent('ui:addFriendItemInstant', { detail: { friendData, container, type } }));
+}
 function renderContacts() { window.dispatchEvent(new CustomEvent('renderContacts')); }
 function renderFriends() { window.dispatchEvent(new CustomEvent('renderFriends')); }
 function renderFriendRequests() { window.dispatchEvent(new CustomEvent('renderFriendRequests')); }
 function renderSentRequests() { window.dispatchEvent(new CustomEvent('renderSentRequests')); }
-function addFriendRequestItem(requestData, container, type) {}
-function handleFriendAction(action, friendData, type, button) {}
-function handleRequestAction(action, requestData, button) {}
+function addFriendRequestItem(requestData, container, type) {
+    window.dispatchEvent(new CustomEvent('ui:addFriendRequestItem', { detail: { requestData, container, type } }));
+}
+function handleFriendAction(action, friendData, type, button) {
+    window.dispatchEvent(new CustomEvent('ui:handleFriendAction', { detail: { action, friendData, type, button } }));
+}
+function handleRequestAction(action, requestData, button) {
+    window.dispatchEvent(new CustomEvent('ui:handleRequestAction', { detail: { action, requestData, button } }));
+}
 
 function filterFriendsByCategory(category) {
     currentCategoryFilter = category;

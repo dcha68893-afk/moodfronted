@@ -124,6 +124,8 @@
     <script src="js/services.friend.js"></script>
     <script src="js/app.sync.manager.js"></script>
     <script src="js/app.offline.queue.js"></script>
+    <!-- Tell api_core.js relay not to duplicate-handle API_REQUESTs that chat.html already handles -->
+    <script>window.__parentHandlesApiRequests = true;</script>
     <script type="module" src="js/api.core.js"></script>
 
 <script>
@@ -209,6 +211,16 @@
     // Auth endpoints
     '/auth/me': '/auth/me',                   // ✅ This exists
     '/auth/sessions': '/auth/sessions',                // ❌ This doesn't exist - need to add or map
+
+    // Status endpoints - ADDED
+    '/api/status': '/status',                  // ✅ GET all statuses
+    '/status': '/status',                      // ✅ GET all statuses
+    '/api/status/create': '/status',           // ✅ POST create status (same route, method differs)
+    '/status/create': '/status',               // ✅ POST create status
+    '/api/status/view': '/status/view',        // ✅ POST mark viewed
+    '/status/view': '/status/view',            // ✅ POST mark viewed
+    '/api/status/delete': '/status/delete',    // ✅ POST delete
+    '/status/delete': '/status/delete',        // ✅ POST delete
 };
     
 function getSessionData() {
@@ -536,41 +548,28 @@ window.addEventListener('message', async function(event) {
                 response = await window.api.request(endpoint, { method, body });
             }
             
-            // CRITICAL FIX: Format response with proper payload structure
-            // The frontend expects: { type: 'API_RESPONSE', requestId, payload: { success, data, ... } }
-            let responsePayload = {};
-            
-            if (response && response.success === true) {
-                // Success response - put data in payload.data
-                responsePayload = {
+            // Build response payload.
+            // FIXED: Pass the raw backend JSON through as-is inside payload.data so that
+            // each module's own response unwrapper can handle its specific shape.
+            // The old conditional logic was silently discarding nested data in some paths
+            // (e.g. /api/friends returns { success, data: { friends: [] } } — the extra
+            // branch checks were not covering all cases and left payload.data as {}).
+            const isSuccess = response && (response.success === true ||
+                (response.status && response.status >= 200 && response.status < 300));
+
+            const responsePayload = isSuccess
+                ? {
                     success: true,
-                    data: response.data || {},
+                    // response.data is the parsed backend JSON body
+                    data: response.data !== undefined ? response.data : response,
                     statusCode: response.status || 200
-                };
-                
-                // If response.data has nested structure, preserve it
-                if (response.data && response.data.data) {
-                    // Already has data wrapper
-                } else if (response.data && response.data.friends) {
-                    responsePayload.data = response.data;
-                } else if (response.data && response.data.requests) {
-                    responsePayload.data = response.data;
-                } else if (response.data && response.data.users) {
-                    responsePayload.data = response.data;
-                } else if (response.data && Object.keys(response.data).length > 0) {
-                    responsePayload.data = response.data;
-                } else {
-                    responsePayload.data = { success: true };
-                }
-            } else {
-                // Error response
-                responsePayload = {
+                  }
+                : {
                     success: false,
                     error: response?.message || response?.error || 'Request failed',
                     statusCode: response?.status || 500,
-                    data: response?.data || {}
-                };
-            }
+                    data: response?.data || null
+                  };
             
             // Send response back to module with correct payload structure
             if (event.source && event.source.postMessage) {

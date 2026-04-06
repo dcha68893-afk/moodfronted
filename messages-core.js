@@ -752,38 +752,52 @@
         
         // Handle response with safe fallback
         try {
-            if (response && response.success === false) {
-                console.error(`[${MODULE_NAME}] API request failed:`, response.error);
-                pending.reject(new Error(response.error || 'API request failed'));
+            // FIXED: Explicit failure check — also treat HTTP error status codes as failures
+            const isFailed = response &&
+                (response.success === false ||
+                 (response.statusCode !== undefined && response.statusCode >= 400));
+
+            if (isFailed) {
+                const errMsg = response.error || response.message || 'API request failed';
+                console.error(`[${MODULE_NAME}] API request failed:`, errMsg);
+                pending.reject(new Error(errMsg));
             } else {
-                // FIXED: Extract data from nested response structures
+                // FIXED: Unwrap the layered response shapes:
+                // Relay sends: { success, data: <backend-json>, statusCode }
+                // Backend /api/chats sends: { success: true, data: [...] }
+                // Backend /api/friends sends: { success: true, data: { friends: [...] } }
+                // Backend /api/messages sends: { status: "success", data: { messages: [...] } }
                 let result = response;
-                
-                // Handle { status: "success", data: {...} } pattern
-                if (result && result.status === 'success' && result.data) {
+
+                // Step 1: unwrap top-level { success, data } from relay
+                if (result && result.data !== undefined && result.success === true) {
                     result = result.data;
                 }
-                
-                // Handle { data: {...} } pattern
-                if (result && result.data !== undefined && !result.status) {
+
+                // Step 2: unwrap { status: "success", data: {...} }
+                if (result && result.status === 'success' && result.data !== undefined) {
                     result = result.data;
                 }
-                
-                // Handle /api/chats endpoint - extract chats array
-                if (result && result.chats !== undefined) {
+
+                // Step 3: backend returns { success: true, data: [...] } for chats
+                if (result && result.success === true && result.data !== undefined) {
+                    result = result.data;
+                }
+
+                // Step 4: extract specific arrays
+                if (result && result.friends !== undefined && Array.isArray(result.friends)) {
+                    result = result.friends;
+                } else if (result && result.chats !== undefined && Array.isArray(result.chats)) {
                     result = result.chats;
-                }
-                
-                // Handle /api/messages endpoint - extract messages array
-                if (result && result.messages !== undefined && Array.isArray(result.messages)) {
+                } else if (result && result.messages !== undefined && Array.isArray(result.messages)) {
                     result = result.messages;
                 }
-                
-                // If result is still wrapped in a data property
-                if (result && result.data !== undefined && !result.status) {
+
+                // Step 5: one more unwrap if still nested
+                if (result && result.data !== undefined && !Array.isArray(result) && typeof result === 'object') {
                     result = result.data;
                 }
-                
+
                 pending.resolve(result);
             }
         } catch (error) {
@@ -2284,7 +2298,7 @@
             
             try {
                 console.log('[ChatManager] 📤 Fetching conversations from backend');
-                const conversations = await makeApiRequest('/api/chats', 'GET');
+                const conversations = await makeApiRequest('/chats', 'GET');
                 
                 console.log(`[ChatManager] 📥 Received conversations response:`, conversations);
                 
@@ -2809,7 +2823,36 @@
                 this._loading = false;
             }
         },
-        
+
+        // ADDED: Fallback — populate the contact list with all platform users when
+        // the current user has no accepted friends yet.  This prevents the "Start Chat"
+        // panel from showing an empty list for new accounts.
+        async _fetchAllUsersAsFallback() {
+            if (!ensureActive('_fetchAllUsersAsFallback')) return;
+            if (!SessionManager.isAuthenticated()) return;
+            // Don't overwrite if friends were loaded after the initial check
+            if (this._friends && this._friends.length > 0) return;
+            try {
+                const result = await makeApiRequest('/friends/users/all', 'GET', null, { limit: 50 });
+                let users = [];
+                if (Array.isArray(result)) {
+                    users = result;
+                } else if (result && result.users && Array.isArray(result.users)) {
+                    users = result.users;
+                } else if (result && result.data && Array.isArray(result.data)) {
+                    users = result.data;
+                }
+                if (users.length > 0) {
+                    // Mark these as "all users" not confirmed friends
+                    const currentUserId = SessionManager.getUserId();
+                    users = users.filter(u => (u.id || u.uid) !== currentUserId);
+                    this.setFriends(users);
+                }
+            } catch (e) {
+                Logger.warn('FriendManager', 'Failed to fetch all users as fallback:', e.message);
+            }
+        },
+
         setFriends: function(friends) {
             this._friends = friends || [];
             this._rebuildMap();
@@ -3609,7 +3652,7 @@
             }
         },
         
-        createConversation: function(participants, options = {}) {
+        createConversation: async function(participants, options = {}) {
             const guardResult = window.__guardAction('createConversation', MODULE_NAME, currentState, false);
             if (guardResult !== null) {
                 return guardResult;
@@ -3618,10 +3661,66 @@
             if (!participants || participants.length === 0) return false;
             if (!canSendUserMessages()) return false;
             if (!SessionManager.isAuthenticated()) return false;
-            
+
+            // FIXED: For direct (1-to-1) chats, call POST /messages with receiverId.
+            // The backend finds or creates the direct chat and returns the chatId.
+            // Previously this only fired a postMessage event that nothing in chat.html
+            // handled, so clicking a friend never actually opened a chat window.
+            const type = options.type || 'direct';
+
+            if (type === 'direct' && participants.length === 1) {
+                const receiverId = participants[0];
+                try {
+                    // Check if we already have a chat with this friend in cache
+                    const existing = ChatManager.getConversations().find(c =>
+                        c.type === 'direct' &&
+                        c.participants &&
+                        c.participants.some(p => (p.id || p) === receiverId)
+                    );
+
+                    if (existing) {
+                        // Chat already exists locally — just open it
+                        await ConversationManager.openConversation(existing.id, options);
+                        return true;
+                    }
+
+                    // Call POST /messages with a placeholder message (empty content triggers
+                    // chat creation only; back-end still requires content so send a single space
+                    // which the UI can filter out). Actually the backend creates the chat on any
+                    // POST /messages with receiverId, so send an initialMessage if provided.
+                    const body = {
+                        receiverId: receiverId,
+                        content: options.initialMessage || ' ',
+                        type: 'text'
+                    };
+
+                    const result = await makeApiRequest('/messages', 'POST', body);
+                    
+                    // result could be the message object or { chatId, ... }
+                    const chatId = result?.chatId || result?.data?.chatId || result?.id || result?.data?.id;
+
+                    if (chatId) {
+                        // Reload conversations to include new chat
+                        await ChatManager.fetchConversations();
+                        await ConversationManager.openConversation(chatId, options);
+                        
+                        try {
+                            window.dispatchEvent(new CustomEvent('conversationCreated', {
+                                detail: { participants, options, chatId }
+                            }));
+                        } catch (e) {}
+                        return true;
+                    }
+                } catch (error) {
+                    Logger.error('ConversationManager', 'Failed to create direct conversation:', error.message);
+                }
+                return false;
+            }
+
+            // For group chats (or other types) fall back to the postMessage approach
             const result = safeSend(OUTGOING_ACTIONS.CREATE_CONVERSATION, {
                 participants: participants,
-                type: options.type || 'direct',
+                type,
                 name: options.name,
                 initialMessage: options.initialMessage
             }, { requireAck: false });
@@ -3630,7 +3729,6 @@
                 return false;
             }
             
-            // Dispatch UI event to show new chat panel
             try {
                 window.dispatchEvent(new CustomEvent('conversationCreated', {
                     detail: { participants, options }
