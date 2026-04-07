@@ -1,8 +1,8 @@
 // =============================================
-// FRIEND PAGE UI - STABILIZED COMMUNICATION v4.1
+// FRIEND PAGE UI - STABILIZED COMMUNICATION v4.2
 // DETERMINISTIC MICRO-FRONTEND ARCHITECTURE
 // COMPLETE INTEGRATION WITH REAL BACKEND SYSTEM
-// STABILITY v4.1: Lifecycle hardening, duplicate prevention, error resilience
+// FIXED: All Users rendering, search, event triggers, avatar fields
 // =============================================
 
 // =============================================
@@ -164,6 +164,73 @@ import {
 } from './friend-core.js';
 
 // =============================================
+// [2B] CHAT NAVIGATION FIX - Ensure user ID is passed correctly
+// =============================================
+
+/**
+ * Enhanced navigate to chat that ensures user ID is properly passed
+ */
+// =============================================
+// [2B] CHAT NAVIGATION FIX - Ensure chat opens with selected user
+// =============================================
+
+/**
+ * Enhanced navigate to chat that ensures the messages module opens
+ * the chat with the selected user immediately
+ */
+function navigateToChatWithUser(userId, userName, additionalData = {}) {
+    if (!userId) {
+        console.error('[ChatNav] Cannot navigate to chat: No user ID provided');
+        showNotification('Cannot start chat: User not found', 'error');
+        return;
+    }
+    
+    const displayName = userName || 'User';
+    const numericUserId = parseInt(userId);
+    console.log('[ChatNav] Opening chat with user:', { userId: numericUserId, displayName });
+    
+    // Close any open modals in friends module
+    if (domElements.startChatModal) domElements.startChatModal.classList.remove('active');
+    if (domElements.friendDetailsPanel) domElements.friendDetailsPanel.classList.remove('active');
+    if (domElements.addFriendModal) domElements.addFriendModal.classList.remove('active');
+    
+    // Method 1: Send message to parent to switch to messages module with chat context
+    if (window.parent && window.parent !== window) {
+        // First, send the chat context to be stored
+        const contextMessage = {
+            type: 'SET_PENDING_CHAT',
+            payload: {
+                userId: numericUserId,
+                userName: displayName,
+                ...additionalData
+            },
+            source: 'friends-ui',
+            timestamp: Date.now()
+        };
+        console.log('[ChatNav] Sending pending chat context:', contextMessage);
+        window.parent.postMessage(contextMessage, '*');
+        
+        // Then, request to switch to messages module
+        const switchMessage = {
+            type: 'SWITCH_MODULE',
+            module: 'messages',
+            source: 'friends-ui',
+            timestamp: Date.now()
+        };
+        console.log('[ChatNav] Requesting module switch to messages');
+        window.parent.postMessage(switchMessage, '*');
+        
+        showNotification(`Opening chat with ${displayName}...`, 'info', 1500);
+        return;
+    }
+    
+    // Method 2: Try direct navigation with URL parameters that messages module can read
+    console.log('[ChatNav] Parent not available, using direct navigation with params');
+    const chatUrl = `message.html?chatId=${numericUserId}&type=direct&userName=${encodeURIComponent(displayName)}&openChat=${numericUserId}`;
+    window.location.href = chatUrl;
+}
+
+// =============================================
 // HOISTED HELPERS — defined at module scope so tab handlers can call them
 // before bindAllEvents() has finished running
 // =============================================
@@ -210,8 +277,9 @@ async function loadGroupMembers(groupId, searchTerm) {
         }
         groupMembersList.innerHTML = members.map(m => {
             const isSelf = m.id === (currentUser && currentUser.id);
-            const avatarInner = m.avatar
-                ? `<img src="${escapeHtml(m.avatar)}" style="width:100%;height:100%;object-fit:cover;" onerror="this.style.display='none'">`
+            const avatarUrl = m.photoURL || m.avatar;
+            const avatarInner = avatarUrl
+                ? `<img src="${escapeHtml(avatarUrl)}" style="width:100%;height:100%;object-fit:cover;" onerror="this.style.display='none'">`
                 : escapeHtml(((m.displayName || m.username || '?')[0]).toUpperCase());
             return `<div style="display:flex;align-items:center;gap:12px;padding:10px;border-bottom:1px solid var(--border-color);">
                 <div style="width:36px;height:36px;border-radius:50%;background:var(--primary-color);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:bold;flex-shrink:0;overflow:hidden;">${avatarInner}</div>
@@ -1057,6 +1125,22 @@ export const RenderPipeline = {
             }, 100));
         });
         
+        // FIX: Listen for allUsersLoaded event to trigger re-render
+        window.addEventListener('allUsersLoaded', (event) => {
+            if (!isUIActive()) return;
+            const { users, count } = event.detail || {};
+            logUI('allUsersLoaded event received', { count: count || users?.length });
+            this.queueRender('allUsers', debounce(() => {
+                // Check if all-users tab is active before re-rendering
+                const allUsersTab = document.querySelector('.add-friend-tab[data-tab="all-users"]');
+                const allUsersContent = document.getElementById('all-usersTab');
+                if (allUsersTab && allUsersTab.classList.contains('active') && 
+                    allUsersContent && allUsersContent.classList.contains('active')) {
+                    renderAllUsersList();
+                }
+            }, 50));
+        });
+        
         this.processQueue();
     },
 
@@ -1347,6 +1431,21 @@ export const CoreIntegration = {
                 displaySearchResults(data.results, data.query);
             }
         });
+        
+        // FIX: Subscribe to allUsersLoaded to refresh UI when data arrives
+        this.subscribe('allUsersLoaded', (event) => {
+            const data = this.validateEventData(event);
+            logUI('allUsersLoaded event in CoreIntegration', { 
+                count: data?.users?.length || data?.count || 0 
+            });
+            // Force refresh if all-users tab is active
+            const allUsersTab = document.querySelector('.add-friend-tab[data-tab="all-users"]');
+            const allUsersContent = document.getElementById('all-usersTab');
+            if (allUsersTab && allUsersTab.classList.contains('active') && 
+                allUsersContent && allUsersContent.classList.contains('active')) {
+                setTimeout(() => renderAllUsersList(), 10);
+            }
+        });
     },
 
     subscribe(eventName, handler) {
@@ -1391,7 +1490,6 @@ export const CoreIntegration = {
 // =============================================
 // [7A] SEARCH RESULT DISPLAY FUNCTION - REAL BACKEND INTEGRATION
 // =============================================
-
 function displaySearchResults(results, query) {
     const allUsersListElement = document.getElementById('allUsersList');
     const allUsersStatusElement = document.getElementById('allUsersStatus');
@@ -1417,13 +1515,29 @@ function displaySearchResults(results, query) {
     }
     
     const fragment = document.createDocumentFragment();
+    let validCount = 0;
     results.forEach(user => {
         const userItem = createUserSearchItemElement(user);
-        if (userItem) fragment.appendChild(userItem);
+        if (userItem && userItem.nodeType === Node.ELEMENT_NODE) {
+            fragment.appendChild(userItem);
+            validCount++;
+        } else {
+            console.warn('[displaySearchResults] Skipping invalid user item', user);
+        }
     });
     
     allUsersListElement.innerHTML = '';
-    allUsersListElement.appendChild(fragment);
+    if (validCount === 0) {
+        allUsersListElement.innerHTML = `
+            <div class="empty-state">
+                <i class="fas fa-exclamation-triangle" style="color: var(--warning-color);"></i>
+                <p>Unable to display users</p>
+                <p class="subtext">Please try refreshing</p>
+            </div>
+        `;
+    } else {
+        allUsersListElement.appendChild(fragment);
+    }
 }
 
 // =============================================
@@ -1899,6 +2013,10 @@ export const renderMutedFriends = function() {
     });
 };
 
+// =============================================
+// [8A] RENDER ALL USERS LIST - FIXED WITH PROPER STATE ACCESS
+// =============================================
+
 export const renderAllUsersList = function() {
     if (!isUIActive()) {
         return null;
@@ -1908,105 +2026,139 @@ export const renderAllUsersList = function() {
         const allUsersStatusElement = document.getElementById('allUsersStatus');
         const allUsersSearchElement = document.getElementById('allUsersSearch');
 
-        if (!allUsersListElement) return;
+        if (!allUsersListElement) {
+            console.warn('[renderAllUsersList] allUsersList element not found, retrying in 100ms');
+            setTimeout(() => renderAllUsersList(), 100);
+            return;
+        }
 
         const searchTerm = allUsersSearchElement ? allUsersSearchElement.value.toLowerCase().trim() : '';
         
-        // If there's a search term, perform REAL search through core
-        if (searchTerm && typeof searchFriends === 'function') {
-            logUI('Performing real search for:', searchTerm);
-            
-            // Show loading state
+        // Get users from cache
+        let userArray = [];
+        
+        if (window.FriendCore && window.FriendCore._allUsersCache && Array.isArray(window.FriendCore._allUsersCache)) {
+            userArray = window.FriendCore._allUsersCache;
+            console.log(`[renderAllUsersList] ✅ Got ${userArray.length} users from FriendCore._allUsersCache`);
+        } else if (window._allUsersCache && Array.isArray(window._allUsersCache)) {
+            userArray = window._allUsersCache;
+            console.log(`[renderAllUsersList] ⚠️ Got ${userArray.length} users from window._allUsersCache`);
+        } else if (allUsers && Array.isArray(allUsers) && allUsers.length > 0) {
+            userArray = allUsers;
+            console.log(`[renderAllUsersList] ⚠️ Got ${userArray.length} users from imported allUsers (may be stale)`);
+        } else {
+            // No data available - show loading state
+            console.log('[renderAllUsersList] No user data available, showing loading state');
             allUsersListElement.innerHTML = `
                 <div class="empty-state">
                     <i class="fas fa-spinner fa-spin" style="font-size: 32px; margin-bottom: 15px;"></i>
-                    <p>Searching for "${escapeHtml(searchTerm)}"...</p>
+                    <p>Loading users...</p>
                 </div>
             `;
-            
             if (allUsersStatusElement) {
-                allUsersStatusElement.textContent = `Searching for "${escapeHtml(searchTerm)}"...`;
+                allUsersStatusElement.textContent = 'Loading users...';
             }
-            
-            // Perform real search
-            searchFriends(searchTerm, { includeUsers: true, limit: 50 })
-                .then(results => {
-                    logUI('Search results:', { count: results.length });
-                    displaySearchResults(results, searchTerm);
-                })
-                .catch(error => {
-                    logUI('Search failed:', error);
-                    allUsersListElement.innerHTML = `
-                        <div class="empty-state error-boundary">
-                            <i class="fas fa-exclamation-triangle" style="color: var(--warning-color);"></i>
-                            <p>Search failed</p>
-                            <p class="subtext">${escapeHtml(error.message || 'Please try again')}</p>
-                            <button class="action-btn secondary retry-search-btn" style="margin-top: 15px;">
-                                <i class="fas fa-sync-alt"></i> Retry
-                            </button>
-                        </div>
-                    `;
-                    
-                    const retryBtn = allUsersListElement.querySelector('.retry-search-btn');
-                    if (retryBtn) {
-                        retryBtn.addEventListener('click', () => renderAllUsersList());
-                    }
-                    
-                    if (allUsersStatusElement) {
-                        allUsersStatusElement.textContent = `Search failed`;
-                    }
-                });
             return;
         }
         
-        // No search term - show all users from cache or fetch new
-        const userArray = Array.isArray(allUsers) ? allUsers : [];
         const currentUserId = currentUser?.id;
-
+        
+        // Filter out current user and apply search term (if any)
         let filteredUsers = userArray.filter(user => {
             if (!user || !user.id) return false;
             if (user.id === currentUserId) return false;
+            
+            if (searchTerm) {
+                const displayNameMatch = (user.displayName || '').toLowerCase().includes(searchTerm);
+                const usernameMatch = (user.username || '').toLowerCase().includes(searchTerm);
+                const emailMatch = (user.email || '').toLowerCase().includes(searchTerm);
+                if (!displayNameMatch && !usernameMatch && !emailMatch) return false;
+            }
             return true;
         });
 
+        // Sort users (online first, then alphabetically)
         filteredUsers.sort((a, b) => {
             if (a.online !== b.online) return b.online ? 1 : -1;
             return (a.displayName || '').localeCompare(b.displayName || '');
         });
 
+        // Update status text
         if (allUsersStatusElement) {
-            allUsersStatusElement.textContent = `${filteredUsers.length} user${filteredUsers.length !== 1 ? 's' : ''} available`;
+            if (searchTerm) {
+                allUsersStatusElement.textContent = `${filteredUsers.length} user${filteredUsers.length !== 1 ? 's' : ''} found for "${escapeHtml(searchTerm)}"`;
+            } else {
+                allUsersStatusElement.textContent = `${filteredUsers.length} user${filteredUsers.length !== 1 ? 's' : ''} available`;
+            }
         }
 
+        // Clear and render
         allUsersListElement.innerHTML = '';
 
         if (filteredUsers.length === 0) {
-            allUsersListElement.innerHTML = `
-                <div class="empty-state">
-                    <i class="fas fa-users" style="font-size: 48px; margin-bottom: 15px;"></i>
-                    <p>No users found</p>
-                    <p class="subtext">Check back later for new users</p>
-                    <button class="action-btn secondary refresh-users-btn" style="margin-top: 15px;">
-                        <i class="fas fa-sync-alt"></i> Refresh
-                    </button>
-                </div>
-            `;
-            
-            const refreshBtn = allUsersListElement.querySelector('.refresh-users-btn');
-            if (refreshBtn) {
-                refreshBtn.addEventListener('click', () => {
-                    fetchAllUsersFromBackend().then(() => renderAllUsersList());
-                });
+            if (searchTerm) {
+                allUsersListElement.innerHTML = `
+                    <div class="empty-state">
+                        <i class="fas fa-search" style="font-size: 48px; margin-bottom: 15px;"></i>
+                        <p>No users found for "${escapeHtml(searchTerm)}"</p>
+                        <p class="subtext">Try a different search term</p>
+                    </div>
+                `;
+            } else {
+                allUsersListElement.innerHTML = `
+                    <div class="empty-state">
+                        <i class="fas fa-users" style="font-size: 48px; margin-bottom: 15px;"></i>
+                        <p>No users found</p>
+                        <p class="subtext">Check back later for new users</p>
+                        <button class="action-btn secondary refresh-users-btn" style="margin-top: 15px;">
+                            <i class="fas fa-sync-alt"></i> Refresh
+                        </button>
+                    </div>
+                `;
+                const refreshBtn = allUsersListElement.querySelector('.refresh-users-btn');
+                if (refreshBtn) {
+                    refreshBtn.addEventListener('click', () => {
+                        if (typeof fetchAllUsersFromBackend === 'function') {
+                            fetchAllUsersFromBackend().then(() => renderAllUsersList());
+                        }
+                    });
+                }
             }
             return;
         }
 
+        // Render each user
         const fragment = document.createDocumentFragment();
+        let validCount = 0;
+        
         filteredUsers.forEach(user => {
             const userItem = createUserSearchItemElement(user);
-            if (userItem) fragment.appendChild(userItem);
+            if (userItem && userItem.nodeType === Node.ELEMENT_NODE) {
+                fragment.appendChild(userItem);
+                validCount++;
+            } else {
+                console.warn('[renderAllUsersList] Skipping invalid user item', user);
+            }
         });
-        allUsersListElement.appendChild(fragment);
+        
+        if (validCount === 0 && filteredUsers.length > 0) {
+            allUsersListElement.innerHTML = `
+                <div class="empty-state error-boundary">
+                    <i class="fas fa-exclamation-triangle" style="color: var(--warning-color);"></i>
+                    <p>Unable to display users</p>
+                    <p class="subtext">Please try refreshing</p>
+                    <button class="action-btn secondary retry-users-render" style="margin-top: 15px;">
+                        <i class="fas fa-sync-alt"></i> Retry
+                    </button>
+                </div>
+            `;
+            const retryBtn = allUsersListElement.querySelector('.retry-users-render');
+            if (retryBtn) {
+                retryBtn.addEventListener('click', () => renderAllUsersList());
+            }
+        } else {
+            allUsersListElement.appendChild(fragment);
+        }
 
     }, () => {
         const allUsersListElement = document.getElementById('allUsersList');
@@ -2020,7 +2172,6 @@ export const renderAllUsersList = function() {
                     </button>
                 </div>
             `;
-
             const retryBtn = allUsersListElement.querySelector('.retry-users-btn');
             if (retryBtn) {
                 retryBtn.addEventListener('click', () => {
@@ -2028,13 +2179,14 @@ export const renderAllUsersList = function() {
                         showNotification('Please wait while module initializes...', 'info');
                         return;
                     }
-                    fetchAllUsersFromBackend().then(() => renderAllUsersList());
+                    if (typeof fetchAllUsersFromBackend === 'function') {
+                        fetchAllUsersFromBackend().then(() => renderAllUsersList());
+                    }
                 });
             }
         }
     });
 };
-
 // =============================================
 // [9] UI ELEMENT CREATORS - STRICT LIFECYCLE COMPLIANCE
 // =============================================
@@ -2051,10 +2203,9 @@ function createFriendItemElement(friendData, type, instantMode = false) {
 
         const displayName = escapeHtml(friendData.displayName || 'Unknown User');
         const username = friendData.username ? escapeHtml(friendData.username) : null;
-        // Support both photoURL (real users) and avatar (demo / backend avatar field)
-        const photoURL = friendData.photoURL
-            ? escapeHtml(friendData.photoURL)
-            : (friendData.avatar ? escapeHtml(friendData.avatar) : null);
+        // FIX: Normalize avatar field - support both photoURL and avatar
+        const photoURL = friendData.photoURL || friendData.avatar;
+        const avatarUrl = photoURL ? escapeHtml(photoURL) : null;
 
         const initials = displayName
             .split(' ')
@@ -2101,8 +2252,8 @@ function createFriendItemElement(friendData, type, instantMode = false) {
         const isBusiness = friendData.isBusiness === true;
 
         let avatarHtml = '';
-        if (photoURL) {
-            avatarHtml = `<div class="friend-avatar" style="background-image: url('${photoURL}');"></div>`;
+        if (avatarUrl) {
+            avatarHtml = `<div class="friend-avatar" style="background-image: url('${avatarUrl}');"></div>`;
         } else {
             avatarHtml = `<div class="friend-avatar"><span>${initials}</span></div>`;
         }
@@ -2200,26 +2351,43 @@ function createFriendItemElement(friendData, type, instantMode = false) {
                 showFriendDetails(friendData, type);
             }
         });
-
-        const actionButtons = friendItem.querySelectorAll('.friend-action-btn');
-        actionButtons.forEach(btn => {
-            btn.addEventListener('click', (e) => {
-                if (!isUIActive()) {
-                    showNotification('Please wait while module initializes...', 'info');
-                    e.stopPropagation();
-                    return;
-                }
-                e.stopPropagation();
-                if (isDemo) {
-                    showNotification('Add real friends to use this feature!', 'info', 3000);
-                    return;
-                }
-                const action = btn.dataset.action;
-                logUI(`Friend action: ${action} for ${friendId}`);
-                handleFriendAction(action, friendData, type, btn);
-            });
-        });
-
+const actionButtons = friendItem.querySelectorAll('.friend-action-btn');
+actionButtons.forEach(btn => {
+    btn.addEventListener('click', (e) => {
+        if (!isUIActive()) {
+            showNotification('Please wait while module initializes...', 'info');
+            e.stopPropagation();
+            return;
+        }
+        e.stopPropagation();
+        if (isDemo) {
+            showNotification('Add real friends to use this feature!', 'info', 3000);
+            return;
+        }
+        const action = btn.dataset.action;
+        // Extract user data from the button's dataset
+        const userId = btn.dataset.userId || friendData?.id;
+        const userName = btn.dataset.userName || friendData?.displayName || 'User';
+        
+        console.log(`[FriendAction] ${action} for ${userId} (${userName})`);
+        
+        if (action === 'start-chat') {
+            navigateToChatWithUser(userId, userName);
+        } else if (action === 'call') {
+            if (typeof navigateToCall === 'function') {
+                navigateToCall(userId, userName);
+            } else {
+                showNotification('Call feature not available', 'warning');
+            }
+        } else if (action === 'add') {
+            sendFriendRequest(userId);
+        } else if (action === 'more') {
+            showFriendOptions(friendData);
+        } else {
+            logUI(`Unknown action: ${action}`);
+        }
+    });
+});
         const mutualFriendsElement = friendItem.querySelector('.mutual-friends');
         if (mutualFriendsElement) {
             mutualFriendsElement.addEventListener('click', (e) => {
@@ -2255,7 +2423,9 @@ function createFriendRequestItemElement(requestData, type) {
 
         const displayName = escapeHtml(userData.displayName || 'Unknown User');
         const username = userData.username ? escapeHtml(userData.username) : null;
-        const photoURL = userData.photoURL ? escapeHtml(userData.photoURL) : null;
+        // FIX: Normalize avatar field
+        const photoURL = userData.photoURL || userData.avatar;
+        const avatarUrl = photoURL ? escapeHtml(photoURL) : null;
 
         const initials = displayName
             .split(' ')
@@ -2268,8 +2438,8 @@ function createFriendRequestItemElement(requestData, type) {
         const mutualCount = mutualFriendsCache && mutualFriendsCache[userId] ? mutualFriendsCache[userId] : 0;
 
         let avatarHtml = '';
-        if (photoURL) {
-            avatarHtml = `<div class="friend-avatar" style="background-image: url('${photoURL}');"></div>`;
+        if (avatarUrl) {
+            avatarHtml = `<div class="friend-avatar" style="background-image: url('${avatarUrl}');"></div>`;
         } else {
             avatarHtml = `<div class="friend-avatar"><span>${initials}</span></div>`;
         }
@@ -2374,15 +2544,30 @@ function createFriendRequestItemElement(requestData, type) {
 }
 
 function createUserSearchItemElement(user) {
-    if (!user || !user.id) return null;
+    // Guard: must have valid id
+    if (!user || !user.id) {
+        console.warn('[createUserSearchItemElement] Invalid user (missing id)', user);
+        return null;
+    }
 
-    return ErrorHandler.createBoundary(`createUserItem:${user.id}`, () => {
+    // Safety: ensure required arrays exist
+    const safeFriends = Array.isArray(friends) ? friends : [];
+    const safeSentRequests = Array.isArray(sentRequests) ? sentRequests : [];
+    const safeFriendRequests = Array.isArray(friendRequests) ? friendRequests : [];
+
+    try {
         const userId = user.id;
 
-        const displayName = escapeHtml(user.displayName || 'Unknown User');
-        const username = user.username ? escapeHtml(user.username) : null;
-        const photoURL = user.photoURL ? escapeHtml(user.photoURL) : null;
-        const bio = user.bio ? escapeHtml(user.bio.substring(0, 30) + (user.bio.length > 30 ? '...' : '')) : null;
+        const displayName = (user.displayName || user.username || 'Unknown User').toString();
+        const escapedDisplayName = escapeHtml(displayName);
+        const username = user.username ? escapeHtml(user.username.toString()) : null;
+        
+        // FIX: Normalize avatar field - support both photoURL and avatar
+        const avatarUrl = user.photoURL || user.avatar;
+        const avatarSrc = avatarUrl ? escapeHtml(avatarUrl) : null;
+        
+        const bioRaw = user.bio || '';
+        const bio = bioRaw ? escapeHtml(bioRaw.substring(0, 30) + (bioRaw.length > 30 ? '...' : '')) : null;
 
         const initials = displayName
             .split(' ')
@@ -2392,22 +2577,22 @@ function createUserSearchItemElement(user) {
             .substring(0, 2)
             .replace(/[^A-Z0-9]/g, 'U');
 
-        const isAlreadyFriend = friends && friends.some(f => f && f.id === userId);
-        const hasPendingRequest = sentRequests && sentRequests.some(r => r && r.receiverId === userId);
-        const hasIncomingRequest = friendRequests && friendRequests.some(r => r && r.senderId === userId);
+        const isAlreadyFriend = safeFriends.some(f => f && f.id === userId);
+        const hasPendingRequest = safeSentRequests.some(r => r && r.receiverId === userId);
+        const hasIncomingRequest = safeFriendRequests.some(r => r && r.senderId === userId);
 
         let avatarHtml = '';
-        if (photoURL) {
-            avatarHtml = `<div class="user-search-avatar" style="background-image: url('${photoURL}');"></div>`;
+        if (avatarSrc) {
+            avatarHtml = `<div class="user-search-avatar" style="background-image: url('${avatarSrc}');"></div>`;
         } else {
-            avatarHtml = `<div class="user-search-avatar"><span>${initials}</span></div>`;
+            avatarHtml = `<div class="user-search-avatar"><span>${escapeHtml(initials)}</span></div>`;
         }
 
         let actionsHtml = '';
 
         if (isAlreadyFriend) {
             actionsHtml = `
-                <button class="friend-action-btn chat" data-action="start-chat" data-user-id="${userId}" data-user-name="${displayName}" title="Start Chat">
+                <button class="friend-action-btn chat" data-action="start-chat" data-user-id="${userId}" data-user-name="${escapedDisplayName}" title="Start Chat">
                     <i class="fas fa-comments"></i>
                 </button>
                 <button class="friend-action-btn" data-action="more" title="More options">
@@ -2430,26 +2615,33 @@ function createUserSearchItemElement(user) {
                 </button>
             `;
         } else {
-            actionsHtml = `
-                <button class="friend-action-btn success" data-action="add" title="Add Friend">
-                    <i class="fas fa-user-plus"></i>
-                </button>
-                <button class="friend-action-btn chat" data-action="start-chat" data-user-id="${userId}" data-user-name="${displayName}" title="Start Chat">
-                    <i class="fas fa-comments"></i>
-                </button>
-            `;
+            // In the actionsHtml for non-friend users (the 'start-chat' button):
+actionsHtml = `
+    <button class="friend-action-btn success" data-action="add" title="Add Friend">
+        <i class="fas fa-user-plus"></i>
+    </button>
+    <button class="friend-action-btn chat" data-action="start-chat" 
+        data-user-id="${userId}" 
+        data-user-name="${escapedDisplayName}"
+        title="Start Chat">
+        <i class="fas fa-comments"></i>
+    </button>
+`;
         }
 
         const userItem = document.createElement('div');
         userItem.className = 'user-search-item';
         userItem.dataset.userId = userId;
 
+        const onlineStatus = user.online === true;
+        const statusHtml = onlineStatus ? '<span class="user-search-status online"></span>' : '<span class="user-search-status offline"></span>';
+
         userItem.innerHTML = `
             ${avatarHtml}
             <div class="user-search-info">
                 <div class="user-search-name">
-                    ${displayName}
-                    <span class="user-search-status ${user.online ? 'online' : 'offline'}"></span>
+                    ${escapedDisplayName}
+                    ${statusHtml}
                 </div>
                 <div class="user-search-username">
                     ${username || 'No username'}
@@ -2461,6 +2653,7 @@ function createUserSearchItemElement(user) {
             </div>
         `;
 
+        // Attach event listeners
         userItem.addEventListener('click', (e) => {
             if (!isUIActive()) {
                 showNotification('Please wait while module initializes...', 'info');
@@ -2486,8 +2679,11 @@ function createUserSearchItemElement(user) {
 
                 switch(action) {
                     case 'start-chat':
-                        navigateToChat(btn.dataset.userId, btn.dataset.userName);
-                        break;
+    const chatUserId = btn.dataset.userId;
+    const chatUserName = btn.dataset.userName;
+    console.log('[UserSearch] Start chat with:', { chatUserId, chatUserName });
+    navigateToChatWithUser(chatUserId, chatUserName);
+    break;
                     case 'add':
                         btn.disabled = true;
                         btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
@@ -2496,13 +2692,14 @@ function createUserSearchItemElement(user) {
                                 btn.innerHTML = '<i class="fas fa-check"></i>';
                                 btn.style.background = 'var(--success-color, #28a745)';
                                 btn.title = 'Request sent';
-                                showNotification(`Friend request sent to ${user.displayName || user.username}`, 'success');
+                                showNotification(`Friend request sent to ${displayName}`, 'success');
                             } else {
                                 btn.disabled = false;
                                 btn.innerHTML = '<i class="fas fa-user-plus"></i>';
                                 showNotification((result && result.error) || 'Failed to send friend request', 'error');
                             }
-                        }).catch(() => {
+                        }).catch(err => {
+                            console.error('Send friend request error:', err);
                             btn.disabled = false;
                             btn.innerHTML = '<i class="fas fa-user-plus"></i>';
                             showNotification('Failed to send friend request', 'error');
@@ -2512,15 +2709,15 @@ function createUserSearchItemElement(user) {
                         showFriendOptions(user);
                         break;
                     case 'cancel-request':
-                        const sentRequest = sentRequests.find(r => r && r.receiverId === userId);
+                        const sentRequest = safeSentRequests.find(r => r && r.receiverId === userId);
                         if (sentRequest) cancelFriendRequest(sentRequest);
                         break;
                     case 'accept':
-                        const incomingRequest = friendRequests.find(r => r && r.senderId === userId);
+                        const incomingRequest = safeFriendRequests.find(r => r && r.senderId === userId);
                         if (incomingRequest) acceptFriendRequestOnline(incomingRequest.id, userId);
                         break;
                     case 'decline':
-                        const declineRequest = friendRequests.find(r => r && r.senderId === userId);
+                        const declineRequest = safeFriendRequests.find(r => r && r.senderId === userId);
                         if (declineRequest) declineFriendRequest(declineRequest);
                         break;
                 }
@@ -2529,7 +2726,10 @@ function createUserSearchItemElement(user) {
 
         return userItem;
 
-    }, null);
+    } catch (error) {
+        console.error('[createUserSearchItemElement] Error creating user item:', error, user);
+        return null;
+    }
 }
 
 // =============================================
@@ -2635,7 +2835,9 @@ export const loadFriendDetails = async function(friendData, type) {
 
             const displayName = escapeHtml(detailedData.displayName || 'Unknown User');
             const username = detailedData.username ? escapeHtml(detailedData.username) : 'No username';
-            const photoURL = detailedData.photoURL ? escapeHtml(detailedData.photoURL) : null;
+            // FIX: Normalize avatar field
+            const photoURL = detailedData.photoURL || detailedData.avatar;
+            const avatarUrl = photoURL ? escapeHtml(photoURL) : null;
             const email = detailedData.email ? escapeHtml(detailedData.email) : null;
             const phoneNumber = detailedData.phoneNumber ? escapeHtml(detailedData.phoneNumber) : null;
             const bio = detailedData.bio ? escapeHtml(detailedData.bio) : null;
@@ -2663,8 +2865,8 @@ export const loadFriendDetails = async function(friendData, type) {
             const hasIncomingRequest = friendRequests && friendRequests.some(r => r && r.senderId === friendId);
 
             let avatarHtml = '';
-            if (photoURL) {
-                avatarHtml = `<div class="friend-profile-avatar" style="background-image: url('${photoURL}');"></div>`;
+            if (avatarUrl) {
+                avatarHtml = `<div class="friend-profile-avatar" style="background-image: url('${avatarUrl}');"></div>`;
             } else {
                 avatarHtml = `<div class="friend-profile-avatar"><span style="color: white; font-size: 36px;">${initials}</span></div>`;
             }
@@ -3006,7 +3208,9 @@ export const showFriendRequestProfile = function(requestData) {
         const userId = userData.id || 'unknown';
         const displayName = escapeHtml(userData.displayName || 'Unknown User');
         const username = userData.username ? escapeHtml(userData.username) : 'No username';
-        const photoURL = userData.photoURL ? escapeHtml(userData.photoURL) : null;
+        // FIX: Normalize avatar field
+        const photoURL = userData.photoURL || userData.avatar;
+        const avatarUrl = photoURL ? escapeHtml(photoURL) : null;
         const bio = userData.bio ? escapeHtml(userData.bio) : null;
         const email = userData.email ? escapeHtml(userData.email) : null;
 
@@ -3032,8 +3236,8 @@ export const showFriendRequestProfile = function(requestData) {
         profileModal.id = `requestProfileModal_${Date.now()}`;
 
         let avatarHtml = '';
-        if (photoURL) {
-            avatarHtml = `<div class="friend-profile-avatar" style="background-image: url('${photoURL}'); width: 100px; height: 100px;"></div>`;
+        if (avatarUrl) {
+            avatarHtml = `<div class="friend-profile-avatar" style="background-image: url('${avatarUrl}'); width: 100px; height: 100px;"></div>`;
         } else {
             avatarHtml = `<div class="friend-profile-avatar" style="width: 100px; height: 100px;"><span style="color: white; font-size: 36px;">${initials}</span></div>`;
         }
@@ -3214,7 +3418,9 @@ export const showFriendOptions = function(friendData) {
 
         const friendId = friendData.id;
         const displayName = escapeHtml(friendData.displayName || 'User');
-        const photoURL = friendData.photoURL ? escapeHtml(friendData.photoURL) : null;
+        // FIX: Normalize avatar field
+        const photoURL = friendData.photoURL || friendData.avatar;
+        const avatarUrl = photoURL ? escapeHtml(photoURL) : null;
 
         const initials = displayName
             .split(' ')
@@ -3232,8 +3438,8 @@ export const showFriendOptions = function(friendData) {
         optionsModal.id = `optionsModal_${Date.now()}`;
 
         let avatarHtml = '';
-        if (photoURL) {
-            avatarHtml = `<div class="friend-profile-avatar" style="background-image: url('${photoURL}'); width: 80px; height: 80px; margin: 0 auto 15px;"></div>`;
+        if (avatarUrl) {
+            avatarHtml = `<div class="friend-profile-avatar" style="background-image: url('${avatarUrl}'); width: 80px; height: 80px; margin: 0 auto 15px;"></div>`;
         } else {
             avatarHtml = `<div class="friend-profile-avatar" style="width: 80px; height: 80px; margin: 0 auto 15px;"><span style="color: white; font-size: 24px;">${initials}</span></div>`;
         }
@@ -3570,7 +3776,9 @@ function populateChatFriendsList() {
         allChattableFriends.forEach(friend => {
             const displayName = escapeHtml(friend.displayName || 'Unknown User');
             const username = friend.username ? escapeHtml(friend.username) : null;
-            const photoURL = friend.photoURL ? escapeHtml(friend.photoURL) : null;
+            // FIX: Normalize avatar field
+            const photoURL = friend.photoURL || friend.avatar;
+            const avatarUrl = photoURL ? escapeHtml(photoURL) : null;
 
             const initials = displayName
                 .split(' ')
@@ -3581,8 +3789,8 @@ function populateChatFriendsList() {
                 .replace(/[^A-Z0-9]/g, 'U');
 
             let avatarHtml = '';
-            if (photoURL) {
-                avatarHtml = `<div class="friend-avatar" style="background-image: url('${photoURL}');"></div>`;
+            if (avatarUrl) {
+                avatarHtml = `<div class="friend-avatar" style="background-image: url('${avatarUrl}');"></div>`;
             } else {
                 avatarHtml = `<div class="friend-avatar"><span>${initials}</span></div>`;
             }
@@ -3703,8 +3911,11 @@ export const handleFriendAction = function(action, friendData, type, button) {
 
         switch(action) {
             case 'start-chat':
-                navigateToChat(userId, userName);
-                break;
+    const chatUserId = btn.dataset.userId;
+    const chatUserName = btn.dataset.userName;
+    console.log('[UserSearch] Start chat with:', { chatUserId, chatUserName });
+    navigateToChatWithUser(chatUserId, chatUserName);
+    break;
             case 'call':
                 navigateToCall(userId, userName);
                 break;
@@ -3875,7 +4086,9 @@ function setupRetryButtons() {
         const retryUsersBtn = e.target.closest('.retry-users-btn');
         if (retryUsersBtn) {
             logUI('Retry users list');
-            fetchAllUsersFromBackend().then(() => renderAllUsersList());
+            if (typeof fetchAllUsersFromBackend === 'function') {
+                fetchAllUsersFromBackend().then(() => renderAllUsersList());
+            }
             return;
         }
         
@@ -4272,24 +4485,27 @@ function bindAllEvents() {
 
     // Confirm Start Chat button
     if (domElements.confirmStartChatBtn) {
-        domElements.confirmStartChatBtn.addEventListener('click', function(e) {
-            e.preventDefault();
-            e.stopPropagation();
-            if (!isUIActive()) {
-                showNotification('Please wait while module initializes...', 'info');
-                return;
+    domElements.confirmStartChatBtn.addEventListener('click', function(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        if (!isUIActive()) {
+            showNotification('Please wait while module initializes...', 'info');
+            return;
+        }
+        if (window.selectedChatFriend) {
+            const userId = window.selectedChatFriend.id;
+            const userName = window.selectedChatFriend.displayName || window.selectedChatFriend.username || 'User';
+            console.log('[ChatModal] Confirmed chat with:', { userId, userName });
+            navigateToChatWithUser(userId, userName);
+            if (domElements.startChatModal) {
+                domElements.startChatModal.classList.remove('active');
             }
-            if (window.selectedChatFriend) {
-                const userId = window.selectedChatFriend.id;
-                const userName = window.selectedChatFriend.displayName || 'User';
-                navigateToChat(userId, userName);
-                if (domElements.startChatModal) {
-                    domElements.startChatModal.classList.remove('active');
-                }
-                window.selectedChatFriend = null;
-            }
-        });
-    }
+            window.selectedChatFriend = null;
+        } else {
+            showNotification('Please select a friend to chat with', 'warning');
+        }
+    });
+}
 
     // Redirect to Login button
     if (domElements.redirectToLoginBtn) {
@@ -4382,13 +4598,13 @@ function bindAllEvents() {
             searchFriendsLegacy(this.value);
         }, 300));
     }
-
-    if (domElements.allUsersSearch) {
-        domElements.allUsersSearch.addEventListener('input', debounce(function() {
-            if (!isUIActive()) return;
-            renderAllUsersList();
-        }, 300));
-    }
+if (domElements.allUsersSearch) {
+    domElements.allUsersSearch.addEventListener('input', debounce(function() {
+        if (!isUIActive()) return;
+        console.log('[All Users] Search input changed:', this.value);
+        renderAllUsersList(); // This will filter the already-displayed list
+    }, 300));
+}
 
     if (domElements.searchChatUser) {
         domElements.searchChatUser.addEventListener('input', function() {
@@ -4418,9 +4634,68 @@ function bindAllEvents() {
             if (tabContent) {
                 tabContent.classList.add('active');
 
-                if (tabName === 'all-users') {
-                    fetchAllUsersFromBackend().then(() => renderAllUsersList());
+               if (tabName === 'all-users') {
+    // ALWAYS try to render immediately with whatever data is available
+    // Then fetch fresh data in background
+    console.log('[All Users] Tab activated, attempting to render');
+    
+    // Step 1: Try to render with cached data immediately
+    let hasData = false;
+    
+    if (window.FriendCore && window.FriendCore._allUsersCache && window.FriendCore._allUsersCache.length > 0) {
+        console.log('[All Users] Using FriendCore._allUsersCache, count:', window.FriendCore._allUsersCache.length);
+        renderAllUsersList();
+        hasData = true;
+    } else if (window._allUsersCache && window._allUsersCache.length > 0) {
+        console.log('[All Users] Using window._allUsersCache, count:', window._allUsersCache.length);
+        renderAllUsersList();
+        hasData = true;
+    } else if (allUsers && Array.isArray(allUsers) && allUsers.length > 0) {
+        console.log('[All Users] Using imported allUsers, count:', allUsers.length);
+        renderAllUsersList();
+        hasData = true;
+    }
+    
+    // Step 2: Always fetch fresh data in background to update the list
+    // This ensures we have the latest users and also covers the case where cache was empty
+    if (typeof fetchAllUsersFromBackend === 'function') {
+        console.log('[All Users] Fetching fresh users in background...');
+        fetchAllUsersFromBackend().then(() => {
+            console.log('[All Users] Fresh users loaded, re-rendering...');
+            renderAllUsersList();
+        }).catch(err => {
+            console.error('[All Users] Failed to fetch users:', err);
+            if (!hasData) {
+                // Only show error if we had no data to begin with
+                const allUsersListElement = document.getElementById('allUsersList');
+                if (allUsersListElement && allUsersListElement.innerHTML.includes('Loading')) {
+                    allUsersListElement.innerHTML = `
+                        <div class="empty-state error-boundary">
+                            <i class="fas fa-exclamation-triangle" style="color: var(--warning-color);"></i>
+                            <p>Failed to load users</p>
+                            <button class="action-btn secondary retry-users-btn" style="margin-top: 15px;">
+                                <i class="fas fa-sync-alt"></i> Retry
+                            </button>
+                        </div>
+                    `;
                 }
+            }
+        });
+    } else if (!hasData) {
+        // No data and no fetch function - show empty state with retry
+        console.warn('[All Users] No data available and fetchAllUsersFromBackend is not a function');
+        const allUsersListElement = document.getElementById('allUsersList');
+        if (allUsersListElement) {
+            allUsersListElement.innerHTML = `
+                <div class="empty-state">
+                    <i class="fas fa-users" style="font-size: 48px; margin-bottom: 15px;"></i>
+                    <p>Unable to load users</p>
+                    <p class="subtext">Please try refreshing the page</p>
+                </div>
+            `;
+        }
+    }
+}
 
                 if (tabName === 'qr' && featureFlags.qrCode) {
                     if (currentUser?.id) {
@@ -4432,9 +4707,21 @@ function bindAllEvents() {
                     setTimeout(loadGroupsIntoSelect, 100);
                 }
 
+                // FIX: Nearby tab - auto-start discovery
+                if (tabName === 'nearby') {
+                    setTimeout(() => {
+                        const startNearbyBtn = document.getElementById('startNearbyBtn');
+                        if (startNearbyBtn && !startNearbyBtn.disabled) {
+                            startNearbyBtn.click();
+                        }
+                    }, 100);
+                }
+
                 if (tabName !== 'nearby') {
                     // Stop nearby scanning when leaving that tab
-                    NearbyManager && NearbyManager.stop && NearbyManager.stop();
+                    if (NearbyManager && NearbyManager.stop) {
+                        NearbyManager.stop();
+                    }
                     const sBtn = document.getElementById('startNearbyBtn');
                     const xBtn = document.getElementById('stopNearbyBtn');
                     if (sBtn) sBtn.disabled = false;
@@ -4469,6 +4756,16 @@ function bindAllEvents() {
                 if (method === 'qr' && featureFlags.qrCode && currentUser?.id) {
                     setTimeout(generateUniqueQRCode, 100);
                 }
+                
+                // FIX: Nearby method - auto-start
+                if (method === 'nearby') {
+                    setTimeout(() => {
+                        const startNearbyBtn = document.getElementById('startNearbyBtn');
+                        if (startNearbyBtn && !startNearbyBtn.disabled) {
+                            startNearbyBtn.click();
+                        }
+                    }, 100);
+                }
             }
         });
     });
@@ -4485,10 +4782,15 @@ function bindAllEvents() {
             nearbyListEl.innerHTML = `<p style="color:var(--text-secondary);text-align:center;padding:20px;">No users found nearby right now.</p>`;
             return;
         }
-        nearbyListEl.innerHTML = users.map(u => `
+        nearbyListEl.innerHTML = users.map(u => {
+            const avatarUrl = u.photoURL || u.avatar;
+            const avatarHtml = avatarUrl 
+                ? `<img src="${escapeHtml(avatarUrl)}" style="width:100%;height:100%;object-fit:cover;" onerror="this.style.display='none'">`
+                : escapeHtml((u.displayName||u.username||'?')[0].toUpperCase());
+            return `
             <div style="display:flex;align-items:center;gap:12px;padding:10px;border-bottom:1px solid var(--border-color);">
                 <div style="width:40px;height:40px;border-radius:50%;background:var(--primary-color);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:bold;flex-shrink:0;overflow:hidden;">
-                    ${u.avatar ? `<img src="${escapeHtml(u.avatar)}" style="width:100%;height:100%;object-fit:cover;" onerror="this.style.display='none'">` : escapeHtml((u.displayName||u.username||'?')[0].toUpperCase())}
+                    ${avatarHtml}
                 </div>
                 <div style="flex:1;min-width:0;">
                     <div style="font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(u.displayName||u.username)}</div>
@@ -4498,7 +4800,7 @@ function bindAllEvents() {
                     <i class="fas fa-user-plus"></i> Add
                 </button>
             </div>
-        `).join('');
+        `}).join('');
 
         // Wire add buttons
         nearbyListEl.querySelectorAll('.nearby-add-btn').forEach(btn => {
@@ -4738,20 +5040,14 @@ export {
 
 // =============================================
 // END OF UI MODULE
-// Version: 4.1
-// ✅ INTEGRATED: Real search with searchFriends from core
-// ✅ INTEGRATED: Search by first letter with searchFriendsByLetter
-// ✅ FIXED: All users search triggers real backend queries
-// ✅ FIXED: QR scan sends real requests through core
-// ✅ FIXED: Send friend request uses core's sendFriendRequest
-// ✅ FIXED: All imports from friend-core.js complete
-// ✅ ADDED: displaySearchResults function for real search results
-// ✅ ADDED: Search result event handling from core
-// ✅ ADDED: Retry button for failed searches
-// ✅ ADDED: Loading states during search
-// ✅ ADDED: Duplicate event binding prevention with flags
-// ✅ ADDED: RefreshDomElements for reliable element references
-// ✅ ADDED: Lifecycle-aware UI initialization
+// Version: 4.2
+// ✅ FIXED: All Users rendering uses window.FriendCore._allUsersCache
+// ✅ FIXED: Client-side search (no API calls)
+// ✅ FIXED: allUsersLoaded event listener added
+// ✅ FIXED: Avatar normalization (photoURL || avatar) everywhere
+// ✅ FIXED: Nearby tab auto-start on activation
+// ✅ FIXED: Search input triggers client-side filtering
+// ✅ FIXED: Refresh button forces fetch then re-render
 // ✅ PRESERVED: All existing UI features and animations
 // ✅ PRESERVED: All category filters and friend lists
 // ✅ PRESERVED: Camera and QR code functionality

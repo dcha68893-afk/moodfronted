@@ -199,6 +199,13 @@
     '/friends/pinned': '/friends/pinned',               // ✅ This exists
     '/friends/muted': '/friends/muted',                 // ✅ This exists
     '/friends/groups/user': '/groups/user',             // ✅ Map to /groups/user
+
+    // ✅ FIXED: Missing friend endpoints now mapped correctly
+    '/friends/requests/send': '/friends/send',          // ✅ POST send friend request
+    '/friends/incoming': '/friends/incoming',           // ✅ GET incoming requests
+    '/friends/search': '/friends/search',               // ✅ GET search users
+    '/friends/users/all': '/friends/users/all',         // ✅ GET all users for discovery
+    '/friends/nearby': '/friends/nearby',               // ✅ GET nearby users
     
     // Settings endpoints - ADD THESE
     '/settings': '/settings',                 // ✅ This exists

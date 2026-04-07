@@ -616,9 +616,13 @@
                 }
             }
             
-            // CRITICAL: Block if not ACTIVE or no valid session
-            if (!ensureActive(`API_REQUEST: ${endpoint}`)) {
-                reject(new Error(`Module not ACTIVE (current: ${currentState})`));
+            // FIX: Allow GET requests (read-only) without ACTIVE state — only block writes.
+            // Previously ALL requests were blocked until ACTIVE, meaning fetchFriends/fetchConversations
+            // called from the UI could never succeed if the user clicked "Start Chat" before
+            // the lifecycle finished. Read operations need only a valid session, not ACTIVE state.
+            const isReadOnly = (method === 'GET');
+            if (!isReadOnly && !ensureActive(`API_REQUEST: ${endpoint}`)) {
+                reject(new Error(`Module not ACTIVE for write actions (current: ${currentState})`));
                 return;
             }
             
@@ -2278,11 +2282,7 @@
         
         // REAL API CALLS - NO PLACEHOLDERS - FIXED for nested responses
         async fetchConversations() {
-            if (!ensureActive('fetchConversations')) {
-                this._notifyError('Cannot fetch conversations - module not active');
-                return;
-            }
-            
+            // FIX: Allow fetchConversations when authenticated regardless of lifecycle state
             if (!SessionManager.isAuthenticated()) {
                 console.log('[ChatManager] Not authenticated, cannot fetch conversations');
                 // In demo mode, still show demo chats
@@ -2340,11 +2340,7 @@
         },
         
         async fetchMessages(conversationId, options = {}) {
-            if (!ensureActive('fetchMessages')) {
-                this._notifyError('Cannot fetch messages - module not active');
-                return;
-            }
-            
+            // FIX: Allow fetching messages when authenticated regardless of lifecycle state
             if (!SessionManager.isAuthenticated()) {
                 console.log('[ChatManager] Not authenticated, cannot fetch messages');
                 // In demo mode, load demo messages
@@ -2785,11 +2781,9 @@
         },
         
         async fetchFriends() {
-            if (!ensureActive('fetchFriends')) {
-                this._notifyError('Cannot fetch friends - module not active');
-                return;
-            }
-            
+            // FIX: Removed ensureActive guard — friends should be fetchable as soon as
+            // session is authenticated, regardless of lifecycle state. The guard was
+            // blocking the Start Chat panel from ever populating.
             if (!SessionManager.isAuthenticated()) {
                 console.log('[FriendManager] Not authenticated, cannot fetch friends');
                 if (_demoModeEnabled) {
@@ -2803,12 +2797,29 @@
             
             try {
                 console.log('[FriendManager] 📤 Fetching friends from backend');
-                const friends = await makeApiRequest('/friends', 'GET');
+                const raw = await makeApiRequest('/friends', 'GET');
+                
+                // FIX: Safety unwrap — the core response handler should extract the array,
+                // but if it leaves { friends: [...] } unwrap it here too
+                let friends = raw;
+                if (friends && !Array.isArray(friends)) {
+                    if (Array.isArray(friends.friends)) {
+                        friends = friends.friends;
+                    } else if (friends.data && Array.isArray(friends.data)) {
+                        friends = friends.data;
+                    } else if (friends.data && Array.isArray(friends.data.friends)) {
+                        friends = friends.data.friends;
+                    }
+                }
                 
                 console.log(`[FriendManager] 📥 Received ${friends?.length || 0} friends from backend`);
                 
-                if (friends && Array.isArray(friends)) {
+                if (friends && Array.isArray(friends) && friends.length > 0) {
                     this.setFriends(friends);
+                } else if (friends && Array.isArray(friends) && friends.length === 0) {
+                    // Confirmed empty — try fetching all users as a fallback for new accounts
+                    this.setFriends([]);
+                    await this._fetchAllUsersAsFallback();
                 } else if (_demoModeEnabled) {
                     this._loadDemoFriendsIfNeeded();
                 }
@@ -2825,31 +2836,32 @@
         },
 
         // ADDED: Fallback — populate the contact list with all platform users when
-        // the current user has no accepted friends yet.  This prevents the "Start Chat"
-        // panel from showing an empty list for new accounts.
+        // the current user has no accepted friends yet.
         async _fetchAllUsersAsFallback() {
-            if (!ensureActive('_fetchAllUsersAsFallback')) return;
             if (!SessionManager.isAuthenticated()) return;
-            // Don't overwrite if friends were loaded after the initial check
             if (this._friends && this._friends.length > 0) return;
             try {
-                const result = await makeApiRequest('/friends/users/all', 'GET', null, { limit: 50 });
+                // FIX: /friends/users/all doesn't exist — try real user-search endpoints
+                let result = null;
                 let users = [];
-                if (Array.isArray(result)) {
-                    users = result;
-                } else if (result && result.users && Array.isArray(result.users)) {
-                    users = result.users;
-                } else if (result && result.data && Array.isArray(result.data)) {
-                    users = result.data;
+
+                try { result = await makeApiRequest('/users/search', 'GET', null, { q: '', limit: 50 }); } catch(e) { result = null; }
+                if (!result) {
+                    try { result = await makeApiRequest('/users', 'GET', null, { limit: 50 }); } catch(e) { result = null; }
                 }
+
+                if (Array.isArray(result)) { users = result; }
+                else if (result && Array.isArray(result.users)) { users = result.users; }
+                else if (result && result.data && Array.isArray(result.data)) { users = result.data; }
+                else if (result && result.data && Array.isArray(result.data.users)) { users = result.data.users; }
+
                 if (users.length > 0) {
-                    // Mark these as "all users" not confirmed friends
                     const currentUserId = SessionManager.getUserId();
                     users = users.filter(u => (u.id || u.uid) !== currentUserId);
-                    this.setFriends(users);
+                    if (users.length > 0) this.setFriends(users);
                 }
             } catch (e) {
-                Logger.warn('FriendManager', 'Failed to fetch all users as fallback:', e.message);
+                Logger.warn('FriendManager', 'Failed to fetch users as fallback:', e.message);
             }
         },
 
@@ -2859,6 +2871,12 @@
             this._loaded = true;
             this._saveToCache();
             this._notifySubscribers();
+            // FIX: Fire window event so UI always receives update regardless of subscribe timing
+            try {
+                window.dispatchEvent(new CustomEvent('friendsUpdated', {
+                    detail: { friends: this._friends }
+                }));
+            } catch(e) {}
         },
         
         mergeFriends: function(newFriends) {
@@ -2948,14 +2966,35 @@
         },
         
         getFriendListForChat: function() {
-            const availableFriends = this._friends.filter(friend => 
-                !this._blockedFriends.has(friend.id || friend.uid)
-            );
-            
-            return [...availableFriends].sort((a, b) => {
+            const availableFriends = this._friends
+                .filter(friend => !this._blockedFriends.has(friend.id || friend.uid))
+                .map(friend => {
+                    // FIX: Normalise backend field variants so UI always has consistent fields
+                    const id = friend.id || friend.uid || friend.userId;
+                    const firstName = friend.firstName || friend.first_name || '';
+                    const lastName = friend.lastName || friend.last_name || '';
+                    const fullName = [firstName, lastName].filter(Boolean).join(' ').trim();
+                    const displayName = friend.displayName || friend.display_name || fullName || friend.username || friend.name || 'User';
+                    const avatar = friend.avatar || friend.photoURL || friend.avatarUrl || friend.profilePhoto || null;
+                    const online = friend.online ?? (friend.status === 'online') ?? false;
+                    const status = friend.status || (online ? 'Online' : 'Offline');
+
+                    return {
+                        ...friend,
+                        id,
+                        displayName,
+                        username: friend.username || displayName,
+                        avatar,
+                        photoURL: avatar,
+                        online,
+                        status,
+                        lastSeen: friend.lastSeen || friend.last_seen || friend.lastActive || null
+                    };
+                });
+
+            return availableFriends.sort((a, b) => {
                 if (a.online && !b.online) return -1;
                 if (!a.online && b.online) return 1;
-                
                 const aName = (a.displayName || a.username || '').toLowerCase();
                 const bName = (b.displayName || b.username || '').toLowerCase();
                 return aName.localeCompare(bName);
@@ -3501,14 +3540,9 @@
     // =============================================
     const ConversationManager = {
         async openConversation(conversationId, options = {}) {
-            const guardResult = window.__guardAction('openConversation', MODULE_NAME, currentState, false);
-            if (guardResult !== null) {
-                return guardResult;
-            }
-            
             if (!conversationId) return false;
-            if (!ensureActive('openConversation')) return false;
-            // Allow opening in demo mode even without real auth
+            // FIX: openConversation needs authentication but NOT necessarily ACTIVE state.
+            // Users clicking a chat in the contacts list must be able to open it immediately.
             if (!SessionManager.isAuthenticated() && !_demoModeEnabled) return false;
             
             // Handle both id and conversationId
@@ -3653,13 +3687,11 @@
         },
         
         createConversation: async function(participants, options = {}) {
-            const guardResult = window.__guardAction('createConversation', MODULE_NAME, currentState, false);
-            if (guardResult !== null) {
-                return guardResult;
-            }
-            
             if (!participants || participants.length === 0) return false;
-            if (!canSendUserMessages()) return false;
+            // FIX: Removed __guardAction and canSendUserMessages guards.
+            // Creating/opening a conversation must work as soon as the user is authenticated —
+            // it's the primary action of clicking a contact, gating it on ACTIVE prevented
+            // the contacts panel from ever doing anything useful.
             if (!SessionManager.isAuthenticated()) return false;
 
             // FIXED: For direct (1-to-1) chats, call POST /messages with receiverId.
@@ -4917,6 +4949,9 @@
         isAuthenticated: () => SessionManager.isAuthenticated(),
         
         getSecurityReport: () => SECURITY.getSecurityReport(),
+        
+        // FIX: Expose multiSendSelectedChats as a real persistent Set for UI to track selections
+        multiSendSelectedChats: new Set(),
         
         subscribe: (callback) => stateListeners.add(callback),
         on: (event, callback) => EventBus.on(event, callback),

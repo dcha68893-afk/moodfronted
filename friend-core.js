@@ -1,12 +1,10 @@
 // =============================================
-// FRIEND PAGE - STABILIZED COMMUNICATION v12.1
-// AUTH-HARDENED MICRO-FRONTEND ARCHITECTURE
-// COMPLETE FIX: All API calls through parent with proper authentication
-// FIXED: No direct fetch calls - all through parent messaging
-// FIXED: Authentication waiting before any API calls
-// FIXED: Request queue for pending auth operations
-// FIXED: Proper parent message format handling for AUTH_READY and PARENT_READY
-// STABILITY v12.1: Auth-first initialization, request queuing, proper error handling
+// FRIEND PAGE - STABILIZED COMMUNICATION v13.0
+// FIXED: All Users / Discovery showing 0 users
+// FIXED: Search uses client-side filtering (no API calls)
+// FIXED: Avatar field normalization (avatar/photoURL)
+// FIXED: Global state exposure (window.FriendCore)
+// FIXED: Event-driven rendering
 // =============================================
 
 import {
@@ -34,18 +32,18 @@ import {
 } from './js/api.messages.js';
 
 // =============================================
-// [CONSTANTS & CONFIGURATION] - DEFINED FIRST
+// [CONSTANTS & CONFIGURATION]
 // =============================================
 
 const DEBUG = false;
 const PRODUCTION = window.location.hostname !== 'localhost' && !window.location.hostname.includes('127.0.0.1');
 
 const MODULE_NAME = 'friends';
-const MODULE_VERSION = '12.1';
+const MODULE_VERSION = '13.0';
 const EXPECTED_PARENT_ORIGIN = window.location.origin;
 
 // =============================================
-// [FRIEND CATEGORIES] - DEFINED EARLY
+// [FRIEND CATEGORIES]
 // =============================================
 
 const friendCategories = {
@@ -59,7 +57,7 @@ const friendCategories = {
 };
 
 // =============================================
-// [STORAGE KEYS] - DEFINED EARLY
+// [STORAGE KEYS]
 // =============================================
 
 const LOCAL_STORAGE_KEYS = {
@@ -88,7 +86,7 @@ const LOCAL_STORAGE_KEYS = {
 };
 
 // =============================================
-// [SESSION STORAGE] - MEMORY ONLY, NO LOCALSTORAGE
+// [SESSION STORAGE] - MEMORY ONLY
 // =============================================
 const __session = {
     token: null,
@@ -98,7 +96,7 @@ const __session = {
 };
 
 // =============================================
-// [LIFECYCLE STATE MACHINE] - STRICT DETERMINISTIC
+// [LIFECYCLE STATE MACHINE]
 // =============================================
 
 const LIFECYCLE_STATES = {
@@ -112,7 +110,6 @@ const LIFECYCLE_STATES = {
     ERROR: 'ERROR'
 };
 
-// Internal state - single source of truth
 let currentState = LIFECYCLE_STATES.BOOT;
 let childReadySent = false;
 let parentReadyReceived = false;
@@ -122,7 +119,7 @@ const _listeners = new Set();
 let initializationLock = false;
 
 // =============================================
-// [REQUEST QUEUE] - FOR PENDING AUTH OPERATIONS
+// [REQUEST QUEUE]
 // =============================================
 
 const requestQueue = [];
@@ -167,7 +164,7 @@ async function flushRequestQueue() {
 }
 
 // =============================================
-// [STRICT STATE TRANSITION] - NO INVALID TRANSITIONS
+// [STRICT STATE TRANSITION]
 // =============================================
 
 const VALID_TRANSITIONS = {
@@ -249,7 +246,7 @@ const LifecycleStateMachine = {
 };
 
 // =============================================
-// [LIFECYCLE GUARD] - PREVENT PREMATURE ACTIONS
+// [LIFECYCLE GUARD]
 // =============================================
 
 function assertActive(actionName) {
@@ -282,7 +279,7 @@ function assertReadyForSession(actionName) {
 }
 
 // =============================================
-// [EXACTLY-ONCE CHILD_READY SENDER] - NO RETRIES
+// [EXACTLY-ONCE CHILD_READY SENDER]
 // =============================================
 function sendChildReady() {
     if (childReadySent) {
@@ -295,11 +292,10 @@ function sendChildReady() {
         return false;
     }
 
-    // CRITICAL: Send module name at root level for parent detection
     const sent = sendMessageInternal({
         type: 'CHILD_READY',
-        module: MODULE_NAME,      // ← This is what parent looks for
-        source: MODULE_NAME,      // ← Also this
+        module: MODULE_NAME,
+        source: MODULE_NAME,
         target: 'parent',
         payload: {
             module: MODULE_NAME,
@@ -317,8 +313,9 @@ function sendChildReady() {
     }
     return false;
 }
+
 // =============================================
-// [PARENT_READY HANDLER] - EXACTLY ONCE WITH PROPER SESSION EXTRACTION
+// [PARENT_READY HANDLER]
 // =============================================
 function handleParentReady(message) {
     if (parentReadyReceived) {
@@ -333,7 +330,6 @@ function handleParentReady(message) {
 
     console.log('[Lifecycle] PARENT_READY received - extracting session');
 
-    // Parent sends: PARENT_READY.payload = { protocol, state, message, session: { token, user, ... }, userId }
     let session = null;
 
     if (message.payload?.session) {
@@ -361,7 +357,7 @@ function handleParentReady(message) {
 }
 
 // =============================================
-// [AUTH_READY HANDLER] - PROPER SESSION EXTRACTION FROM PARENT
+// [AUTH_READY HANDLER]
 // =============================================
 
 function handleAuthReady(message) {
@@ -379,22 +375,18 @@ function handleAuthReady(message) {
 
     console.log('[Lifecycle] AUTH_READY received - extracting session');
 
-    // Parent sends: AUTH_READY.payload = { authenticated, session: { token, user, userId, ... }, user, userId }
     let token = null;
     let user  = null;
 
-    // Primary: session object inside payload (parent's standard format)
     if (message.payload?.session) {
         const s = message.payload.session;
         token = s.token || null;
         user  = s.user  || null;
     }
 
-    // Secondary: user / token at payload root (also sent by parent as convenience fields)
     if (!token && message.payload?.token)  token = message.payload.token;
     if (!user  && message.payload?.user)   user  = message.payload.user;
 
-    // Tertiary: userId at payload root — build a user object from it
     if (!user && message.payload?.userId) {
         const uid = message.payload.userId;
         user = {
@@ -406,7 +398,6 @@ function handleAuthReady(message) {
         };
     }
 
-    // Final guard: userId at message root
     if (!user && message.userId) {
         const uid = message.userId;
         user = { id: uid, userId: uid, username: String(uid), email: '', displayName: String(uid) };
@@ -414,7 +405,6 @@ function handleAuthReady(message) {
     if (!token && message.token) token = message.token;
     
     if (user) {
-        // Ensure both id and userId are always set
         if (!user.id   && user.userId) user.id     = user.userId;
         if (!user.userId && user.id)   user.userId = user.id;
 
@@ -460,7 +450,6 @@ function applySession(session) {
     let token = session.token || session.accessToken || null;
     let user = session.user || null;
     
-    // Create user from root data if needed
     if (!user && (session.id || session.userId)) {
         user = {
             id: session.id || session.userId,
@@ -500,7 +489,7 @@ function onModuleActive() {
 }
 
 // =============================================
-// [MESSAGE QUEUE] - PRESERVED
+// [MESSAGE QUEUE]
 // =============================================
 
 const _messageQueue = [];
@@ -539,7 +528,7 @@ function flushQueue() {
 }
 
 // =============================================
-// [MESSAGE WRAPPER] - WITH DEDUPLICATION
+// [MESSAGE WRAPPER]
 // =============================================
 
 const generateMessageId = importedGenerateMessageId || function() {
@@ -614,7 +603,7 @@ function safeSend(message) {
 }
 
 // =============================================
-// [AUTHENTICATED REQUEST THROUGH PARENT] - MAIN FIX
+// [AUTHENTICATED REQUEST THROUGH PARENT]
 // =============================================
 
 function isAuthenticated() {
@@ -775,7 +764,7 @@ async function authorizedRequest(endpoint, options = {}) {
 }
 
 // =============================================
-// [API GATEWAY] - THROUGH PARENT
+// [API GATEWAY]
 // =============================================
 const APIGateway = {
     _pendingRequests: new Map(),
@@ -816,7 +805,7 @@ const APIGateway = {
 };
 
 // =============================================
-// [LOGGING SYSTEM] - PRESERVED
+// [LOGGING SYSTEM]
 // =============================================
 
 const Logger = {
@@ -867,7 +856,7 @@ const Logger = {
 };
 
 // =============================================
-// [STATUS MANAGER] - PRESERVED
+// [STATUS MANAGER]
 // =============================================
 
 const StatusManager = {
@@ -904,7 +893,7 @@ const StatusManager = {
 };
 
 // =============================================
-// [ERROR HANDLING] - PRESERVED
+// [ERROR HANDLING]
 // =============================================
 
 let NetworkError;
@@ -1025,7 +1014,7 @@ const ErrorHandler = {
 };
 
 // =============================================
-// [SAFE STORAGE LAYER] - PRESERVED
+// [SAFE STORAGE LAYER]
 // =============================================
 
 const SafeStorage = {
@@ -1139,7 +1128,7 @@ const SafeStorage = {
 };
 
 // =============================================
-// [SECURITY VALIDATOR] - PRESERVED WITH RELAXED INIT
+// [SECURITY VALIDATOR]
 // =============================================
 
 const SecurityValidator = {
@@ -1191,7 +1180,6 @@ const SecurityValidator = {
         if (!message || typeof message !== 'object') return false;
         if (!message.type || typeof message.type !== 'string') return false;
 
-        // Accept messages originating from parent, targeting this module or broadcast
         if (message.source && message.source !== 'parent' && message.source !== MODULE_NAME) {
             return false;
         }
@@ -2044,7 +2032,7 @@ const MessageDispatcher = {
 };
 
 // =============================================
-// [FRIEND CACHE MANAGER] - NOW SAFE TO USE LOCAL_STORAGE_KEYS
+// [FRIEND CACHE MANAGER]
 // =============================================
 
 const FriendCacheManager = {
@@ -2320,38 +2308,36 @@ const FriendCacheManager = {
         return true;
     },
     
+    // FIXED: Client-side search (NO API CALLS)
     searchFriends(query, options = {}) {
         if (!query || typeof query !== 'string') return [];
         
         const normalizedQuery = query.toLowerCase().trim();
+        if (normalizedQuery.length === 0) return [];
+        
         const results = [];
-        const cacheKey = `search_${normalizedQuery}`;
+        const searchTargets = options.includeUsers ? 
+            [...this._cache.friends.values(), ...this._cache.users.values()] : 
+            [...this._cache.friends.values()];
         
-        if (this._searchCache?.get(cacheKey)) {
-            const cachedIds = this._searchCache.get(cacheKey);
-            const cachedResults = cachedIds
-                .map(id => this._cache.friends.get(id))
-                .filter(f => f !== undefined);
-            if (cachedResults.length > 0) return cachedResults;
-        }
-        
-        for (const friend of this._cache.friends.values()) {
-            if (this._matchesQuery(friend, normalizedQuery)) {
-                results.push(friend);
+        for (const item of searchTargets) {
+            if (this._matchesQuery(item, normalizedQuery)) {
+                results.push(item);
             }
         }
         
-        if (results.length === 0 || options.includeUsers) {
-            for (const user of this._cache.users.values()) {
-                if (this._matchesQuery(user, normalizedQuery) && !this._cache.friends.has(user.id)) {
-                    results.push(user);
-                }
-            }
-        }
-        
-        if (!this._searchCache) this._searchCache = new Map();
-        this._searchCache.set(cacheKey, results.map(f => f.id));
-        setTimeout(() => this._searchCache?.delete(cacheKey), this._ttl.search);
+        // Sort results by relevance (name match first)
+        results.sort((a, b) => {
+            const aName = (a.displayName || a.name || '').toLowerCase();
+            const bName = (b.displayName || b.name || '').toLowerCase();
+            
+            if (aName === normalizedQuery && bName !== normalizedQuery) return -1;
+            if (bName === normalizedQuery && aName !== normalizedQuery) return 1;
+            if (aName.startsWith(normalizedQuery) && !bName.startsWith(normalizedQuery)) return -1;
+            if (bName.startsWith(normalizedQuery) && !aName.startsWith(normalizedQuery)) return 1;
+            
+            return aName.localeCompare(bName);
+        });
         
         return results;
     },
@@ -2415,7 +2401,7 @@ const FriendCacheManager = {
 FriendCacheManager.init();
 
 // =============================================
-// [FRIEND REQUEST MANAGER] - ALL REQUESTS THROUGH PARENT
+// [FRIEND REQUEST MANAGER]
 // =============================================
 
 const FriendRequestManager = {
@@ -2587,6 +2573,8 @@ const FriendRequestManager = {
         Logger.info('FriendRequestManager', 'Accepting friend request', { requestId, friendId });
         
         try {
+            const existingRequest = FriendCacheManager.getRequest(requestId);
+            
             const response = await authorizedRequest(`/api/friends/requests/${requestId}/accept`, {
                 method: 'POST'
             });
@@ -2596,11 +2584,11 @@ const FriendRequestManager = {
                 
                 const newFriend = {
                     id: friendId,
-                    displayName: existingRequest.senderName || existingRequest.user?.displayName || 'Friend',
-                    username: existingRequest.senderUsername || existingRequest.user?.username || '',
+                    displayName: existingRequest?.senderName || existingRequest?.user?.displayName || 'Friend',
+                    username: existingRequest?.senderUsername || existingRequest?.user?.username || '',
                     addedAt: Date.now(),
                     online: false,
-                    category: existingRequest.category || 'friend'
+                    category: existingRequest?.category || 'friend'
                 };
                 
                 FriendCacheManager.setFriend(newFriend);
@@ -2756,13 +2744,11 @@ const FriendRequestManager = {
 setInterval(() => FriendRequestManager.cleanup(), 60000);
 
 // =============================================
-// [FRIEND SEARCH ENGINE] - REAL SEARCH THROUGH PARENT
+// [FRIEND SEARCH ENGINE] - FIXED: CLIENT-SIDE SEARCH ONLY
 // =============================================
 
 const FriendSearchEngine = {
     _searchCache: new Map(),
-    _pendingSearches: new Map(),
-    _debounceTimers: new Map(),
     
     async search(query, options = {}) {
         if (!assertActive('FriendSearchEngine.search')) {
@@ -2794,60 +2780,58 @@ const FriendSearchEngine = {
             return cached.results;
         }
         
-        Logger.info('FriendSearchEngine', 'Performing real search', { query: normalizedQuery, options });
+        Logger.info('FriendSearchEngine', 'Performing client-side search', { query: normalizedQuery, options });
         
-        try {
-            const response = await authorizedRequest('/api/friends/search', {
-                method: 'GET',
-                params: { 
-                    q: normalizedQuery,
-                    limit: options.limit || 20,
-                    includeUsers: options.includeUsers || false
-                }
-            });
-            
-            Logger.info('FriendSearchEngine', 'Search response', { success: response.success, data: response.data });
-            
-            if (response.success && response.data) {
-                let results = [];
-                
-                if (response.data.users && Array.isArray(response.data.users)) {
-                    results = response.data.users;
-                } else if (response.data.results && Array.isArray(response.data.results)) {
-                    results = response.data.results;
-                } else if (Array.isArray(response.data)) {
-                    results = response.data;
-                }
-                
-                const currentUserId = __session.user?.id;
-                if (currentUserId) {
-                    results = results.filter(user => user.id !== currentUserId);
-                }
-                
-                this._searchCache.set(cacheKey, {
-                    results,
-                    timestamp: Date.now()
+        // FIXED: Use client-side filtering instead of API call
+        let results = [];
+        
+        if (options.includeUsers) {
+            // Search across all users (for discovery)
+            const allUsers = window._allUsersCache || FriendCacheManager.getAllUsers();
+            if (allUsers && allUsers.length > 0) {
+                results = allUsers.filter(user => {
+                    if (!user || !user.id) return false;
+                    
+                    const name = (user.displayName || user.name || '').toLowerCase();
+                    const username = (user.username || '').toLowerCase();
+                    const email = (user.email || '').toLowerCase();
+                    
+                    return name.includes(normalizedQuery) || 
+                           username.includes(normalizedQuery) || 
+                           email.includes(normalizedQuery);
                 });
-                
-                results.forEach(user => {
-                    if (user && user.id && !FriendCacheManager.getUser(user.id)) {
-                        FriendCacheManager.setUser(user);
-                    }
-                });
-                
-                window.dispatchEvent(new CustomEvent('friendGlobalSearchResults', {
-                    detail: { query: normalizedQuery, results }
-                }));
-                
-                return results;
-            } else {
-                Logger.warn('FriendSearchEngine', 'Search returned no results or error', { error: response.error });
-                return [];
             }
-        } catch (error) {
-            Logger.error('FriendSearchEngine', 'Search failed', error);
-            return [];
+        } else {
+            // Search only friends
+            results = FriendCacheManager.searchFriends(normalizedQuery, { includeUsers: false });
         }
+        
+        // Filter out current user
+        const currentUserId = __session.user?.id;
+        if (currentUserId) {
+            results = results.filter(user => String(user.id) !== String(currentUserId));
+        }
+        
+        this._searchCache.set(cacheKey, {
+            results,
+            timestamp: Date.now()
+        });
+        
+        // Normalize avatar fields
+        results.forEach(user => {
+            if (user && user.id) {
+                user.photoURL = user.photoURL || user.avatar || '';
+                if (!FriendCacheManager.getUser(user.id)) {
+                    FriendCacheManager.setUser(user);
+                }
+            }
+        });
+        
+        window.dispatchEvent(new CustomEvent('friendGlobalSearchResults', {
+            detail: { query: normalizedQuery, results }
+        }));
+        
+        return results;
     },
     
     async searchByLetter(letter, options = {}) {
@@ -2866,13 +2850,11 @@ const FriendSearchEngine = {
     
     clearCache() {
         this._searchCache.clear();
-        this._debounceTimers.forEach(timer => clearTimeout(timer));
-        this._debounceTimers.clear();
     }
 };
 
 // =============================================
-// [QR CODE MANAGER] - COMPLETE FIX WITH REAL BACKEND
+// [QR CODE MANAGER]
 // =============================================
 
 const QRCodeManager = {
@@ -2903,7 +2885,7 @@ const QRCodeManager = {
         
         const qrData = {
             type: 'knecta_friend_request',
-            version: '12.0',
+            version: '13.0',
             userId: userId,
             username: username,
             displayName: displayName,
@@ -2926,17 +2908,14 @@ const QRCodeManager = {
         try {
             const qrData = typeof qrString === 'string' ? JSON.parse(qrString) : qrString;
             
-            // Must have a userId at minimum
             if (!qrData || !qrData.userId) {
                 return { valid: false, reason: 'Invalid QR code format' };
             }
             
-            // Check expiry only if expiresAt is present
             if (qrData.expiresAt && Date.now() > qrData.expiresAt) {
                 return { valid: false, reason: 'QR code expired — ask your friend to refresh their QR code' };
             }
             
-            // Accept any QR that has a userId — signature is verified server-side when fetching user
             return { valid: true, data: qrData };
         } catch (error) {
             return { valid: false, reason: 'Could not read QR code data' };
@@ -2944,9 +2923,8 @@ const QRCodeManager = {
     },
     
     _generateSecureHash(userId, username, email, timestamp, nonce) {
-        // Deterministic hash — NO random entropy so validate() can reproduce it
         try {
-            const data = `${userId}:${username}:${email}:${timestamp}:${nonce}:knecta-secret-v12`;
+            const data = `${userId}:${username}:${email}:${timestamp}:${nonce}:knecta-secret-v13`;
             let hash = 0;
             for (let i = 0; i < data.length; i++) {
                 hash = ((hash << 5) - hash) + data.charCodeAt(i);
@@ -3025,7 +3003,8 @@ const QRCodeManager = {
             user: {
                 id: qrData.userId,
                 displayName: qrData.displayName,
-                username: qrData.username
+                username: qrData.username,
+                avatar: qrData.avatar || ''
             }
         };
     },
@@ -3232,7 +3211,7 @@ const GroupParticipationManager = {
 };
 
 // =============================================
-// [UI BRIDGE] - WITH COMPLETE FRIEND SEARCH HANDLING
+// [UI BRIDGE]
 // =============================================
 
 const UIBridge = {
@@ -5360,7 +5339,7 @@ const MessageBus = {
 };
 
 // =============================================
-// [DATA LOADING FUNCTIONS] - ALL THROUGH PARENT
+// [DATA LOADING FUNCTIONS]
 // =============================================
 
 let friendsLoading = false;
@@ -5449,18 +5428,12 @@ async function loadFriendsFromBackend() {
 
             if (validFriends.length > 0) {
                 FriendCacheManager.setFriends(validFriends);
+                console.log(`✅ loadFriendsFromBackend: Loaded ${validFriends.length} friends`);
             } else {
-                // Backend confirmed 0 friends — clear any stale demo or cached data
-                Logger.info('loadFriendsFromBackend', 'No friends from backend — clearing cache');
+                console.log('ℹ️ loadFriendsFromBackend: No friends yet (normal for new users) - preserving user discovery data');
                 FriendCacheManager.setFriends([]);
-                FriendCacheManager.syncToGlobals();
-                updateFriendCounts?.();
-                window.dispatchEvent(new CustomEvent('friendsUpdated', { detail: { friends: [], demo: false } }));
-                clearFriendsLoading();
-                return { success: true, count: 0 };
             }
             
-            FriendCacheManager.setFriends(validFriends);
             FriendCacheManager.syncToGlobals();
             FriendCacheManager.persist();
             
@@ -5468,7 +5441,9 @@ async function loadFriendsFromBackend() {
             
             SafeStorage.setItem(LOCAL_STORAGE_KEYS.LAST_SYNC, Date.now().toString());
             
-            window.dispatchEvent(new CustomEvent('friendsUpdated', { detail: { friends: validFriends } }));
+            window.dispatchEvent(new CustomEvent('friendsUpdated', { 
+                detail: { friends: validFriends, count: validFriends.length } 
+            }));
             
             clearFriendsLoading();
             return { success: true, count: validFriends.length };
@@ -5498,6 +5473,75 @@ async function loadFriendsFromBackend() {
     
     return { success: false };
 }
+
+// =============================================
+// [DISCOVERABLE USERS] - FIXED VERSION
+// =============================================
+
+function getDiscoverableUsers() {
+    let allUsersList = [];
+    
+    // Priority 1: window._allUsersCache (set by fetchAllUsersFromBackend)
+    if (window._allUsersCache && Array.isArray(window._allUsersCache) && window._allUsersCache.length > 0) {
+        allUsersList = window._allUsersCache;
+        console.log(`[getDiscoverableUsers] Using window._allUsersCache: ${allUsersList.length} users`);
+    }
+    // Priority 2: window.FriendCore._allUsers
+    else if (window.FriendCore && window.FriendCore._allUsers && window.FriendCore._allUsers.length > 0) {
+        allUsersList = window.FriendCore._allUsers;
+        console.log(`[getDiscoverableUsers] Using FriendCore._allUsers: ${allUsersList.length} users`);
+    }
+    // Priority 3: FriendCacheManager users
+    else {
+        allUsersList = FriendCacheManager.getAllUsers();
+        console.log(`[getDiscoverableUsers] Using FriendCacheManager: ${allUsersList.length} users`);
+    }
+    
+    if (!allUsersList || allUsersList.length === 0) {
+        console.warn('[getDiscoverableUsers] No users found in any cache - try calling fetchAllUsersFromBackend()');
+        return [];
+    }
+    
+    // Get existing friend IDs to filter out
+    const existingFriends = FriendCacheManager.getAllFriends();
+    const friendIds = new Set();
+    existingFriends.forEach(friend => {
+        if (friend && friend.id) {
+            friendIds.add(String(friend.id));
+        }
+    });
+    
+    // Get current user ID
+    const currentUserId = __session.user?.id || currentUser?.id;
+    
+    // Filter out current user and existing friends
+    const discoverable = allUsersList.filter(user => {
+        if (!user || !user.id) return false;
+        if (currentUserId && String(user.id) === String(currentUserId)) return false;
+        if (friendIds.has(String(user.id))) return false;
+        return true;
+    });
+    
+    // Normalize avatar fields
+    discoverable.forEach(user => {
+        user.photoURL = user.photoURL || user.avatar || '';
+    });
+    
+    console.log(`[getDiscoverableUsers] Total: ${allUsersList.length}, Friends: ${friendIds.size}, Discoverable: ${discoverable.length}`);
+    
+    // Sort discoverable users (online first, then alphabetically)
+    discoverable.sort((a, b) => {
+        if (a.online !== b.online) return b.online ? 1 : -1;
+        const nameA = (a.displayName || a.username || '').toLowerCase();
+        const nameB = (b.displayName || b.username || '').toLowerCase();
+        return nameA.localeCompare(nameB);
+    });
+    
+    return discoverable;
+}
+
+// Export for global access
+window.getDiscoverableUsers = getDiscoverableUsers;
 
 async function loadFriendRequestsFromBackend() {
     if (!assertActive('loadFriendRequestsFromBackend')) {
@@ -5722,6 +5766,10 @@ async function loadGroupsFromBackend() {
     return { success: false };
 }
 
+// =============================================
+// [FETCH ALL USERS] - FIXED: Sets window._allUsersCache and dispatches events
+// =============================================
+
 async function fetchAllUsersFromBackend() {
     if (!assertActive('fetchAllUsersFromBackend')) {
         return { success: false, error: 'Module not active' };
@@ -5741,31 +5789,78 @@ async function fetchAllUsersFromBackend() {
         
         Logger.info('fetchAllUsersFromBackend', 'Users fetched', { success: response.success });
         
-        const usersData = response.data?.users || response.data || [];
-        const currentUserId = __session.user?.id;
-        const filteredUsers = Array.isArray(usersData) ? usersData.filter(user => user.id !== currentUserId) : [];
+        let usersData = [];
         
+        if (response.success && response.data) {
+            if (response.data.users && Array.isArray(response.data.users)) {
+                usersData = response.data.users;
+            } else if (Array.isArray(response.data)) {
+                usersData = response.data;
+            } else if (response.data.data && response.data.data.users) {
+                usersData = response.data.data.users;
+            }
+        }
+        
+        const currentUserId = __session.user?.id;
+        const filteredUsers = Array.isArray(usersData) ? usersData.filter(user => String(user.id) !== String(currentUserId)) : [];
+        
+        // Normalize avatar fields
+        filteredUsers.forEach(user => {
+            user.photoURL = user.photoURL || user.avatar || '';
+            user.displayName = user.displayName || user.name || user.username || 'User';
+        });
+        
+        // ✅ CRITICAL: Store in window._allUsersCache for UI access
+        window._allUsersCache = filteredUsers;
+        
+        // ✅ Store in FriendCacheManager for persistence
+        FriendCacheManager.setUsers(filteredUsers);
+        
+        // ✅ Make available on FriendCore for UI
+        if (window.FriendCore) {
+            window.FriendCore._allUsers = filteredUsers;
+            window.FriendCore.discoverableUsers = filteredUsers;
+        }
+        
+        // Store original unfiltered users for debugging
+        if (!window._allUsersRaw) window._allUsersRaw = [];
+        window._allUsersRaw = Array.isArray(usersData) ? usersData : [];
+        
+        // Sort for display
         filteredUsers.sort((a, b) => {
             if (a.online !== b.online) return b.online ? 1 : -1;
             return (a.displayName || '').localeCompare(b.displayName || '');
         });
         
-        FriendCacheManager.setUsers(filteredUsers);
         FriendCacheManager.syncToGlobals();
         FriendCacheManager.persist();
         localStorage.setItem('all_users_last_sync', Date.now().toString());
         
-        return { success: true, count: filteredUsers.length };
+        // ✅ Dispatch event for UI to update
+        window.dispatchEvent(new CustomEvent('allUsersLoaded', {
+            detail: { users: filteredUsers, count: filteredUsers.length }
+        }));
+        
+        console.log(`✅ fetchAllUsersFromBackend: Loaded ${filteredUsers.length} users for discovery`);
+        
+        return { success: true, count: filteredUsers.length, users: filteredUsers };
     } catch (error) {
         Logger.error('fetchAllUsersFromBackend', 'Failed to fetch users', error);
         
+        // Try to load from cache
+        const cached = FriendCacheManager.getAllUsers();
         if (cached.length > 0) {
             allUsers = cached;
-            return { success: true, count: cached.length, cached: true };
+            if (window.FriendCore) window.FriendCore._allUsers = cached;
+            window._allUsersCache = cached;
+            window.dispatchEvent(new CustomEvent('allUsersLoaded', {
+                detail: { users: cached, count: cached.length, cached: true }
+            }));
+            return { success: true, count: cached.length, cached: true, users: cached };
         }
     }
     
-    return { success: false };
+    return { success: false, users: [] };
 }
 
 function guardFriendOperation(operationName) {
@@ -6300,17 +6395,15 @@ function getFriendsForGroup() {
 }
 
 // =============================================
-// [CAMERA AND QR CODE FUNCTIONS] - WITH SCAN STOP FIX
+// [CAMERA AND QR CODE FUNCTIONS]
 // =============================================
 
 async function startCameraScanner() {
-    // If auth not ready yet, queue and retry — don't silently block
     if (!authReadyReceived || !__session.ready || !__session.token) {
         if (!assertActive('startCameraScanner')) {
             showNotification?.('Module not active, please wait...', 'warning');
             return;
         }
-        // Queue with a short retry — camera can start once session is ready
         let attempts = 0;
         const waitAndStart = setInterval(() => {
             attempts++;
@@ -6434,21 +6527,25 @@ function processScannedQRCodeReal(qrData) {
         }
         
         const user = result.user || result.data;
+        const scannedUserId = user?.id || user?.userId;
         
-        if (!user || !user.userId) {
+        if (!user || !scannedUserId) {
             showNotification?.('Invalid QR code data', 'error');
             QRCodeManager.resetScan();
             return;
         }
         
+        user.id = user.id || scannedUserId;
+        user.userId = user.userId || scannedUserId;
+        
         const currentUserId = __session.user?.id;
-        if (currentUserId === user.userId) {
+        if (currentUserId === scannedUserId || String(currentUserId) === String(scannedUserId)) {
             showNotification?.('You cannot add yourself as a friend', 'warning');
             QRCodeManager.resetScan();
             return;
         }
         
-        const existingFriend = FriendCacheManager.getFriend(user.userId);
+        const existingFriend = FriendCacheManager.getFriend(scannedUserId);
         if (existingFriend) {
             showNotification?.('You are already friends with this user', 'info');
             QRCodeManager.resetScan();
@@ -6456,7 +6553,7 @@ function processScannedQRCodeReal(qrData) {
         }
         
         const existingSent = FriendCacheManager.getAllSentRequests()
-            .find(r => r.receiverId === user.userId);
+            .find(r => r.receiverId === scannedUserId || r.receiverId === String(scannedUserId));
         if (existingSent) {
             showNotification?.('Friend request already sent', 'info');
             QRCodeManager.resetScan();
@@ -6480,6 +6577,7 @@ function processScannedQRCodeReal(qrData) {
 
 function showFriendRequestFromQRReal(qrData, userInfo) {
     const user = userInfo || qrData;
+    const userId = user.id || user.userId || qrData?.userId;
     
     const avatar = document.getElementById('requestAvatar');
     const name = document.getElementById('requestName');
@@ -6494,8 +6592,9 @@ function showFriendRequestFromQRReal(qrData, userInfo) {
     }
     
     if (avatar) {
-        if (user.photoURL) {
-            avatar.style.backgroundImage = `url('${escapeHtml(user.photoURL)}')`;
+        const avatarUrl = user.photoURL || user.avatar;
+        if (avatarUrl) {
+            avatar.style.backgroundImage = `url('${escapeHtml(avatarUrl)}')`;
             avatar.style.backgroundSize = 'cover';
             avatar.innerHTML = '';
         } else {
@@ -6509,7 +6608,7 @@ function showFriendRequestFromQRReal(qrData, userInfo) {
     if (username) username.textContent = user.username || '@unknown';
     
     if (mutual) {
-        getMutualFriendsCount(user.userId).then(count => {
+        getMutualFriendsCount(userId).then(count => {
             mutual.textContent = count.toString();
         }).catch(() => {
             mutual.textContent = '0';
@@ -6520,30 +6619,31 @@ function showFriendRequestFromQRReal(qrData, userInfo) {
         const newAccept = accept.cloneNode(true);
         accept.parentNode.replaceChild(newAccept, accept);
         
-        newAccept.dataset.userId = user.userId;
-        newAccept.dataset.userName = user.displayName || 'User';
+        newAccept.dataset.userId = userId;
+        newAccept.dataset.userName = user.displayName || user.username || 'User';
         newAccept.dataset.qrData = JSON.stringify(qrData);
+        newAccept.textContent = 'Send Friend Request & Save';
         
         newAccept.addEventListener('click', async (e) => {
-            const userId = e.target.dataset.userId;
+            const targetUserId = e.target.dataset.userId;
             const userName = e.target.dataset.userName;
             
             e.target.disabled = true;
             e.target.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Sending...';
             
-            const result = await sendFriendRequest(userId, 'friend', `Added via QR code on ${new Date().toLocaleDateString()}`);
+            const result = await sendFriendRequest(targetUserId, 'friend', `Added via QR code on ${new Date().toLocaleDateString()}`);
             
             if (result && result.success) {
                 showNotification?.(`Friend request sent to ${userName}`, 'success');
                 
-                const modal = document.getElementById('friendRequestModal');
-                if (modal) modal.classList.remove('active');
+                const modalEl = document.getElementById('friendRequestModal');
+                if (modalEl) modalEl.classList.remove('active');
                 
                 loadSentRequestsFromBackend().catch(() => {});
             } else {
                 showNotification?.(result?.error || 'Failed to send friend request', 'error');
                 e.target.disabled = false;
-                e.target.innerHTML = 'Send Friend Request';
+                e.target.textContent = 'Send Friend Request & Save';
             }
         });
     }
@@ -7219,7 +7319,7 @@ function handleUnifiedCacheReady(event) {
 }
 
 // =============================================
-// [INITIALIZATION FLOW] - AUTH-FIRST DETERMINISTIC HANDSHAKE
+// [INITIALIZATION FLOW]
 // =============================================
 
 async function initialize() {
@@ -7258,8 +7358,35 @@ async function initialize() {
         window.addEventListener('loadInitialData', () => {
             if (authReadyReceived && __session.ready) {
                 startParallelDataLoading();
+                
+                setTimeout(() => {
+                    console.log('[Init] Loading all users for discovery...');
+                    fetchAllUsersFromBackend().then(result => {
+                        console.log(`[Init] All users loaded: ${result.count} discoverable users`);
+                        if (result.users && result.users.length > 0) {
+                            window.allUsersList = result.users;
+                            if (window.FriendCore) {
+                                window.FriendCore._allUsers = result.users;
+                                window.FriendCore.discoverableUsers = result.users;
+                            }
+                            
+                            window.dispatchEvent(new CustomEvent('allUsersReady', {
+                                detail: { users: result.users, count: result.users.length }
+                            }));
+                            
+                            if (window.currentSection === 'discovery' || window.location.hash === '#discovery') {
+                                renderAllUsersList();
+                            }
+                        }
+                    }).catch(error => {
+                        console.error('[Init] Failed to load all users:', error);
+                    });
+                }, 500);
             } else {
-                queueRequest(() => startParallelDataLoading());
+                queueRequest(() => {
+                    startParallelDataLoading();
+                    queueRequest(() => fetchAllUsersFromBackend());
+                });
             }
         });
         
@@ -7393,7 +7520,40 @@ function searchFriendsLegacy(searchTerm) {
 }
 
 function renderAllUsersList() {
-    window.dispatchEvent(new CustomEvent('renderAllUsersList'));
+    const discoverableUsers = getDiscoverableUsers();
+    
+    console.log(`[renderAllUsersList] Rendering ${discoverableUsers.length} discoverable users`);
+    
+    if (discoverableUsers.length === 0) {
+        console.warn('[renderAllUsersList] No discoverable users found');
+        
+        if (authReadyReceived && __session.ready && (!window._allUsersCache || window._allUsersCache.length === 0)) {
+            console.log('[renderAllUsersList] No users in cache, fetching from backend...');
+            fetchAllUsersFromBackend().then(result => {
+                if (result.success && result.users && result.users.length > 0) {
+                    console.log(`[renderAllUsersList] Loaded ${result.users.length} users, re-rendering`);
+                    const freshUsers = getDiscoverableUsers();
+                    window.dispatchEvent(new CustomEvent('renderAllUsersList', {
+                        detail: { users: freshUsers, count: freshUsers.length }
+                    }));
+                } else {
+                    window.dispatchEvent(new CustomEvent('renderAllUsersList', {
+                        detail: { users: [], count: 0, error: 'No users found' }
+                    }));
+                }
+            });
+            return;
+        }
+        
+        window.dispatchEvent(new CustomEvent('renderAllUsersList', {
+            detail: { users: [], count: 0, message: 'No users to discover' }
+        }));
+        return;
+    }
+    
+    window.dispatchEvent(new CustomEvent('renderAllUsersList', {
+        detail: { users: discoverableUsers, count: discoverableUsers.length, timestamp: Date.now() }
+    }));
 }
 
 function loadFriendDetails(friendData, type) {
@@ -7583,7 +7743,7 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 // =============================================
-// [EXPORTS] - ALL AVAILABLE EXPORTS
+// [EXPORTS]
 // =============================================
 
 const HandshakeClient = null;
@@ -7643,7 +7803,7 @@ const KYN = {
 };
 
 const friendCore = {
-    version: '12.1',
+    version: '13.0',
     initialized: false,
     fallbackMode: false,
     init: initialize,
@@ -7668,8 +7828,15 @@ const friendCore = {
     isSessionReady: () => __session.ready,
     getState: () => currentState,
     isActive: () => currentState === LIFECYCLE_STATES.ACTIVE && parentReadyReceived && authReadyReceived && __session.ready,
-    getSession: () => ({ token: __session.token, user: __session.user, ready: __session.ready })
+    getSession: () => ({ token: __session.token, user: __session.user, ready: __session.ready }),
+    getAllUsers: () => window._allUsersCache || FriendCacheManager.getAllUsers(),
+    fetchAllUsers: fetchAllUsersFromBackend
 };
+
+// ✅ CRITICAL: Expose FriendCore globally for UI access
+window.FriendCore = friendCore;
+window._allUsersCache = window._allUsersCache || [];
+window.friendCore = friendCore;
 
 // =============================================
 // [NEARBY MANAGER] - Real geolocation-based discovery
@@ -7703,7 +7870,7 @@ const NearbyManager = {
             (err) => {
                 Logger.warn('NearbyManager', 'Geolocation error', err);
                 this._onStatus('Location permission denied — showing online users instead');
-                this._fetchNearby(); // fallback: no coords, server returns online users
+                this._fetchNearby();
             },
             { enableHighAccuracy: false, timeout: 10000, maximumAge: 30000 }
         );
@@ -7729,12 +7896,15 @@ const NearbyManager = {
             }
             const response = await authorizedRequest(url);
             if (response.success && this._onResult) {
-                this._onResult(response.data?.users || [], response.data?.mode || 'none');
+                const users = response.data?.users || [];
+                users.forEach(user => {
+                    user.photoURL = user.photoURL || user.avatar || '';
+                });
+                this._onResult(users, response.data?.mode || 'none');
             }
         } catch (err) {
             Logger.error('NearbyManager', 'Failed to fetch nearby users', err);
         }
-        // Re-poll every 30 seconds while active
         if (this._searching) {
             setTimeout(() => this._fetchNearby(), 30000);
         }
@@ -7870,7 +8040,7 @@ export {
     // V6 State
     V6,
 
-    // Lifecycle - ALL lifecycle exports
+    // Lifecycle
     LifecycleStateMachine,
     LIFECYCLE_STATES,
     __session,
@@ -7983,20 +8153,40 @@ window.__FRIEND_MODULE_READY__ = true;
 window.__MODULE_READY__ = true;
 
 // =============================================
+// [DEBUG HELPER]
+// =============================================
+
+window.debugUserDiscovery = function() {
+    console.log('=== USER DISCOVERY DEBUG ===');
+    console.log('window._allUsersCache:', window._allUsersCache?.length || 0);
+    console.log('window._allUsersRaw:', window._allUsersRaw?.length || 0);
+    console.log('window.discoverableUsers:', window.discoverableUsers?.length || 0);
+    console.log('window.FriendCore?._allUsers:', window.FriendCore?._allUsers?.length || 0);
+    console.log('allUsers variable:', window.allUsers?.length || 0);
+    console.log('FriendCacheManager users:', FriendCacheManager?.getAllUsers()?.length || 0);
+    console.log('Current user ID:', __session.user?.id || currentUser?.id);
+    console.log('Friends count:', FriendCacheManager?.getAllFriends()?.length || 0);
+    console.log('Auth ready:', authReadyReceived);
+    console.log('Session ready:', __session.ready);
+    console.log('Parent ready:', parentReadyReceived);
+    console.log('Module active:', currentState === LIFECYCLE_STATES.ACTIVE);
+    
+    const discoverable = getDiscoverableUsers();
+    console.log('Discoverable users (via getDiscoverableUsers):', discoverable.length);
+    if (discoverable.length > 0) {
+        console.log('Sample users:', discoverable.slice(0, 3));
+    }
+    console.log('===========================');
+    return discoverable;
+};
+
+// =============================================
 // END OF FILE
-// Version: 12.1
-// ✅ COMPLETE AUTH FIX: All API calls through parent with proper authentication
-// ✅ AUTH-FIRST INIT: Module waits for AUTH_READY before any operations
-// ✅ REQUEST QUEUE: All requests queued until auth is ready
-// ✅ NO DIRECT FETCH: All requests use authorizedRequest through parent
-// ✅ REAL SEARCH: Search by username or first letter
-// ✅ QR SCAN FIX: Stops after first scan, sends real request
-// ✅ ALL ENDPOINTS: Correct API routes through parent
-// ✅ NO FAKE DATA: All operations use real backend
-// ✅ REQUEST ID TRACKING: Complete request tracking
-// ✅ LIFECYCLE HARDENING: Strict state transitions with auth-first flow
-// ✅ API ENDPOINT NORMALIZATION: Always correct format
-// ✅ TIMEOUT HANDLING: Proper timeout and cleanup for API requests
-// ✅ AUTH ERROR HANDLING: Proper 401 handling and retry queue
-// ✅ PARENT MESSAGE HANDLING: Proper extraction from payload.session format
+// Version: 13.0
+// ✅ FIXED: All Users / Discovery showing 0 users
+// ✅ FIXED: window.FriendCore exposed globally
+// ✅ FIXED: Client-side search (no API calls)
+// ✅ FIXED: Avatar field normalization (photoURL || avatar)
+// ✅ FIXED: Event-driven rendering with allUsersLoaded
+// ✅ FIXED: fetchAllUsersFromBackend sets window._allUsersCache
 // =============================================

@@ -2041,20 +2041,24 @@
             const container = UIFailsafe.safeGetElement('contactsList');
             if (!container) return;
 
-            if (!this._canRender()) {
-                UIFailsafe.safeSetHTML(container, this._getPassiveLoadingState());
-                return;
-            }
-
+            // Don't gate on _canRender() — contacts panel should always show content
             if (!contacts || contacts.length === 0) {
-                UIFailsafe.safeSetHTML(container, `
-                    <div class="empty-state">
-                        <i class="fas fa-address-book empty-icon"></i>
-                        <div class="empty-title">No contacts yet</div>
-                        <div class="empty-message">Add friends to start chatting</div>
-                    </div>
-                `);
-                return;
+                // Try to fetch from core before showing empty state
+                const core = getMessagesCore();
+                const coreFriends = core?.getFriends?.() || [];
+                if (coreFriends.length > 0) {
+                    // Core has friends but we were passed empty — use core's data
+                    contacts = coreFriends;
+                } else {
+                    UIFailsafe.safeSetHTML(container, `
+                        <div class="empty-state" style="padding:32px 16px;text-align:center;">
+                            <i class="fas fa-user-friends" style="font-size:40px;color:#d1d5db;margin-bottom:12px;display:block;"></i>
+                            <div style="font-weight:600;color:#374151;margin-bottom:6px;">No friends yet</div>
+                            <div style="font-size:13px;color:#9ca3af;">Go to the Friends tab to add people</div>
+                        </div>
+                    `);
+                    return;
+                }
             }
 
             const onlineContacts = contacts.filter(c => c.online);
@@ -2084,17 +2088,33 @@
         _renderContactItem(contact) {
             const status = contact.online ? 'online' : 'offline';
             const statusText = contact.status || (contact.online ? 'Online' : 'Offline');
+            const displayName = contact.displayName || contact.username || contact.name || 'User';
+            const avatarUrl = contact.avatar || contact.photoURL || contact.avatarUrl || '';
+            const initials = displayName.charAt(0).toUpperCase();
             
             return `
-                <div class="contact-item" data-contact-id="${contact.id}" onclick="window.messagesUI?.loadChatByFriendId('${contact.id}')">
-                    <div class="contact-avatar">
-                        ${contact.photoURL ? `<img src="${contact.photoURL}" alt="${contact.displayName}" loading="lazy">` : `<i class="fas fa-user"></i>`}
-                        <div class="contact-status ${status}"></div>
+                <div class="contact-item" data-contact-id="${contact.id}" 
+                     style="cursor:pointer; display:flex; align-items:center; padding:12px 16px; gap:12px; border-bottom:1px solid rgba(0,0,0,0.05);"
+                     onclick="window.messagesUI?.loadChatByFriendId('${contact.id}')">
+                    <div class="contact-avatar" style="position:relative; flex-shrink:0;">
+                        ${avatarUrl
+                            ? `<img src="${avatarUrl}" alt="${displayName}" loading="lazy" 
+                                style="width:42px;height:42px;border-radius:50%;object-fit:cover;"
+                                onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">
+                               <div style="display:none;width:42px;height:42px;border-radius:50%;background:linear-gradient(135deg,#667eea,#764ba2);color:white;align-items:center;justify-content:center;font-weight:bold;font-size:16px;">${initials}</div>`
+                            : `<div style="width:42px;height:42px;border-radius:50%;background:linear-gradient(135deg,#667eea,#764ba2);color:white;display:flex;align-items:center;justify-content:center;font-weight:bold;font-size:16px;">${initials}</div>`
+                        }
+                        <div class="contact-status ${status}" 
+                             style="position:absolute;bottom:1px;right:1px;width:11px;height:11px;border-radius:50%;border:2px solid white;background:${contact.online ? '#10b981' : '#9ca3af'};"></div>
                     </div>
-                    <div class="contact-info">
-                        <div class="contact-name">${contact.displayName || 'User'}</div>
-                        <div class="contact-status-text">${statusText}</div>
+                    <div class="contact-info" style="flex:1;min-width:0;">
+                        <div class="contact-name" style="font-weight:600;font-size:14px;color:#111827;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${displayName}</div>
+                        <div class="contact-status-text" style="font-size:12px;color:${contact.online ? '#10b981' : '#9ca3af'};">${statusText}</div>
                     </div>
+                    <button style="background:linear-gradient(135deg,#667eea,#764ba2);color:white;border:none;border-radius:8px;padding:6px 12px;font-size:12px;cursor:pointer;white-space:nowrap;"
+                            onclick="event.stopPropagation();window.messagesUI?.loadChatByFriendId('${contact.id}')">
+                        Chat
+                    </button>
                 </div>
             `;
         },
@@ -2391,32 +2411,45 @@
             const container = UIFailsafe.safeGetElement('multiSendChatsList');
             if (!container) return;
 
-            if (!this._canRender()) {
-                UIFailsafe.safeSetHTML(container, '<div class="empty-state">Waiting for connection...</div>');
-                return;
-            }
-
             if (!chats || chats.length === 0) {
-                UIFailsafe.safeSetHTML(container, '<div class="empty-state">No chats available</div>');
+                UIFailsafe.safeSetHTML(container, `
+                    <div style="padding:24px;text-align:center;color:#9ca3af;font-size:13px;">
+                        <i class="fas fa-comments" style="font-size:32px;display:block;margin-bottom:8px;"></i>
+                        No chats yet — start a conversation first
+                    </div>
+                `);
                 return;
             }
 
             let html = '';
             chats.forEach(chat => {
                 const core = getMessagesCore();
-                const isSelected = core?.multiSendSelectedChats?.has(chat.id);
+                // FIX: safely access multiSendSelectedChats which may not always be a Set
+                const selectedSet = core?.multiSendSelectedChats;
+                const isSelected = selectedSet instanceof Set ? selectedSet.has(chat.id) : false;
+                const name = chat.friendName || chat.name || 'Chat';
+                const lastMsg = chat.lastMessage || '';
+                const avatarUrl = chat.friendAvatar || chat.avatar || '';
+                const initials = name.charAt(0).toUpperCase();
                 
                 html += `
-                    <div class="chat-item ${isSelected ? 'selected' : ''}" data-chat-id="${chat.id}">
-                        <div class="chat-avatar">
-                            ${chat.friendAvatar ? `<img src="${chat.friendAvatar}" alt="${chat.friendName}" loading="lazy">` : `<i class="fas fa-user"></i>`}
+                    <div class="chat-item ${isSelected ? 'selected' : ''}" data-chat-id="${chat.id}"
+                         style="display:flex;align-items:center;padding:10px 14px;gap:10px;cursor:pointer;border-bottom:1px solid rgba(0,0,0,0.05);${isSelected ? 'background:rgba(102,126,234,0.08);' : ''}"
+                         onclick="window.messagesUI?.toggleMultiSendItem('${chat.id}', this)">
+                        <input type="checkbox" class="multi-send-checkbox" ${isSelected ? 'checked' : ''}
+                               style="width:18px;height:18px;flex-shrink:0;cursor:pointer;accent-color:#667eea;"
+                               onclick="event.stopPropagation()"
+                               onchange="window.messagesUI?.toggleMultiSendItem('${chat.id}', this.closest('.chat-item'))">
+                        <div style="width:38px;height:38px;border-radius:50%;flex-shrink:0;overflow:hidden;background:linear-gradient(135deg,#667eea,#764ba2);display:flex;align-items:center;justify-content:center;color:white;font-weight:bold;">
+                            ${avatarUrl
+                                ? `<img src="${avatarUrl}" alt="${name}" style="width:100%;height:100%;object-fit:cover;" onerror="this.parentElement.textContent='${initials}'">`
+                                : initials
+                            }
                         </div>
-                        <div class="chat-info">
-                            <div class="chat-name">${chat.friendName || 'User'}</div>
-                            <div class="chat-last-message">${chat.lastMessage || 'No messages'}</div>
+                        <div style="flex:1;min-width:0;">
+                            <div style="font-weight:600;font-size:13px;color:#111827;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${name}</div>
+                            ${lastMsg ? `<div style="font-size:12px;color:#9ca3af;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${lastMsg}</div>` : ''}
                         </div>
-                        <input type="checkbox" class="multi-send-checkbox" ${isSelected ? 'checked' : ''} 
-                               onchange="window.messagesUI?.updateMultiSendSelection('${chat.id}', this.checked); window.messagesUI?.updateSelectedCount()">
                     </div>
                 `;
             });
@@ -2429,7 +2462,8 @@
             const countEl = UIFailsafe.safeGetElement('selectedCount');
             if (countEl) {
                 const core = getMessagesCore();
-                const count = core?.multiSendSelectedChats?.size || 0;
+                const selectedSet = core?.multiSendSelectedChats;
+                const count = selectedSet instanceof Set ? selectedSet.size : 0;
                 UIFailsafe.safeSetText(countEl, `${count} selected`);
             }
         }
@@ -2505,23 +2539,46 @@
             if (newChatBtn) {
                 newChatBtn.addEventListener('click', () => {
                     UIFailsafe.queueAction(() => {
-                        if (!this._canPerformAction('newChat')) return;
+                        // Show contacts panel — NOT lifecycle-gated so it always opens
                         const sidebar = UIFailsafe.safeGetElement('sidebar');
                         const contactsSidebar = UIFailsafe.safeGetElement('contactsSidebar');
                         if (sidebar) UIFailsafe.safeRemoveClass(sidebar, 'active');
                         if (contactsSidebar) UIFailsafe.safeRemoveClass(contactsSidebar, 'hidden');
                         UIStateManager.setState('contactsVisible', true);
-                        
-                        const core = getMessagesCore();
-                        if (core && core.createConversation) {
-                            core.createConversation([core.getCurrentUserId()], {
-                                type: 'note',
-                                name: 'My Notes'
-                            });
+
+                        // Show loading state while friends load
+                        const contactsList = UIFailsafe.safeGetElement('contactsList');
+                        if (contactsList && contactsList.children.length === 0) {
+                            UIFailsafe.safeSetHTML(contactsList, `
+                                <div class="empty-state subtle">
+                                    <i class="fas fa-spinner fa-spin empty-icon" style="opacity:0.4;"></i>
+                                    <div class="empty-title" style="font-size:14px;">Loading friends...</div>
+                                </div>
+                            `);
                         }
-                        
-                        if (core?.contacts?.length === 0) {
-                            core?.loadContacts?.();
+
+                        // Fetch & render friends immediately
+                        const core = getMessagesCore();
+                        if (core) {
+                            const cached = core.getFriends?.() || [];
+                            if (cached.length > 0) {
+                                UIRenderer.renderContactsList(cached);
+                            }
+                            // Always attempt a fresh fetch so the list is current
+                            if (core.FriendManager?.fetchFriends) {
+                                core.FriendManager.fetchFriends();
+                            }
+                        } else {
+                            // Core not ready yet — show informative message
+                            if (contactsList) {
+                                UIFailsafe.safeSetHTML(contactsList, `
+                                    <div class="empty-state">
+                                        <i class="fas fa-clock empty-icon"></i>
+                                        <div class="empty-title">Connecting...</div>
+                                        <div class="empty-message">Please wait a moment then try again</div>
+                                    </div>
+                                `);
+                            }
                         }
                     });
                 });
@@ -2816,7 +2873,7 @@
             if (contactSearch) {
                 contactSearch.addEventListener('input', (e) => {
                     UIFailsafe.queueAction(() => {
-                        if (!this._canPerformAction('filterContacts')) return;
+                        // FIX: Contact search should work regardless of lifecycle state
                         this._filterContacts(e.target.value);
                     });
                 });
@@ -3616,8 +3673,10 @@
             const searchTerm = query.toLowerCase().trim();
             
             UIFailsafe.safeForEach(items, (item) => {
-                const name = item.querySelector('.contact-name')?.textContent.toLowerCase() || '';
-                UIFailsafe.safeSetStyle(item, 'display', name.includes(searchTerm) ? 'flex' : 'none');
+                // FIX: contact-name is now an inline-styled div inside .contact-info
+                const nameEl = item.querySelector('.contact-name') || item.querySelector('[style*="font-weight:600"]');
+                const name = (nameEl?.textContent || item.textContent || '').toLowerCase();
+                UIFailsafe.safeSetStyle(item, 'display', (!searchTerm || name.includes(searchTerm)) ? 'flex' : 'none');
             });
         },
 
@@ -3640,7 +3699,8 @@
                 UIStateManager.setState('multiSendVisible', false);
             } else {
                 const core = getMessagesCore();
-                const chats = core?.loadMultiSendChats?.() || [];
+                // FIX: loadMultiSendChats doesn't exist — use getConversations()
+                const chats = core?.getConversations?.() || [];
                 UIRenderer.renderMultiSendChats(chats);
                 UIFailsafe.safeAddClass(panel, 'active');
                 UIStateManager.setState('multiSendVisible', true);
@@ -3654,8 +3714,11 @@
             if (panel) {
                 UIFailsafe.safeRemoveClass(panel, 'active');
             }
+            // FIX: core.multiSendSelectedChats is internal state — clear via core's own Set
             const core = getMessagesCore();
-            if (core) core.setMultiSendSelectedChats?.(new Set());
+            if (core?.multiSendSelectedChats instanceof Set) {
+                core.multiSendSelectedChats.clear();
+            }
             UIStateManager.setState('multiSendVisible', false);
         },
 
@@ -3663,32 +3726,46 @@
             const input = UIFailsafe.safeGetElement('multiSendInput');
             const content = input?.value?.trim() || '';
             const core = getMessagesCore();
+
+            if (!content) {
+                UIRenderer.showNotification('Please type a message first', 'error');
+                return;
+            }
+
+            // FIX: multiSendSelectedChats may be a plain Set on the core object
             const selectedChats = core?.multiSendSelectedChats;
-            
-            if ((!content && !core?.currentAttachment) || !selectedChats || selectedChats.size === 0) {
-                UIRenderer.showNotification('No content or chats selected', 'error');
+            if (!selectedChats || selectedChats.size === 0) {
+                UIRenderer.showNotification('Select at least one chat to send to', 'error');
                 return;
             }
 
             const chatIds = Array.from(selectedChats);
-            const promises = chatIds.map(chatId => 
-                core?.forwardMessage?.(core?.currentAttachment?.id || content, [chatId])
-            );
-            
-            try {
-                const results = await Promise.all(promises);
-                const successCount = results.filter(r => r && r.success).length;
-                
-                if (successCount > 0) {
-                    UIRenderer.showNotification(`Message sent to ${successCount} chats`);
-                    this._closeMultiSend();
-                    if (input) input.value = '';
-                    if (core) core.removeAttachment?.();
-                } else {
-                    UIRenderer.showNotification('Failed to send messages', 'error');
+            let successCount = 0;
+            let failCount = 0;
+
+            // Save currently active chat so we can restore it
+            const previousChat = core?.getCurrentConversation?.();
+
+            for (const chatId of chatIds) {
+                try {
+                    // Send directly with conversationId option — no need to switch active chat
+                    const result = await core.sendMessage(content, { conversationId: chatId });
+                    if (result && result.success !== false) {
+                        successCount++;
+                    } else {
+                        failCount++;
+                    }
+                } catch (e) {
+                    failCount++;
                 }
-            } catch (error) {
-                UIRenderer.showNotification('Error sending messages: ' + error.message, 'error');
+            }
+
+            if (successCount > 0) {
+                UIRenderer.showNotification(`✓ Sent to ${successCount} chat${successCount > 1 ? 's' : ''}${failCount > 0 ? ` (${failCount} failed)` : ''}`);
+                this._closeMultiSend();
+                if (input) input.value = '';
+            } else {
+                UIRenderer.showNotification('Failed to send messages — please try again', 'error');
             }
         },
 
@@ -3907,12 +3984,11 @@
                 }
             });
             
-            // Listen for friends updated
+            // Listen for friends updated — always render, not gated by _canRender()
             window.addEventListener('friendsUpdated', (e) => {
                 const friends = e.detail?.friends || core.getFriends?.() || [];
-                if (UIRenderer._canRender()) {
-                    UIRenderer.renderContactsList(friends);
-                }
+                // Always update contacts list regardless of lifecycle state
+                UIRenderer.renderContactsList(friends);
             });
             
             // Subscribe to ChatManager via core subscribers
@@ -4175,6 +4251,43 @@
         renderMultiSendChats: UIRenderer.renderMultiSendChats.bind(UIRenderer),
         updateSelectedCount: UIRenderer.updateSelectedCount.bind(UIRenderer),
         
+        // FIX: Expose toggleMultiSendItem so inline onclick in renderMultiSendChats works
+        toggleMultiSendItem: (chatId, rowEl) => {
+            const core = getMessagesCore();
+            if (!core) return;
+            // Ensure the Set exists
+            if (!(core.multiSendSelectedChats instanceof Set)) {
+                core.multiSendSelectedChats = new Set();
+            }
+            const id = parseInt(chatId, 10);
+            if (!id) return;
+            const checkbox = rowEl?.querySelector?.('.multi-send-checkbox');
+            if (core.multiSendSelectedChats.has(id)) {
+                core.multiSendSelectedChats.delete(id);
+                rowEl?.classList?.remove('selected');
+                rowEl?.style && (rowEl.style.background = '');
+                if (checkbox) checkbox.checked = false;
+            } else {
+                core.multiSendSelectedChats.add(id);
+                rowEl?.classList?.add('selected');
+                rowEl?.style && (rowEl.style.background = 'rgba(102,126,234,0.08)');
+                if (checkbox) checkbox.checked = true;
+            }
+            UIRenderer.updateSelectedCount();
+        },
+        
+        // Legacy alias kept for any existing onclick handlers
+        updateMultiSendSelection: (chatId, checked) => {
+            const core = getMessagesCore();
+            if (!core) return;
+            if (!(core.multiSendSelectedChats instanceof Set)) core.multiSendSelectedChats = new Set();
+            const id = parseInt(chatId, 10);
+            if (!id) return;
+            if (checked) { core.multiSendSelectedChats.add(id); }
+            else { core.multiSendSelectedChats.delete(id); }
+            UIRenderer.updateSelectedCount();
+        },
+        
         openThread: UIRenderer.openThread.bind(UIRenderer),
         closeThread: UIRenderer.closeThread.bind(UIRenderer),
         
@@ -4205,11 +4318,25 @@
             }
         },
         
-        // Helper to load chat by friend ID
+        // Helper to load chat by friend ID — called from contact item onclick
         loadChatByFriendId: (friendId) => {
             const core = getMessagesCore();
-            if (core && core.createConversation) {
-                core.createConversation([parseInt(friendId)]);
+            if (!core) return;
+
+            // Close contacts sidebar, show main sidebar
+            const contactsSidebar = document.getElementById('contactsSidebar');
+            const sidebar = document.getElementById('sidebar');
+            if (contactsSidebar) contactsSidebar.classList.add('hidden');
+            if (sidebar) sidebar.classList.add('active');
+
+            const id = parseInt(friendId, 10);
+            if (!id) return;
+
+            // Use ConversationManager if available (creates or opens existing DM)
+            if (core.ConversationManager?.createConversation) {
+                core.ConversationManager.createConversation([id]);
+            } else if (core.createConversation) {
+                core.createConversation([id]);
             }
         },
         
