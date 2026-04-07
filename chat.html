@@ -212,15 +212,27 @@
     '/auth/me': '/auth/me',                   // ✅ This exists
     '/auth/sessions': '/auth/sessions',                // ❌ This doesn't exist - need to add or map
 
-    // Status endpoints - ADDED
-    '/api/status': '/status',                  // ✅ GET all statuses
-    '/status': '/status',                      // ✅ GET all statuses
-    '/api/status/create': '/status',           // ✅ POST create status (same route, method differs)
-    '/status/create': '/status',               // ✅ POST create status
-    '/api/status/view': '/status/view',        // ✅ POST mark viewed
-    '/status/view': '/status/view',            // ✅ POST mark viewed
-    '/api/status/delete': '/status/delete',    // ✅ POST delete
-    '/status/delete': '/status/delete',        // ✅ POST delete
+    // Status endpoints - FIXED v2.0
+    // All status-core.js calls now go to correct REST paths.
+    // Note: prefix-stripping below removes /api/ so e.g. /api/status → /status
+    '/api/status':         '/status',          // GET  all public statuses
+    '/status':             '/status',          // GET  all public statuses (also POST create)
+    '/api/status/my':      '/status/my',       // GET  my own statuses
+    '/status/my':          '/status/my',
+    '/api/status/friends': '/status/friends',  // GET  friends' statuses (NEW)
+    '/status/friends':     '/status/friends',
+    '/api/status/stats':   '/status/stats',    // GET  statistics
+    '/status/stats':       '/status/stats',
+    '/api/status/trending':'/status/trending', // GET  trending
+    '/status/trending':    '/status/trending',
+    '/api/status/public':  '/status/public',   // GET  public statuses
+    '/status/public':      '/status/public',
+    // Dynamic routes (/api/status/:id, /:id/view, /:id/like, etc.)
+    // are passed through as-is after the /api/ prefix is stripped.
+    // Legacy bad mappings REMOVED (they pointed to non-existent routes):
+    //   /status/create  → was wrong, POST /status is the create route
+    //   /status/view    → was wrong, POST /status/:id/view is the view route
+    //   /status/delete  → was wrong, DELETE /status/:id is the delete route
 };
     
 function getSessionData() {

@@ -1258,17 +1258,22 @@ async function loadStatuses() {
     try {
         console.log(`[${MODULE_NAME}] 📤 Loading statuses from backend`);
         const response = await makeApiRequest('/api/status', 'GET');
+
+        // Backend wraps data: { success, data: { statuses: [...] } }
+        // After handleApiResponse resolves, we receive response.data (the inner data object).
+        // Support both shapes for resilience.
+        const statusList = (response && (response.statuses || (response.data && response.data.statuses))) || null;
+
+        console.log(`[${MODULE_NAME}] 📥 Received ${statusList?.length || 0} statuses from backend`);
         
-        console.log(`[${MODULE_NAME}] 📥 Received ${response?.statuses?.length || 0} statuses from backend`);
-        
-        if (response && response.statuses && Array.isArray(response.statuses)) {
+        if (statusList && Array.isArray(statusList)) {
             statusCache.clear();
             statusState.statuses = [];
             statusState.myStatuses = [];
             
             const currentUserId = getSessionUserId();
             
-            response.statuses.forEach(status => {
+            statusList.forEach(status => {
                 if (status && status.id) {
                     statusCache.add(status.id);
                     statusState.statuses.push(status);
@@ -1287,6 +1292,9 @@ async function loadStatuses() {
             
             logStatus('SUCCESS', `Loaded ${statusState.statuses.length} statuses`);
             notifyStatusObservers();
+
+            // Also load friends' statuses
+            loadFriendsStatusesInBackground().catch(() => {});
         } else {
             throw new Error('Invalid response format');
         }
@@ -1309,7 +1317,8 @@ async function postStatus(statusData) {
         return { success: false, error: 'Not authenticated' };
     }
     
-    if (!statusData || (!statusData.text && !statusData.media)) {
+    // Accept both .content (backend field) and .text (legacy UI field)
+    if (!statusData || (!statusData.content && !statusData.text && !statusData.media && !statusData.mediaUrl)) {
         return { success: false, error: 'Status content required' };
     }
     
@@ -1319,25 +1328,32 @@ async function postStatus(statusData) {
         console.log(`[${MODULE_NAME}] 📤 Posting new status`);
         
         const payload = {
-            text: statusData.text || '',
+            // Backend expects 'content', frontend may send 'text' — normalise here
+            content: statusData.content || statusData.text || '',
             type: statusData.type || 'text',
-            media: statusData.media || null,
-            mood: statusData.mood || null,
-            intent: statusData.intent || null,
-            category: statusData.category || null,
-            privacy: statusData.privacy || 'friends',
-            duration: statusData.duration || 86400
+            moodType: statusData.mood || statusData.moodType || null,
+            mediaUrl: statusData.media || statusData.mediaUrl || null,
+            isPublic: (statusData.privacy === 'everyone' || statusData.privacy === 'public')
+                ? true
+                : (statusData.isPublic !== undefined ? statusData.isPublic : true),
+            location: statusData.location || null,
+            latitude: statusData.latitude || null,
+            longitude: statusData.longitude || null,
         };
         
-        const response = await makeApiRequest('/api/status/create', 'POST', payload);
+        // POST /api/status  (chat.html maps /api/status/create → /status but POST / is the same)
+        const response = await makeApiRequest('/api/status', 'POST', payload);
         
         console.log(`[${MODULE_NAME}] 📥 Status posted successfully:`, response);
         
-        if (response && response.status) {
-            addStatus(response.status);
+        // Handle both { status } and { data: { status } } response shapes
+        const newStatus = response?.status || response?.data?.status || null;
+        
+        if (newStatus) {
+            addStatus(newStatus);
             updateStatusState({ loading: false });
             logStatus('POST', 'Status posted successfully');
-            return { success: true, status: response.status };
+            return { success: true, status: newStatus };
         } else {
             throw new Error('Invalid response from server');
         }
@@ -1361,7 +1377,8 @@ async function markStatusViewed(statusId) {
     try {
         console.log(`[${MODULE_NAME}] 📤 Marking status as viewed: ${statusId}`);
         
-        const response = await makeApiRequest('/api/status/view', 'POST', { statusId });
+        // Correct RESTful endpoint: POST /api/status/:statusId/view
+        const response = await makeApiRequest(`/api/status/${statusId}/view`, 'POST', {});
         
         console.log(`[${MODULE_NAME}] 📥 Status marked as viewed:`, response);
         
@@ -1391,7 +1408,8 @@ async function deleteStatus(statusId) {
     try {
         console.log(`[${MODULE_NAME}] 📤 Deleting status: ${statusId}`);
         
-        const response = await makeApiRequest('/api/status/delete', 'POST', { statusId });
+        // Correct RESTful endpoint: DELETE /api/status/:statusId
+        const response = await makeApiRequest(`/api/status/${statusId}`, 'DELETE', null);
         
         console.log(`[${MODULE_NAME}] 📥 Status deleted:`, response);
         
@@ -1421,7 +1439,7 @@ async function addReaction(statusId, reaction) {
     try {
         console.log(`[${MODULE_NAME}] 📤 Adding reaction ${reaction} to status: ${statusId}`);
         
-        const response = await makeApiRequest('/api/status/reaction/add', 'POST', { statusId, reaction });
+        const response = await makeApiRequest(`/api/status/${statusId}/like`, 'POST', {});
         
         console.log(`[${MODULE_NAME}] 📥 Reaction added:`, response);
         
@@ -1460,7 +1478,7 @@ async function removeReaction(statusId, reaction) {
     try {
         console.log(`[${MODULE_NAME}] 📤 Removing reaction ${reaction} from status: ${statusId}`);
         
-        const response = await makeApiRequest('/api/status/reaction/remove', 'POST', { statusId, reaction });
+        const response = await makeApiRequest(`/api/status/${statusId}/like`, 'DELETE', null);
         
         console.log(`[${MODULE_NAME}] 📥 Reaction removed:`, response);
         
@@ -7162,9 +7180,12 @@ async function safeApiOperation(operation) {
 
 async function loadStatusesInBackground() {
     try {
-        const response = await secureApiCall('/api/statuses');
-        if (response && response.statuses) {
-            statuses = response.statuses;
+        // FIXED: correct endpoint is /api/status (not /api/statuses)
+        const response = await secureApiCall('/api/status');
+        // Backend returns { success, data: { statuses: [...] } }
+        const list = response?.statuses || response?.data?.statuses || [];
+        if (list && list.length >= 0) {
+            statuses = list;
             if (typeof filterStatusesByPrivacy !== 'undefined') statuses = filterStatusesByPrivacy(statuses);
             statuses.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
             SafeStorage.setJSON(LOCAL_STORAGE_KEYS.STATUSES, statuses);
@@ -7182,9 +7203,11 @@ async function loadStatusesInBackground() {
 
 async function loadMyStatusesInBackground() {
     try {
-        const response = await secureApiCall('/api/statuses/my');
-        if (response && response.statuses) {
-            myStatuses = response.statuses;
+        // FIXED: correct endpoint is /api/status/my
+        const response = await secureApiCall('/api/status/my');
+        const list = response?.statuses || response?.data?.statuses || [];
+        if (list) {
+            myStatuses = list;
             SafeStorage.setJSON(LOCAL_STORAGE_KEYS.MY_STATUSES, myStatuses);
         }
     } catch (error) {
@@ -7192,11 +7215,30 @@ async function loadMyStatusesInBackground() {
     }
 }
 
+// NEW: load friends' statuses so they appear in the status feed
+async function loadFriendsStatusesInBackground() {
+    try {
+        const response = await secureApiCall('/api/status/friends');
+        const list = response?.statuses || response?.data?.statuses || [];
+        if (list) {
+            friendsStatuses = list;
+            logStatus('SUCCESS', `Loaded ${friendsStatuses.length} friends statuses`);
+            notifyStatusObservers();
+        }
+    } catch (error) {
+        // Non-fatal — friends statuses are a bonus
+        console.warn(`[${MODULE_NAME}] Could not load friends statuses:`, error.message);
+    }
+}
+
 async function loadHighlightsInBackground() {
     try {
-        const response = await secureApiCall('/api/statuses/highlights');
-        if (response && response.highlights) {
-            highlights = response.highlights;
+        // Highlights not a separate route — fetch own statuses and filter
+        const response = await secureApiCall('/api/status/my');
+        const list = response?.statuses || response?.data?.statuses || [];
+        if (list) {
+            // Treat pinned statuses as highlights
+            highlights = list.filter(s => s.metadata && s.metadata.pinned);
             SafeStorage.setJSON(LOCAL_STORAGE_KEYS.HIGHLIGHTS, highlights);
         }
     } catch (error) {
@@ -7313,9 +7355,11 @@ async function loadInitialData() {
         const loadPromises = [];
         
         loadPromises.push(safeApiOperation(async () => {
-            const statusesResponse = await secureApiCall('/api/statuses');
-            if (statusesResponse && statusesResponse.statuses) {
-                statuses = statusesResponse.statuses;
+            // FIXED: /api/status (not /api/statuses), unwrap data wrapper
+            const statusesResponse = await secureApiCall('/api/status');
+            const list = statusesResponse?.statuses || statusesResponse?.data?.statuses || [];
+            if (list) {
+                statuses = list;
                 if (typeof filterStatusesByPrivacy !== 'undefined') statuses = filterStatusesByPrivacy(statuses);
                 statuses.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
                 SafeStorage.setJSON(LOCAL_STORAGE_KEYS.STATUSES, statuses);
@@ -7323,18 +7367,21 @@ async function loadInitialData() {
         }));
         
         loadPromises.push(safeApiOperation(async () => {
-            const myStatusesResponse = await secureApiCall('/api/statuses/my');
-            if (myStatusesResponse && myStatusesResponse.statuses) {
-                myStatuses = myStatusesResponse.statuses;
+            // FIXED: /api/status/my (not /api/statuses/my)
+            const myStatusesResponse = await secureApiCall('/api/status/my');
+            const myList = myStatusesResponse?.statuses || myStatusesResponse?.data?.statuses || [];
+            if (myList) {
+                myStatuses = myList;
                 SafeStorage.setJSON(LOCAL_STORAGE_KEYS.MY_STATUSES, myStatuses);
             }
         }));
         
         loadPromises.push(safeApiOperation(async () => {
-            const highlightsResponse = await secureApiCall('/api/statuses/highlights');
-            if (highlightsResponse && highlightsResponse.highlights) {
-                highlights = highlightsResponse.highlights;
-                SafeStorage.setJSON(LOCAL_STORAGE_KEYS.HIGHLIGHTS, highlights);
+            // FIXED: /api/status/friends — loads friends' statuses
+            const friendsResponse = await secureApiCall('/api/status/friends');
+            const friendsList = friendsResponse?.statuses || friendsResponse?.data?.statuses || [];
+            if (friendsList) {
+                friendsStatuses = friendsList;
             }
         }));
         

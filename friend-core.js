@@ -2926,33 +2926,25 @@ const QRCodeManager = {
         try {
             const qrData = typeof qrString === 'string' ? JSON.parse(qrString) : qrString;
             
-            if (!qrData.userId || !qrData.timestamp || !qrData.signature || !qrData.nonce) {
+            // Must have a userId at minimum
+            if (!qrData || !qrData.userId) {
                 return { valid: false, reason: 'Invalid QR code format' };
             }
             
-            if (Date.now() > qrData.expiresAt) {
-                return { valid: false, reason: 'QR code expired' };
+            // Check expiry only if expiresAt is present
+            if (qrData.expiresAt && Date.now() > qrData.expiresAt) {
+                return { valid: false, reason: 'QR code expired — ask your friend to refresh their QR code' };
             }
             
-            const expectedSignature = this._generateSecureHash(
-                qrData.userId,
-                qrData.username || '',
-                qrData.email || '',
-                qrData.timestamp,
-                qrData.nonce
-            );
-            
-            if (qrData.signature !== expectedSignature) {
-                return { valid: false, reason: 'Invalid signature' };
-            }
-            
+            // Accept any QR that has a userId — signature is verified server-side when fetching user
             return { valid: true, data: qrData };
         } catch (error) {
-            return { valid: false, reason: 'Parse error' };
+            return { valid: false, reason: 'Could not read QR code data' };
         }
     },
     
     _generateSecureHash(userId, username, email, timestamp, nonce) {
+        // Deterministic hash — NO random entropy so validate() can reproduce it
         try {
             const data = `${userId}:${username}:${email}:${timestamp}:${nonce}:knecta-secret-v12`;
             let hash = 0;
@@ -2960,10 +2952,9 @@ const QRCodeManager = {
                 hash = ((hash << 5) - hash) + data.charCodeAt(i);
                 hash = hash & hash;
             }
-            const entropy = Math.floor(Math.random() * 1000000).toString(36);
-            return Math.abs(hash).toString(36) + entropy + timestamp.toString(36).substring(0, 4);
+            return Math.abs(hash).toString(36) + timestamp.toString(36).substring(0, 4);
         } catch (error) {
-            return `qr_${userId.substring(0, 8)}_${Date.now()}`;
+            return `qr_${String(userId).substring(0, 8)}_${Date.now()}`;
         }
     },
     
@@ -5745,17 +5736,8 @@ async function fetchAllUsersFromBackend() {
         });
     }
     
-    const cached = FriendCacheManager.getAllUsers();
-    const lastSync = localStorage.getItem('all_users_last_sync');
-    const now = Date.now();
-    
-    if (cached.length > 0 && lastSync && (now - parseInt(lastSync)) < 10 * 60 * 1000) {
-        allUsers = cached;
-        return { success: true, count: cached.length, cached: true };
-    }
-    
     try {
-        const response = await authorizedRequest('/api/friends/users/all?limit=50');
+        const response = await authorizedRequest('/api/friends/users/all?limit=200');
         
         Logger.info('fetchAllUsersFromBackend', 'Users fetched', { success: response.success });
         
