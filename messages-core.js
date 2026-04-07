@@ -7,6 +7,7 @@
 // FIXED: API response format handling for nested responses
 // FIXED: Conversation data normalization
 // ADDED: Demo chat history for moodchat1 and moodchat2 (4 messages)
+// ADDED: openChatWithUser function for external chat opening
 // =============================================
 (function() {
     'use strict';
@@ -75,7 +76,7 @@
                     id: 'msg_demo_1001_2',
                     content: 'I\'m doing great! Just finished some work. How about you?',
                     type: 'text',
-                    senderId: 1001, // current user's perspective - assuming user is replying as moodchat1
+                    senderId: 1001,
                     sender: { id: 1001, displayName: 'Me', avatar: '' },
                     timestamp: Date.now() - 3500000,
                     status: 'read',
@@ -157,22 +158,18 @@
     function __isValidSession(session) {
         if (!session) return false;
         
-        // Must have token
         if (!session.token || typeof session.token !== 'string') return false;
         
-        // Must have valid userId (number, not 'user' or 'default')
         if (session.userId === undefined || session.userId === null) return false;
         if (typeof session.userId !== 'number') return false;
         if (session.userId === 0) return false;
         
-        // Additional validation for userId strings that might be numeric
         const userIdStr = String(session.userId);
         if (userIdStr === 'user' || userIdStr === 'default' || userIdStr === '') return false;
         
         return true;
     }
     
-    // Session ID generator for deduplication
     function __getSessionId(session) {
         if (!session) return null;
         if (session.sessionId) return session.sessionId;
@@ -183,21 +180,18 @@
     // LIFECYCLE GUARD UTILITIES
     // =============================================
     
-    // Safe check if we can send CHILD_READY (only when state is READY)
     if (typeof window.__lifecycleCanSendChildReady !== 'function') {
         window.__lifecycleCanSendChildReady = function(state) {
             return state === LIFECYCLE_STATES.READY;
         };
     }
     
-    // Safe check if we can perform user actions (only when state is ACTIVE)
     if (typeof window.__lifecycleCanPerformAction !== 'function') {
         window.__lifecycleCanPerformAction = function(state) {
             return state === LIFECYCLE_STATES.ACTIVE;
         };
     }
     
-    // ENSURE ACTIVE - CRITICAL GUARD
     function ensureActive(actionName) {
         if (currentState !== LIFECYCLE_STATES.ACTIVE) {
             console.warn(`[${MODULE_NAME}][LifecycleGuard] ❌ Blocked action '${actionName}' - not ACTIVE (current: ${currentState})`);
@@ -206,7 +200,6 @@
         return true;
     }
     
-    // Safe CHILD_READY sender - EXACTLY ONCE, NO RETRY
     if (typeof window.__safeSendChildReady !== 'function' && typeof window.safeSendChildReady !== 'function') {
         window.__safeSendChildReady = function(originalSendFn, moduleName) {
             let sent = false;
@@ -230,7 +223,6 @@
         };
     }
     
-    // Safe action guard (blocks actions when not ACTIVE)
     if (typeof window.__guardAction !== 'function') {
         window.__guardAction = function(actionName, moduleName, state, fallbackReturn = false) {
             if (!window.__lifecycleCanPerformAction(state)) {
@@ -249,7 +241,7 @@
         MAX_QUEUE_SIZE: 500,
         TYPING_TIMEOUT: 3000,
         TYPING_RATE_LIMIT: 2000,
-        REQUEST_TIMEOUT: 30000 // 30 seconds timeout for API requests
+        REQUEST_TIMEOUT: 30000
     };
 
     // =============================================
@@ -274,29 +266,24 @@
     const processedMessageIds = new Set();
     const sentMessageIds = new Set();
     
-    // Session tracking for deduplication
     let _lastSessionId = null;
     let _validSessionSet = false;
     let _storedSession = null;
     
-    // UI initialization flag
     let _uiInitialized = false;
     
-    // Demo mode flag - disabled when real session/backend is present
-    // Will be enabled only if no parent activates the module within timeout
     let _demoModeEnabled = false;
     let _demoBootstrapFired = false;
     
-    // Parent ready promise
     let parentReadyResolver;
     let parentReadyPromise = new Promise((resolve) => {
         parentReadyResolver = resolve;
     });
 
     // =============================================
-    // PENDING REQUESTS TRACKING (REQUEST ID MANDATORY)
+    // PENDING REQUESTS TRACKING
     // =============================================
-    const pendingRequests = new Map(); // requestId -> { resolve, reject, timeout, timestamp, type }
+    const pendingRequests = new Map();
     
     function cleanupPendingRequests() {
         const now = Date.now();
@@ -314,17 +301,15 @@
         }
     }
     
-    // Cleanup interval for pending requests
     setInterval(cleanupPendingRequests, TIMING.CLEANUP_INTERVAL);
 
     // =============================================
-    // MESSAGE QUEUE SYSTEM (ONLY DURING WAIT_PARENT)
+    // MESSAGE QUEUE SYSTEM
     // =============================================
     const messageQueue = [];
     let processingQueue = false;
 
     function setState(nextState, reason = '') {
-        // Prevent duplicate transitions to same state
         if (currentState === nextState) {
             debugLog(`[${MODULE_NAME}] Attempted duplicate transition to ${nextState}, ignoring`);
             return true;
@@ -363,7 +348,6 @@
 
         notifyStateListeners(nextState, fromState, reason);
         
-        // When transitioning to ACTIVE, ensure UI is fully initialized
         if (nextState === LIFECYCLE_STATES.ACTIVE && !_uiInitialized) {
             initializeUISafe();
         }
@@ -424,7 +408,6 @@
     }
 
     function resetLifecycle() {
-        // Prevent reset during active state
         if (currentState === LIFECYCLE_STATES.ACTIVE) {
             console.warn(`[${MODULE_NAME}] Cannot reset lifecycle while ACTIVE`);
             return;
@@ -444,7 +427,6 @@
             parentReadyResolver = resolve;
         });
         
-        // Reset session tracking
         _lastSessionId = null;
         _validSessionSet = false;
         _storedSession = null;
@@ -585,28 +567,24 @@
         
         let normalized = endpoint.trim();
         
-        // Remove /api prefix if present (parent handles it)
         if (normalized.startsWith('/api/')) {
             normalized = normalized.substring(4);
         }
         
-        // Ensure starts with /
         if (!normalized.startsWith('/')) {
             normalized = '/' + normalized;
         }
         
-        // Prevent double slashes
         normalized = normalized.replace(/\/+/g, '/');
         
         return normalized;
     }
 
     // =============================================
-    // API REQUEST HANDLER (NO DIRECT FETCH - PARENT ROUTED)
+    // API REQUEST HANDLER
     // =============================================
     function makeApiRequest(endpoint, method, data = null, params = null) {
         return new Promise((resolve, reject) => {
-            // If demo mode is enabled, return demo data
             if (_demoModeEnabled) {
                 console.log(`[${MODULE_NAME}] Demo mode: returning mock data for ${endpoint}`);
                 const demoData = getDemoData(endpoint, method);
@@ -616,10 +594,6 @@
                 }
             }
             
-            // FIX: Allow GET requests (read-only) without ACTIVE state — only block writes.
-            // Previously ALL requests were blocked until ACTIVE, meaning fetchFriends/fetchConversations
-            // called from the UI could never succeed if the user clicked "Start Chat" before
-            // the lifecycle finished. Read operations need only a valid session, not ACTIVE state.
             const isReadOnly = (method === 'GET');
             if (!isReadOnly && !ensureActive(`API_REQUEST: ${endpoint}`)) {
                 reject(new Error(`Module not ACTIVE for write actions (current: ${currentState})`));
@@ -642,7 +616,6 @@
             
             let timeoutId = null;
             
-            // Store pending request with timeout
             timeoutId = setTimeout(() => {
                 if (pendingRequests.has(requestId)) {
                     console.warn(`[${MODULE_NAME}] API request timeout: ${method} ${normalizedEndpoint} (${requestId})`);
@@ -659,7 +632,6 @@
                 timeout: timeoutId
             });
             
-            // Build message to parent with validated payload
             const message = {
                 id: generateMessageId(),
                 type: 'API_REQUEST',
@@ -677,7 +649,6 @@
             
             console.log(`[${MODULE_NAME}] 📤 Sending API_REQUEST: ${method} ${normalizedEndpoint} (${requestId})`);
             
-            // Send to parent with safety check
             try {
                 if (!window.parent || window.parent === window) {
                     throw new Error('No parent window');
@@ -695,13 +666,11 @@
         });
     }
     
-    // Get demo data for endpoints
     function getDemoData(endpoint, method) {
         if (endpoint === '/chats' || endpoint === '/api/chats') {
             return DEMO_CHATS.conversations;
         }
         if (endpoint === '/messages' && method === 'GET') {
-            // Return messages for all conversations
             return {
                 status: 'success',
                 data: {
@@ -727,7 +696,6 @@
         return null;
     }
     
-    // Handle API_RESPONSE from parent - FIXED for nested responses
     function handleApiResponse(data) {
         const requestId = data.requestId;
         const response = data.payload || data;
@@ -746,17 +714,13 @@
         
         const pending = pendingRequests.get(requestId);
         
-        // Clear timeout
         if (pending.timeout) {
             clearTimeout(pending.timeout);
         }
         
-        // Remove from pending
         pendingRequests.delete(requestId);
         
-        // Handle response with safe fallback
         try {
-            // FIXED: Explicit failure check — also treat HTTP error status codes as failures
             const isFailed = response &&
                 (response.success === false ||
                  (response.statusCode !== undefined && response.statusCode >= 400));
@@ -766,29 +730,20 @@
                 console.error(`[${MODULE_NAME}] API request failed:`, errMsg);
                 pending.reject(new Error(errMsg));
             } else {
-                // FIXED: Unwrap the layered response shapes:
-                // Relay sends: { success, data: <backend-json>, statusCode }
-                // Backend /api/chats sends: { success: true, data: [...] }
-                // Backend /api/friends sends: { success: true, data: { friends: [...] } }
-                // Backend /api/messages sends: { status: "success", data: { messages: [...] } }
                 let result = response;
 
-                // Step 1: unwrap top-level { success, data } from relay
                 if (result && result.data !== undefined && result.success === true) {
                     result = result.data;
                 }
 
-                // Step 2: unwrap { status: "success", data: {...} }
                 if (result && result.status === 'success' && result.data !== undefined) {
                     result = result.data;
                 }
 
-                // Step 3: backend returns { success: true, data: [...] } for chats
                 if (result && result.success === true && result.data !== undefined) {
                     result = result.data;
                 }
 
-                // Step 4: extract specific arrays
                 if (result && result.friends !== undefined && Array.isArray(result.friends)) {
                     result = result.friends;
                 } else if (result && result.chats !== undefined && Array.isArray(result.chats)) {
@@ -797,7 +752,6 @@
                     result = result.messages;
                 }
 
-                // Step 5: one more unwrap if still nested
                 if (result && result.data !== undefined && !Array.isArray(result) && typeof result === 'object') {
                     result = result.data;
                 }
@@ -811,10 +765,9 @@
     }
 
     // =============================================
-    // CORE MESSAGE SENDER (NO RETRY)
+    // CORE MESSAGE SENDER
     // =============================================
     function sendMessage(type, payload = {}, options = {}) {
-        // GUARD: Block if not ACTIVE for user actions
         if (SECURITY.isUserAction(type) && !window.__lifecycleCanPerformAction(currentState)) {
             console.warn(`[${MODULE_NAME}][LifecycleGuard] Blocked message type '${type}' - not ACTIVE (current: ${currentState})`);
             return { success: false, blocked: true, reason: `not_active:${currentState}` };
@@ -824,7 +777,6 @@
         const requestId = options.requestId || generateRequestId();
         const timestamp = Date.now();
         
-        // Prevent duplicate message sending
         if (isDuplicateSentMessage(id)) {
             console.warn(`[${MODULE_NAME}] Duplicate message prevented: ${id}`);
             return { success: false, blocked: true, reason: 'duplicate_message' };
@@ -865,7 +817,6 @@
 
         debugLog(`[${MODULE_NAME}] Sending message:`, message);
 
-        // Queue if in WAIT_PARENT or WAITING_AUTH - HARD BLOCK STATE
         if ((currentState === LIFECYCLE_STATES.WAIT_PARENT || currentState === LIFECYCLE_STATES.WAITING_AUTH) && !SECURITY.isEssentialMessage(type)) {
             if (messageQueue.length < TIMING.MAX_QUEUE_SIZE) {
                 messageQueue.push(message);
@@ -877,7 +828,6 @@
             }
         }
 
-        // Block if not ACTIVE for user actions
         if (SECURITY.isUserAction(type) && currentState !== LIFECYCLE_STATES.ACTIVE) {
             console.warn(`[${MODULE_NAME}] Cannot send ${type} - not ACTIVE (${currentState})`);
             return { success: false, blocked: true, reason: `not_active:${currentState}` };
@@ -906,9 +856,6 @@
         }
     }
 
-    // =============================================
-    // SAFE SEND (NO RETRY)
-    // =============================================
     function safeSend(type, payload = {}, options = {}) {
         if (SECURITY.isUserAction(type)) {
             const guardResult = window.__guardAction(type, MODULE_NAME, currentState, { success: false, blocked: true, reason: `invalid_state:${currentState}` });
@@ -1053,7 +1000,7 @@
     };
 
     // =============================================
-    // LOCAL STORAGE KEYS (FOR UI STATE ONLY - NEVER TOKENS)
+    // LOCAL STORAGE KEYS
     // =============================================
     const LOCAL_STORAGE_KEYS = {
         SESSION_CACHE: 'kynecta_session_cache_v8',
@@ -1329,7 +1276,7 @@
     };
 
     // =============================================
-    // SAFE STORAGE LAYER (UI STATE ONLY - NEVER TOKENS)
+    // SAFE STORAGE LAYER
     // =============================================
     const SafeStorage = {
         memoryStore: new Map(),
@@ -1371,7 +1318,6 @@
                     const value = localStorage.getItem(key);
                     if (value !== null) return value;
                 } catch (e) {
-                    // Silent fail, use memory store
                 }
             }
             return this.memoryStore.has(key) ? this.memoryStore.get(key) : fallback;
@@ -1442,29 +1388,24 @@
         },
         
         validateIncomingMessage: function(event) {
-            // Validate origin
             if (!SECURITY.validateOrigin(event.origin)) {
                 return { valid: false, reason: 'invalid_origin' };
             }
             
-            // Validate structure
             if (!SecurityUtils.validateMessageStructure(event.data)) {
                 return { valid: false, reason: 'invalid_structure' };
             }
             
             const data = event.data;
             
-            // Validate source
             if (data.source && data.source !== 'parent') {
                 return { valid: false, reason: 'invalid_source' };
             }
             
-            // Validate target
             if (data.target && data.target !== MODULE_NAME && data.target !== 'all' && data.target !== '*') {
                 return { valid: false, reason: 'wrong_target' };
             }
             
-            // Validate duplicate
             if (data.messageId && isDuplicateMessage(data.messageId)) {
                 return { valid: false, reason: 'duplicate_message' };
             }
@@ -1489,7 +1430,7 @@
     }.init();
 
     // =============================================
-    // SESSION MANAGER (MEMORY ONLY - NO STORAGE) WITH VALIDATION
+    // SESSION MANAGER (MEMORY ONLY)
     // =============================================
     const SessionManager = {
         _session: {
@@ -1512,7 +1453,6 @@
         },
 
         setSession: function(sessionData) {
-            // CRITICAL: Validate session before accepting
             if (!__isValidSession(sessionData)) {
                 console.warn('[SessionManager] Ignored invalid session data', { 
                     hasToken: !!sessionData?.token,
@@ -1523,14 +1463,12 @@
                 return false;
             }
             
-            // Deduplicate: Prevent processing same session multiple times
             const sessionId = __getSessionId(sessionData);
             if (sessionId && this._lastSessionId === sessionId) {
                 console.log('[SessionManager] Duplicate session ignored');
                 return false;
             }
             
-            // Prevent session downgrade: If we already have valid session, don't replace with invalid
             if (this._session.authenticated && __isValidSession(this._session)) {
                 if (!__isValidSession(sessionData)) {
                     console.warn('[SessionManager] Prevented session downgrade - rejecting invalid session');
@@ -1540,7 +1478,6 @@
             
             console.log('[SessionManager] Setting valid session', { userId: sessionData.userId });
             
-            // CRITICAL FIX: Disable demo mode when a real session is received
             if (_demoModeEnabled) {
                 console.log('[SessionManager] Real session received - disabling demo mode');
                 _demoModeEnabled = false;
@@ -1554,7 +1491,6 @@
             this._sessionReady = true;
             this._lastSessionId = sessionId;
             
-            // Store in global for validation access
             _storedSession = this._session;
             _validSessionSet = true;
             
@@ -1581,7 +1517,6 @@
                 }));
             } catch (e) {}
             
-            // If we're in WAITING_AUTH, transition to ACTIVE
             if (currentState === LIFECYCLE_STATES.WAITING_AUTH && __isValidSession(this._session)) {
                 console.log('[SessionManager] Valid session received, transitioning to ACTIVE');
                 setState(LIFECYCLE_STATES.ACTIVE, 'valid_session_received');
@@ -1663,7 +1598,7 @@
     }.init();
 
     // =============================================
-    // PARENT CONNECTION MANAGER (DETERMINISTIC HANDSHAKE)
+    // PARENT CONNECTION MANAGER
     // =============================================
     const ParentConnectionManager = {
         _outboundQueue: [],
@@ -1722,27 +1657,22 @@
                 MessageIdCache.add(data.messageId);
             }
             
-            // Handle API_RESPONSE from parent
             if (data.type === INCOMING_TYPES.API_RESPONSE) {
                 handleApiResponse(data);
             }
             
-            // Handle SESSION_DATA - with validation
             if (data.type === INCOMING_TYPES.SESSION_DATA || data.type === INCOMING_TYPES.SESSION_RESPONSE) {
                 this._handleSessionData(data);
             }
             
-            // Handle PARENT_READY - DETERMINISTIC: Only activate if in WAIT_PARENT and have valid session
             if (data.type === INCOMING_TYPES.PARENT_READY || data.type === INCOMING_TYPES.coreReady) {
                 this._handleParentReady(data);
             }
             
-            // Handle MESSAGE_ACK - Update message status
             if (data.type === INCOMING_TYPES.MESSAGE_ACK) {
                 this._handleMessageAck(data);
             }
             
-            // Handle MESSAGE_RECEIVE - Incoming message from parent
             if (data.type === INCOMING_TYPES.MESSAGE_RECEIVE || data.type === INCOMING_TYPES.NEW_MESSAGE) {
                 this._handleMessageReceive(data);
             }
@@ -1776,7 +1706,6 @@
                 return;
             }
             
-            // CRITICAL FIX: Check if module matches OR if it's undefined (accept any)
             if (data.module && data.module !== MODULE_NAME) {
                 console.warn(`[${MODULE_NAME}] Invalid PARENT_READY - module mismatch (expected: ${MODULE_NAME}, got: ${data.module})`);
                 return;
@@ -1792,14 +1721,12 @@
                 parentReadyResolver = null;
             }
             
-            // Check if session was provided in PARENT_READY payload
             const providedSession = parentReadyData.session || parentReadyData;
             if (providedSession && providedSession.token && providedSession.userId) {
                 console.log(`[${MODULE_NAME}] Session provided in PARENT_READY, userId: ${providedSession.userId}`);
                 SessionManager.setSession(providedSession);
             } else {
                 console.log(`[${MODULE_NAME}] No session in PARENT_READY payload, will wait for SESSION_DATA`);
-                // In demo mode, create a mock session
                 if (_demoModeEnabled) {
                     console.log(`[${MODULE_NAME}] Demo mode: creating mock session`);
                     SessionManager.setSession({
@@ -1810,10 +1737,8 @@
                 }
             }
             
-            // Transition based on session validity
             if (currentState === LIFECYCLE_STATES.WAIT_PARENT) {
                 if (SessionManager.isAuthenticated()) {
-                    // Valid session exists, go to ACTIVE
                     setState(LIFECYCLE_STATES.ACTIVE, 'parent_ready_with_valid_session');
                     console.log(`[${MODULE_NAME}] ACTIVE (valid session)`);
                     
@@ -1821,11 +1746,9 @@
                     flushMessageQueue();
                     startDataFlow();
                 } else {
-                    // No valid session yet, wait for it
                     console.log(`[${MODULE_NAME}] WAITING_AUTH (no valid session yet)`);
                     setState(LIFECYCLE_STATES.WAITING_AUTH, 'parent_ready_waiting_for_session');
                     
-                    // Request session from parent
                     safeSend(OUTGOING_ACTIONS.REQUEST_SESSION, {
                         module: MODULE_NAME,
                         timestamp: Date.now()
@@ -1842,14 +1765,11 @@
             const sessionData = data.payload || data;
             Logger.info('ParentConnectionManager', 'Received session data from parent');
             
-            // CRITICAL: Validate session data
             if (sessionData && sessionData.token && sessionData.userId) {
-                // Ensure userId is a number
                 if (typeof sessionData.userId === 'string' && !isNaN(parseInt(sessionData.userId))) {
                     sessionData.userId = parseInt(sessionData.userId);
                 }
                 
-                // Also ensure id is set
                 if (!sessionData.id && sessionData.userId) {
                     sessionData.id = sessionData.userId;
                 }
@@ -1866,7 +1786,6 @@
                     userId: sessionData?.userId,
                     userIdType: typeof sessionData?.userId
                 });
-                // In demo mode, create a mock session if none exists
                 if (_demoModeEnabled && !SessionManager.isAuthenticated()) {
                     console.log('[ParentConnectionManager] Demo mode: creating mock session');
                     SessionManager.setSession({
@@ -1885,12 +1804,10 @@
             
             Logger.info('ParentConnectionManager', `Message ACK: ${messageId} - ${status}`);
             
-            // Update message status in UI
             if (MessageHandler && MessageHandler.updateMessageStatus) {
                 MessageHandler.updateMessageStatus(messageId, status, payload);
             }
             
-            // Dispatch event for UI update
             try {
                 window.dispatchEvent(new CustomEvent('messageStatusUpdated', {
                     detail: { messageId, status, payload }
@@ -1906,7 +1823,6 @@
                 return;
             }
             
-            // Prevent duplicate processing
             if (isDuplicateMessage(message.id)) {
                 Logger.debug('ParentConnectionManager', `Duplicate message ignored: ${message.id}`);
                 return;
@@ -1914,7 +1830,6 @@
             
             Logger.info('ParentConnectionManager', `Message received: ${message.id}`);
             
-            // Add to chat manager
             if (ChatManager && ChatManager.addMessage) {
                 ChatManager.addMessage({
                     ...message,
@@ -1922,12 +1837,10 @@
                 });
             }
             
-            // Play notification if needed
             if (message.senderId !== SessionManager.getUserId() && UIFeatures) {
                 UIFeatures.playNotificationSound();
             }
             
-            // Dispatch event for UI
             try {
                 window.dispatchEvent(new CustomEvent('newMessage', {
                     detail: { message }
@@ -2130,7 +2043,7 @@
     }.init();
 
     // =============================================
-    // SESSION STORE (UI ONLY) WITH VALIDATION
+    // SESSION STORE (UI ONLY)
     // =============================================
     const SessionStore = {
         _user: null,
@@ -2151,7 +2064,6 @@
         setUser: function(user) {
             if (!user) return false;
             
-            // Validate user has valid ID
             const userId = user.id || user.uid;
             if (!userId || typeof userId !== 'number' || userId === 0) {
                 console.warn('[SessionStore] Cannot set user with invalid ID:', userId);
@@ -2199,7 +2111,7 @@
     }.init();
 
     // =============================================
-    // CHAT MANAGER (REAL DATA ONLY - NO MOCKS) - FIXED FOR NESTED RESPONSES
+    // CHAT MANAGER (REAL DATA ONLY)
     // =============================================
     const ChatManager = {
         _conversations: [],
@@ -2226,12 +2138,10 @@
                 this._rebuildMap();
                 this._saveToCache();
                 
-                // Load demo messages for active conversation if needed
                 if (!this._activeConversation && this._conversations.length > 0) {
                     this._activeConversation = this._conversations[0];
                 }
                 
-                // Load messages for each conversation
                 for (const [convId, messages] of Object.entries(DEMO_CHATS.messages)) {
                     const key = `${LOCAL_STORAGE_KEYS.MESSAGES_PREFIX}${convId}`;
                     SafeStorage.setJSON(key, messages);
@@ -2280,12 +2190,9 @@
             });
         },
         
-        // REAL API CALLS - NO PLACEHOLDERS - FIXED for nested responses
         async fetchConversations() {
-            // FIX: Allow fetchConversations when authenticated regardless of lifecycle state
             if (!SessionManager.isAuthenticated()) {
                 console.log('[ChatManager] Not authenticated, cannot fetch conversations');
-                // In demo mode, still show demo chats
                 if (_demoModeEnabled && (!this._conversations || this._conversations.length === 0)) {
                     this._loadDemoDataIfNeeded();
                 }
@@ -2302,7 +2209,6 @@
                 
                 console.log(`[ChatManager] 📥 Received conversations response:`, conversations);
                 
-                // Handle the response - extract chats array from nested structure
                 let chatsArray = [];
                 if (conversations && Array.isArray(conversations)) {
                     chatsArray = conversations;
@@ -2320,7 +2226,6 @@
                     this.setConversations(chatsArray);
                     this._notifySuccess('Conversations loaded');
                 } else if (_demoModeEnabled) {
-                    // Use demo data if no real data
                     this._loadDemoDataIfNeeded();
                 } else {
                     this.setConversations([]);
@@ -2340,10 +2245,8 @@
         },
         
         async fetchMessages(conversationId, options = {}) {
-            // FIX: Allow fetching messages when authenticated regardless of lifecycle state
             if (!SessionManager.isAuthenticated()) {
                 console.log('[ChatManager] Not authenticated, cannot fetch messages');
-                // In demo mode, load demo messages
                 if (_demoModeEnabled && conversationId) {
                     const demoMessages = DEMO_CHATS.messages[conversationId];
                     if (demoMessages) {
@@ -2373,7 +2276,6 @@
                 
                 console.log(`[ChatManager] 📥 Received messages response:`, response);
                 
-                // Handle nested response structure
                 let messagesArray = [];
                 if (response && Array.isArray(response)) {
                     messagesArray = response;
@@ -2388,7 +2290,6 @@
                 console.log(`[ChatManager] 📥 Extracted ${messagesArray.length} messages from response`);
                 
                 if (messagesArray.length > 0) {
-                    // Normalize messages
                     const normalizedMessages = messagesArray.map(msg => ({
                         id: msg.id,
                         content: msg.content || msg.text || '',
@@ -2402,7 +2303,6 @@
                     this.setMessages(normalizedMessages);
                     this._notifySuccess('Messages loaded');
                 } else if (_demoModeEnabled) {
-                    // Load demo messages
                     const demoMessages = DEMO_CHATS.messages[conversationId];
                     if (demoMessages) {
                         this.setMessages(demoMessages);
@@ -2465,13 +2365,10 @@
         },
         
         setConversations: function(conversations) {
-            // Normalize conversation data for UI
             const currentUserId = SessionManager.getUserId();
             const normalizedConversations = (conversations || []).map(chat => {
-                // If chat already has friendName, use as is
                 if (chat.friendName) return chat;
                 
-                // Otherwise, extract from otherParticipant or participants
                 const otherUser = chat.otherParticipant || 
                     (chat.participants && chat.participants.find(p => p.id !== currentUserId));
                 
@@ -2479,7 +2376,6 @@
                 const friendAvatar = otherUser?.avatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(friendName)}&background=random&color=fff`;
                 const friendId = otherUser?.id;
                 
-                // Extract last message
                 let lastMessageText = '';
                 let lastMessageTime = chat.lastMessageAt || chat.updatedAt;
                 if (chat.lastMessage) {
@@ -2503,7 +2399,6 @@
                 };
             });
             
-            // Add demo chats if none exist
             if (normalizedConversations.length === 0 && _demoModeEnabled) {
                 this._loadDemoDataIfNeeded();
                 return;
@@ -2517,7 +2412,6 @@
         },
         
         setMessages: function(messages) {
-            // Deduplicate messages by ID
             const uniqueMessages = [];
             const seenIds = new Set();
             
@@ -2528,7 +2422,6 @@
                 }
             }
             
-            // Sort by timestamp
             uniqueMessages.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
             
             this._messages = uniqueMessages;
@@ -2540,7 +2433,6 @@
         addMessage: function(message) {
             if (!message || !message.id) return;
             
-            // Prevent duplicate
             if (this._messagesMap.has(message.id)) {
                 console.log(`[ChatManager] Duplicate message ignored: ${message.id}`);
                 return;
@@ -2594,7 +2486,6 @@
             this._activeConversation = conversation;
             this._notifySubscribers();
             
-            // Save last chat to cache
             if (conversation) {
                 try {
                     SafeStorage.setJSON(LOCAL_STORAGE_KEYS.UI_STATE, {
@@ -2662,7 +2553,6 @@
                 try { cb(this._conversations, this._activeConversation, this._messages); } catch (e) {}
             });
             
-            // Also dispatch DOM event so messages-ui can re-render
             try {
                 window.dispatchEvent(new CustomEvent('conversationsUpdated', {
                     detail: { 
@@ -2781,9 +2671,6 @@
         },
         
         async fetchFriends() {
-            // FIX: Removed ensureActive guard — friends should be fetchable as soon as
-            // session is authenticated, regardless of lifecycle state. The guard was
-            // blocking the Start Chat panel from ever populating.
             if (!SessionManager.isAuthenticated()) {
                 console.log('[FriendManager] Not authenticated, cannot fetch friends');
                 if (_demoModeEnabled) {
@@ -2799,8 +2686,6 @@
                 console.log('[FriendManager] 📤 Fetching friends from backend');
                 const raw = await makeApiRequest('/friends', 'GET');
                 
-                // FIX: Safety unwrap — the core response handler should extract the array,
-                // but if it leaves { friends: [...] } unwrap it here too
                 let friends = raw;
                 if (friends && !Array.isArray(friends)) {
                     if (Array.isArray(friends.friends)) {
@@ -2817,7 +2702,6 @@
                 if (friends && Array.isArray(friends) && friends.length > 0) {
                     this.setFriends(friends);
                 } else if (friends && Array.isArray(friends) && friends.length === 0) {
-                    // Confirmed empty — try fetching all users as a fallback for new accounts
                     this.setFriends([]);
                     await this._fetchAllUsersAsFallback();
                 } else if (_demoModeEnabled) {
@@ -2835,13 +2719,10 @@
             }
         },
 
-        // ADDED: Fallback — populate the contact list with all platform users when
-        // the current user has no accepted friends yet.
         async _fetchAllUsersAsFallback() {
             if (!SessionManager.isAuthenticated()) return;
             if (this._friends && this._friends.length > 0) return;
             try {
-                // FIX: /friends/users/all doesn't exist — try real user-search endpoints
                 let result = null;
                 let users = [];
 
@@ -2871,7 +2752,6 @@
             this._loaded = true;
             this._saveToCache();
             this._notifySubscribers();
-            // FIX: Fire window event so UI always receives update regardless of subscribe timing
             try {
                 window.dispatchEvent(new CustomEvent('friendsUpdated', {
                     detail: { friends: this._friends }
@@ -2969,7 +2849,6 @@
             const availableFriends = this._friends
                 .filter(friend => !this._blockedFriends.has(friend.id || friend.uid))
                 .map(friend => {
-                    // FIX: Normalise backend field variants so UI always has consistent fields
                     const id = friend.id || friend.uid || friend.userId;
                     const firstName = friend.firstName || friend.first_name || '';
                     const lastName = friend.lastName || friend.last_name || '';
@@ -3200,7 +3079,7 @@
     };
 
     // =============================================
-    // MESSAGE HANDLER (NO RETRY, PARENT-ACKNOWLEDGED)
+    // MESSAGE HANDLER
     // =============================================
     const MessageHandler = {
         _optimisticMessages: new Map(),
@@ -3259,12 +3138,10 @@
             EventBus.emit('message:sending', { message: optimisticMessage, optimistic: true });
             
             try {
-                // REAL BACKEND CALL via parent
                 const result = await ChatManager.sendMessageToBackend(content, conversationId, options);
                 
                 console.log(`[MessageHandler] Message sent successfully:`, result);
                 
-                // Update optimistic message with real data
                 const realMessage = result.message || result;
                 if (realMessage && realMessage.id) {
                     optimisticMessage.id = realMessage.id;
@@ -3272,7 +3149,6 @@
                     optimisticMessage.optimistic = false;
                     optimisticMessage.realId = realMessage.id;
                     
-                    // Replace in messages list
                     const messages = ChatManager.getMessages();
                     const index = messages.findIndex(m => m.localId === localId);
                     if (index !== -1) {
@@ -3536,31 +3412,25 @@
     };
 
     // =============================================
-    // CONVERSATION MANAGER (REAL API CALLS) - FIXED
+    // CONVERSATION MANAGER (REAL API CALLS)
     // =============================================
     const ConversationManager = {
         async openConversation(conversationId, options = {}) {
             if (!conversationId) return false;
-            // FIX: openConversation needs authentication but NOT necessarily ACTIVE state.
-            // Users clicking a chat in the contacts list must be able to open it immediately.
             if (!SessionManager.isAuthenticated() && !_demoModeEnabled) return false;
             
-            // Handle both id and conversationId
             const actualId = typeof conversationId === 'object' ? conversationId.id : conversationId;
             
             const conversation = ChatManager.getConversation(actualId);
             if (conversation) {
                 ChatManager.setActiveConversation(conversation);
-                // Update UI to show chat panel
                 this._showChatPanel(conversation);
             } else {
-                // If conversation doesn't exist in cache, still allow to open and fetch
                 const tempConversation = { id: actualId, friendName: 'Loading...', friendAvatar: '', online: false };
                 ChatManager.setActiveConversation(tempConversation);
                 this._showChatPanel(tempConversation);
             }
             
-            // Mark conversation as active
             const result = safeSend(OUTGOING_ACTIONS.OPEN_CONVERSATION, {
                 conversationId: actualId
             }, { requireAck: false });
@@ -3569,7 +3439,6 @@
                 return false;
             }
             
-            // Fetch messages for this conversation
             await this.fetchMessages(actualId, options);
             
             const draft = UIStateManager.getDraft(actualId);
@@ -3580,7 +3449,6 @@
             
             this.markAsRead(actualId);
             
-            // Dispatch UI event to show chat panel
             try {
                 window.dispatchEvent(new CustomEvent('conversationOpened', {
                     detail: { conversationId: actualId, conversation }
@@ -3591,7 +3459,6 @@
         },
         
         _showChatPanel(conversation) {
-            // Update chat header UI
             const chatPanel = document.getElementById('chatPanel');
             const sidebar = document.getElementById('sidebar');
             const backBtn = document.getElementById('backToChatsBtn');
@@ -3606,7 +3473,6 @@
                 backBtn.style.display = 'flex';
             }
             
-            // Update header with conversation info
             const nameEl = document.getElementById('chatFriendName');
             const avatarEl = document.getElementById('chatFriendAvatar');
             const statusEl = document.getElementById('chatStatusText');
@@ -3630,13 +3496,11 @@
                 if (indicatorEl) avatarEl.appendChild(indicatorEl);
             }
             
-            // Enable message input
             const messageInput = document.getElementById('messageInput');
             const sendButton = document.getElementById('sendButton');
             if (messageInput) messageInput.disabled = false;
             if (sendButton) sendButton.disabled = false;
             
-            // Focus input
             setTimeout(() => {
                 if (messageInput) messageInput.focus();
             }, 100);
@@ -3645,7 +3509,6 @@
         async fetchMessages(conversationId, options = {}) {
             if (!conversationId) return;
             if (!ensureActive('fetchMessages')) return;
-            // Allow in demo mode
             if (!SessionManager.isAuthenticated() && !_demoModeEnabled) return;
             
             await ChatManager.fetchMessages(conversationId, options);
@@ -3677,7 +3540,6 @@
                 conversation.unreadCount = 0;
                 EventBus.emit('conversation:updated', conversation);
                 
-                // Dispatch UI event to update unread count
                 try {
                     window.dispatchEvent(new CustomEvent('conversationRead', {
                         detail: { conversationId }
@@ -3688,68 +3550,141 @@
         
         createConversation: async function(participants, options = {}) {
             if (!participants || participants.length === 0) return false;
-            // FIX: Removed __guardAction and canSendUserMessages guards.
-            // Creating/opening a conversation must work as soon as the user is authenticated —
-            // it's the primary action of clicking a contact, gating it on ACTIVE prevented
-            // the contacts panel from ever doing anything useful.
             if (!SessionManager.isAuthenticated()) return false;
 
-            // FIXED: For direct (1-to-1) chats, call POST /messages with receiverId.
-            // The backend finds or creates the direct chat and returns the chatId.
-            // Previously this only fired a postMessage event that nothing in chat.html
-            // handled, so clicking a friend never actually opened a chat window.
             const type = options.type || 'direct';
 
-            if (type === 'direct' && participants.length === 1) {
-                const receiverId = participants[0];
-                try {
-                    // Check if we already have a chat with this friend in cache
-                    const existing = ChatManager.getConversations().find(c =>
-                        c.type === 'direct' &&
-                        c.participants &&
-                        c.participants.some(p => (p.id || p) === receiverId)
-                    );
+ if (type === 'direct' && participants.length === 1) {
+    const receiverId = participants[0];
+    try {
+        // First check if conversation already exists
+        const existing = ChatManager.getConversations().find(c =>
+            c.type === 'direct' &&
+            c.participants &&
+            c.participants.some(p => (p.id || p) === receiverId)
+        );
 
-                    if (existing) {
-                        // Chat already exists locally — just open it
-                        await ConversationManager.openConversation(existing.id, options);
-                        return true;
-                    }
+        if (existing) {
+            await ConversationManager.openConversation(existing.id, options);
+            return existing.id;
+        }
 
-                    // Call POST /messages with a placeholder message (empty content triggers
-                    // chat creation only; back-end still requires content so send a single space
-                    // which the UI can filter out). Actually the backend creates the chat on any
-                    // POST /messages with receiverId, so send an initialMessage if provided.
-                    const body = {
-                        receiverId: receiverId,
-                        content: options.initialMessage || ' ',
-                        type: 'text'
-                    };
-
-                    const result = await makeApiRequest('/messages', 'POST', body);
-                    
-                    // result could be the message object or { chatId, ... }
-                    const chatId = result?.chatId || result?.data?.chatId || result?.id || result?.data?.id;
-
-                    if (chatId) {
-                        // Reload conversations to include new chat
-                        await ChatManager.fetchConversations();
-                        await ConversationManager.openConversation(chatId, options);
-                        
-                        try {
-                            window.dispatchEvent(new CustomEvent('conversationCreated', {
-                                detail: { participants, options, chatId }
-                            }));
-                        } catch (e) {}
-                        return true;
-                    }
-                } catch (error) {
-                    Logger.error('ConversationManager', 'Failed to create direct conversation:', error.message);
-                }
-                return false;
+        // Get the user's real name from FriendManager or from options
+        let realUserName = options.name;
+        let realUserAvatar = null;
+        
+        // Try to get from FriendManager first
+        if (window.MessagesCore && window.MessagesCore.FriendManager) {
+            const friend = window.MessagesCore.FriendManager.getFriend(receiverId);
+            if (friend) {
+                realUserName = friend.displayName || friend.username || friend.name || options.name;
+                realUserAvatar = friend.avatar || friend.photoURL || null;
             }
+        }
+        
+        // If still no name, try to fetch from backend
+        if (!realUserName || realUserName === `User_${receiverId}`) {
+            try {
+                const userInfo = await makeApiRequest(`/users/${receiverId}`, 'GET');
+                if (userInfo) {
+                    realUserName = userInfo.displayName || userInfo.username || userInfo.name || options.name;
+                    realUserAvatar = userInfo.avatar || userInfo.photoURL || null;
+                }
+            } catch (e) {
+                console.log('[ConversationManager] Could not fetch user info:', e);
+            }
+        }
+        
+        // Final fallback
+        if (!realUserName || realUserName === `User_${receiverId}`) {
+            realUserName = options.name || `User_${receiverId}`;
+        }
 
-            // For group chats (or other types) fall back to the postMessage approach
+        // Only send a real message if there's actual content
+        if (options.initialMessage && options.initialMessage.trim()) {
+            const body = {
+                receiverId: receiverId,
+                content: options.initialMessage.trim(),
+                type: 'text'
+            };
+
+            const result = await makeApiRequest('/messages', 'POST', body);
+            
+            const chatId = result?.chatId || result?.data?.chatId || result?.id || result?.data?.id;
+
+            if (chatId) {
+                await ChatManager.fetchConversations();
+                await ConversationManager.openConversation(chatId, options);
+                
+                try {
+                    window.dispatchEvent(new CustomEvent('conversationCreated', {
+                        detail: { participants, options, chatId }
+                    }));
+                } catch (e) {}
+                return chatId;
+            }
+        }
+        
+        // No existing conversation and no real message to send
+        // Create a temporary/pending conversation so the chat panel opens
+        const tempConversationId = `pending_${receiverId}_${Date.now()}`;
+        const tempConversation = {
+            id: tempConversationId,
+            type: 'direct',
+            friendId: receiverId,
+            friendName: realUserName,  // Use the real name we fetched
+            friendAvatar: realUserAvatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(realUserName)}&background=random&color=fff`,
+            online: false,
+            unreadCount: 0,
+            lastMessage: 'No messages yet',
+            lastMessageAt: Date.now(),
+            pendingReceiverId: receiverId,
+            isPending: true
+        };
+        
+        // Add to conversations list temporarily
+        const currentConversations = ChatManager.getConversations();
+        currentConversations.unshift(tempConversation);
+        ChatManager.setConversations(currentConversations);
+        
+        // Open the chat panel with this temporary conversation
+        ChatManager.setActiveConversation(tempConversation);
+        ConversationManager._showChatPanel(tempConversation);
+        
+        // Also update the UI header immediately
+        const nameEl = document.getElementById('chatFriendName');
+        if (nameEl) {
+            nameEl.textContent = realUserName;
+        }
+        
+        const avatarEl = document.getElementById('chatFriendAvatar');
+        if (avatarEl && tempConversation.friendAvatar) {
+            avatarEl.innerHTML = `<img src="${tempConversation.friendAvatar}" alt="${realUserName}">`;
+        }
+        
+        // Dispatch event for UI to know this is a pending chat
+        try {
+            window.dispatchEvent(new CustomEvent('conversationCreated', {
+                detail: { 
+                    participants, 
+                    options, 
+                    chatId: tempConversationId,
+                    isPending: true,
+                    receiverId: receiverId,
+                    userName: realUserName,
+                    userAvatar: tempConversation.friendAvatar
+                }
+            }));
+        } catch (e) {}
+        
+        return tempConversationId;
+        
+    } catch (error) {
+        Logger.error('ConversationManager', 'Failed to create direct conversation:', error.message);
+    }
+    return false;
+}
+
             const result = safeSend(OUTGOING_ACTIONS.CREATE_CONVERSATION, {
                 participants: participants,
                 type,
@@ -3769,6 +3704,112 @@
             
             return true;
         },
+
+        _showChatPanel: function(conversation) {
+    const chatPanel = document.getElementById('chatPanel');
+    const sidebar = document.getElementById('sidebar');
+    const backBtn = document.getElementById('backToChatsBtn');
+    
+    if (chatPanel) {
+        chatPanel.classList.remove('hidden');
+    }
+    if (sidebar && window.innerWidth <= 768) {
+        sidebar.classList.remove('active');
+    }
+    if (backBtn && window.innerWidth <= 768) {
+        backBtn.style.display = 'flex';
+    }
+    
+    const nameEl = document.getElementById('chatFriendName');
+    const avatarEl = document.getElementById('chatFriendAvatar');
+    const statusEl = document.getElementById('chatStatusText');
+    const indicatorEl = document.getElementById('chatStatusIndicator');
+    
+    if (nameEl) {
+        nameEl.textContent = conversation.friendName || conversation.name || 'Chat';
+    }
+    if (statusEl) {
+        statusEl.textContent = conversation.online ? 'Online' : 'Offline';
+    }
+    if (indicatorEl) {
+        indicatorEl.className = `chat-status ${conversation.online ? 'online' : 'offline'}`;
+    }
+    if (avatarEl) {
+        if (conversation.friendAvatar) {
+            avatarEl.innerHTML = `<img src="${conversation.friendAvatar}" alt="${conversation.friendName || 'User'}">`;
+        } else {
+            avatarEl.innerHTML = '<i class="fas fa-user"></i>';
+        }
+        if (indicatorEl) avatarEl.appendChild(indicatorEl);
+    }
+    
+    const messageInput = document.getElementById('messageInput');
+    const sendButton = document.getElementById('sendButton');
+    if (messageInput) messageInput.disabled = false;
+    if (sendButton) sendButton.disabled = false;
+    
+    setTimeout(() => {
+        if (messageInput) messageInput.focus();
+    }, 100);
+},
+
+async getOrCreateConversationByUserId(userId, userName) {
+    if (!userId) return null;
+    
+    const numericUserId = typeof userId === 'string' ? parseInt(userId, 10) : userId;
+    
+    // Try to get real user name from FriendManager first
+    let realUserName = userName;
+    let realUserAvatar = null;
+    
+    if (window.MessagesCore && window.MessagesCore.FriendManager) {
+        const friend = window.MessagesCore.FriendManager.getFriend(numericUserId);
+        if (friend) {
+            realUserName = friend.displayName || friend.username || friend.name || userName;
+            realUserAvatar = friend.avatar || friend.photoURL || null;
+        }
+    }
+    
+    // Check existing conversations
+    const existingConversation = ChatManager.getConversations().find(c =>
+        c.type === 'direct' &&
+        (c.friendId === numericUserId ||
+         (c.participants && c.participants.some(p => (p.id || p) === numericUserId)))
+    );
+    
+    if (existingConversation) {
+        await this.openConversation(existingConversation.id);
+        return existingConversation;
+    }
+    
+    // Create new conversation with the real name
+    const result = await this.createConversation([numericUserId], { 
+        name: realUserName || userName || `User_${numericUserId}`,
+        type: 'direct'
+    });
+    
+    if (result && result !== false) {
+        // Find the newly created conversation
+        const newConversation = ChatManager.getConversations().find(c =>
+            c.type === 'direct' &&
+            (c.friendId === numericUserId ||
+             (c.participants && c.participants.some(p => (p.id || p) === numericUserId)))
+        );
+        
+        if (newConversation) {
+            await this.openConversation(newConversation.id);
+            return newConversation;
+        }
+        
+        // Return the temp conversation if we created one
+        const tempConv = ChatManager.getActiveChat();
+        if (tempConv && tempConv.pendingReceiverId === numericUserId) {
+            return tempConv;
+        }
+    }
+    
+    return null;
+},
         
         archiveConversation: function(conversationId, archived = true) {
             const guardResult = window.__guardAction('archiveConversation', MODULE_NAME, currentState);
@@ -4112,7 +4153,6 @@
         },
         
         _attachStartChatListeners: function() {
-            // Attach listener for "Start Chat" button or similar
             const startChatButton = document.getElementById('startChatBtn') || document.querySelector('.start-chat-btn');
             if (startChatButton) {
                 startChatButton.addEventListener('click', () => {
@@ -4121,14 +4161,12 @@
                         return;
                     }
                     
-                    // Show friend list or create new chat panel
                     const friendListPanel = document.getElementById('friendListPanel');
                     const startChatPanel = document.getElementById('startChatPanel');
                     
                     if (friendListPanel) friendListPanel.style.display = 'block';
                     if (startChatPanel) startChatPanel.style.display = 'block';
                     
-                    // Dispatch event to show friends
                     EventBus.emit('ui:showFriends', { timestamp: Date.now() });
                     
                     Logger.info('UIBridge', 'Start chat panel activated');
@@ -4279,16 +4317,13 @@
             document.addEventListener('click', async (e) => {
                 const conversationItem = e.target.closest('.chat-item');
                 if (conversationItem) {
-                    // Allow click if active+authenticated OR in demo mode
                     const canAct = (canSendUserMessages() && SessionManager.isAuthenticated()) || _demoModeEnabled;
                     if (canAct) {
                         const conversationId = conversationItem.dataset.chatId;
                         if (conversationId) {
-                            // Hide start chat panel if visible
                             const startChatPanel = document.getElementById('startChatPanel');
                             if (startChatPanel) startChatPanel.style.display = 'none';
                             
-                            // Show chat panel
                             const chatPanel = document.getElementById('chatPanel');
                             if (chatPanel) chatPanel.classList.remove('hidden');
                             
@@ -4306,15 +4341,12 @@
                     const friendId = friendItem.dataset.contactId;
                     const friendName = friendItem.querySelector('.contact-name')?.textContent || 'Friend';
                     if (friendId) {
-                        // Hide friend list panel if visible
                         const contactsSidebar = document.getElementById('contactsSidebar');
                         if (contactsSidebar) contactsSidebar.classList.add('hidden');
                         
-                        // Show sidebar
                         const sidebar = document.getElementById('sidebar');
                         if (sidebar) sidebar.classList.add('active');
                         
-                        // Create and open conversation
                         ConversationManager.createConversation([parseInt(friendId)], { name: friendName });
                     }
                 }
@@ -4446,7 +4478,7 @@
     }.init();
 
     // =============================================
-    // MODULE LIFECYCLE CONTROLLER (DETERMINISTIC HANDSHAKE)
+    // MODULE LIFECYCLE CONTROLLER
     // =============================================
     const ModuleLifecycleController = {
         _startTime: null,
@@ -4500,7 +4532,6 @@
                 ParentConnectionManager.notifyChildReady();
             }
             
-            // Wait for parent ready but don't block - we'll transition to WAITING_AUTH if no session
             const parentReadyTimeout = setTimeout(() => {
                 if (currentState === LIFECYCLE_STATES.WAIT_PARENT && !parentReadyReceived) {
                     console.log(`[${MODULE_NAME}] Parent ready timeout, requesting session...`);
@@ -4714,7 +4745,6 @@
             return;
         }
         
-        // Ensure demo mode is off when real session is present
         if (_demoModeEnabled) {
             console.log('[DataFlow] Real session active - disabling demo mode');
             _demoModeEnabled = false;
@@ -4722,7 +4752,6 @@
         
         Logger.info('DataFlow', 'Starting data flow');
         
-        // Clear any demo data that was loaded before real session arrived
         if (ChatManager._conversations && ChatManager._conversations.length > 0) {
             const hasOnlyDemo = ChatManager._conversations.every(c => c.id === 1001 || c.id === 1002);
             if (hasOnlyDemo) {
@@ -4740,7 +4769,6 @@
             }
         }
         
-        // Fetch real data from backend
         ConversationManager.fetchConversations().catch(e => {
             Logger.error('DataFlow', 'Failed to fetch conversations', e);
         });
@@ -4755,10 +4783,95 @@
     }
 
     // =============================================
-    // INITIALIZATION (DETERMINISTIC HANDSHAKE)
+    // OPEN CHAT BY USER ID - Core function
+    // =============================================
+
+    /**
+     * Opens a chat with a specific user
+     * @param {number|string} userId - The user ID to chat with
+     * @param {string} userName - The user's display name (optional)
+     * @returns {Promise<object>} - Result of opening the chat
+     */
+    async function openChatWithUser(userId, userName) {
+    console.log('[MessageCore] openChatWithUser called:', { userId, userName });
+    
+    if (!userId) {
+        console.error('[MessageCore] Cannot open chat: No userId provided');
+        return { success: false, error: 'No userId provided' };
+    }
+    
+    const numericUserId = typeof userId === 'string' ? parseInt(userId, 10) : userId;
+    
+    // Try to get real user name from FriendManager
+    let realUserName = userName;
+    if (window.MessagesCore && window.MessagesCore.FriendManager) {
+        const friend = window.MessagesCore.FriendManager.getFriend(numericUserId);
+        if (friend) {
+            realUserName = friend.displayName || friend.username || friend.name || userName;
+        }
+    }
+    
+    const displayName = realUserName || userName || `User_${numericUserId}`;
+    
+    if (!MessagesCore.isReady()) {
+        console.log('[MessageCore] Module not ready, waiting for boot...');
+        await MessagesCore.waitForBoot();
+    }
+    
+    try {
+        if (MessagesCore.ConversationManager && typeof MessagesCore.ConversationManager.createConversation === 'function') {
+            console.log('[MessageCore] Using ConversationManager.createConversation');
+            const result = await MessagesCore.ConversationManager.createConversation(
+                [numericUserId], 
+                { name: displayName, type: 'direct' }
+            );
+            
+            if (result !== false) {
+                const conversations = MessagesCore.ChatManager.getConversations();
+                const conversation = conversations.find(c => 
+                    c.friendId === numericUserId || 
+                    (c.participants && c.participants.some(p => (p.id || p) === numericUserId))
+                );
+                
+                if (conversation) {
+                    await MessagesCore.ConversationManager.openConversation(conversation.id);
+                    return { success: true, conversationId: conversation.id, conversation };
+                }
+            }
+            
+            return { success: !!result, result };
+        }
+        
+        if (MessagesCore.ChatManager && typeof MessagesCore.ChatManager.openChat === 'function') {
+            console.log('[MessageCore] Using ChatManager.openChat');
+            const result = await MessagesCore.ChatManager.openChat(numericUserId, displayName);
+            return { success: true, result };
+        }
+        
+        console.log('[MessageCore] Dispatching event for UI');
+        window.dispatchEvent(new CustomEvent('messages:openChat', {
+            detail: {
+                userId: numericUserId,
+                userName: displayName,
+                recipientId: numericUserId,
+                recipientName: displayName,
+                timestamp: Date.now()
+            }
+        }));
+        
+        return { success: true, method: 'event', userId: numericUserId };
+        
+    } catch (error) {
+        console.error('[MessageCore] Failed to open chat:', error);
+        return { success: false, error: error.message };
+    }
+}
+
+    // =============================================
+    // INITIALIZATION
     // =============================================
     async function initialize() {
-        console.log(`[${MODULE_NAME}] 🚀 Messages Core v${MODULE_VERSION} (Stabilized Protocol | Real Data Only | Session Validation | UI Enhanced | Demo Data Included)`);
+        console.log(`[${MODULE_NAME}] 🚀 Messages Core v${MODULE_VERSION} (Stabilized Protocol | Real Data Only | Session Validation | UI Enhanced | Demo Data Included | openChatWithUser Added)`);
         
         try {
             setState(LIFECYCLE_STATES.BOOT, 'initialization_start');
@@ -4775,15 +4888,12 @@
             
             console.log(`[${MODULE_NAME}] ✅ Initialized - waiting for parent activation and valid session`);
             
-            // Demo bootstrap: if no real parent activates us within 3 seconds, enable demo mode
-            // This handles the case where the app is opened standalone without a parent frame
             setTimeout(() => {
                 if (!_demoBootstrapFired && currentState !== LIFECYCLE_STATES.ACTIVE && !parentReadyReceived) {
                     _demoBootstrapFired = true;
                     console.log(`[${MODULE_NAME}] Demo bootstrap: no parent detected after 3s, activating demo mode`);
                     _demoModeEnabled = true;
                     
-                    // Force through state machine
                     try {
                         if (currentState === LIFECYCLE_STATES.BOOT) setState(LIFECYCLE_STATES.INITIALIZING, 'demo_bootstrap');
                         if (currentState === LIFECYCLE_STATES.INITIALIZING) setState(LIFECYCLE_STATES.READY, 'demo_bootstrap');
@@ -4799,7 +4909,6 @@
                             setState(LIFECYCLE_STATES.ACTIVE, 'demo_self_activate');
                         }
                         if (currentState !== LIFECYCLE_STATES.ACTIVE) {
-                            // Force it
                             currentState = LIFECYCLE_STATES.ACTIVE;
                             notifyStateListeners(LIFECYCLE_STATES.ACTIVE, 'BOOT', 'demo_force');
                         }
@@ -4808,7 +4917,6 @@
                         ChatManager._loadDemoDataIfNeeded();
                         FriendManager._loadDemoFriendsIfNeeded();
                         
-                        // Notify UI that conversations are ready
                         setTimeout(() => {
                             try {
                                 window.dispatchEvent(new CustomEvent('conversationsUpdated', {
@@ -4853,7 +4961,6 @@
                 SafeStorage.set('lastChatId', uiState.lastChatId);
             }
         } catch (error) {
-            // Silent fail on cache load
         }
     }
     
@@ -4950,9 +5057,9 @@
         
         getSecurityReport: () => SECURITY.getSecurityReport(),
         
-        // FIX: Expose multiSendSelectedChats as a real persistent Set for UI to track selections
         multiSendSelectedChats: new Set(),
-        
+         getOrCreateConversationByUserId: (userId, userName) => 
+        ConversationManager.getOrCreateConversationByUserId(userId, userName),
         subscribe: (callback) => stateListeners.add(callback),
         on: (event, callback) => EventBus.on(event, callback),
         off: (event, callback) => EventBus.off(event, callback),
@@ -4977,6 +5084,8 @@
         sendTyping: (conversationId, isTyping) => TypingManager.sendTyping(conversationId, isTyping),
         stopTyping: () => TypingManager.stopTyping(),
         getTypingUsers: (conversationId) => TypingManager.getTypingUsersForConversation(conversationId),
+        
+        openChatWithUser: openChatWithUser,
         
         UI: {
             saveDraft: (conversationId, text, attachment) => UIStateManager.saveDraft(conversationId, text, attachment),
@@ -5033,6 +5142,7 @@
     };
 
     window.MessagesCore = MessagesCore;
+    window.openChatWithUser = openChatWithUser;
     window.__MODULE_NAME__ = MODULE_NAME;
     window.__MODULE_VERSION__ = MODULE_VERSION;
     

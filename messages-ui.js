@@ -4,6 +4,7 @@
 // FIXED: Session state synchronization
 // FIXED: Lifecycle state detection
 // FIXED: Chat panel display and message input box
+// ADDED: Auto-open chat event handler for external messages
 // =============================================
 
 (function() {
@@ -2085,17 +2086,20 @@
             UIFailsafe.safeSetHTML(container, html);
         },
 
-        _renderContactItem(contact) {
+                _renderContactItem(contact) {
             const status = contact.online ? 'online' : 'offline';
             const statusText = contact.status || (contact.online ? 'Online' : 'Offline');
             const displayName = contact.displayName || contact.username || contact.name || 'User';
             const avatarUrl = contact.avatar || contact.photoURL || contact.avatarUrl || '';
             const initials = displayName.charAt(0).toUpperCase();
             
+            // Escape the display name to handle special characters
+            const escapedName = displayName.replace(/'/g, "\\'").replace(/"/g, '&quot;');
+            
             return `
-                <div class="contact-item" data-contact-id="${contact.id}" 
+                <div class="contact-item" data-contact-id="${contact.id}" data-contact-name="${escapedName}"
                      style="cursor:pointer; display:flex; align-items:center; padding:12px 16px; gap:12px; border-bottom:1px solid rgba(0,0,0,0.05);"
-                     onclick="window.messagesUI?.loadChatByFriendId('${contact.id}')">
+                     onclick="window.messagesUI?.loadChatByFriendId('${contact.id}', '${escapedName}')">
                     <div class="contact-avatar" style="position:relative; flex-shrink:0;">
                         ${avatarUrl
                             ? `<img src="${avatarUrl}" alt="${displayName}" loading="lazy" 
@@ -2112,7 +2116,7 @@
                         <div class="contact-status-text" style="font-size:12px;color:${contact.online ? '#10b981' : '#9ca3af'};">${statusText}</div>
                     </div>
                     <button style="background:linear-gradient(135deg,#667eea,#764ba2);color:white;border:none;border-radius:8px;padding:6px 12px;font-size:12px;cursor:pointer;white-space:nowrap;"
-                            onclick="event.stopPropagation();window.messagesUI?.loadChatByFriendId('${contact.id}')">
+                            onclick="event.stopPropagation();window.messagesUI?.loadChatByFriendId('${contact.id}', '${escapedName}')">
                         Chat
                     </button>
                 </div>
@@ -3963,11 +3967,276 @@
     }.init();
 
     // =============================================
+    // AUTO-OPEN CHAT FROM EXTERNAL REQUEST
+    // =============================================
+
+    /**
+     * Sets up listener to automatically open chat when requested from parent
+     */
+    function setupAutoOpenChat() {
+        console.log('[MessageUI] Setting up auto-open chat listener');
+        
+        // Listen for the custom event dispatched by message.html
+        window.addEventListener('messages:openChat', function(event) {
+            const { userId, userName, recipientId, recipientName } = event.detail || {};
+            const targetUserId = userId || recipientId;
+            const targetUserName = userName || recipientName || 'User';
+            
+            console.log('[MessageUI] Auto-open chat requested:', { targetUserId, targetUserName });
+            
+            if (!targetUserId) {
+                console.error('[MessageUI] No user ID provided for auto-open');
+                return;
+            }
+            
+            // Wait a bit for the UI to be fully loaded
+            setTimeout(() => {
+                openChatWithUserInUI(targetUserId, targetUserName);
+            }, 500);
+        });
+
+        // FIX: Listen for OPEN_CHAT_WITH_USER postMessage from the parent frame (chat.html).
+        // This is the primary path when the user clicks "Start Chat" in the friends module:
+        // friend-ui → SWITCH_MODULE (with payload) → chat.html → OPEN_CHAT_WITH_USER → here.
+        window.addEventListener('message', function(event) {
+            const msg = event.data || {};
+            if (msg.type !== 'OPEN_CHAT_WITH_USER') return;
+
+            const payload = msg.payload || {};
+            const targetUserId = payload.userId || payload.recipientId;
+            const targetUserName = payload.userName || payload.recipientName || 'User';
+
+            console.log('[MessageUI] Received OPEN_CHAT_WITH_USER postMessage:', { targetUserId, targetUserName });
+
+            if (!targetUserId) {
+                console.error('[MessageUI] OPEN_CHAT_WITH_USER: No userId in payload');
+                return;
+            }
+
+            // Give the UI a moment to settle after the module becomes visible
+            setTimeout(() => {
+                openChatWithUserInUI(targetUserId, targetUserName);
+            }, 300);
+        });
+        
+        // Also check sessionStorage for pending chat (from URL params or previous navigation).
+        // FIX: Check BOTH keys — 'open_chat_on_load' (our key) and 'pending_chat' (chat.html's key).
+        // At startup the messages iframe may already be loaded; this catches any value written
+        // before setupAutoOpenChat ran.
+        const pendingChatRaw = sessionStorage.getItem('open_chat_on_load') || sessionStorage.getItem('pending_chat');
+        if (pendingChatRaw) {
+            try {
+                const chatData = JSON.parse(pendingChatRaw);
+                console.log('[MessageUI] Found pending chat in sessionStorage:', chatData);
+                
+                // Clear both keys to avoid processing twice
+                sessionStorage.removeItem('open_chat_on_load');
+                sessionStorage.removeItem('pending_chat');
+                
+                setTimeout(() => {
+                    openChatWithUserInUI(chatData.userId, chatData.userName || 'User');
+                }, 800);
+            } catch (e) {
+                console.error('[MessageUI] Failed to parse pending chat:', e);
+            }
+        }
+    }
+
+    function openChatWithUserInUI(userId, userName) {
+        console.log('[MessageUI] Opening chat with user:', { userId, userName });
+        
+        const numericUserId = parseInt(userId);
+        const core = getMessagesCore();
+        
+        // Show chat panel immediately with loading state
+        const chatPanel = document.getElementById('chatPanel');
+        const sidebar = document.getElementById('sidebar');
+        const contactsSidebar = document.getElementById('contactsSidebar');
+        
+        if (contactsSidebar) contactsSidebar.classList.add('hidden');
+        if (sidebar) sidebar.classList.add('active');
+        if (chatPanel) {
+            chatPanel.classList.remove('hidden');
+            UIStateManager.setState('chatVisible', true);
+            
+            // Show loading state
+            const messagesContainer = document.getElementById('messagesContainer');
+            if (messagesContainer) {
+                messagesContainer.innerHTML = `
+                    <div class="loading-chat">
+                        <div class="loading-spinner"></div>
+                        <p>Opening conversation with ${userName}...</p>
+                    </div>
+                `;
+            }
+        }
+        
+        // Store friend name for later use
+        window.currentFriendName = userName;
+        if (window.messagesUI && typeof window.messagesUI.loadChatByFriendId === 'function') {
+            console.log('[MessageUI] Using messagesUI.loadChatByFriendId');
+            window.messagesUI.loadChatByFriendId(numericUserId, userName);
+            return;
+        }
+
+        // Method 2: Try to use core's openConversation
+        if (core && typeof core.openConversation === 'function') {
+            console.log('[MessageUI] Using core.openConversation');
+            core.openConversation(numericUserId);
+            
+            // Update header with user name
+            setTimeout(() => {
+                const nameEl = document.getElementById('chatFriendName');
+                if (nameEl) nameEl.textContent = userName;
+                const statusEl = document.getElementById('chatStatusText');
+                if (statusEl) statusEl.textContent = 'Online';
+                const indicatorEl = document.getElementById('chatStatusIndicator');
+                if (indicatorEl) indicatorEl.className = 'chat-status online';
+                
+                // Clear loading
+                const messagesContainer = document.getElementById('messagesContainer');
+                if (messagesContainer && messagesContainer.innerHTML.includes('loading-chat')) {
+                    messagesContainer.innerHTML = `
+                        <div class="empty-chat">
+                            <i class="fas fa-comment-dots empty-chat-icon"></i>
+                            <div class="empty-chat-title">No messages yet</div>
+                            <div class="empty-chat-message">Type your first message below to start the conversation with ${userName}</div>
+                        </div>
+                    `;
+                }
+            }, 100);
+            return;
+        }
+        
+        // Method 3: Try to use ConversationManager
+        if (core && core.ConversationManager && typeof core.ConversationManager.createConversation === 'function') {
+            console.log('[MessageUI] Using ConversationManager.createConversation');
+            const result = core.ConversationManager.createConversation([numericUserId]);
+            
+            const openPanel = () => {
+                setTimeout(() => {
+                    const nameEl = document.getElementById('chatFriendName');
+                    if (nameEl) nameEl.textContent = userName;
+                    const messagesContainer = document.getElementById('messagesContainer');
+                    if (messagesContainer && messagesContainer.innerHTML.includes('loading-chat')) {
+                        messagesContainer.innerHTML = `
+                            <div class="empty-chat">
+                                <i class="fas fa-comment-dots empty-chat-icon"></i>
+                                <div class="empty-chat-title">No messages yet</div>
+                                <div class="empty-chat-message">Type your first message below to start the conversation with ${userName}</div>
+                            </div>
+                        `;
+                    }
+                }, 100);
+            };
+            
+            if (result && typeof result.then === 'function') {
+                result.then((conversation) => {
+                    console.log('[MessageUI] Conversation opened:', conversation);
+                    openPanel();
+                }).catch((error) => {
+                    console.error('[MessageUI] Failed to open conversation:', error);
+                    openPanel(); // Still open panel even on error
+                });
+            } else {
+                openPanel();
+            }
+            return;
+        }
+        
+        // Method 4: Try to use window.ChatManager
+        if (window.ChatManager && typeof window.ChatManager.openChat === 'function') {
+            console.log('[MessageUI] Using ChatManager.openChat');
+            window.ChatManager.openChat(numericUserId, userName);
+            return;
+        }
+        
+        // Method 5: Find the user in the friends/conversations list and click
+        const selectors = [
+            `.contact-item[data-contact-id="${numericUserId}"]`,
+            `.friend-item[data-user-id="${numericUserId}"]`,
+            `.conversation-item[data-user-id="${numericUserId}"]`,
+            `.chat-item[data-user-id="${numericUserId}"]`,
+            `.user-item[data-user-id="${numericUserId}"]`
+        ];
+        
+        for (const selector of selectors) {
+            const userElement = document.querySelector(selector);
+            if (userElement) {
+                console.log('[MessageUI] Found user element:', selector);
+                const chatButton = userElement.querySelector('.chat-btn, .start-chat, [data-action="start-chat"], button:last-child');
+                if (chatButton) {
+                    chatButton.click();
+                } else {
+                    userElement.click();
+                }
+                return;
+            }
+        }
+        
+        // Method 6: Search for the user by name
+        const searchInput = document.querySelector('.contact-search, .search-input, #contactSearch, #searchUsers, .user-search, [placeholder*="search"]');
+        if (searchInput) {
+            console.log('[MessageUI] Searching for user:', userName);
+            searchInput.value = userName;
+            searchInput.dispatchEvent(new Event('input', { bubbles: true }));
+            searchInput.dispatchEvent(new Event('change', { bubbles: true }));
+            
+            const newChatBtn = document.getElementById('newChatBtn');
+            if (newChatBtn && !document.getElementById('contactsSidebar')?.classList.contains('active')) {
+                newChatBtn.click();
+            }
+            
+            setTimeout(() => {
+                const firstResult = document.querySelector('.contact-item, .friend-item, .user-search-item');
+                if (firstResult) {
+                    firstResult.click();
+                    setTimeout(() => {
+                        if (chatPanel) {
+                            chatPanel.classList.remove('hidden');
+                            UIStateManager.setState('chatVisible', true);
+                        }
+                    }, 200);
+                } else {
+                    console.log('[MessageUI] No search results found for:', userName);
+                    showNotificationInMessages(`Click + New Chat to start conversation with ${userName}`, 'info');
+                }
+            }, 600);
+        } else {
+            console.log('[MessageUI] Could not find way to open chat with user:', userId);
+            showNotificationInMessages(`Click + New Chat to start conversation with ${userName}`, 'info');
+            if (chatPanel) {
+                chatPanel.classList.remove('hidden');
+                UIStateManager.setState('chatVisible', true);
+            }
+        }
+    }
+
+    /**
+     * Helper function for notifications within messages module
+     */
+    function showNotificationInMessages(message, type = 'info') {
+        // Try to use the global notification function
+        if (window.messagesUI && typeof window.messagesUI.showNotification === 'function') {
+            window.messagesUI.showNotification(message, type);
+        } else if (typeof window.showNotification === 'function') {
+            window.showNotification(message, type);
+        } else if (UIRenderer && typeof UIRenderer.showNotification === 'function') {
+            UIRenderer.showNotification(message, type);
+        } else {
+            console.log('[MessageUI] Notification:', message);
+        }
+    }
+
+    // =============================================
     // UI INITIALIZATION (PASSIVE UNTIL ACTIVE)
     // =============================================
     function initializeUI() {
         _ensureStatusIndicators();
         _removeLoadingOverlays();
+        
+        // Setup auto-open chat listener
+        setupAutoOpenChat();
         
         // Subscribe to core data events to re-render UI when real data arrives
         const setupCoreSubscriptions = () => {
@@ -4318,25 +4587,182 @@
             }
         },
         
-        // Helper to load chat by friend ID — called from contact item onclick
-        loadChatByFriendId: (friendId) => {
+              loadChatByFriendId: (friendId, friendName) => {
             const core = getMessagesCore();
-            if (!core) return;
+            if (!core) {
+                console.log('[messagesUI] Core not available, retrying in 500ms');
+                setTimeout(() => {
+                    const retryCore = getMessagesCore();
+                    if (retryCore) {
+                        window.messagesUI.loadChatByFriendId(friendId, friendName);
+                    }
+                }, 500);
+                return;
+            }
 
-            // Close contacts sidebar, show main sidebar
+            // Store friend name for header update
+            const displayName = friendName || 'User';
+            window.currentFriendName = displayName;
+            
+            console.log('[messagesUI] loadChatByFriendId called with:', { friendId, friendName: displayName });
+
+            // Close contacts sidebar, show main sidebar and chat panel immediately
             const contactsSidebar = document.getElementById('contactsSidebar');
             const sidebar = document.getElementById('sidebar');
+            const chatPanel = document.getElementById('chatPanel');
+            
             if (contactsSidebar) contactsSidebar.classList.add('hidden');
             if (sidebar) sidebar.classList.add('active');
+            
+            // IMMEDIATELY update chat header with the friend name
+            const nameEl = document.getElementById('chatFriendName');
+            if (nameEl) {
+                nameEl.textContent = displayName;
+            }
+            
+            // IMMEDIATELY show chat panel with loading state
+            if (chatPanel) {
+                chatPanel.classList.remove('hidden');
+                UIStateManager.setState('chatVisible', true);
+                
+                // Show loading indicator in messages container
+                const messagesContainer = document.getElementById('messagesContainer');
+                if (messagesContainer) {
+                    messagesContainer.innerHTML = `
+                        <div class="loading-chat">
+                            <div class="loading-spinner"></div>
+                            <p>Opening conversation with ${displayName}...</p>
+                        </div>
+                    `;
+                }
+            }
 
             const id = parseInt(friendId, 10);
-            if (!id) return;
+            if (!id) {
+                console.error('[messagesUI] Invalid friend ID:', friendId);
+                return;
+            }
 
-            // Use ConversationManager if available (creates or opens existing DM)
+            // Helper function to ensure chat panel is fully opened
+            const ensureChatPanelOpen = (conversationId) => {
+                console.log('[messagesUI] Ensuring chat panel open with ID:', conversationId);
+                
+                // Make sure chat panel is visible
+                if (chatPanel) {
+                    chatPanel.classList.remove('hidden');
+                    UIStateManager.setState('chatVisible', true);
+                }
+                
+                // Update chat header with friend info - use the stored name
+                const nameEl = document.getElementById('chatFriendName');
+                if (nameEl) {
+                    nameEl.textContent = displayName;
+                }
+                
+                // Try to get additional friend info from core
+                const coreInstance = getMessagesCore();
+                if (coreInstance) {
+                    const friends = coreInstance.getFriends ? coreInstance.getFriends() : [];
+                    const friend = friends.find(f => f.id === id);
+                    if (friend) {
+                        const avatarEl = document.getElementById('chatFriendAvatar');
+                        const statusEl = document.getElementById('chatStatusText');
+                        const indicatorEl = document.getElementById('chatStatusIndicator');
+                        
+                        if (nameEl) nameEl.textContent = friend.displayName || friend.username || displayName;
+                        if (statusEl) statusEl.textContent = friend.online ? 'Online' : 'Offline';
+                        if (indicatorEl) indicatorEl.className = `chat-status ${friend.online ? 'online' : 'offline'}`;
+                        if (avatarEl) {
+                            if (friend.avatar || friend.photoURL) {
+                                avatarEl.innerHTML = `<img src="${friend.avatar || friend.photoURL}" alt="${friend.displayName}" loading="lazy">`;
+                            } else {
+                                avatarEl.innerHTML = '<i class="fas fa-user"></i>';
+                            }
+                            if (indicatorEl) avatarEl.appendChild(indicatorEl);
+                        }
+                    } else {
+                        // Update avatar with initials
+                        const avatarEl = document.getElementById('chatFriendAvatar');
+                        if (avatarEl) {
+                            const initials = displayName.charAt(0).toUpperCase();
+                            avatarEl.innerHTML = `<div style="width:40px;height:40px;border-radius:50%;background:linear-gradient(135deg,#667eea,#764ba2);color:white;display:flex;align-items:center;justify-content:center;font-weight:bold;font-size:16px;">${initials}</div>`;
+                            const indicatorEl = document.getElementById('chatStatusIndicator');
+                            if (indicatorEl) avatarEl.appendChild(indicatorEl);
+                        }
+                    }
+                }
+                
+                // Clear loading and show empty chat state if no messages yet
+                const messagesContainer = document.getElementById('messagesContainer');
+                if (messagesContainer && messagesContainer.innerHTML.includes('loading-chat')) {
+                    setTimeout(() => {
+                        if (messagesContainer.innerHTML.includes('loading-chat')) {
+                            messagesContainer.innerHTML = `
+                                <div class="empty-chat">
+                                    <i class="fas fa-comment-dots empty-chat-icon"></i>
+                                    <div class="empty-chat-title">No messages yet</div>
+                                    <div class="empty-chat-message">Type your first message below to start the conversation with ${displayName}</div>
+                                </div>
+                            `;
+                        }
+                    }, 1000);
+                }
+                
+                // Fetch messages for this conversation if we have a valid ID
+                if (conversationId && conversationId !== false && conversationId !== null) {
+                    setTimeout(() => {
+                        const coreFetch = getMessagesCore();
+                        if (coreFetch && conversationId) {
+                            coreFetch.fetchMessages?.(conversationId);
+                        }
+                    }, 100);
+                }
+            };
+
+            // Use ConversationManager if available
             if (core.ConversationManager?.createConversation) {
-                core.ConversationManager.createConversation([id]);
+                console.log('[messagesUI] Using ConversationManager.createConversation');
+                const result = core.ConversationManager.createConversation([id]);
+                
+                if (result && typeof result.then === 'function') {
+                    result.then((conversation) => {
+                        console.log('[messagesUI] Conversation created/opened:', conversation);
+                        if (conversation === false || conversation === null) {
+                            console.log('[messagesUI] createConversation returned false, opening panel anyway');
+                            ensureChatPanelOpen(id);
+                        } else {
+                            const conversationId = conversation?.id || conversation;
+                            ensureChatPanelOpen(conversationId);
+                        }
+                    }).catch((error) => {
+                        console.error('[messagesUI] Failed to create conversation:', error);
+                        ensureChatPanelOpen(id);
+                    });
+                } else {
+                    const conversationId = (result === false || result === null) ? id : (result?.id || result);
+                    ensureChatPanelOpen(conversationId);
+                }
             } else if (core.createConversation) {
-                core.createConversation([id]);
+                console.log('[messagesUI] Using core.createConversation');
+                const result = core.createConversation([id]);
+                if (result && typeof result.then === 'function') {
+                    result.then((conversation) => {
+                        const conversationId = (conversation === false || conversation === null) ? id : (conversation?.id || conversation);
+                        ensureChatPanelOpen(conversationId);
+                    }).catch(() => {
+                        ensureChatPanelOpen(id);
+                    });
+                } else {
+                    const conversationId = (result === false || result === null) ? id : (result?.id || result);
+                    ensureChatPanelOpen(conversationId);
+                }
+            } else if (core.openConversation) {
+                console.log('[messagesUI] Using core.openConversation');
+                core.openConversation(id);
+                ensureChatPanelOpen(id);
+            } else {
+                console.warn('[messagesUI] No conversation creation method available');
+                ensureChatPanelOpen(id);
             }
         },
         
@@ -4431,9 +4857,9 @@
     window.messagesUI = messagesUI;
     
     // Add media viewer close handler
-    const closeMediaViewer = document.getElementById('closeMediaViewer');
-    if (closeMediaViewer) {
-        closeMediaViewer.addEventListener('click', () => {
+    const closeMediaViewerBtn = document.getElementById('closeMediaViewer');
+    if (closeMediaViewerBtn) {
+        closeMediaViewerBtn.addEventListener('click', () => {
             const viewer = document.getElementById('mediaViewer');
             if (viewer) viewer.classList.remove('active');
         });

@@ -5,37 +5,177 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Kynecta - Advanced Mood-Based Chat</title>
     <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { font-family: system-ui, -apple-system, sans-serif; background: #f5f5f5; overflow: hidden; height: 100vh; }
-        .hidden { display: none !important; }
-        #loadingScreen { position: fixed; inset: 0; background: white; z-index: 9999; display: flex; align-items: center; justify-content: center; transition: opacity 0.3s; }
-        #permanentSidebar { position: fixed; left: 0; top: 0; bottom: 0; width: 60px; background: linear-gradient(180deg, #111827 0%, #1f2937 100%); display: flex; flex-direction: column; align-items: center; padding: 20px 0; z-index: 100; }
-        .nav-icon { width: 48px; height: 48px; display: flex; align-items: center; justify-content: center; border-radius: 12px; margin: 8px 0; cursor: pointer; color: #9ca3af; transition: all 0.2s; font-size: 20px; }
-        .nav-icon:hover { background: rgba(255,255,255,0.1); color: white; }
-        .nav-icon.active { background: #7c3aed; color: white; }
-        .iframe-container { position: fixed; top: 0; left: 60px; right: 0; bottom: 0; background: white; z-index: 90; }
-        .iframe-container.hidden { display: none; }
-        .content-iframe { width: 100%; height: 100%; border: none; display: block; }
-        .mobile-nav-bar { display: none; position: fixed; bottom: 0; left: 0; right: 0; height: 60px; background: linear-gradient(135deg, #667eea, #764ba2); z-index: 1000; justify-content: space-around; align-items: center; }
-        .mobile-nav-icon { flex: 1; text-align: center; padding: 12px; color: rgba(255,255,255,0.8); cursor: pointer; font-size: 20px; }
-        .mobile-nav-icon.active { background: rgba(255,255,255,0.2); color: white; }
-        @media (max-width: 768px) {
-            #permanentSidebar { display: none; }
-            .iframe-container { left: 0; }
-            .mobile-nav-bar { display: flex; }
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
         }
-        @media (min-width: 769px) { .mobile-nav-bar { display: none; } }
-        .kynecta-status-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
-        .status-connected { background-color: #10b981; }
-        .relative { position: relative; }
-        .mt-auto { margin-top: auto; }
-        .mb-4 { margin-bottom: 1rem; }
-        @keyframes pulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.7; transform: scale(0.98); } }
+
+        body {
+            font-family: system-ui, -apple-system, sans-serif;
+            background: #f5f5f5;
+            overflow: hidden;
+            height: 100vh;
+        }
+
+        .hidden {
+            display: none !important;
+        }
+
+        #loadingScreen {
+            position: fixed;
+            inset: 0;
+            background: white;
+            z-index: 9999;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: opacity 0.3s;
+        }
+
+        #permanentSidebar {
+            position: fixed;
+            left: 0;
+            top: 0;
+            bottom: 0;
+            width: 60px;
+            background: linear-gradient(180deg, #111827 0%, #1f2937 100%);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 20px 0;
+            z-index: 100;
+        }
+
+        .nav-icon {
+            width: 48px;
+            height: 48px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 12px;
+            margin: 8px 0;
+            cursor: pointer;
+            color: #9ca3af;
+            transition: all 0.2s;
+            font-size: 20px;
+        }
+
+        .nav-icon:hover {
+            background: rgba(255,255,255,0.1);
+            color: white;
+        }
+
+        .nav-icon.active {
+            background: #7c3aed;
+            color: white;
+        }
+
+        .iframe-container {
+            position: fixed;
+            top: 0;
+            left: 60px;
+            right: 0;
+            bottom: 0;
+            background: white;
+            z-index: 90;
+        }
+
+        .iframe-container.hidden {
+            display: none;
+        }
+
+        .content-iframe {
+            width: 100%;
+            height: 100%;
+            border: none;
+            display: block;
+        }
+
+        .mobile-nav-bar {
+            display: none;
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            height: 60px;
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            z-index: 1000;
+            justify-content: space-around;
+            align-items: center;
+        }
+
+        .mobile-nav-icon {
+            flex: 1;
+            text-align: center;
+            padding: 12px;
+            color: rgba(255,255,255,0.8);
+            cursor: pointer;
+            font-size: 20px;
+        }
+
+        .mobile-nav-icon.active {
+            background: rgba(255,255,255,0.2);
+            color: white;
+        }
+
+        @media (max-width: 768px) {
+            #permanentSidebar {
+                display: none;
+            }
+            .iframe-container {
+                left: 0;
+            }
+            .mobile-nav-bar {
+                display: flex;
+            }
+        }
+
+        @media (min-width: 769px) {
+            .mobile-nav-bar {
+                display: none;
+            }
+        }
+
+        .kynecta-status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            display: inline-block;
+        }
+
+        .status-connected {
+            background-color: #10b981;
+        }
+
+        .relative {
+            position: relative;
+        }
+
+        .mt-auto {
+            margin-top: auto;
+        }
+
+        .mb-4 {
+            margin-bottom: 1rem;
+        }
+
+        @keyframes pulse {
+            0%, 100% {
+                opacity: 1;
+                transform: scale(1);
+            }
+            50% {
+                opacity: 0.7;
+                transform: scale(0.98);
+            }
+        }
     </style>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 </head>
 <body>
 
+    <!-- Loading Screen -->
     <div id="loadingScreen">
         <div style="text-align: center;">
             <div style="width: 64px; height: 64px; background: linear-gradient(135deg, #a855f7, #10b981); border-radius: 16px; display: flex; align-items: center; justify-content: center; margin: 0 auto 16px; animation: pulse 1.5s infinite;">
@@ -46,6 +186,7 @@
         </div>
     </div>
 
+    <!-- Permanent Sidebar (Desktop) -->
     <div id="permanentSidebar">
         <button class="nav-icon active" data-page="messages"><i class="fas fa-comments"></i></button>
         <button class="nav-icon" data-page="status"><i class="fas fa-circle"></i></button>
@@ -54,9 +195,12 @@
         <button class="nav-icon" data-page="calls"><i class="fas fa-phone"></i></button>
         <button class="nav-icon" data-page="settings"><i class="fas fa-cog"></i></button>
         <button class="nav-icon" data-page="tools"><i class="fas fa-tools"></i></button>
-        <div class="mt-auto mb-4 relative"><div class="kynecta-status-dot status-connected" style="position: absolute; bottom: 2px; right: 2px;"></div></div>
+        <div class="mt-auto mb-4 relative">
+            <div class="kynecta-status-dot status-connected" style="position: absolute; bottom: 2px; right: 2px;"></div>
+        </div>
     </div>
 
+    <!-- Mobile Navigation Bar -->
     <div id="mobileNavBar" class="mobile-nav-bar">
         <button class="mobile-nav-icon active" data-page="messages"><i class="fas fa-comments"></i></button>
         <button class="mobile-nav-icon" data-page="calls"><i class="fas fa-phone"></i></button>
@@ -67,56 +211,79 @@
         <button class="mobile-nav-icon" data-page="tools"><i class="fas fa-tools"></i></button>
     </div>
 
-    <div id="messagesContent" class="iframe-container"><iframe id="messagesIframe" class="content-iframe" src="message.html" sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-modals allow-downloads allow-popups-to-escape-sandbox"></iframe></div>
-    <div id="statusContent" class="iframe-container hidden"><iframe id="statusIframe" class="content-iframe" src="status.html" sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-modals allow-downloads allow-popups-to-escape-sandbox"></iframe></div>
-    <div id="groupContent" class="iframe-container hidden"><iframe id="groupIframe" class="content-iframe" src="group.html" sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-modals allow-downloads allow-popups-to-escape-sandbox"></iframe></div>
-    <div id="friendsContent" class="iframe-container hidden"><iframe id="friendsIframe" class="content-iframe" src="friend.html" sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-modals allow-downloads allow-popups-to-escape-sandbox" allow="camera; microphone; geolocation"></iframe></div>
-    <div id="callsContent" class="iframe-container hidden"><iframe id="callsIframe" class="content-iframe" src="calls.html" sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-modals allow-downloads allow-popups-to-escape-sandbox"></iframe></div>
-    <div id="settingsContent" class="iframe-container hidden"><iframe id="settingsIframe" class="content-iframe" src="settings.html" sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-modals allow-downloads allow-popups-to-escape-sandbox"></iframe></div>
-    <div id="toolsContent" class="iframe-container hidden"><iframe id="toolsIframe" class="content-iframe" src="Tools.html" sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-modals allow-downloads allow-popups-to-escape-sandbox"></iframe></div>
+    <!-- IFrame Containers for each module -->
+    <div id="messagesContent" class="iframe-container">
+        <iframe id="messagesIframe" class="content-iframe" src="message.html" data-module="messages" sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-modals allow-downloads allow-popups-to-escape-sandbox"></iframe>
+    </div>
+    <div id="statusContent" class="iframe-container hidden">
+        <iframe id="statusIframe" class="content-iframe" src="status.html" data-module="status" sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-modals allow-downloads allow-popups-to-escape-sandbox"></iframe>
+    </div>
+    <div id="groupContent" class="iframe-container hidden">
+        <iframe id="groupIframe" class="content-iframe" src="group.html" data-module="group" sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-modals allow-downloads allow-popups-to-escape-sandbox"></iframe>
+    </div>
+    <div id="friendsContent" class="iframe-container hidden">
+        <iframe id="friendsIframe" class="content-iframe" src="friend.html" data-module="friends" sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-modals allow-downloads allow-popups-to-escape-sandbox" allow="camera; microphone; geolocation"></iframe>
+    </div>
+    <div id="callsContent" class="iframe-container hidden">
+        <iframe id="callsIframe" class="content-iframe" src="calls.html" data-module="calls" sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-modals allow-downloads allow-popups-to-escape-sandbox"></iframe>
+    </div>
+    <div id="settingsContent" class="iframe-container hidden">
+        <iframe id="settingsIframe" class="content-iframe" src="settings.html" data-module="settings" sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-modals allow-downloads allow-popups-to-escape-sandbox"></iframe>
+    </div>
+    <div id="toolsContent" class="iframe-container hidden">
+        <iframe id="toolsIframe" class="content-iframe" src="Tools.html" data-module="tools" sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-modals allow-downloads allow-popups-to-escape-sandbox"></iframe>
+    </div>
 
     <script>
-    // Environment detection
-    window.__getApiBase = function() { return 'http://localhost:4000/api'; };
-    
-    // Session protection - prevent clearing
-    (function() {
-        const originalRemove = localStorage.removeItem;
-        localStorage.removeItem = function(key) {
-            if (key === 'kynecta_auth' || key === 'token' || key === 'moodchat_token' || key === 'accessToken') {
-                console.log('🛡️ Blocked clearing:', key);
-                return;
-            }
-            originalRemove.call(this, key);
+        // ======================================================================
+        // ENVIRONMENT DETECTION & SESSION PROTECTION
+        // ======================================================================
+        window.__getApiBase = function() {
+            return 'http://localhost:4000/api';
         };
-    })();
-    
-    // Navigation
-    document.querySelectorAll('.nav-icon, .mobile-nav-icon').forEach(btn => {
-        btn.addEventListener('click', (e) => {
-            e.preventDefault();
-            const page = btn.dataset.page;
-            if (page) {
-                document.querySelectorAll('.iframe-container').forEach(c => c.classList.add('hidden'));
-                const target = document.getElementById(`${page}Content`);
-                if (target) target.classList.remove('hidden');
-                document.querySelectorAll('.nav-icon, .mobile-nav-icon').forEach(b => b.classList.remove('active'));
-                btn.classList.add('active');
-            }
+
+        // Session protection - prevent clearing critical auth keys
+        (function() {
+            const originalRemove = localStorage.removeItem;
+            localStorage.removeItem = function(key) {
+                if (key === 'kynecta_auth' || key === 'token' || key === 'moodchat_token' || key === 'accessToken') {
+                    console.log('🛡️ Blocked clearing:', key);
+                    return;
+                }
+                originalRemove.call(this, key);
+            };
+        })();
+
+        // ======================================================================
+        // NAVIGATION HANDLERS
+        // ======================================================================
+        document.querySelectorAll('.nav-icon, .mobile-nav-icon').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.preventDefault();
+                const page = btn.dataset.page;
+                if (page) {
+                    document.querySelectorAll('.iframe-container').forEach(c => c.classList.add('hidden'));
+                    const target = document.getElementById(`${page}Content`);
+                    if (target) target.classList.remove('hidden');
+                    document.querySelectorAll('.nav-icon, .mobile-nav-icon').forEach(b => b.classList.remove('active'));
+                    btn.classList.add('active');
+                }
+            });
         });
-    });
-    
-    // Hide loading screen after a short delay
-    setTimeout(() => {
-        const loading = document.getElementById('loadingScreen');
-        if (loading) {
-            loading.style.opacity = '0';
-            setTimeout(() => loading.classList.add('hidden'), 300);
-        }
-    }, 2000);
+
+        // Hide loading screen after delay
+        setTimeout(() => {
+            const loading = document.getElementById('loadingScreen');
+            if (loading) {
+                loading.style.opacity = '0';
+                setTimeout(() => loading.classList.add('hidden'), 300);
+            }
+        }, 2000);
+
+        // ======================================================================
+        // LOAD MODULE SCRIPTS
+        // ======================================================================
     </script>
-    
-    <!-- Load module scripts -->
     <script src="js/app.core.eventbus.js"></script>
     <script src="js/app.core.store.js"></script>
     <script src="js/app.realtime.socket.js"></script>
@@ -124,584 +291,565 @@
     <script src="js/services.friend.js"></script>
     <script src="js/app.sync.manager.js"></script>
     <script src="js/app.offline.queue.js"></script>
-    <!-- Tell api_core.js relay not to duplicate-handle API_REQUESTs that chat.html already handles -->
     <script>window.__parentHandlesApiRequests = true;</script>
     <script type="module" src="js/api.core.js"></script>
 
-<script>
+    <script>
+        // ======================================================================
+        // PARENT ORCHESTRATION - CORE FUNCTIONALITY
+        // ======================================================================
+        (function originalParentFormat() {
+            console.log('📡 Parent broadcaster started');
 
-// ===== PARENT ORCHESTRATION =====
-(function originalParentFormat() {
-    console.log('📡 Parent broadcaster started');
-    
-    // Cache session data
-    let cachedToken = null;
-    let cachedUserId = null;
-    let cachedUser = null;
-    
-    // Request throttling
-    const requestThrottle = new Map();
-    const THROTTLE_TIMES = {
-        '/api/chats': 3000,
-        '/api/friends': 3000,
-        '/api/settings': 5000,
-        '/api/groups': 3000,
-        'default': 2000
-    };
-    
-    function canMakeRequest(endpoint) {
-        const now = Date.now();
-        const lastRequest = requestThrottle.get(endpoint) || 0;
-        const throttleTime = THROTTLE_TIMES[endpoint] || THROTTLE_TIMES.default;
-        
-        if (now - lastRequest < throttleTime) {
-            console.log(`[Throttle] Skipping ${endpoint} - ${now - lastRequest}ms since last request`);
-            return false;
-        }
-        
-        requestThrottle.set(endpoint, now);
-        return true;
-    }
-    
-    // Map modules to iframes
-    const moduleToIframeId = {
-        'messages': 'messagesIframe',
-        'status': 'statusIframe',
-        'group': 'groupIframe',
-        'groups': 'groupIframe',
-        'friends': 'friendsIframe',
-        'calls': 'callsIframe',
-        'settings': 'settingsIframe',
-        'tools': 'toolsIframe'
-    };
-    
-    const endpointMappings = {
-    // Group endpoints - THESE EXIST
-    '/group/user': '/groups/user',           // ✅ This works
-    '/group/user/': '/groups/user',          // ✅ This works
-    '/group/invites': '/groups/invites',      // ✅ This exists (returns empty array)
-    '/invites': '/groups/invites/user',       // ✅ Fix: /api/invites → /groups/invites/user
-    '/group/moods': '/groups/moods',          // ✅ This exists (returns mood list)
-    '/group/purposes': '/groups/purposes',    // ✅ This exists (returns purpose list)
-    '/group/notes': '/groups/notes',          // ✅ This exists (returns note types)
-    
-    // Chat endpoints
-    '/chats': '/chats',                       // ✅ This exists
-    '/chats/': '/chats',                      // ✅ This exists
-    '/messages': '/messages',                 // ✅ Fix: messages endpoint
-    '/messages/send': '/messages',            // ✅ Fix: send message → POST /messages
-    
-    // Friend endpoints - FIX THESE
-    '/friends': '/friends',                   // ✅ This exists
-    '/friends/requests/incoming': '/friends/incoming',  // ✅ This exists
-    '/friends/requests/sent': '/friends/sent',          // ✅ This exists
-    '/friends/contacts/synced': '/friends/synced',      // ✅ This exists
-    '/friends/pinned': '/friends/pinned',               // ✅ This exists
-    '/friends/muted': '/friends/muted',                 // ✅ This exists
-    '/friends/groups/user': '/groups/user',             // ✅ Map to /groups/user
+            // Cache session data
+            let cachedToken = null;
+            let cachedUserId = null;
+            let cachedUser = null;
 
-    // ✅ FIXED: Missing friend endpoints now mapped correctly
-    '/friends/requests/send': '/friends/send',          // ✅ POST send friend request
-    '/friends/incoming': '/friends/incoming',           // ✅ GET incoming requests
-    '/friends/search': '/friends/search',               // ✅ GET search users
-    '/friends/users/all': '/friends/users/all',         // ✅ GET all users for discovery
-    '/friends/nearby': '/friends/nearby',               // ✅ GET nearby users
-    
-    // Settings endpoints - ADD THESE
-    '/settings': '/settings',                 // ✅ This exists
-    '/profile': '/settings',                  // 🔧 Map to /settings (not /settings/profile)
-    '/users/settings': '/settings',           // 🔧 Map to /settings
-    '/users/profile': '/settings',            // 🔧 Map to /settings
-    '/users/blocked': '/settings/blocked-users', // ✅ This exists
-    '/friends/contacts': '/friends',          // 🔧 Map to /friends
-    
-    // Auth endpoints
-    '/auth/me': '/auth/me',                   // ✅ This exists
-    '/auth/sessions': '/auth/sessions',                // ❌ This doesn't exist - need to add or map
+            // Request throttling
+            const requestThrottle = new Map();
+            const THROTTLE_TIMES = {
+                '/api/chats': 3000,
+                '/api/friends': 3000,
+                '/api/settings': 5000,
+                '/api/groups': 3000,
+                'default': 2000
+            };
 
-    // Status endpoints - FIXED v2.0
-    // All status-core.js calls now go to correct REST paths.
-    // Note: prefix-stripping below removes /api/ so e.g. /api/status → /status
-    '/api/status':         '/status',          // GET  all public statuses
-    '/status':             '/status',          // GET  all public statuses (also POST create)
-    '/api/status/my':      '/status/my',       // GET  my own statuses
-    '/status/my':          '/status/my',
-    '/api/status/friends': '/status/friends',  // GET  friends' statuses (NEW)
-    '/status/friends':     '/status/friends',
-    '/api/status/stats':   '/status/stats',    // GET  statistics
-    '/status/stats':       '/status/stats',
-    '/api/status/trending':'/status/trending', // GET  trending
-    '/status/trending':    '/status/trending',
-    '/api/status/public':  '/status/public',   // GET  public statuses
-    '/status/public':      '/status/public',
-    // Dynamic routes (/api/status/:id, /:id/view, /:id/like, etc.)
-    // are passed through as-is after the /api/ prefix is stripped.
-    // Legacy bad mappings REMOVED (they pointed to non-existent routes):
-    //   /status/create  → was wrong, POST /status is the create route
-    //   /status/view    → was wrong, POST /status/:id/view is the view route
-    //   /status/delete  → was wrong, DELETE /status/:id is the delete route
-};
-    
-function getSessionData() {
-    // Try multiple token keys
-    const token = localStorage.getItem('token') || 
-                  localStorage.getItem('moodchat_token') || 
-                  localStorage.getItem('accessToken');
-    
-    if (!token) {
-        console.log('[Parent] No token found in localStorage');
-        return null;
-    }
-    
-    let userId = null;
-    let user = null;
-    
-    // PRIMARY METHOD: Decode JWT token directly
-    try {
-        const parts = token.split('.');
-        if (parts.length === 3) {
-            const payload = JSON.parse(atob(parts[1]));
-            console.log('[Parent] Decoded token payload:', payload);
-            
-            // Extract user ID - try multiple possible field names
-            userId = payload.userId || payload.id || payload.sub || payload.user_id || payload.uid;
-            
-            if (userId) {
-                user = {
-                    id: userId,
-                    userId: userId,
-                    username: payload.username || payload.name || payload.email?.split('@')[0] || 'User',
-                    email: payload.email || '',
-                    displayName: payload.displayName || payload.username || payload.name || 'User',
-                    firstName: payload.firstName || '',
-                    lastName: payload.lastName || ''
-                };
-                console.log('[Parent] ✓ Extracted user from token:', { userId, username: user.username });
-            }
-        }
-    } catch (e) {
-        console.warn('[Parent] Failed to decode token:', e);
-    }
-    
-    // SECONDARY METHOD: Try kynecta_auth
-    if (!userId) {
-        const authData = localStorage.getItem('kynecta_auth');
-        if (authData) {
-            try {
-                const parsed = JSON.parse(authData);
-                userId = parsed.userId || parsed.id || parsed.user?.id;
-                if (userId) {
-                    user = parsed.user || parsed;
-                    console.log('[Parent] ✓ Extracted user from kynecta_auth:', { userId });
+            function canMakeRequest(endpoint) {
+                const now = Date.now();
+                const lastRequest = requestThrottle.get(endpoint) || 0;
+                const throttleTime = THROTTLE_TIMES[endpoint] || THROTTLE_TIMES.default;
+                if (now - lastRequest < throttleTime) {
+                    console.log(`[Throttle] Skipping ${endpoint} - ${now - lastRequest}ms since last request`);
+                    return false;
                 }
-            } catch(e) {
-                console.warn('[Parent] Failed to parse kynecta_auth:', e);
-            }
-        }
-    }
-    
-    // TERTIARY METHOD: Try user data
-    if (!userId) {
-        const userData = localStorage.getItem('user') || localStorage.getItem('currentUser') || localStorage.getItem('USER_DATA');
-        if (userData) {
-            try {
-                const parsed = JSON.parse(userData);
-                userId = parsed.id || parsed.userId;
-                if (userId) {
-                    user = parsed;
-                    console.log('[Parent] ✓ Extracted user from user data:', { userId });
-                }
-            } catch(e) {}
-        }
-    }
-    
-    if (!userId) {
-        console.error('[Parent] ❌ Could not extract user ID from any source');
-        // Fallback: use a default user ID from token if available
-        if (token) {
-            // Try to extract from token as a last resort
-            const tokenParts = token.split('.');
-            if (tokenParts.length === 3) {
-                try {
-                    const payload = JSON.parse(atob(tokenParts[1]));
-                    if (payload.userId || payload.id) {
-                        userId = payload.userId || payload.id;
-                        console.log('[Parent] ✓ Extracted userId from token payload as fallback:', userId);
-                    }
-                } catch(e) {}
-            }
-        }
-        
-        if (!userId) {
-            return null;
-        }
-    }
-    
-    return { token, userId, user };
-}
-
-function updateSessionCache() {
-    const session = getSessionData();
-    if (session && session.userId) {
-        cachedToken = session.token;
-        cachedUserId = session.userId;
-        cachedUser = session.user || { id: session.userId, userId: session.userId, username: 'User' };
-        console.log('[Parent] ✅ Session cache updated:', { 
-            userId: cachedUserId, 
-            tokenLength: cachedToken?.length,
-            hasUser: !!cachedUser 
-        });
-    } else {
-        console.warn('[Parent] ⚠️ No valid session found');
-        cachedToken = null;
-        cachedUserId = null;
-        cachedUser = null;
-    }
-}
-
-    // Initial update
-    updateSessionCache();
-    
-    // Update periodically (less frequent)
-    setInterval(updateSessionCache, 10000);
-    
-    // Listen for storage changes
-    window.addEventListener('storage', function(e) {
-        if (e.key === 'token' || e.key === 'moodchat_token' || e.key === 'kynecta_auth' || e.key === 'accessToken') {
-            console.log('[Parent] Storage changed, updating session');
-            updateSessionCache();
-            // Resend session to all modules
-            setTimeout(() => sendToAllModulesIfNeeded(true), 100);
-        }
-    });
-
-function sendSessionToModule(iframe, moduleName) {
-    if (!cachedToken || !cachedUserId) {
-        console.log(`[Parent] No session for ${moduleName}, skipping`);
-        return;
-    }
-    
-    if (!iframe || !iframe.contentWindow) {
-        console.log(`[Parent] No iframe for ${moduleName}`);
-        return;
-    }
-    
-    // CRITICAL FIX: Ensure user object has the correct ID format
-    const userData = {
-        id: cachedUserId,
-        userId: cachedUserId,
-        username: cachedUser?.username || 'User',
-        displayName: cachedUser?.displayName || cachedUser?.username || 'User',
-        email: cachedUser?.email || '',
-        firstName: cachedUser?.firstName || '',
-        lastName: cachedUser?.lastName || ''
-    };
-    
-    const sessionData = {
-        token: cachedToken,
-        user: userData,
-        authenticated: true,
-        expiresAt: Date.now() + 3600000,
-        ready: true,
-        userId: cachedUserId,  // Add userId at root level
-        id: cachedUserId       // Add id at root level
-    };
-    
-    // Send SESSION_DATA with proper structure - include userId at root
-    iframe.contentWindow.postMessage({
-        type: 'SESSION_DATA',
-        id: `session_${Date.now()}_${moduleName}`,
-        source: 'parent',
-        target: moduleName,
-        payload: sessionData,
-        userId: cachedUserId,  // Include userId in root
-        timestamp: Date.now()
-    }, '*');
-    
-    // Send AUTH_READY with proper structure
-    iframe.contentWindow.postMessage({
-        type: 'AUTH_READY',
-        id: `auth_ready_${Date.now()}_${moduleName}`,
-        source: 'parent',
-        target: moduleName,
-        payload: {
-            authenticated: true,
-            session: sessionData,
-            user: userData,
-            userId: cachedUserId,
-            timestamp: Date.now()
-        },
-        userId: cachedUserId,  // Include userId in root
-        timestamp: Date.now()
-    }, '*');
-    
-    // Send PARENT_READY
-    iframe.contentWindow.postMessage({
-        type: 'PARENT_READY',
-        id: `parent_ready_${Date.now()}_${moduleName}`,
-        source: 'parent',
-        target: moduleName,
-        payload: {
-            protocol: 'KYN-8.0',
-            state: 'READY',
-            message: 'Parent is ready',
-            session: sessionData,
-            userId: cachedUserId
-        },
-        userId: cachedUserId,  // Include userId in root
-        timestamp: Date.now()
-    }, '*');
-    
-    console.log(`📡 Sent session to ${moduleName} (userId: ${cachedUserId})`);
-}
-
-    let lastSessionSend = 0;
-    const SESSION_SEND_INTERVAL = 30000; // 30 seconds minimum
-  
-    function sendToAllModulesIfNeeded(force = false) {
-    const now = Date.now();
-    if (!force && now - lastSessionSend < SESSION_SEND_INTERVAL) {
-        console.log('[Parent] Skipping session send - too soon');
-        return;
-    }
-    
-    if (!cachedToken || !cachedUserId) {
-        console.log('[Parent] No session available');
-        return;
-    }
-    
-    lastSessionSend = now;
-    console.log('[Parent] Sending session to all modules');
-    
-    Object.entries(moduleToIframeId).forEach(([moduleName, iframeId]) => {
-        const iframe = document.getElementById(iframeId);
-        if (iframe && iframe.contentWindow) {
-            sendSessionToModule(iframe, moduleName);
-        }
-    });
-}
-    // In chat.html, replace the message handler inside the <script> tag
-
-window.addEventListener('message', async function(event) {
-    const data = event.data || {};
- 
-    // Handle CHILD_READY - send session to the module that just became ready
-    if (data.type === 'CHILD_READY') {
-        // Resolve module name from all possible fields in order of reliability
-        const targetModule = data.module || data.source || data.payload?.module || null;
-        console.log(`📡 CHILD_READY from ${targetModule || 'unknown'}`);
-
-        if (targetModule && moduleToIframeId[targetModule]) {
-            const iframe = document.getElementById(moduleToIframeId[targetModule]);
-            if (iframe && iframe.contentWindow) {
-                if (cachedToken && cachedUserId) {
-                    console.log(`📡 Sending session to ${targetModule} (from CHILD_READY)`);
-                    sendSessionToModule(iframe, targetModule);
-                } else {
-                    // Session not cached yet — update cache then send
-                    updateSessionCache();
-                    if (cachedToken && cachedUserId) {
-                        console.log(`📡 Sending session to ${targetModule} (from CHILD_READY, cache refreshed)`);
-                        sendSessionToModule(iframe, targetModule);
-                    } else {
-                        console.warn(`📡 No session available for ${targetModule} — will retry on next broadcast`);
-                    }
-                }
-            }
-        } else {
-            console.log(`📡 Unrecognised module "${targetModule}" — broadcasting to all`);
-            sendToAllModulesIfNeeded(true);
-        }
-    }
-    // Handle API REQUESTS - NOW USING API GATEWAY WITH CORRECT RESPONSE FORMAT
-    if (data.type === 'API_REQUEST') {
-        let endpoint = data.payload?.endpoint || data.endpoint;
-        
-        if (!endpoint) {
-            console.error('[Parent] API_REQUEST missing endpoint:', data);
-            return;
-        }
-        
-        // Apply endpoint mappings
-        if (endpointMappings[endpoint]) {
-            console.log(`[Parent] Mapping: ${endpoint} → ${endpointMappings[endpoint]}`);
-            endpoint = endpointMappings[endpoint];
-        }
-        
-        // Remove /api/ prefix if present - API gateway will add it
-        if (endpoint.startsWith('/api/')) {
-            endpoint = endpoint.substring(4);
-        }
-        
-        // Ensure endpoint starts with /
-        if (!endpoint.startsWith('/')) {
-            endpoint = '/' + endpoint;
-        }
-        
-        const requestId = data.payload?.requestId || data.requestId;
-        const method = data.payload?.method || data.method || 'GET';
-        const body = data.payload?.body || data.body;
-        const params = data.payload?.params || data.params || null;
-        
-        console.log(`[Parent] API: ${method} ${endpoint} (${requestId})`);
-        
-        try {
-            // Use the API gateway for all requests
-            let response;
-            
-            // Wait for API gateway to be ready
-            if (window.api && window.api.core && window.api.core.waitFor) {
-                await window.api.core.waitFor();
-            }
-            
-            // Make request through API gateway
-            if (method === 'GET') {
-                response = await window.api.get(endpoint, params || {});
-            } else if (method === 'POST') {
-                response = await window.api.post(endpoint, body);
-            } else if (method === 'PUT') {
-                response = await window.api.put(endpoint, body);
-            } else if (method === 'DELETE') {
-                response = await window.api.del(endpoint);
-            } else {
-                response = await window.api.request(endpoint, { method, body });
-            }
-            
-            // Build response payload.
-            // FIXED: Pass the raw backend JSON through as-is inside payload.data so that
-            // each module's own response unwrapper can handle its specific shape.
-            // The old conditional logic was silently discarding nested data in some paths
-            // (e.g. /api/friends returns { success, data: { friends: [] } } — the extra
-            // branch checks were not covering all cases and left payload.data as {}).
-            const isSuccess = response && (response.success === true ||
-                (response.status && response.status >= 200 && response.status < 300));
-
-            const responsePayload = isSuccess
-                ? {
-                    success: true,
-                    // response.data is the parsed backend JSON body
-                    data: response.data !== undefined ? response.data : response,
-                    statusCode: response.status || 200
-                  }
-                : {
-                    success: false,
-                    error: response?.message || response?.error || 'Request failed',
-                    statusCode: response?.status || 500,
-                    data: response?.data || null
-                  };
-            
-            // Send response back to module with correct payload structure
-            if (event.source && event.source.postMessage) {
-                event.source.postMessage({
-                    type: 'API_RESPONSE',
-                    requestId: requestId,
-                    payload: responsePayload,
-                    timestamp: new Date().toISOString()
-                }, '*');
-            }
-            
-            console.log(`[Parent] Response: ${endpoint} (${responsePayload.success ? 'OK' : 'Error'})`);
-            
-        } catch (error) {
-            console.error(`[Parent] API error: ${endpoint}`, error);
-            
-            // Send error response with correct payload structure
-            if (event.source && event.source.postMessage) {
-                event.source.postMessage({
-                    type: 'API_RESPONSE',
-                    requestId: requestId,
-                    payload: {
-                        success: false,
-                        error: error.message || 'Request failed',
-                        statusCode: error.status || 500,
-                        data: null
-                    },
-                    timestamp: new Date().toISOString()
-                }, '*');
-            }
-        }
-    }
-});
-    
-    // Send initial session to all modules after a delay
-    setTimeout(() => {
-        console.log('📡 Sending initial session to all modules');
-        sendToAllModulesIfNeeded(true);
-    }, 1000);
-    
-    // No periodic sends - only on-demand
-    // Add token refresh function to parent
-async function refreshAuthToken() {
-    try {
-        const refreshToken = localStorage.getItem('refreshToken');
-        if (!refreshToken) {
-            console.log('[Parent] No refresh token available');
-            return false;
-        }
-        
-        const response = await fetch('http://localhost:4000/api/auth/refresh', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ refreshToken }),
-            credentials: 'include'
-        });
-        
-        if (response.ok) {
-            const data = await response.json();
-            const newToken = data.token || data.accessToken;
-            
-            if (newToken) {
-                // Update all storage locations
-                localStorage.setItem('token', newToken);
-                localStorage.setItem('moodchat_token', newToken);
-                localStorage.setItem('accessToken', newToken);
-                
-                // Update auth storage
-                const authData = localStorage.getItem('kynecta_auth');
-                if (authData) {
-                    const parsed = JSON.parse(authData);
-                    parsed.token = newToken;
-                    localStorage.setItem('kynecta_auth', JSON.stringify(parsed));
-                }
-                
-                console.log('[Parent] ✅ Token refreshed successfully');
-                
-                // Resend session to all modules
-                setTimeout(() => sendToAllModulesIfNeeded(true), 100);
-                
+                requestThrottle.set(endpoint, now);
                 return true;
             }
-        }
-        
-        console.log('[Parent] ❌ Token refresh failed');
-        return false;
-    } catch (error) {
-        console.error('[Parent] Token refresh error:', error);
-        return false;
-    }
-}
 
-// Call refresh on 401 errors
-const originalPostMessage = window.postMessage;
-window.addEventListener('message', async (event) => {
-    const data = event.data || {};
-    
-    // Check for API responses with 401
-    if (data.type === 'API_RESPONSE' && data.status === 401) {
-        console.log('[Parent] Received 401, attempting token refresh');
-        const refreshed = await refreshAuthToken();
-        
-        if (refreshed) {
-            // Retry the failed request if we have the original request info
-            if (data.originalRequest) {
-                // Resend the request with new token
-                // This would require storing the original request
+            // Map modules to iframes
+            const moduleToIframeId = {
+                'messages': 'messagesIframe',
+                'status': 'statusIframe',
+                'group': 'groupIframe',
+                'groups': 'groupIframe',
+                'friends': 'friendsIframe',
+                'calls': 'callsIframe',
+                'settings': 'settingsIframe',
+                'tools': 'toolsIframe'
+            };
+
+            // API Endpoint Mappings
+            const endpointMappings = {
+                '/group/user': '/groups/user',
+                '/group/user/': '/groups/user',
+                '/group/invites': '/groups/invites',
+                '/invites': '/groups/invites/user',
+                '/group/moods': '/groups/moods',
+                '/group/purposes': '/groups/purposes',
+                '/group/notes': '/groups/notes',
+                '/chats': '/chats',
+                '/chats/': '/chats',
+                '/messages': '/messages',
+                '/messages/send': '/messages',
+                '/friends': '/friends',
+                '/friends/requests/incoming': '/friends/incoming',
+                '/friends/requests/sent': '/friends/sent',
+                '/friends/contacts/synced': '/friends/synced',
+                '/friends/pinned': '/friends/pinned',
+                '/friends/muted': '/friends/muted',
+                '/friends/groups/user': '/groups/user',
+                '/friends/requests/send': '/friends/send',
+                '/friends/incoming': '/friends/incoming',
+                '/friends/search': '/friends/search',
+                '/friends/users/all': '/friends/users/all',
+                '/friends/nearby': '/friends/nearby',
+                '/settings': '/settings',
+                '/profile': '/settings',
+                '/users/settings': '/settings',
+                '/users/profile': '/settings',
+                '/users/blocked': '/settings/blocked-users',
+                '/friends/contacts': '/friends',
+                '/auth/me': '/auth/me',
+                '/api/status': '/status',
+                '/status': '/status',
+                '/api/status/my': '/status/my',
+                '/status/my': '/status/my',
+                '/api/status/friends': '/status/friends',
+                '/status/friends': '/status/friends',
+                '/api/status/stats': '/status/stats',
+                '/status/stats': '/status/stats',
+                '/api/status/trending': '/status/trending',
+                '/status/trending': '/status/trending',
+                '/api/status/public': '/status/public',
+                '/status/public': '/status/public',
+            };
+
+            function getSessionData() {
+                const token = localStorage.getItem('token') || 
+                              localStorage.getItem('moodchat_token') || 
+                              localStorage.getItem('accessToken');
+                if (!token) {
+                    console.log('[Parent] No token found in localStorage');
+                    return null;
+                }
+
+                let userId = null;
+                let user = null;
+
+                // Decode JWT token
+                try {
+                    const parts = token.split('.');
+                    if (parts.length === 3) {
+                        const payload = JSON.parse(atob(parts[1]));
+                        userId = payload.userId || payload.id || payload.sub || payload.user_id || payload.uid;
+                        if (userId) {
+                            user = {
+                                id: userId,
+                                userId: userId,
+                                username: payload.username || payload.name || payload.email?.split('@')[0] || 'User',
+                                email: payload.email || '',
+                                displayName: payload.displayName || payload.username || payload.name || 'User',
+                                firstName: payload.firstName || '',
+                                lastName: payload.lastName || ''
+                            };
+                        }
+                    }
+                } catch (e) {
+                    console.warn('[Parent] Failed to decode token:', e);
+                }
+
+                // Fallback to kynecta_auth
+                if (!userId) {
+                    const authData = localStorage.getItem('kynecta_auth');
+                    if (authData) {
+                        try {
+                            const parsed = JSON.parse(authData);
+                            userId = parsed.userId || parsed.id || parsed.user?.id;
+                            if (userId) user = parsed.user || parsed;
+                        } catch(e) {}
+                    }
+                }
+
+                if (!userId) return null;
+                return { token, userId, user };
             }
-        }
-    }
-});
-})();
 
-</script>
+            function updateSessionCache() {
+                const session = getSessionData();
+                if (session && session.userId) {
+                    cachedToken = session.token;
+                    cachedUserId = session.userId;
+                    cachedUser = session.user || { id: session.userId, userId: session.userId, username: 'User' };
+                    console.log('[Parent] ✅ Session cache updated:', { userId: cachedUserId });
+                } else {
+                    cachedToken = null;
+                    cachedUserId = null;
+                    cachedUser = null;
+                }
+            }
+
+            function sendSessionToModule(iframe, moduleName) {
+                if (!cachedToken || !cachedUserId) {
+                    console.log(`[Parent] No session for ${moduleName}, skipping`);
+                    return;
+                }
+                if (!iframe || !iframe.contentWindow) {
+                    console.log(`[Parent] No iframe for ${moduleName}`);
+                    return;
+                }
+
+                const userData = {
+                    id: cachedUserId,
+                    userId: cachedUserId,
+                    username: cachedUser?.username || 'User',
+                    displayName: cachedUser?.displayName || cachedUser?.username || 'User',
+                    email: cachedUser?.email || '',
+                    firstName: cachedUser?.firstName || '',
+                    lastName: cachedUser?.lastName || ''
+                };
+
+                const sessionData = {
+                    token: cachedToken,
+                    user: userData,
+                    authenticated: true,
+                    expiresAt: Date.now() + 3600000,
+                    ready: true,
+                    userId: cachedUserId,
+                    id: cachedUserId
+                };
+
+                iframe.contentWindow.postMessage({
+                    type: 'SESSION_DATA',
+                    id: `session_${Date.now()}_${moduleName}`,
+                    source: 'parent',
+                    target: moduleName,
+                    payload: sessionData,
+                    userId: cachedUserId,
+                    timestamp: Date.now()
+                }, '*');
+
+                iframe.contentWindow.postMessage({
+                    type: 'AUTH_READY',
+                    id: `auth_ready_${Date.now()}_${moduleName}`,
+                    source: 'parent',
+                    target: moduleName,
+                    payload: {
+                        authenticated: true,
+                        session: sessionData,
+                        user: userData,
+                        userId: cachedUserId,
+                        timestamp: Date.now()
+                    },
+                    userId: cachedUserId,
+                    timestamp: Date.now()
+                }, '*');
+
+                iframe.contentWindow.postMessage({
+                    type: 'PARENT_READY',
+                    id: `parent_ready_${Date.now()}_${moduleName}`,
+                    source: 'parent',
+                    target: moduleName,
+                    payload: {
+                        protocol: 'KYN-8.0',
+                        state: 'READY',
+                        message: 'Parent is ready',
+                        session: sessionData,
+                        userId: cachedUserId
+                    },
+                    userId: cachedUserId,
+                    timestamp: Date.now()
+                }, '*');
+
+                console.log(`📡 Sent session to ${moduleName} (userId: ${cachedUserId})`);
+            }
+
+            let lastSessionSend = 0;
+            const SESSION_SEND_INTERVAL = 30000;
+
+            function sendToAllModulesIfNeeded(force = false) {
+                const now = Date.now();
+                if (!force && now - lastSessionSend < SESSION_SEND_INTERVAL) {
+                    console.log('[Parent] Skipping session send - too soon');
+                    return;
+                }
+                if (!cachedToken || !cachedUserId) {
+                    console.log('[Parent] No session available');
+                    return;
+                }
+                lastSessionSend = now;
+                Object.entries(moduleToIframeId).forEach(([moduleName, iframeId]) => {
+                    const iframe = document.getElementById(iframeId);
+                    if (iframe && iframe.contentWindow) {
+                        sendSessionToModule(iframe, moduleName);
+                    }
+                });
+            }
+
+            // Token refresh function
+            async function refreshAuthToken() {
+                try {
+                    const refreshToken = localStorage.getItem('refreshToken');
+                    if (!refreshToken) return false;
+                    const response = await fetch('http://localhost:4000/api/auth/refresh', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ refreshToken }),
+                        credentials: 'include'
+                    });
+                    if (response.ok) {
+                        const data = await response.json();
+                        const newToken = data.token || data.accessToken;
+                        if (newToken) {
+                            localStorage.setItem('token', newToken);
+                            localStorage.setItem('moodchat_token', newToken);
+                            localStorage.setItem('accessToken', newToken);
+                            const authData = localStorage.getItem('kynecta_auth');
+                            if (authData) {
+                                const parsed = JSON.parse(authData);
+                                parsed.token = newToken;
+                                localStorage.setItem('kynecta_auth', JSON.stringify(parsed));
+                            }
+                            console.log('[Parent] ✅ Token refreshed successfully');
+                            setTimeout(() => sendToAllModulesIfNeeded(true), 100);
+                            return true;
+                        }
+                    }
+                    return false;
+                } catch (error) {
+                    console.error('[Parent] Token refresh error:', error);
+                    return false;
+                }
+            }
+
+            updateSessionCache();
+            setInterval(updateSessionCache, 10000);
+
+            window.addEventListener('storage', function(e) {
+                if (e.key === 'token' || e.key === 'moodchat_token' || e.key === 'kynecta_auth' || e.key === 'accessToken') {
+                    updateSessionCache();
+                    setTimeout(() => sendToAllModulesIfNeeded(true), 100);
+                }
+            });
+
+            // ==================================================================
+            // MAIN MESSAGE HANDLER (Combined: existing + new handlers)
+            // ==================================================================
+            window.addEventListener('message', async function(event) {
+                // Security: Only accept messages from same origin or local dev server
+                if (event.origin !== window.location.origin && event.origin !== 'http://127.0.0.1:5500' && event.origin !== 'http://localhost:5500') {
+                    return;
+                }
+
+                const data = event.data || {};
+                if (!data || typeof data !== 'object') return;
+
+                // ========== HANDLE CHILD_READY ==========
+                if (data.type === 'CHILD_READY') {
+                    const targetModule = data.module || data.source || data.payload?.module || null;
+                    console.log(`📡 CHILD_READY from ${targetModule || 'unknown'}`);
+                    if (targetModule && moduleToIframeId[targetModule]) {
+                        const iframe = document.getElementById(moduleToIframeId[targetModule]);
+                        if (iframe && iframe.contentWindow) {
+                            if (cachedToken && cachedUserId) {
+                                sendSessionToModule(iframe, targetModule);
+                            } else {
+                                updateSessionCache();
+                                if (cachedToken && cachedUserId) {
+                                    sendSessionToModule(iframe, targetModule);
+                                }
+                            }
+                        }
+                    } else {
+                        sendToAllModulesIfNeeded(true);
+                    }
+                }
+
+                // ========== HANDLE API REQUESTS ==========
+                if (data.type === 'API_REQUEST') {
+                    let endpoint = data.payload?.endpoint || data.endpoint;
+                    if (!endpoint) {
+                        console.error('[Parent] API_REQUEST missing endpoint:', data);
+                        return;
+                    }
+                    if (endpointMappings[endpoint]) {
+                        endpoint = endpointMappings[endpoint];
+                    }
+                    if (endpoint.startsWith('/api/')) {
+                        endpoint = endpoint.substring(4);
+                    }
+                    if (!endpoint.startsWith('/')) {
+                        endpoint = '/' + endpoint;
+                    }
+
+                    const requestId = data.payload?.requestId || data.requestId;
+                    const method = data.payload?.method || data.method || 'GET';
+                    const body = data.payload?.body || data.body;
+                    const params = data.payload?.params || data.params || null;
+
+                    try {
+                        if (window.api && window.api.core && window.api.core.waitFor) {
+                            await window.api.core.waitFor();
+                        }
+
+                        let response;
+                        if (method === 'GET') {
+                            response = await window.api.get(endpoint, params || {});
+                        } else if (method === 'POST') {
+                            response = await window.api.post(endpoint, body);
+                        } else if (method === 'PUT') {
+                            response = await window.api.put(endpoint, body);
+                        } else if (method === 'DELETE') {
+                            response = await window.api.del(endpoint);
+                        } else {
+                            response = await window.api.request(endpoint, { method, body });
+                        }
+
+                        const isSuccess = response && (response.success === true || (response.status && response.status >= 200 && response.status < 300));
+                        const responsePayload = isSuccess ? {
+                            success: true,
+                            data: response.data !== undefined ? response.data : response,
+                            statusCode: response.status || 200
+                        } : {
+                            success: false,
+                            error: response?.message || response?.error || 'Request failed',
+                            statusCode: response?.status || 500,
+                            data: response?.data || null
+                        };
+
+                        if (event.source && event.source.postMessage) {
+                            event.source.postMessage({
+                                type: 'API_RESPONSE',
+                                requestId: requestId,
+                                payload: responsePayload,
+                                timestamp: new Date().toISOString()
+                            }, '*');
+                        }
+                    } catch (error) {
+                        console.error(`[Parent] API error: ${endpoint}`, error);
+                        if (event.source && event.source.postMessage) {
+                            event.source.postMessage({
+                                type: 'API_RESPONSE',
+                                requestId: requestId,
+                                payload: {
+                                    success: false,
+                                    error: error.message || 'Request failed',
+                                    statusCode: error.status || 500,
+                                    data: null
+                                },
+                                timestamp: new Date().toISOString()
+                            }, '*');
+                        }
+                    }
+                }
+
+                // ========== NEW: Handle pending chat from friends module ==========
+                if (data.type === 'SET_PENDING_CHAT') {
+                    console.log('[Parent] Received pending chat context:', data.payload);
+                    sessionStorage.setItem('pending_chat', JSON.stringify({
+                        userId: data.payload.userId,
+                        userName: data.payload.userName,
+                        timestamp: Date.now()
+                    }));
+                    window.__pendingChat = data.payload;
+                }
+
+                // ========== NEW: Handle module switch request ==========
+                if (data.type === 'SWITCH_MODULE') {
+                    console.log('[Parent] Switching to module:', data.module);
+                    const targetModuleName = data.module;
+                    let targetIframe = null;
+
+                    // Find target iframe by data-module attribute or src
+                    for (const [moduleName, iframeId] of Object.entries(moduleToIframeId)) {
+                        const iframe = document.getElementById(iframeId);
+                        if (iframe && (moduleName === targetModuleName || iframe.src.includes(targetModuleName))) {
+                            targetIframe = iframe;
+                            break;
+                        }
+                    }
+
+                    // Hide all containers, show target
+                    document.querySelectorAll('.iframe-container').forEach(container => {
+                        container.classList.add('hidden');
+                    });
+                    if (targetIframe) {
+                        const parentContainer = targetIframe.closest('.iframe-container');
+                        if (parentContainer) parentContainer.classList.remove('hidden');
+                    } else {
+                        // Fallback: try to show by module name
+                        const targetContainer = document.getElementById(`${targetModuleName}Content`);
+                        if (targetContainer) targetContainer.classList.remove('hidden');
+                    }
+
+                    // Update active nav buttons
+                    document.querySelectorAll('.nav-icon, .mobile-nav-icon').forEach(btn => {
+                        if (btn.dataset.page === targetModuleName) {
+                            btn.classList.add('active');
+                        } else {
+                            btn.classList.remove('active');
+                        }
+                    });
+
+                    // FIX: If the SWITCH_MODULE message itself carries a user payload
+                    // (sent by friend-ui.js navigateToChatWithUser), persist it into
+                    // pending_chat NOW — before the setTimeout fires — so the read below
+                    // always finds it even when sessionStorage wasn't written in time.
+                    if (data.payload && data.payload.userId) {
+                        console.log('[Parent] SWITCH_MODULE carries chat payload, saving to pending_chat:', data.payload);
+                        sessionStorage.setItem('pending_chat', JSON.stringify(data.payload));
+                        window.__pendingChat = data.payload;
+                    }
+
+                    // Send pending chat to the newly visible iframe
+                    setTimeout(() => {
+                        const pendingChat = sessionStorage.getItem('pending_chat');
+                        if (pendingChat && targetIframe && targetIframe.contentWindow) {
+                            let chatData;
+                            try { chatData = JSON.parse(pendingChat); } catch(e) { chatData = null; }
+                            if (chatData) {
+                                console.log('[Parent] Sending pending chat to module:', chatData);
+                                targetIframe.contentWindow.postMessage({
+                                    type: 'OPEN_CHAT_WITH_USER',
+                                    payload: chatData,
+                                    source: 'parent-frame',
+                                    timestamp: Date.now()
+                                }, '*');
+                                sessionStorage.removeItem('pending_chat');
+                                window.__pendingChat = null;
+                            }
+                        }
+                    }, 500);
+                }
+
+                // ========== NEW: Direct message to messages module ==========
+                if (data.type === 'DIRECT_CHAT_REQUEST') {
+                    console.log('[Parent] Direct chat request for user:', data.payload);
+                    sessionStorage.setItem('pending_chat', JSON.stringify(data.payload));
+                    window.__pendingChat = data.payload;
+
+                    const messagesIframe = document.getElementById('messagesIframe');
+                    if (messagesIframe && messagesIframe.contentWindow) {
+                        messagesIframe.contentWindow.postMessage({
+                            type: 'OPEN_CHAT_WITH_USER',
+                            payload: data.payload,
+                            source: 'parent-frame',
+                            timestamp: Date.now()
+                        }, '*');
+
+                        // Ensure messages container is visible
+                        document.querySelectorAll('.iframe-container').forEach(c => c.classList.add('hidden'));
+                        const messagesContainer = document.getElementById('messagesContent');
+                        if (messagesContainer) messagesContainer.classList.remove('hidden');
+
+                        // Update active nav
+                        document.querySelectorAll('.nav-icon, .mobile-nav-icon').forEach(btn => {
+                            if (btn.dataset.page === 'messages') {
+                                btn.classList.add('active');
+                            } else {
+                                btn.classList.remove('active');
+                            }
+                        });
+                    }
+                }
+
+                // ========== Handle 401 responses for token refresh ==========
+                if (data.type === 'API_RESPONSE' && data.status === 401) {
+                    console.log('[Parent] Received 401, attempting token refresh');
+                    await refreshAuthToken();
+                }
+            });
+
+            // Initial session broadcast
+            setTimeout(() => {
+                sendToAllModulesIfNeeded(true);
+            }, 1000);
+        })();
+
+        // ======================================================================
+        // PENDING CHAT INITIALIZATION ON PAGE LOAD
+        // ======================================================================
+        document.addEventListener('DOMContentLoaded', function() {
+            const pendingChat = sessionStorage.getItem('pending_chat');
+            if (pendingChat) {
+                console.log('[Parent] Found pending chat on load:', pendingChat);
+                const chatData = JSON.parse(pendingChat);
+                const messagesIframe = document.getElementById('messagesIframe');
+                if (messagesIframe && messagesIframe.contentWindow) {
+                    setTimeout(() => {
+                        messagesIframe.contentWindow.postMessage({
+                            type: 'OPEN_CHAT_WITH_USER',
+                            payload: chatData,
+                            source: 'parent-frame',
+                            timestamp: Date.now()
+                        }, '*');
+                        sessionStorage.removeItem('pending_chat');
+                        window.__pendingChat = null;
+                    }, 1000);
+                }
+            }
+        });
+    </script>
 </body>
 </html>

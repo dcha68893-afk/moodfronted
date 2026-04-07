@@ -189,45 +189,42 @@ function navigateToChatWithUser(userId, userName, additionalData = {}) {
     const numericUserId = parseInt(userId);
     console.log('[ChatNav] Opening chat with user:', { userId: numericUserId, displayName });
     
-    // Close any open modals in friends module
+    // Close any open modals
     if (domElements.startChatModal) domElements.startChatModal.classList.remove('active');
     if (domElements.friendDetailsPanel) domElements.friendDetailsPanel.classList.remove('active');
     if (domElements.addFriendModal) domElements.addFriendModal.classList.remove('active');
     
-    // Method 1: Send message to parent to switch to messages module with chat context
+    // Build the chat payload once and reuse it everywhere
+    const chatPayload = {
+        userId: numericUserId,
+        userName: displayName,
+        timestamp: Date.now(),
+        source: 'friends-module'
+    };
+
+    // FIX: Store under BOTH keys so whichever side reads first will find it.
+    // chat.html reads 'pending_chat'; messages-ui.js setupAutoOpenChat reads 'open_chat_on_load'.
+    sessionStorage.setItem('pending_chat', JSON.stringify(chatPayload));
+    sessionStorage.setItem('open_chat_on_load', JSON.stringify(chatPayload));
+    
+    // Send message to parent to switch to messages module
     if (window.parent && window.parent !== window) {
-        // First, send the chat context to be stored
-        const contextMessage = {
-            type: 'SET_PENDING_CHAT',
-            payload: {
-                userId: numericUserId,
-                userName: displayName,
-                ...additionalData
-            },
-            source: 'friends-ui',
-            timestamp: Date.now()
-        };
-        console.log('[ChatNav] Sending pending chat context:', contextMessage);
-        window.parent.postMessage(contextMessage, '*');
-        
-        // Then, request to switch to messages module
-        const switchMessage = {
+        // FIX: Include the user payload directly in the SWITCH_MODULE message so
+        // chat.html can forward it to the messages iframe even if sessionStorage
+        // is cleared or read before we write it.
+        window.parent.postMessage({
             type: 'SWITCH_MODULE',
             module: 'messages',
+            payload: chatPayload,
             source: 'friends-ui',
             timestamp: Date.now()
-        };
-        console.log('[ChatNav] Requesting module switch to messages');
-        window.parent.postMessage(switchMessage, '*');
+        }, '*');
         
         showNotification(`Opening chat with ${displayName}...`, 'info', 1500);
-        return;
+    } else {
+        // Fallback: direct navigation
+        window.location.href = `message.html?openChat=${numericUserId}&userName=${encodeURIComponent(displayName)}`;
     }
-    
-    // Method 2: Try direct navigation with URL parameters that messages module can read
-    console.log('[ChatNav] Parent not available, using direct navigation with params');
-    const chatUrl = `message.html?chatId=${numericUserId}&type=direct&userName=${encodeURIComponent(displayName)}&openChat=${numericUserId}`;
-    window.location.href = chatUrl;
 }
 
 // =============================================
