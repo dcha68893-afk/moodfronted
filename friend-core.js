@@ -1,10 +1,13 @@
 // =============================================
-// FRIEND PAGE - STABILIZED COMMUNICATION v13.0
+// FRIEND PAGE - STABILIZED COMMUNICATION v13.1
 // FIXED: All Users / Discovery showing 0 users
 // FIXED: Search uses client-side filtering (no API calls)
 // FIXED: Avatar field normalization (avatar/photoURL)
 // FIXED: Global state exposure (window.FriendCore)
 // FIXED: Event-driven rendering
+// ADDED: Polling for incoming friend requests (30s interval)
+// ADDED: Request deduplication with content-based hashing
+// ADDED: Smart UI updates with shallow comparison
 // =============================================
 
 import {
@@ -39,8 +42,377 @@ const DEBUG = false;
 const PRODUCTION = window.location.hostname !== 'localhost' && !window.location.hostname.includes('127.0.0.1');
 
 const MODULE_NAME = 'friends';
-const MODULE_VERSION = '13.0';
+const MODULE_VERSION = '13.1';
 const EXPECTED_PARENT_ORIGIN = window.location.origin;
+
+// =============================================
+// [POLLING CONFIGURATION]
+// =============================================
+
+const POLLING_CONFIG = {
+    INCOMING_REQUESTS_INTERVAL: 30000, // 30 seconds
+    MAX_RETRY_ATTEMPTS: 3,
+    RETRY_DELAY: 5000,
+    ENABLED: true
+};
+
+let pollingIntervals = {
+    incomingRequests: null
+};
+
+let pollingRetryCounts = {
+    incomingRequests: 0
+};
+
+// =============================================
+// [REQUEST DEDUPLICATION]
+// =============================================
+
+const RequestDeduplicator = {
+    _processedHashes: new Map(),
+    _maxCacheSize: 200,
+    _cacheTTL: 60000, // 1 minute
+    
+    generateHash(request) {
+        if (!request || !request.id) return null;
+        
+        const data = {
+            id: request.id,
+            senderId: request.senderId || request.sender?.id,
+            receiverId: request.receiverId || request.receiver?.id,
+            status: request.status,
+            timestamp: request.timestamp || request.createdAt
+        };
+        
+        const str = JSON.stringify(data);
+        let hash = 0;
+        for (let i = 0; i < str.length; i++) {
+            hash = ((hash << 5) - hash) + str.charCodeAt(i);
+            hash = hash & hash;
+        }
+        return `${hash}_${data.id}`;
+    },
+    
+    isDuplicate(request) {
+        const hash = this.generateHash(request);
+        if (!hash) return false;
+        
+        if (this._processedHashes.has(hash)) {
+            const entry = this._processedHashes.get(hash);
+            if (Date.now() - entry.timestamp < this._cacheTTL) {
+                return true;
+            }
+            this._processedHashes.delete(hash);
+        }
+        return false;
+    },
+    
+    markProcessed(request) {
+        const hash = this.generateHash(request);
+        if (!hash) return;
+        
+        this._processedHashes.set(hash, {
+            timestamp: Date.now(),
+            request: request
+        });
+        
+        this._cleanup();
+    },
+    
+    _cleanup() {
+        if (this._processedHashes.size <= this._maxCacheSize) return;
+        
+        const now = Date.now();
+        for (const [hash, entry] of this._processedHashes.entries()) {
+            if (now - entry.timestamp > this._cacheTTL) {
+                this._processedHashes.delete(hash);
+            }
+        }
+        
+        // If still too large, remove oldest 20%
+        if (this._processedHashes.size > this._maxCacheSize) {
+            const entries = Array.from(this._processedHashes.entries());
+            entries.sort((a, b) => a[1].timestamp - b[1].timestamp);
+            const toRemove = Math.floor(entries.length * 0.2);
+            for (let i = 0; i < toRemove; i++) {
+                this._processedHashes.delete(entries[i][0]);
+            }
+        }
+    },
+    
+    reset() {
+        this._processedHashes.clear();
+    }
+};
+
+// =============================================
+// [SHALLOW COMPARISON UTILITIES]
+// =============================================
+
+const ShallowCompare = {
+    areRequestsEqual(oldRequests, newRequests) {
+        if (!oldRequests && !newRequests) return true;
+        if (!oldRequests || !newRequests) return false;
+        if (oldRequests.length !== newRequests.length) return false;
+        
+        // Sort both arrays by ID for consistent comparison
+        const sortedOld = [...oldRequests].sort((a, b) => String(a.id).localeCompare(String(b.id)));
+        const sortedNew = [...newRequests].sort((a, b) => String(a.id).localeCompare(String(b.id)));
+        
+        for (let i = 0; i < sortedOld.length; i++) {
+            const oldReq = sortedOld[i];
+            const newReq = sortedNew[i];
+            
+            // Compare key fields
+            if (oldReq.id !== newReq.id) return false;
+            if (oldReq.status !== newReq.status) return false;
+            if ((oldReq.senderId || oldReq.sender?.id) !== (newReq.senderId || newReq.sender?.id)) return false;
+            
+            // Compare timestamp within 2 seconds tolerance
+            const oldTime = oldReq.timestamp || oldReq.createdAt || 0;
+            const newTime = newReq.timestamp || newReq.createdAt || 0;
+            if (Math.abs(oldTime - newTime) > 2000) return false;
+        }
+        
+        return true;
+    },
+    
+    hasChanges(oldData, newData, keyFields = ['id', 'status', 'timestamp']) {
+        if (!oldData && !newData) return false;
+        if (!oldData || !newData) return true;
+        
+        for (const field of keyFields) {
+            const oldValue = oldData[field];
+            const newValue = newData[field];
+            
+            if (oldValue !== newValue) {
+                // Handle nested objects like sender.id
+                if (typeof oldValue === 'object' && typeof newValue === 'object') {
+                    if (JSON.stringify(oldValue) !== JSON.stringify(newValue)) {
+                        return true;
+                    }
+                } else if (oldValue !== newValue) {
+                    return true;
+                }
+            }
+        }
+        
+        return false;
+    }
+};
+
+// =============================================
+// [POLLING MANAGER]
+// =============================================
+
+const PollingManager = {
+    _isPolling: false,
+    _lastFetchTimestamp: null,
+    _lastRequestHash: null,
+    
+    async startPollingIncomingRequests() {
+        if (!POLLING_CONFIG.ENABLED) {
+            Logger.info('PollingManager', 'Polling disabled by configuration');
+            return;
+        }
+        
+        if (pollingIntervals.incomingRequests) {
+            Logger.debug('PollingManager', 'Polling already active');
+            return;
+        }
+        
+        // Wait for module to be active before starting polling
+        const waitForActive = () => {
+            return new Promise((resolve) => {
+                if (currentState === LIFECYCLE_STATES.ACTIVE && authReadyReceived && __session.ready) {
+                    resolve();
+                } else {
+                    const checkInterval = setInterval(() => {
+                        if (currentState === LIFECYCLE_STATES.ACTIVE && authReadyReceived && __session.ready) {
+                            clearInterval(checkInterval);
+                            resolve();
+                        }
+                    }, 1000);
+                }
+            });
+        };
+        
+        await waitForActive();
+        
+        Logger.info('PollingManager', 'Starting polling for incoming requests', {
+            interval: POLLING_CONFIG.INCOMING_REQUESTS_INTERVAL
+        });
+        
+        // Immediate first fetch
+        await this._fetchIncomingRequests();
+        
+        // Set up interval
+        pollingIntervals.incomingRequests = setInterval(async () => {
+            await this._fetchIncomingRequests();
+        }, POLLING_CONFIG.INCOMING_REQUESTS_INTERVAL);
+        
+        this._isPolling = true;
+    },
+    
+    stopPollingIncomingRequests() {
+        if (pollingIntervals.incomingRequests) {
+            clearInterval(pollingIntervals.incomingRequests);
+            pollingIntervals.incomingRequests = null;
+            Logger.info('PollingManager', 'Stopped polling for incoming requests');
+        }
+        this._isPolling = false;
+        this._lastFetchTimestamp = null;
+        this._lastRequestHash = null;
+        pollingRetryCounts.incomingRequests = 0;
+    },
+    
+    async _fetchIncomingRequests() {
+        if (!assertActive('PollingManager._fetchIncomingRequests')) {
+            Logger.debug('PollingManager', 'Module not active, skipping poll');
+            return;
+        }
+        
+        if (!authReadyReceived || !__session.ready || !__session.token) {
+            Logger.debug('PollingManager', 'Auth not ready, skipping poll');
+            return;
+        }
+        
+        try {
+            const response = await authorizedRequest('/api/friends/incoming', {
+                timeout: 10000 // 10 second timeout for polling requests
+            });
+            
+            pollingRetryCounts.incomingRequests = 0;
+            
+            if (response.success && (response.data?.requests || response.data)) {
+                const requestsData = response.data?.requests || response.data || [];
+                
+                // Deduplicate requests
+                const uniqueRequests = this._deduplicateRequests(requestsData);
+                
+                // Check if data has actually changed before updating UI
+                const currentRequests = FriendCacheManager.getAllRequests();
+                
+                if (!ShallowCompare.areRequestsEqual(currentRequests, uniqueRequests)) {
+                    Logger.info('PollingManager', 'Incoming requests changed, updating UI', {
+                        oldCount: currentRequests.length,
+                        newCount: uniqueRequests.length
+                    });
+                    
+                    // Update cache
+                    FriendCacheManager.setRequests(uniqueRequests);
+                    FriendCacheManager.syncToGlobals();
+                    FriendCacheManager.persist();
+                    
+                    // Dispatch event for UI update
+                    window.dispatchEvent(new CustomEvent('requestsUpdated', {
+                        detail: { 
+                            requests: uniqueRequests, 
+                            count: uniqueRequests.length,
+                            source: 'polling',
+                            timestamp: Date.now()
+                        }
+                    }));
+                    
+                    // Also dispatch specific polling update event
+                    window.dispatchEvent(new CustomEvent('incomingRequestsPolled', {
+                        detail: {
+                            requests: uniqueRequests,
+                            previousCount: currentRequests.length,
+                            newCount: uniqueRequests.length,
+                            hasChanges: true,
+                            timestamp: Date.now()
+                        }
+                    }));
+                } else {
+                    Logger.debug('PollingManager', 'No changes in incoming requests');
+                    
+                    window.dispatchEvent(new CustomEvent('incomingRequestsPolled', {
+                        detail: {
+                            hasChanges: false,
+                            timestamp: Date.now()
+                        }
+                    }));
+                }
+                
+                this._lastFetchTimestamp = Date.now();
+            }
+        } catch (error) {
+            pollingRetryCounts.incomingRequests++;
+            Logger.error('PollingManager', 'Failed to fetch incoming requests', error, {
+                attempt: pollingRetryCounts.incomingRequests
+            });
+            
+            // Exponential backoff for retries
+            if (pollingRetryCounts.incomingRequests <= POLLING_CONFIG.MAX_RETRY_ATTEMPTS) {
+                const delay = POLLING_CONFIG.RETRY_DELAY * Math.pow(2, pollingRetryCounts.incomingRequests - 1);
+                Logger.info('PollingManager', `Retry ${pollingRetryCounts.incomingRequests} in ${delay}ms`);
+                
+                setTimeout(() => {
+                    if (pollingIntervals.incomingRequests) {
+                        this._fetchIncomingRequests();
+                    }
+                }, delay);
+            } else {
+                Logger.warn('PollingManager', 'Max retry attempts reached for incoming requests polling');
+            }
+        }
+    },
+    
+    _deduplicateRequests(requests) {
+        if (!requests || !Array.isArray(requests)) return [];
+        
+        const uniqueMap = new Map();
+        
+        for (const request of requests) {
+            if (!request || !request.id) continue;
+            
+            // Skip if we've already processed this exact request
+            if (RequestDeduplicator.isDuplicate(request)) {
+                Logger.debug('PollingManager', 'Skipping duplicate request', { id: request.id });
+                continue;
+            }
+            
+            // Use ID as primary key for deduplication
+            if (!uniqueMap.has(request.id)) {
+                uniqueMap.set(request.id, request);
+                RequestDeduplicator.markProcessed(request);
+            } else {
+                // If duplicate ID exists, keep the one with newer timestamp
+                const existing = uniqueMap.get(request.id);
+                const existingTime = existing.timestamp || existing.createdAt || 0;
+                const newTime = request.timestamp || request.createdAt || 0;
+                
+                if (newTime > existingTime) {
+                    uniqueMap.set(request.id, request);
+                }
+            }
+        }
+        
+        // Sort by timestamp (newest first)
+        const uniqueRequests = Array.from(uniqueMap.values());
+        uniqueRequests.sort((a, b) => {
+            const timeA = a.timestamp || a.createdAt || 0;
+            const timeB = b.timestamp || b.createdAt || 0;
+            return timeB - timeA;
+        });
+        
+        return uniqueRequests;
+    },
+    
+    isPolling() {
+        return this._isPolling && pollingIntervals.incomingRequests !== null;
+    },
+    
+    reset() {
+        this.stopPollingIncomingRequests();
+        this._isPolling = false;
+        this._lastFetchTimestamp = null;
+        this._lastRequestHash = null;
+        pollingRetryCounts.incomingRequests = 0;
+        RequestDeduplicator.reset();
+    }
+};
 
 // =============================================
 // [FRIEND CATEGORIES]
@@ -423,6 +795,9 @@ function handleAuthReady(message) {
         transitionTo(LIFECYCLE_STATES.READY,      'auth_ready_complete');
         sendChildReady();
         flushRequestQueue();
+
+        // Start polling for incoming requests after auth is ready
+        PollingManager.startPollingIncomingRequests();
 
     } else {
         console.error('[Lifecycle] AUTH_READY received but could not extract user.', {
@@ -2516,6 +2891,11 @@ const FriendRequestManager = {
                     }
                 });
                 
+                // Trigger immediate polling to refresh incoming requests
+                setTimeout(() => {
+                    PollingManager._fetchIncomingRequests();
+                }, 1000);
+                
                 return { success: true, request: response.data || optimisticRequest };
             } else {
                 optimisticRequest.failed = true;
@@ -2612,6 +2992,11 @@ const FriendRequestManager = {
                     }
                 });
                 
+                // Trigger immediate polling to refresh incoming requests
+                setTimeout(() => {
+                    PollingManager._fetchIncomingRequests();
+                }, 500);
+                
                 return { success: true };
             } else {
                 return { success: false, error: response?.error || 'Accept failed' };
@@ -2665,6 +3050,11 @@ const FriendRequestManager = {
                         timestamp: Date.now()
                     }
                 });
+                
+                // Trigger immediate polling to refresh incoming requests
+                setTimeout(() => {
+                    PollingManager._fetchIncomingRequests();
+                }, 500);
                 
                 return { success: true };
             } else {
@@ -2885,7 +3275,7 @@ const QRCodeManager = {
         
         const qrData = {
             type: 'knecta_friend_request',
-            version: '13.0',
+            version: '13.1',
             userId: userId,
             username: username,
             displayName: displayName,
@@ -7720,6 +8110,7 @@ window.addEventListener('beforeunload', () => {
     MessageTracker.reset();
     FriendCacheManager.persist();
     FriendSearchEngine.clearCache();
+    PollingManager.stopPollingIncomingRequests();
 });
 
 // =============================================
@@ -7803,7 +8194,7 @@ const KYN = {
 };
 
 const friendCore = {
-    version: '13.0',
+    version: '13.1',
     initialized: false,
     fallbackMode: false,
     init: initialize,
@@ -7830,7 +8221,10 @@ const friendCore = {
     isActive: () => currentState === LIFECYCLE_STATES.ACTIVE && parentReadyReceived && authReadyReceived && __session.ready,
     getSession: () => ({ token: __session.token, user: __session.user, ready: __session.ready }),
     getAllUsers: () => window._allUsersCache || FriendCacheManager.getAllUsers(),
-    fetchAllUsers: fetchAllUsersFromBackend
+    fetchAllUsers: fetchAllUsersFromBackend,
+    startPolling: PollingManager.startPollingIncomingRequests.bind(PollingManager),
+    stopPolling: PollingManager.stopPollingIncomingRequests.bind(PollingManager),
+    isPolling: PollingManager.isPolling.bind(PollingManager)
 };
 
 // ✅ CRITICAL: Expose FriendCore globally for UI access
@@ -8146,7 +8540,10 @@ export {
     ENV_CONFIG,
 
     // Nearby Discovery
-    NearbyManager
+    NearbyManager,
+    
+    // Polling Manager
+    PollingManager
 };
 
 window.__FRIEND_MODULE_READY__ = true;
@@ -8182,11 +8579,14 @@ window.debugUserDiscovery = function() {
 
 // =============================================
 // END OF FILE
-// Version: 13.0
+// Version: 13.1
 // ✅ FIXED: All Users / Discovery showing 0 users
 // ✅ FIXED: window.FriendCore exposed globally
 // ✅ FIXED: Client-side search (no API calls)
 // ✅ FIXED: Avatar field normalization (photoURL || avatar)
 // ✅ FIXED: Event-driven rendering with allUsersLoaded
 // ✅ FIXED: fetchAllUsersFromBackend sets window._allUsersCache
+// ✅ ADDED: Polling for incoming requests (30s interval)
+// ✅ ADDED: Request deduplication with content-based hashing
+// ✅ ADDED: Smart UI updates with shallow comparison
 // =============================================

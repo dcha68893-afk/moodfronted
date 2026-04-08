@@ -1,5 +1,5 @@
 // =============================================
-// MESSAGES CORE - v8.0.5 (ADDED DEMO CHAT HISTORY)
+// MESSAGES CORE - v8.0.6 (PENDING CHAT HANDLING + DEDUPLICATION)
 // REAL END-TO-END MESSAGING | NO PLACEHOLDERS | NO DIRECT FETCH
 // STRICT LIFECYCLE ENFORCEMENT | NO RETRY LOOPS | NO FALLBACKS
 // COMPLETE REQUEST-ID TRACKING | DEDUPLICATION
@@ -8,6 +8,9 @@
 // FIXED: Conversation data normalization
 // ADDED: Demo chat history for moodchat1 and moodchat2 (4 messages)
 // ADDED: openChatWithUser function for external chat opening
+// ADDED: Pending conversation deduplication
+// ADDED: Smart message sending (chatId OR receiverId)
+// ADDED: Pending conversation replacement after successful send
 // =============================================
 (function() {
     'use strict';
@@ -16,7 +19,7 @@
     // MODULE IDENTIFICATION
     // =============================================
     const MODULE_NAME = 'messages';
-    const MODULE_VERSION = '8.0.5';
+    const MODULE_VERSION = '8.0.6';
     
     // =============================================
     // DEBUG MODE (DISABLED IN PRODUCTION)
@@ -2124,6 +2127,7 @@
         _historyCache: new Map(),
         _loadingChats: false,
         _loadingMessages: false,
+        _pendingConversations: new Map(), // Track pending conversations by receiverId
         
         init: function() {
             this._loadFromCache();
@@ -2190,6 +2194,116 @@
             });
         },
         
+        // Check if a pending conversation already exists for a receiverId
+        getPendingConversationByReceiverId: function(receiverId) {
+            if (!receiverId) return null;
+            const pendingId = `pending_${receiverId}`;
+            return this._conversations.find(c => c.id === pendingId || c.pendingReceiverId === receiverId);
+        },
+        
+        // Get or create pending conversation (with deduplication)
+        getOrCreatePendingConversation: function(receiverId, userName, userAvatar) {
+            if (!receiverId) return null;
+            
+            // Check if pending conversation already exists
+            const existing = this.getPendingConversationByReceiverId(receiverId);
+            if (existing) {
+                console.log('[ChatManager] Reusing existing pending conversation for receiverId:', receiverId);
+                return existing;
+            }
+            
+            // Create new pending conversation
+            const pendingId = `pending_${receiverId}`;
+            const pendingConversation = {
+                id: pendingId,
+                type: 'direct',
+                friendId: receiverId,
+                friendName: userName || `User_${receiverId}`,
+                friendAvatar: userAvatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(userName || `User_${receiverId}`)}&background=random&color=fff`,
+                online: false,
+                unreadCount: 0,
+                lastMessage: 'No messages yet',
+                lastMessageAt: Date.now(),
+                pendingReceiverId: receiverId,
+                isPending: true
+            };
+            
+            this._conversations.unshift(pendingConversation);
+            this._conversationsMap.set(pendingId, pendingConversation);
+            this._pendingConversations.set(receiverId, pendingConversation);
+            this._saveToCache();
+            this._notifySubscribers();
+            
+            console.log('[ChatManager] Created new pending conversation for receiverId:', receiverId);
+            return pendingConversation;
+        },
+        
+        // Replace pending conversation with real conversation after successful message send
+        replacePendingConversation: function(pendingId, realConversation) {
+            const pendingIndex = this._conversations.findIndex(c => c.id === pendingId);
+            if (pendingIndex === -1) return null;
+            
+            const pendingConv = this._conversations[pendingIndex];
+            const receiverId = pendingConv.pendingReceiverId;
+            
+            // Preserve messages from pending conversation
+            const pendingMessagesKey = `${LOCAL_STORAGE_KEYS.MESSAGES_PREFIX}${pendingId}`;
+            const pendingMessages = SafeStorage.getJSON(pendingMessagesKey, []);
+            
+            // Remove pending from tracking
+            if (receiverId) {
+                this._pendingConversations.delete(receiverId);
+            }
+            
+            // Replace with real conversation
+            const newConversation = {
+                ...realConversation,
+                // Preserve any user-set name if not overwritten
+                friendName: realConversation.friendName || pendingConv.friendName,
+                friendAvatar: realConversation.friendAvatar || pendingConv.friendAvatar
+            };
+            
+            this._conversations[pendingIndex] = newConversation;
+            this._conversationsMap.delete(pendingId);
+            this._conversationsMap.set(newConversation.id, newConversation);
+            
+            // Migrate messages to new conversation ID if any exist
+            if (pendingMessages.length > 0) {
+                const realMessagesKey = `${LOCAL_STORAGE_KEYS.MESSAGES_PREFIX}${newConversation.id}`;
+                const existingMessages = SafeStorage.getJSON(realMessagesKey, []);
+                const mergedMessages = [...pendingMessages, ...existingMessages];
+                mergedMessages.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
+                SafeStorage.setJSON(realMessagesKey, mergedMessages);
+                SafeStorage.remove(pendingMessagesKey);
+                
+                // Update active conversation messages if this was the active one
+                if (this._activeConversation && this._activeConversation.id === pendingId) {
+                    this._messages = mergedMessages;
+                    this._activeConversation = newConversation;
+                    this._rebuildMessagesMap();
+                }
+            }
+            
+            // Update active conversation reference
+            if (this._activeConversation && this._activeConversation.id === pendingId) {
+                this._activeConversation = newConversation;
+            }
+            
+            this._saveToCache();
+            this._notifySubscribers();
+            
+            console.log('[ChatManager] Replaced pending conversation', pendingId, 'with real conversation', newConversation.id);
+            
+            // Dispatch event for UI to update
+            try {
+                window.dispatchEvent(new CustomEvent('conversationReplaced', {
+                    detail: { oldId: pendingId, newConversation }
+                }));
+            } catch (e) {}
+            
+            return newConversation;
+        },
+        
         async fetchConversations() {
             if (!SessionManager.isAuthenticated()) {
                 console.log('[ChatManager] Not authenticated, cannot fetch conversations');
@@ -2223,7 +2337,17 @@
                 console.log(`[ChatManager] 📥 Extracted ${chatsArray.length} chats from response`);
                 
                 if (chatsArray.length > 0) {
+                    // Preserve pending conversations when merging
+                    const pendingConvs = this._conversations.filter(c => c.isPending === true);
                     this.setConversations(chatsArray);
+                    // Re-add pending conversations that still exist
+                    for (const pending of pendingConvs) {
+                        if (!this._conversationsMap.has(pending.id) && pending.pendingReceiverId) {
+                            this._conversations.unshift(pending);
+                            this._conversationsMap.set(pending.id, pending);
+                        }
+                    }
+                    this._notifySubscribers();
                     this._notifySuccess('Conversations loaded');
                 } else if (_demoModeEnabled) {
                     this._loadDemoDataIfNeeded();
@@ -2245,6 +2369,12 @@
         },
         
         async fetchMessages(conversationId, options = {}) {
+            // Do NOT fetch messages for pending conversations
+            if (conversationId && typeof conversationId === 'string' && conversationId.startsWith('pending_')) {
+                console.log('[ChatManager] Skipping message fetch for pending conversation:', conversationId);
+                return;
+            }
+            
             if (!SessionManager.isAuthenticated()) {
                 console.log('[ChatManager] Not authenticated, cannot fetch messages');
                 if (_demoModeEnabled && conversationId) {
@@ -2348,18 +2478,71 @@
                 throw new Error('Empty message');
             }
             
-            console.log(`[ChatManager] 📤 Sending message to conversation: ${conversationId}`);
+            // Determine if we're sending to a pending conversation or real one
+            const isPending = typeof conversationId === 'string' && conversationId.startsWith('pending_');
+            let requestBody = {};
             
-            const result = await makeApiRequest('/messages/send', 'POST', {
-                chatId: conversationId,
-                content: content,
-                type: options.type || 'text',
-                attachment: options.attachment,
-                replyTo: options.replyTo,
-                mentions: options.mentions
-            });
+            if (isPending) {
+                // For pending conversations, find the receiverId
+                const pendingConv = this._conversationsMap.get(conversationId);
+                if (!pendingConv || !pendingConv.pendingReceiverId) {
+                    throw new Error('Invalid pending conversation: missing receiverId');
+                }
+                console.log(`[ChatManager] 📤 Sending message to pending conversation - using receiverId: ${pendingConv.pendingReceiverId}`);
+                requestBody = {
+                    receiverId: pendingConv.pendingReceiverId,
+                    content: content,
+                    type: options.type || 'text',
+                    attachment: options.attachment,
+                    replyTo: options.replyTo,
+                    mentions: options.mentions
+                };
+            } else {
+                // For real conversations, use chatId
+                console.log(`[ChatManager] 📤 Sending message to real conversation - using chatId: ${conversationId}`);
+                requestBody = {
+                    chatId: conversationId,
+                    content: content,
+                    type: options.type || 'text',
+                    attachment: options.attachment,
+                    replyTo: options.replyTo,
+                    mentions: options.mentions
+                };
+            }
+            
+            const result = await makeApiRequest('/messages', 'POST', requestBody);
             
             console.log(`[ChatManager] 📥 Message sent successfully:`, result);
+            
+            // Check if we got a real chatId back (for pending conversation)
+            if (isPending && result && (result.chatId || (result.data && result.data.chatId))) {
+                const realChatId = result.chatId || result.data.chatId;
+                if (realChatId && typeof realChatId === 'number') {
+                    console.log(`[ChatManager] Received real chatId ${realChatId} for pending conversation, replacing...`);
+                    // Fetch the real conversation data
+                    try {
+                        const realConversation = await makeApiRequest(`/chats/${realChatId}`, 'GET');
+                        if (realConversation) {
+                            const normalizedConv = {
+                                id: realConversation.id || realChatId,
+                                friendId: realConversation.friendId || realConversation.otherParticipant?.id,
+                                friendName: realConversation.friendName || realConversation.otherParticipant?.displayName || 'Chat',
+                                friendAvatar: realConversation.friendAvatar || realConversation.otherParticipant?.avatar,
+                                lastMessage: realConversation.lastMessage || content,
+                                lastMessageAt: realConversation.lastMessageAt || Date.now(),
+                                unreadCount: 0,
+                                online: realConversation.online || false,
+                                type: 'direct'
+                            };
+                            this.replacePendingConversation(conversationId, normalizedConv);
+                            // Update result with the new chatId
+                            result.chatId = realChatId;
+                        }
+                    } catch (e) {
+                        console.warn('[ChatManager] Could not fetch real conversation details:', e);
+                    }
+                }
+            }
             
             return result;
         },
@@ -2404,7 +2587,9 @@
                 return;
             }
             
-            this._conversations = normalizedConversations;
+            // Preserve existing pending conversations
+            const existingPending = this._conversations.filter(c => c.isPending === true);
+            this._conversations = [...normalizedConversations, ...existingPending];
             this._rebuildMap();
             this._loaded = true;
             this._saveToCache();
@@ -2595,6 +2780,7 @@
             this._messages = [];
             this._messagesMap.clear();
             this._historyCache.clear();
+            this._pendingConversations.clear();
         }
     }.init();
 
@@ -3160,6 +3346,15 @@
                     optimisticMessage.optimistic = false;
                 }
                 
+                // If we got a real chatId from the response and this was a pending conversation, update UI
+                if (result && result.chatId && typeof conversationId === 'string' && conversationId.startsWith('pending_')) {
+                    console.log(`[MessageHandler] Received real chatId ${result.chatId} for pending conversation, updating active chat...`);
+                    const realConversation = ChatManager.getConversation(result.chatId);
+                    if (realConversation) {
+                        ChatManager.setActiveConversation(realConversation);
+                    }
+                }
+                
                 this._optimisticMessages.delete(localId);
                 this._pendingRequests.delete(requestId);
                 
@@ -3439,7 +3634,12 @@
                 return false;
             }
             
-            await this.fetchMessages(actualId, options);
+            // Only fetch messages if this is a real conversation (not pending)
+            if (typeof actualId !== 'string' || !actualId.startsWith('pending_')) {
+                await this.fetchMessages(actualId, options);
+            } else {
+                console.log('[ConversationManager] Skipping message fetch for pending conversation:', actualId);
+            }
             
             const draft = UIStateManager.getDraft(actualId);
             EventBus.emit('draft:loaded', { conversationId: actualId, draft });
@@ -3508,6 +3708,11 @@
         
         async fetchMessages(conversationId, options = {}) {
             if (!conversationId) return;
+            // Skip for pending conversations
+            if (typeof conversationId === 'string' && conversationId.startsWith('pending_')) {
+                console.log('[ConversationManager] Skipping fetchMessages for pending conversation:', conversationId);
+                return;
+            }
             if (!ensureActive('fetchMessages')) return;
             if (!SessionManager.isAuthenticated() && !_demoModeEnabled) return;
             
@@ -3556,15 +3761,18 @@
 
  if (type === 'direct' && participants.length === 1) {
     const receiverId = participants[0];
+    const numericReceiverId = typeof receiverId === 'string' ? parseInt(receiverId, 10) : receiverId;
+    
     try {
-        // First check if conversation already exists
-        const existing = ChatManager.getConversations().find(c =>
+        // First check if conversation already exists (real or pending)
+        let existing = ChatManager.getConversations().find(c =>
             c.type === 'direct' &&
-            c.participants &&
-            c.participants.some(p => (p.id || p) === receiverId)
+            (c.friendId === numericReceiverId || c.pendingReceiverId === numericReceiverId ||
+             (c.participants && c.participants.some(p => (p.id || p) === numericReceiverId)))
         );
 
         if (existing) {
+            // If it's a pending conversation, we can still use it
             await ConversationManager.openConversation(existing.id, options);
             return existing.id;
         }
@@ -3575,7 +3783,7 @@
         
         // Try to get from FriendManager first
         if (window.MessagesCore && window.MessagesCore.FriendManager) {
-            const friend = window.MessagesCore.FriendManager.getFriend(receiverId);
+            const friend = window.MessagesCore.FriendManager.getFriend(numericReceiverId);
             if (friend) {
                 realUserName = friend.displayName || friend.username || friend.name || options.name;
                 realUserAvatar = friend.avatar || friend.photoURL || null;
@@ -3583,9 +3791,9 @@
         }
         
         // If still no name, try to fetch from backend
-        if (!realUserName || realUserName === `User_${receiverId}`) {
+        if (!realUserName || realUserName === `User_${numericReceiverId}`) {
             try {
-                const userInfo = await makeApiRequest(`/users/${receiverId}`, 'GET');
+                const userInfo = await makeApiRequest(`/users/${numericReceiverId}`, 'GET');
                 if (userInfo) {
                     realUserName = userInfo.displayName || userInfo.username || userInfo.name || options.name;
                     realUserAvatar = userInfo.avatar || userInfo.photoURL || null;
@@ -3596,14 +3804,14 @@
         }
         
         // Final fallback
-        if (!realUserName || realUserName === `User_${receiverId}`) {
-            realUserName = options.name || `User_${receiverId}`;
+        if (!realUserName || realUserName === `User_${numericReceiverId}`) {
+            realUserName = options.name || `User_${numericReceiverId}`;
         }
 
         // Only send a real message if there's actual content
         if (options.initialMessage && options.initialMessage.trim()) {
             const body = {
-                receiverId: receiverId,
+                receiverId: numericReceiverId,
                 content: options.initialMessage.trim(),
                 type: 'text'
             };
@@ -3626,58 +3834,44 @@
         }
         
         // No existing conversation and no real message to send
-        // Create a temporary/pending conversation so the chat panel opens
-        const tempConversationId = `pending_${receiverId}_${Date.now()}`;
-        const tempConversation = {
-            id: tempConversationId,
-            type: 'direct',
-            friendId: receiverId,
-            friendName: realUserName,  // Use the real name we fetched
-            friendAvatar: realUserAvatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(realUserName)}&background=random&color=fff`,
-            online: false,
-            unreadCount: 0,
-            lastMessage: 'No messages yet',
-            lastMessageAt: Date.now(),
-            pendingReceiverId: receiverId,
-            isPending: true
-        };
-        
-        // Add to conversations list temporarily
-        const currentConversations = ChatManager.getConversations();
-        currentConversations.unshift(tempConversation);
-        ChatManager.setConversations(currentConversations);
-        
-        // Open the chat panel with this temporary conversation
-        ChatManager.setActiveConversation(tempConversation);
-        ConversationManager._showChatPanel(tempConversation);
-        
-        // Also update the UI header immediately
-        const nameEl = document.getElementById('chatFriendName');
-        if (nameEl) {
-            nameEl.textContent = realUserName;
+        // Check for existing pending conversation before creating a new one
+        const existingPending = ChatManager.getPendingConversationByReceiverId(numericReceiverId);
+        if (existingPending) {
+            await ConversationManager.openConversation(existingPending.id, options);
+            return existingPending.id;
         }
         
-        const avatarEl = document.getElementById('chatFriendAvatar');
-        if (avatarEl && tempConversation.friendAvatar) {
-            avatarEl.innerHTML = `<img src="${tempConversation.friendAvatar}" alt="${realUserName}">`;
+        // Create a new pending conversation (deduplicated)
+        const pendingConversation = ChatManager.getOrCreatePendingConversation(
+            numericReceiverId, 
+            realUserName, 
+            realUserAvatar
+        );
+        
+        if (pendingConversation) {
+            // Open the chat panel with this pending conversation
+            ChatManager.setActiveConversation(pendingConversation);
+            ConversationManager._showChatPanel(pendingConversation);
+            
+            // Dispatch event for UI to know this is a pending chat
+            try {
+                window.dispatchEvent(new CustomEvent('conversationCreated', {
+                    detail: { 
+                        participants, 
+                        options, 
+                        chatId: pendingConversation.id,
+                        isPending: true,
+                        receiverId: numericReceiverId,
+                        userName: realUserName,
+                        userAvatar: pendingConversation.friendAvatar
+                    }
+                }));
+            } catch (e) {}
+            
+            return pendingConversation.id;
         }
         
-        // Dispatch event for UI to know this is a pending chat
-        try {
-            window.dispatchEvent(new CustomEvent('conversationCreated', {
-                detail: { 
-                    participants, 
-                    options, 
-                    chatId: tempConversationId,
-                    isPending: true,
-                    receiverId: receiverId,
-                    userName: realUserName,
-                    userAvatar: tempConversation.friendAvatar
-                }
-            }));
-        } catch (e) {}
-        
-        return tempConversationId;
+        return false;
         
     } catch (error) {
         Logger.error('ConversationManager', 'Failed to create direct conversation:', error.message);
@@ -3770,10 +3964,10 @@ async getOrCreateConversationByUserId(userId, userName) {
         }
     }
     
-    // Check existing conversations
+    // Check existing conversations (real or pending)
     const existingConversation = ChatManager.getConversations().find(c =>
         c.type === 'direct' &&
-        (c.friendId === numericUserId ||
+        (c.friendId === numericUserId || c.pendingReceiverId === numericUserId ||
          (c.participants && c.participants.some(p => (p.id || p) === numericUserId)))
     );
     
@@ -3782,7 +3976,7 @@ async getOrCreateConversationByUserId(userId, userName) {
         return existingConversation;
     }
     
-    // Create new conversation with the real name
+    // Create new conversation with the real name (will create pending if needed)
     const result = await this.createConversation([numericUserId], { 
         name: realUserName || userName || `User_${numericUserId}`,
         type: 'direct'
@@ -3792,7 +3986,7 @@ async getOrCreateConversationByUserId(userId, userName) {
         // Find the newly created conversation
         const newConversation = ChatManager.getConversations().find(c =>
             c.type === 'direct' &&
-            (c.friendId === numericUserId ||
+            (c.friendId === numericUserId || c.pendingReceiverId === numericUserId ||
              (c.participants && c.participants.some(p => (p.id || p) === numericUserId)))
         );
         
@@ -4829,7 +5023,7 @@ async getOrCreateConversationByUserId(userId, userName) {
             if (result !== false) {
                 const conversations = MessagesCore.ChatManager.getConversations();
                 const conversation = conversations.find(c => 
-                    c.friendId === numericUserId || 
+                    c.friendId === numericUserId || c.pendingReceiverId === numericUserId ||
                     (c.participants && c.participants.some(p => (p.id || p) === numericUserId))
                 );
                 
@@ -4871,7 +5065,7 @@ async getOrCreateConversationByUserId(userId, userName) {
     // INITIALIZATION
     // =============================================
     async function initialize() {
-        console.log(`[${MODULE_NAME}] 🚀 Messages Core v${MODULE_VERSION} (Stabilized Protocol | Real Data Only | Session Validation | UI Enhanced | Demo Data Included | openChatWithUser Added)`);
+        console.log(`[${MODULE_NAME}] 🚀 Messages Core v${MODULE_VERSION} (Stabilized Protocol | Real Data Only | Session Validation | UI Enhanced | Demo Data Included | openChatWithUser Added | Pending Chat Handling)`);
         
         try {
             setState(LIFECYCLE_STATES.BOOT, 'initialization_start');
