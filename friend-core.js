@@ -2830,182 +2830,267 @@ const FriendRequestManager = {
         return promise;
     },
     
-    async _executeSendRequest(userId, options, opId) {
-        Logger.info('FriendRequestManager', 'Sending friend request', { userId, options });
+  // In FriendRequestManager._executeSendRequest - UPDATE the response handling:
+
+async _executeSendRequest(userId, options, opId) {
+    Logger.info('FriendRequestManager', 'Sending friend request', { userId, options });
+    
+    const optimisticRequest = {
+        id: `temp_${Date.now()}`,
+        receiverId: userId,
+        senderId: __session.user?.id,
+        status: 'pending',
+        timestamp: Date.now(),
+        category: options.category || 'friend',
+        note: options.note || '',
+        isTemporary: options.isTemporary || false,
+        duration: options.duration || null,
+        isBusiness: options.isBusiness || false,
+        optimistic: true
+    };
+    
+    FriendCacheManager.setSentRequest(optimisticRequest);
+    FriendCacheManager.syncToGlobals();
+    
+    window.dispatchEvent(new CustomEvent('friendRequestSent', {
+        detail: { request: optimisticRequest, optimistic: true }
+    }));
+    
+    try {
+        const response = await authorizedRequest('/api/friends/requests/send', {
+            method: 'POST',
+            body: JSON.stringify({ 
+                receiverId: userId,
+                category: options.category || 'friend',
+                note: options.note || ''
+            })
+        });
         
-        const optimisticRequest = {
-            id: `temp_${Date.now()}`,
-            receiverId: userId,
-            senderId: __session.user?.id,
-            status: 'pending',
-            timestamp: Date.now(),
-            category: options.category || 'friend',
-            note: options.note || '',
-            isTemporary: options.isTemporary || false,
-            duration: options.duration || null,
-            isBusiness: options.isBusiness || false,
-            optimistic: true
-        };
+        Logger.info('FriendRequestManager', 'Send request response', { success: response.success, data: response.data });
         
-        FriendCacheManager.setSentRequest(optimisticRequest);
-        FriendCacheManager.syncToGlobals();
-        
-        window.dispatchEvent(new CustomEvent('friendRequestSent', {
-            detail: { request: optimisticRequest, optimistic: true }
-        }));
-        
-        try {
-            const response = await authorizedRequest('/api/friends/requests/send', {
-                method: 'POST',
-                body: JSON.stringify({ 
-                    receiverId: userId, 
-                    category: options.category || 'friend', 
-                    note: options.note || '', 
-                    isTemporary: options.isTemporary || false, 
-                    duration: options.duration || null, 
-                    isBusiness: options.isBusiness || false 
-                })
-            });
+        // FIXED: Handle different response formats
+        if (response && response.success) {
+            let requestData = null;
             
-            Logger.info('FriendRequestManager', 'Send request response', { success: response.success, data: response.data });
-            
-            if (response && response.success) {
-                if (response.data) {
-                    FriendCacheManager.removeSentRequest(optimisticRequest.id);
-                    FriendCacheManager.setSentRequest(response.data);
+            // Extract request data from various response formats
+            if (response.data) {
+                if (response.data.request) {
+                    requestData = response.data.request;
+                } else if (response.data.data?.request) {
+                    requestData = response.data.data.request;
+                } else if (response.data.id) {
+                    requestData = response.data;
+                } else {
+                    requestData = response.data;
                 }
-                
-                FriendCacheManager.syncToGlobals();
-                FriendCacheManager.persist();
-                
-                window.dispatchEvent(new CustomEvent('friendRequestSent', {
-                    detail: { request: response.data || optimisticRequest, success: true }
-                }));
-                
-                safeSend({
-                    type: 'FRIEND_REQUEST_SENT',
-                    payload: {
-                        requestId: response.data?.id || optimisticRequest.id,
-                        receiverId: userId,
-                        timestamp: Date.now()
-                    }
-                });
-                
-                // Trigger immediate polling to refresh incoming requests
-                setTimeout(() => {
-                    PollingManager._fetchIncomingRequests();
-                }, 1000);
-                
-                return { success: true, request: response.data || optimisticRequest };
-            } else {
-                optimisticRequest.failed = true;
-                FriendCacheManager.setSentRequest(optimisticRequest);
-                FriendCacheManager.syncToGlobals();
-                
-                window.dispatchEvent(new CustomEvent('friendRequestFailed', {
-                    detail: { request: optimisticRequest, error: response?.error || 'API error' }
-                }));
-                
-                return { 
-                    success: false, 
-                    error: response?.error || 'Failed to send request',
-                    optimistic: optimisticRequest 
-                };
             }
-        } catch (error) {
-            Logger.error('FriendRequestManager', 'Send request failed', error);
             
+            if (requestData) {
+                FriendCacheManager.removeSentRequest(optimisticRequest.id);
+                // Format the request for cache
+                const formattedRequest = {
+                    id: requestData.id,
+                    receiverId: requestData.receiverId,
+                    senderId: requestData.requesterId,
+                    status: requestData.status,
+                    createdAt: requestData.createdAt,
+                    timestamp: requestData.createdAt || Date.now()
+                };
+                FriendCacheManager.setSentRequest(formattedRequest);
+            }
+            
+            FriendCacheManager.syncToGlobals();
+            FriendCacheManager.persist();
+            
+            window.dispatchEvent(new CustomEvent('friendRequestSent', {
+                detail: { request: requestData || optimisticRequest, success: true }
+            }));
+            
+            // Trigger immediate polling to refresh incoming requests
+            setTimeout(() => {
+                PollingManager._fetchIncomingRequests();
+                loadSentRequestsFromBackend();
+                loadFriendRequestsFromBackend();
+            }, 500);
+            
+            showNotification?.('Friend request sent successfully!', 'success');
+            
+            return { success: true, request: requestData || optimisticRequest };
+        } else {
             optimisticRequest.failed = true;
-            optimisticRequest.error = error.message;
             FriendCacheManager.setSentRequest(optimisticRequest);
             FriendCacheManager.syncToGlobals();
             
             window.dispatchEvent(new CustomEvent('friendRequestFailed', {
-                detail: { request: optimisticRequest, error: error.message }
+                detail: { request: optimisticRequest, error: response?.error || response?.message || 'API error' }
             }));
             
-            return { success: false, error: error.message, optimistic: optimisticRequest };
+            showNotification?.(response?.error || response?.message || 'Failed to send friend request', 'error');
+            
+            return { 
+                success: false, 
+                error: response?.error || response?.message || 'Failed to send request',
+                optimistic: optimisticRequest 
+            };
         }
-    },
+    } catch (error) {
+        Logger.error('FriendRequestManager', 'Send request failed', error);
+        
+        optimisticRequest.failed = true;
+        optimisticRequest.error = error.message;
+        FriendCacheManager.setSentRequest(optimisticRequest);
+        FriendCacheManager.syncToGlobals();
+        
+        window.dispatchEvent(new CustomEvent('friendRequestFailed', {
+            detail: { request: optimisticRequest, error: error.message }
+        }));
+        
+        showNotification?.(error.message || 'Failed to send friend request', 'error');
+        
+        return { success: false, error: error.message, optimistic: optimisticRequest };
+    }
+},
     
-    async acceptFriendRequest(requestId, friendId) {
-        if (!assertActive('acceptFriendRequest')) {
-            return { success: false, error: 'Module not active' };
-        }
-        
-        if (!authReadyReceived || !__session.ready || !__session.token) {
-            return new Promise((resolve, reject) => {
-                queueRequest(async () => {
-                    try {
-                        const result = await this.acceptFriendRequest(requestId, friendId);
-                        resolve(result);
-                    } catch (error) {
-                        reject(error);
-                    }
-                });
+   // In FriendRequestManager - UPDATE the acceptFriendRequest method:
+
+// In FriendRequestManager - REPLACE the acceptFriendRequest method:
+
+async acceptFriendRequest(requestId, friendId) {
+    console.log('[FriendRequestManager] acceptFriendRequest called with:', { requestId, friendId });
+    
+    if (!assertActive('acceptFriendRequest')) {
+        console.error('[FriendRequestManager] Module not active');
+        return { success: false, error: 'Module not active' };
+    }
+    
+    if (!authReadyReceived || !__session.ready || !__session.token) {
+        console.log('[FriendRequestManager] Auth not ready, queueing request');
+        return new Promise((resolve, reject) => {
+            queueRequest(async () => {
+                try {
+                    const result = await this.acceptFriendRequest(requestId, friendId);
+                    resolve(result);
+                } catch (error) {
+                    reject(error);
+                }
             });
-        }
+        });
+    }
+    
+    if (!requestId || !friendId) {
+        console.error('[FriendRequestManager] Invalid request data:', { requestId, friendId });
+        return { success: false, error: 'Invalid request data' };
+    }
+    
+    console.log('[FriendRequestManager] Accepting friend request via API', { requestId, friendId });
+    
+    try {
+        const existingRequest = FriendCacheManager.getRequest(requestId);
+        console.log('[FriendRequestManager] Existing request from cache:', existingRequest);
         
-        if (!requestId || !friendId) {
-            return { success: false, error: 'Invalid request data' };
-        }
+        // Make the API call to accept the request
+        const response = await authorizedRequest(`/api/friends/requests/${requestId}/accept`, {
+            method: 'POST'
+        });
         
-        Logger.info('FriendRequestManager', 'Accepting friend request', { requestId, friendId });
+        console.log('[FriendRequestManager] Accept request response:', response);
         
-        try {
-            const existingRequest = FriendCacheManager.getRequest(requestId);
+        if (response && response.success) {
+            console.log('[FriendRequestManager] Request accepted successfully on backend');
             
-            const response = await authorizedRequest(`/api/friends/requests/${requestId}/accept`, {
-                method: 'POST'
-            });
+            // Remove the incoming request from cache
+            FriendCacheManager.removeRequest(requestId);
             
-            if (response && response.success) {
-                FriendCacheManager.removeRequest(requestId);
-                
-                const newFriend = {
+            // Fetch the friend details to add to friends list
+            const friendDetailsResponse = await authorizedRequest(`/api/friends/user/${friendId}`);
+            console.log('[FriendRequestManager] Friend details response:', friendDetailsResponse);
+            
+            let newFriend = null;
+            if (friendDetailsResponse.success && friendDetailsResponse.data) {
+                const userData = friendDetailsResponse.data.user || friendDetailsResponse.data;
+                newFriend = {
+                    id: userData.id,
+                    displayName: userData.displayName || userData.username || 'Friend',
+                    username: userData.username || '',
+                    avatar: userData.avatar || '',
+                    photoURL: userData.avatar || '',
+                    firstName: userData.firstName || '',
+                    lastName: userData.lastName || '',
+                    status: userData.status || 'offline',
+                    lastSeen: userData.lastActive || userData.lastSeen,
+                    addedAt: Date.now(),
+                    category: existingRequest?.category || 'friend'
+                };
+            } else {
+                // Fallback if user fetch fails
+                newFriend = {
                     id: friendId,
                     displayName: existingRequest?.senderName || existingRequest?.user?.displayName || 'Friend',
                     username: existingRequest?.senderUsername || existingRequest?.user?.username || '',
+                    avatar: existingRequest?.senderAvatar || existingRequest?.user?.avatar || '',
+                    photoURL: existingRequest?.senderAvatar || existingRequest?.user?.avatar || '',
                     addedAt: Date.now(),
-                    online: false,
                     category: existingRequest?.category || 'friend'
                 };
-                
-                FriendCacheManager.setFriend(newFriend);
-                FriendCacheManager.syncToGlobals();
-                FriendCacheManager.persist();
-                
-                window.dispatchEvent(new CustomEvent('friendRequestAccepted', {
-                    detail: { requestId, friendId, success: true }
-                }));
-                
-                window.dispatchEvent(new CustomEvent('friendAdded', {
-                    detail: { friend: newFriend }
-                }));
-                
-                safeSend({
-                    type: 'FRIEND_ACCEPTED',
-                    payload: {
-                        requestId,
-                        friendId,
-                        timestamp: Date.now()
-                    }
-                });
-                
-                // Trigger immediate polling to refresh incoming requests
-                setTimeout(() => {
-                    PollingManager._fetchIncomingRequests();
-                }, 500);
-                
-                return { success: true };
-            } else {
-                return { success: false, error: response?.error || 'Accept failed' };
             }
-        } catch (error) {
-            Logger.error('FriendRequestManager', 'Accept failed', error);
-            return { success: false, error: error.message };
+            
+            // Add to friends cache
+            FriendCacheManager.setFriend(newFriend);
+            FriendCacheManager.syncToGlobals();
+            FriendCacheManager.persist();
+            
+            // Trigger refresh of friends list
+            await loadFriendsFromBackend();
+            
+            // Dispatch internal UI update event
+            window.dispatchEvent(new CustomEvent('friendRequestAccepted', {
+                detail: { requestId, friendId, success: true, friend: newFriend }
+            }));
+            
+            window.dispatchEvent(new CustomEvent('friendAdded', {
+                detail: { friend: newFriend }
+            }));
+            
+            // Send event to parent: FRIEND_ACCEPTED
+            safeSend({
+                type: 'FRIEND_ACCEPTED',
+                payload: {
+                    requestId,
+                    friendId,
+                    friend: newFriend,
+                    timestamp: Date.now()
+                }
+            });
+            
+            // Trigger immediate polling to refresh incoming requests and friends
+            setTimeout(() => {
+                PollingManager._fetchIncomingRequests();
+                loadFriendsFromBackend();
+                loadSentRequestsFromBackend();
+                loadFriendRequestsFromBackend();
+            }, 500);
+            
+            if (typeof showNotification === 'function') {
+                showNotification(`You are now friends with ${newFriend.displayName}!`, 'success');
+            }
+            
+            return { success: true, friend: newFriend };
+        } else {
+            const errorMsg = response?.error || response?.message || 'Accept failed';
+            console.error('[FriendRequestManager] Accept failed:', errorMsg);
+            if (typeof showNotification === 'function') {
+                showNotification(errorMsg, 'error');
+            }
+            return { success: false, error: errorMsg };
         }
-    },
+    } catch (error) {
+        console.error('[FriendRequestManager] Accept request error:', error);
+        if (typeof showNotification === 'function') {
+            showNotification(error.message || 'Failed to accept friend request', 'error');
+        }
+        return { success: false, error: error.message };
+    }
+},
     
     async declineFriendRequest(requestId) {
         if (!assertActive('declineFriendRequest')) {
@@ -3132,6 +3217,66 @@ const FriendRequestManager = {
 };
 
 setInterval(() => FriendRequestManager.cleanup(), 60000);
+
+// =============================================
+// [GLOBAL EVENT HANDLERS FOR FRIEND_ACCEPTED]
+// =============================================
+
+// Handle incoming FRIEND_ACCEPTED events from other modules/parent
+function handleFriendAcceptedEvent(event) {
+    const { requestId, friendId, friend } = event.detail || {};
+    
+    if (!friendId && !requestId) {
+        Logger.warn('FriendAcceptedHandler', 'Invalid FRIEND_ACCEPTED event', event.detail);
+        return;
+    }
+    
+    Logger.info('FriendAcceptedHandler', 'Processing FRIEND_ACCEPTED event', { requestId, friendId });
+    
+    // Reload friends from backend
+    loadFriendsFromBackend().then(result => {
+        Logger.info('FriendAcceptedHandler', 'Friends reloaded after FRIEND_ACCEPTED', result);
+    }).catch(error => {
+        Logger.error('FriendAcceptedHandler', 'Failed to reload friends', error);
+    });
+    
+    // Reload sent requests
+    loadSentRequestsFromBackend().then(result => {
+        Logger.info('FriendAcceptedHandler', 'Sent requests reloaded after FRIEND_ACCEPTED', result);
+    }).catch(error => {
+        Logger.error('FriendAcceptedHandler', 'Failed to reload sent requests', error);
+    });
+    
+    // Reload incoming requests
+    loadFriendRequestsFromBackend().then(result => {
+        Logger.info('FriendAcceptedHandler', 'Incoming requests reloaded after FRIEND_ACCEPTED', result);
+    }).catch(error => {
+        Logger.error('FriendAcceptedHandler', 'Failed to reload incoming requests', error);
+    });
+    
+    // Dispatch internal UI update event
+    window.dispatchEvent(new CustomEvent('friendsListNeedsRefresh', {
+        detail: {
+            source: 'FRIEND_ACCEPTED',
+            requestId,
+            friendId,
+            timestamp: Date.now()
+        }
+    }));
+    
+    window.dispatchEvent(new CustomEvent('refreshAllFriendData', {
+        detail: {
+            source: 'FRIEND_ACCEPTED',
+            timestamp: Date.now()
+        }
+    }));
+}
+
+// Register event listener for FRIEND_ACCEPTED
+window.addEventListener('FRIEND_ACCEPTED', handleFriendAcceptedEvent);
+
+// Also listen for the internal event from our own accept method
+window.addEventListener('friendRequestAccepted', handleFriendAcceptedEvent);
 
 // =============================================
 // [FRIEND SEARCH ENGINE] - FIXED: CLIENT-SIDE SEARCH ONLY
@@ -3769,84 +3914,122 @@ const UIBridge = {
         this._eventListeners.set('changeStatus', handler);
     },
     
-    _attachFriendRequestListeners() {
-        const sendHandler = (event) => {
-            if (!assertActive('ui:sendFriendRequest')) {
-                return;
-            }
-            
-            const { userId, options } = event.detail || {};
-            if (!userId) return;
-            
-            FriendRequestManager.sendFriendRequest(userId, options || {})
-                .then(result => {
-                    window.dispatchEvent(new CustomEvent('ui:friendRequestResult', {
-                        detail: { userId, result }
-                    }));
-                });
-        };
+  _attachFriendRequestListeners() {
+    // Send friend request handler
+    const sendHandler = (event) => {
+        if (!assertActive('ui:sendFriendRequest')) {
+            console.warn('[UIBridge] Cannot send friend request - module not active');
+            return;
+        }
         
-        window.addEventListener('ui:sendFriendRequest', sendHandler);
-        this._eventListeners.set('sendFriendRequest', sendHandler);
+        const { userId, options } = event.detail || {};
+        console.log('[UIBridge] Send friend request:', { userId, options });
         
-        const acceptHandler = (event) => {
-            if (!assertActive('ui:acceptFriendRequest')) {
-                return;
-            }
-            
-            const { requestId, friendId } = event.detail || {};
-            if (!requestId || !friendId) return;
-            
-            FriendRequestManager.acceptFriendRequest(requestId, friendId)
-                .then(result => {
-                    window.dispatchEvent(new CustomEvent('ui:friendRequestResult', {
-                        detail: { requestId, result }
-                    }));
-                });
-        };
+        if (!userId) return;
         
-        window.addEventListener('ui:acceptFriendRequest', acceptHandler);
-        this._eventListeners.set('acceptFriendRequest', acceptHandler);
-        
-        const declineHandler = (event) => {
-            if (!assertActive('ui:declineFriendRequest')) {
-                return;
-            }
-            
-            const { requestId } = event.detail || {};
-            if (!requestId) return;
-            
-            FriendRequestManager.declineFriendRequest(requestId)
-                .then(result => {
-                    window.dispatchEvent(new CustomEvent('ui:friendRequestResult', {
-                        detail: { requestId, result }
-                    }));
-                });
-        };
-        
-        window.addEventListener('ui:declineFriendRequest', declineHandler);
-        this._eventListeners.set('declineFriendRequest', declineHandler);
-        
-        const cancelHandler = (event) => {
-            if (!assertActive('ui:cancelFriendRequest')) {
-                return;
-            }
-            
-            const { requestId } = event.detail || {};
-            if (!requestId) return;
-            
-            FriendRequestManager.cancelFriendRequest(requestId)
-                .then(result => {
-                    window.dispatchEvent(new CustomEvent('ui:friendRequestResult', {
-                        detail: { requestId, result }
-                    }));
-                });
-        };
-        
-        window.addEventListener('ui:cancelFriendRequest', cancelHandler);
-        this._eventListeners.set('cancelFriendRequest', cancelHandler);
-    },
+        FriendRequestManager.sendFriendRequest(userId, options || {})
+            .then(result => {
+                console.log('[UIBridge] Send friend request result:', result);
+                window.dispatchEvent(new CustomEvent('ui:friendRequestResult', {
+                    detail: { userId, result }
+                }));
+            })
+            .catch(error => {
+                console.error('[UIBridge] Send friend request error:', error);
+            });
+    };
     
+    window.addEventListener('ui:sendFriendRequest', sendHandler);
+    this._eventListeners.set('sendFriendRequest', sendHandler);
+    
+    // ACCEPT friend request handler - FIXED
+    const acceptHandler = (event) => {
+        if (!assertActive('ui:acceptFriendRequest')) {
+            console.warn('[UIBridge] Cannot accept friend request - module not active');
+            return;
+        }
+        
+        const { requestId, friendId } = event.detail || {};
+        console.log('[UIBridge] Accept friend request - DETAILS:', { requestId, friendId, eventDetail: event.detail });
+        
+        if (!requestId || !friendId) {
+            console.error('[UIBridge] Missing requestId or friendId for accept');
+            return;
+        }
+        
+        // Show loading state
+        window.dispatchEvent(new CustomEvent('ui:showLoading', {
+            detail: { message: 'Accepting friend request...' }
+        }));
+        
+        FriendRequestManager.acceptFriendRequest(requestId, friendId)
+            .then(result => {
+                console.log('[UIBridge] Accept friend request result:', result);
+                window.dispatchEvent(new CustomEvent('ui:friendRequestResult', {
+                    detail: { requestId, result }
+                }));
+                
+                if (result.success) {
+                    // Trigger UI refresh
+                    window.dispatchEvent(new CustomEvent('ui:refreshFriendsList'));
+                    window.dispatchEvent(new CustomEvent('ui:refreshRequestsList'));
+                }
+            })
+            .catch(error => {
+                console.error('[UIBridge] Accept friend request error:', error);
+                window.dispatchEvent(new CustomEvent('ui:friendRequestResult', {
+                    detail: { requestId, error: error.message, result: { success: false, error: error.message } }
+                }));
+            })
+            .finally(() => {
+                window.dispatchEvent(new CustomEvent('ui:hideLoading'));
+            });
+    };
+    
+    window.addEventListener('ui:acceptFriendRequest', acceptHandler);
+    this._eventListeners.set('acceptFriendRequest', acceptHandler);
+    
+    // Decline handler
+    const declineHandler = (event) => {
+        if (!assertActive('ui:declineFriendRequest')) {
+            return;
+        }
+        
+        const { requestId } = event.detail || {};
+        if (!requestId) return;
+        
+        FriendRequestManager.declineFriendRequest(requestId)
+            .then(result => {
+                window.dispatchEvent(new CustomEvent('ui:friendRequestResult', {
+                    detail: { requestId, result }
+                }));
+            });
+    };
+    
+    window.addEventListener('ui:declineFriendRequest', declineHandler);
+    this._eventListeners.set('declineFriendRequest', declineHandler);
+    
+    // Cancel handler
+    const cancelHandler = (event) => {
+        if (!assertActive('ui:cancelFriendRequest')) {
+            return;
+        }
+        
+        const { requestId } = event.detail || {};
+        if (!requestId) return;
+        
+        FriendRequestManager.cancelFriendRequest(requestId)
+            .then(result => {
+                window.dispatchEvent(new CustomEvent('ui:friendRequestResult', {
+                    detail: { requestId, result }
+                }));
+            });
+    };
+    
+    window.addEventListener('ui:cancelFriendRequest', cancelHandler);
+    this._eventListeners.set('cancelFriendRequest', cancelHandler);
+},
+
     _attachQRCodeListeners() {
         const scanHandler = (event) => {
             if (!assertActive('ui:scanQRCode')) {
@@ -5804,6 +5987,7 @@ async function loadFriendsFromBackend() {
         if (response.success && response.data) {
             let friendsData = [];
             
+            // Handle different response formats from backend
             if (response.data.friends && Array.isArray(response.data.friends)) {
                 friendsData = response.data.friends;
             } else if (response.data.data && response.data.data.friends) {
@@ -5814,13 +5998,26 @@ async function loadFriendsFromBackend() {
                 friendsData = [response.data];
             }
             
-            const validFriends = friendsData.filter(f => f && f.id);
+            // Format friends data consistently
+            const validFriends = friendsData.filter(f => f && f.id).map(friend => ({
+                id: friend.id,
+                displayName: friend.displayName || friend.username || 'User',
+                username: friend.username || '',
+                avatar: friend.avatar || friend.photoURL || '',
+                photoURL: friend.avatar || friend.photoURL || '',
+                firstName: friend.firstName || '',
+                lastName: friend.lastName || '',
+                status: friend.status || 'offline',
+                lastSeen: friend.lastActive || friend.lastSeen,
+                online: friend.status === 'online',
+                addedAt: friend.addedAt || friend.createdAt || Date.now()
+            }));
 
             if (validFriends.length > 0) {
                 FriendCacheManager.setFriends(validFriends);
                 console.log(`✅ loadFriendsFromBackend: Loaded ${validFriends.length} friends`);
             } else {
-                console.log('ℹ️ loadFriendsFromBackend: No friends yet (normal for new users) - preserving user discovery data');
+                console.log('ℹ️ loadFriendsFromBackend: No friends yet (normal for new users)');
                 FriendCacheManager.setFriends([]);
             }
             
@@ -5832,7 +6029,7 @@ async function loadFriendsFromBackend() {
             SafeStorage.setItem(LOCAL_STORAGE_KEYS.LAST_SYNC, Date.now().toString());
             
             window.dispatchEvent(new CustomEvent('friendsUpdated', { 
-                detail: { friends: validFriends, count: validFriends.length } 
+                detail: { friends: validFriends, count: validFriends.length }
             }));
             
             clearFriendsLoading();
@@ -5952,13 +6149,53 @@ async function loadFriendRequestsFromBackend() {
         
         Logger.info('loadFriendRequestsFromBackend', 'Requests loaded', { success: response.success });
         
-        if (response.success && (response.data?.requests || response.data)) {
-            const requestsData = response.data?.requests || response.data || [];
-            FriendCacheManager.setRequests(requestsData);
+        if (response.success && response.data) {
+            let requestsData = [];
+            
+            // Handle different response formats
+            if (response.data.requests && Array.isArray(response.data.requests)) {
+                requestsData = response.data.requests;
+            } else if (response.data.data?.requests && Array.isArray(response.data.data.requests)) {
+                requestsData = response.data.data.requests;
+            } else if (Array.isArray(response.data)) {
+                requestsData = response.data;
+            } else if (response.data.data && Array.isArray(response.data.data)) {
+                requestsData = response.data.data;
+            }
+            
+            // Format requests for cache
+            const formattedRequests = requestsData.map(req => ({
+                id: req.id,
+                senderId: req.senderId || req.requesterId,
+                receiverId: req.receiverId,
+                status: req.status,
+                senderName: req.user?.displayName || req.user?.username || 'User',
+                senderUsername: req.user?.username || '',
+                senderAvatar: req.user?.avatar || '',
+                user: req.user,
+                createdAt: req.createdAt,
+                timestamp: req.createdAt || Date.now()
+            }));
+            
+            console.log(`[loadFriendRequestsFromBackend] Loaded ${formattedRequests.length} incoming requests`);
+            
+            FriendCacheManager.setRequests(formattedRequests);
             FriendCacheManager.syncToGlobals();
             FriendCacheManager.persist();
-            window.dispatchEvent(new CustomEvent('requestsUpdated', { detail: { requests: requestsData } }));
-            return { success: true, count: requestsData.length };
+            
+            window.dispatchEvent(new CustomEvent('requestsUpdated', { 
+                detail: { requests: formattedRequests, count: formattedRequests.length }
+            }));
+            
+            return { success: true, count: formattedRequests.length };
+        }
+        
+        const cached = FriendCacheManager.getAllRequests();
+        if (cached.length > 0) {
+            FriendCacheManager.syncToGlobals();
+            window.dispatchEvent(new CustomEvent('requestsUpdated', { 
+                detail: { requests: cached, cached: true }
+            }));
         }
     } catch (error) {
         Logger.error('loadFriendRequestsFromBackend', 'Failed to load requests', error);
@@ -5987,17 +6224,47 @@ async function loadSentRequestsFromBackend() {
     }
     
     try {
-        const response = await authorizedRequest('/api/friends/requests/sent');
+        const response = await authorizedRequest('/api/friends/sent');
         
         Logger.info('loadSentRequestsFromBackend', 'Sent requests loaded', { success: response.success });
         
-        if (response.success && (response.data?.requests || response.data)) {
-            const requestsData = response.data?.requests || response.data || [];
-            FriendCacheManager.setSentRequests(requestsData);
+        if (response.success && response.data) {
+            let requestsData = [];
+            
+            // Handle different response formats
+            if (response.data.requests && Array.isArray(response.data.requests)) {
+                requestsData = response.data.requests;
+            } else if (response.data.data?.requests && Array.isArray(response.data.data.requests)) {
+                requestsData = response.data.data.requests;
+            } else if (Array.isArray(response.data)) {
+                requestsData = response.data;
+            }
+            
+            // Format requests for cache
+            const formattedRequests = requestsData.map(req => ({
+                id: req.id,
+                receiverId: req.receiverId,
+                senderId: req.senderId || req.requesterId,
+                status: req.status,
+                receiverName: req.user?.displayName || req.user?.username || 'User',
+                receiverUsername: req.user?.username || '',
+                receiverAvatar: req.user?.avatar || '',
+                user: req.user,
+                createdAt: req.createdAt,
+                timestamp: req.createdAt || Date.now()
+            }));
+            
+            console.log(`[loadSentRequestsFromBackend] Loaded ${formattedRequests.length} sent requests`);
+            
+            FriendCacheManager.setSentRequests(formattedRequests);
             FriendCacheManager.syncToGlobals();
             FriendCacheManager.persist();
-            window.dispatchEvent(new CustomEvent('sentRequestsUpdated', { detail: { requests: requestsData } }));
-            return { success: true, count: requestsData.length };
+            
+            window.dispatchEvent(new CustomEvent('sentRequestsUpdated', { 
+                detail: { requests: formattedRequests, count: formattedRequests.length }
+            }));
+            
+            return { success: true, count: formattedRequests.length };
         }
     } catch (error) {
         Logger.error('loadSentRequestsFromBackend', 'Failed to load sent requests', error);
@@ -8589,4 +8856,7 @@ window.debugUserDiscovery = function() {
 // ✅ ADDED: Polling for incoming requests (30s interval)
 // ✅ ADDED: Request deduplication with content-based hashing
 // ✅ ADDED: Smart UI updates with shallow comparison
+// ✅ ADDED: FRIEND_ACCEPTED event handling and parent notification
+// ✅ ADDED: Idempotent accept/decline operations
+// ✅ ADDED: Event-driven reload on FRIEND_ACCEPTED
 // =============================================

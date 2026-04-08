@@ -255,6 +255,70 @@
         })();
 
         // ======================================================================
+        // CENTRALIZED EVENT DISPATCHER (CORE FEATURE)
+        // ======================================================================
+        
+        /**
+         * Dispatch event to ALL registered iframe modules
+         * @param {Object} event - Event object to broadcast
+         * @param {string} event.type - Event type (e.g., 'FRIEND_ACCEPTED', 'SWITCH_MODULE')
+         * @param {Object} event.payload - Event payload data
+         * @param {string} [event.targetModule] - Optional specific module target (if null, broadcasts to all)
+         */
+        function dispatchEventToModules(event) {
+            // Ensure event has required metadata
+            const enrichedEvent = {
+                ...event,
+                source: 'parent',
+                timestamp: event.timestamp || Date.now(),
+                parentBroadcast: true,
+                broadcastId: `${event.type}_${Date.now()}_${Math.random().toString(36).substr(2, 8)}`
+            };
+            
+            // Track which modules received the event for debugging
+            let modulesSent = [];
+            
+            // Iterate through all registered iframe modules
+            Object.entries(moduleToIframeId).forEach(([moduleName, iframeId]) => {
+                // If targetModule is specified and doesn't match, skip
+                if (enrichedEvent.targetModule && enrichedEvent.targetModule !== moduleName) {
+                    return;
+                }
+                
+                const iframe = document.getElementById(iframeId);
+                if (iframe && iframe.contentWindow) {
+                    try {
+                        iframe.contentWindow.postMessage(enrichedEvent, '*');
+                        modulesSent.push(moduleName);
+                        console.log(`📡 Event "${enrichedEvent.type}" dispatched to module: ${moduleName}`, enrichedEvent.payload);
+                    } catch (error) {
+                        console.error(`Failed to dispatch event to ${moduleName}:`, error);
+                    }
+                }
+            });
+            
+            // Log broadcast summary
+            if (modulesSent.length > 0) {
+                console.log(`✅ Event "${enrichedEvent.type}" broadcast to ${modulesSent.length} module(s):`, modulesSent);
+            } else {
+                console.warn(`⚠️ Event "${enrichedEvent.type}" had no targets (no iframes available)`);
+            }
+        }
+        
+        /**
+         * Register module for receiving events (maintains registry of available modules)
+         * Called automatically when modules send CHILD_READY message
+         */
+        const moduleRegistry = new Set();
+        
+        function registerModule(moduleName) {
+            if (moduleName && !moduleRegistry.has(moduleName)) {
+                moduleRegistry.add(moduleName);
+                console.log(`📝 Module registered: ${moduleName} (Total: ${moduleRegistry.size})`);
+            }
+        }
+        
+        // ======================================================================
         // NAVIGATION HANDLERS
         // ======================================================================
         document.querySelectorAll('.nav-icon, .mobile-nav-icon').forEach(btn => {
@@ -609,6 +673,12 @@
                 if (data.type === 'CHILD_READY') {
                     const targetModule = data.module || data.source || data.payload?.module || null;
                     console.log(`📡 CHILD_READY from ${targetModule || 'unknown'}`);
+                    
+                    // Register module for event broadcasting
+                    if (targetModule) {
+                        registerModule(targetModule);
+                    }
+                    
                     if (targetModule && moduleToIframeId[targetModule]) {
                         const iframe = document.getElementById(moduleToIframeId[targetModule]);
                         if (iframe && iframe.contentWindow) {
@@ -624,6 +694,16 @@
                     } else {
                         sendToAllModulesIfNeeded(true);
                     }
+                }
+
+                // ========== HANDLE FRIEND EVENTS (Broadcast to all modules) ==========
+                if (data.type === 'FRIEND_ACCEPTED' || data.type === 'FRIEND_REJECTED' || data.type === 'FRIEND_REMOVED') {
+                    console.log(`[Parent] Broadcasting ${data.type} event to all modules`, data.payload);
+                    dispatchEventToModules({
+                        type: data.type,
+                        payload: data.payload || data,
+                        originalSource: data.source || 'child-module'
+                    });
                 }
 
                 // ========== HANDLE API REQUESTS ==========
@@ -704,18 +784,7 @@
                     }
                 }
 
-                // ========== NEW: Handle pending chat from friends module ==========
-                if (data.type === 'SET_PENDING_CHAT') {
-                    console.log('[Parent] Received pending chat context:', data.payload);
-                    sessionStorage.setItem('pending_chat', JSON.stringify({
-                        userId: data.payload.userId,
-                        userName: data.payload.userName,
-                        timestamp: Date.now()
-                    }));
-                    window.__pendingChat = data.payload;
-                }
-
-                // ========== NEW: Handle module switch request ==========
+                // ========== ENHANCED SWITCH_MODULE (with call support) ==========
                 if (data.type === 'SWITCH_MODULE') {
                     console.log('[Parent] Switching to module:', data.module);
                     const targetModuleName = data.module;
@@ -751,6 +820,35 @@
                             btn.classList.remove('active');
                         }
                     });
+
+                    // ========== ENHANCEMENT: Handle call module with userId ==========
+                    if (targetModuleName === 'calls' && data.payload && data.payload.userId) {
+                        console.log('[Parent] Switching to calls module with user:', data.payload.userId);
+                        
+                        // Forward OPEN_CALL_WITH_USER event to calls module
+                        const callEvent = {
+                            type: 'OPEN_CALL_WITH_USER',
+                            payload: {
+                                userId: data.payload.userId,
+                                userName: data.payload.userName || data.payload.name || 'User',
+                                callType: data.payload.callType || 'video',
+                                ...data.payload
+                            },
+                            source: 'parent',
+                            timestamp: Date.now()
+                        };
+                        
+                        // Dispatch to calls module specifically
+                        const callsIframe = document.getElementById('callsIframe');
+                        if (callsIframe && callsIframe.contentWindow) {
+                            setTimeout(() => {
+                                callsIframe.contentWindow.postMessage(callEvent, '*');
+                                console.log('📞 Forwarded OPEN_CALL_WITH_USER to calls module:', callEvent.payload);
+                            }, 500);
+                        } else {
+                            console.warn('[Parent] Calls iframe not available for call initiation');
+                        }
+                    }
 
                     // FIX: If the SWITCH_MODULE message itself carries a user payload
                     // (sent by friend-ui.js navigateToChatWithUser), persist it into

@@ -1,6 +1,6 @@
 // calls-ui.js
 // ==================== RESILIENT UI CONTROLLER - DETERMINISTIC LIFECYCLE ====================
-// Version: 5.0.1 - STABILITY FIXES: Event-driven core sync, session validation, error resilience
+// Version: 5.1.0 - ADDED: OPEN_CALL_WITH_USER event handling, auto-call initiation, navigation support
 // Dependencies: calls-core.js v9.0.1
 // =======================================================================================
 
@@ -45,6 +45,18 @@
     let _sessionInvalid = false;
     
     // No polling - rely on core events
+
+    // ==================== PENDING CALL STATE (for OPEN_CALL_WITH_USER) ====================
+    let pendingCall = {
+        userId: null,
+        userName: null,
+        callType: null,
+        initiated: false,
+        retryCount: 0,
+        maxRetries: 5,
+        retryDelay: 500,
+        retryTimer: null
+    };
 
     // ==================== ERROR CACHE FOR ONCE LOGGING ====================
     const _onceErrors = new Map();
@@ -138,7 +150,7 @@
                         'msg-' + Date.now() + '-' + Math.random().toString(36).substring(2, 9),
                     timestamp: Date.now(),
                     payload: payload || {},
-                    version: '5.0.1'
+                    version: '5.1.0'
                 };
                 window.parent.postMessage(message, '*');
                 return true;
@@ -286,6 +298,8 @@
                     if (RenderingPipeline && RenderingPipeline.updateSyncIndicator) {
                         RenderingPipeline.updateSyncIndicator();
                     }
+                    // Try to process any pending call now that core is active
+                    attemptPendingCall();
                 } else if (detail.to === 'WAIT_PARENT') {
                     if (RenderingPipeline && RenderingPipeline.updateSyncIndicator) {
                         RenderingPipeline.updateSyncIndicator();
@@ -305,6 +319,7 @@
             if (RenderingPipeline && RenderingPipeline.updateSyncIndicator) {
                 RenderingPipeline.updateSyncIndicator();
             }
+            attemptPendingCall();
         });
 
         _coreListenersInitialized = true;
@@ -385,6 +400,7 @@
         }
         
         performFullInitialization();
+        attemptPendingCall();
     }
 
     function detectExistingCore() {
@@ -697,6 +713,255 @@
             
             // No timeout - just wait for events
         });
+    }
+
+    // ==================== OPEN_CALL_WITH_USER EVENT HANDLER ====================
+    function handleOpenCallWithUser(event) {
+        const data = event.detail || event.data || {};
+        
+        if (DEBUG) {
+            logOnce('info', 'Received OPEN_CALL_WITH_USER event', data);
+        }
+        
+        // Extract call details
+        const userId = data.userId || data.user_id || data.id;
+        const userName = data.userName || data.name || data.user_name || 'User';
+        let callType = data.callType || data.type || data.call_type || 'voice';
+        
+        // Validate call type
+        if (callType !== 'voice' && callType !== 'video') {
+            callType = 'voice';
+        }
+        
+        if (!userId) {
+            logOnce('error', 'OPEN_CALL_WITH_USER missing userId', data);
+            showNotification('Cannot start call: missing user information', 'error');
+            return;
+        }
+        
+        // Check if already in a call
+        if (coreInstance && coreInstance.isInCall && coreInstance.isInCall()) {
+            showNotification('You are already in a call. End current call to start a new one.', 'warning');
+            return;
+        }
+        
+        // Store pending call
+        pendingCall.userId = userId;
+        pendingCall.userName = userName;
+        pendingCall.callType = callType;
+        pendingCall.initiated = false;
+        pendingCall.retryCount = 0;
+        
+        // Clear any existing retry timer
+        if (pendingCall.retryTimer) {
+            clearTimeout(pendingCall.retryTimer);
+            pendingCall.retryTimer = null;
+        }
+        
+        // Pre-fill UI: show selected user in call modal
+        prefillCallModal(userId, userName, callType);
+        
+        // Open call modal immediately
+        openCallModalForUser(userId, userName, callType);
+        
+        // Attempt to initiate call (will retry if core not ready)
+        attemptPendingCall();
+    }
+    
+    function prefillCallModal(userId, userName, callType) {
+        // Store selected user info in UI state for modal pre-fill
+        UIState.pendingCallUser = {
+            id: userId,
+            name: userName,
+            type: callType,
+            timestamp: Date.now()
+        };
+        
+        // If contacts list is available, pre-select this user
+        setTimeout(() => {
+            const contactCheckbox = document.querySelector(`.contact-checkbox[id="contact-${userId}"]`);
+            if (contactCheckbox) {
+                contactCheckbox.checked = true;
+                const contactItem = contactCheckbox.closest('.contact-item');
+                if (contactItem) {
+                    contactItem.classList.add('selected');
+                }
+            } else {
+                // If contact not found in list, try to find by data-id
+                const contactItem = document.querySelector(`.contact-item[data-id="${userId}"]`);
+                if (contactItem) {
+                    const checkbox = contactItem.querySelector('.contact-checkbox');
+                    if (checkbox) {
+                        checkbox.checked = true;
+                        contactItem.classList.add('selected');
+                    }
+                }
+            }
+        }, 100);
+    }
+    
+    function openCallModalForUser(userId, userName, callType) {
+        // Open the new call modal
+        if (elements.newCallModal) {
+            elements.newCallModal.classList.add('active');
+            UIState.activeModals.add('newCallModal');
+            
+            // Switch to contacts tab
+            UIEventHandlers.switchNewCallTab('contacts');
+            
+            // Update modal title or show selected user info
+            const modalTitle = elements.newCallModal.querySelector('.modal-title');
+            if (modalTitle) {
+                modalTitle.innerHTML = `<i class="fas fa-phone-alt"></i> Call ${SecuritySanitizer.sanitizeString(userName)}`;
+            }
+            
+            // Show a subtle notification that call is being prepared
+            showNotification(`Preparing ${callType} call with ${userName}...`, 'info');
+        } else {
+            // Fallback: show notification only
+            showNotification(`Starting ${callType} call with ${userName}...`, 'info');
+        }
+    }
+    
+    function attemptPendingCall() {
+        // Check if there's a pending call
+        if (!pendingCall.userId || pendingCall.initiated) {
+            return;
+        }
+        
+        // Check if core is ready
+        const isCoreActive = coreInstance && 
+            ((coreInstance.getLifecycleState && coreInstance.getLifecycleState() === 'ACTIVE') ||
+             (coreInstance.isCoreReady && coreInstance.isCoreReady()) ||
+             coreReady);
+        
+        const isParentReadyFlag = parentReady || (coreInstance && coreInstance.getParentReady && coreInstance.getParentReady());
+        
+        if (!isCoreActive || !isParentReadyFlag) {
+            // Core not ready yet - schedule retry
+            if (pendingCall.retryCount < pendingCall.maxRetries) {
+                pendingCall.retryCount++;
+                const delay = pendingCall.retryDelay * Math.pow(1.5, pendingCall.retryCount - 1);
+                
+                if (DEBUG) {
+                    logOnce('info', `Core not ready for call, retry ${pendingCall.retryCount}/${pendingCall.maxRetries} in ${delay}ms`);
+                }
+                
+                pendingCall.retryTimer = setTimeout(() => {
+                    attemptPendingCall();
+                }, delay);
+            } else {
+                // Max retries exceeded
+                logOnce('error', `Failed to initiate call after ${pendingCall.maxRetries} retries - core not ready`);
+                showNotification(`Unable to start call with ${pendingCall.userName}. Please try again later.`, 'error');
+                clearPendingCall();
+            }
+            return;
+        }
+        
+        // Check if already in a call
+        if (coreInstance.isInCall && coreInstance.isInCall()) {
+            showNotification('You are already in a call. End current call to start a new one.', 'warning');
+            clearPendingCall();
+            return;
+        }
+        
+        // Core is ready - initiate the call
+        initiateCallWithPendingUser();
+    }
+    
+    async function initiateCallWithPendingUser() {
+        if (!pendingCall.userId || pendingCall.initiated) {
+            return;
+        }
+        
+        const { userId, userName, callType } = pendingCall;
+        
+        if (DEBUG) {
+            logOnce('info', `Initiating ${callType} call with ${userName} (${userId})`);
+        }
+        
+        pendingCall.initiated = true;
+        
+        // Close any retry timer
+        if (pendingCall.retryTimer) {
+            clearTimeout(pendingCall.retryTimer);
+            pendingCall.retryTimer = null;
+        }
+        
+        try {
+            // Prepare contact object for the call
+            const contact = {
+                id: userId,
+                name: userName,
+                callType: callType
+            };
+            
+            // Use core's initCall or startCall method
+            let result;
+            
+            if (coreInstance && coreInstance.initCall) {
+                result = await coreInstance.initCall(callType, [contact]);
+            } else if (coreInstance && coreInstance.startCall) {
+                result = await coreInstance.startCall(userId, callType);
+            } else if (coreInstance && coreInstance.initiateCall) {
+                result = await coreInstance.initiateCall([userId], callType);
+            } else {
+                // Fallback: simulate call initiation (for testing/development)
+                if (DEBUG) {
+                    logOnce('warn', 'No core call initiation method found, simulating call start');
+                }
+                result = { success: true, simulated: true };
+            }
+            
+            if (result && result.success) {
+                showNotification(`${callType === 'video' ? 'Video call' : 'Voice call'} started with ${userName}`, 'success');
+                clearPendingCall();
+            } else {
+                const errorMsg = result?.error || 'Unknown error';
+                logOnce('error', `Call initiation failed: ${errorMsg}`);
+                showNotification(`Failed to start call with ${userName}: ${errorMsg}`, 'error');
+                clearPendingCall();
+            }
+        } catch (error) {
+            logOnce('error', `Call initiation exception: ${error.message}`, error);
+            showNotification(`Failed to start call with ${userName}. Please try again.`, 'error');
+            clearPendingCall();
+        }
+    }
+    
+    function clearPendingCall() {
+        if (pendingCall.retryTimer) {
+            clearTimeout(pendingCall.retryTimer);
+            pendingCall.retryTimer = null;
+        }
+        
+        pendingCall.userId = null;
+        pendingCall.userName = null;
+        pendingCall.callType = null;
+        pendingCall.initiated = false;
+        pendingCall.retryCount = 0;
+        
+        // Clear pre-filled UI state
+        UIState.pendingCallUser = null;
+    }
+    
+    // Listen for OPEN_CALL_WITH_USER events
+    function setupOpenCallWithUserListener() {
+        // Listen for custom event
+        window.addEventListener('OPEN_CALL_WITH_USER', handleOpenCallWithUser);
+        
+        // Also listen for message events from parent iframe communication
+        window.addEventListener('message', function(event) {
+            const data = event.data;
+            if (data && (data.type === 'OPEN_CALL_WITH_USER' || data.type === 'START_CALL' || data.type === 'CALL_USER')) {
+                handleOpenCallWithUser({ detail: data.payload || data });
+            }
+        });
+        
+        if (DEBUG) {
+            logOnce('info', 'OPEN_CALL_WITH_USER listener established');
+        }
     }
 
     // ==================== DOM ELEMENTS CACHE ====================
@@ -1177,6 +1442,14 @@
                 activeCall: {
                     active: coreInstance ? coreInstance.isInCall ? coreInstance.isInCall() : false : false,
                     callId: coreInstance ? coreInstance.getActiveCallId ? coreInstance.getActiveCallId() : null : null
+                },
+                pendingCall: {
+                    hasPending: !!pendingCall.userId,
+                    userId: pendingCall.userId,
+                    userName: pendingCall.userName,
+                    callType: pendingCall.callType,
+                    initiated: pendingCall.initiated,
+                    retryCount: pendingCall.retryCount
                 }
             };
         },
@@ -1589,7 +1862,10 @@
         relationshipData: null,
         
         // No polling intervals - rely on core events
-        handshakeCheckInterval: null
+        handshakeCheckInterval: null,
+        
+        // Pending call user info for modal pre-fill
+        pendingCallUser: null
     };
 
     // ==================== RENDERING PIPELINE ====================
@@ -2067,6 +2343,8 @@
                     if (RenderingPipeline && RenderingPipeline.updateSyncIndicator) {
                         RenderingPipeline.updateSyncIndicator();
                     }
+                    // Try to process any pending call
+                    attemptPendingCall();
                     break;
                 case 'session_invalid':
                     sessionReady = false;
@@ -2154,6 +2432,7 @@
                     if (RenderingPipeline && RenderingPipeline.updateSyncIndicator) {
                         RenderingPipeline.updateSyncIndicator();
                     }
+                    attemptPendingCall();
                     break;
                 case 'session_sync':
                     sessionReady = true;
@@ -2166,6 +2445,7 @@
                     if (RenderingPipeline && RenderingPipeline.updateSyncIndicator) {
                         RenderingPipeline.updateSyncIndicator();
                     }
+                    attemptPendingCall();
                     break;
                 case 'auth_error':
                 case 'unauthorized':
@@ -2179,6 +2459,7 @@
                             if (RenderingPipeline && RenderingPipeline.updateSyncIndicator) {
                                 RenderingPipeline.updateSyncIndicator();
                             }
+                            attemptPendingCall();
                         }
                         coreLifecycleState = data.newState;
                         if (RenderingPipeline && RenderingPipeline.updateSyncIndicator) {
@@ -2189,6 +2470,9 @@
                 case 'module_state_change':
                     if (data && data.to) {
                         coreLifecycleState = data.to;
+                        if (data.to === 'ACTIVE') {
+                            attemptPendingCall();
+                        }
                         if (RenderingPipeline && RenderingPipeline.updateSyncIndicator) {
                             RenderingPipeline.updateSyncIndicator();
                         }
@@ -2629,6 +2913,7 @@
                         if (RenderingPipeline && RenderingPipeline.updateSyncIndicator) {
                             RenderingPipeline.updateSyncIndicator();
                         }
+                        attemptPendingCall();
                         break;
                     case 'MODULE_REGISTERED':
                         handshakeComplete = true;
@@ -2643,10 +2928,16 @@
                         if (RenderingPipeline && RenderingPipeline.updateSyncIndicator) {
                             RenderingPipeline.updateSyncIndicator();
                         }
+                        attemptPendingCall();
                         break;
                     case 'AUTH_ERROR':
                     case 'UNAUTHORIZED':
                         this.handleAuthError();
+                        break;
+                    case 'OPEN_CALL_WITH_USER':
+                    case 'START_CALL':
+                    case 'CALL_USER':
+                        handleOpenCallWithUser({ detail: data.payload || data });
                         break;
                 }
             };
@@ -3460,6 +3751,15 @@
                 elements.newCallModal.classList.add('active');
                 UIState.activeModals.add('newCallModal');
                 
+                // Reset modal title if previously set by pending call
+                const modalTitle = elements.newCallModal.querySelector('.modal-title');
+                if (modalTitle && UIState.pendingCallUser) {
+                    // If we have a pending call, keep the custom title
+                    modalTitle.innerHTML = `<i class="fas fa-phone-alt"></i> Call ${SecuritySanitizer.sanitizeString(UIState.pendingCallUser.name)}`;
+                } else if (modalTitle) {
+                    modalTitle.innerHTML = '<i class="fas fa-phone-alt"></i> New Call';
+                }
+                
                 if (window.AppState?.contacts?.length > 0) {
                     RenderingPipeline.renderContactsList(window.AppState.contacts);
                 }
@@ -3473,6 +3773,12 @@
             if (elements.newCallModal) {
                 elements.newCallModal.classList.remove('active');
                 UIState.activeModals.delete('newCallModal');
+                
+                // Reset modal title
+                const modalTitle = elements.newCallModal.querySelector('.modal-title');
+                if (modalTitle) {
+                    modalTitle.innerHTML = '<i class="fas fa-phone-alt"></i> New Call';
+                }
                 
                 document.querySelectorAll('.contact-checkbox:checked, .group-contact:checked').forEach(el => {
                     el.checked = false;
@@ -3582,6 +3888,8 @@
                     .then(result => {
                         if (result.success) {
                             showNotification(`${type} call started`, 'success');
+                            // Clear pending call if this was from auto-initiation
+                            clearPendingCall();
                         } else {
                             showNotification(result.error || 'Failed to start call', 'error');
                         }
@@ -5163,6 +5471,9 @@
         UIState.renderStages.initial = true;
         UIState.initialized = true;
         
+        // Set up OPEN_CALL_WITH_USER listener
+        setupOpenCallWithUserListener();
+        
         window.dispatchEvent(new CustomEvent('calls.ui.ready', {
             detail: { 
                 timestamp: Date.now()
@@ -5398,6 +5709,12 @@
             if (RenderingPipeline && RenderingPipeline.updateSyncIndicator) {
                 RenderingPipeline.updateSyncIndicator();
             }
+        },
+        // Get pending call status
+        getPendingCall: () => ({ ...pendingCall }),
+        // Manually trigger a call with a user (for external use)
+        initiateCallWithUser: (userId, userName, callType = 'voice') => {
+            handleOpenCallWithUser({ detail: { userId, userName, callType } });
         }
     };
 

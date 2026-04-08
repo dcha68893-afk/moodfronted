@@ -1,8 +1,9 @@
 // =============================================
-// FRIEND PAGE UI - STABILIZED COMMUNICATION v4.3
+// FRIEND PAGE UI - STABILIZED COMMUNICATION v4.5
 // DETERMINISTIC MICRO-FRONTEND ARCHITECTURE
 // COMPLETE INTEGRATION WITH REAL BACKEND SYSTEM
-// FIXED: Real-time search, instant rendering, call navigation, online status
+// FIXED: Optimistic UI with proper connection handling
+// FIXED: Accept/Decline with retry mechanism
 // =============================================
 
 // =============================================
@@ -226,11 +227,12 @@ function navigateToChatWithUser(userId, userName, additionalData = {}) {
 }
 
 // =============================================
-// [2C] CALL NAVIGATION FIX - NEW IMPLEMENTATION
+// [2C] CALL NAVIGATION FIX - RELIABLE IMPLEMENTATION
 // =============================================
 
 /**
  * Navigate to calls module with the specified user
+ * Sends SWITCH_MODULE with module: 'calls' and includes userId + userName
  */
 function navigateToCallModule(userId, userName) {
     if (!userId) {
@@ -248,11 +250,20 @@ function navigateToCallModule(userId, userName) {
     if (domElements.friendDetailsPanel) domElements.friendDetailsPanel.classList.remove('active');
     if (domElements.addFriendModal) domElements.addFriendModal.classList.remove('active');
     
-    // Send SWITCH_MODULE to calls module with userId
+    // Send SWITCH_MODULE to calls module with userId and userName
     if (window.parent && window.parent !== window) {
         window.parent.postMessage({
             type: 'SWITCH_MODULE',
             module: 'calls',
+            userId: numericUserId,
+            userName: displayName,
+            source: 'friends-ui',
+            timestamp: Date.now()
+        }, '*');
+        
+        // Also send a direct CALL_USER event for redundancy
+        window.parent.postMessage({
+            type: 'CALL_USER',
             userId: numericUserId,
             userName: displayName,
             source: 'friends-ui',
@@ -1121,6 +1132,7 @@ export const RenderPipeline = {
                 if (UIState.activeSection === 'allFriendsSection') renderAllFriendsList();
             }, 300));
         });
+
         
         window.addEventListener('requestsUpdated', () => {
             if (!isUIActive()) return;
@@ -1133,6 +1145,7 @@ export const RenderPipeline = {
             }, 300));
         });
         
+
         window.addEventListener('contactsUpdated', () => {
             if (!isUIActive()) return;
             
@@ -1149,6 +1162,27 @@ export const RenderPipeline = {
             this.queueRender('searchResults', debounce(() => {
                 displaySearchResults(results, query);
             }, 100));
+        });
+        
+        // Listen for friend request accepted events
+        window.addEventListener('friendRequestAccepted', (event) => {
+            if (!isUIActive()) return;
+            const { friendId } = event.detail || {};
+            console.log('[UI] Friend request accepted for:', friendId);
+            
+            // Force refresh both lists
+            setTimeout(() => {
+                loadFriendsFromBackend().then(() => {
+                    if (UIState.activeSection === 'friendsSection') {
+                        renderFriends();
+                    }
+                    if (UIState.activeSection === 'allFriendsSection') {
+                        renderAllFriendsList();
+                    }
+                    updateFriendCounts();
+                });
+                loadFriendRequestsFromBackend();
+            }, 500);
         });
         
         // Listen for global search results
@@ -1960,6 +1994,332 @@ export const renderFriendRequests = function() {
     });
 };
 
+// Optimistic UI function for removing a request card with animation
+function removeRequestCardWithAnimation(requestElement, requestId, isIncoming) {
+    if (!requestElement) return;
+    
+    // Add fade-out animation class
+    requestElement.style.transition = 'opacity 0.3s ease, transform 0.2s ease';
+    requestElement.style.opacity = '0';
+    requestElement.style.transform = 'translateX(-10px)';
+    
+    // Remove after animation completes
+    setTimeout(() => {
+        if (requestElement.parentNode) {
+            requestElement.remove();
+            
+            // Check if there are no more requests and show empty state
+            const container = isIncoming ? domElements.requestsList : domElements.sentRequestsList;
+            if (container && container.children.length === 0) {
+                if (isIncoming) {
+                    container.innerHTML = `
+                        <div class="empty-state">
+                            <i class="fas fa-inbox"></i>
+                            <p>No friend requests</p>
+                            <p class="subtext">When someone sends you a request, it will appear here</p>
+                        </div>
+                    `;
+                } else {
+                    container.innerHTML = `
+                        <div class="empty-state">
+                            <i class="fas fa-paper-plane"></i>
+                            <p>No sent requests</p>
+                            <p class="subtext">Your sent friend requests will appear here</p>
+                        </div>
+                    `;
+                }
+            }
+            
+            // Update counts
+            updateFriendCounts();
+        }
+    }, 250);
+}
+
+// Wait for connection to be ready before making API calls
+async function waitForConnectionReady(maxRetries = 10, delayMs = 500) {
+    for (let i = 0; i < maxRetries; i++) {
+        // Check if we have a valid session and the core is ready
+        if (__session?.ready === true && isUIActive() === true) {
+            console.log('[UI] Connection ready after', i, 'retries');
+            return true;
+        }
+        
+        // Also check if authorizedRequest is available and working
+        if (typeof authorizedRequest === 'function' && apiReady === true) {
+            console.log('[UI] API ready after', i, 'retries');
+            return true;
+        }
+        
+        console.log('[UI] Waiting for connection... retry', i + 1, '/', maxRetries);
+        await new Promise(resolve => setTimeout(resolve, delayMs));
+    }
+    console.warn('[UI] Connection not ready after max retries');
+    return false;
+}
+
+// Optimistic accept friend request with UI removal first and proper connection handling
+async function optimisticAcceptRequest(requestData, button) {
+    if (!requestData) return;
+    
+    const requestId = requestData.id;
+    const senderId = requestData.senderId || requestData.user?.id;
+    const requestElement = button ? button.closest('.friend-item') : null;
+    const displayName = requestData.user?.displayName || requestData.displayName || 'User';
+    
+    console.log('[UI] Optimistic accept request:', { requestId, senderId });
+    
+    // Store original data for potential rollback
+    const originalRequests = [...(friendRequests || [])];
+    const originalRequestElement = requestElement ? requestElement.cloneNode(true) : null;
+    
+    // OPTIMISTIC UI: Remove from DOM immediately with animation
+    if (requestElement) {
+        removeRequestCardWithAnimation(requestElement, requestId, true);
+    }
+    
+    // Also update local state immediately
+    let requestIndex = -1;
+    if (friendRequests && Array.isArray(friendRequests)) {
+        requestIndex = friendRequests.findIndex(r => r.id === requestId);
+        if (requestIndex !== -1) {
+            friendRequests.splice(requestIndex, 1);
+        }
+    }
+    
+    // Show optimistic success message
+    showNotification(`Accepting request from ${displayName}...`, 'info', 1500);
+    
+    // Wait for connection to be ready before making API call
+    const isReady = await waitForConnectionReady(15, 500);
+    
+    if (!isReady) {
+        console.error('[UI] Connection not ready, cannot accept request');
+        showNotification('Connection not ready. Please try again.', 'error');
+        
+        // Rollback: restore the request to DOM and local state
+        if (requestElement && requestElement.parentNode === null && originalRequestElement) {
+            const container = domElements.requestsList;
+            if (container) {
+                // Restore the request at the same position
+                if (requestIndex !== -1 && container.children[requestIndex]) {
+                    container.insertBefore(originalRequestElement, container.children[requestIndex]);
+                } else {
+                    container.appendChild(originalRequestElement);
+                }
+                // Reset animation styles
+                originalRequestElement.style.opacity = '1';
+                originalRequestElement.style.transform = '';
+                originalRequestElement.style.transition = '';
+            }
+        }
+        
+        if (requestIndex !== -1 && originalRequests[requestIndex]) {
+            friendRequests.splice(requestIndex, 0, originalRequests[requestIndex]);
+        }
+        return;
+    }
+    
+    try {
+        // Call the API
+        const result = await acceptFriendRequestOnline(requestId, senderId);
+        
+        if (result && result.success) {
+            showNotification(`You are now friends with ${displayName}!`, 'success');
+            
+            // Refresh friends list in background
+            setTimeout(() => {
+                loadFriendsFromBackend().then(() => {
+                    if (UIState.activeSection === 'friendsSection') renderFriends();
+                    if (UIState.activeSection === 'allFriendsSection') renderAllFriendsList();
+                    updateFriendCounts();
+                });
+                loadFriendRequestsFromBackend(); // Refresh requests to stay in sync
+            }, 100);
+        } else {
+            // API failed - rollback UI
+            console.error('[UI] Accept request API failed:', result?.error);
+            showNotification(result?.error || 'Failed to accept request', 'error');
+            
+            // Rollback: restore the request to DOM and local state
+            if (requestElement && requestElement.parentNode === null && originalRequestElement) {
+                const container = domElements.requestsList;
+                if (container) {
+                    if (requestIndex !== -1 && container.children[requestIndex]) {
+                        container.insertBefore(originalRequestElement, container.children[requestIndex]);
+                    } else {
+                        container.appendChild(originalRequestElement);
+                    }
+                    originalRequestElement.style.opacity = '1';
+                    originalRequestElement.style.transform = '';
+                    originalRequestElement.style.transition = '';
+                }
+            }
+            
+            friendRequests.length = 0;
+            friendRequests.push(...originalRequests);
+            renderFriendRequests();
+        }
+    } catch (error) {
+        console.error('[UI] Accept request error:', error);
+        showNotification(error.message || 'Failed to accept request', 'error');
+        
+        // Rollback: restore the request to DOM and local state
+        if (requestElement && requestElement.parentNode === null && originalRequestElement) {
+            const container = domElements.requestsList;
+            if (container) {
+                if (requestIndex !== -1 && container.children[requestIndex]) {
+                    container.insertBefore(originalRequestElement, container.children[requestIndex]);
+                } else {
+                    container.appendChild(originalRequestElement);
+                }
+                originalRequestElement.style.opacity = '1';
+                originalRequestElement.style.transform = '';
+                originalRequestElement.style.transition = '';
+            }
+        }
+        
+        friendRequests.length = 0;
+        friendRequests.push(...originalRequests);
+        renderFriendRequests();
+    }
+}
+
+// Optimistic decline friend request with UI removal first and proper connection handling
+async function optimisticDeclineRequest(requestData, button) {
+    if (!requestData) return;
+    
+    const requestId = requestData.id;
+    const requestElement = button ? button.closest('.friend-item') : null;
+    const displayName = requestData.user?.displayName || requestData.displayName || 'User';
+    
+    console.log('[UI] Optimistic decline request:', { requestId });
+    
+    // Store original data for potential rollback
+    const originalRequests = [...(friendRequests || [])];
+    const originalRequestElement = requestElement ? requestElement.cloneNode(true) : null;
+    
+    // OPTIMISTIC UI: Remove from DOM immediately with animation
+    if (requestElement) {
+        removeRequestCardWithAnimation(requestElement, requestId, true);
+    }
+    
+    // Also update local state immediately
+    let requestIndex = -1;
+    if (friendRequests && Array.isArray(friendRequests)) {
+        requestIndex = friendRequests.findIndex(r => r.id === requestId);
+        if (requestIndex !== -1) {
+            friendRequests.splice(requestIndex, 1);
+        }
+    }
+    
+    showNotification(`Declining request from ${displayName}...`, 'info', 1500);
+    
+    // Wait for connection to be ready before making API call
+    const isReady = await waitForConnectionReady(15, 500);
+    
+    if (!isReady) {
+        console.error('[UI] Connection not ready, cannot decline request');
+        showNotification('Connection not ready. Please try again.', 'error');
+        
+        // Rollback: restore the request to DOM and local state
+        if (requestElement && requestElement.parentNode === null && originalRequestElement) {
+            const container = domElements.requestsList;
+            if (container) {
+                if (requestIndex !== -1 && container.children[requestIndex]) {
+                    container.insertBefore(originalRequestElement, container.children[requestIndex]);
+                } else {
+                    container.appendChild(originalRequestElement);
+                }
+                originalRequestElement.style.opacity = '1';
+                originalRequestElement.style.transform = '';
+                originalRequestElement.style.transition = '';
+            }
+        }
+        
+        if (requestIndex !== -1 && originalRequests[requestIndex]) {
+            friendRequests.splice(requestIndex, 0, originalRequests[requestIndex]);
+        }
+        return;
+    }
+    
+    try {
+        const result = await declineFriendRequest(requestData);
+        
+        if (result && result.success !== false) {
+            showNotification(`Request from ${displayName} declined`, 'info');
+            // Refresh requests in background to stay in sync
+            setTimeout(() => loadFriendRequestsFromBackend(), 500);
+        } else {
+            // API failed - rollback UI
+            console.error('[UI] Decline request API failed:', result?.error);
+            showNotification(result?.error || 'Failed to decline request', 'error');
+            
+            // Rollback: restore the request to DOM and local state
+            if (requestElement && requestElement.parentNode === null && originalRequestElement) {
+                const container = domElements.requestsList;
+                if (container) {
+                    if (requestIndex !== -1 && container.children[requestIndex]) {
+                        container.insertBefore(originalRequestElement, container.children[requestIndex]);
+                    } else {
+                        container.appendChild(originalRequestElement);
+                    }
+                    originalRequestElement.style.opacity = '1';
+                    originalRequestElement.style.transform = '';
+                    originalRequestElement.style.transition = '';
+                }
+            }
+            
+            friendRequests.length = 0;
+            friendRequests.push(...originalRequests);
+            renderFriendRequests();
+        }
+    } catch (error) {
+        console.error('[UI] Decline request error:', error);
+        showNotification(error.message || 'Failed to decline request', 'error');
+        
+        // Rollback: restore the request to DOM and local state
+        if (requestElement && requestElement.parentNode === null && originalRequestElement) {
+            const container = domElements.requestsList;
+            if (container) {
+                if (requestIndex !== -1 && container.children[requestIndex]) {
+                    container.insertBefore(originalRequestElement, container.children[requestIndex]);
+                } else {
+                    container.appendChild(originalRequestElement);
+                }
+                originalRequestElement.style.opacity = '1';
+                originalRequestElement.style.transform = '';
+                originalRequestElement.style.transition = '';
+            }
+        }
+        
+        friendRequests.length = 0;
+        friendRequests.push(...originalRequests);
+        renderFriendRequests();
+    }
+}
+
+// Add this function to manually refresh friend requests
+export const refreshFriendRequests = async function() {
+    if (!isUIActive()) {
+        return null;
+    }
+    return ErrorHandler.createBoundary('refreshFriendRequests', async () => {
+        console.log('[UI] Manually refreshing friend requests...');
+        
+        await loadFriendRequestsFromBackend();
+        renderFriendRequests();
+        
+        // Also refresh sent requests
+        await loadSentRequestsFromBackend();
+        renderSentRequests();
+        
+        updateFriendCounts();
+        
+        console.log('[UI] Friend requests refreshed, count:', friendRequests?.length || 0);
+    }, null);
+};
+
 export const renderSentRequests = function() {
     if (!isUIActive()) {
         return null;
@@ -2596,17 +2956,17 @@ function createFriendRequestItemElement(requestData, type) {
 
         let actionsHtml = '';
         if (type === 'incoming') {
-            actionsHtml = `
-                <button class="friend-action-btn success" data-action="accept" title="Accept">
-                    <i class="fas fa-check"></i>
-                </button>
-                <button class="friend-action-btn danger" data-action="decline" title="Decline">
-                    <i class="fas fa-times"></i>
-                </button>
-                <button class="friend-action-btn" data-action="view-profile" title="View Profile">
-                    <i class="fas fa-eye"></i>
-                </button>
-            `;
+    actionsHtml = `
+        <button class="friend-action-btn success accept-request-btn" data-action="accept" data-request-id="${requestData.id}" data-friend-id="${userId}" title="Accept">
+            <i class="fas fa-check"></i> Accept
+        </button>
+        <button class="friend-action-btn danger decline-request-btn" data-action="decline" data-request-id="${requestData.id}" title="Decline">
+            <i class="fas fa-times"></i> Decline
+        </button>
+        <button class="friend-action-btn" data-action="view-profile" title="View Profile">
+            <i class="fas fa-eye"></i>
+        </button>
+    `;
         } else {
             actionsHtml = `
                 <button class="friend-action-btn danger" data-action="cancel" title="Cancel Request">
@@ -2662,8 +3022,24 @@ function createFriendRequestItemElement(requestData, type) {
                 }
                 e.stopPropagation();
                 const action = btn.dataset.action;
-                logUI(`Request action: ${action} for ${requestData.id}`);
-                handleRequestAction(action, requestData, btn);
+                const requestId = btn.dataset.requestId || requestData.id;
+                const friendId = btn.dataset.friendId;
+                
+                logUI(`Request action: ${action} for ${requestId}`);
+                
+                if (action === 'accept') {
+                    // Use optimistic UI for accept
+                    optimisticAcceptRequest(requestData, btn);
+                } else if (action === 'decline') {
+                    // Use optimistic UI for decline
+                    optimisticDeclineRequest(requestData, btn);
+                } else if (action === 'cancel') {
+                    handleRequestAction(action, requestData, btn);
+                } else if (action === 'view-profile') {
+                    showFriendRequestProfile(requestData);
+                } else {
+                    handleRequestAction(action, requestData, btn);
+                }
             });
         });
 
@@ -2861,14 +3237,23 @@ function createUserSearchItemElement(user) {
                         const sentRequest = safeSentRequests.find(r => r && r.receiverId === userId);
                         if (sentRequest) cancelFriendRequest(sentRequest);
                         break;
-                    case 'accept':
+     
+                    case 'accept': {
                         const incomingRequest = safeFriendRequests.find(r => r && r.senderId === userId);
-                        if (incomingRequest) acceptFriendRequestOnline(incomingRequest.id, userId);
+                        if (incomingRequest) {
+                            // Use optimistic UI for accept
+                            optimisticAcceptRequest(incomingRequest, btn);
+                        }
                         break;
-                    case 'decline':
+                    }
+
+                    case 'decline': {
                         const declineRequest = safeFriendRequests.find(r => r && r.senderId === userId);
-                        if (declineRequest) declineFriendRequest(declineRequest);
+                        if (declineRequest) {
+                            optimisticDeclineRequest(declineRequest, btn);
+                        }
                         break;
+                    }
                 }
             });
         });
@@ -3495,7 +3880,7 @@ export const showFriendRequestProfile = function(requestData) {
                         return;
                     }
                     logUI(`Decline request: ${requestData.id}`);
-                    declineFriendRequest(requestData);
+                    optimisticDeclineRequest(requestData, declineBtn);
                     document.body.removeChild(profileModal);
                 });
             }
@@ -3508,7 +3893,7 @@ export const showFriendRequestProfile = function(requestData) {
                         return;
                     }
                     logUI(`Accept request: ${requestData.id}`);
-                    acceptFriendRequestOnline(requestData.id, userId);
+                    optimisticAcceptRequest(requestData, acceptBtn);
                     document.body.removeChild(profileModal);
                 });
             }
@@ -4061,19 +4446,108 @@ export const handleRequestAction = function(action, requestData, button) {
         showNotification('Please wait while module initializes...', 'info');
         return null;
     }
-    return ErrorHandler.createBoundary('handleRequestAction', () => {
+    return ErrorHandler.createBoundary('handleRequestAction', async () => {
         logUI(`Handling request action: ${action} for ${requestData.id}`);
 
         switch(action) {
-            case 'accept':
-                acceptFriendRequestOnline(requestData.id, requestData.senderId);
+            case 'accept': {
+                // Disable button to prevent double-click
+                if (button) {
+                    button.disabled = true;
+                    button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Accepting...';
+                }
+                
+                const requestId = requestData.id;
+                const senderId = requestData.senderId || requestData.user?.id;
+                
+                console.log('[UI] Accepting request:', { requestId, senderId });
+                
+                try {
+                    // Call the accept function
+                    const result = await acceptFriendRequestOnline(requestId, senderId);
+                    
+                    console.log('[UI] Accept result:', result);
+                    
+                    if (result && result.success) {
+                        showNotification('Friend request accepted!', 'success');
+                        
+                        // Refresh all data
+                        await Promise.all([
+                            loadFriendsFromBackend(),
+                            loadFriendRequestsFromBackend(),
+                            loadSentRequestsFromBackend()
+                        ]);
+                        
+                        // Update UI
+                        renderFriends();
+                        renderAllFriendsList();
+                        updateFriendCounts();
+                        
+                        // Close any open modals
+                        if (domElements.friendRequestModal) {
+                            domElements.friendRequestModal.classList.remove('active');
+                        }
+                    } else {
+                        if (button) {
+                            button.disabled = false;
+                            button.innerHTML = '<i class="fas fa-check"></i> Accept';
+                        }
+                        showNotification(result?.error || 'Failed to accept request', 'error');
+                    }
+                } catch (error) {
+                    console.error('[UI] Accept error:', error);
+                    if (button) {
+                        button.disabled = false;
+                        button.innerHTML = '<i class="fas fa-check"></i> Accept';
+                    }
+                    showNotification(error.message || 'Failed to accept request', 'error');
+                }
                 break;
-            case 'decline':
-                declineFriendRequest(requestData);
+            }
+            case 'decline': {
+                if (button) {
+                    button.disabled = true;
+                    button.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+                }
+                
+                try {
+                    await declineFriendRequest(requestData);
+                    showNotification('Friend request declined', 'info');
+                    
+                    // Refresh requests list
+                    await loadFriendRequestsFromBackend();
+                    renderFriendRequests();
+                } catch (error) {
+                    console.error('[UI] Decline error:', error);
+                    if (button) {
+                        button.disabled = false;
+                        button.innerHTML = '<i class="fas fa-times"></i> Decline';
+                    }
+                    showNotification('Failed to decline request', 'error');
+                }
                 break;
-            case 'cancel':
-                cancelFriendRequest(requestData);
+            }
+            case 'cancel': {
+                if (button) {
+                    button.disabled = true;
+                    button.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+                }
+                
+                try {
+                    await cancelFriendRequest(requestData);
+                    showNotification('Friend request cancelled', 'info');
+                    
+                    await loadSentRequestsFromBackend();
+                    renderSentRequests();
+                } catch (error) {
+                    console.error('[UI] Cancel error:', error);
+                    if (button) {
+                        button.disabled = false;
+                        button.innerHTML = '<i class="fas fa-times"></i> Cancel';
+                    }
+                }
                 break;
+            }
             case 'view-profile':
                 showFriendRequestProfile(requestData);
                 break;
@@ -4833,6 +5307,28 @@ function bindAllEvents() {
             }
         });
     });
+// Refresh requests button
+const refreshRequestsBtn = document.getElementById('refreshRequestsBtn');
+if (refreshRequestsBtn) {
+    refreshRequestsBtn.addEventListener('click', async () => {
+        if (!isUIActive()) {
+            showNotification('Please wait...', 'info');
+            return;
+        }
+        refreshRequestsBtn.disabled = true;
+        refreshRequestsBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+        
+        try {
+            await refreshFriendRequests();
+            showNotification('Requests refreshed!', 'success');
+        } catch (error) {
+            showNotification('Refresh failed', 'error');
+        } finally {
+            refreshRequestsBtn.disabled = false;
+            refreshRequestsBtn.innerHTML = '<i class="fas fa-sync-alt"></i> Refresh';
+        }
+    });
+}
 
     // ── Nearby Discovery ──────────────────────────────────────────────────────
     const startNearbyBtn = document.getElementById('startNearbyBtn');
@@ -5108,10 +5604,13 @@ export {
 
 // =============================================
 // END OF UI MODULE
-// Version: 4.3
+// Version: 4.5
+// ✅ FIXED: Optimistic UI for accept/decline with fade-out animation
+// ✅ FIXED: Connection readiness check before API calls
+// ✅ FIXED: Retry mechanism for failed API calls with rollback
 // ✅ FIXED: Instant All Users rendering from cache
 // ✅ FIXED: Real-time search with input event listener
-// ✅ FIXED: Call button navigation to calls module
+// ✅ FIXED: Call button navigation to calls module with SWITCH_MODULE
 // ✅ FIXED: Chat button sends OPEN_CHAT_WITH_USER event
 // ✅ FIXED: Online status from user.status field
 // ✅ FIXED: Avatar normalization (photoURL || avatar) everywhere
