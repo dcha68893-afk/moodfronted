@@ -2317,7 +2317,7 @@
                 <div class="friend-stats">
                     <div class="stats-container">
                         <div class="stat-item">
-                            <div class="stat-number" id="totalFriends">0</div>
+                            <div class="stat-number" id="totalFriendsStat">0</div>
                             <div class="stat-label">Total</div>
                         </div>
                         <div class="stat-item">
@@ -2349,12 +2349,7 @@
                     <!-- All Friends Section -->
                     <div class="friends-section active" id="allFriendsSection">
                         <div class="friends-list" id="allFriendsList">
-                            <!-- Initial empty state - will be populated in background -->
-                            <div class="empty-state">
-                                <i class="fas fa-user-friends"></i>
-                                <p>Loading friends...</p>
-                                <p class="subtext">Please wait while we load your friends</p>
-                            </div>
+                            <!-- Populated by renderAllFriendsList() -->
                         </div>
                     </div>
                     

@@ -2947,31 +2947,67 @@
         },
 
         async _fetchAllUsersAsFallback() {
-            if (!SessionManager.isAuthenticated()) return;
-            if (this._friends && this._friends.length > 0) return;
-            try {
-                let result = null;
-                let users = [];
+    if (!SessionManager.isAuthenticated()) return;
+    if (this._friends && this._friends.length > 0) return;
+    try {
+        let result = null;
+        let users = [];
 
-                try { result = await makeApiRequest('/users/search', 'GET', null, { q: '', limit: 50 }); } catch(e) { result = null; }
-                if (!result) {
-                    try { result = await makeApiRequest('/users', 'GET', null, { limit: 50 }); } catch(e) { result = null; }
-                }
-
-                if (Array.isArray(result)) { users = result; }
-                else if (result && Array.isArray(result.users)) { users = result.users; }
-                else if (result && result.data && Array.isArray(result.data)) { users = result.data; }
-                else if (result && result.data && Array.isArray(result.data.users)) { users = result.data.users; }
-
-                if (users.length > 0) {
-                    const currentUserId = SessionManager.getUserId();
-                    users = users.filter(u => (u.id || u.uid) !== currentUserId);
-                    if (users.length > 0) this.setFriends(users);
-                }
-            } catch (e) {
-                Logger.warn('FriendManager', 'Failed to fetch users as fallback:', e.message);
+        // FIX: Use /users endpoint instead of /users/search which is failing with 500
+        // The /users endpoint returns all users (excluding current user) with pagination
+        try { 
+            result = await makeApiRequest('/users', 'GET', null, { limit: 200 }); 
+        } catch(e) { 
+            console.log('[FriendManager] /users endpoint failed:', e.message);
+            result = null; 
+        }
+        
+        // Fallback to /users/all if /users fails
+        if (!result) {
+            try { 
+                result = await makeApiRequest('/users/all', 'GET', null, { limit: 200 }); 
+            } catch(e) { 
+                console.log('[FriendManager] /users/all endpoint failed:', e.message);
+                result = null; 
             }
-        },
+        }
+
+        // Parse response - handle different response formats
+        if (Array.isArray(result)) { 
+            users = result; 
+        }
+        else if (result && Array.isArray(result.users)) { 
+            users = result.users; 
+        }
+        else if (result && result.data && Array.isArray(result.data)) { 
+            users = result.data; 
+        }
+        else if (result && result.data && Array.isArray(result.data.users)) { 
+            users = result.data.users; 
+        }
+        else if (result && result.data && result.data.data && Array.isArray(result.data.data.users)) {
+            users = result.data.data.users;
+        }
+
+        if (users.length > 0) {
+            const currentUserId = SessionManager.getUserId();
+            // Filter out current user and ensure we have valid user objects
+            users = users.filter(u => {
+                const userId = u.id || u.uid;
+                return userId && userId !== currentUserId;
+            });
+            
+            if (users.length > 0) {
+                console.log(`[FriendManager] Loaded ${users.length} users as fallback`);
+                this.setFriends(users);
+            }
+        } else {
+            console.log('[FriendManager] No users found in fallback fetch');
+        }
+    } catch (e) {
+        Logger.warn('FriendManager', 'Failed to fetch users as fallback:', e.message);
+    }
+},
 
         setFriends: function(friends) {
             this._friends = friends || [];

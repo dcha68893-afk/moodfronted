@@ -19,6 +19,7 @@
 
 import {
     // Core State
+    authReadyReceived,
     currentUser,
     userData,
     friends,
@@ -1134,14 +1135,24 @@ export const RenderPipeline = {
     },
 
     setupLiveUpdateListeners() {
+        // Always update counts on these events - no lifecycle guard needed
+        window.addEventListener('updateFriendCounts', () => updateFriendCounts());
+
         window.addEventListener('friendsUpdated', () => {
-            if (!isUIActive()) return;
-            
+            updateFriendCounts();
             this.queueRender('friends', debounce(() => {
                 if (UIState.activeSection === 'friendsSection') renderFriends();
-                if (UIState.activeSection === 'allFriendsSection') renderAllFriendsList();
+                else if (UIState.activeSection === 'allFriendsSection') renderAllFriendsList();
+                else renderAllFriendsList(); // default: refresh all-friends so it's ready
             }, 300));
         });
+
+        // Catch any data load completion events and update counts
+        window.addEventListener('requestsUpdated', () => updateFriendCounts());
+        window.addEventListener('sentRequestsUpdated', () => updateFriendCounts());
+        window.addEventListener('pinnedFriendsUpdated', () => updateFriendCounts());
+        window.addEventListener('mutedFriendsUpdated', () => updateFriendCounts());
+        window.addEventListener('contactsUpdated', () => updateFriendCounts());
 
         
         window.addEventListener('requestsUpdated', (event) => {
@@ -1693,43 +1704,35 @@ function getUserOnlineStatusText(user) {
 // [8] UI RENDERING FUNCTIONS - STRICT LIFECYCLE COMPLIANCE
 // =============================================
 
-// FIXED: updateFriendCounts - use live window globals to avoid stale ES module bindings
+// FIXED: updateFriendCounts - no lifecycle guard, reads from window globals (set by syncToGlobals)
 export const updateFriendCounts = function() {
-    if (!isUIActive()) {
-        return null;
+    try {
+        // window globals are always fresh - syncToGlobals() dispatches updateFriendCounts after every update
+        const friendArray   = Array.isArray(window.friends)       ? window.friends       : (Array.isArray(friends)       ? friends       : []);
+        const contactArray  = Array.isArray(window.contacts)      ? window.contacts      : (Array.isArray(contacts)      ? contacts      : []);
+        const requestArray  = Array.isArray(window.friendRequests) ? window.friendRequests : (Array.isArray(friendRequests) ? friendRequests : []);
+        const sentArray     = Array.isArray(window.sentRequests)   ? window.sentRequests   : (Array.isArray(sentRequests)   ? sentRequests   : []);
+        const pinnedArray   = Array.isArray(window.pinnedFriends)  ? window.pinnedFriends  : (Array.isArray(pinnedFriends)  ? pinnedFriends  : []);
+        const mutedArray    = Array.isArray(window.mutedFriends)   ? window.mutedFriends   : (Array.isArray(mutedFriends)   ? mutedFriends   : []);
+        const temporaryArray = Array.isArray(window.temporaryFriends) ? window.temporaryFriends : (Array.isArray(temporaryFriends) ? temporaryFriends : []);
+
+        const set = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
+
+        set('totalFriends', friendArray.length);
+        set('totalFriendsStat', friendArray.length);
+        set('friendsCount', friendArray.length);
+        set('onlineFriends', friendArray.filter(f => f && (f.online === true || f.status === 'online')).length);
+        set('pinnedFriends', pinnedArray.length);
+        set('pinnedCount', pinnedArray.length);
+        set('mutedCount', mutedArray.length);
+        set('contactsCount', contactArray.length);
+        set('requestsCount', requestArray.length);
+        set('requestsSectionCount', requestArray.length);
+        set('sentRequestsCount', sentArray.length);
+        set('temporaryCount', temporaryArray.length);
+    } catch(e) {
+        console.warn('[updateFriendCounts] Error:', e);
     }
-    return ErrorHandler.createBoundary('updateFriendCounts', () => {
-        const totalFriendsElement = document.getElementById('totalFriends');
-        const onlineFriendsElement = document.getElementById('onlineFriends');
-        const pinnedFriendsElement = document.getElementById('pinnedFriends');
-        const friendsCountElement = document.getElementById('friendsCount');
-        const contactsCountElement = document.getElementById('contactsCount');
-        const requestsCountElement = document.getElementById('requestsCount');
-        const requestsSectionCountElement = document.getElementById('requestsSectionCount');
-        const sentRequestsCountElement = document.getElementById('sentRequestsCount');
-        const pinnedCountElement = document.getElementById('pinnedCount');
-        const mutedCountElement = document.getElementById('mutedCount');
-
-        // FIXED: Use window globals to get live data (syncToGlobals keeps these fresh)
-        const friendArray = (window.friends && Array.isArray(window.friends)) ? window.friends : (Array.isArray(friends) ? friends : []);
-        const contactArray = (window.contacts && Array.isArray(window.contacts)) ? window.contacts : (Array.isArray(contacts) ? contacts : []);
-        const requestArray = (window.friendRequests && Array.isArray(window.friendRequests)) ? window.friendRequests : (Array.isArray(friendRequests) ? friendRequests : []);
-        const sentArray = (window.sentRequests && Array.isArray(window.sentRequests)) ? window.sentRequests : (Array.isArray(sentRequests) ? sentRequests : []);
-        const pinnedArray = (window.pinnedFriends && Array.isArray(window.pinnedFriends)) ? window.pinnedFriends : (Array.isArray(pinnedFriends) ? pinnedFriends : []);
-        const mutedArray = (window.mutedFriends && Array.isArray(window.mutedFriends)) ? window.mutedFriends : (Array.isArray(mutedFriends) ? mutedFriends : []);
-
-        if (totalFriendsElement) totalFriendsElement.textContent = friendArray.length;
-        const onlineCount = friendArray.filter(f => f && (f.online === true || f.status === 'online')).length;
-        if (onlineFriendsElement) onlineFriendsElement.textContent = onlineCount;
-        if (pinnedFriendsElement) pinnedFriendsElement.textContent = pinnedArray.length;
-        if (friendsCountElement) friendsCountElement.textContent = friendArray.length;
-        if (contactsCountElement) contactsCountElement.textContent = contactArray.length;
-        if (requestsCountElement) requestsCountElement.textContent = requestArray.length;
-        if (requestsSectionCountElement) requestsSectionCountElement.textContent = requestArray.length;
-        if (sentRequestsCountElement) sentRequestsCountElement.textContent = sentArray.length;
-        if (pinnedCountElement) pinnedCountElement.textContent = pinnedArray.length;
-        if (mutedCountElement) mutedCountElement.textContent = mutedArray.length;
-    }, null);
 };
 
 export const updateCurrentSection = function() {
@@ -1761,11 +1764,16 @@ export const updateCurrentSection = function() {
 };
 
 export const renderAllFriendsList = function() {
-    // Show loading state when not active
-    if (!isUIActive()) {
-        if (domElements.allFriendsList && domElements.allFriendsList.innerHTML === '') {
-            domElements.allFriendsList.innerHTML = UIBoundaries.createPassiveLoadingState('allFriendsSection');
-        }
+    // Use window globals (always fresh from syncToGlobals)
+    const _pinnedArray = Array.isArray(window.pinnedFriends) ? window.pinnedFriends : (Array.isArray(pinnedFriends) ? pinnedFriends : []);
+    const _friendArray = Array.isArray(window.friends) ? window.friends : (Array.isArray(friends) ? friends : []);
+    const _contactArray = Array.isArray(window.contacts) ? window.contacts : (Array.isArray(contacts) ? contacts : []);
+    const _temporaryArray = Array.isArray(window.temporaryFriends) ? window.temporaryFriends : (Array.isArray(temporaryFriends) ? temporaryFriends : []);
+    const _hasData = _friendArray.length + _pinnedArray.length + _contactArray.length + _temporaryArray.length > 0;
+
+    // Only block if truly no data and not active yet
+    if (!_hasData && !isUIActive()) {
+        // Leave existing HTML (hardcoded loading state) in place
         return null;
     }
     
@@ -1774,10 +1782,10 @@ export const renderAllFriendsList = function() {
 
         domElements.allFriendsList.innerHTML = '';
 
-        const pinnedArray = Array.isArray(pinnedFriends) ? pinnedFriends : [];
-        const friendArray = Array.isArray(friends) ? friends : [];
-        const contactArray = Array.isArray(contacts) ? contacts : [];
-        const temporaryArray = Array.isArray(temporaryFriends) ? temporaryFriends : [];
+        const pinnedArray = _pinnedArray;
+        const friendArray = _friendArray;
+        const contactArray = _contactArray;
+        const temporaryArray = _temporaryArray;
 
         const allToDisplay = [...pinnedArray, ...friendArray, ...contactArray, ...temporaryArray];
 
@@ -1894,14 +1902,13 @@ export const renderContacts = function() {
 };
 
 export const renderFriends = function() {
-    const friendArray = window.friends || [];
-    
-    console.log('[UI] renderFriends called, count:', friendArray.length);
-    // Show loading state when not active
-    if (!isUIActive()) {
-        if (domElements.friendsList && domElements.friendsList.innerHTML === '') {
-            domElements.friendsList.innerHTML = UIBoundaries.createPassiveLoadingState('friendsSection');
-        }
+    // Use window globals (always fresh from syncToGlobals)
+    const _friendArray = Array.isArray(window.friends) ? window.friends : (Array.isArray(friends) ? friends : []);
+    const _pinnedArray = Array.isArray(window.pinnedFriends) ? window.pinnedFriends : (Array.isArray(pinnedFriends) ? pinnedFriends : []);
+
+    console.log('[UI] renderFriends called, count:', _friendArray.length);
+    // Only block if truly no data and not active yet
+    if (_friendArray.length === 0 && !isUIActive()) {
         return null;
     }
     
@@ -1910,8 +1917,8 @@ export const renderFriends = function() {
 
         domElements.friendsList.innerHTML = '';
 
-        const friendArray = Array.isArray(friends) ? friends : [];
-        const pinnedArray = Array.isArray(pinnedFriends) ? pinnedFriends : [];
+        const friendArray = _friendArray;
+        const pinnedArray = _pinnedArray;
 
         if (friendArray.length === 0) {
             domElements.friendsList.innerHTML = `
@@ -2000,23 +2007,19 @@ export const renderFriends = function() {
 };
 
 export const renderFriendRequests = function() {
-     const requestArray = window.friendRequests || [];
-    
-    console.log('[UI] renderFriendRequests called, count:', requestArray.length);
-    // Show loading state when not active
     if (!isUIActive()) {
-        if (domElements.requestsList && domElements.requestsList.innerHTML === '') {
-            domElements.requestsList.innerHTML = UIBoundaries.createPassiveLoadingState('requestsSection');
-        }
         return null;
     }
-    
     return ErrorHandler.createBoundary('renderFriendRequests', () => {
         if (!domElements.requestsList) return;
 
+        // CRITICAL: Clear the container first
         domElements.requestsList.innerHTML = '';
 
-        const requestArray = Array.isArray(friendRequests) ? friendRequests : [];
+        // Use the global friendRequests variable
+        const requestArray = window.friendRequests || friendRequests || [];
+        
+        console.log('[UI] renderFriendRequests called, count:', requestArray.length);
 
         if (requestArray.length === 0) {
             domElements.requestsList.innerHTML = `
@@ -2035,6 +2038,12 @@ export const renderFriendRequests = function() {
             if (requestElement) fragment.appendChild(requestElement);
         });
         domElements.requestsList.appendChild(fragment);
+        
+        // Update the count badge
+        const requestsCountElement = document.getElementById('requestsCount');
+        if (requestsCountElement) requestsCountElement.textContent = requestArray.length;
+        const requestsSectionCountElement = document.getElementById('requestsSectionCount');
+        if (requestsSectionCountElement) requestsSectionCountElement.textContent = requestArray.length;
 
     }, () => {
         if (domElements.requestsList) {
@@ -2042,8 +2051,202 @@ export const renderFriendRequests = function() {
         }
     });
 };
+// =============================================
+// FIXED: waitForConnectionReady - properly detects ACTIVE state and authorizedRequest availability
+// This fixes the "Connection not ready" error when accepting friend requests
+// =============================================
 
-// Optimistic UI function for removing a request card with animation
+async function waitForConnectionReady(maxRetries = 10, delayMs = 300) {
+    for (let i = 0; i < maxRetries; i++) {
+        // Check conditions using safe fallbacks
+        const sessionValid = (typeof __session !== 'undefined' && __session?.ready === true) ||
+                             (window.__session?.ready === true);
+        const parentReady = (typeof parentReadyReceived !== 'undefined' && parentReadyReceived === true) ||
+                            (window.parentReadyReceived === true);
+        const stateActive = (typeof currentState !== 'undefined' && currentState === LIFECYCLE_STATES.ACTIVE) ||
+                            (window.currentState === LIFECYCLE_STATES.ACTIVE);
+        const authReady = (typeof authReadyReceived !== 'undefined' && authReadyReceived === true) ||
+                          (window.authReadyReceived === true);
+        const apiAvailable = typeof authorizedRequest === 'function';
+        
+        if (sessionValid && parentReady && stateActive && authReady && apiAvailable) {
+            console.log('[UI] Connection ready after', i, 'retries');
+            return true;
+        }
+        
+        console.log('[UI] Waiting for connection... retry', i + 1, '/', maxRetries, {
+            sessionValid, parentReady, stateActive, authReady, apiAvailable
+        });
+        await new Promise(resolve => setTimeout(resolve, delayMs));
+    }
+    
+    console.error('[UI] Connection not ready after max retries');
+    return false;
+}
+
+// In friend-ui.js - REPLACE the optimisticAcceptRequest function
+// =============================================
+// OPTIMISTIC ACCEPT FRIEND REQUEST - COMPLETE FIXED VERSION
+// Add this function after waitForConnectionReady
+// =============================================
+
+async function optimisticAcceptRequest(requestData, button) {
+    if (!requestData) return;
+    
+    const requestId = requestData.id;
+    const senderId = requestData.senderId || requestData.user?.id;
+    const requestElement = button ? button.closest('.friend-item') : null;
+    const displayName = requestData.user?.displayName || requestData.displayName || 'User';
+    
+    console.log('[UI] Optimistic accept request:', { requestId, senderId });
+    
+    // Store original data for potential rollback
+    const originalRequests = [...(friendRequests || [])];
+    const originalRequestElement = requestElement ? requestElement.cloneNode(true) : null;
+    
+    // OPTIMISTIC UI: Remove from DOM immediately with animation
+    if (requestElement) {
+        removeRequestCardWithAnimation(requestElement, requestId, true);
+    }
+    
+    // Also update local state immediately
+    let requestIndex = -1;
+    if (friendRequests && Array.isArray(friendRequests)) {
+        requestIndex = friendRequests.findIndex(r => r.id === requestId);
+        if (requestIndex !== -1) {
+            friendRequests.splice(requestIndex, 1);
+        }
+    }
+    
+    // Update UI counts immediately
+    updateFriendCounts();
+    
+    showNotification(`Accepting request from ${displayName}...`, 'info', 1500);
+    
+    // Wait for connection to be ready
+    const isReady = await waitForConnectionReady(15, 500);
+    
+    if (!isReady) {
+        console.error('[UI] Connection not ready for accept');
+        showNotification('Connection not ready. Please try again.', 'error');
+        
+        // Rollback UI
+        if (requestElement && requestElement.parentNode === null && originalRequestElement) {
+            const container = domElements.requestsList;
+            if (container) {
+                if (requestIndex !== -1 && container.children[requestIndex]) {
+                    container.insertBefore(originalRequestElement, container.children[requestIndex]);
+                } else {
+                    container.appendChild(originalRequestElement);
+                }
+                originalRequestElement.style.opacity = '1';
+                originalRequestElement.style.transform = '';
+                originalRequestElement.style.transition = '';
+            }
+        }
+        
+        if (requestIndex !== -1 && originalRequests[requestIndex]) {
+            friendRequests.splice(requestIndex, 0, originalRequests[requestIndex]);
+        }
+        renderFriendRequests();
+        updateFriendCounts();
+        return;
+    }
+    
+    console.log('[UI] Connection ready, proceeding with API call');
+    
+    try {
+        // Make direct API call to accept the request
+        const response = await authorizedRequest(`/api/friends/requests/${requestId}/accept`, {
+            method: 'POST',
+            timeout: 15000
+        });
+        
+        console.log('[UI] Accept request API response:', response);
+        
+        if (response && response.success) {
+            showNotification(`You are now friends with ${displayName}!`, 'success');
+            
+            // Force immediate removal from ALL caches
+            if (friendRequests && Array.isArray(friendRequests)) {
+                const idx = friendRequests.findIndex(r => r.id === requestId);
+                if (idx !== -1) friendRequests.splice(idx, 1);
+            }
+            
+            if (window.friendRequests && Array.isArray(window.friendRequests)) {
+                const idx = window.friendRequests.findIndex(r => r.id === requestId);
+                if (idx !== -1) window.friendRequests.splice(idx, 1);
+            }
+            
+            // Immediately re-render
+            renderFriendRequests();
+            updateFriendCounts();
+            
+            // Refresh in background
+            setTimeout(async () => {
+                try {
+                    await loadFriendsFromBackend();
+                    await loadFriendRequestsFromBackend();
+                    await loadSentRequestsFromBackend();
+                    renderFriends();
+                    renderAllFriendsList();
+                    renderFriendRequests();
+                    updateFriendCounts();
+                } catch (refreshError) {
+                    console.error('[UI] Background refresh error:', refreshError);
+                }
+            }, 100);
+            
+        } else {
+            console.error('[UI] Accept request API failed:', response?.error);
+            showNotification(response?.error || 'Failed to accept request', 'error');
+            
+            // Rollback UI
+            if (requestElement && requestElement.parentNode === null && originalRequestElement) {
+                const container = domElements.requestsList;
+                if (container) {
+                    if (requestIndex !== -1 && container.children[requestIndex]) {
+                        container.insertBefore(originalRequestElement, container.children[requestIndex]);
+                    } else {
+                        container.appendChild(originalRequestElement);
+                    }
+                    originalRequestElement.style.opacity = '1';
+                    originalRequestElement.style.transform = '';
+                    originalRequestElement.style.transition = '';
+                }
+            }
+            
+            friendRequests.length = 0;
+            friendRequests.push(...originalRequests);
+            renderFriendRequests();
+            updateFriendCounts();
+        }
+    } catch (error) {
+        console.error('[UI] Accept request error:', error);
+        showNotification(error.message || 'Failed to accept request', 'error');
+        
+        // Rollback UI
+        if (requestElement && requestElement.parentNode === null && originalRequestElement) {
+            const container = domElements.requestsList;
+            if (container) {
+                if (requestIndex !== -1 && container.children[requestIndex]) {
+                    container.insertBefore(originalRequestElement, container.children[requestIndex]);
+                } else {
+                    container.appendChild(originalRequestElement);
+                }
+                originalRequestElement.style.opacity = '1';
+                originalRequestElement.style.transform = '';
+                originalRequestElement.style.transition = '';
+            }
+        }
+        
+        friendRequests.length = 0;
+        friendRequests.push(...originalRequests);
+        renderFriendRequests();
+        updateFriendCounts();
+    }
+}
+
 function removeRequestCardWithAnimation(requestElement, requestId, isIncoming) {
     if (!requestElement) return;
     
@@ -2083,179 +2286,6 @@ function removeRequestCardWithAnimation(requestElement, requestId, isIncoming) {
             updateFriendCounts();
         }
     }, 250);
-}
-
-// =============================================
-// FIXED: waitForConnectionReady - properly detects ACTIVE state and authorizedRequest availability
-// This fixes the "Connection not ready" error when accepting friend requests
-// =============================================
-async function waitForConnectionReady(maxRetries = 10, delayMs = 300) {
-    for (let i = 0; i < maxRetries; i++) {
-        // Check if we have a valid session and the core is active
-        if (__session?.ready === true && isUIActive() === true) {
-            console.log('[UI] Connection ready after', i, 'retries (session ready)');
-            return true;
-        }
-        
-        // Check if authorizedRequest is available as a function
-        if (typeof authorizedRequest === 'function' && isUIActive() === true) {
-            console.log('[UI] Connection ready after', i, 'retries (authorizedRequest available)');
-            return true;
-        }
-        
-        // CRITICAL FIX: Check if core is in ACTIVE state and parent is ready
-        // This catches the case where __session.ready might be undefined but core is active
-        if (currentState === LIFECYCLE_STATES.ACTIVE && parentReadyReceived === true) {
-            console.log('[UI] Connection ready after', i, 'retries (ACTIVE state + parent ready)');
-            return true;
-        }
-        
-        // Also check if apiReady flag is true (from core initialization)
-        if (apiReady === true && isUIActive() === true) {
-            console.log('[UI] Connection ready after', i, 'retries (apiReady)');
-            return true;
-        }
-        
-        console.log('[UI] Waiting for connection... retry', i + 1, '/', maxRetries);
-        await new Promise(resolve => setTimeout(resolve, delayMs));
-    }
-    
-    // FINAL FALLBACK: if authorizedRequest exists as a function, allow anyway
-    // This ensures that even if our state checks are wrong, the API call can still proceed
-    if (typeof authorizedRequest === 'function') {
-        console.warn('[UI] Connection not fully ready but authorizedRequest exists - allowing call');
-        return true;
-    }
-    
-    console.error('[UI] Connection not ready after max retries');
-    return false;
-}
-
-// Optimistic accept friend request with UI removal first and proper connection handling
-async function optimisticAcceptRequest(requestData, button) {
-    if (!requestData) return;
-    
-    const requestId = requestData.id;
-    const senderId = requestData.senderId || requestData.user?.id;
-    const requestElement = button ? button.closest('.friend-item') : null;
-    const displayName = requestData.user?.displayName || requestData.displayName || 'User';
-    
-    console.log('[UI] Optimistic accept request:', { requestId, senderId });
-    
-    // Store original data for potential rollback
-    const originalRequests = [...(friendRequests || [])];
-    const originalRequestElement = requestElement ? requestElement.cloneNode(true) : null;
-    
-    // OPTIMISTIC UI: Remove from DOM immediately with animation
-    if (requestElement) {
-        removeRequestCardWithAnimation(requestElement, requestId, true);
-    }
-    
-    // Also update local state immediately
-    let requestIndex = -1;
-    if (friendRequests && Array.isArray(friendRequests)) {
-        requestIndex = friendRequests.findIndex(r => r.id === requestId);
-        if (requestIndex !== -1) {
-            friendRequests.splice(requestIndex, 1);
-        }
-    }
-    
-    // Show optimistic success message
-    showNotification(`Accepting request from ${displayName}...`, 'info', 1500);
-    
-    // Wait for connection to be ready before making API call
-    const isReady = await waitForConnectionReady(15, 500);
-    
-    if (!isReady) {
-        console.error('[UI] Connection not ready, cannot accept request');
-        showNotification('Connection not ready. Please try again.', 'error');
-        
-        // Rollback: restore the request to DOM and local state
-        if (requestElement && requestElement.parentNode === null && originalRequestElement) {
-            const container = domElements.requestsList;
-            if (container) {
-                // Restore the request at the same position
-                if (requestIndex !== -1 && container.children[requestIndex]) {
-                    container.insertBefore(originalRequestElement, container.children[requestIndex]);
-                } else {
-                    container.appendChild(originalRequestElement);
-                }
-                // Reset animation styles
-                originalRequestElement.style.opacity = '1';
-                originalRequestElement.style.transform = '';
-                originalRequestElement.style.transition = '';
-            }
-        }
-        
-        if (requestIndex !== -1 && originalRequests[requestIndex]) {
-            friendRequests.splice(requestIndex, 0, originalRequests[requestIndex]);
-        }
-        return;
-    }
-    
-    try {
-        // Call the API
-        const result = await acceptFriendRequestOnline(requestId, senderId);
-        
-        if (result && result.success) {
-            showNotification(`You are now friends with ${displayName}!`, 'success');
-            
-            // Refresh friends list in background
-            setTimeout(() => {
-                loadFriendsFromBackend().then(() => {
-                    if (UIState.activeSection === 'friendsSection') renderFriends();
-                    if (UIState.activeSection === 'allFriendsSection') renderAllFriendsList();
-                    updateFriendCounts();
-                });
-                loadFriendRequestsFromBackend(); // Refresh requests to stay in sync
-            }, 100);
-        } else {
-            // API failed - rollback UI
-            console.error('[UI] Accept request API failed:', result?.error);
-            showNotification(result?.error || 'Failed to accept request', 'error');
-            
-            // Rollback: restore the request to DOM and local state
-            if (requestElement && requestElement.parentNode === null && originalRequestElement) {
-                const container = domElements.requestsList;
-                if (container) {
-                    if (requestIndex !== -1 && container.children[requestIndex]) {
-                        container.insertBefore(originalRequestElement, container.children[requestIndex]);
-                    } else {
-                        container.appendChild(originalRequestElement);
-                    }
-                    originalRequestElement.style.opacity = '1';
-                    originalRequestElement.style.transform = '';
-                    originalRequestElement.style.transition = '';
-                }
-            }
-            
-            friendRequests.length = 0;
-            friendRequests.push(...originalRequests);
-            renderFriendRequests();
-        }
-    } catch (error) {
-        console.error('[UI] Accept request error:', error);
-        showNotification(error.message || 'Failed to accept request', 'error');
-        
-        // Rollback: restore the request to DOM and local state
-        if (requestElement && requestElement.parentNode === null && originalRequestElement) {
-            const container = domElements.requestsList;
-            if (container) {
-                if (requestIndex !== -1 && container.children[requestIndex]) {
-                    container.insertBefore(originalRequestElement, container.children[requestIndex]);
-                } else {
-                    container.appendChild(originalRequestElement);
-                }
-                originalRequestElement.style.opacity = '1';
-                originalRequestElement.style.transform = '';
-                originalRequestElement.style.transition = '';
-            }
-        }
-        
-        friendRequests.length = 0;
-        friendRequests.push(...originalRequests);
-        renderFriendRequests();
-    }
 }
 
 // Optimistic decline friend request with UI removal first and proper connection handling
@@ -5262,10 +5292,6 @@ if (domElements.closeCameraBtn) {
         tab.addEventListener('click', function(e) {
             e.preventDefault();
             e.stopPropagation();
-            if (!isUIActive()) {
-                showNotification('Please wait while module initializes...', 'info');
-                return;
-            }
             logUI(`Tab clicked: ${tabId}`);
 
             document.querySelectorAll('.category-btn').forEach(btn => btn.classList.remove('active'));
@@ -5277,7 +5303,11 @@ if (domElements.closeCameraBtn) {
             const section = document.getElementById(sectionId);
             if (section) {
                 section.classList.add('active');
-                updateCurrentSection();
+                UIState.activeSection = sectionId;
+                // Render directly - functions now handle data availability themselves
+                if (sectionId === 'allFriendsSection') renderAllFriendsList();
+                else if (sectionId === 'friendsSection') renderFriends();
+                else if (isUIActive()) updateCurrentSection();
             }
         });
     });

@@ -597,6 +597,10 @@ function transitionTo(nextState, reason = '') {
     _notifyListeners(nextState, fromState, reason);
     console.log(`[${MODULE_NAME}] State: ${fromState} → ${nextState}`, { reason });
 
+    window.dispatchEvent(new CustomEvent('lifecycleChanged', {
+        detail: { toState: nextState, fromState, reason }
+    }));
+
     return true;
 }
 
@@ -1401,15 +1405,14 @@ const ErrorHandler = {
     },
     
     createBoundary(name, fn, fallback = null) {
-        return function(...args) {
-            try {
-                return fn.apply(this, args);
-            } catch (error) {
-                Logger.error('Boundary', `${name} failed`, error);
-                if (typeof fallback === 'function') return fallback.apply(this, args);
-                return fallback;
-            }
-        };
+        // Execute fn immediately (not as a wrapper) so render calls work correctly
+        try {
+            return fn();
+        } catch (error) {
+            Logger.error('Boundary', `${name} failed`, error);
+            if (typeof fallback === 'function') return fallback();
+            return fallback;
+        }
     }
 };
 
@@ -2773,6 +2776,9 @@ const FriendCacheManager = {
         window.pinnedFriends = _p;
         window.mutedFriends = _m;
         window.allUsers = _u;
+        // Notify UI to refresh counts and re-render active section whenever globals are synced
+        window.dispatchEvent(new CustomEvent('updateFriendCounts'));
+        window.dispatchEvent(new CustomEvent('friendsUpdated', { detail: { friends: _f } }));
     },
     
     persist() {
