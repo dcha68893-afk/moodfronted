@@ -1,4 +1,3 @@
-
 // =============================================
 // GROUPS MODULE - PARENT AUTHORITY COMPLIANT
 // DETERMINISTIC STATE MACHINE - VERSION 9.0.1
@@ -86,7 +85,7 @@ const LifecycleState = (function() {
         const oldState = _state;
         _state = newState;
         
-        console.log(`[${MODULE_NAME}] State: ${oldState} → ${newState}`);
+        /* lifecycle log suppressed */
         
         // Notify listeners
         _listeners.forEach(listener => {
@@ -440,7 +439,7 @@ function apiRequest(endpoint, method = 'GET', body = null) {
             requestId
         });
         
-        console.log(`[${MODULE_NAME}] Sending API_REQUEST: ${method} ${normalizedEndpoint} (${requestId})`);
+        /* lifecycle log suppressed */
         
         if (!parentReady) {
             messageQueue.push(message);
@@ -484,13 +483,13 @@ function flushQueue() {
 function sendChildReady() {
     // STRICT: Only send in READY state
     if (!LifecycleState.isReady()) {
-        console.log(`[${MODULE_NAME}] BLOCKED: CHILD_READY cannot send in state ${LifecycleState.getState()}`);
+        /* lifecycle log suppressed */
         return false;
     }
     
     // STRICT: Only send once - enhanced guard
     if (childReadySent || _childReadySentFlag) {
-        console.log(`[${MODULE_NAME}] BLOCKED: CHILD_READY already sent`);
+        /* lifecycle log suppressed */
         return false;
     }
     
@@ -513,11 +512,11 @@ function sendChildReady() {
     try {
         const result = sendMessage(message);
         if (result.success) {
-            console.log(`[${MODULE_NAME}] CHILD_READY sent`);
+            /* lifecycle log suppressed */
             
             // STRICT: Transition to WAIT_PARENT immediately after sending
             LifecycleState.setState(LifecycleState.STATES.WAIT_PARENT);
-            console.log(`[${MODULE_NAME}] State: READY → WAIT_PARENT`);
+            /* lifecycle log suppressed */
             
             return true;
         } else {
@@ -716,7 +715,7 @@ const ParentMessaging = {
         
         // STRICT: Deduplicate by messageId
         if (message.id && isDuplicate(message.id)) {
-            console.log(`[${MODULE_NAME}] Duplicate ignored: ${message.type} (${message.id})`);
+            /* lifecycle log suppressed */
             return true;
         }
         
@@ -865,13 +864,13 @@ const MessageRouter = {
     handleParentReady(message) {
         // STRICT: Only process if waiting for parent
         if (!LifecycleState.isWaitingForParent()) {
-            console.log(`[${MODULE_NAME}] PARENT_READY ignored - not in WAIT_PARENT (state: ${LifecycleState.getState()})`);
+            /* lifecycle log suppressed */
             return;
         }
         
         // STRICT: Prevent duplicate processing - enhanced guard
         if (parentReadyReceived || _parentReadyProcessedFlag) {
-            console.log(`[${MODULE_NAME}] PARENT_READY already processed`);
+            /* lifecycle log suppressed */
             return;
         }
         
@@ -879,7 +878,7 @@ const MessageRouter = {
         parentReadyReceived = true;
         handshakeCompleted = true;
         
-        console.log(`[${MODULE_NAME}] PARENT_READY received`);
+        /* lifecycle log suppressed */
         
         // Extract session data from message
         const sessionData = message.payload?.session || message.session || message.payload;
@@ -922,7 +921,7 @@ const MessageRouter = {
     },
     
     handleModuleRegistered(message) {
-        console.log(`[${MODULE_NAME}] MODULE_REGISTERED received`);
+        /* lifecycle log suppressed */
         
         if (LifecycleState.isActive() && message.payload?.success) {
             LifecycleState.setRegistered();
@@ -931,7 +930,7 @@ const MessageRouter = {
     
     handleSessionSync(message) {
         const sessionData = message.payload;
-        console.log(`[${MODULE_NAME}] SESSION_DATA received`, sessionData ? 'with data' : 'empty');
+        /* lifecycle log suppressed */
         
         // Validate session data before applying
         if (!__isValidSession(sessionData)) {
@@ -976,7 +975,7 @@ const MessageRouter = {
     
     handleSessionUpdate(message) {
         const updateData = message.payload;
-        console.log(`[${MODULE_NAME}] SESSION_UPDATE received`);
+        /* lifecycle log suppressed */
         
         if (updateData && LifecycleState.isActive()) {
             // Validate partial update (only fields we care about)
@@ -2053,7 +2052,7 @@ const GroupCore = {
         debugLog('Requesting group list via apiRequest');
         
         try {
-            const response = await apiRequest('/group/user', 'GET');
+            const response = await apiRequest('/groups/user', 'GET');
             
             if (response && response.success && response.data) {
                 const groupsData = response.data;
@@ -2096,7 +2095,7 @@ const GroupCore = {
         debugLog('Creating group via apiRequest');
         
         try {
-            const response = await apiRequest('/group/create', 'POST', {
+            const response = await apiRequest('/groups', 'POST', {
                 name: groupData.name,
                 description: groupData.description || '',
                 members: groupData.members || [],
@@ -2147,7 +2146,7 @@ const GroupCore = {
         debugLog(`Getting group details for ${groupId}`);
         
         try {
-            const response = await apiRequest(`/group/${groupId}`, 'GET');
+            const response = await apiRequest(`/groups/${groupId}`, 'GET');
             
             if (response && response.success && response.data) {
                 const group = response.data;
@@ -2179,7 +2178,7 @@ const GroupCore = {
         debugLog('Updating group via apiRequest');
         
         try {
-            const response = await apiRequest(`/group/${groupId}`, 'PUT', {
+            const response = await apiRequest(`/groups/${groupId}`, 'PUT', {
                 name: groupData.name,
                 description: groupData.description,
                 privacy: groupData.privacy,
@@ -2222,7 +2221,7 @@ const GroupCore = {
         debugLog('Deleting group via apiRequest');
         
         try {
-            const response = await apiRequest(`/group/${groupId}`, 'DELETE');
+            const response = await apiRequest(`/groups/${groupId}`, 'DELETE');
             
             if (response && response.success) {
                 // Remove from local stores
@@ -2262,7 +2261,7 @@ const GroupCore = {
         debugLog('Adding member to group via apiRequest');
         
         try {
-            const response = await apiRequest('/group/add-member', 'POST', {
+            const response = await apiRequest(`/groups/${groupId}/members/${userId}`, 'POST', {
                 groupId,
                 userId,
                 role
@@ -2310,10 +2309,10 @@ const GroupCore = {
         debugLog('Removing member from group via apiRequest');
         
         try {
-            const response = await apiRequest('/group/remove-member', 'POST', {
+            const response = await apiRequest(`/groups/${groupId}/members/${userId}`, 'DELETE');const _unused = {
                 groupId,
                 userId
-            });
+            };
             
             if (response && response.success) {
                 const group = this.getGroupById(groupId);
@@ -2353,7 +2352,7 @@ const GroupCore = {
         debugLog('Leaving group via apiRequest');
         
         try {
-            const response = await apiRequest(`/group/${groupId}/leave`, 'POST');
+            const response = await apiRequest(`/groups/${groupId}/leave`, 'POST');
             
             if (response && response.success) {
                 // Remove from local stores
@@ -2390,7 +2389,7 @@ const GroupCore = {
         debugLog('Promoting to admin via apiRequest');
         
         try {
-            const response = await apiRequest('/group/promote-admin', 'POST', {
+            const response = await apiRequest(`/groups/${groupId}/members/${userId}/role`, 'PUT', {
                 groupId,
                 userId
             });
@@ -2433,7 +2432,7 @@ const GroupCore = {
         debugLog('Demoting from admin via apiRequest');
         
         try {
-            const response = await apiRequest('/group/demote-admin', 'POST', {
+            const response = await apiRequest(`/groups/${groupId}/members/${userId}/role`, 'PUT', {
                 groupId,
                 userId
             });
@@ -2476,7 +2475,7 @@ const GroupCore = {
         debugLog('Sending join request via apiRequest');
         
         try {
-            const response = await apiRequest(`/group/${groupId}/join-request`, 'POST', {
+            const response = await apiRequest(`/groups/${groupId}/join`, 'POST', {
                 message
             });
             
@@ -2508,7 +2507,7 @@ const GroupCore = {
         debugLog('Approving join request via apiRequest');
         
         try {
-            const response = await apiRequest(`/group/${groupId}/join-request/${requestId}/approve`, 'POST');
+            const response = await apiRequest(`/groups/${groupId}/members/${requestId}`, 'POST');
             
             if (response && response.success) {
                 this.emit('group:join-request-approved', { groupId, userId });
@@ -2538,7 +2537,7 @@ const GroupCore = {
         debugLog('Rejecting join request via apiRequest');
         
         try {
-            const response = await apiRequest(`/group/${groupId}/join-request/${requestId}/reject`, 'POST');
+            const response = await apiRequest(`/groups/${groupId}/join`, 'POST'); // reject join request, 'POST');
             
             if (response && response.success) {
                 this.emit('group:join-request-rejected', { groupId, userId });
@@ -2568,7 +2567,7 @@ const GroupCore = {
         debugLog('Sending group message via apiRequest');
         
         try {
-            const response = await apiRequest('/group/message', 'POST', {
+            const response = await apiRequest(`/groups/${groupId}/messages`, 'POST', {
                 groupId,
                 content,
                 topic,
@@ -2603,7 +2602,7 @@ const GroupCore = {
         debugLog(`Loading messages for group ${groupId}`);
         
         try {
-            const response = await apiRequest(`/group/messages?groupId=${groupId}&limit=${limit}`, 'GET');
+            const response = await apiRequest(`/groups/${groupId}/messages?limit=${limit}`, 'GET');
             
             if (response && response.success && response.data) {
                 const messages = response.data;
@@ -5557,7 +5556,7 @@ async function acceptGroupInvite(inviteData) {
         const inviteId = inviteData.id || inviteData.inviteId;
         const groupId = inviteData.groupId || inviteData.id;
         
-        const response = await secureApiCall(`/invites/${inviteId}/accept`, {
+        const response = await secureApiCall(`/groups/invites/${inviteId}/accept`, {
             method: 'POST'
         });
         
@@ -5583,7 +5582,7 @@ async function declineGroupInvite(inviteData) {
         
         const inviteId = inviteData.id || inviteData.inviteId;
         
-        const response = await secureApiCall(`/invites/${inviteId}/decline`, {
+        const response = await secureApiCall(`/groups/invites/${inviteId}/reject`, {
             method: 'POST'
         });
         
@@ -5976,7 +5975,7 @@ async function syncGroupInvitesFromServer() {
     if (!sessionReady && !sessionReceived) return;
     
     try {
-        const response = await secureApiCall('/invites', { silent: true });
+        const response = await secureApiCall('/groups/invites/user', { silent: true });
         
         const serverInvites = [];
         

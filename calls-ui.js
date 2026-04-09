@@ -1,8 +1,349 @@
 // calls-ui.js
 // ==================== RESILIENT UI CONTROLLER - DETERMINISTIC LIFECYCLE ====================
-// Version: 5.1.0 - ADDED: OPEN_CALL_WITH_USER event handling, auto-call initiation, navigation support
+// Version: 5.2.1 - FIXED: createNotification HTML sanitizer, call history refresh
 // Dependencies: calls-core.js v9.0.1
 // =======================================================================================
+
+// ==================== EARLY OPEN_CALL_WITH_USER LISTENER ====================
+// Set up immediately when script loads, before any initialization
+// ==================== EARLY OPEN_CALL_WITH_USER LISTENER ====================
+// Set up immediately when script loads, before any initialization
+(function setupEarlyCallListener() {
+    'use strict';
+    
+    // Store pending call for later processing
+    let pendingOpenCall = null;
+    let listenerEstablished = false;
+    async function startCallWithUser(userId, userName, callType) {
+    console.log('[Calls UI] Starting call with:', { userId, userName, callType });
+    
+    pendingOpenCall = null;
+    window.__pendingCallData = null;
+    
+    if (!userId) {
+        console.error('[Calls UI] Cannot start call: No userId');
+        showNotificationInCalls('Cannot start call: Missing user information', 'error');
+        return;
+    }
+    
+    if (window.callCore && window.callCore.isInCall && window.callCore.isInCall()) {
+        showNotificationInCalls('You are already in a call', 'warning');
+        return;
+    }
+    
+    // FIX: Request permissions first
+    try {
+        const hasPermissions = await requestMediaPermissions(callType);
+        if (!hasPermissions) {
+            showNotificationInCalls('Microphone access is required for calls. Please grant permission and try again.', 'error');
+            return;
+        }
+    } catch (permError) {
+        console.error('[Calls UI] Permission error:', permError);
+        showNotificationInCalls('Cannot access microphone. Please check your browser permissions.', 'error');
+        return;
+    }
+    
+    showNotificationInCalls(`Starting ${callType} call with ${userName}...`, 'info');
+    
+    const callId = `call_${Date.now()}_${userId}`;
+    
+    const callContainer = document.getElementById('callContainer');
+    const sidebar = document.getElementById('sidebar');
+    if (callContainer) {
+        callContainer.classList.add('active');
+    }
+    if (sidebar) {
+        sidebar.style.display = 'none';
+    }
+    
+    const callWithName = document.getElementById('callWithName');
+    if (callWithName) {
+        callWithName.textContent = userName;
+    }
+    const callStatusText = document.getElementById('callStatusText');
+    if (callStatusText) {
+        callStatusText.textContent = 'Initiating call...';
+    }
+    
+    // FIX: Use initiateCall which handles proper API flow
+    if (window.callCore && window.callCore.initiateCall) {
+        const result = await window.callCore.initiateCall(callType, [parseInt(userId)]);
+        if (result && result.success) {
+            showNotificationInCalls(`${callType === 'video' ? 'Video call' : 'Voice call'} started with ${userName}`, 'success');
+            if (callStatusText) {
+                callStatusText.textContent = 'Connecting...';
+            }
+        } else {
+            console.error('[Calls UI] Call initiation failed:', result);
+            showNotificationInCalls(result?.error || 'Failed to start call', 'error');
+            if (callContainer) {
+                callContainer.classList.remove('active');
+            }
+            if (sidebar) {
+                sidebar.style.display = 'flex';
+            }
+        }
+    } else if (window.callCore && window.callCore.startCall) {
+        const result = await window.callCore.startCall(parseInt(userId), callType);
+        if (result && result.success) {
+            showNotificationInCalls(`${callType === 'video' ? 'Video call' : 'Voice call'} started with ${userName}`, 'success');
+        } else {
+            console.error('[Calls UI] startCall failed:', result);
+            showNotificationInCalls(result?.error || 'Failed to start call', 'error');
+            if (callContainer) {
+                callContainer.classList.remove('active');
+            }
+            if (sidebar) {
+                sidebar.style.display = 'flex';
+            }
+        }
+    } else {
+        console.error('[Calls UI] No call initiation method available');
+        showNotificationInCalls('Call system not ready', 'error');
+        if (callContainer) {
+            callContainer.classList.remove('active');
+        }
+        if (sidebar) {
+            sidebar.style.display = 'flex';
+        }
+    }
+}
+
+// Add this helper function
+async function requestMediaPermissions(callType) {
+    try {
+        const constraints = {
+            audio: true,
+            video: callType === 'video'
+        };
+        const stream = await navigator.mediaDevices.getUserMedia(constraints);
+        // Stop tracks immediately - we just need permission
+        stream.getTracks().forEach(track => track.stop());
+        return true;
+    } catch (error) {
+        console.error('[Calls UI] Permission request failed:', error);
+        if (error.name === 'NotAllowedError') {
+            showNotificationInCalls('Please allow microphone access to make calls', 'error');
+        }
+        return false;
+    }
+}
+    function showNotificationInCalls(message, type = 'info') {
+        const notificationArea = document.getElementById('notificationArea');
+        if (notificationArea) {
+            const notification = document.createElement('div');
+            notification.className = `call-notification ${type}`;
+            notification.innerHTML = `
+                <div class="call-notification-content">
+                    <div class="call-notification-title">${type.charAt(0).toUpperCase() + type.slice(1)}</div>
+                    <div class="call-notification-message">${message}</div>
+                </div>
+                <button class="call-notification-close" onclick="this.parentElement.remove()">
+                    <i class="fas fa-times"></i>
+                </button>
+            `;
+            notificationArea.appendChild(notification);
+            setTimeout(() => notification.remove(), 3000);
+        } else {
+            console.log('[Calls UI] Notification:', message);
+        }
+    }
+    
+    function processPendingCall() {
+        if (!pendingOpenCall) return;
+        
+        const callData = pendingOpenCall;
+        pendingOpenCall = null;
+        
+        // Check if core is ready
+        const isCoreActive = window.callCore && 
+            ((window.callCore.getLifecycleState && window.callCore.getLifecycleState() === 'ACTIVE') ||
+             (window.callCore.isCoreReady && window.callCore.isCoreReady()));
+        
+        if (isCoreActive) {
+            startCallWithUser(callData.userId, callData.userName, callData.callType);
+        } else {
+            // Wait for core
+            console.log('[Calls UI] Core not ready, waiting...');
+            pendingOpenCall = callData;
+            setTimeout(processPendingCall, 500);
+        }
+    }
+    
+    // Listen for OPEN_CALL_WITH_USER events immediately
+    window.addEventListener('OPEN_CALL_WITH_USER', function(event) {
+        const data = event.detail || event.data || {};
+        const userId = data.userId || data.user_id || data.id;
+        const userName = data.userName || data.name || data.user_name || 'User';
+        const callType = data.callType || data.type || data.call_type || 'voice';
+        
+        console.log('[Calls UI][Early] Received OPEN_CALL_WITH_USER:', { userId, userName, callType });
+        
+        if (!userId) return;
+        
+        // Store for processing
+        pendingOpenCall = { userId, userName, callType };
+        
+        // Try to process immediately
+        const isCoreActive = window.callCore && 
+            ((window.callCore.getLifecycleState && window.callCore.getLifecycleState() === 'ACTIVE') ||
+             (window.callCore.isCoreReady && window.callCore.isCoreReady()));
+        
+        if (isCoreActive) {
+            processPendingCall();
+        } else {
+            // Wait for core to be ready
+            const checkInterval = setInterval(() => {
+                const isReady = window.callCore && 
+                    ((window.callCore.getLifecycleState && window.callCore.getLifecycleState() === 'ACTIVE') ||
+                     (window.callCore.isCoreReady && window.callCore.isCoreReady()));
+                
+                if (isReady) {
+                    clearInterval(checkInterval);
+                    processPendingCall();
+                }
+            }, 200);
+            
+            // Timeout after 10 seconds
+            setTimeout(() => {
+                clearInterval(checkInterval);
+                if (pendingOpenCall) {
+                    console.warn('[Calls UI] Timeout waiting for core');
+                    showNotificationInCalls('Unable to start call - please try again', 'error');
+                    pendingOpenCall = null;
+                }
+            }, 10000);
+        }
+    });
+    
+    // Also listen for postMessage events
+    window.addEventListener('message', function(event) {
+        const data = event.data;
+        if (data && (data.type === 'OPEN_CALL_WITH_USER' || data.type === 'START_CALL' || data.type === 'CALL_USER')) {
+            const callData = data.payload || data;
+            const eventObj = new CustomEvent('OPEN_CALL_WITH_USER', { detail: callData });
+            window.dispatchEvent(eventObj);
+        }
+    });
+    
+    console.log('[Calls UI][Early] OPEN_CALL_WITH_USER listener established');
+})();
+
+// Add this function to load and display call history
+async function loadCallHistory() {
+    try {
+        const response = await fetch('/api/calls/history', {
+            headers: {
+                'Authorization': `Bearer ${window.__CHILD_SESSION__?.token || ''}`
+            }
+        });
+        
+        if (response.ok) {
+            const data = await response.json();
+            const calls = data.data?.calls || data.calls || [];
+            
+            displayCallHistory(calls);
+            return calls;
+        }
+    } catch (error) {
+        console.error('[Calls UI] Failed to load call history:', error);
+    }
+    return [];
+}
+
+function displayCallHistory(calls) {
+    const allCallsList = document.getElementById('allCallsList');
+    const missedCallsList = document.getElementById('missedCallsList');
+    
+    if (!allCallsList) return;
+    
+    if (!calls || calls.length === 0) {
+        allCallsList.innerHTML = `
+            <div class="offline-state">
+                <i class="fas fa-phone-slash"></i>
+                <p>No recent calls</p>
+                <p class="subtext">Your call history will appear here</p>
+            </div>
+        `;
+        return;
+    }
+    
+    let allHtml = '';
+    let missedHtml = '';
+    
+    calls.forEach(call => {
+        const otherParticipant = call.otherParticipants?.[0] || call.caller;
+        const name = otherParticipant?.displayName || otherParticipant?.username || 'Unknown';
+        const initials = name.split(' ').map(n => n[0]).join('').toUpperCase().substring(0, 2);
+        const isMissed = call.status === 'missed';
+        const isIncoming = call.direction === 'incoming';
+        const icon = call.type === 'video' ? 'fa-video' : 'fa-phone';
+        const statusIcon = isMissed ? 'fa-phone-slash' : (isIncoming ? 'fa-arrow-down' : 'fa-arrow-up');
+        const statusClass = isMissed ? 'missed' : (isIncoming ? 'incoming' : 'outgoing');
+        
+        const callHtml = `
+            <div class="call-history-item ${isMissed ? 'missed' : ''}" data-call-id="${call.id}">
+                <div class="call-avatar" style="background-color: #6c5ce7">
+                    <span>${SecuritySanitizer.sanitizeString(initials)}</span>
+                </div>
+                <div class="call-info">
+                    <div class="call-name">
+                        ${SecuritySanitizer.sanitizeString(name)}
+                        <span class="call-status-icon ${statusClass}">
+                            <i class="fas ${statusIcon}"></i>
+                        </span>
+                    </div>
+                    <div class="call-details">
+                        <i class="fas ${icon}"></i>
+                        <span>${call.type === 'video' ? 'Video call' : 'Voice call'}</span>
+                        <span>•</span>
+                        <span>${call.displayDuration || '0:00'}</span>
+                    </div>
+                    <div class="call-time">
+                        ${new Date(call.startedAt).toLocaleString()}
+                    </div>
+                </div>
+                <button class="call-action-btn" data-user-id="${otherParticipant?.id}" data-user-name="${name}" data-call-type="${call.type}">
+                    <i class="fas fa-phone"></i>
+                </button>
+            </div>
+        `;
+        
+        allHtml += callHtml;
+        
+        if (isMissed) {
+            missedHtml += callHtml;
+        }
+    });
+    
+    allCallsList.innerHTML = allHtml || '<div class="offline-state"><i class="fas fa-phone-slash"></i><p>No recent calls</p></div>';
+    
+    if (missedCallsList) {
+        missedCallsList.innerHTML = missedHtml || '<div class="offline-state"><i class="fas fa-phone-slash"></i><p>No missed calls</p></div>';
+    }
+    
+    // Attach click handlers to call action buttons
+    document.querySelectorAll('.call-action-btn').forEach(btn => {
+        btn.removeEventListener('click', handleCallActionClick);
+        btn.addEventListener('click', handleCallActionClick);
+    });
+}
+
+function handleCallActionClick(e) {
+    e.stopPropagation();
+    const userId = this.dataset.userId;
+    const userName = this.dataset.userName;
+    const callType = this.dataset.callType || 'voice';
+    
+    if (userId) {
+        // Trigger call with this user
+        const event = new CustomEvent('OPEN_CALL_WITH_USER', {
+            detail: { userId, userName, callType, source: 'call-history' }
+        });
+        window.dispatchEvent(event);
+    }
+}
 
 (function() {
     'use strict';
@@ -150,7 +491,7 @@
                         'msg-' + Date.now() + '-' + Math.random().toString(36).substring(2, 9),
                     timestamp: Date.now(),
                     payload: payload || {},
-                    version: '5.1.0'
+                    version: '5.2.1'
                 };
                 window.parent.postMessage(message, '*');
                 return true;
@@ -869,67 +1210,52 @@
         // Core is ready - initiate the call
         initiateCallWithPendingUser();
     }
+
+// In calls-ui.js, around the initiateCallWithPendingUser function
+
+async function initiateCallWithPendingUser() {
+    if (!pendingCall.userId || pendingCall.initiated) return;
     
-    async function initiateCallWithPendingUser() {
-        if (!pendingCall.userId || pendingCall.initiated) {
-            return;
-        }
-        
-        const { userId, userName, callType } = pendingCall;
-        
-        if (DEBUG) {
-            logOnce('info', `Initiating ${callType} call with ${userName} (${userId})`);
-        }
-        
-        pendingCall.initiated = true;
-        
-        // Close any retry timer
-        if (pendingCall.retryTimer) {
-            clearTimeout(pendingCall.retryTimer);
-            pendingCall.retryTimer = null;
-        }
-        
-        try {
-            // Prepare contact object for the call
-            const contact = {
-                id: userId,
-                name: userName,
-                callType: callType
-            };
-            
-            // Use core's initCall or startCall method
-            let result;
-            
-            if (coreInstance && coreInstance.initCall) {
-                result = await coreInstance.initCall(callType, [contact]);
-            } else if (coreInstance && coreInstance.startCall) {
-                result = await coreInstance.startCall(userId, callType);
-            } else if (coreInstance && coreInstance.initiateCall) {
-                result = await coreInstance.initiateCall([userId], callType);
-            } else {
-                // Fallback: simulate call initiation (for testing/development)
-                if (DEBUG) {
-                    logOnce('warn', 'No core call initiation method found, simulating call start');
-                }
-                result = { success: true, simulated: true };
-            }
-            
-            if (result && result.success) {
-                showNotification(`${callType === 'video' ? 'Video call' : 'Voice call'} started with ${userName}`, 'success');
-                clearPendingCall();
-            } else {
-                const errorMsg = result?.error || 'Unknown error';
-                logOnce('error', `Call initiation failed: ${errorMsg}`);
-                showNotification(`Failed to start call with ${userName}: ${errorMsg}`, 'error');
-                clearPendingCall();
-            }
-        } catch (error) {
-            logOnce('error', `Call initiation exception: ${error.message}`, error);
-            showNotification(`Failed to start call with ${userName}. Please try again.`, 'error');
-            clearPendingCall();
-        }
+    const { userId, userName, callType } = pendingCall;
+    
+    pendingCall.initiated = true;
+    
+    if (pendingCall.retryTimer) {
+        clearTimeout(pendingCall.retryTimer);
+        pendingCall.retryTimer = null;
     }
     
+    try {
+        if (!coreInstance) throw new Error('Core not ready');
+        if (coreInstance.getLifecycleState && coreInstance.getLifecycleState() !== 'ACTIVE') {
+            throw new Error('Core not active');
+        }
+        
+        // FIXED: Send the CALL_INITIATE message with correct payload
+        const result = await coreInstance.sendAction('CALL_INITIATE', {
+            callId: `call_${Date.now()}_${userId}`,
+            callType: callType,
+            participants: [parseInt(userId)]  // Send as array for consistency
+        });
+        
+        if (result && result.success) {
+            showNotification(`${callType === 'video' ? 'Video call' : 'Voice call'} started with ${userName}`, 'success');
+            clearPendingCall();
+            
+            if (elements.newCallModal) {
+                elements.newCallModal.classList.remove('active');
+                UIState.activeModals.delete('newCallModal');
+            }
+        } else {
+            throw new Error(result?.error || 'Call initiation failed');
+        }
+    } catch (error) {
+        console.error('[Calls UI] Call initiation error:', error);
+        showNotification(`Failed to start call: ${error.message}`, 'error');
+        clearPendingCall();
+    }
+}
+
     function clearPendingCall() {
         if (pendingCall.retryTimer) {
             clearTimeout(pendingCall.retryTimer);
@@ -2372,6 +2698,8 @@
                 case 'call_failed':
                 case 'call_timeout':
                     this.handleCallEnded(data);
+                    // FIX for Bug 6: Refresh call history after call ends
+                    this.refreshCallHistory();
                     break;
                 case 'logout':
                     this.handleLogout();
@@ -2498,6 +2826,47 @@
                         showNotification('You are already in a call', 'warning');
                     }
                     break;
+            }
+        },
+        
+        // FIX for Bug 6: Refresh call history after call ends
+        refreshCallHistory: function() {
+            if (DEBUG) {
+                logOnce('info', 'Refreshing call history after call ended');
+            }
+            
+            // Request updated call history from parent
+            if (window.parent && window.parent !== window) {
+                window.parent.postMessage({ 
+                    type: 'API_REQUEST', 
+                    payload: { 
+                        method: 'GET', 
+                        endpoint: '/calls', 
+                        requestId: `req_history_${Date.now()}` 
+                    }
+                }, '*');
+            }
+            
+            // Also request from core if available
+            if (coreInstance && coreInstance.sendAction) {
+                coreInstance.sendAction('GET_CALL_HISTORY', {})
+                    .catch(err => {
+                        if (DEBUG) {
+                            logOnce('warn', 'Failed to refresh call history via core', err);
+                        }
+                    });
+            }
+            
+            // Refresh the calls list in UI if it exists
+            if (elements.allCallsList) {
+                this.refreshCallsList();
+            }
+        },
+        
+        refreshCallsList: function() {
+            // Trigger a refresh of the calls list
+            if (elements.allCallsSection && elements.allCallsSection.classList.contains('active')) {
+                UIEventHandlers.switchCallCategory(UIState.currentCallCategory);
             }
         },
         
@@ -2731,7 +3100,7 @@
             
             UIState.currentView = 'call';
             
-            this.startCallTimer();
+            UIEventHandlers.startCallTimer();
         },
         
         handleCallStarted: function(callData) {
@@ -2783,6 +3152,19 @@
             
             UIState.currentView = 'sidebar';
             
+            // FIX: Navigate back to messages module immediately after call ends.
+            // The parent chat.html handles SWITCH_MODULE and will restore the
+            // exact chat the user had open before the call — user won't notice
+            // any navigation happened.
+            if (window.parent && window.parent !== window) {
+                window.parent.postMessage({
+                    type: 'SWITCH_MODULE',
+                    module: 'messages',
+                    payload: { returnFromCall: true },
+                    timestamp: Date.now()
+                }, '*');
+            }
+
             setTimeout(() => {
                 UIEventHandlers.showPrivateNotesModal();
             }, 500);
@@ -3463,24 +3845,33 @@
                 this.addListener(elements.quickGroupBtn, 'click', UIEventHandlers.openNewCallModal);
             }
             
+            // ==================== FIXED BUTTON BINDINGS ====================
+            // These fixes prevent call initiation errors by using arrow functions
             if (elements.startVoiceCallBtn) {
-                this.addListener(elements.startVoiceCallBtn, 'click', UIEventHandlers.startVoiceCall);
+                this.addListener(elements.startVoiceCallBtn, 'click', (e) => {
+                    e.preventDefault();
+                    UIEventHandlers.startCallGeneric('voice');
+                });
             }
             
             if (elements.startVideoCallBtn) {
-                this.addListener(elements.startVideoCallBtn, 'click', UIEventHandlers.startVideoCall);
+                this.addListener(elements.startVideoCallBtn, 'click', (e) => {
+                    e.preventDefault();
+                    UIEventHandlers.startCallGeneric('video');
+                });
             }
+            // ==================== END FIXED BUTTON BINDINGS ====================
             
             if (elements.startGroupCallBtn) {
-                this.addListener(elements.startGroupCallBtn, 'click', UIEventHandlers.startGroupCall);
+                this.addListener(elements.startGroupCallBtn, 'click', UIEventHandlers.startGroupCall.bind(UIEventHandlers));
             }
             
             if (elements.generateVoiceLinkBtn) {
-                this.addListener(elements.generateVoiceLinkBtn, 'click', UIEventHandlers.generateVoiceCallLink);
+                this.addListener(elements.generateVoiceLinkBtn, 'click', UIEventHandlers.generateVoiceCallLink.bind(UIEventHandlers));
             }
             
             if (elements.generateVideoLinkBtn) {
-                this.addListener(elements.generateVideoLinkBtn, 'click', UIEventHandlers.generateVideoCallLink);
+                this.addListener(elements.generateVideoLinkBtn, 'click', UIEventHandlers.generateVideoCallLink.bind(UIEventHandlers));
             }
             
             if (elements.copyLinkBtn) {
@@ -3857,18 +4248,11 @@
             return selected;
         },
         
-        startVoiceCall: function() {
-            this.startCallGeneric('voice');
-        },
-        
-        startVideoCall: function() {
-            this.startCallGeneric('video');
-        },
-        
+        // ==================== FIXED CALL METHODS ====================
         startCallGeneric: function(type) {
             if (!canPerformAction('startCall')) return;
             
-            const selectedContacts = this.getSelectedContacts();
+            const selectedContacts = UIEventHandlers.getSelectedContacts();
             
             if (selectedContacts.length === 0) {
                 showNotification('Please select at least one contact', 'warning');
@@ -3886,24 +4270,23 @@
                 
                 coreInstance.initCall(type, selectedContacts)
                     .then(result => {
-                        if (result.success) {
+                        if (result && result.success) {
                             showNotification(`${type} call started`, 'success');
-                            // Clear pending call if this was from auto-initiation
                             clearPendingCall();
+                            UIEventHandlers.closeNewCallModal();
                         } else {
-                            showNotification(result.error || 'Failed to start call', 'error');
+                            showNotification(result?.error || 'Failed to start call', 'error');
                         }
                     })
                     .catch(error => {
-                        showNotification('Failed to start call', 'error');
+                        showNotification('Failed to start call: ' + (error.message || 'Unknown error'), 'error');
                         UILogger.error('Call failed', error);
                     });
             } else {
                 showNotification('Call system not ready', 'error');
             }
-            
-            UIEventHandlers.closeNewCallModal();
         },
+        // ==================== END FIXED CALL METHODS ====================
         
         startGroupCall: function() {
             if (!canPerformAction('startGroupCall')) return;
@@ -3913,7 +4296,7 @@
                 return;
             }
             
-            const selectedContacts = this.getSelectedGroupContacts();
+            const selectedContacts = UIEventHandlers.getSelectedGroupContacts();
             
             if (selectedContacts.length === 0) {
                 showNotification('Please select at least one contact', 'warning');
@@ -4111,61 +4494,99 @@
             showNotification(`Switched to ${UIState.isSpeakerOn ? 'speaker' : 'headphones'}`, 'info');
         },
         
-        endCall: function() {
-            if (!UIState.activeCallId && !coreInstance?.isInCall?.()) {
-                showNotification('No active call to end', 'info');
-                return;
-            }
-            
-            if (confirm('End the call?')) {
-                if (coreInstance && coreInstance.endCall) {
-                    coreInstance.endCall(UIState.activeCallId);
-                }
-                
-                if (UIState.localStream) {
-                    UIState.localStream.getTracks().forEach(track => track.stop());
-                    UIState.localStream = null;
-                }
-                
-                if (UIState.screenStream) {
-                    UIState.screenStream.getTracks().forEach(track => track.stop());
-                    UIState.screenStream = null;
-                }
-                
-                if (UIState.callDurationInterval) {
-                    clearInterval(UIState.callDurationInterval);
-                    UIState.callDurationInterval = null;
-                }
-                
-                UIState.activeCallId = null;
-                UIState.callParticipants = [];
-                UIState.callStartTime = null;
-                
-                if (elements.callContainer) elements.callContainer.classList.remove('active');
-                if (elements.sidebar) elements.sidebar.style.display = 'flex';
-                if (elements.focusModeBtn) elements.focusModeBtn.style.display = 'none';
-                
-                if (UIState.currentFocusMode) {
-                    this.disableFocusMode();
-                }
-                
-                if (elements.videoGrid) {
-                    elements.videoGrid.innerHTML = '';
-                    if (elements.offlineCallPlaceholder) {
-                        elements.offlineCallPlaceholder.style.display = 'flex';
-                    }
-                }
-                
-                UIState.currentView = 'sidebar';
-                
-                setTimeout(() => {
-                    this.showPrivateNotesModal();
-                }, 500);
-                
-                showNotification('Call ended', 'info');
-            }
-        },
+        endCall: async function() {
+    if (!UIState.activeCallId && !coreInstance?.isInCall?.()) {
+        showNotification('No active call to end', 'info');
+        return;
+    }
+    
+    if (confirm('End the call?')) {
+        const callId = UIState.activeCallId;
+        const startTime = UIState.callStartTime;
+        const duration = startTime ? Math.floor((Date.now() - startTime) / 1000) : 0;
         
+        // FIX: Send CALL_ENDED with duration to save to database
+        if (coreInstance && coreInstance.sendAction) {
+            await coreInstance.sendAction('CALL_ENDED', {
+                callId: callId,
+                duration: duration,
+                timestamp: Date.now()
+            });
+        } else if (coreInstance && coreInstance.endCall) {
+            await coreInstance.endCall(callId);
+        }
+        
+        // Clean up local streams
+        if (UIState.localStream) {
+            UIState.localStream.getTracks().forEach(track => track.stop());
+            UIState.localStream = null;
+        }
+        
+        if (UIState.screenStream) {
+            UIState.screenStream.getTracks().forEach(track => track.stop());
+            UIState.screenStream = null;
+        }
+        
+        if (UIState.callDurationInterval) {
+            clearInterval(UIState.callDurationInterval);
+            UIState.callDurationInterval = null;
+        }
+        
+        // Reset UI state
+        UIState.activeCallId = null;
+        UIState.callParticipants = [];
+        UIState.callStartTime = null;
+        UIState.callType = null;
+        UIState.callActive = false;
+        
+        if (elements.callContainer) {
+            elements.callContainer.classList.remove('active');
+        }
+        if (elements.sidebar) {
+            elements.sidebar.style.display = 'flex';
+        }
+        if (elements.focusModeBtn) {
+            elements.focusModeBtn.style.display = 'none';
+        }
+        
+        if (UIState.currentFocusMode) {
+            this.disableFocusMode();
+        }
+        
+        if (elements.videoGrid) {
+            elements.videoGrid.innerHTML = '';
+            if (elements.offlineCallPlaceholder) {
+                elements.offlineCallPlaceholder.style.display = 'flex';
+            }
+        }
+        
+        UIState.currentView = 'sidebar';
+        
+        // FIX: Refresh call history after call ends
+        setTimeout(() => {
+            this.refreshCallHistoryAfterCall();
+            this.showPrivateNotesModal();
+        }, 500);
+        
+        showNotification('Call ended', 'info');
+    }
+},
+
+refreshCallHistoryAfterCall: function() {
+    // Send message to parent to refresh call history
+    if (window.parent && window.parent !== window) {
+        window.parent.postMessage({
+            type: 'REFRESH_CALL_HISTORY',
+            payload: { userId: window.__CHILD_SESSION__?.userId },
+            timestamp: Date.now()
+        }, '*');
+    }
+    
+    // Also request directly from core
+    if (coreInstance && coreInstance.sendAction) {
+        coreInstance.sendAction('GET_CALL_HISTORY', {}).catch(() => {});
+    }
+},
         openMoodSelectionModal: function() {
             if (elements.moodSelectionModal) {
                 elements.moodSelectionModal.classList.add('active');
@@ -4438,49 +4859,121 @@
             showNotification('Call declined', 'info');
         },
         
+
         acceptIncomingCall: function() {
-            this.acceptIncomingCallGeneric(false);
-        },
-        
-        acceptIncomingCallAsVideo: function() {
-            this.acceptIncomingCallGeneric(true);
-        },
-        
-        acceptIncomingCallGeneric: function(asVideo) {
-            if (!canPerformAction('answerCall')) return;
+    this.acceptIncomingCallGeneric(false);
+},
+
+acceptIncomingCallAsVideo: function() {
+    this.acceptIncomingCallGeneric(true);
+},
+
+acceptIncomingCallGeneric: async function(asVideo) {
+    if (!canPerformAction('answerCall')) return;
+    
+    if (coreInstance && coreInstance.isInCall && coreInstance.isInCall()) {
+        showNotification('You are already in a call', 'warning');
+        return;
+    }
+    
+    if (elements.incomingCallModal && elements.incomingCallModal.dataset.timer) {
+        clearInterval(parseInt(elements.incomingCallModal.dataset.timer));
+    }
+    
+    const callerName = elements.incomingCallName?.textContent || 'Caller';
+    const isVideoCall = elements.incomingCallType?.textContent?.includes('Video') || false;
+    const callType = asVideo ? 'video' : (isVideoCall ? 'video' : 'voice');
+    const callId = window._currentIncomingCallId || UIState.activeCallId;
+    
+    if (!callId) {
+        showNotification('Unable to accept call: Missing call ID', 'error');
+        this.declineIncomingCall();
+        return;
+    }
+    
+    if (elements.incomingCallModal) {
+        elements.incomingCallModal.classList.remove('active');
+        UIState.activeModals.delete('incomingCallModal');
+    }
+    
+    showNotification(`Accepting ${callType} call from ${callerName}...`, 'info');
+    
+    // FIX: Use sendAction with CALL_ACCEPT
+    if (coreInstance && coreInstance.sendAction) {
+        try {
+            const result = await coreInstance.sendAction('CALL_ACCEPT', {
+                callId: callId,
+                timestamp: Date.now()
+            });
             
-            // Check for active call
-            if (coreInstance && coreInstance.isInCall && coreInstance.isInCall()) {
-                showNotification('You are already in a call', 'warning');
-                return;
-            }
-            
-            if (elements.incomingCallModal.dataset.timer) {
-                clearInterval(parseInt(elements.incomingCallModal.dataset.timer));
-            }
-            
-            const callerName = elements.incomingCallName?.textContent || 'Caller';
-            const isVideoCall = elements.incomingCallType?.textContent?.includes('Video') || false;
-            const callType = asVideo ? 'video' : (isVideoCall ? 'video' : 'voice');
-            
-            elements.incomingCallModal.classList.remove('active');
-            UIState.activeModals.delete('incomingCallModal');
-            
-            showNotification(`Accepting ${callType} call from ${callerName}...`, 'info');
-            
-            if (coreInstance && coreInstance.answerCall) {
-                coreInstance.answerCall(callType);
+            if (result && result.success) {
+                showNotification(`Call accepted with ${callerName}`, 'success');
             } else {
-                showNotification('Call system not ready', 'error');
+                showNotification(result?.error || 'Failed to accept call', 'error');
+                // Mark as missed if accept failed
+                if (coreInstance.sendAction) {
+                    coreInstance.sendAction('CALL_REJECT', {
+                        callId: callId,
+                        reason: 'failed_to_accept',
+                        timestamp: Date.now()
+                    }).catch(() => {});
+                }
             }
-        },
-        
+        } catch (error) {
+            console.error('[Calls UI] Accept call error:', error);
+            showNotification('Failed to accept call', 'error');
+        }
+    } else if (coreInstance && coreInstance.answerCall) {
+        const result = await coreInstance.answerCall(callId);
+        if (result && result.success) {
+            showNotification(`Call accepted with ${callerName}`, 'success');
+        } else {
+            showNotification(result?.error || 'Failed to accept call', 'error');
+        }
+    } else {
+        showNotification('Call system not ready', 'error');
+        this.declineIncomingCall();
+    }
+},
+
+declineIncomingCall: async function() {
+    if (elements.incomingCallModal && elements.incomingCallModal.dataset.timer) {
+        clearInterval(parseInt(elements.incomingCallModal.dataset.timer));
+    }
+    
+    const callId = window._currentIncomingCallId || UIState.activeCallId;
+    
+    if (elements.incomingCallModal) {
+        elements.incomingCallModal.classList.remove('active');
+        UIState.activeModals.delete('incomingCallModal');
+    }
+    
+    if (callId) {
+        // FIX: Send CALL_REJECT to mark as missed in database
+        if (coreInstance && coreInstance.sendAction) {
+            await coreInstance.sendAction('CALL_REJECT', {
+                callId: callId,
+                reason: 'declined',
+                timestamp: Date.now()
+            });
+        } else if (coreInstance && coreInstance.declineCall) {
+            await coreInstance.declineCall(callId, 'declined');
+        }
+    }
+    
+    // Clear the call state
+    if (coreInstance && coreInstance.resetCallState) {
+        coreInstance.resetCallState();
+    }
+    
+    showNotification('Call declined', 'info');
+},
         generateVoiceCallLink: function() {
-            this.generateCallLink('voice');
+            UIEventHandlers.generateCallLink('voice');
         },
         
         generateVideoCallLink: function() {
-            this.generateCallLink('video');
+            UIEventHandlers.generateCallLink('video');
         },
         
         generateCallLink: function(type) {
@@ -5284,11 +5777,15 @@
     };
 
     // ==================== NOTIFICATION SYSTEM ====================
+    // FIX for Bug 4: HTML tags showing as notification text
+    // Use DOM nodes with textContent for user-provided strings, innerHTML only for static icons
     function createNotification({ type = 'info', title, message, duration = 3000 } = {}) {
         try {
             const notification = document.createElement('div');
             notification.className = `call-notification ${type}`;
             notification.setAttribute('role', 'alert');
+            // Mark as sanitized to bypass the innerHTML patch
+            notification.setAttribute('data-sanitized', 'true');
             
             const iconMap = {
                 success: 'fa-check-circle',
@@ -5297,23 +5794,39 @@
                 info: 'fa-info-circle'
             };
             
-            notification.innerHTML = `
-                <div class="call-notification-icon">
-                    <i class="fas ${iconMap[type] || 'fa-bell'}"></i>
-                </div>
-                <div class="call-notification-content">
-                    <div class="call-notification-title">${title || type.charAt(0).toUpperCase() + type.slice(1)}</div>
-                    <div class="call-notification-message">${SecuritySanitizer.sanitizeString(message)}</div>
-                </div>
-                <button class="call-notification-close" aria-label="Close notification">
-                    <i class="fas fa-times"></i>
-                </button>
-            `;
+            // Build icon div with innerHTML for static icon (safe)
+            const iconDiv = document.createElement('div');
+            iconDiv.className = 'call-notification-icon';
+            iconDiv.setAttribute('data-sanitized', 'true');
+            iconDiv.innerHTML = `<i class="fas ${iconMap[type] || 'fa-bell'}"></i>`;
             
-            const closeBtn = notification.querySelector('.call-notification-close');
-            if (closeBtn) {
-                closeBtn.addEventListener('click', () => notification.remove());
-            }
+            // Build content div with textContent for user strings (auto-escaped)
+            const contentDiv = document.createElement('div');
+            contentDiv.className = 'call-notification-content';
+            
+            const titleDiv = document.createElement('div');
+            titleDiv.className = 'call-notification-title';
+            titleDiv.textContent = title || type.charAt(0).toUpperCase() + type.slice(1);
+            
+            const msgDiv = document.createElement('div');
+            msgDiv.className = 'call-notification-message';
+            msgDiv.textContent = message;
+            
+            contentDiv.appendChild(titleDiv);
+            contentDiv.appendChild(msgDiv);
+            
+            // Build close button with innerHTML for icon (safe)
+            const closeBtn = document.createElement('button');
+            closeBtn.className = 'call-notification-close';
+            closeBtn.setAttribute('aria-label', 'Close notification');
+            closeBtn.setAttribute('data-sanitized', 'true');
+            closeBtn.innerHTML = '<i class="fas fa-times"></i>';
+            
+            closeBtn.addEventListener('click', () => notification.remove());
+            
+            notification.appendChild(iconDiv);
+            notification.appendChild(contentDiv);
+            notification.appendChild(closeBtn);
             
             setTimeout(() => {
                 if (notification.parentNode) {
@@ -5539,8 +6052,11 @@
     const searchContacts = safeBind(UIEventHandlers.searchContacts, UIEventHandlers);
     const searchGroupContacts = safeBind(UIEventHandlers.searchGroupContacts, UIEventHandlers);
     const selectGroupOption = safeBind(UIEventHandlers.selectGroupOption, UIEventHandlers);
-    const startVoiceCall = safeBind(UIEventHandlers.startVoiceCall, UIEventHandlers);
-    const startVideoCall = safeBind(UIEventHandlers.startVideoCall, UIEventHandlers);
+    
+    // Fixed bindings for startVoiceCall and startVideoCall - use arrow functions
+    const startVoiceCall = () => UIEventHandlers.startCallGeneric('voice');
+    const startVideoCall = () => UIEventHandlers.startCallGeneric('video');
+    
     const startGroupCall = safeBind(UIEventHandlers.startGroupCall, UIEventHandlers);
     const generateVoiceCallLink = safeBind(UIEventHandlers.generateVoiceCallLink, UIEventHandlers);
     const generateVideoCallLink = safeBind(UIEventHandlers.generateVideoCallLink, UIEventHandlers);
@@ -5593,6 +6109,22 @@
     const UIErrorBoundaryExport = UIErrorBoundary;
 
     const elementsExport = elements;
+    
+    // Define handleContactClick to fix the bind error
+    const handleContactClick = function(e) {
+        if (e.target.closest('.contact-checkbox')) return;
+        
+        const checkbox = this.querySelector('.contact-checkbox');
+        if (checkbox) {
+            checkbox.checked = !checkbox.checked;
+            
+            if (checkbox.checked) {
+                this.classList.add('selected');
+            } else {
+                this.classList.remove('selected');
+            }
+        }
+    };
 
     window.callsUI = {
         initializeUISystem,
@@ -5714,7 +6246,18 @@
         getPendingCall: () => ({ ...pendingCall }),
         // Manually trigger a call with a user (for external use)
         initiateCallWithUser: (userId, userName, callType = 'voice') => {
-            handleOpenCallWithUser({ detail: { userId, userName, callType } });
+            console.log('[Calls UI] initiateCallWithUser called:', { userId, userName, callType });
+            
+            if (!userId) {
+                console.error('[Calls UI] Cannot initiate call: No userId');
+                return;
+            }
+            
+            // Dispatch the event to trigger the call
+            const eventObj = new CustomEvent('OPEN_CALL_WITH_USER', { 
+                detail: { userId, userName, callType, source: 'manual' } 
+            });
+            window.dispatchEvent(eventObj);
         }
     };
 
@@ -5723,22 +6266,6 @@
     coreInitializationStartTime = Date.now();
     
     setupCoreReadyListener();
-    
-    // Define handleContactClick to fix the bind error
-    const handleContactClick = function(e) {
-        if (e.target.closest('.contact-checkbox')) return;
-        
-        const checkbox = this.querySelector('.contact-checkbox');
-        if (checkbox) {
-            checkbox.checked = !checkbox.checked;
-            
-            if (checkbox.checked) {
-                this.classList.add('selected');
-            } else {
-                this.classList.remove('selected');
-            }
-        }
-    };
     
     if (detectExistingCore()) {
         if (DEBUG) {

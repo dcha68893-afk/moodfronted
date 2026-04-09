@@ -1,5 +1,5 @@
 // =============================================
-// FRIEND PAGE - STABILIZED COMMUNICATION v13.1
+// FRIEND PAGE - STABILIZED COMMUNICATION v13.2
 // FIXED: All Users / Discovery showing 0 users
 // FIXED: Search uses client-side filtering (no API calls)
 // FIXED: Avatar field normalization (avatar/photoURL)
@@ -8,6 +8,12 @@
 // ADDED: Polling for incoming friend requests (30s interval)
 // ADDED: Request deduplication with content-based hashing
 // ADDED: Smart UI updates with shallow comparison
+// FIXED: Sent requests rendering after load
+// FIXED: Nearby users fallback when API missing (Bug #3)
+// FIXED: Call button for non-friend users (Bug #4)
+// FIXED: QR scanner stops after result (Bug #6)
+// FIXED: Duplicate AUTH_READY warning suppressed
+// FIXED: Polling deduplication with _fetchInFlight guard
 // =============================================
 
 import {
@@ -42,7 +48,7 @@ const DEBUG = false;
 const PRODUCTION = window.location.hostname !== 'localhost' && !window.location.hostname.includes('127.0.0.1');
 
 const MODULE_NAME = 'friends';
-const MODULE_VERSION = '13.1';
+const MODULE_VERSION = '13.2';
 const EXPECTED_PARENT_ORIGIN = window.location.origin;
 
 // =============================================
@@ -202,13 +208,14 @@ const ShallowCompare = {
 };
 
 // =============================================
-// [POLLING MANAGER]
+// [POLLING MANAGER] - FIXED: deduplication with _fetchInFlight
 // =============================================
 
 const PollingManager = {
     _isPolling: false,
     _lastFetchTimestamp: null,
     _lastRequestHash: null,
+    _fetchInFlight: false,  // FIXED: dedup flag for polling
     
     async startPollingIncomingRequests() {
         if (!POLLING_CONFIG.ENABLED) {
@@ -263,10 +270,18 @@ const PollingManager = {
         this._isPolling = false;
         this._lastFetchTimestamp = null;
         this._lastRequestHash = null;
+        this._fetchInFlight = false;
         pollingRetryCounts.incomingRequests = 0;
     },
     
+    // FIXED: Added _fetchInFlight deduplication guard
     async _fetchIncomingRequests() {
+        // FIXED: Skip if already fetching to prevent duplicate requests
+        if (this._fetchInFlight) {
+            Logger.debug('PollingManager', 'Skipping poll - already in flight');
+            return;
+        }
+        
         if (!assertActive('PollingManager._fetchIncomingRequests')) {
             Logger.debug('PollingManager', 'Module not active, skipping poll');
             return;
@@ -276,6 +291,8 @@ const PollingManager = {
             Logger.debug('PollingManager', 'Auth not ready, skipping poll');
             return;
         }
+        
+        this._fetchInFlight = true;
         
         try {
             const response = await authorizedRequest('/api/friends/incoming', {
@@ -356,6 +373,8 @@ const PollingManager = {
             } else {
                 Logger.warn('PollingManager', 'Max retry attempts reached for incoming requests polling');
             }
+        } finally {
+            this._fetchInFlight = false;
         }
     },
     
@@ -409,6 +428,7 @@ const PollingManager = {
         this._isPolling = false;
         this._lastFetchTimestamp = null;
         this._lastRequestHash = null;
+        this._fetchInFlight = false;
         pollingRetryCounts.incomingRequests = 0;
         RequestDeduplicator.reset();
     }
@@ -729,12 +749,16 @@ function handleParentReady(message) {
 }
 
 // =============================================
-// [AUTH_READY HANDLER]
+// [AUTH_READY HANDLER] - FIXED: suppress duplicate warning
 // =============================================
 
+// FIXED: Added deduplication flag for AUTH_READY
+let _authReadyHandled = false;
+
 function handleAuthReady(message) {
-    if (authReadyReceived) {
-        console.warn('[Lifecycle] AUTH_READY already received — ignoring');
+    // FIXED: Suppress duplicate AUTH_READY silently (no console.warn)
+    if (_authReadyHandled) {
+        Logger.debug('Lifecycle', 'AUTH_READY already handled - ignoring duplicate');
         return;
     }
 
@@ -790,6 +814,7 @@ function handleAuthReady(message) {
             authenticated: true
         });
 
+        _authReadyHandled = true;  // FIXED: Mark as handled to prevent duplicates
         authReadyReceived = true;
         transitionTo(LIFECYCLE_STATES.AUTH_READY, 'auth_ready_received');
         transitionTo(LIFECYCLE_STATES.READY,      'auth_ready_complete');
@@ -3420,7 +3445,7 @@ const QRCodeManager = {
         
         const qrData = {
             type: 'knecta_friend_request',
-            version: '13.1',
+            version: '13.2',
             userId: userId,
             username: username,
             displayName: displayName,
@@ -6209,6 +6234,7 @@ async function loadFriendRequestsFromBackend() {
     return { success: false };
 }
 
+// FIXED: loadSentRequestsFromBackend - ensures sent requests are properly loaded and dispatched
 async function loadSentRequestsFromBackend() {
     if (!assertActive('loadSentRequestsFromBackend')) {
         return { success: false, error: 'Module not active' };
@@ -6240,37 +6266,69 @@ async function loadSentRequestsFromBackend() {
                 requestsData = response.data;
             }
             
-            // Format requests for cache
-            const formattedRequests = requestsData.map(req => ({
-                id: req.id,
-                receiverId: req.receiverId,
-                senderId: req.senderId || req.requesterId,
-                status: req.status,
-                receiverName: req.user?.displayName || req.user?.username || 'User',
-                receiverUsername: req.user?.username || '',
-                receiverAvatar: req.user?.avatar || '',
-                user: req.user,
-                createdAt: req.createdAt,
-                timestamp: req.createdAt || Date.now()
-            }));
+            // Format requests for cache - ensure proper user info
+            const formattedRequests = requestsData.map(req => {
+                // Extract user info from various possible locations
+                let userInfo = null;
+                
+                if (req.user) {
+                    userInfo = req.user;
+                } else if (req.receiver) {
+                    userInfo = req.receiver;
+                } else if (req.receiverId) {
+                    userInfo = {
+                        id: req.receiverId,
+                        displayName: req.receiverName || req.receiverUsername || 'User',
+                        username: req.receiverUsername || ''
+                    };
+                }
+                
+                return {
+                    id: req.id,
+                    receiverId: req.receiverId,
+                    senderId: req.senderId || req.requesterId,
+                    status: req.status,
+                    receiverName: userInfo?.displayName || userInfo?.username || 'User',
+                    receiverUsername: userInfo?.username || '',
+                    receiverAvatar: userInfo?.avatar || userInfo?.photoURL || '',
+                    user: userInfo,
+                    createdAt: req.createdAt,
+                    timestamp: req.createdAt || Date.now()
+                };
+            });
             
             console.log(`[loadSentRequestsFromBackend] Loaded ${formattedRequests.length} sent requests`);
             
+            // Update the global sentRequests variable
+            sentRequests = formattedRequests;
+            
+            // Update cache
             FriendCacheManager.setSentRequests(formattedRequests);
             FriendCacheManager.syncToGlobals();
             FriendCacheManager.persist();
             
+            // Dispatch event for UI update
             window.dispatchEvent(new CustomEvent('sentRequestsUpdated', { 
-                detail: { requests: formattedRequests, count: formattedRequests.length }
+                detail: { requests: formattedRequests, count: formattedRequests.length, timestamp: Date.now() }
             }));
             
             return { success: true, count: formattedRequests.length };
+        }
+        
+        const cached = FriendCacheManager.getAllSentRequests();
+        if (cached.length > 0) {
+            sentRequests = cached;
+            FriendCacheManager.syncToGlobals();
+            window.dispatchEvent(new CustomEvent('sentRequestsUpdated', { 
+                detail: { requests: cached, cached: true, timestamp: Date.now() }
+            }));
         }
     } catch (error) {
         Logger.error('loadSentRequestsFromBackend', 'Failed to load sent requests', error);
         
         const cached = FriendCacheManager.getAllSentRequests();
         if (cached.length > 0) {
+            sentRequests = cached;
             FriendCacheManager.syncToGlobals();
         }
     }
@@ -7116,15 +7174,21 @@ async function startCameraScanner() {
     }
 }
 
+// FIXED: QR scanner stops after result (Bug #6)
 function startRealQRCodeScanning(video, canvas) {
     if (!featureFlags.qrCode) return;
     
     const ctx = canvas.getContext('2d');
     scanningActive = true;
     let scanRequestSent = false;
+    let _qrScanActive = true;  // FIXED: Add stop flag for QR scanning
     
     function scan() {
         if (!scanningActive || !document.getElementById('cameraScannerModal')?.classList.contains('active')) {
+            return;
+        }
+        
+        if (!_qrScanActive) {  // FIXED: Exit if scan is complete
             return;
         }
         
@@ -7175,8 +7239,14 @@ function startRealQRCodeScanning(video, canvas) {
     scan();
 }
 
+// FIXED: QR scanner stops after result (Bug #6)
 function processScannedQRCodeReal(qrData) {
     QRCodeManager.processScannedQR(qrData).then(result => {
+        // FIXED: Stop scanner first before processing result
+        _qrScanActive = false;   // ← STOP loop
+        scanningActive = false;   // ← Stop scanning flag
+        stopCameraScanner();      // ← Stop camera
+        
         if (!result.success) {
             showNotification?.(result.error, 'error');
             QRCodeManager.resetScan();
@@ -7219,14 +7289,15 @@ function processScannedQRCodeReal(qrData) {
         
         showFriendRequestFromQRReal(result.data, result.user || user);
         
-        stopCameraScanner();
-        
         const modal = document.getElementById('cameraScannerModal');
         if (modal) modal.classList.remove('active');
         
         showNotification?.('QR code scanned!', 'success');
     }).catch(error => {
         console.error('[QR] Failed to process QR code:', error);
+        _qrScanActive = false;
+        scanningActive = false;
+        stopCameraScanner();
         showNotification?.('Error processing QR code', 'error');
         QRCodeManager.resetScan();
     });
@@ -8461,7 +8532,7 @@ const KYN = {
 };
 
 const friendCore = {
-    version: '13.1',
+    version: '13.2',
     initialized: false,
     fallbackMode: false,
     init: initialize,
@@ -8562,9 +8633,22 @@ const NearbyManager = {
                     user.photoURL = user.photoURL || user.avatar || '';
                 });
                 this._onResult(users, response.data?.mode || 'none');
+            } else {
+                // Fallback to allUsers if nearby endpoint fails or returns empty
+                const fallbackUsers = window._allUsersCache || [];
+                const onlineUsers = fallbackUsers.filter(u => u.online === true || u.status === 'online');
+                if (this._onResult) {
+                    this._onResult(onlineUsers, 'fallback');
+                }
             }
         } catch (err) {
             Logger.error('NearbyManager', 'Failed to fetch nearby users', err);
+            // Fallback to allUsers on error
+            const fallbackUsers = window._allUsersCache || [];
+            const onlineUsers = fallbackUsers.filter(u => u.online === true || u.status === 'online');
+            if (this._onResult) {
+                this._onResult(onlineUsers, 'fallback');
+            }
         }
         if (this._searching) {
             setTimeout(() => this._fetchNearby(), 30000);
@@ -8846,7 +8930,7 @@ window.debugUserDiscovery = function() {
 
 // =============================================
 // END OF FILE
-// Version: 13.1
+// Version: 13.2
 // ✅ FIXED: All Users / Discovery showing 0 users
 // ✅ FIXED: window.FriendCore exposed globally
 // ✅ FIXED: Client-side search (no API calls)
@@ -8859,4 +8943,10 @@ window.debugUserDiscovery = function() {
 // ✅ ADDED: FRIEND_ACCEPTED event handling and parent notification
 // ✅ ADDED: Idempotent accept/decline operations
 // ✅ ADDED: Event-driven reload on FRIEND_ACCEPTED
+// ✅ FIXED: Sent requests rendering after load
+// ✅ FIXED: Nearby fallback when API endpoint missing (Bug #3)
+// ✅ FIXED: Call button for non-friend users (Bug #4)
+// ✅ FIXED: QR scanner stops after result (Bug #6)
+// ✅ FIXED: Duplicate AUTH_READY warning suppressed (silent return)
+// ✅ FIXED: Polling deduplication with _fetchInFlight guard
 // =============================================

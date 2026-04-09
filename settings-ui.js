@@ -1,16 +1,20 @@
 // =============================================
-// SETTINGS UI - COMPLETE IMPLEMENTATION v9.1.0
+// SETTINGS UI - COMPLETE IMPLEMENTATION v9.2.0
 // REAL BACKEND-DRIVEN CONTROL SYSTEM
 // FULL SECTION SUPPORT | PARENT-CONTROLLED LIFECYCLE
-// STABILIZED WITH FIXES
+// STABILIZED WITH ALL FIXES
+// =============================================
+// =============================================
+// SETTINGS UI - COMPLETE IMPLEMENTATION v9.2.1
+// REAL BACKEND-DRIVEN CONTROL SYSTEM
+// FULL SECTION SUPPORT | PARENT-CONTROLLED LIFECYCLE
+// STABILIZED WITH ALL FIXES
 // =============================================
 
 import {
-    // Core state
-    currentUser,
+    // Core state (DO NOT import currentSection/unsavedChanges - they are local mutable)
+    currentUser,          // ADDED - needed for profile section
     userSettings,
-    currentSection,
-    unsavedChanges,
     blockedUsers,
     activeSessions,
     userContacts,
@@ -85,7 +89,7 @@ import {
     clearMediaCache,
     onReady,
     isReady,
-    parentReady,
+    parentReady,  // Now correctly exported from core
     
     // Enhanced exports from hardened core
     getCoreDiagnostics,
@@ -122,6 +126,12 @@ import {
 } from './settings-core.js';
 
 // =============================================
+// LOCAL MUTABLE STATE (NOT IMPORTED FROM CORE)
+// =============================================
+let currentSection = 'profile';      // Mutable local variable - FIXED
+let unsavedChanges = false;          // Mutable local variable - FIXED
+
+// =============================================
 // UI INITIALIZATION GUARD - PREVENT MULTIPLE INITIALIZATIONS
 // =============================================
 (function() {
@@ -143,6 +153,23 @@ import {
     };
     forceUICheck();
 })();
+
+// =============================================
+// GLOBAL HELPER FOR SETTING UPDATES - FIXED
+// =============================================
+window.__updateSetting = async (section, key, value) => {
+    try {
+        await SettingsState.update(section, key, value);
+        unsavedChanges = true;
+        window.updateSaveButton();
+        showNotification(`${key} updated`, 'success');
+        return true;
+    } catch (e) {
+        console.error('[SettingsUI] Failed to save setting:', e);
+        showNotification(`Failed to save: ${e.message}`, 'error');
+        return false;
+    }
+};
 
 // =============================================
 // UI STATE VARIABLES - ENHANCED
@@ -553,16 +580,14 @@ function registerForCoreUpdates() {
         const { newState } = event.detail;
         updateConnectionState(newState);
         
-        if (newState === LifecycleState.ACTIVE) {
+        if (newState === LifecycleState.ACTIVE && currentSection) {
             debugLog('Module ACTIVE, refreshing UI with real backend data');
-            if (currentSection) {
-                // Force reload from backend
-                SettingsState.load().then(() => {
-                    loadSection(currentSection);
-                }).catch(() => {
-                    loadSection(currentSection);
-                });
-            }
+            // Force reload from backend
+            SettingsState.load().then(() => {
+                loadSection(currentSection);
+            }).catch(() => {
+                loadSection(currentSection);
+            });
         }
     });
     
@@ -878,11 +903,7 @@ export async function loadSection(sectionId) {
     console.log('[SettingsUI] 📂 Loading section:', sectionId);
     
     try {
-        // STRICT: Check if module is active for auth-required sections
-        const isActive = currentState === LifecycleState.ACTIVE;
-        const hasAuth = checkAuthenticationState();
-        
-        // Update global state
+        // Update global state (local mutable variables - FIXED)
         currentSection = sectionId;
         unsavedChanges = false;
         
@@ -2014,10 +2035,9 @@ function editMoodColorFallback(mood) {
 // =============================================
 export function loadProfileSection(container) {
     debugLog('Loading profile section');
-    const hasAuth = checkAuthenticationState();
     const isActive = currentState === LifecycleState.ACTIVE;
     
-    // Get REAL settings from SettingsState
+    // Get REAL settings from SettingsState (works even without active auth - uses cache)
     const settings = SettingsState.getSection('profile') || DEFAULT_SETTINGS.profile;
     
     container.innerHTML = `
@@ -2031,7 +2051,7 @@ export function loadProfileSection(container) {
                         <div class="setting-label">Profile Photo</div>
                     </div>
                     <div class="setting-control">
-                        <button class="setting-button" id="changePhotoBtn" ${!isActive ? 'disabled' : ''}>
+                        <button class="setting-button" id="changePhotoBtn">
                             <i class="fas fa-camera"></i> Change
                         </button>
                     </div>
@@ -2044,8 +2064,7 @@ export function loadProfileSection(container) {
                     <div class="setting-control">
                         <input type="text" class="setting-input" id="displayNameInput" 
                                value="${escapeHtml(settings.displayName || currentUser?.displayName || '')}" 
-                               placeholder="Your name"
-                               ${!isActive ? 'disabled' : ''}>
+                               placeholder="Your name">
                     </div>
                 </div>
                 
@@ -2056,8 +2075,7 @@ export function loadProfileSection(container) {
                     <div class="setting-control">
                         <input type="text" class="setting-input" id="usernameInput" 
                                value="${escapeHtml(settings.username || currentUser?.username || '')}" 
-                               placeholder="@username"
-                               ${!isActive ? 'disabled' : ''}>
+                               placeholder="@username">
                     </div>
                 </div>
                 
@@ -2067,8 +2085,7 @@ export function loadProfileSection(container) {
                     </div>
                     <div class="setting-control">
                         <textarea class="setting-textarea" id="bioInput" 
-                                  placeholder="About you..." 
-                                  ${!isActive ? 'disabled' : ''}>${escapeHtml(settings.bio || '')}</textarea>
+                                  placeholder="About you...">${escapeHtml(settings.bio || '')}</textarea>
                         <div class="input-hint"><span id="bioCounter">${(settings.bio || '').length}</span>/150</div>
                     </div>
                 </div>
@@ -2080,8 +2097,7 @@ export function loadProfileSection(container) {
                     <div class="setting-control">
                         <input type="email" class="setting-input" id="emailInput" 
                                value="${escapeHtml(settings.email || currentUser?.email || '')}" 
-                               placeholder="email@example.com"
-                               ${!isActive ? 'disabled' : ''}>
+                               placeholder="email@example.com">
                     </div>
                 </div>
             </div>
@@ -2097,7 +2113,7 @@ export function loadProfileSection(container) {
                         <div class="setting-label">Profile Visibility</div>
                     </div>
                     <div class="setting-control">
-                        <select class="setting-dropdown" id="profileVisibilitySelect" ${!isActive ? 'disabled' : ''}>
+                        <select class="setting-dropdown" id="profileVisibilitySelect">
                             <option value="everyone" ${settings.profileVisibility === 'everyone' ? 'selected' : ''}>Everyone</option>
                             <option value="friendsOnly" ${settings.profileVisibility === 'friendsOnly' ? 'selected' : ''}>Friends Only</option>
                             <option value="nobody" ${settings.profileVisibility === 'nobody' ? 'selected' : ''}>Nobody</option>
@@ -2111,7 +2127,7 @@ export function loadProfileSection(container) {
                     </div>
                     <div class="setting-control">
                         <label class="toggle-switch">
-                            <input type="checkbox" id="lastSeenToggle" ${settings.lastSeen ? 'checked' : ''} ${!isActive ? 'disabled' : ''}>
+                            <input type="checkbox" id="lastSeenToggle" ${settings.lastSeen !== false ? 'checked' : ''}>
                             <span class="toggle-slider"></span>
                         </label>
                     </div>
@@ -2125,34 +2141,36 @@ export function loadProfileSection(container) {
 
 function setupProfileEventListeners() {
     const changePhotoBtn = document.getElementById('changePhotoBtn');
-    if (changePhotoBtn && !changePhotoBtn.disabled) {
+    if (changePhotoBtn) {
         changePhotoBtn.addEventListener('click', () => {
             openModal('changePhotoModal');
         });
     }
     
-    const inputs = ['displayNameInput', 'usernameInput', 'emailInput'];
-    inputs.forEach(id => {
-        const element = document.getElementById(id);
-        if (element && !element.disabled) {
-            element.addEventListener('input', () => {
-                const property = id.replace('Input', '');
-                if (property === 'displayName') {
-                    SettingsState.update('profile', 'displayName', element.value);
-                } else if (property === 'username') {
-                    SettingsState.update('profile', 'username', element.value);
-                } else if (property === 'email') {
-                    SettingsState.update('profile', 'email', element.value);
-                }
-                unsavedChanges = true;
-                updateSaveButton();
-            });
-        }
-    });
+    const displayNameInput = document.getElementById('displayNameInput');
+    if (displayNameInput) {
+        displayNameInput.addEventListener('input', () => {
+            window.__updateSetting('profile', 'displayName', displayNameInput.value);
+        });
+    }
+    
+    const usernameInput = document.getElementById('usernameInput');
+    if (usernameInput) {
+        usernameInput.addEventListener('input', () => {
+            window.__updateSetting('profile', 'username', usernameInput.value);
+        });
+    }
+    
+    const emailInput = document.getElementById('emailInput');
+    if (emailInput) {
+        emailInput.addEventListener('input', () => {
+            window.__updateSetting('profile', 'email', emailInput.value);
+        });
+    }
     
     const bioInput = document.getElementById('bioInput');
     const bioCounter = document.getElementById('bioCounter');
-    if (bioInput && bioCounter && !bioInput.disabled) {
+    if (bioInput && bioCounter) {
         bioInput.addEventListener('input', () => {
             const length = bioInput.value.length;
             bioCounter.textContent = length;
@@ -2161,51 +2179,27 @@ function setupProfileEventListeners() {
             } else {
                 bioCounter.style.color = 'var(--primary-color)';
             }
-            SettingsState.update('profile', 'bio', bioInput.value);
-            unsavedChanges = true;
-            updateSaveButton();
+            window.__updateSetting('profile', 'bio', bioInput.value);
         });
     }
     
-    const selects = ['profileVisibilitySelect'];
-    selects.forEach(id => {
-        const element = document.getElementById(id);
-        if (element && !element.disabled) {
-            element.addEventListener('change', () => {
-                const property = id.replace('Select', '');
-                if (property === 'profileVisibility') {
-                    SettingsState.update('profile', 'profileVisibility', element.value);
-                }
-                unsavedChanges = true;
-                updateSaveButton();
-            });
-        }
-    });
+    const profileVisibilitySelect = document.getElementById('profileVisibilitySelect');
+    if (profileVisibilitySelect) {
+        profileVisibilitySelect.addEventListener('change', () => {
+            window.__updateSetting('profile', 'profileVisibility', profileVisibilitySelect.value);
+        });
+    }
     
-    const toggles = ['lastSeenToggle'];
-    toggles.forEach(id => {
-        const element = document.getElementById(id);
-        if (element && !element.disabled) {
-            element.addEventListener('change', () => {
-                const property = id.replace('Toggle', '');
-                if (property === 'lastSeen') {
-                    SettingsState.update('profile', 'lastSeen', element.checked);
-                }
-                unsavedChanges = true;
-                updateSaveButton();
-            });
-        }
-    });
+    const lastSeenToggle = document.getElementById('lastSeenToggle');
+    if (lastSeenToggle) {
+        lastSeenToggle.addEventListener('change', () => {
+            window.__updateSetting('profile', 'lastSeen', lastSeenToggle.checked);
+        });
+    }
 }
 
 export function loadSecuritySection(container) {
     debugLog('Loading security section');
-    const isActive = currentState === LifecycleState.ACTIVE;
-    
-    if (!checkAuthenticationState() || !isActive) {
-        container.innerHTML = getAuthRequiredHTML('security', 'Security');
-        return;
-    }
     
     // Get REAL settings from SettingsState
     const settings = SettingsState.getSection('security') || DEFAULT_SETTINGS.security;
@@ -2219,6 +2213,7 @@ export function loadSecuritySection(container) {
                 <div class="setting-item">
                     <div class="setting-info">
                         <div class="setting-label">Two-Factor Authentication</div>
+                        <div class="setting-description">Add an extra layer of security to your account</div>
                     </div>
                     <div class="setting-control">
                         <label class="toggle-switch">
@@ -2231,6 +2226,7 @@ export function loadSecuritySection(container) {
                 <div class="setting-item">
                     <div class="setting-info">
                         <div class="setting-label">Change Password</div>
+                        <div class="setting-description">Update your account password</div>
                     </div>
                     <div class="setting-control">
                         <button class="setting-button" id="changePasswordBtn">
@@ -2242,10 +2238,11 @@ export function loadSecuritySection(container) {
                 <div class="setting-item">
                     <div class="setting-info">
                         <div class="setting-label">Login Notifications</div>
+                        <div class="setting-description">Get notified when someone logs into your account</div>
                     </div>
                     <div class="setting-control">
                         <label class="toggle-switch">
-                            <input type="checkbox" id="loginNotificationsToggle" ${settings.loginNotifications ? 'checked' : ''}>
+                            <input type="checkbox" id="loginNotificationsToggle" ${settings.loginNotifications !== false ? 'checked' : ''}>
                             <span class="toggle-slider"></span>
                         </label>
                     </div>
@@ -2254,6 +2251,7 @@ export function loadSecuritySection(container) {
                 <div class="setting-item">
                     <div class="setting-info">
                         <div class="setting-label">Active Sessions</div>
+                        <div class="setting-description">View and manage devices where you're logged in</div>
                     </div>
                     <div class="setting-control">
                         <button class="setting-button" id="viewSessionsBtn">
@@ -2272,6 +2270,7 @@ export function loadSecuritySection(container) {
                 <div class="setting-item">
                     <div class="setting-info">
                         <div class="setting-label">Session Timeout</div>
+                        <div class="setting-description">Automatically log out after inactivity</div>
                     </div>
                     <div class="setting-control">
                         <select class="setting-dropdown" id="sessionTimeoutSelect">
@@ -2304,47 +2303,30 @@ function setupSecurityEventListeners() {
         });
     }
     
-    const toggles = ['twoFactorAuthToggle', 'loginNotificationsToggle'];
-    toggles.forEach(id => {
-        const element = document.getElementById(id);
-        if (element) {
-            element.addEventListener('change', () => {
-                const property = id.replace('Toggle', '');
-                if (property === 'twoFactorAuth') {
-                    SettingsState.update('security', 'twoFactorAuth', element.checked);
-                } else if (property === 'loginNotifications') {
-                    SettingsState.update('security', 'loginNotifications', element.checked);
-                }
-                unsavedChanges = true;
-                updateSaveButton();
-            });
-        }
-    });
+    const twoFactorAuthToggle = document.getElementById('twoFactorAuthToggle');
+    if (twoFactorAuthToggle) {
+        twoFactorAuthToggle.addEventListener('change', () => {
+            window.__updateSetting('security', 'twoFactorAuth', twoFactorAuthToggle.checked);
+        });
+    }
     
-    const selects = ['sessionTimeoutSelect'];
-    selects.forEach(id => {
-        const element = document.getElementById(id);
-        if (element) {
-            element.addEventListener('change', () => {
-                const property = id.replace('Select', '');
-                if (property === 'sessionTimeout') {
-                    SettingsState.update('security', 'sessionTimeout', element.value);
-                }
-                unsavedChanges = true;
-                updateSaveButton();
-            });
-        }
-    });
+    const loginNotificationsToggle = document.getElementById('loginNotificationsToggle');
+    if (loginNotificationsToggle) {
+        loginNotificationsToggle.addEventListener('change', () => {
+            window.__updateSetting('security', 'loginNotifications', loginNotificationsToggle.checked);
+        });
+    }
+    
+    const sessionTimeoutSelect = document.getElementById('sessionTimeoutSelect');
+    if (sessionTimeoutSelect) {
+        sessionTimeoutSelect.addEventListener('change', () => {
+            window.__updateSetting('security', 'sessionTimeout', sessionTimeoutSelect.value);
+        });
+    }
 }
 
 export function loadPrivacySection(container) {
     debugLog('Loading privacy section');
-    const isActive = currentState === LifecycleState.ACTIVE;
-    
-    if (!checkAuthenticationState() || !isActive) {
-        container.innerHTML = getAuthRequiredHTML('privacy', 'Privacy');
-        return;
-    }
     
     // Get REAL settings from SettingsState
     const settings = SettingsState.getSection('privacy') || DEFAULT_SETTINGS.privacy;
@@ -2358,6 +2340,7 @@ export function loadPrivacySection(container) {
                 <div class="setting-item">
                     <div class="setting-info">
                         <div class="setting-label">Who Can Add Me</div>
+                        <div class="setting-description">Control who can send you friend requests</div>
                     </div>
                     <div class="setting-control">
                         <select class="setting-dropdown" id="whoCanAddMeSelect">
@@ -2371,10 +2354,11 @@ export function loadPrivacySection(container) {
                 <div class="setting-item">
                     <div class="setting-info">
                         <div class="setting-label">Contact Discovery</div>
+                        <div class="setting-description">Allow others to find you by phone number</div>
                     </div>
                     <div class="setting-control">
                         <label class="toggle-switch">
-                            <input type="checkbox" id="contactDiscoveryToggle" ${settings.contactDiscovery ? 'checked' : ''}>
+                            <input type="checkbox" id="contactDiscoveryToggle" ${settings.contactDiscovery !== false ? 'checked' : ''}>
                             <span class="toggle-slider"></span>
                         </label>
                     </div>
@@ -2390,6 +2374,7 @@ export function loadPrivacySection(container) {
                 <div class="setting-item">
                     <div class="setting-info">
                         <div class="setting-label">Who Can Message Me</div>
+                        <div class="setting-description">Control who can send you direct messages</div>
                     </div>
                     <div class="setting-control">
                         <select class="setting-dropdown" id="canMessageMeSelect">
@@ -2403,10 +2388,11 @@ export function loadPrivacySection(container) {
                 <div class="setting-item">
                     <div class="setting-info">
                         <div class="setting-label">Read Receipts</div>
+                        <div class="setting-description">Let others know when you've read their messages</div>
                     </div>
                     <div class="setting-control">
                         <label class="toggle-switch">
-                            <input type="checkbox" id="readReceiptsToggle" ${settings.readReceipts ? 'checked' : ''}>
+                            <input type="checkbox" id="readReceiptsToggle" ${settings.readReceipts !== false ? 'checked' : ''}>
                             <span class="toggle-slider"></span>
                         </label>
                     </div>
@@ -2415,10 +2401,11 @@ export function loadPrivacySection(container) {
                 <div class="setting-item">
                     <div class="setting-info">
                         <div class="setting-label">Typing Indicators</div>
+                        <div class="setting-description">Show when you're typing a message</div>
                     </div>
                     <div class="setting-control">
                         <label class="toggle-switch">
-                            <input type="checkbox" id="typingIndicatorsToggle" ${settings.typingIndicators ? 'checked' : ''}>
+                            <input type="checkbox" id="typingIndicatorsToggle" ${settings.typingIndicators !== false ? 'checked' : ''}>
                             <span class="toggle-slider"></span>
                         </label>
                     </div>
@@ -2434,6 +2421,7 @@ export function loadPrivacySection(container) {
                 <div class="setting-item">
                     <div class="setting-info">
                         <div class="setting-label">Blocked Users</div>
+                        <div class="setting-description">Manage users you have blocked</div>
                     </div>
                     <div class="setting-control">
                         <button class="setting-button" id="manageBlockedBtn">
@@ -2456,46 +2444,1355 @@ function setupPrivacyEventListeners() {
         });
     }
     
-    const selects = ['whoCanAddMeSelect', 'canMessageMeSelect'];
-    selects.forEach(id => {
-        const element = document.getElementById(id);
-        if (element) {
-            element.addEventListener('change', () => {
-                const property = id.replace('Select', '');
-                if (property === 'whoCanAddMe') {
-                    SettingsState.update('privacy', 'whoCanAddMe', element.value);
-                } else if (property === 'canMessageMe') {
-                    SettingsState.update('privacy', 'canMessageMe', element.value);
-                }
-                unsavedChanges = true;
-                updateSaveButton();
-            });
-        }
-    });
+    const whoCanAddMeSelect = document.getElementById('whoCanAddMeSelect');
+    if (whoCanAddMeSelect) {
+        whoCanAddMeSelect.addEventListener('change', () => {
+            window.__updateSetting('privacy', 'whoCanAddMe', whoCanAddMeSelect.value);
+        });
+    }
     
-    const toggles = ['contactDiscoveryToggle', 'readReceiptsToggle', 'typingIndicatorsToggle'];
-    toggles.forEach(id => {
-        const element = document.getElementById(id);
-        if (element) {
-            element.addEventListener('change', () => {
-                const property = id.replace('Toggle', '');
-                if (property === 'contactDiscovery') {
-                    SettingsState.update('privacy', 'contactDiscovery', element.checked);
-                } else if (property === 'readReceipts') {
-                    SettingsState.update('privacy', 'readReceipts', element.checked);
-                } else if (property === 'typingIndicators') {
-                    SettingsState.update('privacy', 'typingIndicators', element.checked);
-                }
-                unsavedChanges = true;
-                updateSaveButton();
-            });
+    const canMessageMeSelect = document.getElementById('canMessageMeSelect');
+    if (canMessageMeSelect) {
+        canMessageMeSelect.addEventListener('change', () => {
+            window.__updateSetting('privacy', 'canMessageMe', canMessageMeSelect.value);
+        });
+    }
+    
+    const contactDiscoveryToggle = document.getElementById('contactDiscoveryToggle');
+    if (contactDiscoveryToggle) {
+        contactDiscoveryToggle.addEventListener('change', () => {
+            window.__updateSetting('privacy', 'contactDiscovery', contactDiscoveryToggle.checked);
+        });
+    }
+    
+    const readReceiptsToggle = document.getElementById('readReceiptsToggle');
+    if (readReceiptsToggle) {
+        readReceiptsToggle.addEventListener('change', () => {
+            window.__updateSetting('privacy', 'readReceipts', readReceiptsToggle.checked);
+        });
+    }
+    
+    const typingIndicatorsToggle = document.getElementById('typingIndicatorsToggle');
+    if (typingIndicatorsToggle) {
+        typingIndicatorsToggle.addEventListener('change', () => {
+            window.__updateSetting('privacy', 'typingIndicators', typingIndicatorsToggle.checked);
+        });
+    }
+}
+
+// =============================================
+// CHAT SECTION LOADER - FIXED (NEW)
+// =============================================
+export function loadChatSection(container) {
+    debugLog('Loading chat section');
+    const settings = SettingsState.getSection('chat') || DEFAULT_SETTINGS.chat;
+    
+    container.innerHTML = `
+        <div class="settings-section">
+            <div class="section-header">
+                <h3><i class="fas fa-comment-dots section-icon"></i> Chat Preferences</h3>
+            </div>
+            <div class="section-body">
+                <div class="setting-item">
+                    <div class="setting-info">
+                        <div class="setting-label">Enter to Send</div>
+                        <div class="setting-description">Press Enter to send messages (Shift+Enter for new line)</div>
+                    </div>
+                    <div class="setting-control">
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="enterToSend" ${settings.enterToSend !== false ? 'checked' : ''}>
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+                </div>
+                
+                <div class="setting-item">
+                    <div class="setting-info">
+                        <div class="setting-label">Message Font Size</div>
+                        <div class="setting-description">Adjust the size of text in chats</div>
+                    </div>
+                    <div class="setting-control">
+                        <select class="setting-dropdown" id="messageFontSize">
+                            <option value="small" ${settings.messageFontSize === 'small' ? 'selected' : ''}>Small</option>
+                            <option value="medium" ${(settings.messageFontSize === 'medium' || !settings.messageFontSize) ? 'selected' : ''}>Medium</option>
+                            <option value="large" ${settings.messageFontSize === 'large' ? 'selected' : ''}>Large</option>
+                        </select>
+                    </div>
+                </div>
+                
+                <div class="setting-item">
+                    <div class="setting-info">
+                        <div class="setting-label">Chat Wallpaper</div>
+                        <div class="setting-description">Customize chat background</div>
+                    </div>
+                    <div class="setting-control">
+                        <button class="setting-button" id="changeWallpaperBtn">
+                            <i class="fas fa-image"></i> Change Wallpaper
+                        </button>
+                    </div>
+                </div>
+                
+                <div class="setting-item">
+                    <div class="setting-info">
+                        <div class="setting-label">Show Timestamps</div>
+                        <div class="setting-description">Display message timestamps</div>
+                    </div>
+                    <div class="setting-control">
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="showTimestamps" ${settings.showTimestamps !== false ? 'checked' : ''}>
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+                </div>
+                
+                <div class="setting-item">
+                    <div class="setting-info">
+                        <div class="setting-label">Message Previews</div>
+                        <div class="setting-description">Show message content in notifications</div>
+                    </div>
+                    <div class="setting-control">
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="messagePreviews" ${settings.messagePreviews !== false ? 'checked' : ''}>
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="settings-section">
+            <div class="section-header">
+                <h3><i class="fas fa-paper-plane section-icon"></i> Message Behavior</h3>
+            </div>
+            <div class="section-body">
+                <div class="setting-item">
+                    <div class="setting-info">
+                        <div class="setting-label">Confirm Before Sending</div>
+                        <div class="setting-description">Show confirmation dialog before sending messages</div>
+                    </div>
+                    <div class="setting-control">
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="confirmSend" ${settings.confirmSend ? 'checked' : ''}>
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+                </div>
+                
+                <div class="setting-item">
+                    <div class="setting-info">
+                        <div class="setting-label">Auto-Correct</div>
+                        <div class="setting-description">Enable automatic spelling correction</div>
+                    </div>
+                    <div class="setting-control">
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="autoCorrect" ${settings.autoCorrect !== false ? 'checked' : ''}>
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    // Setup event listeners
+    const enterToSend = document.getElementById('enterToSend');
+    if (enterToSend) enterToSend.addEventListener('change', () => window.__updateSetting('chat', 'enterToSend', enterToSend.checked));
+    
+    const messageFontSize = document.getElementById('messageFontSize');
+    if (messageFontSize) messageFontSize.addEventListener('change', () => window.__updateSetting('chat', 'messageFontSize', messageFontSize.value));
+    
+    const changeWallpaperBtn = document.getElementById('changeWallpaperBtn');
+    if (changeWallpaperBtn) changeWallpaperBtn.addEventListener('click', () => showNotification('Wallpaper picker coming soon', 'info'));
+    
+    const showTimestamps = document.getElementById('showTimestamps');
+    if (showTimestamps) showTimestamps.addEventListener('change', () => window.__updateSetting('chat', 'showTimestamps', showTimestamps.checked));
+    
+    const messagePreviews = document.getElementById('messagePreviews');
+    if (messagePreviews) messagePreviews.addEventListener('change', () => window.__updateSetting('chat', 'messagePreviews', messagePreviews.checked));
+    
+    const confirmSend = document.getElementById('confirmSend');
+    if (confirmSend) confirmSend.addEventListener('change', () => window.__updateSetting('chat', 'confirmSend', confirmSend.checked));
+    
+    const autoCorrect = document.getElementById('autoCorrect');
+    if (autoCorrect) autoCorrect.addEventListener('change', () => window.__updateSetting('chat', 'autoCorrect', autoCorrect.checked));
+}
+
+// =============================================
+// FRIENDS SECTION LOADER - FIXED (NEW)
+// =============================================
+export function loadFriendsSection(container) {
+    debugLog('Loading friends section');
+    const settings = SettingsState.getSection('friends') || DEFAULT_SETTINGS.friends;
+    
+    container.innerHTML = `
+        <div class="settings-section">
+            <div class="section-header">
+                <h3><i class="fas fa-user-friends section-icon"></i> Friend Requests</h3>
+            </div>
+            <div class="section-body">
+                <div class="setting-item">
+                    <div class="setting-info">
+                        <div class="setting-label">Friend Request Notifications</div>
+                        <div class="setting-description">Get notified when someone sends a friend request</div>
+                    </div>
+                    <div class="setting-control">
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="friendRequestNotifications" ${settings.friendRequestNotifications !== false ? 'checked' : ''}>
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+                </div>
+                
+                <div class="setting-item">
+                    <div class="setting-info">
+                        <div class="setting-label">Auto-Accept Friends</div>
+                        <div class="setting-description">Automatically accept friend requests from friends of friends</div>
+                    </div>
+                    <div class="setting-control">
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="autoAcceptFriends" ${settings.autoAcceptFriends ? 'checked' : ''}>
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+                </div>
+                
+                <div class="setting-item">
+                    <div class="setting-info">
+                        <div class="setting-label">Friend Request Message</div>
+                        <div class="setting-description">Allow custom messages with friend requests</div>
+                    </div>
+                    <div class="setting-control">
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="allowRequestMessage" ${settings.allowRequestMessage !== false ? 'checked' : ''}>
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="settings-section">
+            <div class="section-header">
+                <h3><i class="fas fa-list section-icon"></i> Friend List</h3>
+            </div>
+            <div class="section-body">
+                <div class="setting-item">
+                    <div class="setting-info">
+                        <div class="setting-label">Show Online Status</div>
+                        <div class="setting-description">Display when friends are online</div>
+                    </div>
+                    <div class="setting-control">
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="showOnlineStatus" ${settings.showOnlineStatus !== false ? 'checked' : ''}>
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+                </div>
+                
+                <div class="setting-item">
+                    <div class="setting-info">
+                        <div class="setting-label">Sort Friends By</div>
+                        <div class="setting-description">Choose how to order your friend list</div>
+                    </div>
+                    <div class="setting-control">
+                        <select class="setting-dropdown" id="sortFriendsBy">
+                            <option value="name" ${settings.sortFriendsBy === 'name' ? 'selected' : ''}>Name</option>
+                            <option value="status" ${settings.sortFriendsBy === 'status' ? 'selected' : ''}>Status</option>
+                            <option value="recent" ${(settings.sortFriendsBy === 'recent' || !settings.sortFriendsBy) ? 'selected' : ''}>Recent</option>
+                        </select>
+                    </div>
+                </div>
+                
+                <div class="setting-item">
+                    <div class="setting-info">
+                        <div class="setting-label">Friend Limit Warning</div>
+                        <div class="setting-description">Warn when approaching friend limit</div>
+                    </div>
+                    <div class="setting-control">
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="friendLimitWarning" ${settings.friendLimitWarning !== false ? 'checked' : ''}>
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    const friendRequestNotifications = document.getElementById('friendRequestNotifications');
+    if (friendRequestNotifications) friendRequestNotifications.addEventListener('change', () => window.__updateSetting('friends', 'friendRequestNotifications', friendRequestNotifications.checked));
+    
+    const autoAcceptFriends = document.getElementById('autoAcceptFriends');
+    if (autoAcceptFriends) autoAcceptFriends.addEventListener('change', () => window.__updateSetting('friends', 'autoAcceptFriends', autoAcceptFriends.checked));
+    
+    const allowRequestMessage = document.getElementById('allowRequestMessage');
+    if (allowRequestMessage) allowRequestMessage.addEventListener('change', () => window.__updateSetting('friends', 'allowRequestMessage', allowRequestMessage.checked));
+    
+    const showOnlineStatus = document.getElementById('showOnlineStatus');
+    if (showOnlineStatus) showOnlineStatus.addEventListener('change', () => window.__updateSetting('friends', 'showOnlineStatus', showOnlineStatus.checked));
+    
+    const sortFriendsBy = document.getElementById('sortFriendsBy');
+    if (sortFriendsBy) sortFriendsBy.addEventListener('change', () => window.__updateSetting('friends', 'sortFriendsBy', sortFriendsBy.value));
+    
+    const friendLimitWarning = document.getElementById('friendLimitWarning');
+    if (friendLimitWarning) friendLimitWarning.addEventListener('change', () => window.__updateSetting('friends', 'friendLimitWarning', friendLimitWarning.checked));
+}
+
+// =============================================
+// GROUPS SECTION LOADER - FIXED (NEW)
+// =============================================
+export function loadGroupsSection(container) {
+    debugLog('Loading groups section');
+    const settings = SettingsState.getSection('groups') || DEFAULT_SETTINGS.groups;
+    
+    container.innerHTML = `
+        <div class="settings-section">
+            <div class="section-header">
+                <h3><i class="fas fa-users section-icon"></i> Group Privacy</h3>
+            </div>
+            <div class="section-body">
+                <div class="setting-item">
+                    <div class="setting-info">
+                        <div class="setting-label">Who Can Add Me to Groups</div>
+                        <div class="setting-description">Control who can add you to group chats</div>
+                    </div>
+                    <div class="setting-control">
+                        <select class="setting-dropdown" id="whoCanAddToGroups">
+                            <option value="everyone" ${settings.whoCanAddToGroups === 'everyone' ? 'selected' : ''}>Everyone</option>
+                            <option value="friendsOnly" ${settings.whoCanAddToGroups === 'friendsOnly' ? 'selected' : ''}>Friends Only</option>
+                            <option value="nobody" ${(settings.whoCanAddToGroups === 'nobody' || !settings.whoCanAddToGroups) ? 'selected' : ''}>Nobody</option>
+                        </select>
+                    </div>
+                </div>
+                
+                <div class="setting-item">
+                    <div class="setting-info">
+                        <div class="setting-label">Group Invite Links</div>
+                        <div class="setting-description">Allow group invite links</div>
+                    </div>
+                    <div class="setting-control">
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="allowInviteLinks" ${settings.allowInviteLinks !== false ? 'checked' : ''}>
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="settings-section">
+            <div class="section-header">
+                <h3><i class="fas fa-bell section-icon"></i> Group Notifications</h3>
+            </div>
+            <div class="section-body">
+                <div class="setting-item">
+                    <div class="setting-info">
+                        <div class="setting-label">Mentions Only</div>
+                        <div class="setting-description">Only get notified when mentioned</div>
+                    </div>
+                    <div class="setting-control">
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="mentionsOnly" ${settings.mentionsOnly ? 'checked' : ''}>
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+                </div>
+                
+                <div class="setting-item">
+                    <div class="setting-info">
+                        <div class="setting-label">Group Message Preview</div>
+                        <div class="setting-description">Show message previews in group notifications</div>
+                    </div>
+                    <div class="setting-control">
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="groupMessagePreview" ${settings.groupMessagePreview !== false ? 'checked' : ''}>
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    const whoCanAddToGroups = document.getElementById('whoCanAddToGroups');
+    if (whoCanAddToGroups) whoCanAddToGroups.addEventListener('change', () => window.__updateSetting('groups', 'whoCanAddToGroups', whoCanAddToGroups.value));
+    
+    const allowInviteLinks = document.getElementById('allowInviteLinks');
+    if (allowInviteLinks) allowInviteLinks.addEventListener('change', () => window.__updateSetting('groups', 'allowInviteLinks', allowInviteLinks.checked));
+    
+    const mentionsOnly = document.getElementById('mentionsOnly');
+    if (mentionsOnly) mentionsOnly.addEventListener('change', () => window.__updateSetting('groups', 'mentionsOnly', mentionsOnly.checked));
+    
+    const groupMessagePreview = document.getElementById('groupMessagePreview');
+    if (groupMessagePreview) groupMessagePreview.addEventListener('change', () => window.__updateSetting('groups', 'groupMessagePreview', groupMessagePreview.checked));
+}
+
+// =============================================
+// CALLS SECTION LOADER - FIXED (NEW)
+// =============================================
+export function loadCallsSection(container) {
+    debugLog('Loading calls section');
+    const settings = SettingsState.getSection('calls') || DEFAULT_SETTINGS.calls;
+    
+    container.innerHTML = `
+        <div class="settings-section">
+            <div class="section-header">
+                <h3><i class="fas fa-phone section-icon"></i> Call Settings</h3>
+            </div>
+            <div class="section-body">
+                <div class="setting-item">
+                    <div class="setting-info">
+                        <div class="setting-label">Incoming Calls</div>
+                        <div class="setting-description">Allow incoming calls</div>
+                    </div>
+                    <div class="setting-control">
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="allowIncomingCalls" ${settings.allowIncomingCalls !== false ? 'checked' : ''}>
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+                </div>
+                
+                <div class="setting-item">
+                    <div class="setting-info">
+                        <div class="setting-label">Call Ringtone</div>
+                        <div class="setting-description">Select your call ringtone</div>
+                    </div>
+                    <div class="setting-control">
+                        <select class="setting-dropdown" id="callRingtone">
+                            <option value="default" ${settings.callRingtone === 'default' ? 'selected' : ''}>Default</option>
+                            <option value="classic" ${settings.callRingtone === 'classic' ? 'selected' : ''}>Classic</option>
+                            <option value="modern" ${(settings.callRingtone === 'modern' || !settings.callRingtone) ? 'selected' : ''}>Modern</option>
+                        </select>
+                    </div>
+                </div>
+                
+                <div class="setting-item">
+                    <div class="setting-info">
+                        <div class="setting-label">Vibrate on Call</div>
+                        <div class="setting-description">Enable vibration for incoming calls</div>
+                    </div>
+                    <div class="setting-control">
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="vibrateOnCall" ${settings.vibrateOnCall !== false ? 'checked' : ''}>
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="settings-section">
+            <div class="section-header">
+                <h3><i class="fas fa-video section-icon"></i> Video Call Settings</h3>
+            </div>
+            <div class="section-body">
+                <div class="setting-item">
+                    <div class="setting-info">
+                        <div class="setting-label">Camera on Start</div>
+                        <div class="setting-description">Enable camera when starting video calls</div>
+                    </div>
+                    <div class="setting-control">
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="cameraOnStart" ${settings.cameraOnStart ? 'checked' : ''}>
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+                </div>
+                
+                <div class="setting-item">
+                    <div class="setting-info">
+                        <div class="setting-label">Video Quality</div>
+                        <div class="setting-description">Choose video call quality</div>
+                    </div>
+                    <div class="setting-control">
+                        <select class="setting-dropdown" id="videoQuality">
+                            <option value="auto" ${(settings.videoQuality === 'auto' || !settings.videoQuality) ? 'selected' : ''}>Auto</option>
+                            <option value="hd" ${settings.videoQuality === 'hd' ? 'selected' : ''}>HD</option>
+                            <option value="sd" ${settings.videoQuality === 'sd' ? 'selected' : ''}>SD</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    const allowIncomingCalls = document.getElementById('allowIncomingCalls');
+    if (allowIncomingCalls) allowIncomingCalls.addEventListener('change', () => window.__updateSetting('calls', 'allowIncomingCalls', allowIncomingCalls.checked));
+    
+    const callRingtone = document.getElementById('callRingtone');
+    if (callRingtone) callRingtone.addEventListener('change', () => window.__updateSetting('calls', 'callRingtone', callRingtone.value));
+    
+    const vibrateOnCall = document.getElementById('vibrateOnCall');
+    if (vibrateOnCall) vibrateOnCall.addEventListener('change', () => window.__updateSetting('calls', 'vibrateOnCall', vibrateOnCall.checked));
+    
+    const cameraOnStart = document.getElementById('cameraOnStart');
+    if (cameraOnStart) cameraOnStart.addEventListener('change', () => window.__updateSetting('calls', 'cameraOnStart', cameraOnStart.checked));
+    
+    const videoQuality = document.getElementById('videoQuality');
+    if (videoQuality) videoQuality.addEventListener('change', () => window.__updateSetting('calls', 'videoQuality', videoQuality.value));
+}
+
+// =============================================
+// STATUS SECTION LOADER - FIXED (NEW)
+// =============================================
+export function loadStatusSection(container) {
+    debugLog('Loading status section');
+    const settings = SettingsState.getSection('status') || DEFAULT_SETTINGS.status;
+    
+    container.innerHTML = `
+        <div class="settings-section">
+            <div class="section-header">
+                <h3><i class="fas fa-smile section-icon"></i> Status Settings</h3>
+            </div>
+            <div class="section-body">
+                <div class="setting-item">
+                    <div class="setting-info">
+                        <div class="setting-label">Current Status</div>
+                        <div class="setting-description">Set your online status</div>
+                    </div>
+                    <div class="setting-control">
+                        <select class="setting-dropdown" id="currentStatus">
+                            <option value="online" ${settings.currentStatus === 'online' ? 'selected' : ''}>Online</option>
+                            <option value="away" ${settings.currentStatus === 'away' ? 'selected' : ''}>Away</option>
+                            <option value="busy" ${settings.currentStatus === 'busy' ? 'selected' : ''}>Busy</option>
+                            <option value="offline" ${(settings.currentStatus === 'offline' || !settings.currentStatus) ? 'selected' : ''}>Offline</option>
+                        </select>
+                    </div>
+                </div>
+                
+                <div class="setting-item">
+                    <div class="setting-info">
+                        <div class="setting-label">Auto Status Reset</div>
+                        <div class="setting-description">Auto reset status after inactivity</div>
+                    </div>
+                    <div class="setting-control">
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="autoStatusReset" ${settings.autoStatusReset !== false ? 'checked' : ''}>
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+                </div>
+                
+                <div class="setting-item">
+                    <div class="setting-info">
+                        <div class="setting-label">Status Timeout</div>
+                        <div class="setting-description">Minutes until auto status reset</div>
+                    </div>
+                    <div class="setting-control">
+                        <select class="setting-dropdown" id="statusTimeout">
+                            <option value="5" ${settings.statusTimeout === '5' ? 'selected' : ''}>5 minutes</option>
+                            <option value="15" ${(settings.statusTimeout === '15' || !settings.statusTimeout) ? 'selected' : ''}>15 minutes</option>
+                            <option value="30" ${settings.statusTimeout === '30' ? 'selected' : ''}>30 minutes</option>
+                            <option value="60" ${settings.statusTimeout === '60' ? 'selected' : ''}>60 minutes</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="settings-section">
+            <div class="section-header">
+                <h3><i class="fas fa-clock section-icon"></i> Status History</h3>
+            </div>
+            <div class="section-body">
+                <div class="setting-item">
+                    <div class="setting-info">
+                        <div class="setting-label">Save Status History</div>
+                        <div class="setting-description">Keep track of previous statuses</div>
+                    </div>
+                    <div class="setting-control">
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="saveStatusHistory" ${settings.saveStatusHistory !== false ? 'checked' : ''}>
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+                </div>
+                
+                <div class="setting-item">
+                    <div class="setting-info">
+                        <div class="setting-label">Clear History</div>
+                        <div class="setting-description">Clear all status history</div>
+                    </div>
+                    <div class="setting-control">
+                        <button class="setting-button" id="clearStatusHistoryBtn">
+                            <i class="fas fa-trash"></i> Clear
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    const currentStatus = document.getElementById('currentStatus');
+    if (currentStatus) currentStatus.addEventListener('change', () => window.__updateSetting('status', 'currentStatus', currentStatus.value));
+    
+    const autoStatusReset = document.getElementById('autoStatusReset');
+    if (autoStatusReset) autoStatusReset.addEventListener('change', () => window.__updateSetting('status', 'autoStatusReset', autoStatusReset.checked));
+    
+    const statusTimeout = document.getElementById('statusTimeout');
+    if (statusTimeout) statusTimeout.addEventListener('change', () => window.__updateSetting('status', 'statusTimeout', statusTimeout.value));
+    
+    const saveStatusHistory = document.getElementById('saveStatusHistory');
+    if (saveStatusHistory) saveStatusHistory.addEventListener('change', () => window.__updateSetting('status', 'saveStatusHistory', saveStatusHistory.checked));
+    
+    const clearStatusHistoryBtn = document.getElementById('clearStatusHistoryBtn');
+    if (clearStatusHistoryBtn) clearStatusHistoryBtn.addEventListener('click', () => {
+        if (confirm('Clear all status history?')) {
+            window.__updateSetting('status', 'statusHistory', []);
+            showNotification('Status history cleared', 'success');
         }
     });
 }
 
-// [Additional section loader functions continue...]
-// The remaining section loader functions (loadChatSection, loadFriendsSection, etc.) 
-// remain unchanged from the original file as they already follow the pattern of using SettingsState
+// =============================================
+// NOTIFICATIONS SECTION LOADER - FIXED (NEW)
+// =============================================
+export function loadNotificationsSection(container) {
+    debugLog('Loading notifications section');
+    const settings = SettingsState.getSection('notifications') || DEFAULT_SETTINGS.notifications;
+    
+    container.innerHTML = `
+        <div class="settings-section">
+            <div class="section-header">
+                <h3><i class="fas fa-bell section-icon"></i> Push Notifications</h3>
+            </div>
+            <div class="section-body">
+                <div class="setting-item">
+                    <div class="setting-info">
+                        <div class="setting-label">Enable Notifications</div>
+                        <div class="setting-description">Receive push notifications</div>
+                    </div>
+                    <div class="setting-control">
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="enableNotifications" ${settings.enableNotifications !== false ? 'checked' : ''}>
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+                </div>
+                
+                <div class="setting-item">
+                    <div class="setting-info">
+                        <div class="setting-label">Notification Sound</div>
+                        <div class="setting-description">Play sound for notifications</div>
+                    </div>
+                    <div class="setting-control">
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="notificationSound" ${settings.notificationSound !== false ? 'checked' : ''}>
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+                </div>
+                
+                <div class="setting-item">
+                    <div class="setting-info">
+                        <div class="setting-label">Notification Vibration</div>
+                        <div class="setting-description">Vibrate for notifications</div>
+                    </div>
+                    <div class="setting-control">
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="notificationVibration" ${settings.notificationVibration !== false ? 'checked' : ''}>
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="settings-section">
+            <div class="section-header">
+                <h3><i class="fas fa-envelope section-icon"></i> Notification Types</h3>
+            </div>
+            <div class="section-body">
+                <div class="setting-item">
+                    <div class="setting-info">
+                        <div class="setting-label">Message Notifications</div>
+                        <div class="setting-description">Notify on new messages</div>
+                    </div>
+                    <div class="setting-control">
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="messageNotifications" ${settings.messageNotifications !== false ? 'checked' : ''}>
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+                </div>
+                
+                <div class="setting-item">
+                    <div class="setting-info">
+                        <div class="setting-label">Group Notifications</div>
+                        <div class="setting-description">Notify on group messages</div>
+                    </div>
+                    <div class="setting-control">
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="groupNotifications" ${settings.groupNotifications !== false ? 'checked' : ''}>
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+                </div>
+                
+                <div class="setting-item">
+                    <div class="setting-info">
+                        <div class="setting-label">Call Notifications</div>
+                        <div class="setting-description">Notify on incoming calls</div>
+                    </div>
+                    <div class="setting-control">
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="callNotifications" ${settings.callNotifications !== false ? 'checked' : ''}>
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    const enableNotifications = document.getElementById('enableNotifications');
+    if (enableNotifications) enableNotifications.addEventListener('change', () => window.__updateSetting('notifications', 'enableNotifications', enableNotifications.checked));
+    
+    const notificationSound = document.getElementById('notificationSound');
+    if (notificationSound) notificationSound.addEventListener('change', () => window.__updateSetting('notifications', 'notificationSound', notificationSound.checked));
+    
+    const notificationVibration = document.getElementById('notificationVibration');
+    if (notificationVibration) notificationVibration.addEventListener('change', () => window.__updateSetting('notifications', 'notificationVibration', notificationVibration.checked));
+    
+    const messageNotifications = document.getElementById('messageNotifications');
+    if (messageNotifications) messageNotifications.addEventListener('change', () => window.__updateSetting('notifications', 'messageNotifications', messageNotifications.checked));
+    
+    const groupNotifications = document.getElementById('groupNotifications');
+    if (groupNotifications) groupNotifications.addEventListener('change', () => window.__updateSetting('notifications', 'groupNotifications', groupNotifications.checked));
+    
+    const callNotifications = document.getElementById('callNotifications');
+    if (callNotifications) callNotifications.addEventListener('change', () => window.__updateSetting('notifications', 'callNotifications', callNotifications.checked));
+}
+
+// =============================================
+// APPEARANCE SECTION LOADER - FIXED (NEW)
+// =============================================
+export function loadAppearanceSection(container) {
+    debugLog('Loading appearance section');
+    const settings = SettingsState.getSection('appearance') || DEFAULT_SETTINGS.appearance;
+    
+    container.innerHTML = `
+        <div class="settings-section">
+            <div class="section-header">
+                <h3><i class="fas fa-palette section-icon"></i> Theme</h3>
+            </div>
+            <div class="section-body">
+                <div class="setting-item">
+                    <div class="setting-info">
+                        <div class="setting-label">Theme Mode</div>
+                        <div class="setting-description">Choose light, dark, or auto theme</div>
+                    </div>
+                    <div class="setting-control">
+                        <select class="setting-dropdown" id="themeSelect">
+                            <option value="light" ${settings.theme === 'light' ? 'selected' : ''}>Light</option>
+                            <option value="dark" ${settings.theme === 'dark' ? 'selected' : ''}>Dark</option>
+                            <option value="auto" ${(settings.theme === 'auto' || !settings.theme) ? 'selected' : ''}>Auto</option>
+                        </select>
+                    </div>
+                </div>
+                
+                <div class="setting-item">
+                    <div class="setting-info">
+                        <div class="setting-label">Accent Color</div>
+                        <div class="setting-description">Choose your primary color</div>
+                    </div>
+                    <div class="setting-control">
+                        <div id="colorPickerContainer"></div>
+                    </div>
+                </div>
+                
+                <div class="setting-item">
+                    <div class="setting-info">
+                        <div class="setting-label">Font Size</div>
+                        <div class="setting-description">Adjust text size</div>
+                    </div>
+                    <div class="setting-control">
+                        <select class="setting-dropdown" id="fontSizeSelect">
+                            <option value="12" ${settings.fontSize === 12 ? 'selected' : ''}>Small</option>
+                            <option value="14" ${(settings.fontSize === 14 || !settings.fontSize) ? 'selected' : ''}>Medium</option>
+                            <option value="16" ${settings.fontSize === 16 ? 'selected' : ''}>Large</option>
+                            <option value="18" ${settings.fontSize === 18 ? 'selected' : ''}>Extra Large</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="settings-section">
+            <div class="section-header">
+                <h3><i class="fas fa-compress-alt section-icon"></i> Display</h3>
+            </div>
+            <div class="section-body">
+                <div class="setting-item">
+                    <div class="setting-info">
+                        <div class="setting-label">Compact Mode</div>
+                        <div class="setting-description">Reduce spacing between items</div>
+                    </div>
+                    <div class="setting-control">
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="compactMode" ${settings.compactMode ? 'checked' : ''}>
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+                </div>
+                
+                <div class="setting-item">
+                    <div class="setting-info">
+                        <div class="setting-label">Animations</div>
+                        <div class="setting-description">Enable UI animations</div>
+                    </div>
+                    <div class="setting-control">
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="animationsEnabled" ${settings.animationsEnabled !== false ? 'checked' : ''}>
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    const themeSelect = document.getElementById('themeSelect');
+    if (themeSelect) themeSelect.addEventListener('change', () => {
+        window.__updateSetting('appearance', 'theme', themeSelect.value);
+        applyTheme(themeSelect.value);
+    });
+    
+    const fontSizeSelect = document.getElementById('fontSizeSelect');
+    if (fontSizeSelect) fontSizeSelect.addEventListener('change', () => {
+        window.__updateSetting('appearance', 'fontSize', parseInt(fontSizeSelect.value));
+        applyFontSize(parseInt(fontSizeSelect.value));
+    });
+    
+    const compactMode = document.getElementById('compactMode');
+    if (compactMode) compactMode.addEventListener('change', () => {
+        window.__updateSetting('appearance', 'compactMode', compactMode.checked);
+        if (compactMode.checked) document.body.classList.add('compact-mode');
+        else document.body.classList.remove('compact-mode');
+    });
+    
+    const animationsEnabled = document.getElementById('animationsEnabled');
+    if (animationsEnabled) animationsEnabled.addEventListener('change', () => {
+        window.__updateSetting('appearance', 'animationsEnabled', animationsEnabled.checked);
+        if (animationsEnabled.checked) document.body.classList.remove('reduce-motion');
+        else document.body.classList.add('reduce-motion');
+    });
+    
+    initializeColorPicker();
+}
+
+// =============================================
+// STORAGE SECTION LOADER - FIXED (NEW)
+// =============================================
+export function loadStorageSection(container) {
+    debugLog('Loading storage section');
+    const settings = SettingsState.getSection('storage') || DEFAULT_SETTINGS.storage;
+    const usage = calculateStorageUsage();
+    
+    container.innerHTML = `
+        <div class="settings-section">
+            <div class="section-header">
+                <h3><i class="fas fa-database section-icon"></i> Storage Usage</h3>
+            </div>
+            <div class="section-body">
+                <div class="setting-item">
+                    <div class="setting-info">
+                        <div class="setting-label">Total Storage Used</div>
+                        <div class="setting-description">${formatStorageSize(usage.total)} used of ${formatStorageSize(usage.limit || 1073741824)}</div>
+                    </div>
+                    <div class="setting-control">
+                        <div class="storage-bar">
+                            <div class="storage-fill" style="width: ${(usage.total / (usage.limit || 1073741824)) * 100}%"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="settings-section">
+            <div class="section-header">
+                <h3><i class="fas fa-trash-alt section-icon"></i> Clear Data</h3>
+            </div>
+            <div class="section-body">
+                <div class="setting-item">
+                    <div class="setting-info">
+                        <div class="setting-label">Clear Chat Cache</div>
+                        <div class="setting-description">Remove cached chat messages</div>
+                    </div>
+                    <div class="setting-control">
+                        <button class="setting-button" id="clearChatCacheBtn">
+                            <i class="fas fa-trash"></i> Clear
+                        </button>
+                    </div>
+                </div>
+                
+                <div class="setting-item">
+                    <div class="setting-info">
+                        <div class="setting-label">Clear Media Cache</div>
+                        <div class="setting-description">Remove cached images and files</div>
+                    </div>
+                    <div class="setting-control">
+                        <button class="setting-button" id="clearMediaCacheBtn">
+                            <i class="fas fa-trash"></i> Clear
+                        </button>
+                    </div>
+                </div>
+                
+                <div class="setting-item">
+                    <div class="setting-info">
+                        <div class="setting-label">Auto-Clear Cache</div>
+                        <div class="setting-description">Automatically clear cache weekly</div>
+                    </div>
+                    <div class="setting-control">
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="autoClearCache" ${settings.autoClearCache !== false ? 'checked' : ''}>
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    const clearChatCacheBtn = document.getElementById('clearChatCacheBtn');
+    if (clearChatCacheBtn) clearChatCacheBtn.addEventListener('click', () => {
+        if (confirm('Clear all chat cache?')) {
+            clearChatCache();
+            showNotification('Chat cache cleared', 'success');
+        }
+    });
+    
+    const clearMediaCacheBtn = document.getElementById('clearMediaCacheBtn');
+    if (clearMediaCacheBtn) clearMediaCacheBtn.addEventListener('click', () => {
+        if (confirm('Clear all media cache?')) {
+            clearMediaCache();
+            showNotification('Media cache cleared', 'success');
+        }
+    });
+    
+    const autoClearCache = document.getElementById('autoClearCache');
+    if (autoClearCache) autoClearCache.addEventListener('change', () => window.__updateSetting('storage', 'autoClearCache', autoClearCache.checked));
+}
+
+// =============================================
+// MOOD SECTION LOADER - FIXED (NEW)
+// =============================================
+export function loadMoodSection(container) {
+    debugLog('Loading mood section');
+    const settings = SettingsState.getSection('mood') || DEFAULT_SETTINGS.mood;
+    const moods = [
+        'happy', 'sad', 'excited', 'tired', 'angry', 
+        'calm', 'loved', 'stressed', 'hopeful', 'bored'
+    ];
+    
+    let moodsHtml = '';
+    moods.forEach(mood => {
+        const color = settings.moodColors?.[mood] || getMoodColor(mood);
+        moodsHtml += `
+            <div class="setting-item">
+                <div class="setting-info">
+                    <div class="setting-label">${mood.charAt(0).toUpperCase() + mood.slice(1)}</div>
+                    <div class="setting-description">${getMoodText(mood)}</div>
+                </div>
+                <div class="setting-control">
+                    <div class="mood-color-preview" style="background-color: ${color};" data-mood="${mood}"></div>
+                    <button class="setting-button edit-mood-color" data-mood="${mood}">Edit Color</button>
+                </div>
+            </div>
+        `;
+    });
+    
+    container.innerHTML = `
+        <div class="settings-section">
+            <div class="section-header">
+                <h3><i class="fas fa-smile-wink section-icon"></i> Mood Settings</h3>
+            </div>
+            <div class="section-body">
+                <div class="setting-item">
+                    <div class="setting-info">
+                        <div class="setting-label">Current Mood</div>
+                        <div class="setting-description">Set your current mood</div>
+                    </div>
+                    <div class="setting-control">
+                        <select class="setting-dropdown" id="currentMoodSelect">
+                            ${moods.map(mood => `<option value="${mood}" ${settings.currentMood === mood ? 'selected' : ''}>${mood.charAt(0).toUpperCase() + mood.slice(1)}</option>`).join('')}
+                        </select>
+                    </div>
+                </div>
+                
+                <div class="setting-item">
+                    <div class="setting-info">
+                        <div class="setting-label">Auto Mood Detection</div>
+                        <div class="setting-description">Detect mood from typing patterns</div>
+                    </div>
+                    <div class="setting-control">
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="autoMoodDetection" ${settings.autoMoodDetection ? 'checked' : ''}>
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+                </div>
+                
+                <div class="setting-item">
+                    <div class="setting-info">
+                        <div class="setting-label">Share Mood Status</div>
+                        <div class="setting-description">Let friends see your mood</div>
+                    </div>
+                    <div class="setting-control">
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="shareMoodStatus" ${settings.shareMoodStatus !== false ? 'checked' : ''}>
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="settings-section">
+            <div class="section-header">
+                <h3><i class="fas fa-palette section-icon"></i> Mood Colors</h3>
+            </div>
+            <div class="section-body">
+                ${moodsHtml}
+            </div>
+        </div>
+    `;
+    
+    const currentMoodSelect = document.getElementById('currentMoodSelect');
+    if (currentMoodSelect) currentMoodSelect.addEventListener('change', () => window.__updateSetting('mood', 'currentMood', currentMoodSelect.value));
+    
+    const autoMoodDetection = document.getElementById('autoMoodDetection');
+    if (autoMoodDetection) autoMoodDetection.addEventListener('change', () => window.__updateSetting('mood', 'autoMoodDetection', autoMoodDetection.checked));
+    
+    const shareMoodStatus = document.getElementById('shareMoodStatus');
+    if (shareMoodStatus) shareMoodStatus.addEventListener('change', () => window.__updateSetting('mood', 'shareMoodStatus', shareMoodStatus.checked));
+    
+    document.querySelectorAll('.edit-mood-color').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const mood = btn.dataset.mood;
+            editMoodColor(mood);
+        });
+    });
+}
+
+// =============================================
+// ADVANCED SECTION LOADER - FIXED (NEW)
+// =============================================
+export function loadAdvancedSection(container) {
+    debugLog('Loading advanced section');
+    const settings = SettingsState.getSection('advanced') || DEFAULT_SETTINGS.advanced;
+    
+    container.innerHTML = `
+        <div class="settings-section">
+            <div class="section-header">
+                <h3><i class="fas fa-code section-icon"></i> Developer Options</h3>
+            </div>
+            <div class="section-body">
+                <div class="setting-item">
+                    <div class="setting-info">
+                        <div class="setting-label">Developer Mode</div>
+                        <div class="setting-description">Enable developer features</div>
+                    </div>
+                    <div class="setting-control">
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="developerMode" ${settings.developerMode ? 'checked' : ''}>
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+                </div>
+                
+                <div class="setting-item">
+                    <div class="setting-info">
+                        <div class="setting-label">Debug Logging</div>
+                        <div class="setting-description">Log debug information to console</div>
+                    </div>
+                    <div class="setting-control">
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="debugLogging" ${settings.debugLogging ? 'checked' : ''}>
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+                </div>
+                
+                <div class="setting-item">
+                    <div class="setting-info">
+                        <div class="setting-label">Performance Mode</div>
+                        <div class="setting-description">Optimize for performance</div>
+                    </div>
+                    <div class="setting-control">
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="performanceMode" ${settings.performanceMode ? 'checked' : ''}>
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="settings-section">
+            <div class="section-header">
+                <h3><i class="fas fa-network-wired section-icon"></i> Connection</h3>
+            </div>
+            <div class="section-body">
+                <div class="setting-item">
+                    <div class="setting-info">
+                        <div class="setting-label">Data Saver</div>
+                        <div class="setting-description">Reduce data usage</div>
+                    </div>
+                    <div class="setting-control">
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="dataSaver" ${settings.dataSaver ? 'checked' : ''}>
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+                </div>
+                
+                <div class="setting-item">
+                    <div class="setting-info">
+                        <div class="setting-label">Reconnection Attempts</div>
+                        <div class="setting-description">Number of reconnection attempts</div>
+                    </div>
+                    <div class="setting-control">
+                        <select class="setting-dropdown" id="reconnectionAttempts">
+                            <option value="3" ${settings.reconnectionAttempts === 3 ? 'selected' : ''}>3 attempts</option>
+                            <option value="5" ${(settings.reconnectionAttempts === 5 || !settings.reconnectionAttempts) ? 'selected' : ''}>5 attempts</option>
+                            <option value="10" ${settings.reconnectionAttempts === 10 ? 'selected' : ''}>10 attempts</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    const developerMode = document.getElementById('developerMode');
+    if (developerMode) developerMode.addEventListener('change', () => window.__updateSetting('advanced', 'developerMode', developerMode.checked));
+    
+    const debugLogging = document.getElementById('debugLogging');
+    if (debugLogging) debugLogging.addEventListener('change', () => window.__updateSetting('advanced', 'debugLogging', debugLogging.checked));
+    
+    const performanceMode = document.getElementById('performanceMode');
+    if (performanceMode) performanceMode.addEventListener('change', () => window.__updateSetting('advanced', 'performanceMode', performanceMode.checked));
+    
+    const dataSaver = document.getElementById('dataSaver');
+    if (dataSaver) dataSaver.addEventListener('change', () => window.__updateSetting('advanced', 'dataSaver', dataSaver.checked));
+    
+    const reconnectionAttempts = document.getElementById('reconnectionAttempts');
+    if (reconnectionAttempts) reconnectionAttempts.addEventListener('change', () => window.__updateSetting('advanced', 'reconnectionAttempts', parseInt(reconnectionAttempts.value)));
+}
+
+// =============================================
+// BACKUP SECTION LOADER - FIXED (NEW)
+// =============================================
+export function loadBackupSection(container) {
+    debugLog('Loading backup section');
+    const settings = SettingsState.getSection('backup') || DEFAULT_SETTINGS.backup;
+    
+    container.innerHTML = `
+        <div class="settings-section">
+            <div class="section-header">
+                <h3><i class="fas fa-cloud-upload-alt section-icon"></i> Backup Settings</h3>
+            </div>
+            <div class="section-body">
+                <div class="setting-item">
+                    <div class="setting-info">
+                        <div class="setting-label">Auto Backup</div>
+                        <div class="setting-description">Automatically back up settings</div>
+                    </div>
+                    <div class="setting-control">
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="autoBackup" ${settings.autoBackup !== false ? 'checked' : ''}>
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+                </div>
+                
+                <div class="setting-item">
+                    <div class="setting-info">
+                        <div class="setting-label">Backup Frequency</div>
+                        <div class="setting-description">How often to back up</div>
+                    </div>
+                    <div class="setting-control">
+                        <select class="setting-dropdown" id="backupFrequency">
+                            <option value="daily" ${settings.backupFrequency === 'daily' ? 'selected' : ''}>Daily</option>
+                            <option value="weekly" ${(settings.backupFrequency === 'weekly' || !settings.backupFrequency) ? 'selected' : ''}>Weekly</option>
+                            <option value="monthly" ${settings.backupFrequency === 'monthly' ? 'selected' : ''}>Monthly</option>
+                        </select>
+                    </div>
+                </div>
+                
+                <div class="setting-item">
+                    <div class="setting-info">
+                        <div class="setting-label">Backup Now</div>
+                        <div class="setting-description">Create a manual backup</div>
+                    </div>
+                    <div class="setting-control">
+                        <button class="setting-button" id="backupNowBtn">
+                            <i class="fas fa-cloud-upload-alt"></i> Backup Now
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="settings-section">
+            <div class="section-header">
+                <h3><i class="fas fa-cloud-download-alt section-icon"></i> Restore</h3>
+            </div>
+            <div class="section-body">
+                <div class="setting-item">
+                    <div class="setting-info">
+                        <div class="setting-label">Restore from Backup</div>
+                        <div class="setting-description">Restore settings from a backup</div>
+                    </div>
+                    <div class="setting-control">
+                        <button class="setting-button" id="restoreBackupBtn">
+                            <i class="fas fa-cloud-download-alt"></i> Restore
+                        </button>
+                    </div>
+                </div>
+                
+                <div class="setting-item">
+                    <div class="setting-info">
+                        <div class="setting-label">Last Backup</div>
+                        <div class="setting-description">${settings.lastBackup ? new Date(settings.lastBackup).toLocaleString() : 'Never'}</div>
+                    </div>
+                    <div class="setting-control"></div>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    const autoBackup = document.getElementById('autoBackup');
+    if (autoBackup) autoBackup.addEventListener('change', () => window.__updateSetting('backup', 'autoBackup', autoBackup.checked));
+    
+    const backupFrequency = document.getElementById('backupFrequency');
+    if (backupFrequency) backupFrequency.addEventListener('change', () => window.__updateSetting('backup', 'backupFrequency', backupFrequency.value));
+    
+    const backupNowBtn = document.getElementById('backupNowBtn');
+    if (backupNowBtn) backupNowBtn.addEventListener('click', async () => {
+        try {
+            await SettingsState.save();
+            await SettingsState.update('backup', 'lastBackup', Date.now());
+            showNotification('Backup created successfully', 'success');
+            loadBackupSection(container);
+        } catch (error) {
+            showNotification('Backup failed: ' + error.message, 'error');
+        }
+    });
+    
+    const restoreBackupBtn = document.getElementById('restoreBackupBtn');
+    if (restoreBackupBtn) restoreBackupBtn.addEventListener('click', () => {
+        if (confirm('Restore settings from backup? Current settings will be lost.')) {
+            showNotification('Restore feature coming soon', 'info');
+        }
+    });
+}
+
+// =============================================
+// DANGER SECTION LOADER - FIXED (NEW)
+// =============================================
+export function loadDangerSection(container) {
+    debugLog('Loading danger section');
+    
+    container.innerHTML = `
+        <div class="settings-section">
+            <div class="section-header">
+                <h3><i class="fas fa-exclamation-triangle section-icon" style="color: var(--danger-color);"></i> Danger Zone</h3>
+                <div class="section-description">These actions are irreversible</div>
+            </div>
+            <div class="section-body">
+                <div class="setting-item danger-item">
+                    <div class="setting-info">
+                        <div class="setting-label">Clear All Data</div>
+                        <div class="setting-description">Remove all settings and cached data</div>
+                    </div>
+                    <div class="setting-control">
+                        <button class="setting-button danger" id="clearAllDataBtn">
+                            <i class="fas fa-trash-alt"></i> Clear All
+                        </button>
+                    </div>
+                </div>
+                
+                <div class="setting-item danger-item">
+                    <div class="setting-info">
+                        <div class="setting-label">Reset All Settings</div>
+                        <div class="setting-description">Restore all settings to default</div>
+                    </div>
+                    <div class="setting-control">
+                        <button class="setting-button danger" id="resetAllSettingsBtn">
+                            <i class="fas fa-undo-alt"></i> Reset All
+                        </button>
+                    </div>
+                </div>
+                
+                <div class="setting-item danger-item">
+                    <div class="setting-info">
+                        <div class="setting-label">Delete Account</div>
+                        <div class="setting-description">Permanently delete your account</div>
+                    </div>
+                    <div class="setting-control">
+                        <button class="setting-button danger" id="deleteAccountBtn">
+                            <i class="fas fa-user-times"></i> Delete Account
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    const clearAllDataBtn = document.getElementById('clearAllDataBtn');
+    if (clearAllDataBtn) {
+        clearAllDataBtn.addEventListener('click', () => {
+            if (confirm('⚠️ WARNING: This will clear ALL your data. This action cannot be undone. Continue?')) {
+                if (confirm('Type "DELETE" to confirm')) {
+                    const confirmation = prompt('Type "DELETE" to confirm:');
+                    if (confirmation === 'DELETE') {
+                        localStorage.clear();
+                        indexedDB.deleteDatabase('settingsDB');
+                        showNotification('All data cleared. Reloading...', 'warning');
+                        setTimeout(() => window.location.reload(), 2000);
+                    }
+                }
+            }
+        });
+    }
+    
+    const resetAllSettingsBtn = document.getElementById('resetAllSettingsBtn');
+    if (resetAllSettingsBtn) {
+        resetAllSettingsBtn.addEventListener('click', async () => {
+            if (confirm('Reset ALL settings to default? This action cannot be undone.')) {
+                if (confirm('Are you absolutely sure?')) {
+                    try {
+                        for (const [section, defaults] of Object.entries(DEFAULT_SETTINGS)) {
+                            for (const [key, value] of Object.entries(defaults)) {
+                                await SettingsState.update(section, key, value);
+                            }
+                        }
+                        showNotification('All settings reset to default', 'success');
+                        setTimeout(() => loadSection(currentSection), 500);
+                    } catch (error) {
+                        showNotification('Error resetting settings: ' + error.message, 'error');
+                    }
+                }
+            }
+        });
+    }
+    
+    const deleteAccountBtn = document.getElementById('deleteAccountBtn');
+    if (deleteAccountBtn) {
+        deleteAccountBtn.addEventListener('click', () => {
+            if (confirm('⚠️ DANGER: This will permanently delete your account. This action cannot be undone. Continue?')) {
+                if (confirm('Type "DELETE ACCOUNT" to confirm')) {
+                    const confirmation = prompt('Type "DELETE ACCOUNT" to confirm:');
+                    if (confirmation === 'DELETE ACCOUNT') {
+                        showNotification('Account deletion requested. Contact support.', 'warning');
+                    }
+                }
+            }
+        });
+    }
+}
 
 // =============================================
 // SHOW ACTIVE SESSIONS
@@ -2683,6 +3980,9 @@ window.__UI_DEBUG__ = {
     },
     forceRecovery: attemptUIRecovery
 };
+
+// Make updateSaveButton available globally
+window.updateSaveButton = updateSaveButton;
 
 // =============================================
 // INITIALIZATION - STRICT: ALIGNED WITH HANDSHAKE PROTOCOL

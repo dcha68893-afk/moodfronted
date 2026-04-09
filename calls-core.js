@@ -1,6 +1,6 @@
 // calls-core.js
 // ==================== CALL IFRAME CORE MODULE - DETERMINISTIC LIFECYCLE ====================
-// Version: 9.0.2 - STABILITY FIXES: Session validation, lifecycle hardening, duplicate prevention
+// Version: 9.0.4 - CRITICAL FIXES: Incoming call activeCallId, Group call support, Call link handling
 // ============================================================================================
 
 (function() {
@@ -1164,13 +1164,14 @@ function applySession(sessionData) {
         activeCall: null,           // { callId, type, participants, startTime, state }
         activeCallId: null,
         callActive: false,
-        callState: 'idle',          // idle, initiating, ringing, connecting, connected, ended, failed
+        callState: 'idle',          // idle, initiating, ringing, connecting, connected, ended, failed, incoming
         callParticipants: [],
         callStartTime: null,
         callDuration: 0,
         callType: null,
         callInvitationTimer: null,
         callInvitationTimeout: 30000,
+        callData: null,             // Store incoming call data
         
         // WebRTC state (in-memory only)
         peerConnection: null,
@@ -1534,7 +1535,7 @@ function applySession(sessionData) {
     
     // ==================== CONFIGURATION ====================
     const CONFIG = {
-        VERSION: '9.0.2',
+        VERSION: '9.0.4',
         PROTOCOL_VERSION: 'KYN-9.0',
         
         PARENT_READY_TIMEOUT: 20000,
@@ -1549,7 +1550,7 @@ function applySession(sessionData) {
         ICE_RESTART_TIMEOUT: 5000,
         MAX_ICE_RESTARTS: 3,
         
-        CALL_INVITATION_TIMEOUT: 30000,
+        CALL_INVITATION_TIMEOUT: 40000,  // Increased from 30000 to 40000
         CALL_CONNECTION_TIMEOUT: 15000,
         
         STORAGE_PREFIX: 'calls_core_',
@@ -2233,16 +2234,39 @@ function applySession(sessionData) {
                 }
                 
                 if (message.type === 'VERIFY_RESPONSE' || message.type === 'SESSION_VERIFIED') {
-                    const isValid = message.valid === true || message.payload?.valid === true;
-                    callsState.verified = isValid;
-                    callsState.verificationLock = false;
-                    
-                    const requestId = message.requestId || message.messageId || message.id;
-                    if (requestId) {
-                        MessageRegistry.acknowledge(requestId, { valid: isValid });
-                    }
-                    return;
-                }
+    const requestId = message.requestId || message.payload?.requestId || message.messageId || message.id;
+    const isValid = message.payload?.valid === true || message.valid === true;
+    
+    // Update state
+    callsState.verified = isValid;
+    callsState.verificationLock = false;
+    
+    // CRITICAL: Properly resolve the pending promise in MessageRegistry
+    if (requestId && MessageRegistry._pendingMessages.has(requestId)) {
+        const pending = MessageRegistry._pendingMessages.get(requestId);
+        if (pending && pending.resolve && !pending.resolved) {
+            clearTimeout(pending.timeoutId);
+            pending.resolve({
+                success: true,
+                payload: { valid: isValid },
+                result: { valid: isValid }
+            });
+            pending.resolved = true;
+            MessageRegistry._pendingMessages.delete(requestId);
+        }
+    } else if (requestId) {
+        // Fallback to acknowledge method
+        MessageRegistry.acknowledge(requestId, { valid: isValid });
+    }
+    
+    // Also update validSessionConfirmed if needed
+    if (isValid && callsState.session) {
+        validSessionConfirmed = true;
+    }
+    
+    logInfo(MODULE, `VERIFY_RESPONSE received: ${isValid ? 'valid' : 'invalid'}`);
+    return;
+}
                 
                 // ==================== CALL SIGNALING HANDLERS (REAL) ====================
                 if (message.type === MESSAGE_TYPES.CALL_INCOMING) {
@@ -3089,21 +3113,21 @@ function applySession(sessionData) {
         
         _setupPeerConnectionListeners: function() {
             if (!this._peerConnection) return;
-            
             this._peerConnection.onicecandidate = (event) => {
-                if (event.candidate) {
-                    this._iceCandidates.push(event.candidate);
-                    this._notifyListeners('ice_candidate', { candidate: event.candidate });
-                    
-                    // Send ICE candidate through parent to backend
-                    if (this._currentCallId) {
-                        IframeTransport.sendAction('ICE_CANDIDATE', {
-                            candidate: event.candidate,
-                            callId: this._currentCallId
-                        }).catch(() => {});
-                    }
-                }
-            };
+    if (event.candidate) {
+        this._iceCandidates.push(event.candidate);
+        this._notifyListeners('ice_candidate', { candidate: event.candidate });
+        
+        // FIXED: Send ICE candidate directly, not as ACTION
+        if (this._currentCallId) {
+            safeSend('ICE_CANDIDATE', {
+                callId: this._currentCallId,
+                candidate: event.candidate,
+                timestamp: Date.now()
+            }, false);
+        }
+    }
+};
             
             this._peerConnection.oniceconnectionstatechange = () => {
                 const state = this._peerConnection.iceConnectionState;
@@ -3472,6 +3496,7 @@ function applySession(sessionData) {
         callsState.remoteStreams.clear();
         callsState.iceCandidates = [];
         callsState.iceRestartCount = 0;
+        callsState.callData = null;
     }
     
     // ==================== CALL STATE GOVERNOR (REAL) ====================
@@ -3479,11 +3504,13 @@ function applySession(sessionData) {
         _currentState: CALLS_STATE.INIT,
         _previousState: null,
         _transitionLock: false,
+        _staleCallCleanupInterval: null,
         _stateChangeListeners: new Set(),
         _moduleRegistered: false,
         _sessionReceived: false,
         _parentReadyReceived: false,
         _session: null,
+        _token: null,
         _verificationInProgress: false,
         _lastVerificationTime: 0,
         _lastVerificationResult: true,
@@ -3496,6 +3523,7 @@ function applySession(sessionData) {
             this._sessionReceived = false;
             this._parentReadyReceived = false;
             this._session = null;
+            this._token = null;
             this._validSessionConfirmed = false;
             
             callsState.registered = false;
@@ -3512,6 +3540,9 @@ function applySession(sessionData) {
             callsState.registrationSent = false;
             validSessionConfirmed = false;
             transitionTo(LifecycleState.INITIALIZING);
+            
+            // Start stale call cleanup
+            this._startStaleCallCleanup();
             
             logInfo(MODULE, 'Calls State Governor initialized');
             return this;
@@ -3612,6 +3643,7 @@ function applySession(sessionData) {
             }
             
             this._session = candidateSession;
+            this._token = candidateSession.token;
             callsState.session = candidateSession;
             callsState.token = candidateSession.token;
             callsState.sessionStatus = 'valid';
@@ -3656,6 +3688,7 @@ function applySession(sessionData) {
                 expiresAt: 0,
                 version: 1
             };
+            this._token = null;
             callsState.session = null;
             callsState.token = null;
             callsState.sessionReceived = false;
@@ -3717,12 +3750,23 @@ function applySession(sessionData) {
                     return;
                 }
                 
+                // ==================== CRITICAL FIX: Fall back to callsState.session if this._session is null ====================
+                // Use callsState.session as fallback for session data
                 if (!callsState.session || !__isValidSession(callsState.session)) {
                     resolve({ valid: false, reason: 'no_token' });
                     return;
                 }
                 
-                if (this._session && this._session.authenticated && this._session.expiresAt > Date.now()) {
+                // Use this._session if available and valid, otherwise fall back to callsState.session
+                const sess = (this._session && this._session.authenticated) ? this._session : callsState.session;
+                
+                if (sess && sess.authenticated && sess.expiresAt > Date.now()) {
+                    // Sync this._session if it was null but we have a valid callsState.session
+                    if (!this._session) {
+                        this._session = sess;
+                        this._token = sess.token;
+                    }
+                    
                     const timeSinceLast = Date.now() - this._lastVerificationTime;
                     if (force || timeSinceLast > 30000) {
                         this._performVerification().then(result => {
@@ -3740,59 +3784,173 @@ function applySession(sessionData) {
         },
         
         _performVerification: function() {
-            return new Promise((resolve) => {
-                if (!assertActive('VERIFY_SESSION')) {
-                    resolve({ valid: callsState.verified, cached: true });
-                    return;
+    return new Promise((resolve) => {
+        if (!assertActive('VERIFY_SESSION')) {
+            resolve({ valid: callsState.verified, cached: true });
+            return;
+        }
+        
+        callsState.verificationLock = true;
+        this._verificationInProgress = true;
+        
+        const requestId = `verify_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+        let responded = false;
+        let timeoutId = null;
+        
+        logSending(MODULE, 'VERIFY_SESSION sent', { requestId });
+        
+        // Set a safety timeout to prevent hanging promises
+        const safetyTimeout = setTimeout(() => {
+            if (!responded) {
+                responded = true;
+                logWarn(MODULE, 'VERIFY_SESSION safety timeout triggered', { requestId });
+                
+                callsState.verificationLock = false;
+                this._verificationInProgress = false;
+                
+                // Fall back to cached session validity
+                const sess = (this._session && this._session.authenticated) ? this._session : callsState.session;
+                if (sess && sess.authenticated && sess.expiresAt > Date.now()) {
+                    logWarn(MODULE, 'Using cached session after safety timeout');
+                    callsState.verified = true;
+                    if (callsState.session) {
+                        validSessionConfirmed = true;
+                    }
+                    resolve({ valid: true, cached: true, timeout: true });
+                } else {
+                    resolve({ valid: false, reason: 'timeout', cached: false });
+                }
+            }
+        }, 8000); // 8 second safety timeout
+        
+        // Register the pending request with MessageRegistry
+        MessageRegistry.register(requestId, 'VERIFY_SESSION', { timeout: 5000 })
+            .then((response) => {
+                if (responded) return;
+                responded = true;
+                clearTimeout(safetyTimeout);
+                
+                this._verificationInProgress = false;
+                this._lastVerificationTime = Date.now();
+                
+                // Extract validity from response - handle multiple response formats
+                let isValid = false;
+                if (response) {
+                    isValid = response.payload?.valid === true || 
+                              response.result?.valid === true || 
+                              response.valid === true ||
+                              (response.payload && response.payload.authenticated === true);
                 }
                 
-                callsState.verificationLock = true;
-                this._verificationInProgress = true;
+                this._lastVerificationResult = isValid;
                 
-                const requestId = `verify_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
-                let responded = false;
+                callsState.verified = isValid;
+                callsState.verificationLock = false;
                 
-                logSending(MODULE, 'VERIFY_SESSION sent', { requestId });
+                if (isValid && callsState.session) {
+                    validSessionConfirmed = true;
+                }
                 
-                safeSend('VERIFY_SESSION', {
-                    requestId: requestId
-                }, { 
-                    requireAck: true,
-                    timeout: 2000
-                })
-                    .then((response) => {
-                        responded = true;
-                        this._verificationInProgress = false;
-                        this._lastVerificationTime = Date.now();
-                        
-                        const isValid = response?.result?.valid === true;
-                        this._lastVerificationResult = isValid;
-                        
-                        callsState.verified = isValid;
-                        callsState.verificationLock = false;
-                        
-                        logSuccess(MODULE, isValid ? 'Session verified' : 'Session verification failed');
-                        resolve({ valid: isValid, verified: true });
-                    })
-                    .catch(() => {
-                        if (!responded) {
-                            logWarn(MODULE, 'Verification timeout', { requestId });
-                            
-                            callsState.verificationLock = false;
-                            this._verificationInProgress = false;
-                            
-                            if (this._session && this._session.authenticated && this._session.expiresAt > Date.now()) {
-                                logWarn(MODULE, 'Using cached session after timeout');
-                                callsState.verified = true;
-                                resolve({ valid: true, cached: true, timeout: true });
-                            } else {
-                                resolve({ valid: false, reason: 'timeout' });
-                            }
-                        }
-                    });
+                logSuccess(MODULE, isValid ? 'Session verified' : 'Session verification failed');
+                resolve({ valid: isValid, verified: true, requestId: requestId });
+            })
+            .catch((error) => {
+                if (responded) return;
+                responded = true;
+                clearTimeout(safetyTimeout);
+                
+                logWarn(MODULE, 'Verification error', { requestId, error: error?.message });
+                
+                callsState.verificationLock = false;
+                this._verificationInProgress = false;
+                
+                // Fall back to cached session validity
+                const sess = (this._session && this._session.authenticated) ? this._session : callsState.session;
+                if (sess && sess.authenticated && sess.expiresAt > Date.now()) {
+                    logWarn(MODULE, 'Using cached session after error');
+                    callsState.verified = true;
+                    if (callsState.session) {
+                        validSessionConfirmed = true;
+                    }
+                    resolve({ valid: true, cached: true, error: true });
+                } else {
+                    resolve({ valid: false, reason: error?.message || 'verification_error', cached: false });
+                }
             });
-        },
         
+        // Send the verification request to parent
+        safeSend('VERIFY_SESSION', {
+            requestId: requestId,
+            timestamp: Date.now()
+        }, false).catch((error) => {
+            if (responded) return;
+            responded = true;
+            clearTimeout(safetyTimeout);
+            
+            logError(MODULE, 'Failed to send VERIFY_SESSION', error);
+            callsState.verificationLock = false;
+            this._verificationInProgress = false;
+            resolve({ valid: false, reason: 'send_failed', error: error?.message });
+        });
+    });
+},
+
+// Add this helper method to clean up stale call states
+_clearStaleCallState: function() {
+    // If a call has been active for more than 60 seconds without being connected,
+    // it's likely stale - clean it up
+    if (callsState.callActive && callsState.callStartTime) {
+        const callDuration = Date.now() - callsState.callStartTime;
+        if (callDuration > 60000 && callsState.callState !== 'connected') {
+            logWarn(MODULE, 'Cleaning up stale call state', {
+                callId: callsState.activeCallId,
+                state: callsState.callState,
+                duration: callDuration
+            });
+            resetCallState();
+        }
+    }
+    
+    // Also check for calls that have been in 'initiating' state for too long
+    if (callsState.callState === 'initiating' && callsState.callStartTime) {
+        const callDuration = Date.now() - callsState.callStartTime;
+        if (callDuration > 30000) { // 30 second timeout for initiating state
+            logWarn(MODULE, 'Cleaning up stale initiating call', {
+                callId: callsState.activeCallId,
+                duration: callDuration
+            });
+            resetCallState();
+        }
+    }
+    
+    // Clean up incoming call data that's been waiting too long
+    if (callsState.callData && callsState.callState === 'incoming') {
+        const incomingCallAge = Date.now() - (callsState.callData.timestamp || callsState.callData.createdAt || Date.now());
+        if (incomingCallAge > 40000) {
+            logWarn(MODULE, 'Cleaning up stale incoming call data', {
+                callId: callsState.callData.callId,
+                age: incomingCallAge
+            });
+            callsState.callData = null;
+            callsState.callState = 'idle';
+            if (callsState.activeCallId === callsState.callData?.callId) {
+                callsState.activeCallId = null;
+            }
+        }
+    }
+},
+
+// Start stale call cleanup interval - call this in initialize()
+_startStaleCallCleanup: function() {
+    if (this._staleCallCleanupInterval) {
+        clearInterval(this._staleCallCleanupInterval);
+    }
+    this._staleCallCleanupInterval = setInterval(() => {
+        this._clearStaleCallState();
+    }, 10000); // Check every 10 seconds
+},
+
+
         initiateCall: async function(callType, participants = []) {
             // CRITICAL: Single active call enforcement
             if (!enforceSingleActiveCall()) {
@@ -3819,11 +3977,33 @@ function applySession(sessionData) {
                 return { success: false, reason: 'recovery' };
             }
             
-            // CRITICAL: Verify valid session before call
-            if (!callsState.session || !__isValidSession(callsState.session)) {
-                logWarn(MODULE, 'Cannot initiate call - no valid session');
+            // ==================== CRITICAL FIX: Use callsState.session as fallback ====================
+            // Check for valid session in both this._session and callsState.session
+            const activeSession = (this._session && this._session.authenticated) ? this._session : callsState.session;
+            const activeToken = this._token || callsState.token;
+            
+            if (!activeSession || !activeSession.authenticated) {
+                logWarn(MODULE, 'Call blocked - no valid session', {
+                    hasThisSession: !!this._session,
+                    hasCallsStateSession: !!callsState.session,
+                    thisSessionAuthenticated: this._session?.authenticated,
+                    callsStateSessionValid: callsState.session ? __isValidSession(callsState.session) : false
+                });
                 this._notifyListeners('call_blocked', { reason: 'no_valid_session' });
                 return { success: false, reason: 'no_valid_session' };
+            }
+            
+            if (!activeToken) {
+                logWarn(MODULE, 'Call blocked - no token');
+                this._notifyListeners('call_blocked', { reason: 'no_token' });
+                return { success: false, reason: 'no_token' };
+            }
+            
+            // Sync this._session if it was null but we have a valid callsState.session
+            if (!this._session) {
+                this._session = activeSession;
+                this._token = activeToken;
+                logInfo(MODULE, 'Synced CallsStateGovernor session from callsState');
             }
             
             const permCheck = await PermissionManager.checkPermissions({
@@ -3845,21 +4025,6 @@ function applySession(sessionData) {
             }
             
             callsState.verified = true;
-            
-            if (!callsState.parentReady) {
-                logWarn(MODULE, 'Call blocked - parent not ready');
-                return { success: false, reason: 'parent_not_ready' };
-            }
-            
-            if (!this._session || !this._session.authenticated) {
-                logWarn(MODULE, 'Call blocked - no valid session');
-                return { success: false, reason: 'no_session' };
-            }
-            
-            if (!callsState.token) {
-                logWarn(MODULE, 'Call blocked - no token');
-                return { success: false, reason: 'no_token' };
-            }
             
             try {
                 const constraints = {
@@ -3884,18 +4049,27 @@ function applySession(sessionData) {
                 WebRTCManager.setCurrentCallId(callId);
                 WebRTCManager.setConnectionTimeout(CONFIG.CALL_CONNECTION_TIMEOUT);
                 
+                // Check if this is a group call (multiple participants)
+                const isGroupCall = Array.isArray(participants) && participants.length > 1;
+                
                 // Send initiate request to parent (parent will send to backend)
-                logCall(MODULE, 'Sending CALL_INITIATE to parent', { callId, callType, participants });
+                logCall(MODULE, 'Sending CALL_INITIATE to parent', { callId, callType, participants, isGroupCall });
                 
-                const result = await IframeTransport.sendAction('CALL_INITIATE', {
-                    callId,
-                    callType,
-                    participants,
+                const result = await safeSend('CALL_INITIATE', {
+                    callId: callId,
+                    callType: callType,
+                    // For group calls, send participantIds array
+                    participantIds: isGroupCall ? participants.map(p => typeof p === 'object' ? p.id : parseInt(p)) : null,
+                    // For 1:1 calls, send calleeId
+                    calleeId: (!isGroupCall && participants[0]) ? (typeof participants[0] === 'object' ? participants[0].id : parseInt(participants[0])) : null,
+                    isGroupCall: isGroupCall,
                     timestamp: Date.now()
-                });
-                
+                }, true);
+
                 if (result.success === false) {
-                    throw new Error(result.reason || 'Failed to initiate call');
+                    // CRITICAL: Clean up call state immediately on failure
+                    resetCallState();
+                    throw new Error(result.reason || result.error || 'Failed to initiate call');
                 }
                 
                 // Set invitation timeout
@@ -3910,7 +4084,7 @@ function applySession(sessionData) {
                 
                 this.transition(CALLS_STATE.CALL_READY, 'call_initiated');
                 
-                logSuccess(MODULE, 'Call initiated', { type: callType, callId });
+                logSuccess(MODULE, 'Call initiated', { type: callType, callId, isGroupCall });
                 
                 return { 
                     success: true, 
@@ -3938,7 +4112,9 @@ function applySession(sessionData) {
             }
             
             // CRITICAL: Verify valid session before accepting call
-            if (!callsState.session || !__isValidSession(callsState.session)) {
+            // Use callsState.session as fallback
+            const activeSession = (this._session && this._session.authenticated) ? this._session : callsState.session;
+            if (!activeSession || !__isValidSession(activeSession)) {
                 logWarn(MODULE, 'Cannot accept call - no valid session');
                 return { success: false, reason: 'no_valid_session' };
             }
@@ -3946,9 +4122,11 @@ function applySession(sessionData) {
             logCall(MODULE, 'Accepting call', { callId });
             
             try {
+                // Determine call type from callData if available
+                const callType = callsState.callData?.callType || 'voice';
                 const constraints = {
                     audio: true,
-                    video: false
+                    video: callType === 'video'
                 };
                 
                 const streamResult = await MediaManager.getLocalStream(constraints);
@@ -3958,7 +4136,7 @@ function applySession(sessionData) {
                 }
                 
                 // Set active call
-                setActiveCall(callId, 'voice', []);
+                setActiveCall(callId, callType, []);
                 
                 // Set up WebRTC
                 WebRTCManager.createPeerConnection();
@@ -3967,10 +4145,10 @@ function applySession(sessionData) {
                 WebRTCManager.setConnectionTimeout(CONFIG.CALL_CONNECTION_TIMEOUT);
                 
                 // Send accept to parent
-                const result = await IframeTransport.sendAction('CALL_ACCEPT', {
+                const result = await safeSend('CALL_ACCEPT', {
                     callId,
                     timestamp: Date.now()
-                });
+                }, true);
                 
                 if (result.success === false) {
                     throw new Error(result.reason || 'Failed to accept call');
@@ -4062,8 +4240,9 @@ function applySession(sessionData) {
                 return;
             }
             
-            // CRITICAL: Check for valid session
-            if (!this._session || !__isValidSession(this._session) || this._session.expiresAt <= Date.now()) {
+            // CRITICAL: Check for valid session using fallback
+            const activeSession = (this._session && this._session.authenticated) ? this._session : callsState.session;
+            if (!activeSession || !__isValidSession(activeSession) || activeSession.expiresAt <= Date.now()) {
                 logWarn(MODULE, 'Incoming call rejected - session invalid');
                 return;
             }
@@ -4091,8 +4270,11 @@ function applySession(sessionData) {
                     return;
                 }
                 
+                // CRITICAL FIX: Set activeCallId for incoming calls
                 callsState.callData = callData;
                 callsState.callState = 'incoming';
+                callsState.activeCallId = callData.callId;  // ← CRITICAL: Set activeCallId for incoming calls
+                callsState.callActive = false; // Not yet active until answered
                 this._notifyListeners('incoming_call', callData);
                 notifyListeners('incoming_call', callData);
             });
@@ -4119,10 +4301,13 @@ function applySession(sessionData) {
         },
         
         canInitiateCall: function() {
+            const activeSession = (this._session && this._session.authenticated) ? this._session : callsState.session;
+            const activeToken = this._token || callsState.token;
+            
             return this._currentState === CALLS_STATE.ACTIVE && 
-                   this._session && 
-                   __isValidSession(this._session) &&
-                   this._session.expiresAt > Date.now() &&
+                   activeSession && 
+                   __isValidSession(activeSession) &&
+                   activeSession.expiresAt > Date.now() &&
                    callsState.verified &&
                    callsState.parentReady &&
                    !callsState.recoveryMode &&
@@ -4143,14 +4328,19 @@ function applySession(sessionData) {
             });
         },
         
-        reset: function() {
-            this._clearTimers();
+      reset: function() {
+    this._clearTimers();
+    if (this._staleCallCleanupInterval) {
+        clearInterval(this._staleCallCleanupInterval);
+        this._staleCallCleanupInterval = null;
+    }
             this._currentState = CALLS_STATE.INIT;
             this._previousState = null;
             this._moduleRegistered = false;
             this._sessionReceived = false;
             this._parentReadyReceived = false;
             this._session = null;
+            this._token = null;
             this._verificationInProgress = false;
             this._validSessionConfirmed = false;
             resetCallState();
@@ -5555,135 +5745,305 @@ function applySession(sessionData) {
     
     MultiModuleCoordinator.initialize();
     
-    // ==================== UI FAILSAFE ====================
-    const UIFailsafe = {
-        _enabled: true,
-        _fallbackMode: false,
-        _disabledButtons: new Set(),
-        _disabledInputs: new Set(),
-        _originalStates: new Map(),
-        _listeners: new Set(),
+    // Replace the entire UIFailsafe object in calls-core.js (around line 5200)
+
+const UIFailsafe = {
+    _enabled: true,
+    _fallbackMode: false,
+    _disabledButtons: new Set(),
+    _disabledInputs: new Set(),
+    _originalStates: new Map(),
+    _listeners: new Set(),
+    _lastMessageShown: null,
+    _notificationContainer: null,
+    
+    initialize: function() {
+        // Create notification container if it doesn't exist
+        this._ensureNotificationContainer();
+        logReady(MODULE, 'UIFailsafe initialized');
+        return this;
+    },
+    
+    _ensureNotificationContainer: function() {
+        if (this._notificationContainer && document.body.contains(this._notificationContainer)) {
+            return this._notificationContainer;
+        }
         
-        initialize: function() {
-            logReady(MODULE, 'UIFailsafe initialized');
-            return this;
-        },
+        let container = document.getElementById('call-notification-container');
+        if (!container) {
+            container = document.createElement('div');
+            container.id = 'call-notification-container';
+            container.style.cssText = `
+                position: fixed;
+                top: 20px;
+                right: 20px;
+                z-index: 10000;
+                display: flex;
+                flex-direction: column;
+                gap: 10px;
+                max-width: 350px;
+                pointer-events: none;
+            `;
+            document.body.appendChild(container);
+        }
         
-        enableFallbackMode: function() {
-            if (this._fallbackMode) return;
-            this._fallbackMode = true;
-            this._notifyListeners('fallback', { enabled: true });
-            logWarn(MODULE, 'UI fallback mode enabled');
-        },
-        
-        disableFallbackMode: function() {
-            if (!this._fallbackMode) return;
-            this._fallbackMode = false;
-            this._restoreUI();
-            this._notifyListeners('fallback', { enabled: false });
-            logInfo(MODULE, 'UI fallback mode disabled');
-        },
-        
-        protectButton: function(button, fallbackHandler) {
-            if (!button) return;
-            const id = button.id || `btn-${Date.now()}-${Math.random()}`;
-            this._originalStates.set(id, { disabled: button.disabled, onclick: button.onclick });
-            
-            const originalClick = button.onclick;
-            button.onclick = (e) => {
-                if (this._fallbackMode) {
-                    if (fallbackHandler) {
-                        fallbackHandler(e);
-                    } else {
-                        e.preventDefault();
-                        e.stopPropagation();
-                    }
-                } else if (originalClick) {
-                    originalClick.call(button, e);
+        // Add styles if not present
+        if (!document.getElementById('call-notification-styles')) {
+            const style = document.createElement('style');
+            style.id = 'call-notification-styles';
+            style.textContent = `
+                @keyframes callNotifySlideIn {
+                    from { transform: translateX(100%); opacity: 0; }
+                    to { transform: translateX(0); opacity: 1; }
                 }
-            };
-            this._disabledButtons.add(id);
-        },
+                @keyframes callNotifySlideOut {
+                    from { transform: translateX(0); opacity: 1; }
+                    to { transform: translateX(100%); opacity: 0; }
+                }
+                .call-notification {
+                    pointer-events: auto;
+                    transition: all 0.3s ease;
+                    animation: callNotifySlideIn 0.3s ease;
+                }
+                .call-notification-removing {
+                    animation: callNotifySlideOut 0.3s ease forwards;
+                }
+            `;
+            document.head.appendChild(style);
+        }
         
-        protectInput: function(input, fallbackValue) {
-            if (!input) return;
-            const id = input.id || `input-${Date.now()}-${Math.random()}`;
-            this._originalStates.set(id, { disabled: input.disabled, value: input.value, oninput: input.oninput });
-            
-            const originalInput = input.oninput;
-            input.oninput = (e) => {
-                if (this._fallbackMode) {
+        this._notificationContainer = container;
+        return container;
+    },
+    
+    // Replace the showFallbackMessage method in UIFailsafe (around line 5900-5950)
+
+showFallbackMessage: function(message, type = 'warning') {
+    // Prevent duplicate notifications
+    const messageKey = `${type}:${message}`;
+    const now = Date.now();
+    
+    if (this._lastMessageShown && this._lastMessageShown.key === messageKey && 
+        (now - this._lastMessageShown.time) < 3000) {
+        return;
+    }
+    
+    this._lastMessageShown = { key: messageKey, time: now };
+    
+    // Get or create notification container
+    let container = document.getElementById('call-notification-container');
+    if (!container) {
+        container = document.createElement('div');
+        container.id = 'call-notification-container';
+        container.style.cssText = `
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 10000;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            max-width: 350px;
+        `;
+        document.body.appendChild(container);
+    }
+    
+    // Check for existing similar notification
+    const existing = container.querySelector(`.call-notification[data-message="${message.replace(/"/g, '&quot;')}"]`);
+    if (existing) {
+        // Update existing notification
+        const titleEl = existing.querySelector('.call-notification-title');
+        if (titleEl) titleEl.textContent = type.charAt(0).toUpperCase() + type.slice(1);
+        if (existing._timeout) clearTimeout(existing._timeout);
+        existing._timeout = setTimeout(() => existing.remove(), 4000);
+        return;
+    }
+    
+    // Colors
+    const colors = {
+        success: '#4caf50',
+        error: '#f44336', 
+        warning: '#ff9800',
+        info: '#2196f3'
+    };
+    
+    // Create notification element
+    const notification = document.createElement('div');
+    notification.className = `call-notification call-notification-${type}`;
+    notification.setAttribute('data-message', message);
+    notification.style.cssText = `
+        background: ${colors[type] || colors.info};
+        color: white;
+        border-radius: 8px;
+        padding: 12px 16px;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        min-width: 250px;
+        animation: slideInRight 0.3s ease;
+    `;
+    
+    notification.innerHTML = `
+        <div style="flex: 1;">
+            <div class="call-notification-title" style="font-weight: bold; margin-bottom: 4px;">${type.charAt(0).toUpperCase() + type.slice(1)}</div>
+            <div class="call-notification-message" style="font-size: 14px;">${this._escapeHtml(message)}</div>
+        </div>
+        <button class="call-notification-close" style="
+            background: transparent;
+            border: none;
+            color: white;
+            cursor: pointer;
+            font-size: 16px;
+            padding: 4px 8px;
+            margin-left: 12px;
+            opacity: 0.7;
+        ">&times;</button>
+    `;
+    
+    // Close button handler
+    const closeBtn = notification.querySelector('.call-notification-close');
+    if (closeBtn) {
+        closeBtn.onclick = () => {
+            if (notification._timeout) clearTimeout(notification._timeout);
+            notification.remove();
+        };
+    }
+    
+    // Auto remove after 4 seconds
+    notification._timeout = setTimeout(() => {
+        if (notification.parentNode) notification.remove();
+    }, 4000);
+    
+    container.appendChild(notification);
+},
+
+_escapeHtml: function(text) {
+    if (!text) return '';
+    return text
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+},
+    
+    _escapeHtml: function(text) {
+        if (!text) return '';
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    },
+    
+    _removeNotification: function(notification) {
+        if (!notification || !notification.parentNode) return;
+        if (notification._timeout) clearTimeout(notification._timeout);
+        notification.classList.add('call-notification-removing');
+        setTimeout(() => {
+            if (notification.parentNode) notification.remove();
+        }, 300);
+    },
+    
+    clearAllNotifications: function() {
+        if (this._notificationContainer) {
+            const notifications = this._notificationContainer.querySelectorAll('.call-notification');
+            notifications.forEach(notification => this._removeNotification(notification));
+        }
+        this._lastMessageShown = null;
+    },
+    
+    enableFallbackMode: function() {
+        if (this._fallbackMode) return;
+        this._fallbackMode = true;
+        this._notifyListeners('fallback', { enabled: true });
+        logWarn(MODULE, 'UI fallback mode enabled');
+    },
+    
+    disableFallbackMode: function() {
+        if (!this._fallbackMode) return;
+        this._fallbackMode = false;
+        this._restoreUI();
+        this._notifyListeners('fallback', { enabled: false });
+        logInfo(MODULE, 'UI fallback mode disabled');
+    },
+    
+    protectButton: function(button, fallbackHandler) {
+        if (!button) return;
+        const id = button.id || `btn-${Date.now()}-${Math.random()}`;
+        this._originalStates.set(id, { disabled: button.disabled, onclick: button.onclick });
+        
+        const originalClick = button.onclick;
+        button.onclick = (e) => {
+            if (this._fallbackMode) {
+                if (fallbackHandler) {
+                    fallbackHandler(e);
+                } else {
                     e.preventDefault();
                     e.stopPropagation();
-                    if (fallbackValue !== undefined) input.value = fallbackValue;
-                } else if (originalInput) {
-                    originalInput.call(input, e);
                 }
-            };
-            this._disabledInputs.add(id);
-        },
+            } else if (originalClick) {
+                originalClick.call(button, e);
+            }
+        };
+        this._disabledButtons.add(id);
+    },
+    
+    protectInput: function(input, fallbackValue) {
+        if (!input) return;
+        const id = input.id || `input-${Date.now()}-${Math.random()}`;
+        this._originalStates.set(id, { disabled: input.disabled, value: input.value, oninput: input.oninput });
         
-        showFallbackMessage: function(message, type = 'warning') {
-            const notificationArea = document.getElementById('notificationArea') || document.body;
-            const notification = document.createElement('div');
-            notification.className = `call-notification ${type}`;
-            notification.innerHTML = `
-                <div class="call-notification-content">
-                    <div class="call-notification-title">${type.charAt(0).toUpperCase() + type.slice(1)}</div>
-                    <div class="call-notification-message">${message}</div>
-                </div>
-                <button class="call-notification-close">
-                    <i class="fas fa-times"></i>
-                </button>
-            `;
-            
-            notification.querySelector('.call-notification-close').addEventListener('click', () => notification.remove());
-            
-            notificationArea.appendChild(notification);
-            
-            setTimeout(() => {
-                if (notification.parentNode) notification.remove();
-            }, 10000);
-        },
-        
-        _restoreUI: function() {
-            this._originalStates.forEach((state, id) => {
-                const element = document.getElementById(id);
-                if (element) {
-                    if (state.disabled !== undefined) element.disabled = state.disabled;
-                    if (state.value !== undefined) element.value = state.value;
-                    if (state.onclick) element.onclick = state.onclick;
-                    if (state.oninput) element.oninput = state.oninput;
-                }
-            });
-            this._originalStates.clear();
-            this._disabledButtons.clear();
-            this._disabledInputs.clear();
-        },
-        
-        addListener: function(listener) {
-            if (typeof listener === 'function') this._listeners.add(listener);
-        },
-        
-        removeListener: function(listener) {
-            this._listeners.delete(listener);
-        },
-        
-        _notifyListeners: function(event, data) {
-            this._listeners.forEach(listener => {
-                try { listener(event, data); } catch (e) {}
-            });
-        },
-        
-        getStatus: function() {
-            return {
-                enabled: this._enabled,
-                fallbackMode: this._fallbackMode,
-                protectedButtons: this._disabledButtons.size,
-                protectedInputs: this._disabledInputs.size
-            };
-        }
-    };
+        const originalInput = input.oninput;
+        input.oninput = (e) => {
+            if (this._fallbackMode) {
+                e.preventDefault();
+                e.stopPropagation();
+                if (fallbackValue !== undefined) input.value = fallbackValue;
+            } else if (originalInput) {
+                originalInput.call(input, e);
+            }
+        };
+        this._disabledInputs.add(id);
+    },
+    
+    _restoreUI: function() {
+        this._originalStates.forEach((state, id) => {
+            const element = document.getElementById(id);
+            if (element) {
+                if (state.disabled !== undefined) element.disabled = state.disabled;
+                if (state.value !== undefined) element.value = state.value;
+                if (state.onclick) element.onclick = state.onclick;
+                if (state.oninput) element.oninput = state.oninput;
+            }
+        });
+        this._originalStates.clear();
+        this._disabledButtons.clear();
+        this._disabledInputs.clear();
+    },
+    
+    addListener: function(listener) {
+        if (typeof listener === 'function') this._listeners.add(listener);
+    },
+    
+    removeListener: function(listener) {
+        this._listeners.delete(listener);
+    },
+    
+    _notifyListeners: function(event, data) {
+        this._listeners.forEach(listener => {
+            try { listener(event, data); } catch (e) {}
+        });
+    },
+    
+    getStatus: function() {
+        return {
+            enabled: this._enabled,
+            fallbackMode: this._fallbackMode,
+            protectedButtons: this._disabledButtons.size,
+            protectedInputs: this._disabledInputs.size
+        };
+    }
+};
     
     UIFailsafe.initialize();
     
@@ -6269,30 +6629,75 @@ function applySession(sessionData) {
             return;
         }
         
+        // CRITICAL FIX: Set activeCallId for incoming calls
         callsState.callData = callData;
         callsState.callState = 'incoming';
+        callsState.activeCallId = callData.callId;  // ← CRITICAL: Set activeCallId for incoming calls
         notifyListeners('incoming_call', callData);
     }
     
     function handleCallInitiated(callData) {
-        logCall(MODULE, 'handleCallInitiated', callData);
+    logCall(MODULE, 'handleCallInitiated', callData);
+    
+    // CRITICAL: Check if the call initiation was successful
+    if (callData.success === false || callData.error) {
+        logWarn(MODULE, 'Call initiation failed, cleaning up', { 
+            error: callData.error, 
+            callId: callData.callId 
+        });
         
-        callsState.callData = callData;
-        callsState.callState = 'initiated';
-        callsState.activeCallId = callData.callId;
-        callsState.callParticipants = callData.participants || [];
-        callsState.callStartTime = Date.now();
-        callsState.callType = callData.callType;
-        callsState.callActive = true;
+        // Clean up the call state
+        if (callsState.activeCallId === callData.callId || callsState.callActive) {
+            resetCallState();
+        }
         
+        // Clear any pending invitation timer
         if (callsState.callInvitationTimer) {
             clearTimeout(callsState.callInvitationTimer);
             callsState.callInvitationTimer = null;
         }
         
-        notifyListeners('call_initiated', callData);
+        // Notify UI of failure
+        notifyListeners('call_initiation_failed', { 
+            callId: callData.callId, 
+            error: callData.error || 'Call initiation failed'
+        });
+        
+        // Show error notification (safe check)
+        if (typeof UIFailsafe !== 'undefined' && UIFailsafe && UIFailsafe.showFallbackMessage) {
+            UIFailsafe.showFallbackMessage(
+                callData.error || 'Failed to start call', 
+                'error'
+            );
+        } else {
+            console.warn('[CallsCore] Cannot show notification - UIFailsafe not ready');
+        }
+        return;
     }
     
+    // Success path
+    callsState.callData = callData;
+    callsState.callState = 'initiated';
+    callsState.activeCallId = callData.callId;
+    callsState.callParticipants = callData.participants || [];
+    callsState.callStartTime = Date.now();
+    callsState.callType = callData.callType;
+    callsState.callActive = true;
+    
+    if (callsState.callInvitationTimer) {
+        clearTimeout(callsState.callInvitationTimer);
+        callsState.callInvitationTimer = null;
+    }
+    
+    notifyListeners('call_initiated', callData);
+    
+    // Show success notification
+    if (typeof UIFailsafe !== 'undefined' && UIFailsafe && UIFailsafe.showFallbackMessage) {
+        const userName = callData.calleeName || callData.participants?.[0] || 'user';
+        UIFailsafe.showFallbackMessage(`Voice call started with ${userName}`, 'success');
+    }
+}
+
     function handleCallAccepted(callData) {
         logCall(MODULE, 'handleCallAccepted', callData);
         
@@ -6352,37 +6757,36 @@ function applySession(sessionData) {
     
     // WebRTC Signaling Handlers (Real)
     async function handleSignalOffer(payload) {
-        logCall(MODULE, 'handleSignalOffer', { callId: payload.callId });
-        
-        if (!callsState.callActive && callsState.callState !== 'initiating') {
-            logWarn(MODULE, 'Signal offer received but no active call');
-            return;
-        }
-        
-        if (!WebRTCManager._peerConnection) {
-            logWarn(MODULE, 'No peer connection for signal offer');
-            return;
-        }
-        
-        try {
-            await WebRTCManager.setRemoteDescription(payload.offer);
-            const answer = await WebRTCManager.createAnswer();
-            
-            // Send answer through parent to backend
-            await IframeTransport.sendAction('SIGNAL_ANSWER', {
-                answer: answer,
-                callId: payload.callId,
-                timestamp: Date.now()
-            });
-            
-            DiagnosticsAgent.record('signaling_send');
-            logCall(MODULE, 'Signal answer sent', { callId: payload.callId });
-            
-        } catch (error) {
-            logError(MODULE, 'Failed to handle signal offer', error);
-        }
+    logCall(MODULE, 'handleSignalOffer', { callId: payload.callId });
+    
+    if (!callsState.callActive && callsState.callState !== 'initiating') {
+        logWarn(MODULE, 'Signal offer received but no active call');
+        return;
     }
     
+    if (!WebRTCManager._peerConnection) {
+        logWarn(MODULE, 'No peer connection for signal offer');
+        return;
+    }
+    
+    try {
+        await WebRTCManager.setRemoteDescription(payload.offer);
+        const answer = await WebRTCManager.createAnswer();
+        
+        // FIXED: Send as direct message type, not as ACTION
+        safeSend('SIGNAL_ANSWER', {
+            callId: payload.callId,
+            answer: answer,
+            timestamp: Date.now()
+        }, false);
+        
+        DiagnosticsAgent.record('signaling_send');
+        logCall(MODULE, 'Signal answer sent', { callId: payload.callId });
+        
+    } catch (error) {
+        logError(MODULE, 'Failed to handle signal offer', error);
+    }
+}
     async function handleSignalAnswer(payload) {
         logCall(MODULE, 'handleSignalAnswer', { callId: payload.callId });
         
@@ -6406,25 +6810,33 @@ function applySession(sessionData) {
     }
     
     async function handleIceCandidate(payload) {
-        logCall(MODULE, 'handleIceCandidate', { callId: payload.callId });
-        
-        if (!callsState.callActive && callsState.callState !== 'initiating') {
-            logWarn(MODULE, 'ICE candidate received but no active call');
-            return;
-        }
-        
-        if (!WebRTCManager._peerConnection) {
-            logWarn(MODULE, 'No peer connection for ICE candidate');
-            return;
-        }
-        
-        try {
-            await WebRTCManager.addIceCandidate(payload.candidate);
-            DiagnosticsAgent.record('signaling_recv');
-        } catch (error) {
-            logError(MODULE, 'Failed to add ICE candidate', error);
-        }
+    logCall(MODULE, 'handleIceCandidate', { callId: payload.callId });
+    
+    if (!callsState.callActive && callsState.callState !== 'initiating') {
+        logWarn(MODULE, 'ICE candidate received but no active call');
+        return;
     }
+    
+    if (!WebRTCManager._peerConnection) {
+        logWarn(MODULE, 'No peer connection for ICE candidate');
+        return;
+    }
+    
+    try {
+        await WebRTCManager.addIceCandidate(payload.candidate);
+        DiagnosticsAgent.record('signaling_recv');
+        
+        // FIXED: Forward ICE candidate to parent as direct message type
+        safeSend('ICE_CANDIDATE', {
+            callId: payload.callId,
+            candidate: payload.candidate,
+            timestamp: Date.now()
+        }, false);
+        
+    } catch (error) {
+        logError(MODULE, 'Failed to add ICE candidate', error);
+    }
+}
     
     function handleRemoteStreamAdded(payload) {
         if (payload.stream) {
@@ -6509,6 +6921,11 @@ function applySession(sessionData) {
     // ==================== UI BRIDGE ====================
     const UIBridge = {
         _initialized: false,
+_acceptCallHandler: null,
+_rejectCallHandler: null,
+_endCallHandler: null,
+_muteCallHandler: null,
+_videoCallHandler: null,
         _eventListeners: new Map(),
         _elements: new Map(),
         
@@ -6517,10 +6934,14 @@ function applySession(sessionData) {
             
             document.addEventListener('DOMContentLoaded', () => {
                 this._setupEventListeners();
+                this._attachCallControls();
             });
             
             if (document.readyState === 'complete' || document.readyState === 'interactive') {
-                setTimeout(() => this._setupEventListeners(), 100);
+                setTimeout(() => {
+                    this._setupEventListeners();
+                    this._attachCallControls();
+                }, 100);
             }
             
             this._initialized = true;
@@ -6562,6 +6983,139 @@ function applySession(sessionData) {
                 this._eventListeners.set(button, { type: 'click', handler });
             });
         },
+        
+        _attachCallControls: function() {
+    // Accept call button
+    const acceptBtn = document.getElementById('acceptCallBtn') || 
+                      document.querySelector('[data-action="accept-call"]') ||
+                      document.querySelector('.accept-call-btn');
+    if (acceptBtn) {
+        acceptBtn.removeEventListener('click', this._acceptCallHandler);
+        this._acceptCallHandler = (e) => {
+            e.preventDefault();
+            if (!window.callCore || !window.callCore.isCoreReady()) {
+                console.warn('[Calls UI] Core not ready to accept call');
+                return;
+            }
+            const callId = window._currentIncomingCallId || callsState.activeCallId;
+            if (callId) {
+                window.callCore.answerCall(callId).then(result => {
+                    if (result.success) {
+                        console.log('[Calls UI] Call accepted');
+                    } else {
+                        console.error('[Calls UI] Failed to accept call', result);
+                    }
+                });
+            }
+        };
+        acceptBtn.addEventListener('click', this._acceptCallHandler);
+    }
+    
+    // Reject/Decline call button
+    const rejectBtn = document.getElementById('rejectCallBtn') || 
+                      document.querySelector('[data-action="reject-call"]') ||
+                      document.querySelector('.reject-call-btn');
+    if (rejectBtn) {
+        rejectBtn.removeEventListener('click', this._rejectCallHandler);
+        this._rejectCallHandler = (e) => {
+            e.preventDefault();
+            if (!window.callCore) return;
+            const callId = window._currentIncomingCallId || callsState.activeCallId;
+            if (callId) {
+                window.callCore.declineCall(callId, 'declined').then(result => {
+                    if (result.success) {
+                        console.log('[Calls UI] Call rejected');
+                        this._closeCallUI();
+                    }
+                });
+            } else {
+                if (window.callCore.resetCallState) {
+                    window.callCore.resetCallState();
+                }
+                this._closeCallUI();
+            }
+        };
+        rejectBtn.addEventListener('click', this._rejectCallHandler);
+    }
+    
+    // End/Hangup call button
+    const endCallBtn = document.getElementById('endCallBtn') || 
+                       document.querySelector('[data-action="end-call"]') ||
+                       document.querySelector('.end-call-btn');
+    if (endCallBtn) {
+        endCallBtn.removeEventListener('click', this._endCallHandler);
+        this._endCallHandler = (e) => {
+            e.preventDefault();
+            if (!window.callCore) return;
+            const callId = callsState.activeCallId;
+            if (callId) {
+                window.callCore.endCall(callId).then(result => {
+                    if (result.success) {
+                        console.log('[Calls UI] Call ended');
+                        this._closeCallUI();
+                    }
+                });
+            } else {
+                if (window.callCore.resetCallState) {
+                    window.callCore.resetCallState();
+                }
+                this._closeCallUI();
+            }
+        };
+        endCallBtn.addEventListener('click', this._endCallHandler);
+    }
+    
+    // Mute button
+    const muteBtn = document.getElementById('muteCallBtn') || 
+                    document.querySelector('[data-action="mute-call"]') ||
+                    document.querySelector('.mute-call-btn');
+    if (muteBtn) {
+        muteBtn.removeEventListener('click', this._muteCallHandler);
+        this._muteCallHandler = (e) => {
+            e.preventDefault();
+            if (window.callCore && window.callCore.toggleMic) {
+                const result = window.callCore.toggleMic();
+                const isMuted = !callsState.micEnabled;
+                muteBtn.classList.toggle('active', isMuted);
+                muteBtn.querySelector('i')?.classList.toggle('fa-microphone-slash', isMuted);
+                muteBtn.querySelector('i')?.classList.toggle('fa-microphone', !isMuted);
+            }
+        };
+        muteBtn.addEventListener('click', this._muteCallHandler);
+    }
+    
+    // Video toggle button
+    const videoBtn = document.getElementById('videoCallBtn') || 
+                     document.querySelector('[data-action="toggle-video"]') ||
+                     document.querySelector('.toggle-video-btn');
+    if (videoBtn) {
+        videoBtn.removeEventListener('click', this._videoCallHandler);
+        this._videoCallHandler = (e) => {
+            e.preventDefault();
+            if (window.callCore && window.callCore.toggleCamera) {
+                window.callCore.toggleCamera();
+                const isVideoOn = callsState.cameraEnabled;
+                videoBtn.classList.toggle('active', isVideoOn);
+            }
+        };
+        videoBtn.addEventListener('click', this._videoCallHandler);
+    }
+},
+
+_closeCallUI: function() {
+    // Hide call modal or overlay
+    const callModal = document.getElementById('callModal') || 
+                      document.querySelector('.call-modal') ||
+                      document.querySelector('.call-overlay');
+    if (callModal) {
+        callModal.style.display = 'none';
+        callModal.classList.add('hidden');
+    }
+    
+    // Reset incoming call tracking
+    window._currentIncomingCallId = null;
+},
+
         
         _attachMediaControls: function() {
             const micButtons = document.querySelectorAll('[data-action="toggle-mic"], .toggle-mic-btn, #toggleMicBtn');
@@ -7131,12 +7685,31 @@ function applySession(sessionData) {
                 queuedMessages: messageQueue.length,
                 signalingState: callsState.signalingState,
                 connectionState: callsState.connectionState,
-                sessionValid: validSessionConfirmed && __isValidSession(callsState.session)
+                sessionValid: validSessionConfirmed && __isValidSession(callsState.session),
+                callData: callsState.callData
             };
         },
         
         getCallsState: function() {
             return { ...callsState };
+        },
+        
+        resetCallState: function() {
+            resetCallState();
+            logInfo(MODULE, 'Call state manually reset');
+            return { success: true };
+        },
+        
+        getCallState: function() {
+            return {
+                callActive: callsState.callActive,
+                callState: callsState.callState,
+                activeCallId: callsState.activeCallId,
+                callType: callsState.callType,
+                callStartTime: callsState.callStartTime,
+                callParticipants: [...callsState.callParticipants],
+                callData: callsState.callData
+            };
         },
         
         getSession: function() {
@@ -7206,7 +7779,10 @@ function applySession(sessionData) {
             
             DiagnosticsAgent.record('call_start');
             
-            return CallsStateGovernor.initiateCall(callType, [targetUserId]);
+            // Convert targetUserId to participants array
+            const participants = targetUserId ? [targetUserId] : [];
+            
+            return CallsStateGovernor.initiateCall(callType, participants);
         },
         
         startGroupCall: function(participants = [], callType = 'voice', options = {}) {

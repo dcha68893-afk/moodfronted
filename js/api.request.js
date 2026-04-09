@@ -183,7 +183,7 @@
         maxRetries: 3,
         retryDelay: 1000,
         activeRequests: new Map(),
-        requestTimeout: 30000
+        requestTimeout: 45000
     };
     
     // ============================================================================
@@ -1474,7 +1474,8 @@
             const shouldRetry = options.retry !== false;
             const maxRetries = options.maxRetries || _requestState.maxRetries;
             const retryDelay = options.retryDelay || _requestState.retryDelay;
-            
+            const requestTimeout = options.timeout || _requestState.requestTimeout;
+
             let lastError;
             
             for (let attempt = 1; attempt <= maxRetries; attempt++) {
@@ -2396,8 +2397,12 @@
                 }
                 
                 const controller = new AbortController();
-                const timeoutId = setTimeout(() => controller.abort(), _requestState.requestTimeout);
-                fetchOptions.signal = controller.signal;
+const timeoutToUse = options.timeout || _requestState.requestTimeout;
+const timeoutId = setTimeout(() => {
+    console.warn(`[API-REQUEST] Timeout after ${timeoutToUse}ms: ${fullUrl}`);
+    controller.abort();
+}, timeoutToUse);
+fetchOptions.signal = controller.signal;
                 
                 const response = await (window.__originalFetch || window.fetch)(fullUrl, fetchOptions);
                 

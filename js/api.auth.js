@@ -2692,13 +2692,15 @@
             
             // ========== CRITICAL FIX: Use centralized API request if available ==========
             let response;
-            
-            // Try using centralized API request first (preferred method)
             if (window.api && window.api.request && window.api.request.post) {
-                console.log('🔐 [AUTH] Using centralized API request for login');
-                
-                try {
-                    const apiResponse = await window.api.request.post('/auth/login', payload);
+    console.log('🔐 [AUTH] Using centralized API request for login');
+    
+    try {
+        // Add timeout parameter - 30 seconds for login
+        const apiResponse = await window.api.request.post('/auth/login', payload, {
+            timeout: 30000,  // 30 seconds timeout for login
+            retryCount: 2     // Allow retry on timeout
+        });
                     console.log('🔐 [AUTH] Centralized API response:', apiResponse);
                     
                     // Check if response indicates success
@@ -2795,13 +2797,31 @@
                 const fullUrl = `${baseUrl}/api/auth/login`;
                 console.log('🔐 [AUTH] Making direct fetch to:', fullUrl);
                 
-                const fetchResponse = await fetch(fullUrl, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify(payload)
-                });
+                // Create abort controller for timeout
+const controller = new AbortController();
+const timeoutId = setTimeout(() => {
+    console.warn('🔐 [AUTH] Login request timeout, aborting...');
+    controller.abort();
+}, 30000); // 30 second timeout
+
+try {
+    const fetchResponse = await fetch(fullUrl, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(payload),
+        signal: controller.signal
+    });
+    clearTimeout(timeoutId);
+    response = fetchResponse;
+} catch (fetchError) {
+    clearTimeout(timeoutId);
+    if (fetchError.name === 'AbortError') {
+        throw new Error('Login request timed out after 30 seconds');
+    }
+    throw fetchError;
+}
                 
                 console.log('🔐 [AUTH] Direct fetch response status:', fetchResponse.status);
                 response = fetchResponse;
@@ -3341,6 +3361,11 @@
     async function autoLogin() {
         console.log('🔐 [AUTH] Auto-login attempt');
         
+        
+    const autoLoginTimeout = setTimeout(() => {
+        console.warn('⚠️ [AUTH] Auto-login taking too long, continuing anyway');
+    }, 15000); // 15 second warning
+    
         const operation = 'autoLogin';
         
         try {
@@ -3439,6 +3464,7 @@
                 }));
             } catch (error) {}
             
+            clearTimeout(autoLoginTimeout);
             return {
                 success: true,
                 user: user,

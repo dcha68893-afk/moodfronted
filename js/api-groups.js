@@ -273,7 +273,7 @@ class ApiGroupManager {
             
             switch (listType) {
                 case 'active':
-                    response = await getGroups();
+                    response = await secureApiFetch('/api/groups/user', { method: 'GET' });
                     break;
                 case 'pending':
                     // Implementation depends on API structure - with fallback

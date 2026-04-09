@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+﻿﻿<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -103,6 +103,15 @@
             z-index: 1000;
             justify-content: space-around;
             align-items: center;
+        }
+
+        body.chat-panel-active .mobile-nav-bar {
+            display: none !important;
+        }
+
+        body.chat-panel-active .iframe-container:not(.hidden) {
+            bottom: 0 !important;
+            height: 100% !important;
         }
 
         .mobile-nav-icon {
@@ -258,15 +267,7 @@
         // CENTRALIZED EVENT DISPATCHER (CORE FEATURE)
         // ======================================================================
         
-        /**
-         * Dispatch event to ALL registered iframe modules
-         * @param {Object} event - Event object to broadcast
-         * @param {string} event.type - Event type (e.g., 'FRIEND_ACCEPTED', 'SWITCH_MODULE')
-         * @param {Object} event.payload - Event payload data
-         * @param {string} [event.targetModule] - Optional specific module target (if null, broadcasts to all)
-         */
         function dispatchEventToModules(event) {
-            // Ensure event has required metadata
             const enrichedEvent = {
                 ...event,
                 source: 'parent',
@@ -275,12 +276,9 @@
                 broadcastId: `${event.type}_${Date.now()}_${Math.random().toString(36).substr(2, 8)}`
             };
             
-            // Track which modules received the event for debugging
             let modulesSent = [];
             
-            // Iterate through all registered iframe modules
             Object.entries(moduleToIframeId).forEach(([moduleName, iframeId]) => {
-                // If targetModule is specified and doesn't match, skip
                 if (enrichedEvent.targetModule && enrichedEvent.targetModule !== moduleName) {
                     return;
                 }
@@ -297,7 +295,6 @@
                 }
             });
             
-            // Log broadcast summary
             if (modulesSent.length > 0) {
                 console.log(`✅ Event "${enrichedEvent.type}" broadcast to ${modulesSent.length} module(s):`, modulesSent);
             } else {
@@ -305,10 +302,6 @@
             }
         }
         
-        /**
-         * Register module for receiving events (maintains registry of available modules)
-         * Called automatically when modules send CHILD_READY message
-         */
         const moduleRegistry = new Set();
         
         function registerModule(moduleName) {
@@ -331,11 +324,18 @@
                     if (target) target.classList.remove('hidden');
                     document.querySelectorAll('.nav-icon, .mobile-nav-icon').forEach(b => b.classList.remove('active'));
                     btn.classList.add('active');
+                    
+                    if (window.innerWidth <= 768) {
+                        if (page === 'messages') {
+                            document.body.classList.add('chat-panel-active');
+                        } else {
+                            document.body.classList.remove('chat-panel-active');
+                        }
+                    }
                 }
             });
         });
 
-        // Hide loading screen after delay
         setTimeout(() => {
             const loading = document.getElementById('loadingScreen');
             if (loading) {
@@ -343,10 +343,97 @@
                 setTimeout(() => loading.classList.add('hidden'), 300);
             }
         }, 2000);
-
-        // ======================================================================
-        // LOAD MODULE SCRIPTS
-        // ======================================================================
+        
+        function setupChatPanelDetection() {
+            const messagesIframe = document.getElementById('messagesIframe');
+            if (!messagesIframe) return;
+            
+            window.addEventListener('message', function(event) {
+                if (event.origin !== window.location.origin && event.origin !== 'http://127.0.0.1:5500' && event.origin !== 'http://localhost:5500') {
+                    return;
+                }
+                const data = event.data || {};
+                if (data.type === 'CHAT_OPENED' || data.type === 'CONVERSATION_OPENED') {
+                    if (window.innerWidth <= 768) {
+                        document.body.classList.add('chat-panel-active');
+                    }
+                }
+                if (data.type === 'CHAT_LIST_SHOWN' || data.type === 'CHAT_CLOSED') {
+                    if (window.innerWidth <= 768) {
+                        const messagesContainer = document.getElementById('messagesContent');
+                        if (messagesContainer && !messagesContainer.classList.contains('hidden')) {
+                            document.body.classList.remove('chat-panel-active');
+                        }
+                    }
+                }
+            });
+            
+            messagesIframe.addEventListener('load', function() {
+                try {
+                    const iframeDoc = messagesIframe.contentDocument || messagesIframe.contentWindow.document;
+                    if (iframeDoc) {
+                        const script = iframeDoc.createElement('script');
+                        script.textContent = `
+                            (function() {
+                                function notifyChatState(state, data) {
+                                    window.parent.postMessage({
+                                        type: state === 'open' ? 'CHAT_OPENED' : 'CHAT_CLOSED',
+                                        payload: data || {}
+                                    }, '*');
+                                }
+                                let lastPath = window.location.pathname;
+                                setInterval(function() {
+                                    if (window.location.pathname !== lastPath) {
+                                        lastPath = window.location.pathname;
+                                        if (lastPath.includes('/chat/') || lastPath.includes('/conversation/')) {
+                                            notifyChatState('open', { path: lastPath });
+                                        } else {
+                                            notifyChatState('closed', { path: lastPath });
+                                        }
+                                    }
+                                }, 500);
+                                document.addEventListener('click', function(e) {
+                                    let target = e.target.closest('.chat-item, .conversation-item, [data-chat-id], [data-conversation-id]');
+                                    if (target) {
+                                        setTimeout(function() {
+                                            if (window.location.pathname.includes('/chat/') || window.location.pathname.includes('/conversation/')) {
+                                                notifyChatState('open', { chatId: target.dataset.chatId });
+                                            }
+                                        }, 100);
+                                    }
+                                });
+                            })();
+                        `;
+                        iframeDoc.head.appendChild(script);
+                    }
+                } catch(e) {
+                    console.warn('[Parent] Cannot inject into iframe due to cross-origin:', e);
+                }
+            });
+        }
+        
+        document.addEventListener('DOMContentLoaded', function() {
+            setupChatPanelDetection();
+            
+            if (window.innerWidth <= 768) {
+                const messagesContainer = document.getElementById('messagesContent');
+                if (messagesContainer && !messagesContainer.classList.contains('hidden')) {
+                    document.body.classList.remove('chat-panel-active');
+                }
+            }
+        });
+        
+        window.addEventListener('resize', function() {
+            if (window.innerWidth > 768) {
+                document.body.classList.remove('chat-panel-active');
+            } else {
+                const messagesContainer = document.getElementById('messagesContent');
+                if (messagesContainer && !messagesContainer.classList.contains('hidden')) {
+                } else {
+                    document.body.classList.remove('chat-panel-active');
+                }
+            }
+        });
     </script>
     <script src="js/app.core.eventbus.js"></script>
     <script src="js/app.core.store.js"></script>
@@ -365,12 +452,10 @@
         (function originalParentFormat() {
             console.log('📡 Parent broadcaster started');
 
-            // Cache session data
             let cachedToken = null;
             let cachedUserId = null;
             let cachedUser = null;
 
-            // Request throttling
             const requestThrottle = new Map();
             const THROTTLE_TIMES = {
                 '/api/chats': 3000,
@@ -392,7 +477,6 @@
                 return true;
             }
 
-            // Map modules to iframes
             const moduleToIframeId = {
                 'messages': 'messagesIframe',
                 'status': 'statusIframe',
@@ -404,7 +488,6 @@
                 'tools': 'toolsIframe'
             };
 
-            // API Endpoint Mappings
             const endpointMappings = {
                 '/group/user': '/groups/user',
                 '/group/user/': '/groups/user',
@@ -448,6 +531,9 @@
                 '/status/trending': '/status/trending',
                 '/api/status/public': '/status/public',
                 '/status/public': '/status/public',
+                // Call history endpoint mapping
+                '/calls': '/calls/history',
+                '/calls/': '/calls/history'
             };
 
             function getSessionData() {
@@ -462,7 +548,6 @@
                 let userId = null;
                 let user = null;
 
-                // Decode JWT token
                 try {
                     const parts = token.split('.');
                     if (parts.length === 3) {
@@ -484,7 +569,6 @@
                     console.warn('[Parent] Failed to decode token:', e);
                 }
 
-                // Fallback to kynecta_auth
                 if (!userId) {
                     const authData = localStorage.getItem('kynecta_auth');
                     if (authData) {
@@ -611,7 +695,33 @@
                 });
             }
 
-            // Token refresh function
+            // ======================================================================
+            // FIX: Add function to refresh call history
+            // ======================================================================
+            async function refreshCallHistoryForUser(userId) {
+                try {
+                    console.log('[Parent] Refreshing call history for user:', userId);
+                    const response = await window.api.get('/calls/history', { limit: 50 });
+                    if (response && (response.success || response.status === 'success')) {
+                        const calls = response.data?.calls || response.calls || [];
+                        console.log('[Parent] Call history refreshed, found:', calls.length, 'calls');
+                        
+                        // Broadcast updated history to calls iframe
+                        const callsIframe = document.getElementById('callsIframe');
+                        if (callsIframe && callsIframe.contentWindow) {
+                            callsIframe.contentWindow.postMessage({
+                                type: 'CALL_HISTORY_UPDATE',
+                                payload: { calls: calls, timestamp: Date.now() }
+                            }, '*');
+                        }
+                        return calls;
+                    }
+                } catch (err) {
+                    console.warn('[Parent] Failed to refresh call history:', err);
+                }
+                return [];
+            }
+
             async function refreshAuthToken() {
                 try {
                     const refreshToken = localStorage.getItem('refreshToken');
@@ -657,11 +767,7 @@
                 }
             });
 
-            // ==================================================================
-            // MAIN MESSAGE HANDLER (Combined: existing + new handlers)
-            // ==================================================================
             window.addEventListener('message', async function(event) {
-                // Security: Only accept messages from same origin or local dev server
                 if (event.origin !== window.location.origin && event.origin !== 'http://127.0.0.1:5500' && event.origin !== 'http://localhost:5500') {
                     return;
                 }
@@ -669,12 +775,30 @@
                 const data = event.data || {};
                 if (!data || typeof data !== 'object') return;
 
-                // ========== HANDLE CHILD_READY ==========
+                // ==================== HANDLE VERIFY_SESSION (CRITICAL FOR CALLS) ====================
+                if (data.type === 'VERIFY_SESSION') {
+                    console.log('[Parent] VERIFY_SESSION received from module:', data.source);
+                    const requestId = data.payload?.requestId || data.requestId;
+                    
+                    if (event.source && event.source.postMessage) {
+                        event.source.postMessage({
+                            type: 'VERIFY_RESPONSE',
+                            requestId: requestId,
+                            payload: {
+                                valid: true,
+                                timestamp: Date.now(),
+                                module: data.source
+                            }
+                        }, '*');
+                        console.log('[Parent] ✅ VERIFY_RESPONSE sent');
+                    }
+                    return;
+                }
+
                 if (data.type === 'CHILD_READY') {
                     const targetModule = data.module || data.source || data.payload?.module || null;
                     console.log(`📡 CHILD_READY from ${targetModule || 'unknown'}`);
                     
-                    // Register module for event broadcasting
                     if (targetModule) {
                         registerModule(targetModule);
                     }
@@ -696,7 +820,6 @@
                     }
                 }
 
-                // ========== HANDLE FRIEND EVENTS (Broadcast to all modules) ==========
                 if (data.type === 'FRIEND_ACCEPTED' || data.type === 'FRIEND_REJECTED' || data.type === 'FRIEND_REMOVED') {
                     console.log(`[Parent] Broadcasting ${data.type} event to all modules`, data.payload);
                     dispatchEventToModules({
@@ -706,7 +829,6 @@
                     });
                 }
 
-                // ========== HANDLE API REQUESTS ==========
                 if (data.type === 'API_REQUEST') {
                     let endpoint = data.payload?.endpoint || data.endpoint;
                     if (!endpoint) {
@@ -784,13 +906,12 @@
                     }
                 }
 
-                // ========== ENHANCED SWITCH_MODULE (with call support) ==========
+                // ==================== SWITCH_MODULE WITH BOTH CHAT AND CALL SUPPORT ====================
                 if (data.type === 'SWITCH_MODULE') {
                     console.log('[Parent] Switching to module:', data.module);
                     const targetModuleName = data.module;
                     let targetIframe = null;
 
-                    // Find target iframe by data-module attribute or src
                     for (const [moduleName, iframeId] of Object.entries(moduleToIframeId)) {
                         const iframe = document.getElementById(iframeId);
                         if (iframe && (moduleName === targetModuleName || iframe.src.includes(targetModuleName))) {
@@ -799,7 +920,6 @@
                         }
                     }
 
-                    // Hide all containers, show target
                     document.querySelectorAll('.iframe-container').forEach(container => {
                         container.classList.add('hidden');
                     });
@@ -807,12 +927,10 @@
                         const parentContainer = targetIframe.closest('.iframe-container');
                         if (parentContainer) parentContainer.classList.remove('hidden');
                     } else {
-                        // Fallback: try to show by module name
                         const targetContainer = document.getElementById(`${targetModuleName}Content`);
                         if (targetContainer) targetContainer.classList.remove('hidden');
                     }
 
-                    // Update active nav buttons
                     document.querySelectorAll('.nav-icon, .mobile-nav-icon').forEach(btn => {
                         if (btn.dataset.page === targetModuleName) {
                             btn.classList.add('active');
@@ -820,90 +938,150 @@
                             btn.classList.remove('active');
                         }
                     });
+                    
+                    if (window.innerWidth <= 768) {
+                        if (targetModuleName === 'messages') {
+                            document.body.classList.remove('chat-panel-active');
+                        } else {
+                            document.body.classList.remove('chat-panel-active');
+                        }
+                    }
 
-                    // ========== ENHANCEMENT: Handle call module with userId ==========
                     if (targetModuleName === 'calls' && data.payload && data.payload.userId) {
-                        console.log('[Parent] Switching to calls module with user:', data.payload.userId);
+                        console.log('[Parent] 🎯 Switching to CALLS module with user:', data.payload);
                         
-                        // Forward OPEN_CALL_WITH_USER event to calls module
+                        const callPayload = {
+                            userId: data.payload.userId,
+                            userName: data.payload.userName || data.payload.name || data.payload.displayName || 'User',
+                            callType: data.payload.callType || 'voice',
+                            timestamp: Date.now(),
+                            source: data.payload.source || 'friends-module'
+                        };
+                        
+                        sessionStorage.setItem('pending_call', JSON.stringify(callPayload));
+                        window.__pendingCall = callPayload;
+                        
                         const callEvent = {
                             type: 'OPEN_CALL_WITH_USER',
-                            payload: {
-                                userId: data.payload.userId,
-                                userName: data.payload.userName || data.payload.name || 'User',
-                                callType: data.payload.callType || 'video',
-                                ...data.payload
-                            },
-                            source: 'parent',
+                            payload: callPayload,
+                            source: 'parent-frame',
                             timestamp: Date.now()
                         };
                         
-                        // Dispatch to calls module specifically
                         const callsIframe = document.getElementById('callsIframe');
                         if (callsIframe && callsIframe.contentWindow) {
+                            callsIframe.contentWindow.postMessage(callEvent, '*');
+                            console.log('📞 SENT OPEN_CALL_WITH_USER to calls module:', callPayload);
+                            
                             setTimeout(() => {
                                 callsIframe.contentWindow.postMessage(callEvent, '*');
-                                console.log('📞 Forwarded OPEN_CALL_WITH_USER to calls module:', callEvent.payload);
+                                console.log('📞 RE-SENT OPEN_CALL_WITH_USER to calls module (delayed)');
                             }, 500);
+                            
+                            setTimeout(() => {
+                                callsIframe.contentWindow.postMessage(callEvent, '*');
+                                console.log('📞 FINAL SEND OPEN_CALL_WITH_USER to calls module');
+                            }, 1500);
                         } else {
                             console.warn('[Parent] Calls iframe not available for call initiation');
+                            window.__pendingCallOnLoad = callPayload;
                         }
                     }
 
-                    // FIX: If the SWITCH_MODULE message itself carries a user payload
-                    // (sent by friend-ui.js navigateToChatWithUser), persist it into
-                    // pending_chat NOW — before the setTimeout fires — so the read below
-                    // always finds it even when sessionStorage wasn't written in time.
-                    if (data.payload && data.payload.userId) {
-                        console.log('[Parent] SWITCH_MODULE carries chat payload, saving to pending_chat:', data.payload);
+                    if (targetModuleName === 'messages' && data.payload && data.payload.userId) {
+                        console.log('[Parent] 🎯 Switching to MESSAGES module with user:', data.payload);
+                        
+                        const chatPayload = {
+                            userId: data.payload.userId,
+                            userName: data.payload.userName || data.payload.name || data.payload.displayName || 'User',
+                            timestamp: data.payload.timestamp || Date.now(),
+                            source: data.payload.source || 'friends-module'
+                        };
+                        
+                        sessionStorage.setItem('pending_chat', JSON.stringify(chatPayload));
+                        window.__pendingChat = chatPayload;
+                        
+                        const messagesIframe = document.getElementById('messagesIframe');
+                        if (messagesIframe && messagesIframe.contentWindow) {
+                            const chatEvent = {
+                                type: 'OPEN_CHAT_WITH_USER',
+                                payload: chatPayload,
+                                source: 'parent-frame',
+                                timestamp: Date.now()
+                            };
+                            messagesIframe.contentWindow.postMessage(chatEvent, '*');
+                            console.log('💬 SENT OPEN_CHAT_WITH_USER to messages module:', chatPayload);
+                        }
+                    }
+
+                    if (data.payload && data.payload.userId && !targetModuleName) {
+                        console.log('[Parent] Legacy payload, saving to pending_chat:', data.payload);
                         sessionStorage.setItem('pending_chat', JSON.stringify(data.payload));
                         window.__pendingChat = data.payload;
                     }
-
-                    // Send pending chat to the newly visible iframe
-                    setTimeout(() => {
-                        const pendingChat = sessionStorage.getItem('pending_chat');
-                        if (pendingChat && targetIframe && targetIframe.contentWindow) {
-                            let chatData;
-                            try { chatData = JSON.parse(pendingChat); } catch(e) { chatData = null; }
-                            if (chatData) {
-                                console.log('[Parent] Sending pending chat to module:', chatData);
-                                targetIframe.contentWindow.postMessage({
-                                    type: 'OPEN_CHAT_WITH_USER',
-                                    payload: chatData,
-                                    source: 'parent-frame',
-                                    timestamp: Date.now()
-                                }, '*');
-                                sessionStorage.removeItem('pending_chat');
-                                window.__pendingChat = null;
-                            }
-                        }
-                    }, 500);
                 }
 
-                // ========== NEW: Direct message to messages module ==========
                 if (data.type === 'DIRECT_CHAT_REQUEST') {
                     console.log('[Parent] Direct chat request for user:', data.payload);
-                    sessionStorage.setItem('pending_chat', JSON.stringify(data.payload));
-                    window.__pendingChat = data.payload;
+                    const chatPayload = {
+                        userId: data.payload.userId,
+                        userName: data.payload.userName || data.payload.name || 'User',
+                        timestamp: Date.now()
+                    };
+                    sessionStorage.setItem('pending_chat', JSON.stringify(chatPayload));
+                    window.__pendingChat = chatPayload;
 
                     const messagesIframe = document.getElementById('messagesIframe');
                     if (messagesIframe && messagesIframe.contentWindow) {
                         messagesIframe.contentWindow.postMessage({
                             type: 'OPEN_CHAT_WITH_USER',
-                            payload: data.payload,
+                            payload: chatPayload,
                             source: 'parent-frame',
                             timestamp: Date.now()
                         }, '*');
 
-                        // Ensure messages container is visible
                         document.querySelectorAll('.iframe-container').forEach(c => c.classList.add('hidden'));
                         const messagesContainer = document.getElementById('messagesContent');
                         if (messagesContainer) messagesContainer.classList.remove('hidden');
 
-                        // Update active nav
                         document.querySelectorAll('.nav-icon, .mobile-nav-icon').forEach(btn => {
                             if (btn.dataset.page === 'messages') {
+                                btn.classList.add('active');
+                            } else {
+                                btn.classList.remove('active');
+                            }
+                        });
+                        
+                        if (window.innerWidth <= 768) {
+                            document.body.classList.add('chat-panel-active');
+                        }
+                    }
+                }
+
+                if (data.type === 'DIRECT_CALL_REQUEST') {
+                    console.log('[Parent] Direct call request for user:', data.payload);
+                    const callPayload = {
+                        userId: data.payload.userId,
+                        userName: data.payload.userName || data.payload.name || 'User',
+                        callType: data.payload.callType || 'voice',
+                        timestamp: Date.now()
+                    };
+                    
+                    const callsIframe = document.getElementById('callsIframe');
+                    if (callsIframe && callsIframe.contentWindow) {
+                        callsIframe.contentWindow.postMessage({
+                            type: 'OPEN_CALL_WITH_USER',
+                            payload: callPayload,
+                            source: 'parent-frame',
+                            timestamp: Date.now()
+                        }, '*');
+
+                        document.querySelectorAll('.iframe-container').forEach(c => c.classList.add('hidden'));
+                        const callsContainer = document.getElementById('callsContent');
+                        if (callsContainer) callsContainer.classList.remove('hidden');
+
+                        document.querySelectorAll('.nav-icon, .mobile-nav-icon').forEach(btn => {
+                            if (btn.dataset.page === 'calls') {
                                 btn.classList.add('active');
                             } else {
                                 btn.classList.remove('active');
@@ -912,40 +1090,310 @@
                     }
                 }
 
-                // ========== Handle 401 responses for token refresh ==========
                 if (data.type === 'API_RESPONSE' && data.status === 401) {
                     console.log('[Parent] Received 401, attempting token refresh');
                     await refreshAuthToken();
                 }
+
+                // ==================== REFRESH CALL HISTORY HANDLER ====================
+                if (data.type === 'REFRESH_CALL_HISTORY') {
+                    console.log('[Parent] Refreshing call history');
+                    const userId = data.payload?.userId || cachedUserId;
+                    if (userId) {
+                        await refreshCallHistoryForUser(userId);
+                    }
+                    return;
+                }
+
+                // ==================== CALL SIGNALING HANDLERS (FIXED) ====================
+                if (data.type === 'CALL_INITIATE') {
+                    const payload = data.payload || {};
+                    const { callId, callType } = payload;
+                    const participants = payload.participants;
+                    const participantIds = payload.participantIds;
+                    const directCalleeId = payload.calleeId;
+                    
+                    let calleeId = directCalleeId 
+                        || (Array.isArray(participantIds) && participantIds[0])
+                        || (Array.isArray(participants) && participants[0])
+                        || participants;
+                    
+                    if (typeof calleeId === 'object' && calleeId !== null) {
+                        calleeId = calleeId.id || calleeId.userId;
+                    }
+                    
+                    const src = event.source;
+                    
+                    try {
+                        // FIX: Use correct endpoint /calls/start
+                        const response = await window.api.post('/calls/start', {
+                            participantIds: [parseInt(calleeId)],
+                            callType: callType === 'video' ? 'video' : 'audio',
+                            isGroupCall: false
+                        });
+                        
+                        const ok = !!(response?.success || response?.status === 'success' || response?.data?.callId);
+                        
+                        if (src && src.postMessage) {
+                            src.postMessage({
+                                type: 'CALL_INITIATED',
+                                payload: {
+                                    success: ok,
+                                    callId: response?.data?.call?.id || response?.data?.callId || callId,
+                                    data: response?.data || null,
+                                    error: ok ? null : (response?.message || response?.data?.message || 'Failed to start call')
+                                }
+                            }, '*');
+                        }
+                        
+                        // Refresh call history after initiating call
+                        if (ok) {
+                            setTimeout(() => refreshCallHistoryForUser(cachedUserId), 1000);
+                        }
+                    } catch (err) {
+                        console.error('[Parent] CALL_INITIATE error:', err);
+                        if (src && src.postMessage) {
+                            src.postMessage({
+                                type: 'CALL_INITIATED',
+                                payload: { success: false, callId, error: err.message }
+                            }, '*');
+                        }
+                    }
+                }
+
+                if (data.type === 'CALL_ACCEPT') {
+                    const { callId } = data.payload || {};
+                    const src = event.source;
+                    try {
+                        // FIX: Use correct endpoint /calls/${callId}/accept
+                        const response = await window.api.post(`/calls/${callId}/accept`, {});
+                        if (src && src.postMessage) {
+                            src.postMessage({
+                                type: 'CALL_ACCEPTED',
+                                payload: {
+                                    success: !!(response?.success || response?.status === 'success'),
+                                    callId,
+                                    data: response?.data || null
+                                }
+                            }, '*');
+                        }
+                        
+                        // Refresh call history after accepting call
+                        setTimeout(() => refreshCallHistoryForUser(cachedUserId), 1000);
+                    } catch (err) {
+                        console.error('[Parent] CALL_ACCEPT error:', err);
+                        if (src && src.postMessage) {
+                            src.postMessage({
+                                type: 'CALL_ACCEPTED',
+                                payload: { success: false, callId, error: err.message }
+                            }, '*');
+                        }
+                    }
+                }
+
+                if (data.type === 'CALL_REJECT') {
+                    const { callId } = data.payload || {};
+                    const src = event.source;
+                    try {
+                        await window.api.post(`/calls/${callId}/reject`, {});
+                        if (src && src.postMessage) {
+                            src.postMessage({ 
+                                type: 'CALL_REJECTED', 
+                                payload: { success: true, callId } 
+                            }, '*');
+                        }
+                        
+                        // Refresh call history after rejecting call (marks as missed)
+                        setTimeout(() => refreshCallHistoryForUser(cachedUserId), 1000);
+                    } catch (err) {
+                        console.warn('[Parent] CALL_REJECT error:', err);
+                        if (src && src.postMessage) {
+                            src.postMessage({ 
+                                type: 'CALL_REJECTED', 
+                                payload: { success: false, callId, error: err.message } 
+                            }, '*');
+                        }
+                    }
+                }
+
+                if (data.type === 'CALL_ENDED') {
+                    const { callId, duration } = data.payload || {};
+                    try {
+                        await window.api.post(`/calls/${callId}/end`, { duration: duration || 0 });
+                        
+                        // Refresh call history after ending call
+                        setTimeout(() => refreshCallHistoryForUser(cachedUserId), 500);
+                    } catch (err) {
+                        console.warn('[Parent] CALL_ENDED error (non-critical):', err);
+                    }
+                }
+
+                if (data.type === 'GET_CALL_HISTORY') {
+                    const src = event.source;
+                    try {
+                        const response = await window.api.get('/calls/history', { limit: 100 });
+                        if (src && src.postMessage) {
+                            src.postMessage({
+                                type: 'CALL_HISTORY_RESPONSE',
+                                payload: {
+                                    success: true,
+                                    calls: response?.data?.calls || response?.calls || []
+                                }
+                            }, '*');
+                        }
+                    } catch (err) {
+                        console.warn('[Parent] GET_CALL_HISTORY error:', err);
+                        if (src && src.postMessage) {
+                            src.postMessage({
+                                type: 'CALL_HISTORY_RESPONSE',
+                                payload: { success: false, error: err.message, calls: [] }
+                            }, '*');
+                        }
+                    }
+                }
+
+                if (data.type === 'SIGNAL_OFFER' || data.type === 'SIGNAL_ANSWER' || data.type === 'ICE_CANDIDATE') {
+                    const { targetUserId } = data.payload || {};
+                    if (targetUserId && window.wsService && window.wsService.sendToUser) {
+                        window.wsService.sendToUser(targetUserId, data.type.toLowerCase(), data.payload);
+                    }
+                    const callsFrame = document.getElementById('callsIframe');
+                    if (callsFrame && callsFrame.contentWindow) {
+                        callsFrame.contentWindow.postMessage({ type: data.type, payload: data.payload }, '*');
+                    }
+                }
             });
 
-            // Initial session broadcast
+            if (window.wsService && typeof window.wsService.on === 'function') {
+                window.wsService.on('call:incoming', function(callData) {
+                    const callsFrame = document.getElementById('callsIframe');
+                    if (callsFrame && callsFrame.contentWindow) {
+                        callsFrame.contentWindow.postMessage({
+                            type: 'CALL_INCOMING',
+                            payload: callData
+                        }, '*');
+                    }
+                });
+                window.wsService.on('call:answered', function(callData) {
+                    const callsFrame = document.getElementById('callsIframe');
+                    if (callsFrame && callsFrame.contentWindow) {
+                        callsFrame.contentWindow.postMessage({ type: 'CALL_ACCEPTED', payload: callData }, '*');
+                    }
+                    // Refresh call history
+                    setTimeout(() => refreshCallHistoryForUser(cachedUserId), 1000);
+                });
+                window.wsService.on('call:rejected', function(callData) {
+                    const callsFrame = document.getElementById('callsIframe');
+                    if (callsFrame && callsFrame.contentWindow) {
+                        callsFrame.contentWindow.postMessage({ type: 'CALL_REJECTED', payload: callData }, '*');
+                    }
+                    // Refresh call history
+                    setTimeout(() => refreshCallHistoryForUser(cachedUserId), 1000);
+                });
+                window.wsService.on('call:ended', function(callData) {
+                    const callsFrame = document.getElementById('callsIframe');
+                    if (callsFrame && callsFrame.contentWindow) {
+                        callsFrame.contentWindow.postMessage({ type: 'CALL_ENDED', payload: callData }, '*');
+                    }
+                    // Refresh call history
+                    setTimeout(() => refreshCallHistoryForUser(cachedUserId), 500);
+                });
+                window.wsService.on('ice_candidate', function(data) {
+                    const callsFrame = document.getElementById('callsIframe');
+                    if (callsFrame && callsFrame.contentWindow) {
+                        callsFrame.contentWindow.postMessage({ type: 'ICE_CANDIDATE', payload: data }, '*');
+                    }
+                });
+                window.wsService.on('call_offer', function(data) {
+                    const callsFrame = document.getElementById('callsIframe');
+                    if (callsFrame && callsFrame.contentWindow) {
+                        callsFrame.contentWindow.postMessage({ type: 'SIGNAL_OFFER', payload: data }, '*');
+                    }
+                });
+                window.wsService.on('call_answer', function(data) {
+                    const callsFrame = document.getElementById('callsIframe');
+                    if (callsFrame && callsFrame.contentWindow) {
+                        callsFrame.contentWindow.postMessage({ type: 'SIGNAL_ANSWER', payload: data }, '*');
+                    }
+                });
+            }
+
             setTimeout(() => {
                 sendToAllModulesIfNeeded(true);
+                // Initial call history refresh
+                if (cachedUserId) {
+                    setTimeout(() => refreshCallHistoryForUser(cachedUserId), 2000);
+                }
             }, 1000);
         })();
 
         // ======================================================================
-        // PENDING CHAT INITIALIZATION ON PAGE LOAD
+        // PENDING CHAT & CALL INITIALIZATION ON PAGE LOAD
         // ======================================================================
         document.addEventListener('DOMContentLoaded', function() {
             const pendingChat = sessionStorage.getItem('pending_chat');
             if (pendingChat) {
                 console.log('[Parent] Found pending chat on load:', pendingChat);
-                const chatData = JSON.parse(pendingChat);
-                const messagesIframe = document.getElementById('messagesIframe');
-                if (messagesIframe && messagesIframe.contentWindow) {
-                    setTimeout(() => {
-                        messagesIframe.contentWindow.postMessage({
-                            type: 'OPEN_CHAT_WITH_USER',
-                            payload: chatData,
+                try {
+                    const chatData = JSON.parse(pendingChat);
+                    const messagesIframe = document.getElementById('messagesIframe');
+                    if (messagesIframe && messagesIframe.contentWindow) {
+                        setTimeout(() => {
+                            messagesIframe.contentWindow.postMessage({
+                                type: 'OPEN_CHAT_WITH_USER',
+                                payload: chatData,
+                                source: 'parent-frame',
+                                timestamp: Date.now()
+                            }, '*');
+                            sessionStorage.removeItem('pending_chat');
+                            window.__pendingChat = null;
+                            
+                            if (window.innerWidth <= 768) {
+                                document.body.classList.add('chat-panel-active');
+                            }
+                        }, 1000);
+                    }
+                } catch(e) {
+                    console.error('[Parent] Failed to parse pending chat:', e);
+                }
+            }
+            
+            const pendingCall = sessionStorage.getItem('pending_call');
+            if (pendingCall) {
+                console.log('[Parent] Found pending call on load:', pendingCall);
+                try {
+                    const callData = JSON.parse(pendingCall);
+                    const callsIframe = document.getElementById('callsIframe');
+                    if (callsIframe && callsIframe.contentWindow) {
+                        setTimeout(() => {
+                            callsIframe.contentWindow.postMessage({
+                                type: 'OPEN_CALL_WITH_USER',
+                                payload: callData,
+                                source: 'parent-frame',
+                                timestamp: Date.now()
+                            }, '*');
+                            sessionStorage.removeItem('pending_call');
+                            window.__pendingCall = null;
+                        }, 1000);
+                    }
+                } catch(e) {
+                    console.error('[Parent] Failed to parse pending call:', e);
+                }
+            }
+            
+            if (window.__pendingCallOnLoad) {
+                setTimeout(() => {
+                    const callsIframe = document.getElementById('callsIframe');
+                    if (callsIframe && callsIframe.contentWindow) {
+                        callsIframe.contentWindow.postMessage({
+                            type: 'OPEN_CALL_WITH_USER',
+                            payload: window.__pendingCallOnLoad,
                             source: 'parent-frame',
                             timestamp: Date.now()
                         }, '*');
-                        sessionStorage.removeItem('pending_chat');
-                        window.__pendingChat = null;
-                    }, 1000);
-                }
+                        window.__pendingCallOnLoad = null;
+                    }
+                }, 1500);
             }
         });
     </script>

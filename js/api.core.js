@@ -993,9 +993,15 @@ function generateRequestId() {
 // ============================================================================
 // ENHANCED CORE FETCH FUNCTION WITH RETRY LIMITS
 // ============================================================================
-
-const DEFAULT_TIMEOUT = 10000; // 10 seconds timeout
-const MAX_RETRIES = 1; // Only retry once
+// Environment-aware timeout
+const getDefaultTimeout = () => {
+    // Check if we're in production (Render)
+    const isProduction = window.location?.hostname?.includes('render.com') || 
+                         window.location?.hostname?.includes('onrender.com');
+    return isProduction ? 30000 : 15000; // 30s for production, 15s for local
+};
+const DEFAULT_TIMEOUT = getDefaultTimeout();
+const MAX_RETRIES = 2; // Retry twice for timeout errors
 const abortControllers = new Map();
 
 async function coreFetch(url, options = {}) {
@@ -1149,11 +1155,13 @@ if (url.startsWith('http://') || url.startsWith('https://')) {
             
             const requestPromise = (async () => {
                 const controller = createAbortController(requestId);
-                const timeoutId = setTimeout(() => {
-                    console.warn(`[API] â° Request timeout after ${options.timeout || DEFAULT_TIMEOUT}ms: ${fullUrl}`);
-                    controller.abort();
-                    abortControllers.delete(requestId);
-                }, options.timeout || DEFAULT_TIMEOUT);
+                // Use request-specific timeout or default
+const requestTimeout = options.timeout || DEFAULT_TIMEOUT;
+const timeoutId = setTimeout(() => {
+    console.warn(`[API] ⏰ Request timeout after ${requestTimeout}ms: ${fullUrl}`);
+    controller.abort();
+    abortControllers.delete(requestId);
+}, requestTimeout);
                 
                 try {
                     const response = await fetch(fullUrl, {
@@ -1360,19 +1368,24 @@ if (url.startsWith('http://') || url.startsWith('https://')) {
             
             console.log(`[API] âœ… Request completed: ${method} ${endpointPath} (${requestDuration}ms)`);
             return normalizeResponse(result);
-            
-        } catch (error) {
-            console.error('[API] âŒ Core fetch error:', error);
-            
-            // Check if we should retry (only for network errors)
-            if (retryCount < MAX_RETRIES && 
-                (error.message?.toLowerCase().includes('network') || 
-                 error.message?.toLowerCase().includes('failed to fetch') ||
-                 error.name === 'AbortError')) {
-                console.log(`[API] ðŸ”„ Network error, retrying (attempt ${retryCount + 1}/${MAX_RETRIES})`);
-                retryCount++;
-                return executeRequest();
-            }
+          
+            } catch (error) {
+    console.error('[API] ❌ Core fetch error:', error);
+    
+    // Check if we should retry (for network errors AND timeouts)
+    const isTimeoutError = error.name === 'AbortError' || 
+                           error.message?.toLowerCase().includes('timeout') ||
+                           error.message?.toLowerCase().includes('aborted');
+    const isNetworkError = error.message?.toLowerCase().includes('network') || 
+                           error.message?.toLowerCase().includes('failed to fetch');
+    
+    if (retryCount < MAX_RETRIES && (isNetworkError || isTimeoutError)) {
+        const retryDelay = isTimeoutError ? 2000 : 1000; // Longer delay for timeout retry
+        console.log(`[API] 🔄 ${isTimeoutError ? 'Timeout' : 'Network'} error, retrying in ${retryDelay}ms (attempt ${retryCount + 1}/${MAX_RETRIES})`);
+        retryCount++;
+        await new Promise(resolve => setTimeout(resolve, retryDelay));
+        return executeRequest();
+    }
             
             return normalizeResponse({
                 __error: true,

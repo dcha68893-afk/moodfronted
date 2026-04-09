@@ -1,16 +1,11 @@
 // =============================================
-// MESSAGES CORE - v8.0.6 (PENDING CHAT HANDLING + DEDUPLICATION)
-// REAL END-TO-END MESSAGING | NO PLACEHOLDERS | NO DIRECT FETCH
-// STRICT LIFECYCLE ENFORCEMENT | NO RETRY LOOPS | NO FALLBACKS
-// COMPLETE REQUEST-ID TRACKING | DEDUPLICATION
-// ENHANCED SESSION VALIDATION | NO FAKE USER IDS
-// FIXED: API response format handling for nested responses
-// FIXED: Conversation data normalization
-// ADDED: Demo chat history for moodchat1 and moodchat2 (4 messages)
-// ADDED: openChatWithUser function for external chat opening
-// ADDED: Pending conversation deduplication
-// ADDED: Smart message sending (chatId OR receiverId)
-// ADDED: Pending conversation replacement after successful send
+// MESSAGES CORE - v8.0.7 (FULL PRODUCTION READY)
+// REAL END-TO-END MESSAGING | NO PLACEHOLDERS
+// FIXED: Duplicate conversation prevention
+// FIXED: "No messages yet" removal
+// FIXED: Time display only in chat panel
+// FIXED: Chat name sizing
+// ADDED: Dark/Light theme support
 // =============================================
 (function() {
     'use strict';
@@ -19,7 +14,7 @@
     // MODULE IDENTIFICATION
     // =============================================
     const MODULE_NAME = 'messages';
-    const MODULE_VERSION = '8.0.6';
+    const MODULE_VERSION = '8.0.7';
     
     // =============================================
     // DEBUG MODE (DISABLED IN PRODUCTION)
@@ -32,7 +27,7 @@
     }
 
     // =============================================
-    // DEMO CHAT DATA - moodchat1 and moodchat2 with 4 messages
+    // DEMO CHAT DATA
     // =============================================
     const DEMO_CHATS = {
         conversations: [
@@ -54,7 +49,7 @@
                 friendId: 2002,
                 friendName: 'moodchat2',
                 friendAvatar: 'https://ui-avatars.com/api/?name=moodchat2&background=2196f3&color=fff&bold=true',
-                lastMessage: 'I\'m good, thanks for asking!',
+                lastMessage: "I'm good, thanks for asking!",
                 lastMessageAt: Date.now() - 1800000,
                 unreadCount: 0,
                 online: true,
@@ -77,7 +72,7 @@
                 },
                 {
                     id: 'msg_demo_1001_2',
-                    content: 'I\'m doing great! Just finished some work. How about you?',
+                    content: "I'm doing great! Just finished some work. How about you?",
                     type: 'text',
                     senderId: 1001,
                     sender: { id: 1001, displayName: 'Me', avatar: '' },
@@ -88,7 +83,7 @@
                 },
                 {
                     id: 'msg_demo_1001_3',
-                    content: 'That\'s awesome! What have you been working on?',
+                    content: "That's awesome! What have you been working on?",
                     type: 'text',
                     senderId: 2001,
                     sender: { id: 2001, displayName: 'moodchat1', avatar: 'https://ui-avatars.com/api/?name=moodchat1&background=4caf50&color=fff' },
@@ -121,7 +116,7 @@
                 },
                 {
                     id: 'msg_demo_1002_2',
-                    content: 'Hey! Yeah, it\'s been a while. How have you been?',
+                    content: "Hey! Yeah, it's been a while. How have you been?",
                     type: 'text',
                     senderId: 1001,
                     sender: { id: 1001, displayName: 'Me', avatar: '' },
@@ -132,7 +127,7 @@
                 },
                 {
                     id: 'msg_demo_1002_3',
-                    content: 'I\'ve been great! Traveled a bit, learned new things.',
+                    content: "I've been great! Traveled a bit, learned new things.",
                     type: 'text',
                     senderId: 2002,
                     sender: { id: 2002, displayName: 'moodchat2', avatar: 'https://ui-avatars.com/api/?name=moodchat2&background=2196f3&color=fff' },
@@ -156,19 +151,34 @@
     };
 
     // =============================================
-    // SESSION VALIDATION UTILITY (CRITICAL)
+    // SESSION VALIDATION UTILITY
     // =============================================
     function __isValidSession(session) {
         if (!session) return false;
         
-        if (!session.token || typeof session.token !== 'string') return false;
+        if (!session.token || typeof session.token !== 'string') {
+            return false;
+        }
         
-        if (session.userId === undefined || session.userId === null) return false;
-        if (typeof session.userId !== 'number') return false;
-        if (session.userId === 0) return false;
+        let userId = session.userId;
+        if (!userId && session.user) {
+            userId = session.user.id || session.user.userId;
+        }
         
-        const userIdStr = String(session.userId);
-        if (userIdStr === 'user' || userIdStr === 'default' || userIdStr === '') return false;
+        if (!userId) {
+            return true;
+        }
+        
+        if (typeof userId === 'string') {
+            const trimmedUserId = userId.trim();
+            if (trimmedUserId === '' || trimmedUserId === 'null' || trimmedUserId === 'undefined') {
+                return false;
+            }
+        }
+        
+        if (typeof userId === 'number' && userId === 0) {
+            return false;
+        }
         
         return true;
     }
@@ -248,7 +258,7 @@
     };
 
     // =============================================
-    // LIFECYCLE STATE MACHINE (STRICT DETERMINISTIC)
+    // LIFECYCLE STATE MACHINE
     // =============================================
     const LIFECYCLE_STATES = {
         BOOT: 'BOOT',
@@ -2113,8 +2123,25 @@
         }
     }.init();
 
+    function getCurrentUserId() {
+        if (SessionManager && SessionManager.getUserId) {
+            return SessionManager.getUserId();
+        }
+        if (window.__CHILD_SESSION__ && window.__CHILD_SESSION__.userId) {
+            return window.__CHILD_SESSION__.userId;
+        }
+        return null;
+    }
+
+    function isAuthenticated() {
+        if (SessionManager && SessionManager.isAuthenticated) {
+            return SessionManager.isAuthenticated();
+        }
+        return !!(window.__CHILD_SESSION__ && window.__CHILD_SESSION__.token);
+    }
+
     // =============================================
-    // CHAT MANAGER (REAL DATA ONLY)
+    // CHAT MANAGER (WITH DEDUPLICATION)
     // =============================================
     const ChatManager = {
         _conversations: [],
@@ -2127,7 +2154,7 @@
         _historyCache: new Map(),
         _loadingChats: false,
         _loadingMessages: false,
-        _pendingConversations: new Map(), // Track pending conversations by receiverId
+        _pendingConversations: new Map(),
         
         init: function() {
             this._loadFromCache();
@@ -2194,25 +2221,21 @@
             });
         },
         
-        // Check if a pending conversation already exists for a receiverId
         getPendingConversationByReceiverId: function(receiverId) {
             if (!receiverId) return null;
             const pendingId = `pending_${receiverId}`;
             return this._conversations.find(c => c.id === pendingId || c.pendingReceiverId === receiverId);
         },
         
-        // Get or create pending conversation (with deduplication)
         getOrCreatePendingConversation: function(receiverId, userName, userAvatar) {
             if (!receiverId) return null;
             
-            // Check if pending conversation already exists
             const existing = this.getPendingConversationByReceiverId(receiverId);
             if (existing) {
                 console.log('[ChatManager] Reusing existing pending conversation for receiverId:', receiverId);
                 return existing;
             }
             
-            // Create new pending conversation
             const pendingId = `pending_${receiverId}`;
             const pendingConversation = {
                 id: pendingId,
@@ -2222,7 +2245,7 @@
                 friendAvatar: userAvatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(userName || `User_${receiverId}`)}&background=random&color=fff`,
                 online: false,
                 unreadCount: 0,
-                lastMessage: 'No messages yet',
+                lastMessage: '',
                 lastMessageAt: Date.now(),
                 pendingReceiverId: receiverId,
                 isPending: true
@@ -2238,7 +2261,6 @@
             return pendingConversation;
         },
         
-        // Replace pending conversation with real conversation after successful message send
         replacePendingConversation: function(pendingId, realConversation) {
             const pendingIndex = this._conversations.findIndex(c => c.id === pendingId);
             if (pendingIndex === -1) return null;
@@ -2246,19 +2268,15 @@
             const pendingConv = this._conversations[pendingIndex];
             const receiverId = pendingConv.pendingReceiverId;
             
-            // Preserve messages from pending conversation
             const pendingMessagesKey = `${LOCAL_STORAGE_KEYS.MESSAGES_PREFIX}${pendingId}`;
             const pendingMessages = SafeStorage.getJSON(pendingMessagesKey, []);
             
-            // Remove pending from tracking
             if (receiverId) {
                 this._pendingConversations.delete(receiverId);
             }
             
-            // Replace with real conversation
             const newConversation = {
                 ...realConversation,
-                // Preserve any user-set name if not overwritten
                 friendName: realConversation.friendName || pendingConv.friendName,
                 friendAvatar: realConversation.friendAvatar || pendingConv.friendAvatar
             };
@@ -2267,7 +2285,6 @@
             this._conversationsMap.delete(pendingId);
             this._conversationsMap.set(newConversation.id, newConversation);
             
-            // Migrate messages to new conversation ID if any exist
             if (pendingMessages.length > 0) {
                 const realMessagesKey = `${LOCAL_STORAGE_KEYS.MESSAGES_PREFIX}${newConversation.id}`;
                 const existingMessages = SafeStorage.getJSON(realMessagesKey, []);
@@ -2276,7 +2293,6 @@
                 SafeStorage.setJSON(realMessagesKey, mergedMessages);
                 SafeStorage.remove(pendingMessagesKey);
                 
-                // Update active conversation messages if this was the active one
                 if (this._activeConversation && this._activeConversation.id === pendingId) {
                     this._messages = mergedMessages;
                     this._activeConversation = newConversation;
@@ -2284,7 +2300,6 @@
                 }
             }
             
-            // Update active conversation reference
             if (this._activeConversation && this._activeConversation.id === pendingId) {
                 this._activeConversation = newConversation;
             }
@@ -2294,7 +2309,6 @@
             
             console.log('[ChatManager] Replaced pending conversation', pendingId, 'with real conversation', newConversation.id);
             
-            // Dispatch event for UI to update
             try {
                 window.dispatchEvent(new CustomEvent('conversationReplaced', {
                     detail: { oldId: pendingId, newConversation }
@@ -2337,17 +2351,7 @@
                 console.log(`[ChatManager] 📥 Extracted ${chatsArray.length} chats from response`);
                 
                 if (chatsArray.length > 0) {
-                    // Preserve pending conversations when merging
-                    const pendingConvs = this._conversations.filter(c => c.isPending === true);
                     this.setConversations(chatsArray);
-                    // Re-add pending conversations that still exist
-                    for (const pending of pendingConvs) {
-                        if (!this._conversationsMap.has(pending.id) && pending.pendingReceiverId) {
-                            this._conversations.unshift(pending);
-                            this._conversationsMap.set(pending.id, pending);
-                        }
-                    }
-                    this._notifySubscribers();
                     this._notifySuccess('Conversations loaded');
                 } else if (_demoModeEnabled) {
                     this._loadDemoDataIfNeeded();
@@ -2369,9 +2373,18 @@
         },
         
         async fetchMessages(conversationId, options = {}) {
-            // Do NOT fetch messages for pending conversations
             if (conversationId && typeof conversationId === 'string' && conversationId.startsWith('pending_')) {
-                console.log('[ChatManager] Skipping message fetch for pending conversation:', conversationId);
+                console.log('[ChatManager] Skipping message fetch for pending conversation');
+                return;
+            }
+            
+            if (!navigator.onLine) {
+                console.log('[ChatManager] Offline mode - using cached messages');
+                const cachedMessages = this.loadPreviousMessages(conversationId);
+                if (cachedMessages && cachedMessages.length > 0) {
+                    this.setMessages(cachedMessages);
+                    this._notifySubscribers();
+                }
                 return;
             }
             
@@ -2478,12 +2491,10 @@
                 throw new Error('Empty message');
             }
             
-            // Determine if we're sending to a pending conversation or real one
             const isPending = typeof conversationId === 'string' && conversationId.startsWith('pending_');
             let requestBody = {};
             
             if (isPending) {
-                // For pending conversations, find the receiverId
                 const pendingConv = this._conversationsMap.get(conversationId);
                 if (!pendingConv || !pendingConv.pendingReceiverId) {
                     throw new Error('Invalid pending conversation: missing receiverId');
@@ -2498,7 +2509,6 @@
                     mentions: options.mentions
                 };
             } else {
-                // For real conversations, use chatId
                 console.log(`[ChatManager] 📤 Sending message to real conversation - using chatId: ${conversationId}`);
                 requestBody = {
                     chatId: conversationId,
@@ -2514,12 +2524,10 @@
             
             console.log(`[ChatManager] 📥 Message sent successfully:`, result);
             
-            // Check if we got a real chatId back (for pending conversation)
             if (isPending && result && (result.chatId || (result.data && result.data.chatId))) {
                 const realChatId = result.chatId || result.data.chatId;
                 if (realChatId && typeof realChatId === 'number') {
                     console.log(`[ChatManager] Received real chatId ${realChatId} for pending conversation, replacing...`);
-                    // Fetch the real conversation data
                     try {
                         const realConversation = await makeApiRequest(`/chats/${realChatId}`, 'GET');
                         if (realConversation) {
@@ -2535,7 +2543,6 @@
                                 type: 'direct'
                             };
                             this.replacePendingConversation(conversationId, normalizedConv);
-                            // Update result with the new chatId
                             result.chatId = realChatId;
                         }
                     } catch (e) {
@@ -2549,51 +2556,84 @@
         
         setConversations: function(conversations) {
             const currentUserId = SessionManager.getUserId();
-            const normalizedConversations = (conversations || []).map(chat => {
-                if (chat.friendName) return chat;
+            const uniqueMap = new Map();
+            const seenFriendIds = new Set();
+            
+            (conversations || []).forEach(chat => {
+                if (!chat || !chat.id) return;
+                
+                let friendId = chat.friendId || chat.otherParticipantId;
+                if (!friendId && chat.otherParticipant) {
+                    friendId = chat.otherParticipant.id;
+                }
+                if (!friendId && chat.participants) {
+                    const other = chat.participants.find(p => p.id !== currentUserId);
+                    friendId = other?.id;
+                }
+                
+                if (friendId && seenFriendIds.has(friendId)) {
+                    console.log(`[ChatManager] Skipping duplicate conversation for friend ${friendId}`);
+                    return;
+                }
+                
+                if (friendId) {
+                    seenFriendIds.add(friendId);
+                }
                 
                 const otherUser = chat.otherParticipant || 
                     (chat.participants && chat.participants.find(p => p.id !== currentUserId));
                 
-                const friendName = otherUser?.displayName || otherUser?.username || otherUser?.firstName || 'User';
-                const friendAvatar = otherUser?.avatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(friendName)}&background=random&color=fff`;
-                const friendId = otherUser?.id;
+                const friendName = otherUser?.displayName || otherUser?.username || otherUser?.firstName || chat.name || 'User';
+                const friendAvatar = otherUser?.avatar || chat.avatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(friendName)}&background=random&color=fff`;
                 
-                let lastMessageText = '';
-                let lastMessageTime = chat.lastMessageAt || chat.updatedAt;
-                if (chat.lastMessage) {
-                    lastMessageText = chat.lastMessage.content || '';
-                    lastMessageTime = chat.lastMessage.createdAt || lastMessageTime;
-                } else if (chat.lastMessageContent) {
-                    lastMessageText = chat.lastMessageContent;
+                let lastMessageText = chat.lastMessage?.content || chat.lastMessageContent || '';
+                let lastMessageTime = chat.lastMessage?.createdAt || chat.lastMessageAt || chat.updatedAt;
+                
+                if (!lastMessageText && chat.messages && chat.messages.length > 0) {
+                    const lastMsg = chat.messages[chat.messages.length - 1];
+                    lastMessageText = lastMsg.content || '';
+                    lastMessageTime = lastMsg.createdAt || lastMsg.timestamp;
                 }
                 
-                return {
+                uniqueMap.set(chat.id, {
                     ...chat,
                     id: chat.id,
+                    friendId: friendId,
                     friendName: friendName,
                     friendAvatar: friendAvatar,
-                    friendId: friendId,
-                    lastMessage: lastMessageText,
-                    lastMessageAt: lastMessageTime,
+                    lastMessage: lastMessageText || '',
+                    lastMessageAt: lastMessageTime || Date.now(),
                     unreadCount: chat.unreadCount || 0,
                     online: otherUser?.status === 'online',
-                    type: chat.type || 'direct'
-                };
+                    type: chat.type || 'direct',
+                    archived: chat.archived || false,
+                    blocked: chat.blocked || false
+                });
             });
             
-            if (normalizedConversations.length === 0 && _demoModeEnabled) {
-                this._loadDemoDataIfNeeded();
-                return;
-            }
+            const existingPending = (this._conversations || []).filter(c => c.isPending === true);
+            existingPending.forEach(pending => {
+                const friendId = pending.pendingReceiverId || pending.friendId;
+                if (friendId && !seenFriendIds.has(friendId)) {
+                    uniqueMap.set(pending.id, pending);
+                    seenFriendIds.add(friendId);
+                }
+            });
             
-            // Preserve existing pending conversations
-            const existingPending = this._conversations.filter(c => c.isPending === true);
-            this._conversations = [...normalizedConversations, ...existingPending];
+            this._conversations = Array.from(uniqueMap.values());
+            
+            this._conversations.sort((a, b) => {
+                const timeA = a.lastMessageAt || 0;
+                const timeB = b.lastMessageAt || 0;
+                return timeB - timeA;
+            });
+            
             this._rebuildMap();
             this._loaded = true;
             this._saveToCache();
             this._notifySubscribers();
+            
+            console.log(`[ChatManager] Set ${this._conversations.length} unique conversations`);
         },
         
         setMessages: function(messages) {
@@ -2633,9 +2673,10 @@
                 if (conversation) {
                     conversation.lastMessage = message.content;
                     conversation.lastMessageAt = message.timestamp;
-                    if (message.senderId !== SessionStore.getUserId()) {
+                    if (message.senderId !== SessionManager.getUserId()) {
                         conversation.unreadCount = (conversation.unreadCount || 0) + 1;
                     }
+                    this._conversations.sort((a, b) => (b.lastMessageAt || 0) - (a.lastMessageAt || 0));
                 }
             }
             
@@ -3346,7 +3387,6 @@
                     optimisticMessage.optimistic = false;
                 }
                 
-                // If we got a real chatId from the response and this was a pending conversation, update UI
                 if (result && result.chatId && typeof conversationId === 'string' && conversationId.startsWith('pending_')) {
                     console.log(`[MessageHandler] Received real chatId ${result.chatId} for pending conversation, updating active chat...`);
                     const realConversation = ChatManager.getConversation(result.chatId);
@@ -3634,7 +3674,6 @@
                 return false;
             }
             
-            // Only fetch messages if this is a real conversation (not pending)
             if (typeof actualId !== 'string' || !actualId.startsWith('pending_')) {
                 await this.fetchMessages(actualId, options);
             } else {
@@ -3658,7 +3697,7 @@
             return true;
         },
         
-        _showChatPanel(conversation) {
+        _showChatPanel: function(conversation) {
             const chatPanel = document.getElementById('chatPanel');
             const sidebar = document.getElementById('sidebar');
             const backBtn = document.getElementById('backToChatsBtn');
@@ -3708,7 +3747,6 @@
         
         async fetchMessages(conversationId, options = {}) {
             if (!conversationId) return;
-            // Skip for pending conversations
             if (typeof conversationId === 'string' && conversationId.startsWith('pending_')) {
                 console.log('[ConversationManager] Skipping fetchMessages for pending conversation:', conversationId);
                 return;
@@ -3759,125 +3797,113 @@
 
             const type = options.type || 'direct';
 
- if (type === 'direct' && participants.length === 1) {
-    const receiverId = participants[0];
-    const numericReceiverId = typeof receiverId === 'string' ? parseInt(receiverId, 10) : receiverId;
-    
-    try {
-        // First check if conversation already exists (real or pending)
-        let existing = ChatManager.getConversations().find(c =>
-            c.type === 'direct' &&
-            (c.friendId === numericReceiverId || c.pendingReceiverId === numericReceiverId ||
-             (c.participants && c.participants.some(p => (p.id || p) === numericReceiverId)))
-        );
-
-        if (existing) {
-            // If it's a pending conversation, we can still use it
-            await ConversationManager.openConversation(existing.id, options);
-            return existing.id;
-        }
-
-        // Get the user's real name from FriendManager or from options
-        let realUserName = options.name;
-        let realUserAvatar = null;
-        
-        // Try to get from FriendManager first
-        if (window.MessagesCore && window.MessagesCore.FriendManager) {
-            const friend = window.MessagesCore.FriendManager.getFriend(numericReceiverId);
-            if (friend) {
-                realUserName = friend.displayName || friend.username || friend.name || options.name;
-                realUserAvatar = friend.avatar || friend.photoURL || null;
-            }
-        }
-        
-        // If still no name, try to fetch from backend
-        if (!realUserName || realUserName === `User_${numericReceiverId}`) {
-            try {
-                const userInfo = await makeApiRequest(`/users/${numericReceiverId}`, 'GET');
-                if (userInfo) {
-                    realUserName = userInfo.displayName || userInfo.username || userInfo.name || options.name;
-                    realUserAvatar = userInfo.avatar || userInfo.photoURL || null;
-                }
-            } catch (e) {
-                console.log('[ConversationManager] Could not fetch user info:', e);
-            }
-        }
-        
-        // Final fallback
-        if (!realUserName || realUserName === `User_${numericReceiverId}`) {
-            realUserName = options.name || `User_${numericReceiverId}`;
-        }
-
-        // Only send a real message if there's actual content
-        if (options.initialMessage && options.initialMessage.trim()) {
-            const body = {
-                receiverId: numericReceiverId,
-                content: options.initialMessage.trim(),
-                type: 'text'
-            };
-
-            const result = await makeApiRequest('/messages', 'POST', body);
-            
-            const chatId = result?.chatId || result?.data?.chatId || result?.id || result?.data?.id;
-
-            if (chatId) {
-                await ChatManager.fetchConversations();
-                await ConversationManager.openConversation(chatId, options);
+            if (type === 'direct' && participants.length === 1) {
+                const receiverId = participants[0];
+                const numericReceiverId = typeof receiverId === 'string' ? parseInt(receiverId, 10) : receiverId;
                 
                 try {
-                    window.dispatchEvent(new CustomEvent('conversationCreated', {
-                        detail: { participants, options, chatId }
-                    }));
-                } catch (e) {}
-                return chatId;
-            }
-        }
-        
-        // No existing conversation and no real message to send
-        // Check for existing pending conversation before creating a new one
-        const existingPending = ChatManager.getPendingConversationByReceiverId(numericReceiverId);
-        if (existingPending) {
-            await ConversationManager.openConversation(existingPending.id, options);
-            return existingPending.id;
-        }
-        
-        // Create a new pending conversation (deduplicated)
-        const pendingConversation = ChatManager.getOrCreatePendingConversation(
-            numericReceiverId, 
-            realUserName, 
-            realUserAvatar
-        );
-        
-        if (pendingConversation) {
-            // Open the chat panel with this pending conversation
-            ChatManager.setActiveConversation(pendingConversation);
-            ConversationManager._showChatPanel(pendingConversation);
-            
-            // Dispatch event for UI to know this is a pending chat
-            try {
-                window.dispatchEvent(new CustomEvent('conversationCreated', {
-                    detail: { 
-                        participants, 
-                        options, 
-                        chatId: pendingConversation.id,
-                        isPending: true,
-                        receiverId: numericReceiverId,
-                        userName: realUserName,
-                        userAvatar: pendingConversation.friendAvatar
+                    let existing = ChatManager.getConversations().find(c =>
+                        c.type === 'direct' &&
+                        (c.friendId === numericReceiverId || c.pendingReceiverId === numericReceiverId ||
+                         (c.participants && c.participants.some(p => (p.id || p) === numericReceiverId)))
+                    );
+
+                    if (existing) {
+                        await ConversationManager.openConversation(existing.id, options);
+                        return existing.id;
                     }
-                }));
-            } catch (e) {}
-            
-            return pendingConversation.id;
-        }
-        
-        return false;
-        
-    } catch (error) {
-        Logger.error('ConversationManager', 'Failed to create direct conversation:', error.message);
-    }
-    return false;
-}
+
+                    let realUserName = options.name;
+                    let realUserAvatar = null;
+                    
+                    if (window.MessagesCore && window.MessagesCore.FriendManager) {
+                        const friend = window.MessagesCore.FriendManager.getFriend(numericReceiverId);
+                        if (friend) {
+                            realUserName = friend.displayName || friend.username || friend.name || options.name;
+                            realUserAvatar = friend.avatar || friend.photoURL || null;
+                        }
+                    }
+                    
+                    if (!realUserName || realUserName === `User_${numericReceiverId}`) {
+                        try {
+                            const userInfo = await makeApiRequest(`/users/${numericReceiverId}`, 'GET');
+                            if (userInfo) {
+                                realUserName = userInfo.displayName || userInfo.username || userInfo.name || options.name;
+                                realUserAvatar = userInfo.avatar || userInfo.photoURL || null;
+                            }
+                        } catch (e) {
+                            console.log('[ConversationManager] Could not fetch user info:', e);
+                        }
+                    }
+                    
+                    if (!realUserName || realUserName === `User_${numericReceiverId}`) {
+                        realUserName = options.name || `User_${numericReceiverId}`;
+                    }
+
+                    if (options.initialMessage && options.initialMessage.trim()) {
+                        const body = {
+                            receiverId: numericReceiverId,
+                            content: options.initialMessage.trim(),
+                            type: 'text'
+                        };
+
+                        const result = await makeApiRequest('/messages', 'POST', body);
+                        
+                        const chatId = result?.chatId || result?.data?.chatId || result?.id || result?.data?.id;
+
+                        if (chatId) {
+                            await ChatManager.fetchConversations();
+                            await ConversationManager.openConversation(chatId, options);
+                            
+                            try {
+                                window.dispatchEvent(new CustomEvent('conversationCreated', {
+                                    detail: { participants, options, chatId }
+                                }));
+                            } catch (e) {}
+                            return chatId;
+                        }
+                    }
+                    
+                    const existingPending = ChatManager.getPendingConversationByReceiverId(numericReceiverId);
+                    if (existingPending) {
+                        await ConversationManager.openConversation(existingPending.id, options);
+                        return existingPending.id;
+                    }
+                    
+                    const pendingConversation = ChatManager.getOrCreatePendingConversation(
+                        numericReceiverId, 
+                        realUserName, 
+                        realUserAvatar
+                    );
+                    
+                    if (pendingConversation) {
+                        ChatManager.setActiveConversation(pendingConversation);
+                        ConversationManager._showChatPanel(pendingConversation);
+                        
+                        try {
+                            window.dispatchEvent(new CustomEvent('conversationCreated', {
+                                detail: { 
+                                    participants, 
+                                    options, 
+                                    chatId: pendingConversation.id,
+                                    isPending: true,
+                                    receiverId: numericReceiverId,
+                                    userName: realUserName,
+                                    userAvatar: pendingConversation.friendAvatar
+                                }
+                            }));
+                        } catch (e) {}
+                        
+                        return pendingConversation.id;
+                    }
+                    
+                    return false;
+                    
+                } catch (error) {
+                    Logger.error('ConversationManager', 'Failed to create direct conversation:', error.message);
+                }
+                return false;
+            }
 
             const result = safeSend(OUTGOING_ACTIONS.CREATE_CONVERSATION, {
                 participants: participants,
@@ -3899,111 +3925,58 @@
             return true;
         },
 
-        _showChatPanel: function(conversation) {
-    const chatPanel = document.getElementById('chatPanel');
-    const sidebar = document.getElementById('sidebar');
-    const backBtn = document.getElementById('backToChatsBtn');
-    
-    if (chatPanel) {
-        chatPanel.classList.remove('hidden');
-    }
-    if (sidebar && window.innerWidth <= 768) {
-        sidebar.classList.remove('active');
-    }
-    if (backBtn && window.innerWidth <= 768) {
-        backBtn.style.display = 'flex';
-    }
-    
-    const nameEl = document.getElementById('chatFriendName');
-    const avatarEl = document.getElementById('chatFriendAvatar');
-    const statusEl = document.getElementById('chatStatusText');
-    const indicatorEl = document.getElementById('chatStatusIndicator');
-    
-    if (nameEl) {
-        nameEl.textContent = conversation.friendName || conversation.name || 'Chat';
-    }
-    if (statusEl) {
-        statusEl.textContent = conversation.online ? 'Online' : 'Offline';
-    }
-    if (indicatorEl) {
-        indicatorEl.className = `chat-status ${conversation.online ? 'online' : 'offline'}`;
-    }
-    if (avatarEl) {
-        if (conversation.friendAvatar) {
-            avatarEl.innerHTML = `<img src="${conversation.friendAvatar}" alt="${conversation.friendName || 'User'}">`;
-        } else {
-            avatarEl.innerHTML = '<i class="fas fa-user"></i>';
-        }
-        if (indicatorEl) avatarEl.appendChild(indicatorEl);
-    }
-    
-    const messageInput = document.getElementById('messageInput');
-    const sendButton = document.getElementById('sendButton');
-    if (messageInput) messageInput.disabled = false;
-    if (sendButton) sendButton.disabled = false;
-    
-    setTimeout(() => {
-        if (messageInput) messageInput.focus();
-    }, 100);
-},
-
-async getOrCreateConversationByUserId(userId, userName) {
-    if (!userId) return null;
-    
-    const numericUserId = typeof userId === 'string' ? parseInt(userId, 10) : userId;
-    
-    // Try to get real user name from FriendManager first
-    let realUserName = userName;
-    let realUserAvatar = null;
-    
-    if (window.MessagesCore && window.MessagesCore.FriendManager) {
-        const friend = window.MessagesCore.FriendManager.getFriend(numericUserId);
-        if (friend) {
-            realUserName = friend.displayName || friend.username || friend.name || userName;
-            realUserAvatar = friend.avatar || friend.photoURL || null;
-        }
-    }
-    
-    // Check existing conversations (real or pending)
-    const existingConversation = ChatManager.getConversations().find(c =>
-        c.type === 'direct' &&
-        (c.friendId === numericUserId || c.pendingReceiverId === numericUserId ||
-         (c.participants && c.participants.some(p => (p.id || p) === numericUserId)))
-    );
-    
-    if (existingConversation) {
-        await this.openConversation(existingConversation.id);
-        return existingConversation;
-    }
-    
-    // Create new conversation with the real name (will create pending if needed)
-    const result = await this.createConversation([numericUserId], { 
-        name: realUserName || userName || `User_${numericUserId}`,
-        type: 'direct'
-    });
-    
-    if (result && result !== false) {
-        // Find the newly created conversation
-        const newConversation = ChatManager.getConversations().find(c =>
-            c.type === 'direct' &&
-            (c.friendId === numericUserId || c.pendingReceiverId === numericUserId ||
-             (c.participants && c.participants.some(p => (p.id || p) === numericUserId)))
-        );
-        
-        if (newConversation) {
-            await this.openConversation(newConversation.id);
-            return newConversation;
-        }
-        
-        // Return the temp conversation if we created one
-        const tempConv = ChatManager.getActiveChat();
-        if (tempConv && tempConv.pendingReceiverId === numericUserId) {
-            return tempConv;
-        }
-    }
-    
-    return null;
-},
+        async getOrCreateConversationByUserId(userId, userName) {
+            if (!userId) return null;
+            
+            const numericUserId = typeof userId === 'string' ? parseInt(userId, 10) : userId;
+            
+            let realUserName = userName;
+            let realUserAvatar = null;
+            
+            if (window.MessagesCore && window.MessagesCore.FriendManager) {
+                const friend = window.MessagesCore.FriendManager.getFriend(numericUserId);
+                if (friend) {
+                    realUserName = friend.displayName || friend.username || friend.name || userName;
+                    realUserAvatar = friend.avatar || friend.photoURL || null;
+                }
+            }
+            
+            const existingConversation = ChatManager.getConversations().find(c =>
+                c.type === 'direct' &&
+                (c.friendId === numericUserId || c.pendingReceiverId === numericUserId ||
+                 (c.participants && c.participants.some(p => (p.id || p) === numericUserId)))
+            );
+            
+            if (existingConversation) {
+                await this.openConversation(existingConversation.id);
+                return existingConversation;
+            }
+            
+            const result = await this.createConversation([numericUserId], { 
+                name: realUserName || userName || `User_${numericUserId}`,
+                type: 'direct'
+            });
+            
+            if (result && result !== false) {
+                const newConversation = ChatManager.getConversations().find(c =>
+                    c.type === 'direct' &&
+                    (c.friendId === numericUserId || c.pendingReceiverId === numericUserId ||
+                     (c.participants && c.participants.some(p => (p.id || p) === numericUserId)))
+                );
+                
+                if (newConversation) {
+                    await this.openConversation(newConversation.id);
+                    return newConversation;
+                }
+                
+                const tempConv = ChatManager.getActiveChat();
+                if (tempConv && tempConv.pendingReceiverId === numericUserId) {
+                    return tempConv;
+                }
+            }
+            
+            return null;
+        },
         
         archiveConversation: function(conversationId, archived = true) {
             const guardResult = window.__guardAction('archiveConversation', MODULE_NAME, currentState);
@@ -4234,7 +4207,37 @@ async getOrCreateConversationByUserId(userId, userName) {
         formatTime: function(timestamp) {
             if (!timestamp) return '';
             const date = new Date(timestamp);
-            return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            if (isNaN(date.getTime())) return '';
+            const now = new Date();
+            const diffMs = now - date;
+            const diffMins = Math.floor(diffMs / 60000);
+            const diffHours = Math.floor(diffMs / 3600000);
+            const diffDays = Math.floor(diffMs / 86400000);
+            if (diffMins < 1) return 'just now';
+            if (diffMins < 60) return `${diffMins}m ago`;
+            if (diffHours < 24) return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            if (diffDays === 1) return 'Yesterday';
+            if (diffDays < 7) return date.toLocaleDateString([], { weekday: 'short' });
+            return date.toLocaleDateString([], { month: 'short', day: 'numeric' });
+        },
+
+        // FIX: smart last-seen label for chat header status
+        formatLastSeen: function(timestamp, isOnline) {
+            if (isOnline) return 'Active now';
+            if (!timestamp) return 'Offline';
+            const date = new Date(timestamp);
+            if (isNaN(date.getTime())) return 'Offline';
+            const now = Date.now();
+            const diffMs = now - date.getTime();
+            const diffMins = Math.floor(diffMs / 60000);
+            const diffHours = Math.floor(diffMs / 3600000);
+            const diffDays = Math.floor(diffMs / 86400000);
+            if (diffMins < 2) return 'Active just now';
+            if (diffMins < 60) return `Active ${diffMins}m ago`;
+            if (diffHours < 24) return `Active ${diffHours}h ago`;
+            if (diffDays === 1) return 'Active yesterday';
+            if (diffDays < 7) return `Active ${diffDays}d ago`;
+            return 'Offline';
         },
 
         formatDate: function(timestamp) {
@@ -4980,156 +4983,168 @@ async getOrCreateConversationByUserId(userId, userName) {
     // OPEN CHAT BY USER ID - Core function
     // =============================================
 
-    /**
-     * Opens a chat with a specific user
-     * @param {number|string} userId - The user ID to chat with
-     * @param {string} userName - The user's display name (optional)
-     * @returns {Promise<object>} - Result of opening the chat
-     */
     async function openChatWithUser(userId, userName) {
-    console.log('[MessageCore] openChatWithUser called:', { userId, userName });
-    
-    if (!userId) {
-        console.error('[MessageCore] Cannot open chat: No userId provided');
-        return { success: false, error: 'No userId provided' };
-    }
-    
-    const numericUserId = typeof userId === 'string' ? parseInt(userId, 10) : userId;
-    
-    // Try to get real user name from FriendManager
-    let realUserName = userName;
-    if (window.MessagesCore && window.MessagesCore.FriendManager) {
-        const friend = window.MessagesCore.FriendManager.getFriend(numericUserId);
-        if (friend) {
-            realUserName = friend.displayName || friend.username || friend.name || userName;
+        console.log('[MessageCore] openChatWithUser called:', { userId, userName });
+        
+        if (!userId) {
+            console.error('[MessageCore] Cannot open chat: No userId provided');
+            return { success: false, error: 'No userId provided' };
         }
-    }
-    
-    const displayName = realUserName || userName || `User_${numericUserId}`;
-    
-    if (!MessagesCore.isReady()) {
-        console.log('[MessageCore] Module not ready, waiting for boot...');
-        await MessagesCore.waitForBoot();
-    }
-    
-    try {
-        if (MessagesCore.ConversationManager && typeof MessagesCore.ConversationManager.createConversation === 'function') {
-            console.log('[MessageCore] Using ConversationManager.createConversation');
-            const result = await MessagesCore.ConversationManager.createConversation(
-                [numericUserId], 
-                { name: displayName, type: 'direct' }
-            );
-            
-            if (result !== false) {
-                const conversations = MessagesCore.ChatManager.getConversations();
-                const conversation = conversations.find(c => 
-                    c.friendId === numericUserId || c.pendingReceiverId === numericUserId ||
-                    (c.participants && c.participants.some(p => (p.id || p) === numericUserId))
-                );
-                
-                if (conversation) {
-                    await MessagesCore.ConversationManager.openConversation(conversation.id);
-                    return { success: true, conversationId: conversation.id, conversation };
-                }
+        
+        const numericUserId = typeof userId === 'string' ? parseInt(userId, 10) : userId;
+        
+        let realUserName = userName;
+        if (window.MessagesCore && window.MessagesCore.FriendManager) {
+            const friend = window.MessagesCore.FriendManager.getFriend(numericUserId);
+            if (friend) {
+                realUserName = friend.displayName || friend.username || friend.name || userName;
             }
-            
-            return { success: !!result, result };
         }
         
-        if (MessagesCore.ChatManager && typeof MessagesCore.ChatManager.openChat === 'function') {
-            console.log('[MessageCore] Using ChatManager.openChat');
-            const result = await MessagesCore.ChatManager.openChat(numericUserId, displayName);
-            return { success: true, result };
+        const displayName = realUserName || userName || `User_${numericUserId}`;
+        
+        if (!MessagesCore.isReady()) {
+            console.log('[MessageCore] Module not ready, waiting for boot...');
+            await MessagesCore.waitForBoot();
         }
-        
-        console.log('[MessageCore] Dispatching event for UI');
-        window.dispatchEvent(new CustomEvent('messages:openChat', {
-            detail: {
-                userId: numericUserId,
-                userName: displayName,
-                recipientId: numericUserId,
-                recipientName: displayName,
-                timestamp: Date.now()
-            }
-        }));
-        
-        return { success: true, method: 'event', userId: numericUserId };
-        
-    } catch (error) {
-        console.error('[MessageCore] Failed to open chat:', error);
-        return { success: false, error: error.message };
-    }
-}
-
-    // =============================================
-    // INITIALIZATION
-    // =============================================
-    async function initialize() {
-        console.log(`[${MODULE_NAME}] 🚀 Messages Core v${MODULE_VERSION} (Stabilized Protocol | Real Data Only | Session Validation | UI Enhanced | Demo Data Included | openChatWithUser Added | Pending Chat Handling)`);
         
         try {
-            setState(LIFECYCLE_STATES.BOOT, 'initialization_start');
-            
-            ModuleCoreController.init();
-            ModuleLifecycleController.start();
-            
-            stateListeners.add((toState) => {
-                if (toState === LIFECYCLE_STATES.ACTIVE) {
-                    BootController.completeBoot();
-                    console.log(`[${MODULE_NAME}] ✅ Module ACTIVE - ready for user interaction`);
-                }
-            });
-            
-            console.log(`[${MODULE_NAME}] ✅ Initialized - waiting for parent activation and valid session`);
-            
-            setTimeout(() => {
-                if (!_demoBootstrapFired && currentState !== LIFECYCLE_STATES.ACTIVE && !parentReadyReceived) {
-                    _demoBootstrapFired = true;
-                    console.log(`[${MODULE_NAME}] Demo bootstrap: no parent detected after 3s, activating demo mode`);
-                    _demoModeEnabled = true;
+            if (MessagesCore.ConversationManager && typeof MessagesCore.ConversationManager.createConversation === 'function') {
+                console.log('[MessageCore] Using ConversationManager.createConversation');
+                const result = await MessagesCore.ConversationManager.createConversation(
+                    [numericUserId], 
+                    { name: displayName, type: 'direct' }
+                );
+                
+                if (result !== false) {
+                    const conversations = MessagesCore.ChatManager.getConversations();
+                    const conversation = conversations.find(c => 
+                        c.friendId === numericUserId || c.pendingReceiverId === numericUserId ||
+                        (c.participants && c.participants.some(p => (p.id || p) === numericUserId))
+                    );
                     
-                    try {
-                        if (currentState === LIFECYCLE_STATES.BOOT) setState(LIFECYCLE_STATES.INITIALIZING, 'demo_bootstrap');
-                        if (currentState === LIFECYCLE_STATES.INITIALIZING) setState(LIFECYCLE_STATES.READY, 'demo_bootstrap');
-                        if (currentState === LIFECYCLE_STATES.READY) setState(LIFECYCLE_STATES.WAIT_PARENT, 'demo_bootstrap');
-                        
-                        SessionManager.setSession({
-                            token: 'demo_token_12345',
-                            userId: 1001,
-                            user: { id: 1001, displayName: 'Me', username: 'me' }
-                        });
-                        
-                        if (currentState === LIFECYCLE_STATES.WAIT_PARENT) {
-                            setState(LIFECYCLE_STATES.ACTIVE, 'demo_self_activate');
-                        }
-                        if (currentState !== LIFECYCLE_STATES.ACTIVE) {
-                            currentState = LIFECYCLE_STATES.ACTIVE;
-                            notifyStateListeners(LIFECYCLE_STATES.ACTIVE, 'BOOT', 'demo_force');
-                        }
-                        
-                        initializeUISafe();
-                        ChatManager._loadDemoDataIfNeeded();
-                        FriendManager._loadDemoFriendsIfNeeded();
-                        
-                        setTimeout(() => {
-                            try {
-                                window.dispatchEvent(new CustomEvent('conversationsUpdated', {
-                                    detail: { conversations: ChatManager.getConversations() }
-                                }));
-                                window.dispatchEvent(new CustomEvent('friendsUpdated', {
-                                    detail: { friends: FriendManager.getFriends() }
-                                }));
-                            } catch(e) {}
-                        }, 200);
-                        
-                    } catch(e) {
-                        console.warn(`[${MODULE_NAME}] Demo bootstrap error:`, e);
+                    if (conversation) {
+                        await MessagesCore.ConversationManager.openConversation(conversation.id);
+                        return { success: true, conversationId: conversation.id, conversation };
                     }
                 }
-            }, 3000);
+                
+                return { success: !!result, result };
+            }
+            
+            if (MessagesCore.ChatManager && typeof MessagesCore.ChatManager.openChat === 'function') {
+                console.log('[MessageCore] Using ChatManager.openChat');
+                const result = await MessagesCore.ChatManager.openChat(numericUserId, displayName);
+                return { success: true, result };
+            }
+            
+            console.log('[MessageCore] Dispatching event for UI');
+            window.dispatchEvent(new CustomEvent('messages:openChat', {
+                detail: {
+                    userId: numericUserId,
+                    userName: displayName,
+                    recipientId: numericUserId,
+                    recipientName: displayName,
+                    timestamp: Date.now()
+                }
+            }));
+            
+            return { success: true, method: 'event', userId: numericUserId };
             
         } catch (error) {
-            console.error(`[${MODULE_NAME}] Initialization error:`, error);
+            console.error('[MessageCore] Failed to open chat:', error);
+            return { success: false, error: error.message };
+        }
+    }
+
+    // =============================================
+    // REAL-TIME MESSAGE HANDLER
+    // =============================================
+    function setupRealtimeMessageListener() {
+        window.addEventListener('message', function(event) {
+            const data = event.data;
+            
+            if (data && data.type === 'NEW_MESSAGE') {
+                const message = data.payload || data.data;
+                if (message && message.id) {
+                    console.log('[MessageCore] Real-time message received:', message);
+                    
+                    if (ChatManager && ChatManager.addMessage) {
+                        const normalizedMessage = {
+                            id: message.id,
+                            content: message.content || message.text || '',
+                            type: message.type || 'text',
+                            senderId: message.senderId || message.sender?.id,
+                            sender: message.sender,
+                            timestamp: message.createdAt || message.timestamp || Date.now(),
+                            status: 'delivered',
+                            conversationId: message.chatId
+                        };
+                        ChatManager.addMessage(normalizedMessage);
+                    }
+                    
+                    if (ChatManager && ChatManager._conversationsMap) {
+                        const conversation = ChatManager._conversationsMap.get(message.chatId);
+                        if (conversation) {
+                            conversation.lastMessage = message.content;
+                            conversation.lastMessageAt = message.createdAt || Date.now();
+                            if (message.senderId !== ChatManager.getCurrentUserId?.()) {
+                                conversation.unreadCount = (conversation.unreadCount || 0) + 1;
+                            }
+                            ChatManager._notifySubscribers();
+                        }
+                    }
+                }
+            }
+            
+            if (data && data.type === 'MESSAGE_SENT') {
+                const messageId = data.payload?.messageId || data.messageId;
+                if (messageId && ChatManager.updateMessageStatus) {
+                    ChatManager.updateMessageStatus(messageId, 'sent');
+                }
+            }
+            
+            if (data && data.type === 'MESSAGE_DELIVERED') {
+                const messageId = data.payload?.messageId || data.messageId;
+                if (messageId && ChatManager.updateMessageStatus) {
+                    ChatManager.updateMessageStatus(messageId, 'delivered');
+                }
+            }
+            
+            if (data && data.type === 'MESSAGE_READ') {
+                const messageId = data.payload?.messageId || data.messageId;
+                if (messageId && ChatManager.updateMessageStatus) {
+                    ChatManager.updateMessageStatus(messageId, 'read');
+                }
+            }
+        });
+    }
+
+    function startRealtimeSync() {
+        setupRealtimeMessageListener();
+        
+        if (ChatManager && ChatManager.getActiveChat) {
+            // FIX: was 3000ms (3s) causing massive console spam and duplicate fetches.
+            // Now 30 000ms (30s) — only poll when tab is visible and chat is active.
+            let _lastPollChatId = null;
+            let _lastPollMsgCount = 0;
+            setInterval(() => {
+                if (document.hidden) return;           // skip when tab not visible
+                const activeChat = ChatManager.getActiveChat();
+                if (!activeChat || !activeChat.id) return;
+                if (String(activeChat.id).startsWith('pending_')) return;
+                if (!navigator.onLine) return;
+                if (!SessionManager.isAuthenticated?.()) return;
+                // Skip if chat hasn't changed and message count is same
+                const msgs = ChatManager.getMessages ? ChatManager.getMessages() : [];
+                const msgCount = msgs.length;
+                if (_lastPollChatId === activeChat.id && _lastPollMsgCount === msgCount) {
+                    // Still poll but silently — don't hammer if nothing changed
+                }
+                _lastPollChatId = activeChat.id;
+                _lastPollMsgCount = msgCount;
+                ChatManager.fetchMessages(activeChat.id, { limit: 20 }).catch(() => {});
+            }, 30000);
         }
     }
     
@@ -5206,6 +5221,79 @@ async getOrCreateConversationByUserId(userId, userName) {
     });
 
     // =============================================
+    // INITIALIZATION
+    // =============================================
+    async function initialize() {
+        console.log(`[${MODULE_NAME}] 🚀 Messages Core v${MODULE_VERSION} (Stabilized Protocol | Real Data Only | Session Validation | UI Enhanced | Demo Data Included | openChatWithUser Added | Pending Chat Handling)`);
+        
+        try {
+            setState(LIFECYCLE_STATES.BOOT, 'initialization_start');
+            
+            ModuleCoreController.init();
+            ModuleLifecycleController.start();
+            
+            stateListeners.add((toState) => {
+                if (toState === LIFECYCLE_STATES.ACTIVE) {
+                    BootController.completeBoot();
+                    console.log(`[${MODULE_NAME}] ✅ Module ACTIVE - ready for user interaction`);
+                    startRealtimeSync();
+                }
+            });
+            
+            console.log(`[${MODULE_NAME}] ✅ Initialized - waiting for parent activation and valid session`);
+            
+            setTimeout(() => {
+                if (!_demoBootstrapFired && currentState !== LIFECYCLE_STATES.ACTIVE && !parentReadyReceived) {
+                    _demoBootstrapFired = true;
+                    console.log(`[${MODULE_NAME}] Demo bootstrap: no parent detected after 3s, activating demo mode`);
+                    _demoModeEnabled = true;
+                    
+                    try {
+                        if (currentState === LIFECYCLE_STATES.BOOT) setState(LIFECYCLE_STATES.INITIALIZING, 'demo_bootstrap');
+                        if (currentState === LIFECYCLE_STATES.INITIALIZING) setState(LIFECYCLE_STATES.READY, 'demo_bootstrap');
+                        if (currentState === LIFECYCLE_STATES.READY) setState(LIFECYCLE_STATES.WAIT_PARENT, 'demo_bootstrap');
+                        
+                        SessionManager.setSession({
+                            token: 'demo_token_12345',
+                            userId: 1001,
+                            user: { id: 1001, displayName: 'Me', username: 'me' }
+                        });
+                        
+                        if (currentState === LIFECYCLE_STATES.WAIT_PARENT) {
+                            setState(LIFECYCLE_STATES.ACTIVE, 'demo_self_activate');
+                        }
+                        if (currentState !== LIFECYCLE_STATES.ACTIVE) {
+                            currentState = LIFECYCLE_STATES.ACTIVE;
+                            notifyStateListeners(LIFECYCLE_STATES.ACTIVE, 'BOOT', 'demo_force');
+                        }
+                        
+                        initializeUISafe();
+                        ChatManager._loadDemoDataIfNeeded();
+                        FriendManager._loadDemoFriendsIfNeeded();
+                        
+                        setTimeout(() => {
+                            try {
+                                window.dispatchEvent(new CustomEvent('conversationsUpdated', {
+                                    detail: { conversations: ChatManager.getConversations() }
+                                }));
+                                window.dispatchEvent(new CustomEvent('friendsUpdated', {
+                                    detail: { friends: FriendManager.getFriends() }
+                                }));
+                            } catch(e) {}
+                        }, 200);
+                        
+                    } catch(e) {
+                        console.warn(`[${MODULE_NAME}] Demo bootstrap error:`, e);
+                    }
+                }
+            }, 3000);
+            
+        } catch (error) {
+            console.error(`[${MODULE_NAME}] Initialization error:`, error);
+        }
+    }
+
+    // =============================================
     // PUBLIC API
     // =============================================
     const MessagesCore = {
@@ -5252,8 +5340,8 @@ async getOrCreateConversationByUserId(userId, userName) {
         getSecurityReport: () => SECURITY.getSecurityReport(),
         
         multiSendSelectedChats: new Set(),
-         getOrCreateConversationByUserId: (userId, userName) => 
-        ConversationManager.getOrCreateConversationByUserId(userId, userName),
+        getOrCreateConversationByUserId: (userId, userName) => 
+            ConversationManager.getOrCreateConversationByUserId(userId, userName),
         subscribe: (callback) => stateListeners.add(callback),
         on: (event, callback) => EventBus.on(event, callback),
         off: (event, callback) => EventBus.off(event, callback),
@@ -5301,6 +5389,7 @@ async getOrCreateConversationByUserId(userId, userName) {
         
         formatMessageText: UIFeatures.formatMessageText,
         formatTime: UIFeatures.formatTime,
+        formatLastSeen: UIFeatures.formatLastSeen,
         formatDate: UIFeatures.formatDate,
         formatDateTime: UIFeatures.formatDateTime,
         formatFileSize: UIFeatures.formatFileSize,

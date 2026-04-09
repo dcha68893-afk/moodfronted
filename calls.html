@@ -2310,6 +2310,24 @@ window.__CALLS_IFRAME__ = {
             border-radius: 8px;
             z-index: 2;
         }
+        @keyframes slideInRight {
+    from {
+        transform: translateX(100%);
+        opacity: 0;
+    }
+    to {
+        transform: translateX(0);
+        opacity: 1;
+    }
+}
+
+.call-notification {
+    transition: all 0.3s ease;
+}
+
+.call-notification-close:hover {
+    opacity: 1 !important;
+}
     </style>
     <link rel="stylesheet" href="/css/suppress-webgl.css">
 </head>

@@ -1,6 +1,6 @@
 // =============================================
 // SETTINGS MODULE - REAL BACKEND-DRIVEN CONTROL SYSTEM
-// VERSION: 9.2.1 - SESSION VALIDATION HARDENED
+// VERSION: 9.2.2 - FIXED EXPORTS & AUTH GUARDS
 // =============================================
 
 // =============================================
@@ -37,7 +37,7 @@ function __isValidSession(session) {
 // MODULE IDENTITY & VERSION
 // =============================================
 const MODULE_NAME = 'settings';
-const MODULE_VERSION = '9.2.1';
+const MODULE_VERSION = '9.2.2';
 const FRAME_ID = 'settings';
 let moduleId = `settings-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
 
@@ -108,7 +108,7 @@ function authorizedRequest(endpoint, options = {}) {
     return new Promise((resolve, reject) => {
         // Block requests if not authenticated
         if (!isAuthenticated) {
-            console.warn(`[${MODULE_NAME}] ⏳ Auth not ready, queuing request: ${endpoint}`);
+            if (DEBUG) console.warn(`[${MODULE_NAME}] ⏳ Auth not ready, queuing request: ${endpoint}`);
             requestQueue.push(() => authorizedRequest(endpoint, options).then(resolve).catch(reject));
             return;
         }
@@ -230,14 +230,39 @@ const SettingsState = {
     },
     
     async update(section, key, value) {
+        // FIX #7: Only check auth for writes, allow reads from cache
         if (!isAuthenticated) {
-            throw new Error('Authentication not ready');
+            // Queue the update for when auth becomes ready
+            return new Promise((resolve, reject) => {
+                requestQueue.push(async () => {
+                    try {
+                        const result = await this._performUpdate(section, key, value);
+                        resolve(result);
+                    } catch (error) {
+                        reject(error);
+                    }
+                });
+            });
         }
         
+        // FIX #7: Don't block writes if not active - queue them
         if (currentState !== LifecycleState.ACTIVE) {
-            throw new Error('Settings not ready: module not active');
+            return new Promise((resolve, reject) => {
+                requestQueue.push(async () => {
+                    try {
+                        const result = await this._performUpdate(section, key, value);
+                        resolve(result);
+                    } catch (error) {
+                        reject(error);
+                    }
+                });
+            });
         }
         
+        return this._performUpdate(section, key, value);
+    },
+    
+    async _performUpdate(section, key, value) {
         const oldValue = this.getSetting(section, key);
         
         if (!this.data[section]) {
@@ -363,12 +388,28 @@ const SettingsState = {
         window.dispatchEvent(event);
     },
     
+    // FIX #8: Allow loading from cache even when module is not ACTIVE
     async load() {
-        if (!isAuthenticated) {
-            console.warn(`[${MODULE_NAME}] ⏳ Cannot load settings: auth not ready`);
-            throw new Error('Authentication not ready');
+        // Allow load from cache even if not authenticated
+        const cached = this._loadFromCache();
+        if (cached && Object.keys(cached).length > 0) {
+            this.data = cached;
+            this.loaded = true;
+            this._notify('loaded', this.data);
+            
+            // If not authenticated, don't try to fetch from backend
+            if (!isAuthenticated) {
+                return this.data;
+            }
         }
         
+        // Only try backend fetch if authenticated
+        if (!isAuthenticated) {
+            if (DEBUG) console.warn(`[${MODULE_NAME}] ⏳ Cannot load settings from backend: auth not ready`);
+            return this.data;
+        }
+        
+        // Don't block on state check for reading
         if (this.loading) {
             return new Promise((resolve) => {
                 const checkLoaded = () => {
@@ -382,20 +423,9 @@ const SettingsState = {
             });
         }
         
-        if (currentState !== LifecycleState.ACTIVE) {
-            throw new Error('Cannot load settings: module not active');
-        }
-        
         this.loading = true;
         
         try {
-            const cached = this._loadFromCache();
-            if (cached && Object.keys(cached).length > 0) {
-                this.data = cached;
-                this.loaded = true;
-                this._notify('loaded', this.data);
-            }
-            
             const response = await this._fetchFromBackend();
             
             if (response && response.success && response.data) {
@@ -2153,7 +2183,7 @@ function authorizedFetch(url, options = {}) {
     }
     
     // This should not be called directly - use authorizedRequest instead
-    console.warn(`[${MODULE_NAME}] ⚠️ authorizedFetch called - this should be replaced with authorizedRequest`);
+    if (DEBUG) console.warn(`[${MODULE_NAME}] ⚠️ authorizedFetch called - this should be replaced with authorizedRequest`);
     return authorizedRequest(url, options);
 }
 
@@ -7049,7 +7079,7 @@ function getParentReadyValue() {
 // Session reference - create a module-level variable
 const sessionWindow = window.session;
 
-// Parent ready reference for export
+// Parent ready reference for export - FIX #6: Use parentReadyReceived which is dynamic
 const parentReadyFlag = window.parentReady;
 
 // =============================================
@@ -7196,9 +7226,9 @@ export {
     // Settings state
     SettingsState,
     
-    // Expose queue and parentReady for debugging
+    // Expose queue and parentReady for debugging - FIX #6: Use parentReadyReceived
     messageQueue,
-    parentReadyFlag as parentReady,
+    parentReadyReceived as parentReady,
     
     // Request queue
     requestQueue

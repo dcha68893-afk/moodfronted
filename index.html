@@ -2820,7 +2820,7 @@
         };
     </script>
     
-    <!-- Main authentication handler + new features (theme picker, bottom nav) -->
+        <!-- Main authentication handler + new features (theme picker, bottom nav) -->
     <script>
         // =============================================
         // THEME TOGGLE (Dark/Light)
@@ -2866,7 +2866,6 @@
             const options = document.querySelectorAll('.theme-option');
             const savedColor = localStorage.getItem('moodchat_dashboard_color') || 'default';
             
-            // Apply saved color
             document.body.setAttribute('data-theme-color', savedColor);
             options.forEach(opt => {
                 if (opt.dataset.color === savedColor) {
@@ -2884,14 +2883,15 @@
                     options.forEach(o => o.classList.remove('active'));
                     opt.classList.add('active');
                     
-                    // Show feedback
-                    window.CoreUtils.showNotification('Theme Updated', `Dashboard color changed to ${color}`, 'success');
+                    if (window.CoreUtils) {
+                        window.CoreUtils.showNotification('Theme Updated', `Dashboard color changed to ${color}`, 'success');
+                    }
                 });
             });
         }
 
         // =============================================
-        // BOTTOM NAV TOGGLE (three dashes) â€“ improved show/hide
+        // BOTTOM NAV TOGGLE
         // =============================================
         function initBottomNav() {
             const toggle = document.getElementById('bottomNavToggle');
@@ -2904,7 +2904,6 @@
                     bottomNav.classList.toggle('visible');
                 });
                 
-                // Close when clicking outside
                 document.addEventListener('click', (e) => {
                     if (!bottomNav.contains(e.target) && !toggle.contains(e.target)) {
                         bottomNav.classList.remove('visible');
@@ -2957,89 +2956,179 @@
         }
         
         // =============================================
-        // AUTH SYSTEM INIT (same as original, but we add new inits)
+        // CORE UTILITIES - FIXED FOR PRODUCTION
+        // =============================================
+        if (!window.CoreUtils) {
+            window.CoreUtils = {
+                showLoading: function(message) {
+                    const overlay = document.getElementById('loadingOverlay');
+                    const text = document.getElementById('loadingText');
+                    if (overlay && text) {
+                        text.textContent = message || 'Loading...';
+                        overlay.classList.add('visible');
+                    }
+                },
+                hideLoading: function() {
+                    const overlay = document.getElementById('loadingOverlay');
+                    if (overlay) {
+                        overlay.classList.remove('visible');
+                    }
+                },
+                showNotification: function(title, message, type) {
+                    const container = document.getElementById('notificationContainer');
+                    if (!container) return;
+                    
+                    const notification = document.createElement('div');
+                    notification.className = `notification ${type || 'info'}`;
+                    notification.innerHTML = `
+                        <div class="notification-icon">
+                            <i class="fas fa-${type === 'success' ? 'check-circle' : type === 'error' ? 'exclamation-circle' : type === 'warning' ? 'exclamation-triangle' : 'info-circle'}"></i>
+                        </div>
+                        <div class="notification-content">
+                            <div class="notification-title">${title || 'Notification'}</div>
+                            <div class="notification-message">${message || ''}</div>
+                        </div>
+                        <button class="notification-close" onclick="this.parentElement.remove()">
+                            <i class="fas fa-times"></i>
+                        </button>
+                    `;
+                    
+                    container.appendChild(notification);
+                    setTimeout(() => notification.classList.add('show'), 10);
+                    setTimeout(() => {
+                        notification.classList.remove('show');
+                        setTimeout(() => notification.remove(), 300);
+                    }, 5000);
+                },
+                validateEmail: function(email) {
+                    const re = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+                    return re.test(email);
+                }
+            };
+        }
+        
+        // =============================================
+        // SESSION STATE MANAGEMENT
+        // =============================================
+        if (!window.SessionState) {
+            window.SessionState = {
+                getToken: function() {
+                    // Check multiple storage locations
+                    return localStorage.getItem('token') || 
+                           localStorage.getItem('accessToken') || 
+                           localStorage.getItem('USER_TOKEN') ||
+                           localStorage.getItem('moodchat_token');
+                },
+                setToken: function(token) {
+                    if (token) {
+                        localStorage.setItem('token', token);
+                        localStorage.setItem('accessToken', token);
+                        localStorage.setItem('USER_TOKEN', token);
+                        localStorage.setItem('moodchat_token', token);
+                    }
+                },
+                clearToken: function() {
+                    localStorage.removeItem('token');
+                    localStorage.removeItem('accessToken');
+                    localStorage.removeItem('USER_TOKEN');
+                    localStorage.removeItem('moodchat_token');
+                    localStorage.removeItem('kynecta_auth');
+                },
+                getUser: function() {
+                    const userStr = localStorage.getItem('currentUser') || localStorage.getItem('user');
+                    return userStr ? JSON.parse(userStr) : null;
+                },
+                setUser: function(user) {
+                    if (user) {
+                        localStorage.setItem('currentUser', JSON.stringify(user));
+                        localStorage.setItem('user', JSON.stringify(user));
+                        window.currentUser = user;
+                    }
+                },
+                clearUser: function() {
+                    localStorage.removeItem('currentUser');
+                    localStorage.removeItem('user');
+                    window.currentUser = null;
+                },
+                isLoggedIn: function() {
+                    return !!this.getToken();
+                }
+            };
+        }
+        
+        // =============================================
+        // AUTH SYSTEM INITIALIZATION - IMPROVED
         // =============================================
         let authInitialized = false;
         
-        function initializeAuthenticationSystem() {
-            if (authInitialized) return;
+        async function waitForAPIReady() {
+            console.log('[AUTH] Waiting for API modules...');
             
-            console.log('[AUTH] Starting authentication system initialization...');
-            
-            waitForAPIReady()
-                .then(() => {
-                    console.log('[AUTH] API modules ready, initializing UI...');
-                    initializeBasicUIComponents();
-                    checkExistingSession();
-                    authInitialized = true;
-                })
-                .catch(error => {
-                    console.warn('[AUTH] API timeout or error, proceeding with fallback:', error);
-                    initializeBasicUIComponents();
-                    checkExistingSession();
-                    authInitialized = true;
-                });
-        }
-        
-        function waitForAPIReady() {
-            return new Promise((resolve, reject) => {
-                console.log('[AUTH] Waiting for API modules...');
+            return new Promise((resolve) => {
+                let attempts = 0;
+                const maxAttempts = 50; // 5 seconds max
                 
                 const checkInterval = setInterval(() => {
-                    const coreReady = window.api && window.api.core && typeof window.api.core.initialize === 'function';
-                    const authReady = window.api && window.api.auth && typeof window.api.auth.login === 'function';
+                    attempts++;
                     
-                    if (coreReady && authReady) {
+                    // Check if api.auth is fully loaded with essential methods
+                    const apiAuthReady = window.api && 
+                                         window.api.auth && 
+                                         typeof window.api.auth.login === 'function' &&
+                                         typeof window.api.auth.getCurrentUser === 'function';
+                    
+                    if (apiAuthReady) {
                         clearInterval(checkInterval);
                         clearTimeout(timeout);
                         console.log('[AUTH] API modules ready!');
-                        
-                        if (window.api.core.initialize) {
-                            window.api.core.initialize().then(() => {
-                                console.log('[AUTH] API core initialized');
-                                resolve();
-                            }).catch(error => {
-                                console.warn('[AUTH] API core init error:', error);
-                                resolve();
-                            });
-                        } else {
-                            resolve();
-                        }
+                        resolve(true);
+                    } else if (attempts >= maxAttempts) {
+                        clearInterval(checkInterval);
+                        clearTimeout(timeout);
+                        console.warn('[AUTH] API timeout - continuing anyway');
+                        resolve(false);
                     }
                 }, 100);
                 
                 const timeout = setTimeout(() => {
                     clearInterval(checkInterval);
-                    console.warn('[AUTH] API wait timeout - proceeding anyway');
-                    resolve();
-                }, 5000);
+                    console.warn('[AUTH] API wait timeout - continuing');
+                    resolve(false);
+                }, 8000);
             });
         }
         
-        function initializeBasicUIComponents() {
-            console.log('[AUTH] Initializing basic UI components...');
+        async function initializeAuthenticationSystem() {
+            if (authInitialized) return;
             
+            console.log('[AUTH] Starting authentication system initialization...');
+            window.CoreUtils.showLoading('Initializing...');
+            
+            // Wait for API to be ready
+            await waitForAPIReady();
+            
+            // Initialize UI components
             initPasswordToggles();
             initThemeToggle();
-            initBottomNav();          // <-- new
-            initDashboardThemePicker(); // <-- new
+            initBottomNav();
+            initDashboardThemePicker();
             
+            // Bind form toggles
             document.querySelectorAll('[data-form-toggle]').forEach(toggle => {
                 toggle.addEventListener('click', function(e) {
                     e.preventDefault();
-                    console.log('[AUTH] Form toggle clicked:', this.id || this.className);
                     const targetForm = this.getAttribute('data-form-toggle');
                     switchForm(targetForm);
                 });
             });
             
+            // Auth tabs for login method switching
             const authTabs = document.querySelectorAll('.auth-tab');
             const loginIdentifier = document.getElementById('loginIdentifier');
             const loginMethodIcon = document.getElementById('loginMethodIcon');
             
             authTabs.forEach(tab => {
                 tab.addEventListener('click', function() {
-                    console.log('[AUTH] Auth tab clicked:', this.getAttribute('data-method'));
                     authTabs.forEach(t => t.classList.remove('active'));
                     this.classList.add('active');
                     
@@ -3067,20 +3156,20 @@
                 });
             });
             
+            // Interest tags for registration
             document.querySelectorAll('.feature-tag').forEach(tag => {
                 tag.addEventListener('click', function() {
-                    console.log('[AUTH] Interest tag clicked:', this.getAttribute('data-interest'));
                     this.classList.toggle('selected');
                 });
             });
             
+            // Mobile menu
             const mobileMenuToggle = document.getElementById('mobileMenuToggle');
             const mobileSidebar = document.getElementById('mobileSidebar');
             const mobileSidebarOverlay = document.getElementById('mobileSidebarOverlay');
             
             if (mobileMenuToggle && mobileSidebar) {
                 mobileMenuToggle.addEventListener('click', function() {
-                    console.log('[AUTH] Mobile menu toggle clicked');
                     mobileSidebar.classList.add('active');
                     mobileSidebarOverlay.classList.add('active');
                 });
@@ -3088,479 +3177,491 @@
             
             if (mobileSidebarOverlay) {
                 mobileSidebarOverlay.addEventListener('click', function() {
-                    console.log('[AUTH] Mobile sidebar overlay clicked');
                     mobileSidebar.classList.remove('active');
                     this.classList.remove('active');
                 });
             }
             
-            initializeQuickLogin();
-            initializeLogout();
-            initializeEnterChat();
+            // Bind auth buttons
+            bindAuthButtons();
             
-            bindAuthButtonsUnconditionally();
+            // Check for existing session (auto-login)
+            await checkExistingSession();
             
-            console.log('[AUTH] Basic UI components initialized');
+            authInitialized = true;
+            window.CoreUtils.hideLoading();
+            console.log('[AUTH] Authentication system initialized');
         }
         
-        function bindAuthButtonsUnconditionally() {
-            console.log('[AUTH] Unconditionally binding authentication buttons...');
-            
+        // =============================================
+        // BIND AUTH BUTTONS - COMPLETE WITH TIMEOUT HANDLING
+        // =============================================
+        function bindAuthButtons() {
+            // LOGIN BUTTON
             const loginButton = document.getElementById('login-button');
             if (loginButton) {
-                loginButton.addEventListener('click', async function(e) {
-                    console.log('[AUTH] Login button clicked - direct handler');
+                // Remove existing listeners by cloning
+                const newLoginButton = loginButton.cloneNode(true);
+                loginButton.parentNode.replaceChild(newLoginButton, loginButton);
+                
+                newLoginButton.addEventListener('click', async function(e) {
+                    e.preventDefault();
+                    console.log('[AUTH] Login button clicked');
                     
-                    const loginForm = document.getElementById('login-form');
-                    if (loginForm) {
-                        e.preventDefault();
+                    const identifier = document.getElementById('loginIdentifier').value.trim();
+                    const password = document.getElementById('loginPassword').value;
+                    const rememberMe = document.getElementById('rememberMe').checked;
+                    const activeTab = document.querySelector('.auth-tab.active');
+                    const method = activeTab ? activeTab.getAttribute('data-method') : 'email';
+                    
+                    clearErrorMessages();
+                    
+                    if (!validateLoginInputs(identifier, password, method)) {
+                        return;
+                    }
+                    
+                    // Show loading state
+                    setButtonLoadingState('login-button', 'loginButtonText', 'loginSpinner', 'Logging in...', true);
+                    
+                    try {
+                        // Prepare login data
+                        const loginData = {
+                            email: identifier,
+                            password: password
+                        };
                         
-                        const identifier = document.getElementById('loginIdentifier').value.trim();
-                        const password = document.getElementById('loginPassword').value;
-                        const rememberMe = document.getElementById('rememberMe').checked;
-                        const activeTab = document.querySelector('.auth-tab.active');
-                        const method = activeTab ? activeTab.getAttribute('data-method') : 'email';
+                        console.log('[AUTH] Calling login API...');
                         
-                        console.log('[AUTH] Login attempt with method:', method, identifier ? 'provided' : 'missing');
-                        
-                        clearErrorMessages();
-                        
-                        if (!validateLoginInputs(identifier, password, method)) {
-                            console.log('[AUTH] Login validation failed');
-                            return;
+                        // Use direct fetch with timeout if api.auth not ready
+                        let response;
+                        if (window.api && window.api.auth && typeof window.api.auth.login === 'function') {
+                            // Add timeout wrapper
+                            const loginPromise = window.api.auth.login(loginData);
+                            const timeoutPromise = new Promise((_, reject) => {
+                                setTimeout(() => reject(new Error('Login timeout after 30 seconds')), 30000);
+                            });
+                            response = await Promise.race([loginPromise, timeoutPromise]);
+                        } else {
+                            // Fallback to direct fetch
+                            console.log('[AUTH] Using direct fetch fallback');
+                            const baseUrl = window.location.hostname === 'localhost' ? 'http://localhost:4000' : 'https://moodchat-fy56.onrender.com';
+                            const fetchResponse = await fetch(`${baseUrl}/api/auth/login`, {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ identifier: identifier, password: password })
+                            });
+                            const data = await fetchResponse.json();
+                            response = { success: fetchResponse.ok, data: data, message: data.message };
                         }
                         
-                        if (!window.AuthGateway || typeof window.AuthGateway.login !== 'function') {
-                            console.error('[AUTH] AuthGateway not ready for login');
-                            window.CoreUtils.showNotification('Error', 'Authentication service is loading. Please try again in a moment.', 'error');
-                            showError('loginIdentifier', 'Service not ready');
-                            return;
-                        }
+                        console.log('[AUTH] Login response:', response);
                         
-                        setButtonLoadingState('login-button', 'loginButtonText', 'loginSpinner', 'Logging in...', true);
-                        
-                        try {
-                            const loginData = {
-                                email: identifier,
-                                password: password
-                            };
+                        if (response && (response.success === true || response.ok === true || response.token || response.data?.token)) {
+                            // Extract token from response
+                            const token = response.token || response.data?.token || response.accessToken;
+                            const user = response.user || response.data?.user;
                             
-                            const methodParam = { email: 'email', mobile: 'mobile', username: 'username' }[method];
-                            if (methodParam) {
-                                loginData[methodParam] = identifier;
-                            }
-                            
-                            console.log('[AUTH] Calling AuthGateway.login() with contract-compliant payload');
-                            
-                            const response = await window.AuthGateway.login(loginData);
-                            const processedResponse = safelyProcessAuthResponse(response);
-                            
-                            console.log('[AUTH] Login response processed:', 
-                                processedResponse.success ? 'success' : 'error',
-                                processedResponse.message || '');
-                            
-                            if (processedResponse.success) {
-                                if (processedResponse.data && processedResponse.data.token) {
-                                    window.SessionState.setToken(processedResponse.data.token);
-                                    console.log('[AUTH] Token stored');
-                                }
-                                if (processedResponse.data && processedResponse.data.user) {
-                                    window.SessionState.setUser(processedResponse.data.user);
+                            if (token) {
+                                // Store token in multiple locations
+                                window.SessionState.setToken(token);
+                                console.log('[AUTH] Token stored');
+                                
+                                // Store unified auth
+                                const authData = { token: token, user: user, timestamp: Date.now() };
+                                localStorage.setItem('kynecta_auth', JSON.stringify(authData));
+                                
+                                if (user) {
+                                    window.SessionState.setUser(user);
+                                    window.currentUser = user;
                                     console.log('[AUTH] User data stored');
-                                    window.currentUser = processedResponse.data.user;
                                 }
                                 
                                 window.CoreUtils.showNotification('Success', 'Login successful! Redirecting to chat...', 'success');
                                 
+                                // Redirect to chat.html
                                 setTimeout(() => {
                                     window.location.href = 'chat.html';
-                                }, 1500);
-                                
+                                }, 1000);
                             } else {
-                                const errorMsg = processedResponse.message || 'Login failed';
-                                const errorField = processedResponse.field === 'password' ? 'loginPassword' : 'loginIdentifier';
-                                
-                                console.error('[AUTH] Login failed:', errorMsg);
-                                
-                                const userFriendlyMsg = getFriendlyErrorMessage(errorMsg);
-                                window.CoreUtils.showNotification('Error', userFriendlyMsg, 'error');
-                                
-                                showError(errorField, userFriendlyMsg);
+                                throw new Error('No token received from server');
                             }
-                        } catch (error) {
-                            console.error('[AUTH] Login error:', error);
-                            
-                            const errorMsg = safelyExtractErrorMessage(error);
+                        } else {
+                            const errorMsg = response?.message || response?.error || 'Login failed';
+                            console.error('[AUTH] Login failed:', errorMsg);
                             window.CoreUtils.showNotification('Error', errorMsg, 'error');
                             showError('loginIdentifier', errorMsg);
-                        } finally {
-                            setButtonLoadingState('login-button', 'loginButtonText', 'loginSpinner', 'Login to MoodChat', false);
                         }
+                    } catch (error) {
+                        console.error('[AUTH] Login error:', error);
+                        
+                        // Check if we have a token stored despite error
+                        const storedToken = window.SessionState.getToken();
+                        if (storedToken) {
+                            console.log('[AUTH] Found stored token - login may have succeeded');
+                            window.CoreUtils.showNotification('Success', 'Login successful! Redirecting...', 'success');
+                            setTimeout(() => {
+                                window.location.href = 'chat.html';
+                            }, 1000);
+                        } else {
+                            const errorMsg = error.message || 'Network error. Please try again.';
+                            window.CoreUtils.showNotification('Error', errorMsg, 'error');
+                            showError('loginIdentifier', errorMsg);
+                        }
+                    } finally {
+                        setButtonLoadingState('login-button', 'loginButtonText', 'loginSpinner', 'Login to MoodChat', false);
                     }
                 });
             }
             
+            // REGISTER BUTTON
             const registerButton = document.getElementById('register-button');
             if (registerButton) {
-                registerButton.addEventListener('click', async function(e) {
-                    console.log('[AUTH] Register button clicked - direct handler');
+                const newRegisterButton = registerButton.cloneNode(true);
+                registerButton.parentNode.replaceChild(newRegisterButton, registerButton);
+                
+                newRegisterButton.addEventListener('click', async function(e) {
+                    e.preventDefault();
+                    console.log('[AUTH] Register button clicked');
                     
-                    const registerForm = document.getElementById('register-form');
-                    if (registerForm) {
-                        e.preventDefault();
+                    const displayName = document.getElementById('registerDisplayName').value.trim();
+                    const username = document.getElementById('registerUsername').value.trim();
+                    const email = document.getElementById('registerEmail').value.trim();
+                    const password = document.getElementById('registerPassword').value;
+                    const confirmPassword = document.getElementById('registerConfirmPassword').value;
+                    const acceptTerms = document.getElementById('acceptTerms').checked;
+                    
+                    clearErrorMessages();
+                    
+                    if (!validateRegisterInputs(displayName, username, email, password, confirmPassword, acceptTerms)) {
+                        return;
+                    }
+                    
+                    setButtonLoadingState('register-button', 'registerButtonText', 'registerSpinner', 'Creating account...', true);
+                    
+                    try {
+                        const registerData = {
+                            email: email,
+                            username: username,
+                            password: password,
+                            displayName: displayName || username
+                        };
                         
-                        const displayName = document.getElementById('registerDisplayName').value.trim();
-                        const username = document.getElementById('registerUsername').value.trim();
-                        const email = document.getElementById('registerEmail').value.trim();
-                        const password = document.getElementById('registerPassword').value;
-                        const confirmPassword = document.getElementById('registerConfirmPassword').value;
-                        const acceptTerms = document.getElementById('acceptTerms').checked;
-                        
-                        console.log('[AUTH] Registration attempt - email:', email ? 'provided' : 'missing');
-                        
-                        clearErrorMessages();
-                        
-                        if (!validateRegisterInputs(displayName, username, email, password, confirmPassword, acceptTerms)) {
-                            console.log('[AUTH] Registration validation failed');
-                            return;
-                        }
-                        
-                        if (!window.AuthGateway || typeof window.AuthGateway.register !== 'function') {
-                            console.error('[AUTH] AuthGateway not ready for registration');
-                            window.CoreUtils.showNotification('Error', 'Registration service is loading. Please try again in a moment.', 'error');
-                            showError('registerEmail', 'Service not ready');
-                            return;
-                        }
-                        
-                        setButtonLoadingState('register-button', 'registerButtonText', 'registerSpinner', 'Creating account...', true);
-                        
-                        try {
-                            const selectedInterests = [];
-                            document.querySelectorAll('.feature-tag.selected').forEach(tag => {
-                                selectedInterests.push(tag.getAttribute('data-interest'));
+                        let response;
+                        if (window.api && window.api.auth && typeof window.api.auth.register === 'function') {
+                            const registerPromise = window.api.auth.register(registerData);
+                            const timeoutPromise = new Promise((_, reject) => {
+                                setTimeout(() => reject(new Error('Registration timeout after 30 seconds')), 30000);
                             });
+                            response = await Promise.race([registerPromise, timeoutPromise]);
+                        } else {
+                            const baseUrl = window.location.hostname === 'localhost' ? 'http://localhost:4000' : 'https://moodchat-fy56.onrender.com';
+                            const fetchResponse = await fetch(`${baseUrl}/api/auth/register`, {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify(registerData)
+                            });
+                            const data = await fetchResponse.json();
+                            response = { success: fetchResponse.ok, data: data };
+                        }
+                        
+                        console.log('[AUTH] Register response:', response);
+                        
+                        if (response && response.success === true) {
+                            const token = response.token || response.data?.token;
+                            const user = response.user || response.data?.user;
                             
-                            const registerData = {
-                                identifier: email,
-                                email: email,
-                                username: username,
-                                password: password,
-                                confirmPassword: confirmPassword,
-                                displayName: displayName || username
-                            };
-                            
-                            console.log('[AUTH] Calling AuthGateway.register() with contract-compliant payload');
-                            
-                            const response = await window.AuthGateway.register(registerData);
-                            const processedResponse = safelyProcessAuthResponse(response);
-                            
-                            console.log('[AUTH] Register response processed:', 
-                                processedResponse.success ? 'success' : 'error',
-                                processedResponse.message || '');
-                            
-                            if (processedResponse.success) {
-                                if (processedResponse.data && processedResponse.data.token) {
-                                    window.SessionState.setToken(processedResponse.data.token);
-                                    console.log('[AUTH] Registration token stored');
-                                }
-                                if (processedResponse.data && processedResponse.data.user) {
-                                    window.SessionState.setUser(processedResponse.data.user);
-                                    console.log('[AUTH] Registration user data stored');
-                                    window.currentUser = processedResponse.data.user;
+                            if (token) {
+                                window.SessionState.setToken(token);
+                                if (user) {
+                                    window.SessionState.setUser(user);
+                                    window.currentUser = user;
                                 }
                                 
-                                window.CoreUtils.showNotification('Success', 'Account created successfully! Redirecting to chat...', 'success');
-                                
+                                window.CoreUtils.showNotification('Success', 'Account created! Redirecting to chat...', 'success');
                                 setTimeout(() => {
                                     window.location.href = 'chat.html';
-                                }, 1500);
-                                
+                                }, 1000);
                             } else {
-                                const errorMsg = processedResponse.message || 'Registration failed';
-                                const errorField = mapErrorFieldToDOM(processedResponse.field);
-                                
-                                console.error('[AUTH] Registration failed:', errorMsg);
-                                
-                                const userFriendlyMsg = getFriendlyErrorMessage(errorMsg);
-                                window.CoreUtils.showNotification('Error', userFriendlyMsg, 'error');
-                                
-                                showError(errorField, userFriendlyMsg);
+                                window.CoreUtils.showNotification('Success', 'Account created! Please login.', 'success');
+                                switchForm('login');
                             }
-                        } catch (error) {
-                            console.error('[AUTH] Registration error:', error);
-                            
-                            const errorMsg = safelyExtractErrorMessage(error);
+                        } else {
+                            const errorMsg = response?.message || response?.error || 'Registration failed';
                             window.CoreUtils.showNotification('Error', errorMsg, 'error');
                             showError('registerEmail', errorMsg);
-                        } finally {
-                            setButtonLoadingState('register-button', 'registerButtonText', 'registerSpinner', 'Create Free Account', false);
                         }
+                    } catch (error) {
+                        console.error('[AUTH] Register error:', error);
+                        window.CoreUtils.showNotification('Error', error.message || 'Registration failed', 'error');
+                    } finally {
+                        setButtonLoadingState('register-button', 'registerButtonText', 'registerSpinner', 'Create Free Account', false);
                     }
                 });
             }
             
+            // FORGOT PASSWORD BUTTON
             const forgotButton = document.getElementById('forgot-button');
             if (forgotButton) {
-                forgotButton.addEventListener('click', async function(e) {
-                    console.log('[AUTH] Forgot password button clicked - direct handler');
+                const newForgotButton = forgotButton.cloneNode(true);
+                forgotButton.parentNode.replaceChild(newForgotButton, forgotButton);
+                
+                newForgotButton.addEventListener('click', async function(e) {
+                    e.preventDefault();
                     
-                    const forgotForm = document.getElementById('forgot-form');
-                    if (forgotForm) {
-                        e.preventDefault();
-                        
-                        const email = document.getElementById('forgotPasswordEmail').value.trim();
-                        
-                        console.log('[AUTH] Password reset requested for:', email ? email : 'no email');
-                        
-                        clearErrorMessages();
-                        hideError('forgotPassword');
-                        
-                        if (!email) {
-                            showError('forgotPassword', 'Email is required');
-                            return;
+                    const email = document.getElementById('forgotPasswordEmail').value.trim();
+                    
+                    clearErrorMessages();
+                    
+                    if (!email) {
+                        showError('forgotPassword', 'Email is required');
+                        return;
+                    }
+                    
+                    if (!window.CoreUtils.validateEmail(email)) {
+                        showError('forgotPassword', 'Valid email is required');
+                        return;
+                    }
+                    
+                    setButtonLoadingState('forgot-button', 'forgotButtonText', 'forgotPasswordSpinner', 'Sending...', true);
+                    
+                    try {
+                        let response;
+                        if (window.api && window.api.auth && typeof window.api.auth.forgotPassword === 'function') {
+                            response = await window.api.auth.forgotPassword({ email: email });
+                        } else {
+                            const baseUrl = window.location.hostname === 'localhost' ? 'http://localhost:4000' : 'https://moodchat-fy56.onrender.com';
+                            const fetchResponse = await fetch(`${baseUrl}/api/auth/forgot-password`, {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ email: email })
+                            });
+                            const data = await fetchResponse.json();
+                            response = { success: fetchResponse.ok, message: data.message };
                         }
                         
-                        if (!window.CoreUtils.validateEmail(email)) {
-                            showError('forgotPassword', 'Please enter a valid email address');
-                            return;
+                        if (response && response.success === true) {
+                            showSuccess('forgotPassword');
+                            window.CoreUtils.showNotification('Success', 'Reset instructions sent to your email', 'success');
+                            document.getElementById('forgotPasswordEmail').value = '';
+                        } else {
+                            window.CoreUtils.showNotification('Error', response?.message || 'Failed to send reset instructions', 'error');
                         }
-                        
-                        if (!window.AuthGateway || typeof window.AuthGateway.forgotPassword !== 'function') {
-                            console.error('[AUTH] AuthGateway not ready for password reset');
-                            window.CoreUtils.showNotification('Error', 'Password reset service is loading. Please try again in a moment.', 'error');
-                            showError('forgotPassword', 'Service not ready');
-                            return;
-                        }
-                        
-                        setButtonLoadingState('forgot-button', 'forgotButtonText', 'forgotPasswordSpinner', 'Sending...', true);
-                        
-                        try {
-                            const forgotData = {
-                                email: email
-                            };
-                            
-                            console.log('[AUTH] Calling AuthGateway.forgotPassword() with contract-compliant payload');
-                            
-                            const response = await window.AuthGateway.forgotPassword(forgotData);
-                            const processedResponse = safelyProcessAuthResponse(response);
-                            
-                            console.log('[AUTH] Forgot password response processed:', 
-                                processedResponse.success ? 'success' : 'error',
-                                processedResponse.message || '');
-                            
-                            if (processedResponse.success) {
-                                showSuccess('forgotPassword');
-                                window.CoreUtils.showNotification('Success', 'Reset instructions sent to your email', 'success');
-                                
-                                document.getElementById('forgotPasswordEmail').value = '';
-                                
-                            } else {
-                                const errorMsg = processedResponse.message || 'Failed to send reset instructions';
-                                
-                                console.error('[AUTH] Forgot password failed:', errorMsg);
-                                
-                                const userFriendlyMsg = getFriendlyErrorMessage(errorMsg);
-                                showError('forgotPassword', userFriendlyMsg);
-                                window.CoreUtils.showNotification('Error', userFriendlyMsg, 'error');
-                            }
-                        } catch (error) {
-                            console.error('[AUTH] Forgot password error:', error);
-                            
-                            const errorMsg = safelyExtractErrorMessage(error);
-                            showError('forgotPassword', errorMsg);
-                            window.CoreUtils.showNotification('Error', errorMsg, 'error');
-                        } finally {
-                            setButtonLoadingState('forgot-button', 'forgotButtonText', 'forgotPasswordSpinner', 'Send Reset Link', false);
-                        }
+                    } catch (error) {
+                        console.error('[AUTH] Forgot password error:', error);
+                        window.CoreUtils.showNotification('Error', error.message || 'Failed to send reset instructions', 'error');
+                    } finally {
+                        setButtonLoadingState('forgot-button', 'forgotButtonText', 'forgotPasswordSpinner', 'Send Reset Link', false);
                     }
                 });
             }
             
-            bindFormSubmissions();
-            
-            console.log('[AUTH] Authentication buttons bound unconditionally');
-        }
-        
-        function safelyProcessAuthResponse(response) {
-            if (response && typeof response === 'object' && 'success' in response) {
-                return response;
-            }
-            
-            if (typeof response === 'string') {
-                try {
-                    const parsed = JSON.parse(response);
-                    if (parsed && typeof parsed === 'object') {
-                        return parsed;
-                    }
-                } catch (e) {
-                    console.warn('[AUTH] Response is not valid JSON:', response.substring(0, 100));
-                    return {
-                        success: false,
-                        message: response || 'Invalid response from server'
-                    };
-                }
-            }
-            
-            console.warn('[AUTH] Unexpected response type:', typeof response);
-            return {
-                success: false,
-                message: 'Unexpected response from server'
-            };
-        }
-        
-        function safelyExtractErrorMessage(error) {
-            if (!error) return 'An unknown error occurred';
-            
-            if (typeof error === 'string') {
-                return getFriendlyErrorMessage(error);
-            }
-            
-            if (error instanceof Error) {
-                const message = error.message || error.toString();
-                
-                if (message.includes('JSON') || message.includes('parse')) {
-                    return 'Server returned an invalid response. Please try again.';
-                }
-                if (message.includes('Network') || message.includes('fetch') || message.includes('network')) {
-                    return 'Network error. Please check your connection and try again.';
-                }
-                if (message.includes('400') || message.includes('Bad Request')) {
-                    return 'Invalid request data. Please check your input.';
-                }
-                if (message.includes('500') || message.includes('Internal Server')) {
-                    return 'Server error. Please try again later.';
-                }
-                
-                return getFriendlyErrorMessage(message);
-            }
-            
-            if (typeof error === 'object') {
-                if (error.message) {
-                    return getFriendlyErrorMessage(error.message);
-                }
-                if (error.error) {
-                    return getFriendlyErrorMessage(error.error);
-                }
-                if (error.statusText) {
-                    return getFriendlyErrorMessage(error.statusText);
-                }
-            }
-            
-            return 'An error occurred. Please try again.';
-        }
-        
-        function mapErrorFieldToDOM(backendField) {
-            if (!backendField) return 'registerEmail';
-            
-            const fieldMap = {
-                'displayName': 'registerName',
-                'username': 'registerUsername',
-                'email': 'registerEmail',
-                'password': 'registerPassword',
-                'confirmPassword': 'registerConfirmPassword'
-            };
-            
-            return fieldMap[backendField] || 'registerEmail';
-        }
-        
-        function getFriendlyErrorMessage(backendMessage) {
-            if (!backendMessage) return 'An error occurred. Please try again.';
-            
-            const lowerMsg = String(backendMessage).toLowerCase();
-            
-            if (lowerMsg.includes('invalid credentials') || lowerMsg.includes('wrong password')) {
-                return 'Incorrect email or password. Please try again.';
-            }
-            if (lowerMsg.includes('user not found') || lowerMsg.includes('email not found')) {
-                return 'No account found with this email. Please check or sign up.';
-            }
-            if (lowerMsg.includes('email already exists') || lowerMsg.includes('already registered')) {
-                return 'This email is already registered. Please login or use a different email.';
-            }
-            if (lowerMsg.includes('password too weak') || lowerMsg.includes('weak password')) {
-                return 'Password is too weak. Please use a stronger password.';
-            }
-            if (lowerMsg.includes('username taken')) {
-                return 'Username is already taken. Please choose a different one.';
-            }
-            if (lowerMsg.includes('required') || lowerMsg.includes('missing')) {
-                return 'Please fill in all required fields.';
-            }
-            if (lowerMsg.includes('network') || lowerMsg.includes('connection')) {
-                return 'Network error. Please check your connection and try again.';
-            }
-            if (lowerMsg.includes('json') || lowerMsg.includes('parse')) {
-                return 'Server returned an invalid response. Please try again.';
-            }
-            
-            return backendMessage.length > 100 ? 
-                'An error occurred. Please try again.' : 
-                backendMessage;
-        }
-        
-        function bindFormSubmissions() {
+            // Bind form submissions
             const loginForm = document.getElementById('login-form');
-            const registerForm = document.getElementById('register-form');
-            const forgotForm = document.getElementById('forgot-form');
-            
             if (loginForm) {
-                loginForm.addEventListener('submit', function(e) {
-                    e.preventDefault();
-                    console.log('[AUTH] Login form submitted via form event');
-                    const loginButton = document.getElementById('login-button');
-                    if (loginButton) {
-                        loginButton.click();
-                    }
-                });
+                loginForm.addEventListener('submit', (e) => { e.preventDefault(); document.getElementById('login-button')?.click(); });
             }
-            
+            const registerForm = document.getElementById('register-form');
             if (registerForm) {
-                registerForm.addEventListener('submit', function(e) {
-                    e.preventDefault();
-                    console.log('[AUTH] Register form submitted via form event');
-                    const registerButton = document.getElementById('register-button');
-                    if (registerButton) {
-                        registerButton.click();
+                registerForm.addEventListener('submit', (e) => { e.preventDefault(); document.getElementById('register-button')?.click(); });
+            }
+            const forgotForm = document.getElementById('forgot-form');
+            if (forgotForm) {
+                forgotForm.addEventListener('submit', (e) => { e.preventDefault(); document.getElementById('forgot-button')?.click(); });
+            }
+        }
+        
+        // =============================================
+        // CHECK EXISTING SESSION (AUTO-LOGIN)
+        // =============================================
+        async function checkExistingSession() {
+            console.log('[AUTH] Checking for existing session...');
+            
+            // Check multiple storage locations
+            const storedToken = window.SessionState.getToken();
+            const storedUser = window.SessionState.getUser();
+            
+            if (storedToken && storedToken.length > 20) {
+                console.log('[AUTH] Found stored token, attempting auto-login');
+                
+                // Try to validate with API if available
+                let isValid = false;
+                
+                if (window.api && window.api.auth && typeof window.api.auth.isAuthenticated === 'function') {
+                    try {
+                        isValid = await window.api.auth.isAuthenticated();
+                        console.log('[AUTH] Token validation result:', isValid);
+                    } catch (error) {
+                        console.warn('[AUTH] Token validation error:', error);
+                        // If API validation fails but we have a token, still consider it valid
+                        isValid = true;
+                    }
+                } else {
+                    // No API available, assume token is valid
+                    isValid = true;
+                }
+                
+                if (isValid && storedUser) {
+                    console.log('[AUTH] Auto-login successful');
+                    window.currentUser = storedUser;
+                    
+                    // Show dashboard
+                    switchForm('dashboard');
+                    document.getElementById('dashboardGreeting').textContent = `Welcome, ${storedUser.displayName || storedUser.username || 'User'}!`;
+                    document.getElementById('dashboardEmail').textContent = storedUser.email || '';
+                    document.getElementById('dashboardAvatar').textContent = (storedUser.displayName || storedUser.username || 'U').charAt(0).toUpperCase();
+                    
+                    // Show quick login card
+                    const quickLoginCard = document.getElementById('quickLoginCard');
+                    if (quickLoginCard) {
+                        document.getElementById('quickLoginName').textContent = `Welcome back, ${storedUser.displayName || storedUser.username || 'User'}!`;
+                        document.getElementById('quickLoginEmail').textContent = storedUser.email || '';
+                        document.getElementById('quickLoginAvatar').textContent = (storedUser.displayName || storedUser.username || 'U').charAt(0).toUpperCase();
+                        quickLoginCard.classList.add('visible');
+                    }
+                    
+                    return true;
+                } else if (storedUser) {
+                    // Token might be expired but we have user data - show quick login
+                    console.log('[AUTH] Token may be expired, showing quick login option');
+                    const quickLoginCard = document.getElementById('quickLoginCard');
+                    if (quickLoginCard) {
+                        document.getElementById('quickLoginName').textContent = `Welcome back, ${storedUser.displayName || storedUser.username || 'User'}!`;
+                        document.getElementById('quickLoginEmail').textContent = storedUser.email || '';
+                        document.getElementById('quickLoginAvatar').textContent = (storedUser.displayName || storedUser.username || 'U').charAt(0).toUpperCase();
+                        quickLoginCard.classList.add('visible');
+                    }
+                    return false;
+                }
+            }
+            
+            console.log('[AUTH] No valid session found');
+            switchForm('login');
+            return false;
+        }
+        
+        // =============================================
+        // QUICK LOGIN INITIALIZATION
+        // =============================================
+        function initializeQuickLogin() {
+            const quickLoginBtn = document.getElementById('quickLoginBtn');
+            const removeQuickLogin = document.getElementById('removeQuickLogin');
+            const useDifferentAccountBtn = document.getElementById('useDifferentAccountBtn');
+            const quickLoginCard = document.getElementById('quickLoginCard');
+            
+            if (quickLoginBtn) {
+                quickLoginBtn.addEventListener('click', async function() {
+                    console.log('[AUTH] Quick login clicked');
+                    const token = window.SessionState.getToken();
+                    const user = window.SessionState.getUser();
+                    
+                    if (token && user) {
+                        window.currentUser = user;
+                        window.CoreUtils.showNotification('Success', 'Quick login successful! Redirecting...', 'success');
+                        setTimeout(() => {
+                            window.location.href = 'chat.html';
+                        }, 1000);
+                    } else {
+                        window.CoreUtils.showNotification('Error', 'Session expired. Please login again.', 'error');
+                        quickLoginCard.classList.remove('visible');
+                        switchForm('login');
                     }
                 });
             }
             
-            if (forgotForm) {
-                forgotForm.addEventListener('submit', function(e) {
-                    e.preventDefault();
-                    console.log('[AUTH] Forgot password form submitted via form event');
-                    const forgotButton = document.getElementById('forgot-button');
-                    if (forgotButton) {
-                        forgotButton.click();
-                    }
+            if (removeQuickLogin) {
+                removeQuickLogin.addEventListener('click', function() {
+                    console.log('[AUTH] Remove quick login');
+                    window.SessionState.clearUser();
+                    window.SessionState.clearToken();
+                    quickLoginCard.classList.remove('visible');
+                    switchForm('login');
+                });
+            }
+            
+            if (useDifferentAccountBtn) {
+                useDifferentAccountBtn.addEventListener('click', function() {
+                    console.log('[AUTH] Use different account');
+                    quickLoginCard.classList.remove('visible');
+                    switchForm('login');
                 });
             }
         }
         
+        // =============================================
+        // DASHBOARD BUTTONS
+        // =============================================
+        function initializeDashboardButtons() {
+            const logoutBtn = document.getElementById('logoutBtn');
+            if (logoutBtn) {
+                logoutBtn.addEventListener('click', function() {
+                    console.log('[AUTH] Logout clicked');
+                    window.SessionState.clearToken();
+                    window.SessionState.clearUser();
+                    window.CoreUtils.showNotification('Success', 'Logged out successfully', 'success');
+                    switchForm('login');
+                });
+            }
+            
+            const enterChatBtn = document.getElementById('enterChatBtn');
+            if (enterChatBtn) {
+                enterChatBtn.addEventListener('click', function() {
+                    console.log('[AUTH] Enter chat clicked');
+                    window.location.href = 'chat.html';
+                });
+            }
+        }
+        
+        // =============================================
+        // FORM SWITCHING
+        // =============================================
+        function switchForm(formName) {
+            const loginContainer = document.getElementById('login-container');
+            const registerContainer = document.getElementById('register-container');
+            const forgotContainer = document.getElementById('forgot-container');
+            const dashboardPanel = document.getElementById('dashboardPanel');
+            
+            if (loginContainer) loginContainer.classList.remove('active');
+            if (registerContainer) registerContainer.classList.remove('active');
+            if (forgotContainer) forgotContainer.classList.remove('active');
+            if (dashboardPanel) dashboardPanel.classList.remove('active');
+            
+            if (formName === 'login') {
+                if (loginContainer) loginContainer.classList.add('active');
+                document.getElementById('panelTitle').textContent = 'Welcome to MoodChat';
+                document.getElementById('panelSubtitle').textContent = 'Login to continue';
+            } else if (formName === 'register') {
+                if (registerContainer) registerContainer.classList.add('active');
+                document.getElementById('panelTitle').textContent = 'Create Account';
+                document.getElementById('panelSubtitle').textContent = 'Join our global community';
+            } else if (formName === 'forgot') {
+                if (forgotContainer) forgotContainer.classList.add('active');
+                document.getElementById('panelTitle').textContent = 'Reset Password';
+                document.getElementById('panelSubtitle').textContent = 'Enter your email to receive reset instructions';
+            } else if (formName === 'dashboard') {
+                if (dashboardPanel) dashboardPanel.classList.add('active');
+                document.getElementById('panelTitle').textContent = 'Dashboard';
+                document.getElementById('panelSubtitle').textContent = 'Welcome back!';
+            }
+            
+            clearErrorMessages();
+        }
+        
+        // =============================================
+        // VALIDATION FUNCTIONS
+        // =============================================
         function validateLoginInputs(identifier, password, method) {
             let isValid = true;
             
             if (!identifier) {
-                const fieldName = method === 'email' ? 'Email address' : 
-                                method === 'mobile' ? 'Mobile number' : 'Username';
-                showError('loginIdentifier', `${fieldName} is required`);
+                showError('loginIdentifier', `${method === 'email' ? 'Email' : method === 'mobile' ? 'Mobile number' : 'Username'} is required`);
                 isValid = false;
             } else if (method === 'email' && !window.CoreUtils.validateEmail(identifier)) {
                 showError('loginIdentifier', 'Please enter a valid email address');
-                isValid = false;
-            } else if (method === 'mobile' && !/^[\d\s\-\+\(\)]{10,20}$/.test(identifier)) {
-                showError('loginIdentifier', 'Please enter a valid mobile number');
-                isValid = false;
-            } else if (method === 'username' && identifier.length < 3) {
-                showError('loginIdentifier', 'Username must be at least 3 characters');
                 isValid = false;
             }
             
             if (!password) {
                 showError('loginPassword', 'Password is required');
-                isValid = false;
-            } else if (password.length < 1) {
-                showError('loginPassword', 'Password cannot be empty');
                 isValid = false;
             }
             
@@ -3576,9 +3677,6 @@
             } else if (displayName.length < 2) {
                 showError('registerName', 'Display name must be at least 2 characters');
                 isValid = false;
-            } else if (displayName.length > 50) {
-                showError('registerName', 'Display name must be less than 50 characters');
-                isValid = false;
             }
             
             if (!username) {
@@ -3586,12 +3684,6 @@
                 isValid = false;
             } else if (username.length < 3) {
                 showError('registerUsername', 'Username must be at least 3 characters');
-                isValid = false;
-            } else if (username.length > 20) {
-                showError('registerUsername', 'Username must be less than 20 characters');
-                isValid = false;
-            } else if (!/^[a-zA-Z0-9_]+$/.test(username)) {
-                showError('registerUsername', 'Username can only contain letters, numbers, and underscores');
                 isValid = false;
             }
             
@@ -3609,15 +3701,9 @@
             } else if (password.length < 6) {
                 showError('registerPassword', 'Password must be at least 6 characters');
                 isValid = false;
-            } else if (password.length > 100) {
-                showError('registerPassword', 'Password is too long (max 100 characters)');
-                isValid = false;
             }
             
-            if (!confirmPassword) {
-                showError('registerConfirmPassword', 'Please confirm your password');
-                isValid = false;
-            } else if (password !== confirmPassword) {
+            if (password !== confirmPassword) {
                 showError('registerConfirmPassword', 'Passwords do not match');
                 isValid = false;
             }
@@ -3628,33 +3714,6 @@
             }
             
             return isValid;
-        }
-        
-        function switchForm(formName) {
-            document.getElementById('login-container').classList.remove('active');
-            document.getElementById('register-container').classList.remove('active');
-            document.getElementById('forgot-container').classList.remove('active');
-            document.getElementById('dashboardPanel').classList.remove('active');
-            
-            if (formName === 'login') {
-                document.getElementById('login-container').classList.add('active');
-                document.getElementById('panelTitle').textContent = 'Welcome to MoodChat';
-                document.getElementById('panelSubtitle').textContent = 'Login to continue';
-            } else if (formName === 'register') {
-                document.getElementById('register-container').classList.add('active');
-                document.getElementById('panelTitle').textContent = 'Create Account';
-                document.getElementById('panelSubtitle').textContent = 'Join our global community';
-            } else if (formName === 'forgot') {
-                document.getElementById('forgot-container').classList.add('active');
-                document.getElementById('panelTitle').textContent = 'Reset Password';
-                document.getElementById('panelSubtitle').textContent = 'Enter your email to receive reset instructions';
-            } else if (formName === 'dashboard') {
-                document.getElementById('dashboardPanel').classList.add('active');
-                document.getElementById('panelTitle').textContent = 'Dashboard';
-                document.getElementById('panelSubtitle').textContent = 'Welcome back!';
-            }
-            
-            clearErrorMessages();
         }
         
         function clearErrorMessages() {
@@ -3689,159 +3748,20 @@
             if (button) button.disabled = isLoading;
             if (buttonText) buttonText.textContent = text;
             if (spinner) {
-                if (isLoading) {
-                    spinner.classList.add('visible');
-                } else {
-                    spinner.classList.remove('visible');
-                }
+                if (isLoading) spinner.classList.add('visible');
+                else spinner.classList.remove('visible');
             }
         }
         
-        function initializeQuickLogin() {
-            const quickLoginBtn = document.getElementById('quickLoginBtn');
-            const removeQuickLogin = document.getElementById('removeQuickLogin');
-            const useDifferentAccountBtn = document.getElementById('useDifferentAccountBtn');
-            const quickLoginCard = document.getElementById('quickLoginCard');
-            
-            const savedUser = window.SessionState.getUser();
-            if (savedUser && quickLoginCard) {
-                document.getElementById('quickLoginName').textContent = `Welcome back, ${savedUser.displayName || savedUser.username || 'User'}!`;
-                document.getElementById('quickLoginEmail').textContent = savedUser.email || '';
-                document.getElementById('quickLoginAvatar').textContent = (savedUser.displayName || savedUser.username || 'U').charAt(0).toUpperCase();
-                quickLoginCard.classList.add('visible');
-            }
-            
-            if (quickLoginBtn) {
-                quickLoginBtn.addEventListener('click', function() {
-                    console.log('[AUTH] Quick login button clicked');
-                    const savedUser = window.SessionState.getUser();
-                    if (savedUser) {
-                        if (window.SessionState.getToken()) {
-                            window.CoreUtils.showNotification('Success', 'Quick login successful! Redirecting to chat...', 'success');
-                            
-                            setTimeout(() => {
-                                window.location.href = 'chat.html';
-                            }, 1500);
-                            
-                        } else {
-                            window.CoreUtils.showNotification('Error', 'Session expired. Please login again.', 'error');
-                            quickLoginCard.classList.remove('visible');
-                        }
-                    }
-                });
-            }
-            
-            if (removeQuickLogin) {
-                removeQuickLogin.addEventListener('click', function() {
-                    console.log('[AUTH] Remove quick login clicked');
-                    quickLoginCard.classList.remove('visible');
-                    window.SessionState.clearUser();
-                    window.SessionState.clearToken();
-                });
-            }
-            
-            if (useDifferentAccountBtn) {
-                useDifferentAccountBtn.addEventListener('click', function() {
-                    console.log('[AUTH] Use different account clicked');
-                    quickLoginCard.classList.remove('visible');
-                    switchForm('login');
-                });
-            }
-        }
-        
-        function initializeLogout() {
-            const logoutBtn = document.getElementById('logoutBtn');
-            if (logoutBtn) {
-                logoutBtn.addEventListener('click', function() {
-                    console.log('[AUTH] Logout button clicked');
-                    window.SessionState.clearToken();
-                    window.SessionState.clearUser();
-                    window.CoreUtils.showNotification('Success', 'Logged out successfully', 'success');
-                    switchForm('login');
-                });
-            }
-        }
-        
-        function initializeEnterChat() {
-            const enterChatBtn = document.getElementById('enterChatBtn');
-            if (enterChatBtn) {
-                enterChatBtn.addEventListener('click', function() {
-                    console.log('[AUTH] Enter chat button clicked - redirecting to chat.html');
-                    window.CoreUtils.showNotification('Info', 'Redirecting to chat...', 'info');
-                    
-                    setTimeout(() => {
-                        window.location.href = 'chat.html';
-                    }, 1000);
-                });
-            }
-        }
-        
-        function checkExistingSession() {
-            if (window.SessionState.isLoggedIn()) {
-                const user = window.SessionState.getUser();
-                if (user) {
-                    switchForm('dashboard');
-                    document.getElementById('dashboardGreeting').textContent = `Welcome, ${user.displayName || user.username || 'User'}!`;
-                    document.getElementById('dashboardEmail').textContent = user.email || '';
-                    document.getElementById('dashboardAvatar').textContent = (user.displayName || user.username || 'U').charAt(0).toUpperCase();
-                    
-                    const quickLoginCard = document.getElementById('quickLoginCard');
-                    if (quickLoginCard) {
-                        document.getElementById('quickLoginName').textContent = `Welcome back, ${user.displayName || user.username || 'User'}!`;
-                        document.getElementById('quickLoginEmail').textContent = user.email || '';
-                        document.getElementById('quickLoginAvatar').textContent = (user.displayName || user.username || 'U').charAt(0).toUpperCase();
-                        quickLoginCard.classList.add('visible');
-                    }
-                }
-            } else {
-                if (window.api && window.api.auth && window.api.auth.isAuthenticated && window.api.auth.isAuthenticated()) {
-                    if (window.api.auth.getCurrentUser) {
-                        const user = window.api.auth.getCurrentUser();
-                        if (user) {
-                            window.SessionState.setUser(user);
-                            window.currentUser = user;
-                            switchForm('dashboard');
-                            document.getElementById('dashboardGreeting').textContent = `Welcome, ${user.displayName || user.username || 'User'}!`;
-                            document.getElementById('dashboardEmail').textContent = user.email || '';
-                            document.getElementById('dashboardAvatar').textContent = (user.displayName || user.username || 'U').charAt(0).toUpperCase();
-                        }
-                    }
-                }
-            }
-        }
-        
+        // =============================================
+        // START THE APPLICATION
+        // =============================================
         document.addEventListener('DOMContentLoaded', function() {
             console.log('[AUTH] DOM loaded, starting authentication system');
-            
-            window.CoreUtils.showLoading('Initializing application...');
-            
             initializeAuthenticationSystem();
-            
-            const loadingCheck = setInterval(() => {
-                if (authInitialized) {
-                    clearInterval(loadingCheck);
-                    window.CoreUtils.hideLoading();
-                    console.log('[AUTH] Authentication system fully initialized');
-                }
-            }, 100);
-            
-            setTimeout(() => {
-                clearInterval(loadingCheck);
-                window.CoreUtils.hideLoading();
-            }, 3000);
+            initializeQuickLogin();
+            initializeDashboardButtons();
         });
-        
-        if (typeof document.addEventListener === 'function') {
-            document.addEventListener('authStateChange', function(event) {
-                console.log('[AUTH] Auth state change event received:', event.detail);
-                checkExistingSession();
-            });
-            
-            document.addEventListener('authReady', function(event) {
-                console.log('[AUTH] Auth ready event received');
-                checkExistingSession();
-            });
-        }
     </script>
 </body>
 </html>

@@ -1208,11 +1208,13 @@
                 if (user && user.id && typeof user.id === 'number') {
                     UIFailsafe.safeAddClass(indicator, 'authenticated');
                     UIFailsafe.safeSetText(text, `Logged in as ${user.displayName || user.username || 'User'}`);
-                    UIFailsafe.safeSetStyle(indicator, 'display', 'flex');
+                    // FIX: hide immediately — user does not need to see this on screen
+                    UIFailsafe.safeSetStyle(indicator, 'display', 'none');
                 } else {
                     UIFailsafe.safeAddClass(indicator, 'authenticating');
                     UIFailsafe.safeSetText(text, 'Connecting...');
-                    UIFailsafe.safeSetStyle(indicator, 'display', 'flex');
+                    // FIX: keep hidden — happens in background
+                    UIFailsafe.safeSetStyle(indicator, 'display', 'none');
                 }
             }
         },
@@ -1220,45 +1222,9 @@
         _updateConnectionUI(ready, quality) {
             const tokenStatus = UIFailsafe.safeGetElement('tokenStatus');
             if (tokenStatus) {
-                UIFailsafe.safeRemoveClass(tokenStatus, 'ready');
-                UIFailsafe.safeRemoveClass(tokenStatus, 'pending');
-                UIFailsafe.safeRemoveClass(tokenStatus, 'error');
-                UIFailsafe.safeRemoveClass(tokenStatus, 'poor');
-                UIFailsafe.safeRemoveClass(tokenStatus, 'dead');
-                
-                if (!ready) {
-                    UIFailsafe.safeAddClass(tokenStatus, 'pending');
-                    const lifecycleState = this.state.lifecycleState;
-                    let message = 'Connecting...';
-                    if (lifecycleState === 'READY') {
-                        message = 'Ready...';
-                    } else if (lifecycleState === 'WAIT_PARENT') {
-                        UIFailsafe.safeSetStyle(tokenStatus, 'display', 'none');
-                        return;
-                    } else if (lifecycleState === 'WAITING_AUTH') {
-                        message = 'Waiting for authentication...';
-                    }
-                    UIFailsafe.safeSetText(tokenStatus, message);
-                    UIFailsafe.safeSetStyle(tokenStatus, 'display', 'block');
-                } else if (quality === 'excellent') {
-                    UIFailsafe.safeAddClass(tokenStatus, 'ready');
-                    UIFailsafe.safeSetText(tokenStatus, '🟢 Connected');
-                    UIFailsafe.safeSetStyle(tokenStatus, 'display', 'block');
-                } else if (quality === 'fair' || quality === 'good') {
-                    UIFailsafe.safeAddClass(tokenStatus, 'ready');
-                    UIFailsafe.safeSetText(tokenStatus, '🟡 Connected (slow)');
-                    UIFailsafe.safeSetStyle(tokenStatus, 'display', 'block');
-                } else if (quality === 'poor') {
-                    UIFailsafe.safeAddClass(tokenStatus, 'poor');
-                    UIFailsafe.safeSetText(tokenStatus, '🟠 Weak connection');
-                    UIFailsafe.safeSetStyle(tokenStatus, 'display', 'block');
-                } else if (quality === 'dead') {
-                    UIFailsafe.safeAddClass(tokenStatus, 'dead');
-                    UIFailsafe.safeSetText(tokenStatus, '🔴 Disconnected');
-                    UIFailsafe.safeSetStyle(tokenStatus, 'display', 'block');
-                } else {
-                    UIFailsafe.safeSetStyle(tokenStatus, 'display', 'none');
-                }
+                // FIX: token/connection status is internal - never show on screen.
+                // All states run in background silently.
+                UIFailsafe.safeSetStyle(tokenStatus, 'display', 'none');
             }
             
             const bgIndicator = UIFailsafe.safeGetElement('backgroundFetchIndicator');
@@ -1335,6 +1301,70 @@
             return { ...this.state };
         }
     }.init();
+
+    function updateChatHeader(chat) {
+    const nameEl = document.getElementById('chatFriendName');
+    const avatarEl = document.getElementById('chatFriendAvatar');
+    const statusEl = document.getElementById('chatStatusText');
+    const indicatorEl = document.getElementById('chatStatusIndicator');
+    
+    if (nameEl) {
+        nameEl.textContent = chat.friendName || chat.name || 'User';
+    }
+    if (statusEl) {
+        // FIX: use smart last-seen label instead of just "Online" / "Offline"
+        const core = getMessagesCore();
+        if (core && core.formatLastSeen) {
+            statusEl.textContent = core.formatLastSeen(chat.lastSeen || null, !!chat.online);
+        } else {
+            statusEl.textContent = chat.online ? 'Active now' : 'Offline';
+        }
+    }
+    if (indicatorEl) {
+        indicatorEl.className = `chat-status ${chat.online ? 'online' : 'offline'}`;
+    }
+    
+    if (avatarEl) {
+        // Clear existing content
+        avatarEl.innerHTML = '';
+        
+        // Try to get avatar from multiple sources
+        let avatarUrl = chat.friendAvatar || chat.avatar;
+        
+        // If no avatar, try to get from current user's profile picture
+        if (!avatarUrl && window.currentUser && window.currentUser.avatar) {
+            avatarUrl = window.currentUser.avatar;
+        }
+        
+        // If still no avatar, check session
+        if (!avatarUrl && window.__CHILD_SESSION__ && window.__CHILD_SESSION__.user) {
+            avatarUrl = window.__CHILD_SESSION__.user.avatar || window.__CHILD_SESSION__.user.photoURL;
+        }
+        
+        if (avatarUrl) {
+            const img = document.createElement('img');
+            img.src = avatarUrl;
+            img.alt = chat.friendName || 'User';
+            img.style.width = '100%';
+            img.style.height = '100%';
+            img.style.objectFit = 'cover';
+            img.style.borderRadius = '50%';
+            img.onerror = () => {
+                // Fallback to initials
+                avatarEl.innerHTML = `<i class="fas fa-user"></i>`;
+                if (indicatorEl) avatarEl.appendChild(indicatorEl);
+            };
+            avatarEl.appendChild(img);
+        } else {
+            // Show initials as fallback
+            const name = chat.friendName || chat.name || 'U';
+            const initial = name.charAt(0).toUpperCase();
+            avatarEl.innerHTML = `<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#667eea,#764ba2);color:white;font-weight:bold;font-size:18px;">${initial}</div>`;
+        }
+        
+        if (indicatorEl) avatarEl.appendChild(indicatorEl);
+    }
+}
 
     // =============================================
     // UI RENDERER (ENHANCED WITH DETERMINISTIC LIFECYCLE & REAL DATA)
@@ -1996,6 +2026,13 @@
                     core.formatTime(chat.lastMessageAt) : 
                     chat.lastMessageAt ? new Date(chat.lastMessageAt).toLocaleTimeString() : '';
                 
+                // FIX: truncate last message to 8 words, never show "No messages yet"
+                const _rawLast = (chat.lastMessage || '').trim();
+                const _words = _rawLast.split(/\s+/).filter(Boolean);
+                const lastMsgDisplay = _words.length > 8
+                    ? _words.slice(0, 8).join(' ') + '...'
+                    : _rawLast;
+                
                 const safeChat = JSON.stringify(chat).replace(/"/g, '&quot;');
                 
                 html += `
@@ -2010,7 +2047,7 @@
                                 <span class="chat-time">${time}</span>
                             </div>
                             <div class="chat-last-message">
-                                <span class="last-message-text">${chat.lastMessage || 'No messages yet'}</span>
+                                <span class="last-message-text">${lastMsgDisplay}</span>
                                 ${draftBadge}
                                 ${unreadBadge}
                             </div>
@@ -2472,6 +2509,336 @@
             }
         }
     }.init();
+
+    // =============================================
+// CALL BUTTON HANDLERS (ADD TO messages-ui.js)
+// =============================================
+
+function setupCallHandlers() {
+    const voiceCallBtn = document.getElementById('voiceCallBtn');
+    const videoCallBtn = document.getElementById('videoCallBtn');
+    
+    if (voiceCallBtn) {
+        voiceCallBtn.addEventListener('click', function() {
+            const activeChat = ChatManager.getActiveChat();
+            if (!activeChat) {
+                showNotificationInMessages('No active chat selected', 'warning');
+                return;
+            }
+            
+            const receiverId = activeChat.friendId || activeChat.pendingReceiverId;
+            const receiverName = activeChat.friendName || 'User';
+            
+            if (!receiverId) {
+                showNotificationInMessages('Cannot identify call recipient', 'error');
+                return;
+            }
+            
+            // Switch to calls module via parent
+            if (window.parent && window.parent !== window) {
+                window.parent.postMessage({
+                    type: 'SWITCH_MODULE',
+                    module: 'calls',
+                    payload: {
+                        userId: receiverId,
+                        userName: receiverName,
+                        callType: 'voice'
+                    },
+                    timestamp: Date.now()
+                }, '*');
+            } else {
+                // Fallback: open calls page in new tab
+                window.open(`/calls.html?userId=${receiverId}&name=${encodeURIComponent(receiverName)}&type=voice`, '_blank');
+            }
+        });
+    }
+    
+    if (videoCallBtn) {
+        videoCallBtn.addEventListener('click', function() {
+            const activeChat = ChatManager.getActiveChat();
+            if (!activeChat) {
+                showNotificationInMessages('No active chat selected', 'warning');
+                return;
+            }
+            
+            const receiverId = activeChat.friendId || activeChat.pendingReceiverId;
+            const receiverName = activeChat.friendName || 'User';
+            
+            if (!receiverId) {
+                showNotificationInMessages('Cannot identify call recipient', 'error');
+                return;
+            }
+            
+            // Switch to calls module via parent
+            if (window.parent && window.parent !== window) {
+                window.parent.postMessage({
+                    type: 'SWITCH_MODULE',
+                    module: 'calls',
+                    payload: {
+                        userId: receiverId,
+                        userName: receiverName,
+                        callType: 'video'
+                    },
+                    timestamp: Date.now()
+                }, '*');
+            } else {
+                window.open(`/calls.html?userId=${receiverId}&name=${encodeURIComponent(receiverName)}&type=video`, '_blank');
+            }
+        });
+    }
+}
+
+// =============================================
+// MESSAGE ACTIONS MENU (FIXED)
+// =============================================
+
+let currentActionMessage = null;
+let actionMenuTimeout = null;
+
+function showMessageActions(message, x, y) {
+    // Clear any existing timeout
+    if (actionMenuTimeout) {
+        clearTimeout(actionMenuTimeout);
+    }
+    
+    // Remove existing menu if any
+    const existingMenu = document.getElementById('dynamicMessageActions');
+    if (existingMenu) {
+        existingMenu.remove();
+    }
+    
+    // Store current message
+    currentActionMessage = message;
+    
+    // Create menu
+    const menu = document.createElement('div');
+    menu.id = 'dynamicMessageActions';
+    menu.className = 'message-actions-menu';
+    menu.style.cssText = `
+        position: fixed;
+        left: ${x}px;
+        top: ${y}px;
+        background: white;
+        border-radius: 12px;
+        box-shadow: 0 4px 20px rgba(0,0,0,0.15);
+        z-index: 10000;
+        min-width: 180px;
+        overflow: hidden;
+        animation: fadeIn 0.2s ease;
+    `;
+    
+    // Determine if user can edit/delete this message
+    const currentUserId = getCurrentUserId();
+    const canEdit = message.senderId === currentUserId;
+    const canDelete = message.senderId === currentUserId;
+    
+    menu.innerHTML = `
+        <div style="padding: 8px 0;">
+            ${canEdit ? `
+                <div class="menu-item" data-action="reply" style="padding: 10px 16px; display: flex; align-items: center; gap: 12px; cursor: pointer; transition: background 0.2s;">
+                    <i class="fas fa-reply" style="width: 20px; color: #0084ff;"></i>
+                    <span>Reply</span>
+                </div>
+                <div class="menu-item" data-action="edit" style="padding: 10px 16px; display: flex; align-items: center; gap: 12px; cursor: pointer; transition: background 0.2s;">
+                    <i class="fas fa-edit" style="width: 20px; color: #0084ff;"></i>
+                    <span>Edit</span>
+                </div>
+            ` : ''}
+            <div class="menu-item" data-action="forward" style="padding: 10px 16px; display: flex; align-items: center; gap: 12px; cursor: pointer; transition: background 0.2s;">
+                <i class="fas fa-share" style="width: 20px; color: #0084ff;"></i>
+                <span>Forward</span>
+            </div>
+            <div class="menu-item" data-action="copy" style="padding: 10px 16px; display: flex; align-items: center; gap: 12px; cursor: pointer; transition: background 0.2s;">
+                <i class="fas fa-copy" style="width: 20px; color: #0084ff;"></i>
+                <span>Copy</span>
+            </div>
+            <div class="menu-item" data-action="star" style="padding: 10px 16px; display: flex; align-items: center; gap: 12px; cursor: pointer; transition: background 0.2s;">
+                <i class="far fa-star" style="width: 20px; color: #ffd700;"></i>
+                <span>Star</span>
+            </div>
+            <div class="menu-item" data-action="report" style="padding: 10px 16px; display: flex; align-items: center; gap: 12px; cursor: pointer; transition: background 0.2s;">
+                <i class="fas fa-flag" style="width: 20px; color: #ff9500;"></i>
+                <span>Report</span>
+            </div>
+            <div style="height: 1px; background: #e5e5ea; margin: 4px 0;"></div>
+            <div class="menu-item" data-action="react-like" style="padding: 10px 16px; display: flex; align-items: center; gap: 12px; cursor: pointer; transition: background 0.2s;">
+                <span style="font-size: 18px;">👍</span>
+                <span>React</span>
+            </div>
+            <div class="menu-item" data-action="react-love" style="padding: 10px 16px; display: flex; align-items: center; gap: 12px; cursor: pointer; transition: background 0.2s;">
+                <span style="font-size: 18px;">❤️</span>
+                <span>Love</span>
+            </div>
+            <div class="menu-item" data-action="react-laugh" style="padding: 10px 16px; display: flex; align-items: center; gap: 12px; cursor: pointer; transition: background 0.2s;">
+                <span style="font-size: 18px;">😂</span>
+                <span>Laugh</span>
+            </div>
+            ${canDelete ? `
+                <div style="height: 1px; background: #e5e5ea; margin: 4px 0;"></div>
+                <div class="menu-item" data-action="delete" style="padding: 10px 16px; display: flex; align-items: center; gap: 12px; cursor: pointer; transition: background 0.2s;">
+                    <i class="fas fa-trash" style="width: 20px; color: #ff3b30;"></i>
+                    <span style="color: #ff3b30;">Delete</span>
+                </div>
+            ` : ''}
+            <div class="menu-item" data-action="info" style="padding: 10px 16px; display: flex; align-items: center; gap: 12px; cursor: pointer; transition: background 0.2s;">
+                <i class="fas fa-info-circle" style="width: 20px; color: #8e8e93;"></i>
+                <span>Info</span>
+            </div>
+        </div>
+    `;
+    
+    document.body.appendChild(menu);
+    
+    // Adjust position if off-screen
+    const rect = menu.getBoundingClientRect();
+    if (rect.right > window.innerWidth) {
+        menu.style.left = (window.innerWidth - rect.width - 10) + 'px';
+    }
+    if (rect.bottom > window.innerHeight) {
+        menu.style.top = (window.innerHeight - rect.height - 10) + 'px';
+    }
+    
+    // Add hover styles
+    const style = document.createElement('style');
+    style.textContent = `
+        .menu-item:hover { background: #f0f2f5; }
+        .message-actions-menu { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: scale(0.95); }
+            to { opacity: 1; transform: scale(1); }
+        }
+    `;
+    document.head.appendChild(style);
+    
+    // Handle menu item clicks
+    menu.querySelectorAll('.menu-item').forEach(item => {
+        item.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const action = item.dataset.action;
+            handleMessageAction(action, currentActionMessage);
+            hideMessageActions();
+        });
+    });
+    
+    // Auto-hide after 8 seconds — enough time to read and choose an action
+    actionMenuTimeout = setTimeout(() => {
+        hideMessageActions();
+    }, 8000);
+    
+    // Click outside to close
+    const closeHandler = (e) => {
+        if (!menu.contains(e.target)) {
+            hideMessageActions();
+            document.removeEventListener('click', closeHandler);
+        }
+    };
+    setTimeout(() => {
+        document.addEventListener('click', closeHandler);
+    }, 10);
+}
+
+function hideMessageActions() {
+    const menu = document.getElementById('dynamicMessageActions');
+    if (menu) menu.remove();
+    if (actionMenuTimeout) clearTimeout(actionMenuTimeout);
+    currentActionMessage = null;
+}
+
+function handleMessageAction(action, message) {
+    if (!message) return;
+    
+    const core = getMessagesCore();
+    
+    switch (action) {
+        case 'reply':
+            // Set reply context
+            setReplyToMessage(message);
+            const input = document.getElementById('messageInput');
+            if (input) input.focus();
+            showNotificationInMessages('Replying to message...', 'info');
+            break;
+            
+        case 'edit':
+            if (core && core.editMessage) {
+                const newContent = prompt('Edit your message:', message.content);
+                if (newContent && newContent.trim()) {
+                    core.editMessage(message.id, newContent.trim());
+                }
+            }
+            break;
+            
+        case 'forward':
+            // Show forward modal
+            showForwardModal(message);
+            break;
+            
+        case 'copy':
+            navigator.clipboard.writeText(message.content || '');
+            showNotificationInMessages('Copied to clipboard', 'success');
+            break;
+            
+        case 'star':
+            if (core && core.UIStateManager && core.UIStateManager.toggleStarred) {
+                const isStarred = core.UIStateManager.toggleStarred(message.id);
+                showNotificationInMessages(isStarred ? 'Message starred' : 'Message unstarred', 'info');
+            }
+            break;
+            
+        case 'report':
+            showReportModal(message);
+            break;
+            
+        case 'react-like':
+            if (core && core.addReaction) {
+                core.addReaction(message.id, '👍', true);
+            }
+            break;
+            
+        case 'react-love':
+            if (core && core.addReaction) {
+                core.addReaction(message.id, '❤️', true);
+            }
+            break;
+            
+        case 'react-laugh':
+            if (core && core.addReaction) {
+                core.addReaction(message.id, '😂', true);
+            }
+            break;
+            
+        case 'delete':
+            if (confirm('Delete this message?')) {
+                if (core && core.deleteMessage) {
+                    core.deleteMessage(message.id, false);
+                }
+            }
+            break;
+            
+        case 'info':
+            showMessageInfo(message);
+            break;
+    }
+}
+
+function setReplyToMessage(message) {
+    // Store reply context
+    window.replyToMessage = message;
+    
+    // Show reply indicator
+    const replyIndicator = document.getElementById('replyIndicator');
+    const replyText = document.getElementById('replyToText');
+    if (replyIndicator && replyText) {
+        const preview = message.content.length > 50 ? message.content.substring(0, 50) + '...' : message.content;
+        replyText.innerHTML = `<i class="fas fa-reply"></i> Replying to: ${preview}`;
+        replyIndicator.style.display = 'flex';
+    }
+}
+
+function cancelReply() {
+    window.replyToMessage = null;
+    const replyIndicator = document.getElementById('replyIndicator');
+    if (replyIndicator) replyIndicator.style.display = 'none';
+}
 
     // =============================================
     // UI EVENT HANDLERS (ENHANCED WITH DETERMINISTIC LIFECYCLE CHECKS)
@@ -3001,8 +3368,18 @@
                 voiceCallBtn.addEventListener('click', () => {
                     UIFailsafe.queueAction(() => {
                         if (!this._canPerformAction('voiceCall')) return;
-                        if (UIStateManager.getState('connectionQuality') !== 'poor') {
-                            this.showNotification('Call feature coming soon');
+                        const core = getMessagesCore();
+                        const activeChat = core?.currentChat || (core?.ChatManager?.getActiveChat?.());
+                        if (!activeChat) { this.showNotification('No active chat selected', 'warning'); return; }
+                        const receiverId = activeChat.friendId || activeChat.pendingReceiverId;
+                        const receiverName = activeChat.friendName || 'User';
+                        if (!receiverId) { this.showNotification('Cannot identify call recipient', 'error'); return; }
+                        if (window.parent && window.parent !== window) {
+                            window.parent.postMessage({
+                                type: 'SWITCH_MODULE', module: 'calls',
+                                payload: { userId: receiverId, userName: receiverName, callType: 'voice' },
+                                timestamp: Date.now()
+                            }, '*');
                         }
                     });
                 });
@@ -3013,8 +3390,18 @@
                 videoCallBtn.addEventListener('click', () => {
                     UIFailsafe.queueAction(() => {
                         if (!this._canPerformAction('videoCall')) return;
-                        if (UIStateManager.getState('connectionQuality') !== 'poor') {
-                            this.showNotification('Video call feature coming soon');
+                        const core = getMessagesCore();
+                        const activeChat = core?.currentChat || (core?.ChatManager?.getActiveChat?.());
+                        if (!activeChat) { this.showNotification('No active chat selected', 'warning'); return; }
+                        const receiverId = activeChat.friendId || activeChat.pendingReceiverId;
+                        const receiverName = activeChat.friendName || 'User';
+                        if (!receiverId) { this.showNotification('Cannot identify call recipient', 'error'); return; }
+                        if (window.parent && window.parent !== window) {
+                            window.parent.postMessage({
+                                type: 'SWITCH_MODULE', module: 'calls',
+                                payload: { userId: receiverId, userName: receiverName, callType: 'video' },
+                                timestamp: Date.now()
+                            }, '*');
                         }
                     });
                 });

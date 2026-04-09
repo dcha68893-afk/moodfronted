@@ -406,7 +406,7 @@
 
   __SESSION_READY_FORCE_TIMEOUT = setTimeout(() => {
     forceSessionReady('force_timeout');
-  }, 3000);
+  }, 8000);
 
   function markSessionReady() {
     if (__SESSION_READY_RESOLVED) return;

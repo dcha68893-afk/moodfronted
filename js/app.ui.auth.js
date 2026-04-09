@@ -2156,11 +2156,26 @@ async login(credentials) {
         try {
             console.log('Attempting login with identifier:', email.substring(0, 3) + '...');
             
-            // Use apiAuthProxy.login()
-            const response = await this._apiAuthProxy.login(email, password, { source: 'auth_gateway' });
-            
-            console.log('Login API call completed, processing response...');
-            console.debug('[AUTH] Raw login response:', response);
+            // Add a timeout wrapper for the login call
+let loginResponse = null;
+let loginError = null;
+
+try {
+    // Race between login and a timeout
+    const loginPromise = this._apiAuthProxy.login(email, password, { source: 'auth_gateway' });
+    const timeoutPromise = new Promise((_, reject) => {
+        setTimeout(() => reject(new Error('Login timeout after 30 seconds')), 30000);
+    });
+    
+    loginResponse = await Promise.race([loginPromise, timeoutPromise]);
+    console.log('Login API call completed, processing response...');
+    console.debug('[AUTH] Raw login response:', loginResponse);
+    response = loginResponse;
+} catch (error) {
+    loginError = error;
+    console.error('Login call error:', error);
+    response = { success: false, error: error.message, message: error.message };
+}
             
             // Handle fallback mode
             if (response.fallbackMode) {
@@ -2426,16 +2441,53 @@ async login(credentials) {
                     userId: user?.id,
                     redirectTo: 'chat.html'
                 };
-            } else {
-                // Handle error response
-                console.log('Login failed - response:', response);
-                this._recordLoginAttempt(email, false);
-                this._loginInProgress = false;
-                this._pendingLoginResolvers.delete(loginKey);
-                
-                // Get error message
-                const errorMessage = response.message || response.error || 'Login failed';
-                
+                } else {
+    // Handle error response
+    console.log('Login failed - response:', response);
+    this._recordLoginAttempt(email, false);
+    this._loginInProgress = false;
+    this._pendingLoginResolvers.delete(loginKey);
+    
+    // Get error message
+    let errorMessage = response.message || response.error || 'Login failed';
+    
+    // Special handling for timeout errors
+    if (errorMessage.includes('timeout') || errorMessage.includes('Timeout') || 
+        (response.error && response.error.includes('timeout'))) {
+        errorMessage = 'Login request timed out. The server might be slow. Please try again.';
+        
+        // Check if we actually have a token stored despite timeout
+        const storedToken = localStorage.getItem('token') || localStorage.getItem('accessToken');
+        if (storedToken && storedToken.length > 20) {
+            console.log('✅ Token found in storage despite timeout - login may have succeeded');
+            // Try to get user data
+            const storedUser = localStorage.getItem('currentUser') || localStorage.getItem('user');
+            if (storedUser) {
+                try {
+                    const user = JSON.parse(storedUser);
+                    console.log('✅ User data found, considering login successful');
+                    this._loginInProgress = false;
+                    this._pendingLoginResolvers.delete(loginKey);
+                    
+                    // Update auth state
+                    await this._updateAuthStateImmediately('authenticated', user, storedToken);
+                    window.currentUser = user;
+                    
+                    // Redirect to chat
+                    setTimeout(() => {
+                        window.location.href = 'chat.html';
+                    }, 500);
+                    
+                    return {
+                        success: true,
+                        user: user,
+                        token: storedToken,
+                        message: 'Login successful (recovered from timeout)'
+                    };
+                } catch (e) {}
+            }
+        }
+    }
                 // Show error notification
                 try {
                     if (window.CoreUtils && window.CoreUtils.showNotification) {
@@ -2701,61 +2753,82 @@ async login(credentials) {
     }
 }
     
-    /**
-     * Auto-login from stored token - Uses apiAuthProxy.validateAuth() or getUser() with waitForReady()
-     */
-    async autoLogin() {
-        try {
-            console.log('Attempting auto-login from stored token...');
-            
-            // Ensure API Auth is ready AND fully initialized - USE waitForReady()
-            await this._ensureAPIReady();
-            
-            // Wait for full initialization if needed - USE waitForReady()
-            if (!this._apiAuthFullyInitialized) {
-                if (window.api?.auth && typeof window.api.auth.waitForReady === 'function') {
+ async autoLogin() {
+    try {
+        console.log('🔐 [AUTH] Auto-login attempt from stored token...');
+        
+        // ADD: Set timeout for auto-login to prevent hanging
+        const autoLoginTimeoutPromise = new Promise((resolve) => {
+            setTimeout(() => {
+                console.warn('⚠️ [AUTH] Auto-login timeout after 10 seconds - checking for stored token');
+                // Check if we have a valid token in storage despite timeout
+                const storedToken = localStorage.getItem('token') || localStorage.getItem('accessToken');
+                const storedUser = localStorage.getItem('currentUser') || localStorage.getItem('user');
+                
+                if (storedToken && storedToken.length > 20 && storedUser) {
                     try {
-                        await window.api.auth.waitForReady();
-                        this._apiAuthFullyInitialized = true;
-                    } catch (error) {
-                        console.warn('⚠️ waitForReady() failed before autoLogin', error);
-                        const fullInitResult = await window.__apiAuthReadinessManager.waitForFullInitialization();
-                        this._apiAuthFullyInitialized = fullInitResult.fullyInitialized;
+                        const user = JSON.parse(storedUser);
+                        console.log('✅ [AUTH] Auto-login timeout but found stored credentials - using them');
+                        resolve({
+                            success: true,
+                            user: user,
+                            token: storedToken,
+                            message: 'Auto-login successful (recovered from timeout)',
+                            recovered: true
+                        });
+                    } catch (e) {
+                        resolve({ success: false, message: 'Auto-login timeout', recovered: false });
                     }
                 } else {
-                    const fullInitResult = await window.__apiAuthReadinessManager.waitForFullInitialization();
-                    this._apiAuthFullyInitialized = fullInitResult.fullyInitialized;
+                    resolve({ success: false, message: 'Auto-login timeout - no stored credentials', recovered: false });
                 }
-            }
-            
-            // Ensure UI orchestration is ready
-            await this._ensureUIOrchestrationReady();
-            
-            // Check if we have a stored token
-            const storedToken = this._state.token;
-            if (!storedToken || !this._isTokenValid(storedToken)) {
-                console.log('Auto-login: No valid stored token');
-                return {
-                    success: false,
-                    message: 'No valid authentication token found'
-                };
-            }
-            
-            // Check if auto-login is already in progress
-            if (this._validationInProgress) {
-                console.log('Auto-login already in progress, waiting...');
-                return new Promise((resolve) => {
-                    const checkInterval = setInterval(() => {
-                        if (!this._validationInProgress) {
-                            clearInterval(checkInterval);
-                            resolve(this.autoLogin());
-                        }
-                    }, 100);
-                });
-            }
-            
-            this._validationInProgress = true;
-            
+            }, 10000); // 10 second timeout
+        });
+        
+        // Ensure API Auth is ready
+        await this._ensureAPIReady();
+        
+        // Ensure UI orchestration is ready
+        await this._ensureUIOrchestrationReady();
+        
+        // Check multiple storage locations for token
+        let storedToken = this._state.token;
+        if (!storedToken) {
+            // Try to recover token from localStorage
+            storedToken = localStorage.getItem('token') || 
+                         localStorage.getItem('accessToken') || 
+                         localStorage.getItem('USER_TOKEN') ||
+                         localStorage.getItem('moodchat_token');
+        }
+        
+        if (!storedToken || !this._isTokenValid(storedToken)) {
+            console.log('🔐 [AUTH] Auto-login: No valid stored token found');
+            return {
+                success: false,
+                message: 'No valid authentication token found',
+                shouldRedirectToLogin: true
+            };
+        }
+        
+        console.log('🔐 [AUTH] Auto-login: Found stored token, validating...');
+        
+        // Check if auto-login is already in progress
+        if (this._validationInProgress) {
+            console.log('🔐 [AUTH] Auto-login already in progress, waiting...');
+            return new Promise((resolve) => {
+                const checkInterval = setInterval(() => {
+                    if (!this._validationInProgress) {
+                        clearInterval(checkInterval);
+                        resolve(this.autoLogin());
+                    }
+                }, 100);
+            });
+        }
+        
+        this._validationInProgress = true;
+        
+        // Race between validation and timeout
+        const validationPromise = (async () => {
             try {
                 // Use apiAuthProxy.validateAuth() or getUser() for token validation
                 let response;
@@ -2765,124 +2838,260 @@ async login(credentials) {
                 } else if (typeof this._apiAuthProxy.getUser === 'function') {
                     response = await this._apiAuthProxy.getUser();
                 } else {
-                    throw new Error('No token validation method available in apiAuthProxy');
+                    throw new Error('No token validation method available');
                 }
                 
-                console.debug('[AUTH] Auto-login validation response:', response);
+                return { response, error: null };
+            } catch (error) {
+                return { response: null, error };
+            }
+        })();
+        
+        const result = await Promise.race([validationPromise, autoLoginTimeoutPromise]);
+        
+        // Handle timeout recovery
+        if (result.recovered === true) {
+            console.log('✅ [AUTH] Auto-login recovered from timeout');
+            const user = result.user;
+            const token = result.token;
+            
+            // Update auth state
+            await this._updateAuthStateImmediately('authenticated', user, token);
+            
+            if (typeof window !== 'undefined') {
+                window.currentUser = user;
+            }
+            
+            // Force redirect to chat.html
+            this._forceUIUpdate();
+            
+            // Dispatch events
+            try {
+                window.dispatchEvent(new CustomEvent('session:ready', {
+                    detail: { token: token, user: user, timestamp: Date.now(), recovered: true }
+                }));
+                window.dispatchEvent(new CustomEvent('user-logged-in', {
+                    detail: { user: user, token: token, timestamp: Date.now(), autoLogin: true }
+                }));
+            } catch (e) {}
+            
+            this._validationInProgress = false;
+            
+            // CRITICAL: Redirect to chat.html
+            if (window.location.pathname !== '/chat.html' && !window.location.pathname.includes('chat.html')) {
+                console.log('🚀 [AUTH] Auto-login successful, redirecting to chat.html');
+                setTimeout(() => {
+                    window.location.href = 'chat.html';
+                }, 500);
+            }
+            
+            return {
+                success: true,
+                user: user,
+                token: token,
+                message: 'Auto-login successful (recovered from timeout)',
+                recovered: true
+            };
+        }
+        
+        // Handle validation error
+        if (result.error) {
+            throw result.error;
+        }
+        
+        const { response } = result;
+        console.debug('[AUTH] Auto-login validation response:', response);
+        
+        // Handle fallback mode
+        if (response.fallbackMode) {
+            console.warn('⚠️ Auto-login in fallback mode - checking storage directly');
+            
+            // Try to get user from storage directly
+            const storedUser = localStorage.getItem('currentUser') || localStorage.getItem('user');
+            if (storedUser && storedToken) {
+                try {
+                    const user = JSON.parse(storedUser);
+                    console.log('✅ Auto-login using direct storage fallback');
+                    
+                    await this._updateAuthStateImmediately('authenticated', user, storedToken);
+                    if (typeof window !== 'undefined') window.currentUser = user;
+                    this._forceUIUpdate();
+                    
+                    this._validationInProgress = false;
+                    
+                    // CRITICAL: Redirect to chat.html
+                    if (window.location.pathname !== '/chat.html' && !window.location.pathname.includes('chat.html')) {
+                        console.log('🚀 Auto-login successful (fallback), redirecting to chat.html');
+                        setTimeout(() => {
+                            window.location.href = 'chat.html';
+                        }, 500);
+                    }
+                    
+                    return {
+                        success: true,
+                        user: user,
+                        token: storedToken,
+                        message: 'Auto-login successful (fallback)'
+                    };
+                } catch (e) {
+                    console.warn('Failed to parse stored user:', e);
+                }
+            }
+            
+            this._validationInProgress = false;
+            return {
+                success: false,
+                message: 'Authentication service unavailable',
+                fallback: true,
+                shouldRedirectToLogin: true
+            };
+        }
+        
+        // Check success
+        const isSuccessful = response.success === true || 
+                            response.ok === true || 
+                            (response.user && (response.user.id || response.user.email));
+        
+        if (isSuccessful) {
+            const user = response.user || response.data?.user || response.data;
+            const token = response.token || storedToken;
+            
+            if (user && this._validateUserObject(user)) {
+                // Update auth state
+                const updateResult = await this._updateAuthStateImmediately('authenticated', user, token);
                 
-                // Handle fallback mode
-                if (response.fallbackMode) {
-                    console.warn('⚠️ Auto-login in fallback mode');
+                if (!updateResult.success) {
+                    console.error('Failed to update auth state during auto-login:', updateResult.error);
                     this._validationInProgress = false;
                     return {
                         success: false,
-                        message: 'Authentication service unavailable',
-                        fallback: true
+                        message: 'Auto-login failed: Could not update authentication state',
+                        shouldRedirectToLogin: true
                     };
                 }
                 
-                // Check success
-                const isSuccessful = response.success === true || 
-                                    response.ok === true || 
-                                    (response.user && (response.user.id || response.user.email));
+                // Update window.currentUser
+                if (typeof window !== 'undefined') {
+                    window.currentUser = user;
+                }
                 
-                if (isSuccessful) {
-                    const user = response.user || response.data?.user || response.data;
-                    const token = response.token || storedToken;
-                    
-                    if (user && this._validateUserObject(user)) {
-                        // Update auth state with validated user IMMEDIATELY
-                        const updateResult = await this._updateAuthStateImmediately('authenticated', user, token);
-                        
-                        if (!updateResult.success) {
-                            console.error('Failed to update auth state during auto-login:', updateResult.error);
-                            this._validationInProgress = false;
-                            return {
-                                success: false,
-                                message: 'Auto-login failed: Could not update authentication state'
-                            };
-                        }
-                        
-                        // Update window.currentUser safely
-                        if (typeof window !== 'undefined') {
-                            window.currentUser = user;
-                            Object.defineProperty(window, 'currentUser', {
-                                value: user,
-                                writable: true,
-                                configurable: true
-                            });
-                        }
-                        
-                        // Force immediate UI update
-                        this._forceUIUpdate();
-                        
-                        console.log('Auto-login successful for user:', user.email || user.username);
-                        
-                        this._validationInProgress = false;
-                        return {
-                            success: true,
-                            user,
-                            token,
-                            message: 'Auto-login successful'
-                        };
+                // Force immediate UI update
+                this._forceUIUpdate();
+                
+                console.log('✅ Auto-login successful for user:', user.email || user.username);
+                
+                // Dispatch events
+                try {
+                    window.dispatchEvent(new CustomEvent('session:ready', {
+                        detail: { token: token, user: user, timestamp: Date.now(), autoLogin: true }
+                    }));
+                    window.dispatchEvent(new CustomEvent('user-logged-in', {
+                        detail: { user: user, token: token, timestamp: Date.now(), autoLogin: true }
+                    }));
+                } catch (e) {}
+                
+                this._validationInProgress = false;
+                
+                // CRITICAL FIX: Redirect to chat.html if not already there
+                const currentPath = window.location.pathname;
+                if (currentPath !== '/chat.html' && !currentPath.includes('chat.html') && currentPath !== '/') {
+                    console.log('🚀 Auto-login successful, redirecting to chat.html from:', currentPath);
+                    setTimeout(() => {
+                        window.location.href = 'chat.html';
+                    }, 500);
+                } else if (currentPath === '/' || currentPath === '/index.html') {
+                    console.log('🚀 Auto-login successful on index page, redirecting to chat.html');
+                    setTimeout(() => {
+                        window.location.href = 'chat.html';
+                    }, 500);
+                } else if (currentPath.includes('chat.html')) {
+                    console.log('✅ Already on chat.html, auto-login complete');
+                    // Still trigger UI update to show logged-in state
+                    if (window.app && window.app.ui && window.app.ui.updateAuthUI) {
+                        window.app.ui.updateAuthUI(user);
                     }
                 }
                 
-                // Validation failed
-                console.log('Auto-login: Token validation failed');
-                await this._updateAuthStateImmediately('unauthenticated', null, null);
-                
-                this._validationInProgress = false;
                 return {
-                    success: false,
-                    message: 'Session expired. Please login again.'
-                };
-                
-            } catch (error) {
-                console.error('Auto-login error:', error);
-                
-                // Handle 401 Unauthorized specifically
-                if (error.message && (error.message.includes('401') || error.message.includes('Unauthorized'))) {
-                    console.log('Auto-login: Token is unauthorized, clearing');
-                    await this._updateAuthStateImmediately('unauthenticated', null, null);
-                    
-                    this._validationInProgress = false;
-                    return {
-                        success: false,
-                        message: 'Session expired. Please login again.'
-                    };
-                }
-                
-                // For network errors, check if we have valid cached state
-                console.warn('Auto-login: Network error, checking cached state');
-                if (this._state.status === 'authenticated' && this._state.token && this._isTokenValid(this._state.token)) {
-                    console.log('Auto-login: Using cached state due to network error');
-                    this._validationInProgress = false;
-                    return {
-                        success: true,
-                        user: this._state.user,
-                        token: this._state.token,
-                        message: 'Auto-login successful (using cached session)',
-                        cached: true
-                    };
-                }
-                
-                this._validationInProgress = false;
-                return {
-                    success: false,
-                    message: 'Network error during auto-login',
-                    cached: false
+                    success: true,
+                    user: user,
+                    token: token,
+                    message: 'Auto-login successful',
+                    redirectTo: 'chat.html'
                 };
             }
-        } catch (error) {
-            window.__authSafetyGuards._logOnce(`Auto-login method failed: ${error.message}`, 'AUTO_LOGIN_METHOD');
-            return {
-                success: false,
-                message: 'Auto-login service temporarily unavailable',
-                fallback: true
-            };
         }
+        
+        // Validation failed - clear session
+        console.log('Auto-login: Token validation failed, clearing session');
+        await this._updateAuthStateImmediately('unauthenticated', null, null);
+        
+        // Clear storage
+        localStorage.removeItem('token');
+        localStorage.removeItem('accessToken');
+        localStorage.removeItem('USER_TOKEN');
+        localStorage.removeItem('kynecta_auth');
+        
+        this._validationInProgress = false;
+        
+        // Redirect to login if on a protected page
+        const currentPath = window.location.pathname;
+        if (currentPath !== '/' && currentPath !== '/index.html' && !currentPath.includes('login')) {
+            console.log('🔐 Session expired, redirecting to login');
+            setTimeout(() => {
+                window.location.href = 'index.html';
+            }, 500);
+        }
+        
+        return {
+            success: false,
+            message: 'Session expired. Please login again.',
+            shouldRedirectToLogin: true
+        };
+        
+    } catch (error) {
+        console.error('Auto-login error:', error);
+        
+        // Check if we have valid cached state despite error
+        const cachedToken = localStorage.getItem('token') || localStorage.getItem('accessToken');
+        const cachedUser = localStorage.getItem('currentUser') || localStorage.getItem('user');
+        
+        if (cachedToken && cachedToken.length > 20 && cachedUser) {
+            try {
+                const user = JSON.parse(cachedUser);
+                console.log('✅ Auto-login: Using cached credentials despite validation error');
+                
+                await this._updateAuthStateImmediately('authenticated', user, cachedToken);
+                if (typeof window !== 'undefined') window.currentUser = user;
+                
+                this._validationInProgress = false;
+                
+                // Redirect to chat.html
+                if (window.location.pathname !== '/chat.html' && !window.location.pathname.includes('chat.html')) {
+                    setTimeout(() => {
+                        window.location.href = 'chat.html';
+                    }, 500);
+                }
+                
+                return {
+                    success: true,
+                    user: user,
+                    token: cachedToken,
+                    message: 'Auto-login successful (cached)',
+                    cached: true
+                };
+            } catch (e) {}
+        }
+        
+        this._validationInProgress = false;
+        return {
+            success: false,
+            message: 'Network error during auto-login',
+            cached: false,
+            shouldRedirectToLogin: true
+        };
     }
+}
     
     /**
      * Logout current user - Uses apiAuthProxy.logout()

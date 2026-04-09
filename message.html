@@ -33,22 +33,8 @@
     window.addEventListener('messagesLifecycleChange', function(e) {
         const tokenStatus = document.getElementById('tokenStatus');
         if (tokenStatus) {
-            if (e.detail.state === 'ACTIVE') {
-                tokenStatus.textContent = '🟢 Connected';
-                tokenStatus.className = 'token-status ready';
-                tokenStatus.style.display = 'block';
-            } else if (e.detail.state === 'WAIT_PARENT') {
-                // WAIT_PARENT: Hide status completely - background connection only
-                tokenStatus.style.display = 'none';
-            } else if (e.detail.state === 'READY') {
-                tokenStatus.textContent = '🟡 Ready...';
-                tokenStatus.className = 'token-status pending';
-                tokenStatus.style.display = 'block';
-            } else {
-                tokenStatus.textContent = '🔴 Connecting...';
-                tokenStatus.className = 'token-status pending';
-                tokenStatus.style.display = 'block';
-            }
+            // FIX: always hidden — connection happens in background, never shown to user
+            tokenStatus.style.display = 'none';
         }
         
         // Update any loading indicators based on state
@@ -364,7 +350,7 @@
             font-size: 14px;
         }
         
-        /* Auth status indicator - subtle */
+        /* Auth status indicator - hidden, runs in background only */
         .auth-status-indicator {
             position: fixed;
             top: 10px;
@@ -375,13 +361,12 @@
             padding: 6px 12px;
             border-radius: 20px;
             font-size: 11px;
-            display: flex;
+            display: none !important;
             align-items: center;
             gap: 6px;
             z-index: 1000;
             backdrop-filter: blur(10px);
             border: 1px solid rgba(0, 132, 255, 0.2);
-            display: none;
         }
         
         .auth-status-indicator.authenticated {
@@ -474,7 +459,7 @@
             100% { transform: rotate(360deg); }
         }
         
-        /* Token status indicator - subtle */
+        /* Token status indicator - hidden, runs in background only */
         .token-status {
             position: fixed;
             bottom: 10px;
@@ -486,6 +471,7 @@
             font-size: 10px;
             z-index: 1000;
             backdrop-filter: blur(10px);
+            display: none !important;
         }
         
         .token-status.ready {
@@ -1587,13 +1573,9 @@
                     clearInterval(checkCoreInterval);
                     console.log('[Messages] Core ACTIVE, UI ready for interaction');
                     
-                    // Show token status as ready
+                    // FIX: token status hidden — connection is background-only
                     const tokenStatus = document.getElementById('tokenStatus');
-                    if (tokenStatus) {
-                        tokenStatus.textContent = '🟢 Connected';
-                        tokenStatus.className = 'token-status ready';
-                        tokenStatus.style.display = 'block';
-                    }
+                    if (tokenStatus) { tokenStatus.style.display = 'none'; }
                     
                     // Remove any loading states
                     const chatsList = document.getElementById('chatsList');
@@ -1610,19 +1592,12 @@
                     
                     if (lifecycleState === 'WAIT_PARENT') {
                         // WAIT_PARENT: No visible UI changes - background connection only
-                        // Hide token status
                         const tokenStatus = document.getElementById('tokenStatus');
-                        if (tokenStatus) {
-                            tokenStatus.style.display = 'none';
-                        }
+                        if (tokenStatus) { tokenStatus.style.display = 'none'; }
                     } else {
-                        // Show subtle fallback for other states
+                        // FIX: also hidden in other states — connection is background-only
                         const tokenStatus = document.getElementById('tokenStatus');
-                        if (tokenStatus) {
-                            tokenStatus.textContent = '🟡 Connecting...';
-                            tokenStatus.className = 'token-status pending';
-                            tokenStatus.style.display = 'block';
-                        }
+                        if (tokenStatus) { tokenStatus.style.display = 'none'; }
                     }
                 }
             }, 1000);

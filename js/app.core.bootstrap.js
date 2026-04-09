@@ -6299,22 +6299,76 @@
   // MAIN EXECUTION ENGINE - COMPLETE PRESERVATION WITH DETERMINISTIC SEQUENCE
   // ============================================================================
 
-  window.initializeEnhancedApp = function () {
+window.initializeEnhancedApp = function () {
     console.log("🚀 Initializing enhanced application...");
 
-    const isLoggedIn = userLoggedIn();
-    const isPublicPage = window.isPublicPage ? window.isPublicPage() : false;
-
-    if (!isLoggedIn && !isPublicPage) {
-      console.log("🔐 Authentication required, redirecting to login before initializing app");
-      APP_BOOTSTRAP.redirectToAuth("Authentication required");
-      return Promise.reject(new Error("Authentication required"));
-    }
-
-    ensureBackwardCompatibility();
-
-    return HARDENED_BOOTSTRAP_CONTROLLER.bootstrap();
-  };
+    // Wait a moment for auto-login to complete
+    const checkAuthAndInitialize = async () => {
+        // Small delay to allow auto-login to process
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        
+        const isLoggedIn = userLoggedIn();
+        const isPublicPage = window.isPublicPage ? window.isPublicPage() : false;
+        
+        // Also check localStorage directly
+        const hasStoredToken = localStorage.getItem('token') || 
+                              localStorage.getItem('accessToken') || 
+                              localStorage.getItem('USER_TOKEN');
+        const hasStoredUser = localStorage.getItem('currentUser') || 
+                             localStorage.getItem('user');
+        
+        const hasValidStorage = hasStoredToken && hasStoredUser && hasStoredToken.length > 20;
+        
+        console.log(`[BOOT] Auth check: loggedIn=${isLoggedIn}, publicPage=${isPublicPage}, hasStorage=${hasValidStorage}`);
+        
+        // If we have stored credentials but not logged in, try to restore
+        if (hasValidStorage && !isLoggedIn && !isPublicPage) {
+            console.log("[BOOT] Found stored credentials but not logged in - attempting restore");
+            
+            try {
+                const user = JSON.parse(hasStoredUser);
+                const token = hasStoredToken;
+                
+                // Restore using AuthGateway if available
+                if (window.AuthGateway && typeof window.AuthGateway.setAuthState === 'function') {
+                    await window.AuthGateway.setAuthState('authenticated', user, token);
+                    window.currentUser = user;
+                    console.log("[BOOT] Successfully restored session from storage");
+                    
+                    // Redirect to chat.html if not already there
+                    if (!window.location.pathname.includes('chat.html') && 
+                        window.location.pathname !== '/' && 
+                        !window.location.pathname.includes('index.html')) {
+                        console.log("[BOOT] Redirecting to chat.html after restore");
+                        window.location.href = 'chat.html';
+                        return;
+                    }
+                }
+            } catch (e) {
+                console.warn("[BOOT] Failed to restore session:", e);
+            }
+        }
+        
+        if (!isLoggedIn && !isPublicPage && !hasValidStorage) {
+            console.log("[BOOT] 🔐 Authentication required, redirecting to login before initializing app");
+            APP_BOOTSTRAP.redirectToAuth("Authentication required");
+            return Promise.reject(new Error("Authentication required"));
+        }
+        
+        // If we're on chat.html but not logged in, redirect to login
+        if (window.location.pathname.includes('chat.html') && !isLoggedIn && !hasValidStorage) {
+            console.log("[BOOT] On chat.html but not authenticated, redirecting to login");
+            window.location.href = 'index.html';
+            return Promise.reject(new Error("Not authenticated"));
+        }
+        
+        ensureBackwardCompatibility();
+        
+        return HARDENED_BOOTSTRAP_CONTROLLER.bootstrap();
+    };
+    
+    return checkAuthAndInitialize();
+};
 
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", () => {
