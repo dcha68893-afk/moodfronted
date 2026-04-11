@@ -947,6 +947,9 @@
         FRIEND_UPDATE: 'FRIEND_UPDATE',
         FRIEND_ONLINE: 'FRIEND_ONLINE',
         FRIEND_OFFLINE: 'FRIEND_OFFLINE',
+        
+    SETTING_CHANGED: 'SETTING_CHANGED',
+    SETTINGS_UPDATED: 'SETTINGS_UPDATED',
         GROUP_UPDATE: 'GROUP_UPDATE',
         STATUS_UPDATE: 'STATUS_UPDATE',
         SETTINGS_UPDATED: 'SETTINGS_UPDATED',
@@ -1655,63 +1658,91 @@
         },
         
         _handleIncomingMessage: function(event) {
-            const validation = SecurityValidator.validateIncomingMessage(event);
-            if (!validation.valid) {
-                if (DEBUG) console.log(`[${MODULE_NAME}] Rejected message:`, validation.reason);
-                return;
+    const validation = SecurityValidator.validateIncomingMessage(event);
+    if (!validation.valid) {
+        if (DEBUG) console.log(`[${MODULE_NAME}] Rejected message:`, validation.reason);
+        return;
+    }
+    
+    const data = validation.data;
+    
+    if (data.messageId && MessageIdCache.has(data.messageId)) {
+        return;
+    }
+    if (data.messageId) {
+        MessageIdCache.add(data.messageId);
+    }
+    
+    // ── OFFLINE-FIRST: Apply per-key setting changes immediately ──
+    if (data && (data.type === 'SETTING_CHANGED' || data.type === 'SETTINGS_UPDATED')) {
+        const payload = data.payload || data;
+        if (data.type === 'SETTING_CHANGED' && payload.section && payload.key !== undefined) {
+            const { section, key, value } = payload;
+            applySettingToMessagesModule(section, key, value);
+            window.dispatchEvent(new CustomEvent('settingChanged', {
+                detail: { section, key, value, timestamp: Date.now() }
+            }));
+        }
+        if (data.type === 'SETTINGS_UPDATED' && payload.settings) {
+            const s = payload.settings;
+            // Apply all sections of a full settings update
+            Object.entries(s).forEach(([sec, secVal]) => {
+                if (secVal && typeof secVal === 'object') {
+                    Object.entries(secVal).forEach(([k, v]) => applySettingToMessagesModule(sec, k, v));
+                }
+            });
+            window.dispatchEvent(new CustomEvent('settingsUpdated', {
+                detail: { settings: s, timestamp: Date.now() }
+            }));
+        }
+        return;
+    }
+
+    // ─── Centralised per-key applier for messages module ──────────────────────
+        // applySettingToModule is defined at top-level below
+    
+    if (data.type === INCOMING_TYPES.API_RESPONSE) {
+        handleApiResponse(data);
+    }
+    
+    if (data.type === INCOMING_TYPES.SESSION_DATA || data.type === INCOMING_TYPES.SESSION_RESPONSE) {
+        this._handleSessionData(data);
+    }
+    
+    if (data.type === INCOMING_TYPES.PARENT_READY || data.type === INCOMING_TYPES.coreReady) {
+        this._handleParentReady(data);
+    }
+    
+    if (data.type === INCOMING_TYPES.MESSAGE_ACK) {
+        this._handleMessageAck(data);
+    }
+    
+    if (data.type === INCOMING_TYPES.MESSAGE_RECEIVE || data.type === INCOMING_TYPES.NEW_MESSAGE) {
+        this._handleMessageReceive(data);
+    }
+    
+    if (this._handlers.has(data.type)) {
+        const handlers = this._handlers.get(data.type);
+        handlers.forEach(handler => {
+            try {
+                handler(data.payload || data, data);
+            } catch (e) {
+                Logger.error('ParentConnectionManager', `Handler error for ${data.type}`, e);
             }
-            
-            const data = validation.data;
-            
-            if (data.messageId && MessageIdCache.has(data.messageId)) {
-                return;
+        });
+    }
+    
+    if (this._handlers.has('*')) {
+        const handlers = this._handlers.get('*');
+        handlers.forEach(handler => {
+            try {
+                handler(data.payload || data, data);
+            } catch (e) {
+                Logger.error('ParentConnectionManager', `Wildcard handler error`, e);
             }
-            if (data.messageId) {
-                MessageIdCache.add(data.messageId);
-            }
-            
-            if (data.type === INCOMING_TYPES.API_RESPONSE) {
-                handleApiResponse(data);
-            }
-            
-            if (data.type === INCOMING_TYPES.SESSION_DATA || data.type === INCOMING_TYPES.SESSION_RESPONSE) {
-                this._handleSessionData(data);
-            }
-            
-            if (data.type === INCOMING_TYPES.PARENT_READY || data.type === INCOMING_TYPES.coreReady) {
-                this._handleParentReady(data);
-            }
-            
-            if (data.type === INCOMING_TYPES.MESSAGE_ACK) {
-                this._handleMessageAck(data);
-            }
-            
-            if (data.type === INCOMING_TYPES.MESSAGE_RECEIVE || data.type === INCOMING_TYPES.NEW_MESSAGE) {
-                this._handleMessageReceive(data);
-            }
-            
-            if (this._handlers.has(data.type)) {
-                const handlers = this._handlers.get(data.type);
-                handlers.forEach(handler => {
-                    try {
-                        handler(data.payload || data, data);
-                    } catch (e) {
-                        Logger.error('ParentConnectionManager', `Handler error for ${data.type}`, e);
-                    }
-                });
-            }
-            
-            if (this._handlers.has('*')) {
-                const handlers = this._handlers.get('*');
-                handlers.forEach(handler => {
-                    try {
-                        handler(data.payload || data, data);
-                    } catch (e) {
-                        Logger.error('ParentConnectionManager', `Wildcard handler error`, e);
-                    }
-                });
-            }
-        },
+        });
+    }
+},
         
         _handleParentReady: function(data) {
             if (parentReadyReceived) {
@@ -4245,16 +4276,15 @@
             const date = new Date(timestamp);
             if (isNaN(date.getTime())) return '';
             const now = new Date();
-            const diffMs = now - date;
-            const diffMins = Math.floor(diffMs / 60000);
-            const diffHours = Math.floor(diffMs / 3600000);
-            const diffDays = Math.floor(diffMs / 86400000);
-            if (diffMins < 1) return 'just now';
-            if (diffMins < 60) return `${diffMins}m ago`;
-            if (diffHours < 24) return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-            if (diffDays === 1) return 'Yesterday';
-            if (diffDays < 7) return date.toLocaleDateString([], { weekday: 'short' });
-            return date.toLocaleDateString([], { month: 'short', day: 'numeric' });
+            // Same calendar day → real 12-hour clock time e.g. "1:30 PM"
+            if (date.toDateString() === now.toDateString()) {
+                return date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: true });
+            }
+            // Any older date → DD/MM/YYYY e.g. "09/04/2026"
+            const dd   = String(date.getDate()).padStart(2, '0');
+            const mm   = String(date.getMonth() + 1).padStart(2, '0');
+            const yyyy = date.getFullYear();
+            return `${dd}/${mm}/${yyyy}`;
         },
 
         // FIX: smart last-seen label for chat header status
@@ -5471,3 +5501,86 @@
         module.exports = MessagesCore;
     }
 })();
+
+// ── TOP-LEVEL: accessible from all closures ──────────────────────────────────
+function applySettingToMessagesModule(section, key, value) {
+    if (section === 'appearance') {
+        if (key === 'theme') {
+            var theme = value === 'auto' ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light') : value;
+            document.documentElement.setAttribute('data-theme', theme);
+            document.body.setAttribute('data-theme', theme);
+        }
+        if (key === 'fontSize') document.documentElement.style.fontSize = value + 'px';
+        if (key === 'language') { window.__appLanguage = value; document.documentElement.setAttribute('lang', value); }
+        if (key === 'accentColor') document.documentElement.style.setProperty('--accent-color', value);
+        if (key === 'compactMode') { document.documentElement.setAttribute('data-compact', value ? 'true' : 'false'); document.body.classList.toggle('compact-mode', !!value); }
+        if (key === 'animationsEnabled' || key === 'animations') { document.documentElement.setAttribute('data-animations', value ? 'true' : 'false'); document.body.classList.toggle('no-animations', !value); }
+    }
+    if (section === 'privacy') {
+        if (key === 'readReceipts') { window.__readReceiptsEnabled = value; document.documentElement.setAttribute('data-read-receipts', value ? 'true' : 'false'); }
+        if (key === 'typingIndicators') { window.__typingIndicatorsEnabled = value; document.documentElement.setAttribute('data-typing-indicators', value ? 'true' : 'false'); }
+        if (key === 'onlineStatus') window.__showOnlineStatus = value;
+        if (key === 'lastSeen') window.__showLastSeen = value;
+        if (key === 'whoCanAddMe') window.__whoCanAddMe = value;
+        if (key === 'canMessageMe') window.__canMessageMe = value;
+        if (key === 'contactDiscovery') window.__contactDiscovery = value;
+    }
+    if (section === 'notifications') {
+        if (key === 'soundEnabled' || key === 'notificationSound') window.__notificationSoundEnabled = value;
+        if (key === 'vibrationEnabled' || key === 'notificationVibration') window.__vibrationEnabled = value;
+        if (key === 'messageNotifications' || key === 'enableNotifications') window.__messageNotificationsEnabled = value;
+        if (key === 'groupNotifications') window.__groupNotificationsEnabled = value;
+        if (key === 'callNotifications') window.__callNotificationsEnabled = value;
+        if (key === 'mentionNotifications') window.__mentionNotificationsEnabled = value;
+        if (key === 'desktopEnabled') window.__desktopNotificationsEnabled = value;
+    }
+    if (section === 'chat') {
+        if (key === 'enterToSend' || key === 'enterKeySends') window.__enterToSend = value;
+        if (key === 'messageFontSize') {
+            var sizeMap = { small: '13px', medium: '15px', large: '18px' };
+            document.documentElement.style.setProperty('--message-font-size', sizeMap[value] || '15px');
+        }
+        if (key === 'showTimestamps') { window.__showTimestamps = value; document.documentElement.setAttribute('data-show-timestamps', value ? 'true' : 'false'); }
+        if (key === 'messagePreviews') window.__messagePreviews = value;
+        if (key === 'confirmSend') window.__confirmSend = value;
+        if (key === 'autoCorrect') window.__autoCorrect = value;
+        if (key === 'mediaAutoDownload') window.__mediaAutoDownload = value;
+        if (key === 'messageHistory') window.__messageHistory = value;
+        if (key === 'showReadReceipts') { window.__readReceiptsEnabled = value; document.documentElement.setAttribute('data-read-receipts', value ? 'true' : 'false'); }
+        if (key === 'allowReactions') { window.__allowReactions = value; document.documentElement.setAttribute('data-allow-reactions', value ? 'true' : 'false'); }
+    }
+    if (section === 'profile') {
+        if (key === 'displayName') window.__currentUserDisplayName = value;
+        if (key === 'photoUrl') window.__currentUserAvatar = value;
+        if (key === 'lastSeen') window.__showLastSeen = value;
+        if (key === 'profileVisibility') window.__profileVisibility = value;
+        if (key === 'currentMood') window.__currentMood = value;
+    }
+    if (section === 'security') {
+        if (key === 'sessionTimeout') window.__sessionTimeout = value;
+    }
+    if (section === 'mood') {
+        if (key === 'currentMood') { window.__currentMood = value; document.documentElement.setAttribute('data-mood', value); }
+        if (key === 'autoMoodDetection') window.__autoMoodDetection = value;
+        if (key === 'shareMoodStatus') window.__shareMoodStatus = value;
+        if (key === 'showMoodTo') window.__showMoodTo = value;
+    }
+    if (section === 'advanced') {
+        if (key === 'developerMode' || key === 'developerTools') window.__developerMode = value;
+        if (key === 'debugLogging' || key === 'debugMode') window.__debugLogging = value;
+        if (key === 'performanceMode') { window.__performanceMode = value; document.documentElement.setAttribute('data-performance-mode', value ? 'true' : 'false'); }
+        if (key === 'dataSaver') window.__dataSaver = value;
+        if (key === 'offlineMode') window.__offlineMode = value;
+        if (key === 'reduceMotion') { document.documentElement.setAttribute('data-reduce-motion', value ? 'true' : 'false'); document.body.classList.toggle('reduce-motion', !!value); }
+        if (key === 'experimentalFeatures') window.__experimentalFeatures = value;
+    }
+    if (section === 'storage') {
+        if (key === 'autoClearCache') window.__autoClearCache = value;
+    }
+    if (section === 'status') {
+        if (key === 'whoCanViewMyStatus') window.__whoCanViewMyStatus = value;
+        if (key === 'autoExpireStatus') window.__autoExpireStatus = value;
+        if (key === 'allowStatusReplies') window.__allowStatusReplies = value;
+        if (key === 'showStatusTo') window.__showStatusTo = value;
+    }
+}

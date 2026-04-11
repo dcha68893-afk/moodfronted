@@ -1045,7 +1045,7 @@
                 </button>
             </div>
             
-            <!-- Spotlight Section -->
+            <!-- Spotlight Section - dynamically controlled by JavaScript, initial display none -->
             <div class="spotlight-section" id="spotlightSection" style="display: none;">
                 <div class="spotlight-header">
                     <i class="fas fa-star"></i>
@@ -1234,8 +1234,8 @@
                     </div>
                 </div>
                 
-                <!-- Digital Items Tab -->
-                <div class="create-listing-tab-content" id="digitalTab">
+                <!-- Digital Items Tab - Fixed duplicate ID: changed to digitalItemTab -->
+                <div class="create-listing-tab-content" id="digitalItemTab">
                     <div class="digital-items-container">
                         <div class="input-group">
                             <label for="digitalTitle">Item Title</label>
@@ -2082,29 +2082,29 @@
             </div>
             <div style="padding: 20px;">
                 <div class="reaction-picker" id="reactionPicker">
-                    <div class="reaction-option" data-reaction="ðŸ‘">
-                        ðŸ‘
+                    <div class="reaction-option" data-reaction="👍">
+                        👍
                     </div>
-                    <div class="reaction-option" data-reaction="â¤ï¸">
-                        â¤ï¸
+                    <div class="reaction-option" data-reaction="❤️">
+                        ❤️
                     </div>
-                    <div class="reaction-option" data-reaction="ðŸ˜®">
-                        ðŸ˜®
+                    <div class="reaction-option" data-reaction="😮">
+                        😮
                     </div>
-                    <div class="reaction-option" data-reaction="ðŸ˜„">
-                        ðŸ˜„
+                    <div class="reaction-option" data-reaction="😄">
+                        😄
                     </div>
-                    <div class="reaction-option premium" data-reaction="ðŸ‘‘">
-                        ðŸ‘‘
+                    <div class="reaction-option premium" data-reaction="💎">
+                        💎
                     </div>
-                    <div class="reaction-option premium" data-reaction="â­">
-                        â­
+                    <div class="reaction-option premium" data-reaction="⭐">
+                        ⭐
                     </div>
-                    <div class="reaction-option premium" data-reaction="ðŸ†">
-                        ðŸ†
+                    <div class="reaction-option premium" data-reaction="🏆">
+                        🏆
                     </div>
-                    <div class="reaction-option premium" data-reaction="ðŸ’Ž">
-                        ðŸ’Ž
+                    <div class="reaction-option premium" data-reaction="💎">
+                        💎
                     </div>
                 </div>
             </div>
@@ -2120,61 +2120,96 @@
     <!-- Upload Progress Bar -->
     <div class="upload-progress" id="uploadProgress"></div>
 
-    <!-- ============================================= -->
-    <!-- FIXED: LOAD ORDER - Core first, then UI -->
-    <!-- ============================================= -->
-    
-    <!-- Load Tool-core.js first -->
-    <script type="module" src="Tool-core.js"></script>
-    
-    <!-- Then load Tool-ui.js -->
-    <script type="module" src="Tool-ui.js"></script>
-    
-    <!-- ============================================= -->
-    <!-- FIXED: UI READY MONITOR - Shows initialization logs -->
-    <!-- ============================================= -->
+    <!-- UI READY MONITOR & DIRECT CLICK BINDING -->
     <script>
-        (function() {
-            'use strict';
-            
-            // Track initialization stages
-            let coreReady = false;
-            let uiReady = false;
-            
-            // Listen for core ready
-            window.addEventListener('marketplaceCoreReady', function() {
-                coreReady = true;
-                console.log('[Tools] ðŸ”µ READY - Core ready');
-                checkAllReady();
-            });
-            
-            // Listen for UI ready (dispatched from Tool-ui.js)
-            window.addEventListener('marketplaceUIReady', function() {
-                uiReady = true;
-                console.log('[Tools] ðŸ”µ READY - UI ready');
-                checkAllReady();
-            });
-            
-            function checkAllReady() {
-                if (coreReady && uiReady) {
-                    console.log('[Tools] âœ… SUCCESS - Marketplace module fully initialized');
-                }
+    (function() {
+        'use strict';
+
+        // Robust direct DOM binding - no lifecycle dependency
+        function bindAll() {
+            if (typeof window.forceBindAllUIEvents === 'function') {
+                window.forceBindAllUIEvents();
+                return;
             }
-            
-            // Fallback timeout
-            setTimeout(function() {
-                if (!coreReady || !uiReady) {
-                    console.log('[Tools] âšª INFO - Module ready (fallback)');
-                }
-            }, 5000);
-        })();
+            // Fallback inline binding if Tool-core.js hasn't exposed forceBindAllUIEvents yet
+            console.log('[Tools] Fallback direct binding');
+
+            function openModal(id) {
+                var el = document.getElementById(id);
+                if (el) { el.classList.add('active'); el.style.display = 'flex'; }
+            }
+            function closeModal(id) {
+                var el = document.getElementById(id);
+                if (el) { el.classList.remove('active'); el.style.display = ''; }
+            }
+
+            var tabs = ['allTab','servicesTab','digitalTab','friendsTab','groupsTab','myTab','premiumTab','spotlightTab'];
+            tabs.forEach(function(id) {
+                var el = document.getElementById(id);
+                if (!el) return;
+                el.onclick = function(e) {
+                    e.preventDefault(); e.stopPropagation();
+                    tabs.forEach(function(tid){ var t=document.getElementById(tid); if(t) t.classList.remove('active'); });
+                    el.classList.add('active');
+                    console.log('[Tools] Tab:', id);
+                    if (typeof window.setActiveTab === 'function') window.setActiveTab(id.replace('Tab',''));
+                };
+            });
+
+            var btns = {
+                'createListingBtn':    function(){ openModal('createListingModal'); },
+                'createListingQuickBtn': function(){ openModal('createListingModal'); },
+                'sellServiceBtn':      function(){ openModal('createListingModal'); },
+                'sellDigitalBtn':      function(){ openModal('createListingModal'); },
+                'viewAnalyticsBtn':    function(){ openModal('analyticsModal'); },
+                'viewSavedBtn':        function(){ openModal('savedItemsModal'); },
+                'viewNotesBtn':        function(){ openModal('myNotesModal'); },
+                'viewTrustStatsBtn':   function(){ openModal('trustStatsModal'); },
+                'premiumOptionsBtn':   function(){ openModal('premiumOptionsModal'); },
+                'viewTeamBtn':         function(){ openModal('teamManagementModal'); },
+                'viewLeaderboardBtn':  function(){ openModal('leaderboardModal'); },
+                'closeCreateListingModal': function(){ closeModal('createListingModal'); },
+                'closeAnalyticsModal': function(){ closeModal('analyticsModal'); },
+                'closePremiumModal':   function(){ closeModal('premiumOptionsModal'); },
+                'closeTeamModal':      function(){ closeModal('teamManagementModal'); },
+                'closeLeaderboardModal': function(){ closeModal('leaderboardModal'); },
+                'closeSavedModal':     function(){ closeModal('savedItemsModal'); },
+                'closeNotesModal':     function(){ closeModal('myNotesModal'); },
+                'closeTrustStatsModal':function(){ closeModal('trustStatsModal'); }
+            };
+            Object.keys(btns).forEach(function(id) {
+                var btn = document.getElementById(id);
+                if (!btn) return;
+                btn.onclick = function(e){ e.preventDefault(); e.stopPropagation(); console.log('[Tools] Btn:', id); btns[id](); };
+            });
+
+            var backBtn = document.getElementById('backBtn');
+            if (backBtn) backBtn.onclick = function(e){ e.preventDefault(); var p=document.getElementById('marketplaceDetailPanel'); if(p) p.classList.remove('active'); };
+        }
+
+        // Run on every possible signal
+        window.addEventListener('tools:active',          function(){ setTimeout(bindAll, 50); setTimeout(bindAll, 300); });
+        window.addEventListener('marketplaceCoreReady',  function(){ setTimeout(bindAll, 50); });
+        window.addEventListener('marketplaceUIReady',    function(){ setTimeout(bindAll, 50); });
+        window.addEventListener('coreDataUpdated',       function(){ setTimeout(bindAll, 50); });
+        window.addEventListener('marketplace:refresh-ui',function(){ setTimeout(bindAll, 50); });
+
+        // Scheduled retries - keeps trying until elements exist
+        var attempts = 0;
+        function retryBind() {
+            attempts++;
+            bindAll();
+            if (attempts < 12) setTimeout(retryBind, attempts < 6 ? 300 : 1000);
+        }
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', function(){ setTimeout(retryBind, 100); });
+        } else {
+            setTimeout(retryBind, 100);
+        }
+    })();
     </script>
-    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+
+        <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
     <script src="/js/vendor/spectrum.min.js"></script>
 </body>
 </html>
-
-
-
-
-

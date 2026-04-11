@@ -847,6 +847,12 @@ const MessageRouter = {
                     this.handleError(message);
                     return true;
                     
+case 'SETTING_CHANGED':
+            case 'SETTINGS_UPDATED':
+              
+                this.handleSettingsChange(message);
+                return true;
+
                 default:
                     debugLog('Unhandled message type:', message.type);
                     return false;
@@ -857,6 +863,7 @@ const MessageRouter = {
         }
     },
     
+
     // =========================================
     // LIFECYCLE HANDLERS - STRICT PROTOCOL
     // =========================================
@@ -1037,10 +1044,36 @@ const MessageRouter = {
     },
     
     handleError(message) {
-        const errorMsg = message.payload?.message || 'Unknown error';
-        console.warn(`[${MODULE_NAME}] Error from parent:`, errorMsg);
-    },
-    
+    const errorMsg = message.payload?.message || 'Unknown error';
+    console.warn(`[${MODULE_NAME}] Error from parent:`, errorMsg);
+},
+
+// =========================================
+// ADD THIS NEW HANDLER METHOD HERE
+// =========================================
+handleSettingsChange(message) {
+    const payload = message.payload || {};
+    const { section, key, value, settings } = payload;
+
+    debugLog('Settings change notification:', { section, key, value });
+
+    // Apply the single key change using the full applier
+    if (section && key !== undefined) {
+        applySettingToGroupModule(section, key, value);
+    }
+
+    // If a full settings object was provided, apply all keys
+    if (settings && typeof settings === 'object') {
+        Object.entries(settings).forEach(([sec, secVal]) => {
+            if (secVal && typeof secVal === 'object')
+                Object.entries(secVal).forEach(([k, v]) => applySettingToGroupModule(sec, k, v));
+        });
+        try { SafeStorage.setItem('user_settings', settings); } catch (e) {}
+    }
+
+    GroupCore.emit('setting_changed', { section, key, value, settings });
+},
+
     // =========================================
     // GROUP MANAGEMENT HANDLERS (PRESERVED)
     // =========================================
@@ -2390,8 +2423,7 @@ const GroupCore = {
         
         try {
             const response = await apiRequest(`/groups/${groupId}/members/${userId}/role`, 'PUT', {
-                groupId,
-                userId
+                role: 'admin'
             });
             
             if (response && response.success) {
@@ -2433,8 +2465,7 @@ const GroupCore = {
         
         try {
             const response = await apiRequest(`/groups/${groupId}/members/${userId}/role`, 'PUT', {
-                groupId,
-                userId
+                role: 'member'
             });
             
             if (response && response.success) {
@@ -2459,6 +2490,66 @@ const GroupCore = {
         }
     },
     
+    // ===== Invite a user to a group via the real invitation API =====
+    async inviteToGroup(groupId, inviteeId, role = 'member', message = '') {
+        if (!LifecycleState.ensureActive()) {
+            queueGroupAction({ type: 'inviteToGroup', groupId, inviteeId, role });
+            return { queued: true };
+        }
+        if (!sessionReady) {
+            queueGroupAction({ type: 'inviteToGroup', groupId, inviteeId, role });
+            requestSession();
+            return { queued: true, reason: 'session_not_ready' };
+        }
+        debugLog(`Inviting user ${inviteeId} to group ${groupId}`);
+        try {
+            const response = await apiRequest(`/group-members/${groupId}/invitations`, 'POST', {
+                inviteeId,
+                role,
+                message,
+            });
+            if (response && response.success) {
+                this.emit('group:invitation-sent', { groupId, inviteeId });
+                debugLog('Invitation sent');
+                return { success: true, data: response.data };
+            }
+            return { success: false, error: response?.error || 'Failed to send invitation' };
+        } catch (error) {
+            debugLog('Failed to invite user:', error);
+            return { success: false, error: error.message };
+        }
+    },
+
+    // ===== Cancel a pending invitation =====
+    async cancelInvitation(invitationId) {
+        if (!LifecycleState.ensureActive()) return { success: false, reason: 'not_active' };
+        if (!sessionReady) { requestSession(); return { success: false, reason: 'session_not_ready' }; }
+        debugLog(`Cancelling invitation ${invitationId}`);
+        try {
+            const response = await apiRequest(`/group-members/invitations/${invitationId}`, 'DELETE');
+            if (response && response.success) {
+                this.emit('group:invitation-cancelled', { invitationId });
+                return { success: true };
+            }
+            return { success: false, error: response?.error || 'Failed to cancel invitation' };
+        } catch (error) {
+            return { success: false, error: error.message };
+        }
+    },
+
+    // ===== Fetch pending invitations for a group =====
+    async getGroupInvitations(groupId) {
+        if (!LifecycleState.ensureActive()) return { success: false, data: [] };
+        if (!sessionReady) { requestSession(); return { success: false, data: [] }; }
+        try {
+            const response = await apiRequest(`/group-members/${groupId}/invitations`, 'GET');
+            if (response && response.success) return { success: true, data: response.data };
+            return { success: false, data: [] };
+        } catch (error) {
+            return { success: false, data: [], error: error.message };
+        }
+    },
+
     // Send join request using apiRequest
     async sendJoinRequest(groupId, message = '') {
         if (!LifecycleState.ensureActive()) {
@@ -2537,7 +2628,8 @@ const GroupCore = {
         debugLog('Rejecting join request via apiRequest');
         
         try {
-            const response = await apiRequest(`/groups/${groupId}/join`, 'POST'); // reject join request, 'POST');
+            // FIXED: Use correct reject endpoint
+            const response = await apiRequest(`/groups/${groupId}/join-requests/${requestId}/reject`, 'POST', { userId });
             
             if (response && response.success) {
                 this.emit('group:join-request-rejected', { groupId, userId });
@@ -2762,11 +2854,39 @@ GroupCore.init();
 // =============================================
 // SINGLE MESSAGE LISTENER - ONE INSTANCE
 // =============================================
+// =============================================
+// SINGLE MESSAGE LISTENER - ONE INSTANCE
+// =============================================
 if (typeof window !== 'undefined' && !window.__GROUPS_MESSAGE_LISTENER_SET__) {
     window.__GROUPS_MESSAGE_LISTENER_SET__ = true;
     
     window.addEventListener('message', (event) => {
         try {
+            const data = event.data;
+            
+            // ── OFFLINE-FIRST: Apply per-key setting changes immediately ──
+            if (data && (data.type === 'SETTING_CHANGED' || data.type === 'SETTINGS_UPDATED')) {
+                const payload = data.payload || data;
+
+                if (data.type === 'SETTING_CHANGED' && payload.section && payload.key !== undefined) {
+                    const { section, key, value } = payload;
+                    applySettingToGroupModule(section, key, value);
+                    window.dispatchEvent(new CustomEvent('settingChanged', { detail: { section, key, value, timestamp: Date.now() } }));
+                    debugLog(`Setting changed: ${section}.${key} = ${value}`);
+                }
+                if (data.type === 'SETTINGS_UPDATED' && payload.settings) {
+                    const s = payload.settings;
+                    Object.entries(s).forEach(([sec, secVal]) => {
+                        if (secVal && typeof secVal === 'object')
+                            Object.entries(secVal).forEach(([k, v]) => applySettingToGroupModule(sec, k, v));
+                    });
+                    window.dispatchEvent(new CustomEvent('settingsUpdated', { detail: { settings: s, timestamp: Date.now() } }));
+                    debugLog('Settings updated:', s);
+                }
+                return;
+            }
+            
+            // Normal message handling
             ParentMessaging.handleIncoming(event);
         } catch (error) {
             console.error(`[${MODULE_NAME}] Error handling message:`, error);
@@ -2774,6 +2894,34 @@ if (typeof window !== 'undefined' && !window.__GROUPS_MESSAGE_LISTENER_SET__) {
     });
 }
 
+
+// Helper function to update group theme when settings change
+function updateGroupThemeOnSettingChange(theme) {
+    try {
+        // Update any open group chat header
+        if (currentChatGroup) {
+            const themeInfo = groupThemes[theme === 'dark' ? 'dark' : 'blue'];
+            const chatAvatar = safeGetElement('#chatAvatar');
+            if (chatAvatar && themeInfo) {
+                chatAvatar.style.background = themeInfo.gradient;
+            }
+        }
+        
+        // Update all group avatars in lists
+        document.querySelectorAll('.group-avatar').forEach(avatar => {
+            const groupItem = avatar.closest('.group-item');
+            if (groupItem && groupItem.dataset.groupId) {
+                const group = GroupCore.getGroupById(groupItem.dataset.groupId);
+                if (group && group.theme) {
+                    const groupThemeInfo = groupThemes[group.theme] || groupThemes.blue;
+                    avatar.style.background = groupThemeInfo.gradient;
+                }
+            }
+        });
+    } catch (error) {
+        debugLog('Error updating group theme:', error);
+    }
+}
 // =============================================
 // INITIALIZATION SEQUENCE - DETERMINISTIC PROTOCOL
 // =============================================
@@ -5208,24 +5356,50 @@ const saveGroupSettings = async function(groupData) {
     } catch (error) {}
 };
 
-function showFriendSelection() {
+async function showFriendSelection() {
     try {
         const friendSelectionModal = safeGetElement('#friendSelectionModal');
-        if (friendSelectionModal) {
-            friendSelectionModal.classList.add('active');
-        }
+        if (friendSelectionModal) friendSelectionModal.classList.add('active');
         selectedFriends = [];
-        
+
         const friendSelectionContent = safeGetElement('#friendSelectionContent');
         if (friendSelectionContent) {
             friendSelectionContent.innerHTML = '<div class="loading-placeholder"><i class="fas fa-spinner fa-spin"></i><p>Loading friends...</p></div>';
         }
-        
-        // Render synchronously without setTimeout
+
+        // FIXED: Actually fetch friends from the real API
         try {
-            renderFriendSelection();
-        } catch (error) {}
-    } catch (error) {}
+            const token = (session && session.token) ||
+                          localStorage.getItem('auth_token') ||
+                          sessionStorage.getItem('auth_token');
+            if (token) {
+                const res = await fetch('/api/friends', {
+                    headers: {
+                        'Authorization': `Bearer ${token}`,
+                        'Content-Type': 'application/json'
+                    }
+                });
+                if (res.ok) {
+                    const data = await res.json();
+                    // friends.js returns { success, data: { friends: [...] } }
+                    const raw = data?.data?.friends || data?.data || data?.friends || [];
+                    friends = raw.map(f => ({
+                        id: f.id,
+                        displayName: f.displayName || [f.firstName, f.lastName].filter(Boolean).join(' ') || f.username || 'Unknown',
+                        username: f.username || '',
+                        photoURL: f.avatar || null,
+                        online: f.status === 'online'
+                    }));
+                }
+            }
+        } catch (fetchErr) {
+            console.warn('[showFriendSelection] Could not fetch friends:', fetchErr.message);
+        }
+
+        renderFriendSelection();
+    } catch (error) {
+        console.error('[showFriendSelection]', error);
+    }
 }
 
 function renderFriendSelection() {
@@ -5425,10 +5599,28 @@ const createGroupOnline = async function(groupData) {
         
         const createGroupModal = safeGetElement('#createGroupModal');
         const friendSelectionModal = safeGetElement('#friendSelectionModal');
-        
+
         if (createGroupModal) createGroupModal.classList.remove('active');
         if (friendSelectionModal) friendSelectionModal.classList.remove('active');
-        
+
+        // FIXED: Send real invitations to every selected friend via the invite API
+        if (selectedFriends.length > 0) {
+            const groupId = newGroup.id || newGroup.group?.id;
+            if (groupId) {
+                for (const friendId of selectedFriends) {
+                    try {
+                        await secureApiCall(`/group-members/${groupId}/invitations`, {
+                            method: 'POST',
+                            body: JSON.stringify({ inviteeId: friendId, role: 'member' }),
+                            headers: { 'Content-Type': 'application/json' }
+                        });
+                    } catch (inviteErr) {
+                        console.warn(`[createGroupOnline] Failed to invite friend ${friendId}:`, inviteErr.message);
+                    }
+                }
+            }
+        }
+
         selectedFriends = [];
         showGroupDetails(newGroup, 'my_group');
         
@@ -5555,16 +5747,28 @@ async function acceptGroupInvite(inviteData) {
         
         const inviteId = inviteData.id || inviteData.inviteId;
         const groupId = inviteData.groupId || inviteData.id;
-        
-        const response = await secureApiCall(`/groups/invites/${inviteId}/accept`, {
+
+        // FIXED: correct endpoint is /api/group-members/invitations/:id/accept
+        const response = await secureApiCall(`/group-members/invitations/${inviteId}/accept`, {
             method: 'POST'
         });
         
         if (!response || !response.success) {
             return;
         }
-        
-        await joinGroupOnline(groupId);
+
+        // Update local state — add to joinedGroups
+        const groupData = response.data?.group || GroupCore.getGroupById(groupId);
+        if (groupData) {
+            if (!joinedGroups.find(g => g.id === groupId)) joinedGroups.push(groupData);
+            if (!groups.find(g => g.id === groupId)) groups.push(groupData);
+        }
+        groupInvites = groupInvites.filter(inv => (inv.id || inv.inviteId) !== inviteId);
+        GroupCore.saveGroups();
+        updateGroupCounts();
+        updateCurrentSection();
+        const groupInviteModal = safeGetElement('#groupInviteModal');
+        if (groupInviteModal) groupInviteModal.classList.remove('active');
     } catch (error) {}
 }
 
@@ -5581,21 +5785,22 @@ async function declineGroupInvite(inviteData) {
         }
         
         const inviteId = inviteData.id || inviteData.inviteId;
-        
-        const response = await secureApiCall(`/groups/invites/${inviteId}/reject`, {
+
+        // FIXED: correct endpoint is /api/group-members/invitations/:id/reject
+        const response = await secureApiCall(`/group-members/invitations/${inviteId}/reject`, {
             method: 'POST'
         });
-        
+
         if (!response || !response.success) {
             return;
         }
-        
-        groupInvites = groupInvites.filter(invite => invite.id !== inviteId);
-        
+
+        groupInvites = groupInvites.filter(invite => (invite.id || invite.inviteId) !== inviteId);
+
         GroupCore.saveGroups();
         updateGroupCounts();
         updateCurrentSection();
-        
+
         const groupInviteModal = safeGetElement('#groupInviteModal');
         if (groupInviteModal) groupInviteModal.classList.remove('active');
         
@@ -6982,6 +7187,113 @@ if (typeof window !== 'undefined') {
 }
 
 // =============================================
+// INVITATION WRAPPER FUNCTIONS
+// export{} blocks cannot contain expressions — these plain functions
+// delegate to GroupCore and can be listed as normal named exports.
+// =============================================
+async function inviteToGroup(groupId, inviteeId, role, msg) {
+    return GroupCore.inviteToGroup(groupId, inviteeId, role, msg);
+}
+async function cancelInvitation(invitationId) {
+    return GroupCore.cancelInvitation(invitationId);
+}
+async function getGroupInvitations(groupId) {
+    return GroupCore.getGroupInvitations(groupId);
+}
+
+
+// Full per-key settings applier for group module
+// ── TOP-LEVEL: accessible from all closures ──────────────────────────────────
+function applySettingToGroupModule(section, key, value) {
+    if (section === 'appearance') {
+        if (key === 'theme') {
+            var theme = value === 'auto' ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light') : value;
+            document.documentElement.setAttribute('data-theme', theme);
+            document.body.setAttribute('data-theme', theme);
+            if (typeof updateGroupThemeOnSettingChange === 'function') updateGroupThemeOnSettingChange(theme);
+        }
+        if (key === 'fontSize') document.documentElement.style.fontSize = value + 'px';
+        if (key === 'language') { window.__appLanguage = value; document.documentElement.setAttribute('lang', value); }
+        if (key === 'accentColor') document.documentElement.style.setProperty('--accent-color', value);
+        if (key === 'compactMode') { document.documentElement.setAttribute('data-compact', value ? 'true' : 'false'); document.body.classList.toggle('compact-mode', !!value); }
+        if (key === 'animationsEnabled' || key === 'animations') { document.documentElement.setAttribute('data-animations', value ? 'true' : 'false'); document.body.classList.toggle('no-animations', !value); }
+    }
+    if (section === 'notifications') {
+        if (key === 'soundEnabled' || key === 'notificationSound') window.__notificationSoundEnabled = value;
+        if (key === 'vibrationEnabled' || key === 'notificationVibration') window.__vibrationEnabled = value;
+        if (key === 'groupNotifications' || key === 'enableNotifications') window.__groupNotificationsEnabled = value;
+        if (key === 'messageNotifications') window.__messageNotificationsEnabled = value;
+        if (key === 'callNotifications') window.__callNotificationsEnabled = value;
+        if (key === 'mentionNotifications') window.__mentionNotificationsEnabled = value;
+        if (key === 'desktopEnabled') window.__desktopNotificationsEnabled = value;
+    }
+    if (section === 'privacy') {
+        if (key === 'readReceipts')     { window.__SHOW_READ_RECEIPTS = value; document.documentElement.setAttribute('data-read-receipts', value ? 'true' : 'false'); }
+        if (key === 'typingIndicators') { window.__SHOW_TYPING_INDICATORS = value; document.documentElement.setAttribute('data-typing-indicators', value ? 'true' : 'false'); }
+        if (key === 'onlineStatus')     window.__showOnlineStatus = value;
+        if (key === 'lastSeen')         window.__showLastSeen = value;
+        if (key === 'whoCanAddMe')      window.__whoCanAddMe = value;
+        if (key === 'canMessageMe')     window.__canMessageMe = value;
+        if (key === 'contactDiscovery') window.__contactDiscovery = value;
+    }
+    if (section === 'groups') {
+        if (key === 'showReadReceipts' || key === 'groupReadReceipts') window.__SHOW_READ_RECEIPTS = value;
+        if (key === 'typingIndicators')  window.__SHOW_TYPING_INDICATORS = value;
+        if (key === 'messageSound' || key === 'groupMessageSound') window.__GROUP_MESSAGE_SOUND = value;
+        if (key === 'groupInvitations') window.__groupInvitations = value;
+        if (key === 'groupAnnouncements') window.__groupAnnouncements = value;
+        if (key === 'allowGroupCreation') window.__allowGroupCreation = value;
+        if (key === 'maxGroupSize') window.__maxGroupSize = value;
+        if (key === 'groupAdminPermissions') window.__groupAdminPermissions = value;
+        if (key === 'whoCanAddToGroups') window.__whoCanAddToGroups = value;
+        if (key === 'allowInviteLinks') window.__allowInviteLinks = value;
+        if (key === 'mentionsOnly') window.__groupMentionsOnly = value;
+        if (key === 'groupMessagePreview') window.__groupMessagePreview = value;
+    }
+    if (section === 'chat') {
+        if (key === 'enterToSend' || key === 'enterKeySends') window.__enterToSend = value;
+        if (key === 'showTimestamps') { window.__showTimestamps = value; document.documentElement.setAttribute('data-show-timestamps', value ? 'true' : 'false'); }
+        if (key === 'allowReactions') { window.__allowReactions = value; document.documentElement.setAttribute('data-allow-reactions', value ? 'true' : 'false'); }
+        if (key === 'mediaAutoDownload') window.__mediaAutoDownload = value;
+        if (key === 'messagePreviews') window.__messagePreviews = value;
+    }
+    if (section === 'profile') {
+        if (key === 'displayName') window.__currentUserDisplayName = value;
+        if (key === 'photoUrl') window.__currentUserAvatar = value;
+        if (key === 'lastSeen') window.__showLastSeen = value;
+        if (key === 'profileVisibility') window.__profileVisibility = value;
+        if (key === 'currentMood') window.__currentMood = value;
+    }
+    if (section === 'security') {
+        if (key === 'sessionTimeout') window.__sessionTimeout = value;
+    }
+    if (section === 'mood') {
+        if (key === 'currentMood') { window.__currentMood = value; document.documentElement.setAttribute('data-mood', value); }
+        if (key === 'autoMoodDetection') window.__autoMoodDetection = value;
+        if (key === 'shareMoodStatus') window.__shareMoodStatus = value;
+        if (key === 'showMoodTo') window.__showMoodTo = value;
+    }
+    if (section === 'status') {
+        if (key === 'whoCanViewMyStatus') window.__whoCanViewMyStatus = value;
+        if (key === 'autoExpireStatus') window.__autoExpireStatus = value;
+        if (key === 'allowStatusReplies') window.__allowStatusReplies = value;
+        if (key === 'showStatusTo') window.__showStatusTo = value;
+    }
+    if (section === 'advanced') {
+        if (key === 'developerMode' || key === 'developerTools') window.__developerMode = value;
+        if (key === 'debugLogging' || key === 'debugMode') window.__debugLogging = value;
+        if (key === 'performanceMode') { window.__performanceMode = value; document.documentElement.setAttribute('data-performance-mode', value ? 'true' : 'false'); }
+        if (key === 'dataSaver') window.__dataSaver = value;
+        if (key === 'offlineMode') window.__offlineMode = value;
+        if (key === 'reduceMotion') { document.documentElement.setAttribute('data-reduce-motion', value ? 'true' : 'false'); document.body.classList.toggle('reduce-motion', !!value); }
+        if (key === 'experimentalFeatures') window.__experimentalFeatures = value;
+    }
+    if (section === 'storage') {
+        if (key === 'autoClearCache') window.__autoClearCache = value;
+    }
+}
+// ===
+// ===========================================
 // COMPREHENSIVE EXPORTS - ALL REQUIRED EXPORTS
 // =============================================
 export {
@@ -7141,6 +7453,11 @@ export {
     renderFriendSelection,
     updateSelectedFriendsList,
     removeSelectedFriend,
+
+    // Invitation helpers (new)
+    inviteToGroup,
+    cancelInvitation,
+    getGroupInvitations,
     
     // Group creation and joining
     createGroupOnline,

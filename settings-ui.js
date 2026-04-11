@@ -325,29 +325,41 @@ function showMobileSection(sectionId) {
 // ANDROID BACK BUTTON HANDLER
 // =============================================
 function setupAndroidBackButton() {
+    const notifyParentGoBack = () => {
+        // Direct postMessage is most reliable — bypasses any auth/state gates
+        try {
+            window.parent.postMessage({
+                type: 'CHILD_CLOSING',
+                module: 'settings',
+                childId: 'settings',
+                timestamp: Date.now()
+            }, '*');
+        } catch (e) {}
+        sendMessageToParent({
+            type: 'CHILD_CLOSING',
+            childId: 'settings',
+            timestamp: Date.now()
+        }).catch(() => {});
+    };
+
     window.addEventListener('popstate', function(event) {
         if (isMobileView) {
             if (currentMobileSection) {
+                // User is inside a settings section panel — go back to the settings menu
                 event.preventDefault();
                 showMobileMenu();
             } else {
+                // User is at the settings menu top level — go back to the app sidebar
                 if (unsavedChanges) {
                     if (confirm('You have unsaved changes. Leave anyway?')) {
-                        sendMessageToParent({
-                            type: PARENT_MESSAGE_TYPES.CHILD_CLOSING,
-                            childId: 'settings',
-                            unsavedChanges: true,
-                            timestamp: Date.now()
-                        }).catch(() => {});
+                        unsavedChanges = false;
+                        notifyParentGoBack();
                     } else {
+                        // Restore history entry so back button works again next time
                         history.pushState({ mobileMenu: true }, null, window.location.href);
                     }
                 } else {
-                    sendMessageToParent({
-                        type: PARENT_MESSAGE_TYPES.CHILD_CLOSING,
-                        childId: 'settings',
-                        timestamp: Date.now()
-                    }).catch(() => {});
+                    notifyParentGoBack();
                 }
             }
         }
@@ -357,6 +369,7 @@ function setupAndroidBackButton() {
         history.replaceState({ mobileMenu: true }, null, window.location.href);
     }
 }
+
 
 // =============================================
 // UI INITIALIZATION - ALIGNED WITH HANDSHAKE PROTOCOL
@@ -425,25 +438,12 @@ export async function initializeUI() {
 // Wait for core with timeout - STRICT: ALIGNED WITH HANDSHAKE PROTOCOL
 function waitForCore(timeout = 5000) {
     return new Promise((resolve) => {
-        // IMMEDIATE CHECK - don't wait if core is already ready
-        if (isReady || window.__SETTINGS_READY__ || window.currentUser || 
-            window.__SETTINGS_SESSION_ACTIVE__ || currentState === LifecycleState.ACTIVE) {
-            console.log('[SettingsUI] Core already ready, not waiting');
-            resolve(true);
-            return;
-        }
-        
-        console.log('[SettingsUI] Waiting for core...');
+        // Always resolve immediately - no connection required
+        console.log('[SettingsUI] Core check - proceeding immediately');
+        resolve(true);
+        return;
         const timeoutId = setTimeout(() => {
-            // Check one more time before timing out
-            if (window.currentUser || window.__SETTINGS_SESSION_ACTIVE__ || 
-                currentState === LifecycleState.ACTIVE) {
-                console.log('[SettingsUI] Core ready after timeout check');
-                resolve(true);
-            } else {
-                console.log('[SettingsUI] Core timeout - proceeding with cached data');
-                resolve(false);
-            }
+            resolve(true);
         }, timeout);
         
         onReady(() => {
@@ -776,14 +776,6 @@ export function buildSettingsMenu() {
             menuItem.style.color = 'var(--danger-color)';
         }
         
-        const hasAuth = checkAuthenticationState();
-        const isActive = currentState === LifecycleState.ACTIVE;
-        if ((item.requiresAuth && !hasAuth) || !isActive) {
-            menuItem.style.opacity = '0.5';
-            menuItem.style.pointerEvents = 'none';
-            menuItem.setAttribute('title', !isActive ? 'Waiting for connection...' : 'Sign in required');
-        }
-        
         menuItem.setAttribute('data-section', item.id);
         
         menuItem.innerHTML = `
@@ -799,12 +791,6 @@ export function buildSettingsMenu() {
             e.stopPropagation();
             
             try {
-                if ((item.requiresAuth && !hasAuth) || currentState !== LifecycleState.ACTIVE) {
-                    const msg = currentState !== LifecycleState.ACTIVE ? 'Waiting for connection...' : 'Please sign in to access this section';
-                    showNotification(msg, 'warning');
-                    return;
-                }
-                
                 document.querySelectorAll('.menu-item').forEach(item => {
                     item.classList.remove('active');
                 });
@@ -1049,25 +1035,6 @@ export function updateSaveButton() {
     const saveBtn = document.getElementById('saveSectionBtn');
     if (!saveBtn) return;
     
-    const hasAuth = checkAuthenticationState();
-    const isActive = currentState === LifecycleState.ACTIVE;
-    
-    if (!hasAuth && currentSection !== 'profile') {
-        saveBtn.disabled = true;
-        saveBtn.innerHTML = '<i class="fas fa-lock"></i> Sign In Required';
-        saveBtn.classList.remove('primary');
-        saveBtn.classList.add('secondary');
-        return;
-    }
-    
-    if (!isActive) {
-        saveBtn.disabled = true;
-        saveBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Connecting...';
-        saveBtn.classList.remove('primary');
-        saveBtn.classList.add('secondary');
-        return;
-    }
-    
     if (unsavedChanges) {
         saveBtn.disabled = false;
         saveBtn.innerHTML = '<i class="fas fa-save"></i> Save Changes';
@@ -1088,21 +1055,31 @@ export function setupEventListeners() {
     const backToAppBtn = document.getElementById('backToAppBtn');
     if (backToAppBtn) {
         backToAppBtn.addEventListener('click', () => {
-            if (unsavedChanges) {
-                if (confirm('You have unsaved changes. Leave anyway?')) {
-                    sendMessageToParent({
-                        type: PARENT_MESSAGE_TYPES.CHILD_CLOSING,
+            const doGoBack = () => {
+                // Tell parent to go back to the previous module
+                try {
+                    window.parent.postMessage({
+                        type: 'CHILD_CLOSING',
+                        module: 'settings',
                         childId: 'settings',
-                        unsavedChanges: true,
                         timestamp: Date.now()
-                    }).catch(() => {});
-                }
-            } else {
+                    }, '*');
+                } catch (e) {}
+                // Also try via sendMessageToParent for compatibility
                 sendMessageToParent({
-                    type: PARENT_MESSAGE_TYPES.CHILD_CLOSING,
+                    type: 'CHILD_CLOSING',
                     childId: 'settings',
                     timestamp: Date.now()
                 }).catch(() => {});
+            };
+
+            if (unsavedChanges) {
+                if (confirm('You have unsaved changes. Leave anyway?')) {
+                    unsavedChanges = false;
+                    doGoBack();
+                }
+            } else {
+                doGoBack();
             }
         });
     }
@@ -1110,16 +1087,6 @@ export function setupEventListeners() {
     const saveSectionBtn = document.getElementById('saveSectionBtn');
     if (saveSectionBtn) {
         saveSectionBtn.addEventListener('click', async () => {
-            if (!checkAuthenticationState()) {
-                showNotification('Please sign in to save settings', 'warning');
-                return;
-            }
-            
-            if (currentState !== LifecycleState.ACTIVE) {
-                showNotification('Waiting for connection...', 'warning');
-                return;
-            }
-            
             try {
                 saveSectionBtn.disabled = true;
                 saveSectionBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Saving...';
@@ -1127,7 +1094,15 @@ export function setupEventListeners() {
                 // Save using core function which uses SettingsState (REAL BACKEND)
                 await coreSaveSettings();
                 
+                unsavedChanges = false;
+                updateSaveButton();
                 showNotification('Settings saved successfully', 'success');
+                
+                // On mobile: after saving, if user is on a section panel offer to go back to menu
+                // On desktop: stay in place (no nav needed)
+                if (isMobileView && currentMobileSection) {
+                    // Optionally show a small "Back to menu" hint — don't force navigate
+                }
                 
             } catch (error) {
                 debugLog('Error saving settings:', error);
@@ -1142,11 +1117,6 @@ export function setupEventListeners() {
     const resetSectionBtn = document.getElementById('resetSectionBtn');
     if (resetSectionBtn) {
         resetSectionBtn.addEventListener('click', async () => {
-            if (!checkAuthenticationState()) {
-                showNotification('Please sign in to reset settings', 'warning');
-                return;
-            }
-            
             if (confirm('Reset all settings in this section to default?')) {
                 try {
                     if (currentSection && DEFAULT_SETTINGS[currentSection]) {
@@ -1173,9 +1143,6 @@ export function setupEventListeners() {
             if (searchDebounceTimer) clearTimeout(searchDebounceTimer);
             
             searchDebounceTimer = setTimeout(() => {
-                if (!checkAuthenticationState()) {
-                    return;
-                }
                 searchSettings(e.target.value);
             }, 300);
         });
@@ -1197,11 +1164,6 @@ export function setupEventListeners() {
     const terminateAllSessionsBtn = document.getElementById('terminateAllSessionsBtn');
     if (terminateAllSessionsBtn) {
         terminateAllSessionsBtn.addEventListener('click', () => {
-            if (!checkAuthenticationState()) {
-                showNotification('Please sign in to terminate sessions', 'warning');
-                return;
-            }
-            
             if (confirm('Terminate all other sessions?')) {
                 terminateAllSessions().catch(() => {});
             }
@@ -1302,7 +1264,6 @@ export function setupPhotoModalListeners() {
     const takePhotoBtn = document.getElementById('takePhotoBtn');
     if (takePhotoBtn) {
         takePhotoBtn.addEventListener('click', () => {
-            if (!checkAuthenticationState()) return;
             takePhoto();
         });
     }
@@ -1310,7 +1271,6 @@ export function setupPhotoModalListeners() {
     const choosePhotoBtn = document.getElementById('choosePhotoBtn');
     if (choosePhotoBtn) {
         choosePhotoBtn.addEventListener('click', () => {
-            if (!checkAuthenticationState()) return;
             choosePhoto();
         });
     }
@@ -1318,7 +1278,6 @@ export function setupPhotoModalListeners() {
     const removePhotoBtn = document.getElementById('removePhotoBtn');
     if (removePhotoBtn) {
         removePhotoBtn.addEventListener('click', () => {
-            if (!checkAuthenticationState()) return;
             removePhoto();
         });
     }
@@ -1326,7 +1285,6 @@ export function setupPhotoModalListeners() {
     const savePhotoBtn = document.getElementById('savePhotoBtn');
     if (savePhotoBtn) {
         savePhotoBtn.addEventListener('click', () => {
-            if (!checkAuthenticationState()) return;
             savePhoto();
         });
     }
@@ -1337,7 +1295,6 @@ export function setupPasswordModalListeners() {
     const savePasswordBtn = document.getElementById('savePasswordBtn');
     if (savePasswordBtn) {
         savePasswordBtn.addEventListener('click', () => {
-            if (!checkAuthenticationState()) return;
             changePassword();
         });
     }
@@ -1762,21 +1719,8 @@ export function updateUserStatus() {
     
     if (!statusIndicator || !statusText) return;
     
-    const hasAuth = checkAuthenticationState();
-    
-    if (hasAuth && currentState === LifecycleState.ACTIVE) {
-        statusIndicator.style.backgroundColor = 'var(--success-color)';
-        statusText.textContent = 'Online';
-    } else if (hasAuth && currentState === LifecycleState.WAIT_PARENT) {
-        statusIndicator.style.backgroundColor = 'var(--warning-color)';
-        statusText.textContent = 'Connecting...';
-    } else if (parentSessionReceived || tokenReady) {
-        statusIndicator.style.backgroundColor = 'var(--success-color)';
-        statusText.textContent = 'Online';
-    } else {
-        statusIndicator.style.backgroundColor = 'var(--warning-color)';
-        statusText.textContent = 'Connecting...';
-    }
+    statusIndicator.style.backgroundColor = 'var(--success-color)';
+    statusText.textContent = 'Online';
 }
 
 // Format time
@@ -2035,8 +1979,6 @@ function editMoodColorFallback(mood) {
 // =============================================
 export function loadProfileSection(container) {
     debugLog('Loading profile section');
-    const isActive = currentState === LifecycleState.ACTIVE;
-    
     // Get REAL settings from SettingsState (works even without active auth - uses cache)
     const settings = SettingsState.getSection('profile') || DEFAULT_SETTINGS.profile;
     
@@ -3914,18 +3856,14 @@ export function showBlockedUsers() {
 
 // Helper for auth required HTML
 function getAuthRequiredHTML(section, title) {
-    const isActive = currentState === LifecycleState.ACTIVE;
-    const message = !isActive ? 'Connecting to parent...' : 'Please sign in to access these settings';
-    
     return `
         <div class="settings-section">
             <div class="section-header">
-                <h3><i class="fas fa-lock section-icon"></i> ${title}</h3>
-                <div class="section-description">${message}</div>
+                <h3><i class="fas fa-cog section-icon"></i> ${title}</h3>
             </div>
             <div class="section-body" style="text-align: center; padding: 30px;">
-                <i class="fas ${!isActive ? 'fa-sync fa-spin' : 'fa-user-lock'}" style="font-size: 48px; color: var(--text-secondary); margin-bottom: 15px;"></i>
-                <p>${message}</p>
+                <i class="fas fa-spinner fa-spin" style="font-size: 48px; color: var(--primary-color); margin-bottom: 15px;"></i>
+                <p>Loading section...</p>
             </div>
         </div>
     `;

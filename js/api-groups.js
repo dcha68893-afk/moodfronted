@@ -29,6 +29,152 @@ export {
     leaveGroup
 };
 
+// =============================================
+// INVITATION & MEMBER MANAGEMENT — MISSING EXPORTS
+// These were completely absent from the original file,
+// causing all invite/cancel/accept/reject actions to silently fail.
+// =============================================
+
+/**
+ * Invite a user to a group by sending a POST to /api/group-members/:groupId/invitations
+ */
+export async function inviteToGroup(groupId, inviteeId, role = 'member', message = '') {
+    return secureApiFetch(`/api/group-members/${groupId}/invitations`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ inviteeId, role, message }),
+    });
+}
+
+/**
+ * Cancel a pending invitation (sender cancels their own invite)
+ */
+export async function cancelInvitation(invitationId) {
+    return secureApiFetch(`/api/group-members/invitations/${invitationId}`, {
+        method: 'DELETE',
+    });
+}
+
+/**
+ * Accept a group invitation (invitee accepts)
+ */
+export async function acceptGroupInvitation(invitationId) {
+    return secureApiFetch(`/api/group-members/invitations/${invitationId}/accept`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+    });
+}
+
+/**
+ * Reject a group invitation (invitee rejects)
+ */
+export async function rejectGroupInvitation(invitationId) {
+    return secureApiFetch(`/api/group-members/invitations/${invitationId}/reject`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+    });
+}
+
+/**
+ * Get all pending invitations for a group (admin view)
+ */
+export async function getGroupInvitations(groupId) {
+    return secureApiFetch(`/api/group-members/${groupId}/invitations`);
+}
+
+/**
+ * Get all invitations sent TO the current user (across all groups)
+ */
+export async function getMyInvitations(status = 'pending') {
+    return secureApiFetch(`/api/groups/invitations?status=${status}`);
+}
+
+/**
+ * Update a member's role in a group
+ */
+export async function updateGroupMemberRole(groupId, memberId, role) {
+    return secureApiFetch(`/api/group-members/${groupId}/members/${memberId}/role`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ role }),
+    });
+}
+
+/**
+ * Mute a group member
+ */
+export async function muteGroupMember(groupId, memberId, duration, reason = '') {
+    return secureApiFetch(`/api/group-members/${groupId}/members/${memberId}/mute`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ duration, reason }),
+    });
+}
+
+/**
+ * Unmute a group member
+ */
+export async function unmuteGroupMember(groupId, memberId) {
+    return secureApiFetch(`/api/group-members/${groupId}/members/${memberId}/mute`, {
+        method: 'DELETE',
+    });
+}
+
+/**
+ * Ban a group member
+ */
+export async function banGroupMember(groupId, memberId, duration = null, reason = '') {
+    return secureApiFetch(`/api/group-members/${groupId}/members/${memberId}/ban`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ duration, reason }),
+    });
+}
+
+/**
+ * Unban a group member
+ */
+export async function unbanGroupMember(groupId, memberId) {
+    return secureApiFetch(`/api/group-members/${groupId}/members/${memberId}/ban`, {
+        method: 'DELETE',
+    });
+}
+
+/**
+ * Transfer group ownership to another member
+ */
+export async function transferGroupOwnership(groupId, newOwnerId) {
+    return secureApiFetch(`/api/group-members/${groupId}/transfer`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ newOwnerId }),
+    });
+}
+
+/**
+ * Get group member statistics (admin only)
+ */
+export async function getGroupMemberStatistics(groupId) {
+    return secureApiFetch(`/api/group-members/${groupId}/statistics`);
+}
+
+/**
+ * Search members in a group
+ */
+export async function searchGroupMembers(groupId, query, options = {}) {
+    const params = new URLSearchParams({ query, ...options });
+    return secureApiFetch(`/api/group-members/${groupId}/members/search?${params}`);
+}
+
+/**
+ * Export group members list (admin only)
+ */
+export async function exportGroupMembers(groupId, format = 'json') {
+    return secureApiFetch(`/api/group-members/${groupId}/members/export?format=${format}`);
+}
+
 // API Group Manager
 class ApiGroupManager {
     constructor() {

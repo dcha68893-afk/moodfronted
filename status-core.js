@@ -19,23 +19,27 @@ function __isValidSession(session) {
 
     // Must have a token that is a non-empty string
     if (!session.token || typeof session.token !== 'string' || session.token.length === 0) {
+        // In guest mode or cached mode, allow missing token temporarily
+        if (session.guestMode === true || session.isGuest === true) {
+            return true;
+        }
         return false;
     }
 
-    // Check userId - must be a valid number, never "user" or default placeholder
-    if (session.userId === undefined || session.userId === null) return false;
-    if (session.userId === 'user') return false;
-    if (typeof session.userId === 'string' && session.userId === '') return false;
+    // Check userId - accept various formats
+    let userId = session.userId;
+    if (!userId && session.user) {
+        userId = session.user.id || session.user.userId;
+    }
     
-    // Accept number or string that can be converted to number
-    const userIdNum = typeof session.userId === 'number' ? session.userId : parseInt(session.userId, 10);
-    if (isNaN(userIdNum) || userIdNum <= 0) return false;
-
-    // If user object exists, validate its structure
-    if (session.user) {
-        if (!session.user.id && !session.user.userId) return false;
-        const userUserId = session.user.id || session.user.userId;
-        if (userUserId === 'user' || userUserId === 'default' || userUserId === 0 || userUserId === '0') return false;
+    // If no userId at all, might be valid if we have token
+    if (!userId && session.token) {
+        return true; // Token-only session is valid
+    }
+    
+    // If userId exists but is placeholder, reject
+    if (userId === 'user' || userId === 'default' || userId === 0 || userId === '0') {
+        return false;
     }
 
     return true;
@@ -44,6 +48,8 @@ function __isValidSession(session) {
 // Store last valid session ID for deduplication
 let _lastValidSessionId = null;
 let _lastValidSessionHash = null;
+let _backgroundInitStarted = false;
+let _backgroundInitWithSessionStarted = false;
 
 function __getSessionHash(session) {
     if (!session) return null;
@@ -251,8 +257,12 @@ function notifyStateListeners(toState, fromState, reason) {
 // LIFECYCLE GUARDS - CRITICAL
 // =============================================
 function ensureActive(actionName) {
-    if (currentState !== LIFECYCLE_STATES.ACTIVE) {
-        console.warn(`[${MODULE_NAME}] ❌ Blocked action '${actionName}' - not ACTIVE (current: ${currentState})`);
+    // Check BOTH state machines
+    const isLegacyActive = (currentState === LIFECYCLE_STATES.ACTIVE);
+    const isNewActive = (typeof _currentState !== 'undefined' && _currentState === LifecycleState.ACTIVE);
+    
+    if (!isLegacyActive && !isNewActive) {
+        console.warn(`[${MODULE_NAME}] ❌ Blocked action '${actionName}' - not ACTIVE (legacy: ${currentState}, new: ${typeof _currentState !== 'undefined' ? _currentState : 'undefined'})`);
         if (typeof DiagnosticsAgent !== 'undefined') DiagnosticsAgent.increment('blockedActions');
         return false;
     }
@@ -351,18 +361,31 @@ function cleanupPendingRequests() {
 
 setInterval(cleanupPendingRequests, TIMING.CLEANUP_INTERVAL);
 
+// In status-core.js, find the makeApiRequest function and update it:
+
 function makeApiRequest(endpoint, method, data = null, params = null) {
     return new Promise((resolve, reject) => {
-        // CRITICAL: Block if not ACTIVE
         if (!ensureActive(`API_REQUEST: ${endpoint}`)) {
             reject(new Error(`Module not ACTIVE (current: ${currentState})`));
             return;
         }
         
+        // Get token directly from session
+        const token = getSessionToken();
+        const userId = getSessionUserId();
+        
+        // Normalize endpoint like other modules do
+        let normalizedEndpoint = endpoint;
+        if (normalizedEndpoint.startsWith('/api/')) {
+            normalizedEndpoint = normalizedEndpoint.substring(4);
+        }
+        if (!normalizedEndpoint.startsWith('/')) {
+            normalizedEndpoint = '/' + normalizedEndpoint;
+        }
+        
         const requestId = generateRequestId();
         const timestamp = Date.now();
         
-        // Store pending request
         pendingRequests.set(requestId, {
             resolve,
             reject,
@@ -376,7 +399,7 @@ function makeApiRequest(endpoint, method, data = null, params = null) {
             }, TIMING.REQUEST_TIMEOUT)
         });
         
-        // Build message to parent
+        // Include token in the payload so parent doesn't need to fetch it
         const message = {
             id: generateMessageId(),
             type: 'API_REQUEST',
@@ -384,25 +407,29 @@ function makeApiRequest(endpoint, method, data = null, params = null) {
             target: 'parent',
             requestId: requestId,
             payload: {
-                endpoint: endpoint,
-                method: method,
-                body: data,
-                params: params
+                endpoint: normalizedEndpoint,
+                method: method.toUpperCase(),
+                body: data || null,
+                params: params || null,
+                token: token,  // ← ADD THIS - send token directly
+                userId: userId // ← ADD THIS - send userId
             },
             timestamp: timestamp
         };
         
-        console.log(`[${MODULE_NAME}] 📤 Sending API_REQUEST: ${method} ${endpoint} (${requestId})`);
-        
-        // Send to parent
         try {
             if (!window.parent || window.parent === window) {
                 throw new Error('No parent window');
             }
             window.parent.postMessage(message, '*');
+            logStatus('SENDING', `API_REQUEST: ${method} ${normalizedEndpoint} (token: ${!!token})`);
         } catch (error) {
             console.error(`[${MODULE_NAME}] Failed to send API_REQUEST:`, error);
-            pendingRequests.delete(requestId);
+            if (pendingRequests.has(requestId)) {
+                const pending = pendingRequests.get(requestId);
+                if (pending.timeout) clearTimeout(pending.timeout);
+                pendingRequests.delete(requestId);
+            }
             reject(error);
         }
     });
@@ -410,16 +437,15 @@ function makeApiRequest(endpoint, method, data = null, params = null) {
 
 // Handle API_RESPONSE from parent
 function handleApiResponse(data) {
-    const requestId = data.requestId;
+    const requestId = data.requestId || data.payload?.requestId;  // also check nested
     const response = data.payload || data;
-    
-    console.log(`[${MODULE_NAME}] 📥 API_RESPONSE received: ${requestId}`, response);
     
     if (!pendingRequests.has(requestId)) {
         console.warn(`[${MODULE_NAME}] No pending request for: ${requestId}`);
+        // Still dispatch for UI listeners
+        document.dispatchEvent(new CustomEvent('apiResponse', { detail: data }));
         return;
     }
-    
     const pending = pendingRequests.get(requestId);
     
     if (pending.timeout) {
@@ -428,12 +454,31 @@ function handleApiResponse(data) {
     
     pendingRequests.delete(requestId);
     
-    if (response.success === false) {
-        console.error(`[${MODULE_NAME}] API request failed:`, response.error);
-        pending.reject(new Error(response.error || 'API request failed'));
+    // Check if response indicates failure
+    const isFailed = response && (
+        response.success === false ||
+        (response.statusCode && response.statusCode >= 400)
+    );
+    
+    if (isFailed) {
+        const errMsg = response.error || response.message || 'API request failed';
+        console.error(`[${MODULE_NAME}] API request failed: ${errMsg}`);
+        pending.reject(new Error(errMsg));
     } else {
-        pending.resolve(response.data || response);
+        // Extract data from response
+        let result = response;
+        
+        // Handle different response formats
+        if (result && result.data !== undefined && result.success === true) {
+            result = result.data;
+        }
+        if (result && result.status === 'success' && result.data !== undefined) {
+            result = result.data;
+        }
+        
+        pending.resolve(result);
     }
+    document.dispatchEvent(new CustomEvent('apiResponse', { detail: data }));
 }
 
 // =============================================
@@ -653,10 +698,17 @@ function onModuleActive() {
         }, 100);
     }
     
+    // Dispatch moduleActive event for UI to pick up
     document.dispatchEvent(new CustomEvent('moduleActive', {
-        detail: { module: MODULE_NAME, timestamp: Date.now() }
+        detail: { module: MODULE_NAME, timestamp: Date.now(), state: 'ACTIVE' }
+    }));
+    
+    // Also dispatch a more specific event
+    window.dispatchEvent(new CustomEvent('statusModuleActive', {
+        detail: { timestamp: Date.now() }
     }));
 }
+
 
 function sendChildReady() {
     if (_childReadySent) {
@@ -664,10 +716,16 @@ function sendChildReady() {
         return false;
     }
 
-    if (_currentState !== LifecycleState.READY) {
+    // Allow from INITIALIZING or READY state
+    if (_currentState !== LifecycleState.READY && _currentState !== LifecycleState.INITIALIZING) {
         debugWarn(`[Lifecycle] Cannot send CHILD_READY — invalid state: ${_currentState}`);
         logStatus('LIFECYCLE', `CHILD_READY blocked - current state: ${_currentState}`);
         return false;
+    }
+
+    // If in INITIALIZING, transition to READY first
+    if (_currentState === LifecycleState.INITIALIZING) {
+        transitionTo(LifecycleState.READY, 'preparing_to_send_child_ready');
     }
 
     _childReadySent = true;
@@ -682,6 +740,7 @@ function sendChildReady() {
 
     parent.postMessage({
         type: "CHILD_READY",
+        source: MODULE_NAME,  // ADD THIS - parent checks source field
         module: MODULE_NAME,
         moduleVersion: '10.0',
         messageId: messageId,
@@ -902,38 +961,22 @@ async function authorizedFetch(url, options = {}) {
         throw error;
     }
     
+    // CRITICAL: Use parent proxy instead of direct fetch
+    // This ensures requests go through chat.html which has the correct backend URL
     try {
-        const response = await fetch(url, {
-            credentials: 'include',
-            ...options,
-            headers: {
-                'Content-Type': 'application/json',
-                ...(options.headers || {}),
-                'Authorization': `Bearer ${token}`
-            }
-        });
-        
-        if (response.status === 401) {
-            debugWarn(`Auth error 401 on ${url} - requesting new session`);
-            clearSession();
-            
-            if (isInState(LifecycleState.ACTIVE) && _sessionRequestRetries < MAX_SESSION_REQUEST_RETRIES) {
-                _sessionRequestRetries++;
-                requestSession();
-            }
-            
-            throw new Error('Unauthorized - session invalid');
-        }
-        
-        _sessionRequestRetries = 0;
-        
-        return response;
+        // Route through parent proxy via API_REQUEST
+        const endpoint = url.replace(/^https?:\/\/[^\/]+/, '');
+        const response = await makeApiRequest(endpoint, options.method || 'GET', options.body, null);
+        // makeApiRequest returns the parsed JSON response directly
+        return {
+            ok: true,
+            status: 200,
+            json: async () => response,
+            text: async () => JSON.stringify(response),
+            headers: new Headers({ 'content-type': 'application/json' })
+        };
     } catch (error) {
-        if (error.code === 'SESSION_NOT_READY' || error.code === 'NO_TOKEN') {
-            throw error;
-        }
-        
-        debugError(`Authorized fetch failed for ${url}:`, error);
+        console.error(`[${MODULE_NAME}] Parent proxy request failed:`, error);
         throw error;
     }
 }
@@ -3219,39 +3262,82 @@ function handleParentMessage(event) {
             }
 
             // Handle AUTH_READY directly
-            if (msg.type === 'AUTH_READY') {
-                console.log('[status] 📥 AUTH_READY received via direct handler');
-                
-                const payload = msg.payload || {};
-                const sessionData = payload.session || payload;
-                
-                if (sessionData && __isValidSession(sessionData)) {
-                    if (!__isDuplicateSession(sessionData)) {
-                        handleSession(sessionData);
-                        __storeValidSessionId(sessionData);
-                        logStatus('SUCCESS', 'Session applied from AUTH_READY');
-                    } else {
-                        logStatus('WARNING', 'Duplicate session data in AUTH_READY ignored');
+if (msg.type === 'AUTH_READY') {
+    console.log('[status] 📥 AUTH_READY received via direct handler');
+    
+    const payload = msg.payload || {};
+    const sessionData = payload.session || payload;
+    
+    if (sessionData && __isValidSession(sessionData)) {
+        if (!__isDuplicateSession(sessionData)) {
+            handleSession(sessionData);
+            __storeValidSessionId(sessionData);
+            logStatus('SUCCESS', 'Session applied from AUTH_READY');
+        } else {
+            logStatus('WARNING', 'Duplicate session data in AUTH_READY ignored');
+        }
+    }
+    
+    // Mark parent as ready
+    parentReady = true;
+    _parentReady = true;
+    
+    // Check BOTH state machines (legacy currentState and new _currentState)
+    const isInWaitParent = (currentState === LIFECYCLE_STATES.WAIT_PARENT) || 
+                           (typeof _currentState !== 'undefined' && _currentState === LifecycleState.WAIT_PARENT);
+    
+    // If we're in WAIT_PARENT, transition to ACTIVE
+    if (isInWaitParent) {
+        if (isSessionReady() && __isValidSession({ token: _sessionToken, userId: _sessionUser?.id || _sessionUser?.userId })) {
+            // Transition BOTH state machines
+            transitionTo(LIFECYCLE_STATES.ACTIVE, 'auth_ready_with_valid_session');
+            if (typeof transitionTo === 'function' && LifecycleState && LifecycleState.ACTIVE) {
+                try {
+                    if (typeof _currentState !== 'undefined' && _currentState !== LifecycleState.ACTIVE) {
+                        // Call the second state machine's transition if it exists
+                        if (typeof window.transitionTo === 'function') window.transitionTo(LifecycleState.ACTIVE, 'auth_ready');
                     }
-                }
-                
-                // Mark parent as ready
-                parentReady = true;
-                _parentReady = true;
-                
-                // If we're in WAIT_PARENT, transition to ACTIVE
-                if (currentState === LIFECYCLE_STATES.WAIT_PARENT) {
-                    if (isSessionReady() && __isValidSession({ token: _sessionToken, userId: _sessionUser?.id })) {
-                        transitionTo(LIFECYCLE_STATES.ACTIVE, 'auth_ready_with_valid_session');
-                        flushQueue();
-                        
-                        if (parentReadyResolver) {
-                            parentReadyResolver({ type: 'AUTH_READY', timestamp: Date.now() });
-                        }
-                    }
-                }
-                return;
+                } catch(e) {}
             }
+            flushQueue();
+            
+            if (parentReadyResolver) {
+                parentReadyResolver({ type: 'AUTH_READY', timestamp: Date.now() });
+            }
+            // =============================================
+// ADD THIS BLOCK INSIDE handleParentMessage function
+// Place it after the other message type checks (like after STATUS_UPDATE)
+// =============================================
+
+// ── OFFLINE-FIRST: Apply per-key setting changes immediately ──
+if (msg.type === 'SETTING_CHANGED' || msg.type === 'SETTINGS_UPDATED') {
+    const payload = msg.payload || msg.data || {};
+
+    if (msg.type === 'SETTING_CHANGED' && payload.section && payload.key !== undefined) {
+        const { section, key, value } = payload;
+        applySettingToStatusModule(section, key, value);
+        window.dispatchEvent(new CustomEvent('settingChanged', { detail: { section, key, value, timestamp: Date.now() } }));
+        EventBus.emit('settingChanged', { section, key, value });
+    }
+
+    if (msg.type === 'SETTINGS_UPDATED' && payload.settings) {
+        const s = payload.settings;
+        Object.entries(s).forEach(([sec, secVal]) => {
+            if (secVal && typeof secVal === 'object')
+                Object.entries(secVal).forEach(([k, v]) => applySettingToStatusModule(sec, k, v));
+        });
+        if (typeof SafeStorage !== 'undefined') SafeStorage.setJSON('user_settings', s);
+        window.dispatchEvent(new CustomEvent('settingsUpdated', { detail: { settings: s, timestamp: Date.now() } }));
+        EventBus.emit('settingsUpdated', { settings: s });
+    }
+
+    return; // Don't process further handlers for these types
+}
+
+        }
+    }
+    return;
+}
 
             // Handle SESSION_DATA
             if (msg.type === 'SESSION_DATA') {
@@ -3465,7 +3551,7 @@ addMessageHandler('LOGOUT', (message) => {
 });
 
 addMessageHandler('API_RESPONSE', (message) => {
-    if (typeof handleApiResponse !== 'undefined') handleApiResponse(message.payload);
+    if (typeof handleApiResponse !== 'undefined') handleApiResponse(message); // pass full message
 });
 
 addMessageHandler('API_ERROR', (message) => {
@@ -6041,12 +6127,52 @@ function handleEnhancedParentMessage(event) {
             return;
         }
         
+        // =============================================
+        // SETTING CHANGED HANDLER - PLACED CORRECTLY HERE
+        // =============================================
+        if (sanitizedMessage.type === 'SETTING_CHANGED' || sanitizedMessage.type === 'SETTINGS_UPDATED') {
+            const payload = sanitizedMessage.payload || sanitizedMessage.data || {};
+
+            if (sanitizedMessage.type === 'SETTING_CHANGED' && payload.section && payload.key !== undefined) {
+                const { section, key, value } = payload;
+                if (typeof applySettingToStatusModule === 'function') {
+                    applySettingToStatusModule(section, key, value);
+                }
+                window.dispatchEvent(new CustomEvent('settingChanged', { 
+                    detail: { section, key, value, timestamp: Date.now() } 
+                }));
+                if (typeof EventBus !== 'undefined') {
+                    EventBus.emit('settingChanged', { section, key, value });
+                }
+            }
+
+            if (sanitizedMessage.type === 'SETTINGS_UPDATED' && payload.settings) {
+                const s = payload.settings;
+                if (typeof applySettingToStatusModule === 'function') {
+                    Object.entries(s).forEach(([sec, secVal]) => {
+                        if (secVal && typeof secVal === 'object') {
+                            Object.entries(secVal).forEach(([k, v]) => applySettingToStatusModule(sec, k, v));
+                        }
+                    });
+                }
+                if (typeof SafeStorage !== 'undefined') {
+                    SafeStorage.setJSON('user_settings', s);
+                }
+                window.dispatchEvent(new CustomEvent('settingsUpdated', { 
+                    detail: { settings: s, timestamp: Date.now() } 
+                }));
+                if (typeof EventBus !== 'undefined') {
+                    EventBus.emit('settingsUpdated', { settings: s });
+                }
+            }
+            return;
+        }
+        
         switch (sanitizedMessage.type) {
             case 'SESSION_DATA':
             case 'SESSION':
             case 'SESSION_ACTIVE':
             case 'SESSION_UPDATE':
-                // Validate session before processing
                 if (sanitizedMessage.payload && __isValidSession(sanitizedMessage.payload)) {
                     handleSecureSessionData(sanitizedMessage);
                 } else {
@@ -6058,12 +6184,11 @@ function handleEnhancedParentMessage(event) {
                     handleSecureSessionData(sanitizedMessage);
                 }
                 break;
-                
             case 'LOGOUT':
                 if (typeof handleLogout !== 'undefined') handleLogout(sanitizedMessage.data || sanitizedMessage.payload);
                 break;
             case 'API_RESPONSE':
-                if (typeof handleApiResponse !== 'undefined') handleApiResponse(sanitizedMessage.data || sanitizedMessage.payload);
+                if (typeof handleApiResponse !== 'undefined') handleApiResponse(sanitizedMessage);
                 break;
             case 'API_ERROR':
                 if (typeof handleApiError !== 'undefined') handleApiError(sanitizedMessage.data || sanitizedMessage.payload);
@@ -6092,7 +6217,6 @@ function handleEnhancedParentMessage(event) {
                     }, 100);
                 }
                 break;
-                
             case 'STATUS_POSTED':
             case 'STATUS_VIEWED':
             case 'STATUS_REACTED':
@@ -6104,7 +6228,10 @@ function handleEnhancedParentMessage(event) {
                     detail: { type: sanitizedMessage.type, payload: sanitizedMessage.payload }
                 }));
                 break;
+            default:
+                break;
         }
+        
     } catch (error) {
         const handlerKey = `enhanced_parent_msg_${error.message}`;
         if (!_loggedMessages.has(handlerKey)) {
@@ -6112,7 +6239,6 @@ function handleEnhancedParentMessage(event) {
             logStatus('FAILED', `handleEnhancedParentMessage: ${error.message}`);
         }
     }
-    
 }
 
 function startSecureHandshake() {
@@ -6464,6 +6590,8 @@ function handleParentUnavailable() {
 
 function startBackgroundInitializationWithSession() {
     if (typeof isBackgroundInitialized !== 'undefined' && isBackgroundInitialized) return;
+    if (_backgroundInitWithSessionStarted) return; // ← ADD THIS LINE
+    _backgroundInitWithSessionStarted = true; // ← ADD THIS LINE
     
     try {
         setTimeout(async () => {
@@ -6565,7 +6693,8 @@ async function makeParentApiRequest(endpoint, options = {}) {
     });
 }
 
-function handleApiResponse(responseData) {
+// NOTE: Real handleApiResponse is defined earlier (line ~430) - this is a supplemental notifier
+function notifyApiResponse(responseData) {
     document.dispatchEvent(new CustomEvent('apiResponse', {
         detail: responseData
     }));
@@ -6656,6 +6785,30 @@ function waitForTokenReady() {
         } catch (error) {
             resolve(false);
         }
+    });
+}
+
+// Add this after the existing waitForTokenReady function
+function waitForTokenReady() {
+    return new Promise((resolve) => {
+        if (isTokenReady || (isSessionReady() && getSessionToken())) {
+            resolve(true);
+            return;
+        }
+        
+        // Check every 100ms
+        const interval = setInterval(() => {
+            if (isTokenReady || (isSessionReady() && getSessionToken())) {
+                clearInterval(interval);
+                resolve(true);
+            }
+        }, 100);
+        
+        // Timeout after 5 seconds
+        setTimeout(() => {
+            clearInterval(interval);
+            resolve(false);
+        }, 5000);
     });
 }
 
@@ -6791,31 +6944,38 @@ function startTokenReadinessCheck() {
 
 // =============================================
 // SECURE API CALL WITH FALLBACK - Using parent proxy
-// =============================================
-const secureApiCall = createErrorBoundary(async function(endpoint, options = {}) {
-    if (state.offlineModeEnabled && options.method && options.method !== 'GET') {
-        throw new Error('Offline mode');
-    }
-    
-    if (parentCoordinator.handshakeComplete && parentReady) {
-        try {
-            return await makeParentApiRequest(endpoint, options);
-        } catch (error) {
-            // Fall through
-        }
-    }
-    
-    try {
-        const response = await authorizedFetch(endpoint, options);
-        return await response.json();
-    } catch (error) {
-        if (error.code === 'SESSION_NOT_READY') {
-            return queueApiRequest(() => secureApiCall(endpoint, options));
-        }
-        throw error;
-    }
-}, 'secureApiCall', null);
+// REPLACE the entire secureApiCall function with this:
 
+// =============================================
+// REPLACE the entire secureApiCall function (around line 4240) with:
+// =============================================
+
+const secureApiCall = createErrorBoundary(async function(endpoint, options = {}) {
+    // ALWAYS use parent proxy - never direct fetch
+    if (!ensureActive('secureApiCall')) {
+        throw new Error('Module not active');
+    }
+    
+    if (!isSessionReady()) {
+        throw new Error('Session not ready');
+    }
+    
+    const method = options.method || 'GET';
+    const body = options.body;
+    const params = options.params;
+    
+    // Use makeApiRequest which sends to parent
+    const response = await makeApiRequest(endpoint, method, body, params);
+    
+    // Return in a format compatible with existing code
+    return {
+        ok: true,
+        status: 200,
+        json: async () => response,
+        text: async () => JSON.stringify(response),
+        headers: new Headers({ 'content-type': 'application/json' })
+    };
+}, 'secureApiCall', null);
 // =============================================
 // GLOBAL STATE VARIABLES
 // =============================================
@@ -7115,6 +7275,8 @@ async function loadCachedDataInstantly() {
 // =============================================
 async function startBackgroundInitialization() {
     if (isBackgroundInitialized) return;
+    if (_backgroundInitStarted) return; // ← ADD THIS LINE
+    _backgroundInitStarted = true; // ← ADD THIS LINE
     
     try {
         onTokenReady(async () => {
@@ -7178,44 +7340,84 @@ async function safeApiOperation(operation) {
     }
 }
 
+
 async function loadStatusesInBackground() {
+    // Wait for token before attempting API call
     try {
-        // FIXED: correct endpoint is /api/status (not /api/statuses)
+        await waitForTokenReady();
+    } catch (err) {
+        logStatus('WARNING', 'Token wait timeout for /status - skipping');
+        return;
+    }
+    
+    if (!isSessionReady() && !getSessionToken()) {
+        logStatus('WARNING', 'No token available for /status - skipping');
+        return;
+    }
+    
+    try {
+        // Use secureApiCall which now uses parent proxy
         const response = await secureApiCall('/api/status');
-        // Backend returns { success, data: { statuses: [...] } }
         const list = response?.statuses || response?.data?.statuses || [];
         if (list && list.length >= 0) {
             statuses = list;
             if (typeof filterStatusesByPrivacy !== 'undefined') statuses = filterStatusesByPrivacy(statuses);
             statuses.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
             SafeStorage.setJSON(LOCAL_STORAGE_KEYS.STATUSES, statuses);
-            
-            const loadKey = 'statuses_loaded_bg';
-            if (!_loggedMessages.has(loadKey)) {
-                _loggedMessages.add(loadKey);
-                logStatus('SUCCESS', `Loaded ${statuses.length} statuses`);
-            }
+            logStatus('SUCCESS', `Loaded ${statuses.length} statuses`);
         }
     } catch (error) {
+        logStatus('FAILED', `loadStatusesInBackground: ${error.message}`);
         throw error;
     }
+}
+
+// Helper function to wait for token with timeout
+async function waitForToken(timeout = 5000) {
+    const startTime = Date.now();
+    
+    while (Date.now() - startTime < timeout) {
+        if (isSessionReady() && getSessionToken()) {
+            return getSessionToken();
+        }
+        if (isTokenReady && getSessionToken()) {
+            return getSessionToken();
+        }
+        await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    
+    return null;
 }
 
 async function loadMyStatusesInBackground() {
+    // Wait for token to be available using the existing token readiness system
     try {
-        // FIXED: correct endpoint is /api/status/my
-        const response = await secureApiCall('/api/status/my');
+        await waitForTokenReady();
+    } catch (err) {
+        logStatus('WARNING', 'Token wait timeout for /status/my - skipping');
+        return;
+    }
+    
+    // Double-check token is actually ready
+    if (!isSessionReady() && !getSessionToken()) {
+        logStatus('WARNING', 'No token available for /status/my - skipping');
+        return;
+    }
+    
+    try {
+        // Use makeApiRequest directly (same as messages module)
+        const response = await makeApiRequest('/api/status/my', 'GET');
         const list = response?.statuses || response?.data?.statuses || [];
-        if (list) {
+        if (Array.isArray(list)) {
             myStatuses = list;
             SafeStorage.setJSON(LOCAL_STORAGE_KEYS.MY_STATUSES, myStatuses);
+            logStatus('SUCCESS', `Loaded ${myStatuses.length} my statuses`);
         }
     } catch (error) {
+        logStatus('FAILED', `loadMyStatusesInBackground: ${error.message}`);
         throw error;
     }
 }
-
-// NEW: load friends' statuses so they appear in the status feed
 async function loadFriendsStatusesInBackground() {
     try {
         const response = await secureApiCall('/api/status/friends');
@@ -7226,41 +7428,63 @@ async function loadFriendsStatusesInBackground() {
             notifyStatusObservers();
         }
     } catch (error) {
-        // Non-fatal — friends statuses are a bonus
-        console.warn(`[${MODULE_NAME}] Could not load friends statuses:`, error.message);
+        logStatus('WARNING', `loadFriendsStatusesInBackground: ${error.message}`);
     }
 }
 
 async function loadHighlightsInBackground() {
+    // Wait for token before attempting API call
     try {
-        // Highlights not a separate route — fetch own statuses and filter
-        const response = await secureApiCall('/api/status/my');
+        await waitForTokenReady();
+    } catch (err) {
+        logStatus('WARNING', 'Token wait timeout for /highlights - skipping');
+        return;
+    }
+    
+    if (!isSessionReady() && !getSessionToken()) {
+        logStatus('WARNING', 'No token available for /highlights - skipping');
+        return;
+    }
+    
+    try {
+        // Use makeApiRequest directly (same as messages module)
+        const response = await makeApiRequest('/api/status/highlights', 'GET');
         const list = response?.statuses || response?.data?.statuses || [];
-        if (list) {
-            // Treat pinned statuses as highlights
+        if (Array.isArray(list)) {
             highlights = list.filter(s => s.metadata && s.metadata.pinned);
             SafeStorage.setJSON(LOCAL_STORAGE_KEYS.HIGHLIGHTS, highlights);
+            logStatus('SUCCESS', `Loaded ${highlights.length} highlights`);
         }
     } catch (error) {
+        logStatus('FAILED', `loadHighlightsInBackground: ${error.message}`);
         throw error;
     }
 }
 
 async function loadUserDataInBackground() {
+    // Wait for token before attempting API call
     try {
-        const response = await secureApiCall('/api/user/me');
-        if (response && response.user) {
-            currentUser = response.user;
-            userData = response.user;
-            
-            const userKey = 'user_data_loaded';
-            if (!_loggedMessages.has(userKey)) {
-                _loggedMessages.add(userKey);
-                logStatus('SUCCESS', 'User data loaded');
-            }
+        await waitForTokenReady();
+    } catch (err) {
+        logStatus('WARNING', 'Token wait timeout for /auth/me - skipping');
+        return;
+    }
+    
+    if (!isSessionReady() && !getSessionToken()) {
+        logStatus('WARNING', 'No token available for /auth/me - skipping');
+        return;
+    }
+    
+    try {
+        const response = await secureApiCall('/api/auth/me');
+        const user = response?.data?.user || response?.user;
+        if (user) {
+            currentUser = user;
+            userData = user;
+            logStatus('SUCCESS', 'User data loaded');
         }
     } catch (error) {
-        throw error;
+        logStatus('WARNING', `loadUserDataInBackground: ${error.message}`);
     }
 }
 
@@ -7350,13 +7574,20 @@ async function initializeStatusSystem() {
     }
 }
 
+// ADD THESE VARIABLES RIGHT BEFORE THE FUNCTION
+let _initialDataLoading = false;
+let _initialDataPromise = null;
+
 async function loadInitialData() {
-    try {
-        const loadPromises = [];
-        
-        loadPromises.push(safeApiOperation(async () => {
-            // FIXED: /api/status (not /api/statuses), unwrap data wrapper
-            const statusesResponse = await secureApiCall('/api/status');
+    if (_initialDataLoading) {
+        return _initialDataPromise;
+    }
+    
+    _initialDataLoading = true;
+    _initialDataPromise = (async () => {
+        try {
+            // Use makeApiRequest for all calls
+            const statusesResponse = await makeApiRequest('/api/status', 'GET');
             const list = statusesResponse?.statuses || statusesResponse?.data?.statuses || [];
             if (list) {
                 statuses = list;
@@ -7364,45 +7595,36 @@ async function loadInitialData() {
                 statuses.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
                 SafeStorage.setJSON(LOCAL_STORAGE_KEYS.STATUSES, statuses);
             }
-        }));
-        
-        loadPromises.push(safeApiOperation(async () => {
-            // FIXED: /api/status/my (not /api/statuses/my)
-            const myStatusesResponse = await secureApiCall('/api/status/my');
+            
+            const myStatusesResponse = await makeApiRequest('/api/status/my', 'GET');
             const myList = myStatusesResponse?.statuses || myStatusesResponse?.data?.statuses || [];
             if (myList) {
                 myStatuses = myList;
                 SafeStorage.setJSON(LOCAL_STORAGE_KEYS.MY_STATUSES, myStatuses);
             }
-        }));
-        
-        loadPromises.push(safeApiOperation(async () => {
-            // FIXED: /api/status/friends — loads friends' statuses
-            const friendsResponse = await secureApiCall('/api/status/friends');
+            
+            const friendsResponse = await makeApiRequest('/api/status/friends', 'GET');
             const friendsList = friendsResponse?.statuses || friendsResponse?.data?.statuses || [];
             if (friendsList) {
                 friendsStatuses = friendsList;
             }
-        }));
-        
-        loadPromises.push(safeApiOperation(async () => {
-            const userResponse = await secureApiCall('/api/user/me');
-            if (userResponse && userResponse.user) {
-                currentUser = userResponse.user;
-                userData = userResponse.user;
+            
+            const userResponse = await makeApiRequest('/api/auth/me', 'GET');
+            if (userResponse && (userResponse.data?.user || userResponse.user)) {
+                currentUser = userResponse.data?.user || userResponse.user;
+                userData = currentUser;
             }
-        }));
-        
-        await Promise.allSettled(loadPromises);
-        
-        const initKey = 'initial_data_loaded';
-        if (!_loggedMessages.has(initKey)) {
-            _loggedMessages.add(initKey);
+            
             logStatus('SUCCESS', 'Initial data loaded');
+        } catch (error) {
+            logStatus('FAILED', `loadInitialData: ${error.message}`);
+            throw error;
+        } finally {
+            _initialDataLoading = false;
         }
-    } catch (error) {
-        throw error;
-    }
+    })();
+    
+    return _initialDataPromise;
 }
 
 // =============================================
@@ -8219,17 +8441,19 @@ async function updateUserStatus() {
                 isOnline: isOnlineGlobal
             });
         }
-        
-        if (isOnlineGlobal && !state.offlineModeEnabled && parentReady && isSessionReady()) {
-            try {
-                await secureApiCall('/api/user/status', {
-                    method: 'POST',
-                    body: JSON.stringify({ status: status, lastSeen: new Date().toISOString() })
-                });
-            } catch (apiError) {}
-        }
-        
     } catch (error) {}
+}
+
+if (isOnlineGlobal && !state.offlineModeEnabled && parentReady && isSessionReady()) {
+    // The backend doesn't have a /api/user/status endpoint
+    // Instead, just update local state and notify parent
+    if (parentCoordinator.handshakeComplete && parentReady) {
+        safeSendAction('USER_STATUS_UPDATE', {
+            userId: userId,
+            status: status,
+            lastSeen: new Date().toISOString()
+        });
+    }
 }
 
 async function syncPendingData() {
@@ -8492,6 +8716,7 @@ function getPendingReplies() {
 function getPendingReactions() {
     try { return pendingReactions || []; } catch (error) { safeLogError('Status', 'getPendingReactions', error); return []; }
 }
+
 
 function getMoodChartData() {
     try { return moodChartData || []; } catch (error) { safeLogError('Status', 'getMoodChartData', error); return []; }
@@ -9120,7 +9345,6 @@ function logOnce(level, msg) {
     _ERROR_CACHE_.add(msg);
     logStatus(level === 'error' ? 'FAILED' : 'WARNING', msg);
 }
-
 async function safeInit() {
     if (_INITIALIZATION_STARTED_) {
         return;
@@ -9152,6 +9376,7 @@ async function safeInit() {
             logStatus('INFO', 'Parent available, starting handshake');
         }
         
+        // CRITICAL: Call initializeModule to start the handshake
         initializeModule();
         
     } else {
@@ -9160,6 +9385,9 @@ async function safeInit() {
             _loggedMessages.add(noParentKey);
             logStatus('WARNING', 'Parent not available');
         }
+        // Still call initializeModule to set up the state machine
+        initializeModule();
+        
         if (state.sessionMirror.validated && isSessionReady() && __isValidSession({ token: state.sessionMirror.token, userId: state.sessionMirror.user?.id })) {
             transitionTo(LifecycleState.ACTIVE, 'cached_session');
             logStatus('SUCCESS', 'Session activated from cache');
@@ -9197,7 +9425,6 @@ function notifyParentReady() {
         sendChildReady();
     }
 }
-
 function initPageCore() {
     try {
         setTimeout(() => {
@@ -9209,6 +9436,9 @@ function initPageCore() {
         safeLogError('Status', 'initPageCore', error);
     }
 }
+
+// Expose initPageCore to window so it can be called from outside the IIFE
+window.initPageCore = initPageCore;
 
 // =============================================
 // FETCH FAILURE SAFE HANDLING
@@ -9433,6 +9663,10 @@ window.ParentConnectionManager = ParentConnectionManager;
 // =============================================
 // INITIALIZATION
 // =============================================
+
+// =============================================
+// INITIALIZATION
+// =============================================
 console.log(`[${MODULE_NAME}] 🚀 Status Core v${MODULE_VERSION} (Strict Parent-Controlled Protocol | Real Data Only)`);
 
 try {
@@ -9447,17 +9681,17 @@ try {
         }
     });
     
+    // CRITICAL: Start the initialization sequence
+    // This must be called to transition from BOOT → INITIALIZING → READY → WAIT_PARENT
+    setTimeout(() => {
+        initializeModule();
+    }, 10);
+    
     console.log(`[${MODULE_NAME}] ✅ Initialized - waiting for parent activation`);
     
 } catch (error) {
     console.error(`[${MODULE_NAME}] Initialization error:`, error);
 }
-
-if (typeof module !== 'undefined' && module.exports) {
-    module.exports = StatusCore;
-}
-
-
 })();
 // =============================================
 // ES MODULE EXPORTS - ADD THIS AFTER THE IIFE CLOSES
@@ -9630,10 +9864,17 @@ setTimeout(() => {
         MODULE_VERSION: window.MODULE_VERSION
     };
     
-    // For ES modules
     if (typeof module !== 'undefined' && module.exports) {
-        module.exports = exports;
-    }
+    module.exports = StatusCore;
+}
+
+// CRITICAL: Start the initialization
+// This ensures the module starts even if DOMContentLoaded already fired
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initPageCore);
+} else {
+    initPageCore();
+}
     
     // Also make available as a named export
     if (typeof exports !== 'undefined') {
@@ -9649,3 +9890,41 @@ setTimeout(() => {
         });
     }
 }, 0);
+
+function applySettingToStatusModule(section, key, value) {
+    if (section === 'appearance') {
+        if (key === 'theme') {
+            const theme = value === 'auto' ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light') : value;
+            document.documentElement.setAttribute('data-theme', theme);
+            document.body.setAttribute('data-theme', theme);
+            logStatus('INFO', `Theme changed to: ${theme}`);
+        }
+        if (key === 'fontSize') {
+            document.documentElement.style.fontSize = value + 'px';
+            logStatus('INFO', `Font size changed to: ${value}px`);
+        }
+        if (key === 'language') window.__appLanguage = value;
+        if (key === 'accentColor') document.documentElement.style.setProperty('--accent-color', value);
+    }
+    if (section === 'notifications') {
+        if (key === 'soundEnabled' || key === 'notificationSound') {
+            window.__notificationSoundEnabled = value;
+            if (typeof window.updateNotificationSound === 'function') window.updateNotificationSound(value);
+            logStatus('INFO', `Notification sound: ${value ? 'enabled' : 'disabled'}`);
+        }
+        if (key === 'vibrationEnabled' || key === 'notificationVibration') window.__vibrationEnabled = value;
+        if (key === 'desktopEnabled') {
+            window.desktopNotificationsEnabled = value;
+            if (typeof window.updateDesktopNotifications === 'function') window.updateDesktopNotifications(value);
+        }
+        if (key === 'enableNotifications' || key === 'messageNotifications') window.__messageNotificationsEnabled = value;
+    }
+    if (section === 'privacy') {
+        if (key === 'onlineStatus') window.__showOnlineStatus = value;
+        if (key === 'lastSeen')     window.__showLastSeen     = value;
+    }
+    if (section === 'chat') {
+        if (key === 'enterToSend')    window.__enterToSend    = value;
+        if (key === 'showTimestamps') window.__showTimestamps = value;
+    }
+}

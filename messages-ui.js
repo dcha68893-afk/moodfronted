@@ -2035,10 +2035,15 @@
                 
                 const safeChat = JSON.stringify(chat).replace(/"/g, '&quot;');
                 
+                const avatarSrc = chat.friendAvatar || chat.avatar || chat.photoURL || '';
+                const avatarInitial = (chat.friendName || 'U').charAt(0).toUpperCase();
+                const avatarHtml = avatarSrc
+                    ? `<img class="avatar-photo" src="${avatarSrc}" alt="${chat.friendName || 'User'}" loading="lazy" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"><span style="display:none;width:100%;height:100%;background:linear-gradient(135deg,#667eea,#764ba2);color:#fff;align-items:center;justify-content:center;font-weight:700;font-size:17px;border-radius:50%;">${avatarInitial}</span>`
+                    : `<span style="width:100%;height:100%;background:linear-gradient(135deg,#667eea,#764ba2);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:17px;border-radius:50%;">${avatarInitial}</span>`;
                 html += `
                     <div class="chat-item ${isSelected ? 'selected' : ''}" data-chat-id="${chat.id}" onclick="window.messagesUI?.openChat(${safeChat})">
-                        <div class="chat-avatar">
-                            ${chat.friendAvatar ? `<img src="${chat.friendAvatar}" alt="${chat.friendName}" loading="lazy">` : `<i class="fas fa-user"></i>`}
+                        <div class="chat-avatar" style="overflow:hidden;">
+                            ${avatarHtml}
                             <div class="chat-status ${status}"></div>
                         </div>
                         <div class="chat-info">
@@ -2520,34 +2525,18 @@ function setupCallHandlers() {
     
     if (voiceCallBtn) {
         voiceCallBtn.addEventListener('click', function() {
-            const activeChat = ChatManager.getActiveChat();
-            if (!activeChat) {
-                showNotificationInMessages('No active chat selected', 'warning');
-                return;
-            }
-            
+            const activeChat = ChatManager.getActiveChat ? ChatManager.getActiveChat() : null;
+            if (!activeChat) return;
             const receiverId = activeChat.friendId || activeChat.pendingReceiverId;
             const receiverName = activeChat.friendName || 'User';
-            
-            if (!receiverId) {
-                showNotificationInMessages('Cannot identify call recipient', 'error');
-                return;
-            }
-            
-            // Switch to calls module via parent
+            if (!receiverId) return;
             if (window.parent && window.parent !== window) {
                 window.parent.postMessage({
-                    type: 'SWITCH_MODULE',
-                    module: 'calls',
-                    payload: {
-                        userId: receiverId,
-                        userName: receiverName,
-                        callType: 'voice'
-                    },
+                    type: 'SWITCH_MODULE', module: 'calls',
+                    payload: { userId: receiverId, userName: receiverName, callType: 'voice', returnTo: 'messages' },
                     timestamp: Date.now()
                 }, '*');
             } else {
-                // Fallback: open calls page in new tab
                 window.open(`/calls.html?userId=${receiverId}&name=${encodeURIComponent(receiverName)}&type=voice`, '_blank');
             }
         });
@@ -2555,30 +2544,15 @@ function setupCallHandlers() {
     
     if (videoCallBtn) {
         videoCallBtn.addEventListener('click', function() {
-            const activeChat = ChatManager.getActiveChat();
-            if (!activeChat) {
-                showNotificationInMessages('No active chat selected', 'warning');
-                return;
-            }
-            
+            const activeChat = ChatManager.getActiveChat ? ChatManager.getActiveChat() : null;
+            if (!activeChat) return;
             const receiverId = activeChat.friendId || activeChat.pendingReceiverId;
             const receiverName = activeChat.friendName || 'User';
-            
-            if (!receiverId) {
-                showNotificationInMessages('Cannot identify call recipient', 'error');
-                return;
-            }
-            
-            // Switch to calls module via parent
+            if (!receiverId) return;
             if (window.parent && window.parent !== window) {
                 window.parent.postMessage({
-                    type: 'SWITCH_MODULE',
-                    module: 'calls',
-                    payload: {
-                        userId: receiverId,
-                        userName: receiverName,
-                        callType: 'video'
-                    },
+                    type: 'SWITCH_MODULE', module: 'calls',
+                    payload: { userId: receiverId, userName: receiverName, callType: 'video', returnTo: 'messages' },
                     timestamp: Date.now()
                 }, '*');
             } else {
@@ -2910,14 +2884,23 @@ function cancelReply() {
             if (newChatBtn) {
                 newChatBtn.addEventListener('click', () => {
                     UIFailsafe.queueAction(() => {
-                        // Show contacts panel — NOT lifecycle-gated so it always opens
-                        const sidebar = UIFailsafe.safeGetElement('sidebar');
                         const contactsSidebar = UIFailsafe.safeGetElement('contactsSidebar');
-                        if (sidebar) UIFailsafe.safeRemoveClass(sidebar, 'active');
-                        if (contactsSidebar) UIFailsafe.safeRemoveClass(contactsSidebar, 'hidden');
+                        if (!contactsSidebar) return;
+
+                        // Show the friends panel
+                        UIFailsafe.safeRemoveClass(contactsSidebar, 'hidden');
+                        contactsSidebar.style.pointerEvents = '';
+
+                        // On mobile: also hide main sidebar so friends panel is full-screen
+                        const isMobile = window.innerWidth <= 768;
+                        if (isMobile) {
+                            const sidebar = UIFailsafe.safeGetElement('sidebar');
+                            if (sidebar) UIFailsafe.safeRemoveClass(sidebar, 'active');
+                        }
+
                         UIStateManager.setState('contactsVisible', true);
 
-                        // Show loading state while friends load
+                        // Show loading state then fetch friends
                         const contactsList = UIFailsafe.safeGetElement('contactsList');
                         if (contactsList && contactsList.children.length === 0) {
                             UIFailsafe.safeSetHTML(contactsList, `
@@ -2928,28 +2911,11 @@ function cancelReply() {
                             `);
                         }
 
-                        // Fetch & render friends immediately
                         const core = getMessagesCore();
                         if (core) {
                             const cached = core.getFriends?.() || [];
-                            if (cached.length > 0) {
-                                UIRenderer.renderContactsList(cached);
-                            }
-                            // Always attempt a fresh fetch so the list is current
-                            if (core.FriendManager?.fetchFriends) {
-                                core.FriendManager.fetchFriends();
-                            }
-                        } else {
-                            // Core not ready yet — show informative message
-                            if (contactsList) {
-                                UIFailsafe.safeSetHTML(contactsList, `
-                                    <div class="empty-state">
-                                        <i class="fas fa-clock empty-icon"></i>
-                                        <div class="empty-title">Connecting...</div>
-                                        <div class="empty-message">Please wait a moment then try again</div>
-                                    </div>
-                                `);
-                            }
+                            if (cached.length > 0) UIRenderer.renderContactsList(cached);
+                            if (core.FriendManager?.fetchFriends) core.FriendManager.fetchFriends();
                         }
                     });
                 });
@@ -2959,10 +2925,9 @@ function cancelReply() {
             if (backFromContacts) {
                 backFromContacts.addEventListener('click', () => {
                     UIFailsafe.queueAction(() => {
-                        if (!this._canPerformAction('backFromContacts')) return;
                         const contactsSidebar = UIFailsafe.safeGetElement('contactsSidebar');
                         const sidebar = UIFailsafe.safeGetElement('sidebar');
-                        if (contactsSidebar) UIFailsafe.safeAddClass(contactsSidebar, 'hidden');
+                        if (contactsSidebar) { UIFailsafe.safeAddClass(contactsSidebar, 'hidden'); contactsSidebar.style.pointerEvents = 'none'; }
                         if (sidebar) UIFailsafe.safeAddClass(sidebar, 'active');
                         UIStateManager.setState('contactsVisible', false);
                     });
@@ -3366,44 +3331,40 @@ function cancelReply() {
             const voiceCallBtn = UIFailsafe.safeGetElement('voiceCallBtn');
             if (voiceCallBtn) {
                 voiceCallBtn.addEventListener('click', () => {
-                    UIFailsafe.queueAction(() => {
-                        if (!this._canPerformAction('voiceCall')) return;
-                        const core = getMessagesCore();
-                        const activeChat = core?.currentChat || (core?.ChatManager?.getActiveChat?.());
-                        if (!activeChat) { this.showNotification('No active chat selected', 'warning'); return; }
-                        const receiverId = activeChat.friendId || activeChat.pendingReceiverId;
-                        const receiverName = activeChat.friendName || 'User';
-                        if (!receiverId) { this.showNotification('Cannot identify call recipient', 'error'); return; }
-                        if (window.parent && window.parent !== window) {
-                            window.parent.postMessage({
-                                type: 'SWITCH_MODULE', module: 'calls',
-                                payload: { userId: receiverId, userName: receiverName, callType: 'voice' },
-                                timestamp: Date.now()
-                            }, '*');
-                        }
-                    });
+                    const core = getMessagesCore();
+                    const activeChat = core?.currentChat || (core?.ChatManager?.getActiveChat?.());
+                    if (!activeChat) { this.showNotification('No active chat selected', 'warning'); return; }
+                    const receiverId = activeChat.friendId || activeChat.pendingReceiverId;
+                    const receiverName = activeChat.friendName || 'User';
+                    if (!receiverId) { this.showNotification('Cannot identify call recipient', 'error'); return; }
+                    // Instant navigation — no visual delay
+                    if (window.parent && window.parent !== window) {
+                        window.parent.postMessage({
+                            type: 'SWITCH_MODULE', module: 'calls',
+                            payload: { userId: receiverId, userName: receiverName, callType: 'voice', returnTo: 'messages' },
+                            timestamp: Date.now()
+                        }, '*');
+                    }
                 });
             }
 
             const videoCallBtn = UIFailsafe.safeGetElement('videoCallBtn');
             if (videoCallBtn) {
                 videoCallBtn.addEventListener('click', () => {
-                    UIFailsafe.queueAction(() => {
-                        if (!this._canPerformAction('videoCall')) return;
-                        const core = getMessagesCore();
-                        const activeChat = core?.currentChat || (core?.ChatManager?.getActiveChat?.());
-                        if (!activeChat) { this.showNotification('No active chat selected', 'warning'); return; }
-                        const receiverId = activeChat.friendId || activeChat.pendingReceiverId;
-                        const receiverName = activeChat.friendName || 'User';
-                        if (!receiverId) { this.showNotification('Cannot identify call recipient', 'error'); return; }
-                        if (window.parent && window.parent !== window) {
-                            window.parent.postMessage({
-                                type: 'SWITCH_MODULE', module: 'calls',
-                                payload: { userId: receiverId, userName: receiverName, callType: 'video' },
-                                timestamp: Date.now()
-                            }, '*');
-                        }
-                    });
+                    const core = getMessagesCore();
+                    const activeChat = core?.currentChat || (core?.ChatManager?.getActiveChat?.());
+                    if (!activeChat) { this.showNotification('No active chat selected', 'warning'); return; }
+                    const receiverId = activeChat.friendId || activeChat.pendingReceiverId;
+                    const receiverName = activeChat.friendName || 'User';
+                    if (!receiverId) { this.showNotification('Cannot identify call recipient', 'error'); return; }
+                    // Instant navigation — no visual delay
+                    if (window.parent && window.parent !== window) {
+                        window.parent.postMessage({
+                            type: 'SWITCH_MODULE', module: 'calls',
+                            payload: { userId: receiverId, userName: receiverName, callType: 'video', returnTo: 'messages' },
+                            timestamp: Date.now()
+                        }, '*');
+                    }
                 });
             }
 
@@ -4998,7 +4959,7 @@ function cancelReply() {
             const sidebar = document.getElementById('sidebar');
             const chatPanel = document.getElementById('chatPanel');
             
-            if (contactsSidebar) contactsSidebar.classList.add('hidden');
+            if (contactsSidebar) { contactsSidebar.classList.add('hidden'); contactsSidebar.style.pointerEvents = 'none'; }
             if (sidebar) sidebar.classList.add('active');
             
             // IMMEDIATELY update chat header with the friend name

@@ -452,6 +452,9 @@ function __isValidSession(session) {
     let moduleInitialized = false;
     let validSessionConfirmed = false;  // Track if valid session has been received
     
+let lastVerificationTime = 0;
+const VERIFICATION_COOLDOWN = 5000;
+
     // ==================== STRICT STATE MANAGEMENT ====================
     function transitionTo(nextState, reason = '') {
         // CRITICAL: Prevent duplicate transitions to same state
@@ -2355,18 +2358,36 @@ function applySession(sessionData) {
                     return;
                 }
                 
-                if (message.type === 'SETTINGS_UPDATED' && (message.payload || message.data)) {
-                    const data = message.payload || message.data;
-                    if (data.premium !== undefined) {
-                        callsState.isPremium = data.premium;
-                    }
-                    if (data.premiumFeatures) {
-                        callsState.premiumFeatures = { ...callsState.premiumFeatures, ...data.premiumFeatures };
-                    }
-                    notifyListeners('settings_update', data);
-                    return;
-                }
-                
+                // ── OFFLINE-FIRST: Apply per-key setting changes immediately ──
+if (message.type === 'SETTING_CHANGED' || message.type === 'SETTINGS_UPDATED') {
+    const data = message.payload || message.data || {};
+
+    if (message.type === 'SETTING_CHANGED' && data.section && data.key !== undefined) {
+        const { section, key, value } = data;
+        applySettingToCallsModule(section, key, value);
+        // Keep premium feature updates
+        if (data.premium !== undefined) callsState.isPremium = data.premium;
+        if (data.premiumFeatures) callsState.premiumFeatures = { ...callsState.premiumFeatures, ...data.premiumFeatures };
+        window.dispatchEvent(new CustomEvent('settingChanged', { detail: { section, key, value, timestamp: Date.now() } }));
+        notifyListeners('setting_changed', { section, key, value });
+        return;
+    }
+
+    if (message.type === 'SETTINGS_UPDATED' && data.settings) {
+        const s = data.settings;
+        Object.entries(s).forEach(([sec, secVal]) => {
+            if (secVal && typeof secVal === 'object')
+                Object.entries(secVal).forEach(([k, v]) => applySettingToCallsModule(sec, k, v));
+        });
+        if (s.premium !== undefined) callsState.isPremium = s.premium;
+        if (s.premiumFeatures) callsState.premiumFeatures = { ...callsState.premiumFeatures, ...s.premiumFeatures };
+        window.dispatchEvent(new CustomEvent('settingsUpdated', { detail: { settings: s, timestamp: Date.now() } }));
+        notifyListeners('settings_update', s);
+        return;
+    }
+    return;
+}
+
                 if (message.type === 'USER_LOGGED_OUT') {
                     // Clean up call state on logout
                     resetCallState();
@@ -3445,28 +3466,35 @@ function applySession(sessionData) {
     }
     
     function setActiveCall(callId, callType, participants) {
-        if (callsState.callActive) {
-            logWarn(MODULE, 'Cannot set active call - another call already active', { existing: callsState.activeCallId });
-            return false;
-        }
-        
-        callsState.activeCall = {
-            callId: callId,
-            type: callType,
-            participants: participants,
-            startTime: Date.now(),
-            state: 'initiating'
-        };
-        callsState.activeCallId = callId;
-        callsState.callActive = true;
-        callsState.callType = callType;
-        callsState.callParticipants = participants;
-        callsState.callStartTime = Date.now();
-        callsState.callState = 'initiating';
-        
-        logCall(MODULE, 'Active call set', { callId, callType });
-        return true;
+    // CRITICAL: Check if there's already an active call
+    if (callsState.callActive && callsState.activeCallId && callsState.activeCallId !== callId) {
+        logWarn(MODULE, 'Cannot set active call - another call already active', { existing: callsState.activeCallId });
+        return false;
     }
+    
+    // If there's a stale call with the same ID, clean it first
+    if (callsState.activeCallId === callId && callsState.callActive) {
+        logWarn(MODULE, 'Call already active with same ID, resetting first', { callId });
+        resetCallState();
+    }
+    
+    callsState.activeCall = {
+        callId: callId,
+        type: callType,
+        participants: participants,
+        startTime: Date.now(),
+        state: 'initiating'
+    };
+    callsState.activeCallId = callId;
+    callsState.callActive = true;
+    callsState.callType = callType;
+    callsState.callParticipants = participants;
+    callsState.callStartTime = Date.now();
+    callsState.callState = 'initiating';
+    
+    logCall(MODULE, 'Active call set', { callId, callType });
+    return true;
+}
     
     function clearActiveCall() {
         callsState.activeCall = null;
@@ -3742,6 +3770,12 @@ function applySession(sessionData) {
                         }
                     }, 50);
                     
+                    
+if (Date.now() - lastVerificationTime < VERIFICATION_COOLDOWN) {
+    console.log('[calls] Skipping verification - cooldown active');
+    return;
+}
+lastVerificationTime = Date.now();
                     setTimeout(() => {
                         clearInterval(checkInterval);
                         resolve({ valid: callsState.verified, cached: true, timeout: true });
@@ -3950,154 +3984,177 @@ _startStaleCallCleanup: function() {
     }, 10000); // Check every 10 seconds
 },
 
+initiateCall: async function(callType, participants = []) {
+    // CRITICAL: Force cleanup of any stale call state first
+    if (callsState.callActive === true || callsState.activeCallId !== null || callsState.callState !== 'idle') {
+        logWarn(MODULE, 'Cleaning up stale call state before initiating', { 
+            callActive: callsState.callActive,
+            activeCallId: callsState.activeCallId,
+            callState: callsState.callState
+        });
+        
+        // Force reset everything
+        resetCallState();
+        callsState.callActive = false;
+        callsState.callState = 'idle';
+        callsState.activeCallId = null;
+        callsState.activeCall = null;
+        callsState.callType = null;
+        callsState.callParticipants = [];
+        callsState.callStartTime = null;
+        
+        if (callsState.callInvitationTimer) {
+            clearTimeout(callsState.callInvitationTimer);
+            callsState.callInvitationTimer = null;
+        }
+        
+        if (MediaManager) MediaManager.stopLocalStream();
+        if (WebRTCManager) WebRTCManager.close();
+        
+        // Small delay to ensure cleanup completes
+        await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    
+    // Double-check after cleanup
+    if (callsState.callActive === true || callsState.activeCallId !== null) {
+        logError(MODULE, 'Call state still active after cleanup, aborting');
+        return { success: false, reason: 'call_state_stale' };
+    }
+    
+    if (!assertActive('initiateCall')) {
+        logWarn(MODULE, 'Cannot initiate call - not in ACTIVE state', { currentState });
+        this._notifyListeners('call_blocked', { reason: 'not_active' });
+        return { success: false, reason: 'not_active' };
+    }
+    
+    if (!parentReady) {
+        logWarn(MODULE, 'Cannot initiate call - parent not ready');
+        this._notifyListeners('call_blocked', { reason: 'parent_not_ready' });
+        return { success: false, reason: 'parent_not_ready' };
+    }
+    
+    if (callsState.recoveryMode) {
+        logWarn(MODULE, 'Cannot initiate call - recovery mode active', { currentState });
+        this._notifyListeners('call_blocked', { reason: 'recovery' });
+        return { success: false, reason: 'recovery' };
+    }
+    
+    // Check for valid session
+    const activeSession = (this._session && this._session.authenticated) ? this._session : callsState.session;
+    const activeToken = this._token || callsState.token;
+    
+    if (!activeSession || !activeSession.authenticated) {
+        logWarn(MODULE, 'Call blocked - no valid session');
+        this._notifyListeners('call_blocked', { reason: 'no_valid_session' });
+        return { success: false, reason: 'no_valid_session' };
+    }
+    
+    if (!activeToken) {
+        logWarn(MODULE, 'Call blocked - no token');
+        this._notifyListeners('call_blocked', { reason: 'no_token' });
+        return { success: false, reason: 'no_token' };
+    }
+    
+    // Sync session
+    if (!this._session) {
+        this._session = activeSession;
+        this._token = activeToken;
+        logInfo(MODULE, 'Synced CallsStateGovernor session from callsState');
+    }
+    
+    const permCheck = await PermissionManager.checkPermissions({
+        audio: true,
+        video: callType === 'video'
+    });
+    
+    if (!permCheck.success) {
+        logWarn(MODULE, 'Call blocked - permission check failed', { error: permCheck.error });
+        this._notifyListeners('permission_denied', { error: permCheck.error });
+        return { success: false, reason: 'permission_denied', error: permCheck.error };
+    }
+    
+    const verifyResult = await this.verifySession(true);
+    
+    if (!verifyResult.valid) {
+        logWarn(MODULE, 'Call blocked - session verification failed', verifyResult);
+        return { success: false, reason: 'verification_failed' };
+    }
+    
+    callsState.verified = true;
+    
+    try {
+        const constraints = {
+            audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+            video: callType === 'video' ? { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user' } : false
+        };
+        
+        const streamResult = await MediaManager.getLocalStream(constraints);
+        
+        if (!streamResult.success) {
+            throw new Error(streamResult.error || 'Failed to get media stream');
+        }
+        
+        const callId = `call_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+        
+        // Set active call
+        setActiveCall(callId, callType, participants);
+        
+        // Set up WebRTC
+        WebRTCManager.createPeerConnection();
+        WebRTCManager.addStream(streamResult.stream);
+        WebRTCManager.setCurrentCallId(callId);
+        WebRTCManager.setConnectionTimeout(CONFIG.CALL_CONNECTION_TIMEOUT);
+        
+        const isGroupCall = Array.isArray(participants) && participants.length > 1;
+        
+        logCall(MODULE, 'Sending CALL_INITIATE to parent', { callId, callType, participants, isGroupCall });
+        
+        const result = await safeSend('CALL_INITIATE', {
+            callId: callId,
+            callType: callType,
+            participantIds: isGroupCall ? participants.map(p => typeof p === 'object' ? p.id : parseInt(p)) : null,
+            calleeId: (!isGroupCall && participants[0]) ? (typeof participants[0] === 'object' ? participants[0].id : parseInt(participants[0])) : null,
+            isGroupCall: isGroupCall,
+            timestamp: Date.now()
+        }, true);
 
-        initiateCall: async function(callType, participants = []) {
-            // CRITICAL: Single active call enforcement
-            if (!enforceSingleActiveCall()) {
-                logWarn(MODULE, 'Cannot initiate call - another call already active');
-                this._notifyListeners('call_blocked', { reason: 'call_active' });
-                return { success: false, reason: 'call_active' };
+        if (result.success === false) {
+            resetCallState();
+            callsState.callActive = false;
+            callsState.callState = 'idle';
+            callsState.activeCallId = null;
+            throw new Error(result.reason || result.error || 'Failed to initiate call');
+        }
+        
+        // Set invitation timeout
+        callsState.callInvitationTimer = setTimeout(() => {
+            if (callsState.callState === 'initiating') {
+                logWarn(MODULE, 'Call invitation timed out');
+                this.endCall(callId);
+                this._notifyListeners('call_timeout', { callId });
+                notifyListeners('call_timeout', { callId });
             }
-            
-            if (!assertActive('initiateCall')) {
-                logWarn(MODULE, 'Cannot initiate call - not in ACTIVE state', { currentState });
-                this._notifyListeners('call_blocked', { reason: 'not_active' });
-                return { success: false, reason: 'not_active' };
-            }
-            
-            if (!parentReady) {
-                logWarn(MODULE, 'Cannot initiate call - parent not ready');
-                this._notifyListeners('call_blocked', { reason: 'parent_not_ready' });
-                return { success: false, reason: 'parent_not_ready' };
-            }
-            
-            if (callsState.recoveryMode) {
-                logWarn(MODULE, 'Cannot initiate call - recovery mode active', { currentState });
-                this._notifyListeners('call_blocked', { reason: 'recovery' });
-                return { success: false, reason: 'recovery' };
-            }
-            
-            // ==================== CRITICAL FIX: Use callsState.session as fallback ====================
-            // Check for valid session in both this._session and callsState.session
-            const activeSession = (this._session && this._session.authenticated) ? this._session : callsState.session;
-            const activeToken = this._token || callsState.token;
-            
-            if (!activeSession || !activeSession.authenticated) {
-                logWarn(MODULE, 'Call blocked - no valid session', {
-                    hasThisSession: !!this._session,
-                    hasCallsStateSession: !!callsState.session,
-                    thisSessionAuthenticated: this._session?.authenticated,
-                    callsStateSessionValid: callsState.session ? __isValidSession(callsState.session) : false
-                });
-                this._notifyListeners('call_blocked', { reason: 'no_valid_session' });
-                return { success: false, reason: 'no_valid_session' };
-            }
-            
-            if (!activeToken) {
-                logWarn(MODULE, 'Call blocked - no token');
-                this._notifyListeners('call_blocked', { reason: 'no_token' });
-                return { success: false, reason: 'no_token' };
-            }
-            
-            // Sync this._session if it was null but we have a valid callsState.session
-            if (!this._session) {
-                this._session = activeSession;
-                this._token = activeToken;
-                logInfo(MODULE, 'Synced CallsStateGovernor session from callsState');
-            }
-            
-            const permCheck = await PermissionManager.checkPermissions({
-                audio: true,
-                video: callType === 'video'
-            });
-            
-            if (!permCheck.success) {
-                logWarn(MODULE, 'Call blocked - permission check failed', { error: permCheck.error });
-                this._notifyListeners('permission_denied', { error: permCheck.error });
-                return { success: false, reason: 'permission_denied', error: permCheck.error };
-            }
-            
-            const verifyResult = await this.verifySession(true);
-            
-            if (!verifyResult.valid) {
-                logWarn(MODULE, 'Call blocked - session verification failed', verifyResult);
-                return { success: false, reason: 'verification_failed' };
-            }
-            
-            callsState.verified = true;
-            
-            try {
-                const constraints = {
-                    audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
-                    video: callType === 'video' ? { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user' } : false
-                };
-                
-                const streamResult = await MediaManager.getLocalStream(constraints);
-                
-                if (!streamResult.success) {
-                    throw new Error(streamResult.error || 'Failed to get media stream');
-                }
-                
-                const callId = `call_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
-                
-                // Set active call BEFORE sending to parent to prevent duplicates
-                setActiveCall(callId, callType, participants);
-                
-                // Set up WebRTC
-                WebRTCManager.createPeerConnection();
-                WebRTCManager.addStream(streamResult.stream);
-                WebRTCManager.setCurrentCallId(callId);
-                WebRTCManager.setConnectionTimeout(CONFIG.CALL_CONNECTION_TIMEOUT);
-                
-                // Check if this is a group call (multiple participants)
-                const isGroupCall = Array.isArray(participants) && participants.length > 1;
-                
-                // Send initiate request to parent (parent will send to backend)
-                logCall(MODULE, 'Sending CALL_INITIATE to parent', { callId, callType, participants, isGroupCall });
-                
-                const result = await safeSend('CALL_INITIATE', {
-                    callId: callId,
-                    callType: callType,
-                    // For group calls, send participantIds array
-                    participantIds: isGroupCall ? participants.map(p => typeof p === 'object' ? p.id : parseInt(p)) : null,
-                    // For 1:1 calls, send calleeId
-                    calleeId: (!isGroupCall && participants[0]) ? (typeof participants[0] === 'object' ? participants[0].id : parseInt(participants[0])) : null,
-                    isGroupCall: isGroupCall,
-                    timestamp: Date.now()
-                }, true);
-
-                if (result.success === false) {
-                    // CRITICAL: Clean up call state immediately on failure
-                    resetCallState();
-                    throw new Error(result.reason || result.error || 'Failed to initiate call');
-                }
-                
-                // Set invitation timeout
-                callsState.callInvitationTimer = setTimeout(() => {
-                    if (callsState.callState === 'initiating') {
-                        logWarn(MODULE, 'Call invitation timed out');
-                        this.endCall(callId);
-                        this._notifyListeners('call_timeout', { callId });
-                        notifyListeners('call_timeout', { callId });
-                    }
-                }, CONFIG.CALL_INVITATION_TIMEOUT);
-                
-                this.transition(CALLS_STATE.CALL_READY, 'call_initiated');
-                
-                logSuccess(MODULE, 'Call initiated', { type: callType, callId, isGroupCall });
-                
-                return { 
-                    success: true, 
-                    callId,
-                    stream: streamResult.stream
-                };
-                
-            } catch (error) {
-                logError(MODULE, 'Failed to initiate call', error);
-                resetCallState();
-                return { success: false, reason: error.message };
-            }
-        },
+        }, CONFIG.CALL_INVITATION_TIMEOUT);
+        
+        this.transition(CALLS_STATE.CALL_READY, 'call_initiated');
+        
+        logSuccess(MODULE, 'Call initiated', { type: callType, callId, isGroupCall });
+        
+        return { 
+            success: true, 
+            callId,
+            stream: streamResult.stream
+        };
+        
+    } catch (error) {
+        logError(MODULE, 'Failed to initiate call', error);
+        resetCallState();
+        callsState.callActive = false;
+        callsState.callState = 'idle';
+        callsState.activeCallId = null;
+        return { success: false, reason: error.message };
+    }
+},
         
         acceptCall: async function(callId) {
             // CRITICAL: Single active call enforcement
@@ -4190,43 +4247,111 @@ _startStaleCallCleanup: function() {
                 return { success: false, reason: error.message };
             }
         },
+endCall: async function(callId, options = {}) {
+    if (!callId && callsState.activeCallId) {
+        callId = callsState.activeCallId;
+    }
+    
+    if (!callId) {
+        logWarn(MODULE, 'No active call to end');
+        return { success: false, reason: 'no_active_call' };
+    }
+    
+    const duration = options.duration || 
+        (callsState.callStartTime ? Math.floor((Date.now() - callsState.callStartTime) / 1000) : 0);
+    
+    const status = options.status || 
+        (callsState.callState === 'connected' && duration > 0 ? 'completed' : 
+         callsState.callState === 'incoming' ? 'missed' : 
+         callsState.callState === 'initiating' ? 'cancelled' : 'failed');
+    
+    logCall(MODULE, 'Ending call', { callId, duration, status });
+    
+    try {
+        // Extract numeric call ID
+        let numericCallId = callId;
+        if (callId && typeof callId === 'string' && callId.startsWith('call_')) {
+            const parts = callId.split('_');
+            if (parts.length >= 2) {
+                numericCallId = parts[1];
+            }
+        }
         
-        endCall: async function(callId) {
-            if (!callId && callsState.activeCallId) {
-                callId = callsState.activeCallId;
-            }
-            
-            if (!callId) {
-                logWarn(MODULE, 'No active call to end');
-                return { success: false, reason: 'no_active_call' };
-            }
-            
-            logCall(MODULE, 'Ending call', { callId });
-            
-            try {
-                await IframeTransport.sendAction('CALL_ENDED', {
-                    callId,
-                    timestamp: Date.now()
-                });
-                
-                resetCallState();
-                
-                if (this._currentState === CALLS_STATE.IN_CALL) {
-                    this.transition(CALLS_STATE.CALL_READY, 'call_ended');
+        // Send detailed call end info
+        await IframeTransport.sendAction('CALL_ENDED', {
+            callId: numericCallId,
+            duration: duration,
+            status: status,
+            timestamp: Date.now()
+        });
+        
+        // Send API request directly
+        if (window.parent && window.parent !== window && numericCallId) {
+            window.parent.postMessage({
+                type: 'API_REQUEST',
+                payload: {
+                    endpoint: `/calls/${numericCallId}/end`,
+                    method: 'POST',
+                    body: { duration, status },
+                    requestId: `end_call_${Date.now()}`
                 }
-                
-                this._notifyListeners('call_ended', { callId });
-                notifyListeners('call_ended', { callId });
-                
-                return { success: true };
-                
-            } catch (error) {
-                logError(MODULE, 'Failed to end call', error);
-                resetCallState();
-                return { success: false, reason: error.message };
-            }
-        },
+            }, '*');
+        }
         
+        // CRITICAL: Reset ALL call state variables
+        resetCallState();
+        callsState.callActive = false;
+        callsState.callState = 'idle';
+        callsState.activeCallId = null;
+        callsState.activeCall = null;
+        callsState.callType = null;
+        callsState.callParticipants = [];
+        callsState.callStartTime = null;
+        callsState.connectionState = 'new';
+        callsState.signalingState = 'new';
+        
+        // Clear any pending timers
+        if (callsState.callInvitationTimer) {
+            clearTimeout(callsState.callInvitationTimer);
+            callsState.callInvitationTimer = null;
+        }
+        
+        // Clean up media and WebRTC
+        MediaManager.stopLocalStream();
+        WebRTCManager.close();
+        
+        if (this._currentState === CALLS_STATE.IN_CALL) {
+            this.transition(CALLS_STATE.CALL_READY, 'call_ended');
+        }
+        
+        this._notifyListeners('call_ended', { callId, duration, status });
+        notifyListeners('call_ended', { callId, duration, status });
+        
+        // Force refresh of call history
+        setTimeout(() => {
+            if (window.parent && window.parent !== window) {
+                window.parent.postMessage({
+                    type: 'REFRESH_CALL_HISTORY',
+                    payload: { userId: callsState.session?.userId, timestamp: Date.now() }
+                }, '*');
+            }
+            if (typeof loadCallHistory === 'function') {
+                loadCallHistory();
+            }
+        }, 500);
+        
+        return { success: true, duration, status };
+        
+    } catch (error) {
+        logError(MODULE, 'Failed to end call', error);
+        resetCallState();
+        callsState.callActive = false;
+        callsState.callState = 'idle';
+        callsState.activeCallId = null;
+        return { success: false, reason: error.message };
+    }
+},
+
         handleIncomingCall: function(callData) {
             logCall(MODULE, 'Incoming call received', callData);
             
@@ -7561,19 +7686,34 @@ _closeCallUI: function() {
                     return;
                 }
                 
-                if (msg.type === 'SETTINGS_UPDATED') {
-                    const data = msg.payload || msg.data;
-                    if (data) {
-                        if (data.premium !== undefined) {
-                            callsState.isPremium = data.premium;
-                        }
-                        if (data.premiumFeatures) {
-                            callsState.premiumFeatures = { ...callsState.premiumFeatures, ...data.premiumFeatures };
-                        }
-                        notifyListeners('settings_update', data);
-                    }
-                    return;
-                }
+// ── OFFLINE-FIRST: Apply per-key setting changes immediately ──
+if (msg.type === 'SETTING_CHANGED' || msg.type === 'SETTINGS_UPDATED') {
+    const data = msg.payload || msg.data || {};
+
+    if (msg.type === 'SETTING_CHANGED' && data.section && data.key !== undefined) {
+        const { section, key, value } = data;
+        applySettingToCallsModule(section, key, value);
+        if (data.premium !== undefined) callsState.isPremium = data.premium;
+        if (data.premiumFeatures) callsState.premiumFeatures = { ...callsState.premiumFeatures, ...data.premiumFeatures };
+        window.dispatchEvent(new CustomEvent('settingChanged', { detail: { section, key, value, timestamp: Date.now() } }));
+        notifyListeners('setting_changed', { section, key, value });
+        return;
+    }
+
+    if (msg.type === 'SETTINGS_UPDATED' && data.settings) {
+        const s = data.settings;
+        Object.entries(s).forEach(([sec, secVal]) => {
+            if (secVal && typeof secVal === 'object')
+                Object.entries(secVal).forEach(([k, v]) => applySettingToCallsModule(sec, k, v));
+        });
+        if (s.premium !== undefined) callsState.isPremium = s.premium;
+        if (s.premiumFeatures) callsState.premiumFeatures = { ...callsState.premiumFeatures, ...s.premiumFeatures };
+        window.dispatchEvent(new CustomEvent('settingsUpdated', { detail: { settings: s, timestamp: Date.now() } }));
+        notifyListeners('settings_update', s);
+        return;
+    }
+    return;
+}
                 
                 if (msg.type === 'USER_LOGGED_OUT') {
                     resetCallState();
@@ -7711,7 +7851,45 @@ _closeCallUI: function() {
                 callData: callsState.callData
             };
         },
-        
+
+        forceResetCallState: function() {
+    console.log('[CallsCore] Force resetting call state');
+    
+    // Reset all call state variables
+    resetCallState();
+    callsState.callActive = false;
+    callsState.callState = 'idle';
+    callsState.activeCallId = null;
+    callsState.activeCall = null;
+    callsState.callType = null;
+    callsState.callParticipants = [];
+    callsState.callStartTime = null;
+    callsState.connectionState = 'new';
+    callsState.signalingState = 'new';
+    callsState.callData = null;
+    
+    // Clear any pending timers
+    if (callsState.callInvitationTimer) {
+        clearTimeout(callsState.callInvitationTimer);
+        callsState.callInvitationTimer = null;
+    }
+    
+    // Clean up media and WebRTC
+    if (MediaManager && MediaManager.stopLocalStream) {
+        MediaManager.stopLocalStream();
+    }
+    if (WebRTCManager && WebRTCManager.close) {
+        WebRTCManager.close();
+    }
+    
+    // Clear the stale call flag in CallsStateGovernor
+    if (CallsStateGovernor && CallsStateGovernor._currentState === CALLS_STATE.IN_CALL) {
+        CallsStateGovernor.transition(CALLS_STATE.CALL_READY, 'force_reset');
+    }
+    
+    return { success: true };
+},
+
         getSession: function() {
             return callsState.session && __isValidSession(callsState.session) ? { ...callsState.session } : null;
         },
@@ -8355,3 +8533,91 @@ _closeCallUI: function() {
     logSuccess(MODULE, 'Call core module loaded');
     
 })();
+
+
+// ── TOP-LEVEL: accessible from all closures ──────────────────────────────────
+function applySettingToCallsModule(section, key, value) {
+    if (section === 'appearance') {
+        if (key === 'theme') {
+            var theme = value === 'auto' ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light') : value;
+            document.documentElement.setAttribute('data-theme', theme);
+            document.body.setAttribute('data-theme', theme);
+        }
+        if (key === 'fontSize') document.documentElement.style.fontSize = value + 'px';
+        if (key === 'language') { window.__appLanguage = value; document.documentElement.setAttribute('lang', value); }
+        if (key === 'accentColor') document.documentElement.style.setProperty('--accent-color', value);
+        if (key === 'compactMode') { document.documentElement.setAttribute('data-compact', value ? 'true' : 'false'); document.body.classList.toggle('compact-mode', !!value); }
+        if (key === 'animationsEnabled' || key === 'animations') { document.documentElement.setAttribute('data-animations', value ? 'true' : 'false'); document.body.classList.toggle('no-animations', !value); }
+    }
+    if (section === 'notifications') {
+        if (key === 'soundEnabled' || key === 'notificationSound') window.__notificationSoundEnabled = value;
+        if (key === 'vibrationEnabled' || key === 'notificationVibration') window.__vibrationEnabled = value;
+        if (key === 'callNotifications' || key === 'enableNotifications') window.__callNotificationsEnabled = value;
+        if (key === 'messageNotifications') window.__messageNotificationsEnabled = value;
+        if (key === 'groupNotifications') window.__groupNotificationsEnabled = value;
+        if (key === 'mentionNotifications') window.__mentionNotificationsEnabled = value;
+        if (key === 'desktopEnabled') window.__desktopNotificationsEnabled = value;
+    }
+    if (section === 'privacy') {
+        if (key === 'onlineStatus') window.__showOnlineStatus = value;
+        if (key === 'lastSeen') window.__showLastSeen = value;
+        if (key === 'readReceipts') { window.__readReceiptsEnabled = value; document.documentElement.setAttribute('data-read-receipts', value ? 'true' : 'false'); }
+        if (key === 'typingIndicators') { window.__typingIndicatorsEnabled = value; document.documentElement.setAttribute('data-typing-indicators', value ? 'true' : 'false'); }
+        if (key === 'whoCanAddMe') window.__whoCanAddMe = value;
+        if (key === 'canMessageMe') window.__canMessageMe = value;
+        if (key === 'contactDiscovery') window.__contactDiscovery = value;
+    }
+    if (section === 'calls') {
+        if (key === 'ringtone' || key === 'callRingtone') window.__callRingtone = value;
+        if (key === 'videoEnabled' || key === 'cameraOnStart') window.__videoEnabled = value;
+        if (key === 'audioEnabled') window.__audioEnabled = value;
+        if (key === 'allowIncomingCalls' || key === 'whoCanCallMe') window.__allowIncomingCalls = value;
+        if (key === 'vibrateOnCall' || key === 'callVibration') window.__callVibration = value;
+        if (key === 'videoQuality') window.__videoQuality = value;
+        if (key === 'voiceQuality') window.__voiceQuality = value;
+        if (key === 'allowScreenShare') window.__allowScreenShare = value;
+    }
+    if (section === 'chat') {
+        if (key === 'enterToSend' || key === 'enterKeySends') window.__enterToSend = value;
+        if (key === 'showTimestamps') { window.__showTimestamps = value; document.documentElement.setAttribute('data-show-timestamps', value ? 'true' : 'false'); }
+        if (key === 'mediaAutoDownload') window.__mediaAutoDownload = value;
+        if (key === 'allowReactions') { window.__allowReactions = value; document.documentElement.setAttribute('data-allow-reactions', value ? 'true' : 'false'); }
+    }
+    if (section === 'profile') {
+        if (key === 'displayName') window.__currentUserDisplayName = value;
+        if (key === 'photoUrl') window.__currentUserAvatar = value;
+        if (key === 'lastSeen') window.__showLastSeen = value;
+        if (key === 'profileVisibility') window.__profileVisibility = value;
+        if (key === 'currentMood') window.__currentMood = value;
+    }
+    if (section === 'security') {
+        if (key === 'sessionTimeout') window.__sessionTimeout = value;
+    }
+    if (section === 'mood') {
+        if (key === 'currentMood') { window.__currentMood = value; document.documentElement.setAttribute('data-mood', value); }
+        if (key === 'autoMoodDetection') window.__autoMoodDetection = value;
+        if (key === 'shareMoodStatus') window.__shareMoodStatus = value;
+        if (key === 'showMoodTo') window.__showMoodTo = value;
+    }
+    if (section === 'advanced') {
+        if (key === 'developerMode' || key === 'developerTools') window.__developerMode = value;
+        if (key === 'debugLogging' || key === 'debugMode') window.__debugLogging = value;
+        if (key === 'performanceMode') { window.__performanceMode = value; document.documentElement.setAttribute('data-performance-mode', value ? 'true' : 'false'); }
+        if (key === 'dataSaver') window.__dataSaver = value;
+        if (key === 'offlineMode') window.__offlineMode = value;
+        if (key === 'reduceMotion') { document.documentElement.setAttribute('data-reduce-motion', value ? 'true' : 'false'); document.body.classList.toggle('reduce-motion', !!value); }
+        if (key === 'experimentalFeatures') window.__experimentalFeatures = value;
+    }
+    if (section === 'storage') {
+        if (key === 'autoClearCache') window.__autoClearCache = value;
+    }
+    if (section === 'status') {
+        if (key === 'whoCanViewMyStatus') window.__whoCanViewMyStatus = value;
+        if (key === 'autoExpireStatus') window.__autoExpireStatus = value;
+        if (key === 'allowStatusReplies') window.__allowStatusReplies = value;
+        if (key === 'showStatusTo') window.__showStatusTo = value;
+    }
+    if (section === 'friends') {
+        if (key === 'showOnlineStatus') window.__showOnlineStatus = value;
+    }
+}

@@ -135,10 +135,12 @@ function authorizedRequest(endpoint, options = {}) {
                 window.removeEventListener('message', handler);
                 pendingRequests.delete(requestId);
                 
-                const response = event.data.response || event.data;
+                // FIX: chat.html sends { type:'API_RESPONSE', requestId, payload:{success,data,statusCode} }
+                // so we must read event.data.payload first, not event.data.response
+                const response = event.data.payload || event.data.response || event.data;
                 
                 // Handle auth failures
-                if (response.status === 401 || response.message === 'Authentication required') {
+                if (response.statusCode === 401 || response.status === 401 || response.message === 'Authentication required') {
                     console.error(`[${MODULE_NAME}] ❌ Unauthorized: ${endpoint}`);
                     
                     window.parent.postMessage({
@@ -206,6 +208,215 @@ async function processRequestQueue() {
 }
 
 // =============================================
+// OFFLINE QUEUE MANAGER - PERSISTS PENDING UPDATES
+// =============================================
+const OfflineQueue = {
+    _queue: [],
+    _storageKey: 'knecta_offline_queue',
+    _online: navigator.onLine !== false,
+    _syncInProgress: false,
+    _watchers: [],
+    
+    init() {
+        this._loadQueue();
+        this._setupOnlineListeners();
+        console.log(`[${MODULE_NAME}] 📦 OfflineQueue initialized, online: ${this._online}, pending: ${this._queue.length}`);
+    },
+    
+    _loadQueue() {
+        try {
+            const saved = localStorage.getItem(this._storageKey);
+            if (saved) {
+                this._queue = JSON.parse(saved);
+                // Clean up old entries (> 7 days)
+                const weekAgo = Date.now() - (7 * 24 * 60 * 60 * 1000);
+                this._queue = this._queue.filter(item => item.timestamp > weekAgo);
+                this._saveQueue();
+            }
+        } catch (e) {}
+    },
+    
+    _saveQueue() {
+        try {
+            localStorage.setItem(this._storageKey, JSON.stringify(this._queue));
+        } catch (e) {}
+    },
+    
+    _setupOnlineListeners() {
+        window.addEventListener('online', () => {
+            console.log(`[${MODULE_NAME}] 🌐 Browser came online`);
+            this._online = true;
+            this._triggerWatchers();
+            if (this.hasPending()) {
+                console.log(`[${MODULE_NAME}] 📤 Syncing ${this._queue.length} pending updates`);
+                this.syncAll();
+            }
+        });
+        
+        window.addEventListener('offline', () => {
+            console.log(`[${MODULE_NAME}] 📴 Browser went offline`);
+            this._online = false;
+        });
+    },
+    
+    isOnline() {
+        return this._online && navigator.onLine !== false;
+    },
+    
+    enqueue(section, key, value) {
+        const item = {
+            id: `${Date.now()}_${Math.random().toString(36).substring(2, 8)}`,
+            section,
+            key,
+            value,
+            timestamp: Date.now(),
+            retries: 0
+        };
+        this._queue.push(item);
+        this._saveQueue();
+        
+        // Update UI badge
+        this._updateBadge();
+        
+        console.log(`[${MODULE_NAME}] 📦 Queued: ${section}.${key} (total: ${this._queue.length})`);
+    },
+    
+    async syncAll(sendFunction = null) {
+        if (this._syncInProgress) return false;
+        if (!this.isOnline()) return false;
+        if (this._queue.length === 0) return true;
+        
+        this._syncInProgress = true;
+        console.log(`[${MODULE_NAME}] 🔄 Syncing ${this._queue.length} queued updates`);
+        
+        const failed = [];
+        
+        for (const item of this._queue) {
+            try {
+                let success = false;
+                
+                if (sendFunction) {
+                    const result = await sendFunction(item.section, item.key, item.value);
+                    success = result && result.success;
+                } else if (typeof SettingsState?._sendUpdateToBackend === 'function') {
+                    const result = await SettingsState._sendUpdateToBackend(item.section, item.key, item.value);
+                    success = result && result.success;
+                }
+                
+                if (success) {
+                    console.log(`[${MODULE_NAME}] ✅ Synced: ${item.section}.${item.key}`);
+                } else {
+                    item.retries++;
+                    if (item.retries < 5) {
+                        failed.push(item);
+                    } else {
+                        console.warn(`[${MODULE_NAME}] ⚠️ Dropping item after ${item.retries} retries: ${item.section}.${item.key}`);
+                    }
+                }
+            } catch (error) {
+                item.retries++;
+                if (item.retries < 5) {
+                    failed.push(item);
+                }
+                console.error(`[${MODULE_NAME}] ❌ Sync failed for ${item.section}.${item.key}:`, error.message);
+            }
+        }
+        
+        this._queue = failed;
+        this._saveQueue();
+        this._updateBadge();
+        this._syncInProgress = false;
+        
+        console.log(`[${MODULE_NAME}] 📦 Sync complete, ${this._queue.length} remaining`);
+        return this._queue.length === 0;
+    },
+    
+    hasPending() {
+        return this._queue.length > 0;
+    },
+    
+    getPendingCount() {
+        return this._queue.length;
+    },
+    
+    clear() {
+        this._queue = [];
+        this._saveQueue();
+        this._updateBadge();
+    },
+    
+    _updateBadge() {
+        const count = this._queue.length;
+        
+        // Dispatch event for UI to show badge
+        const event = new CustomEvent('offlineQueueUpdated', {
+            detail: { pendingCount: count, hasPending: count > 0 }
+        });
+        window.dispatchEvent(event);
+        
+        // Try to update any existing badge element
+        try {
+            let badge = document.getElementById('offlineQueueBadge');
+            if (count > 0) {
+                if (!badge) {
+                    badge = document.createElement('div');
+                    badge.id = 'offlineQueueBadge';
+                    badge.style.cssText = `
+                        position: fixed;
+                        bottom: 20px;
+                        right: 20px;
+                        background: var(--warning-color, #ff9800);
+                        color: white;
+                        border-radius: 20px;
+                        padding: 8px 16px;
+                        font-size: 12px;
+                        z-index: 10000;
+                        cursor: pointer;
+                        box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+                        display: flex;
+                        align-items: center;
+                        gap: 8px;
+                    `;
+                    badge.innerHTML = `
+                        <span>📦</span>
+                        <span>${count} pending sync</span>
+                        <button style="background: white; border: none; border-radius: 4px; padding: 2px 8px; cursor: pointer;">Sync now</button>
+                    `;
+                    badge.querySelector('button').onclick = () => this.syncAll();
+                    document.body.appendChild(badge);
+                } else {
+                    badge.querySelector('span:last-child').textContent = `${count} pending sync`;
+                    badge.style.display = 'flex';
+                }
+            } else if (badge) {
+                badge.style.display = 'none';
+            }
+        } catch (e) {}
+    },
+    
+    watchOnline(callback) {
+        this._watchers.push(callback);
+    },
+    
+    _triggerWatchers() {
+        this._watchers.forEach(cb => {
+            try { cb(); } catch (e) {}
+        });
+    },
+    
+    getDiagnostics() {
+        return {
+            online: this.isOnline(),
+            pendingCount: this._queue.length,
+            queue: this._queue.slice(0, 10)
+        };
+    }
+};
+
+// Initialize OfflineQueue
+OfflineQueue.init();
+
+// =============================================
 // REAL SETTINGS STATE MANAGEMENT - NO MOCK DATA
 // =============================================
 const SettingsState = {
@@ -230,85 +441,80 @@ const SettingsState = {
     },
     
     async update(section, key, value) {
-        // FIX #7: Only check auth for writes, allow reads from cache
-        if (!isAuthenticated) {
-            // Queue the update for when auth becomes ready
-            return new Promise((resolve, reject) => {
+        // STEP 1: Apply locally and broadcast to all modules IMMEDIATELY.
+        // This works offline and requires NO auth — UI must always feel instant.
+        if (!this.data[section]) this.data[section] = {};
+        this.data[section][key] = value;
+        this._saveToCache();
+        this._applySettingGlobally(section, key, value);
+        this._notify('optimistic-update', { section, key, value });
+
+        // STEP 2: Persist to backend when possible
+        if (!isAuthenticated || currentState !== LifecycleState.ACTIVE) {
+            if (!OfflineQueue.isOnline()) {
+                OfflineQueue.enqueue(section, key, value);
+                this._notify('update-queued', { section, key, value, reason: 'offline-pre-auth' });
+            } else {
                 requestQueue.push(async () => {
-                    try {
-                        const result = await this._performUpdate(section, key, value);
-                        resolve(result);
-                    } catch (error) {
-                        reject(error);
-                    }
+                    try { await this._sendUpdateToBackend(section, key, value); } catch (e) {}
                 });
-            });
+            }
+            return { success: true, offline: !OfflineQueue.isOnline() };
         }
-        
-        // FIX #7: Don't block writes if not active - queue them
-        if (currentState !== LifecycleState.ACTIVE) {
-            return new Promise((resolve, reject) => {
-                requestQueue.push(async () => {
-                    try {
-                        const result = await this._performUpdate(section, key, value);
-                        resolve(result);
-                    } catch (error) {
-                        reject(error);
-                    }
-                });
-            });
-        }
-        
+
         return this._performUpdate(section, key, value);
     },
     
     async _performUpdate(section, key, value) {
+        // NOTE: Local apply + cache save + global broadcast already done in update().
+        // This function only handles the backend sync path (called when auth is ACTIVE).
         const oldValue = this.getSetting(section, key);
-        
-        if (!this.data[section]) {
-            this.data[section] = {};
+    
+        // If offline, queue for later sync and return success
+        if (!OfflineQueue.isOnline()) {
+            OfflineQueue.enqueue(section, key, value);
+            this._notify('update-queued', { section, key, value, reason: 'offline' });
+            return { success: true, offline: true };
         }
-        this.data[section][key] = value;
-        
-        this._notify('optimistic-update', { section, key, value, oldValue });
-        
-        const updateId = `${section}:${key}`;
-        this.pendingUpdates.set(updateId, { oldValue, timestamp: Date.now() });
-        
+    
+        // If online, try backend
         try {
             const response = await this._sendUpdateToBackend(section, key, value);
-            
             if (response && response.success) {
-                if (response.data) {
-                    this.data[section][key] = response.data.value || value;
-                }
                 this.lastSynced = Date.now();
-                this.pendingUpdates.delete(updateId);
-                this._saveToCache();
-                this._notify('update-success', { section, key, value: this.data[section][key], oldValue });
-                this._applySettingGlobally(section, key, this.data[section][key]);
-                return { success: true, data: this.data[section][key] };
+                this._notify('update-success', { section, key, value, oldValue });
+                return { success: true };
             } else {
-                this.data[section][key] = oldValue;
-                this.pendingUpdates.delete(updateId);
-                this._notify('update-failed', { section, key, oldValue, error: response?.error || 'Update failed' });
-                throw new Error(response?.error || 'Update failed');
+                OfflineQueue.enqueue(section, key, value);
+                this._notify('update-queued', { section, key, value, reason: 'server-error' });
+                return { success: true, queued: true };
             }
         } catch (error) {
-            this.data[section][key] = oldValue;
-            this.pendingUpdates.delete(updateId);
-            this._notify('update-failed', { section, key, oldValue, error: error.message });
-            throw error;
+            OfflineQueue.enqueue(section, key, value);
+            this._notify('update-queued', { section, key, value, reason: error.message });
+            return { success: true, queued: true };
         }
     },
     
     async _sendUpdateToBackend(section, key, value) {
+        // Map settings sections to the actual server routes that exist.
+        // settings.js has: GET /, PUT /profile, PUT /notifications, PUT /privacy
+        // There is NO generic /update endpoint, so we route per-section.
+        const sectionEndpointMap = {
+            profile:       { endpoint: '/api/settings/profile',       method: 'PUT' },
+            appearance:    { endpoint: '/api/settings/profile',       method: 'PUT' }, // theme/language on profile
+            notifications: { endpoint: '/api/settings/notifications', method: 'PUT' },
+            privacy:       { endpoint: '/api/settings/privacy',       method: 'PUT' },
+            account:       { endpoint: '/api/settings/profile',       method: 'PUT' },
+        };
+        const route = sectionEndpointMap[section] || { endpoint: '/api/settings/profile', method: 'PUT' };
         try {
-            const response = await authorizedRequest('/api/settings/update', {
-                method: 'POST',
-                body: { section, key, value }
+            const response = await authorizedRequest(route.endpoint, {
+                method: route.method,
+                body: { [key]: value, section }
             });
-            return { success: true, data: response };
+            // response is { success, data, statusCode } from chat.html's API_RESPONSE payload
+            return { success: response?.success !== false };
         } catch (error) {
             throw new Error(error.message || 'Update failed');
         }
@@ -542,21 +748,21 @@ const SettingsState = {
 function setState(newState, reason = '') {
     if (currentState === newState) return false;
     
-    // Prevent invalid transitions
+    // Allow all transitions in standalone mode
     const validTransitions = {
-        [LifecycleState.BOOT]: [LifecycleState.INITIALIZING],
-        [LifecycleState.INITIALIZING]: [LifecycleState.WAITING_AUTH, LifecycleState.ERROR],
-        [LifecycleState.WAITING_AUTH]: [LifecycleState.READY, LifecycleState.ERROR],
-        [LifecycleState.READY]: [LifecycleState.WAIT_PARENT],
+        [LifecycleState.BOOT]: [LifecycleState.INITIALIZING, LifecycleState.ACTIVE],
+        [LifecycleState.INITIALIZING]: [LifecycleState.WAITING_AUTH, LifecycleState.READY, LifecycleState.ACTIVE, LifecycleState.ERROR],
+        [LifecycleState.WAITING_AUTH]: [LifecycleState.READY, LifecycleState.WAIT_PARENT, LifecycleState.ACTIVE, LifecycleState.ERROR],
+        [LifecycleState.READY]: [LifecycleState.WAIT_PARENT, LifecycleState.ACTIVE],
         [LifecycleState.WAIT_PARENT]: [LifecycleState.ACTIVE],
-        [LifecycleState.ACTIVE]: []
+        [LifecycleState.ACTIVE]: [LifecycleState.ACTIVE]
     };
     
     if (!validTransitions[currentState]?.includes(newState)) {
         if (DEBUG) {
-            console.warn(`[${MODULE_NAME}] ❌ Invalid transition blocked: ${currentState} → ${newState}`);
+            console.warn(`[${MODULE_NAME}] Transition ${currentState} → ${newState}: proceeding anyway`);
         }
-        return false;
+        // Don't block — just log and continue
     }
     
     const oldState = currentState;
@@ -730,6 +936,26 @@ async function loadSettingsAfterActivation() {
     try {
         await SettingsState.load();
         applySettingsToUI(SettingsState.get());
+        
+        // =============================================
+        // Start watching for reconnection to sync offline queue
+        // =============================================
+        OfflineQueue.watchOnline(() => {
+            if (OfflineQueue.hasPending() && OfflineQueue.isOnline()) {
+                console.log(`[${MODULE_NAME}] 🔄 Online detected, syncing ${OfflineQueue.getPendingCount()} pending updates`);
+                OfflineQueue.syncAll((section, key, value) => {
+                    return SettingsState._sendUpdateToBackend(section, key, value);
+                });
+            }
+        });
+        
+        // Sync any queue that accumulated while offline
+        if (OfflineQueue.hasPending() && OfflineQueue.isOnline()) {
+            console.log(`[${MODULE_NAME}] 🔄 Syncing pending queue (${OfflineQueue.getPendingCount()} items)`);
+            OfflineQueue.syncAll((section, key, value) => {
+                return SettingsState._sendUpdateToBackend(section, key, value);
+            });
+        }
         
         const event = new CustomEvent('settingsLoaded', {
             detail: { settings: SettingsState.get(), timestamp: Date.now() }
@@ -1096,13 +1322,7 @@ function isSentDuplicate(messageId) {
 // SAFE SEND TO PARENT - QUEUE BEFORE ACTIVE
 // =============================================
 function sendMessage(message) {
-    if (currentState !== LifecycleState.ACTIVE) {
-        if (DEBUG && message.type !== 'PING') {
-            console.log(`[${MODULE_NAME}] 📦 Queuing message (state: ${currentState})`);
-        }
-        messageQueue.push(message);
-        return true;
-    }
+    // No longer gate on ACTIVE state - always attempt to send
     
     try {
         let canonicalMessage = message;
@@ -2033,9 +2253,11 @@ const LifecycleController = {
         
         if (currentState === LifecycleState.BOOT) {
             setState(LifecycleState.INITIALIZING, 'component_init');
-            // Wait for authentication instead of going directly to READY
-            setState(LifecycleState.WAITING_AUTH, 'waiting_for_auth');
-            console.log(`[${MODULE_NAME}] ⏳ Waiting for AUTH_READY from parent...`);
+            setState(LifecycleState.WAITING_AUTH, 'auth_bypass');
+            setState(LifecycleState.READY, 'auth_bypass');
+            setState(LifecycleState.WAIT_PARENT, 'auth_bypass');
+            setState(LifecycleState.ACTIVE, 'standalone_mode');
+            console.log(`[${MODULE_NAME}] ✅ Standalone mode - state forced to ACTIVE`);
         }
     },
     
@@ -5716,14 +5938,7 @@ async function loadUserGroups() {
 // UPDATE SETTING - REAL BACKEND PERSISTENCE
 // =============================================
 async function updateSetting(section, key, value) {
-    if (currentState !== LifecycleState.ACTIVE) {
-        throw new Error('Settings not ready');
-    }
-    
-    if (!isAuthenticated) {
-        throw new Error('Authentication not ready');
-    }
-    
+    // No connection/auth gate - always allow updates
     return await SettingsState.update(section, key, value);
 }
 
@@ -5731,79 +5946,63 @@ async function updateSetting(section, key, value) {
 // SAVE ALL SETTINGS
 // =============================================
 async function saveSettings() {
-    if (currentState !== LifecycleState.ACTIVE) {
-        throw new Error('Settings not ready');
-    }
-    
-    if (!isAuthenticated) {
-        throw new Error('Authentication not ready');
-    }
-    
     try {
+        // Always save to localStorage first (works offline/standalone)
         SafeStorage.setJSON('user_settings', userSettings);
         coreData.settings = userSettings;
         SettingsState._saveToCache();
         
-        const requestId = `settings_save_${Date.now()}_${Math.random().toString(36).substring(2, 10)}`;
+        if (userSettings.appearance) {
+            applyTheme(userSettings.appearance.theme || 'auto');
+        }
         
-        const response = await new Promise((resolve, reject) => {
-            const timeoutId = setTimeout(() => {
-                window.removeEventListener('message', handler);
-                reject(new Error('Save timeout'));
-            }, 10000);
-            
-            const handler = (event) => {
-                if (event.data?.type === 'SETTINGS_SAVE_CONFIRMED' && 
-                    event.data?.requestId === requestId) {
-                    clearTimeout(timeoutId);
-                    window.removeEventListener('message', handler);
-                    resolve(event.data);
+        // If offline, queue the entire settings object for later sync
+        if (!OfflineQueue.isOnline()) {
+            // Queue each setting individually
+            for (const [section, values] of Object.entries(userSettings)) {
+                if (values && typeof values === 'object') {
+                    for (const [key, value] of Object.entries(values)) {
+                        OfflineQueue.enqueue(section, key, value);
+                    }
                 }
-                if (event.data?.type === 'SETTINGS_SAVE_ERROR' && 
-                    event.data?.requestId === requestId) {
-                    clearTimeout(timeoutId);
-                    window.removeEventListener('message', handler);
-                    reject(new Error(event.data?.error || 'Save failed'));
-                }
-            };
-            
-            window.addEventListener('message', handler);
-            
+            }
+            console.log(`[${MODULE_NAME}] 📦 Queued settings for offline sync`);
+        } else {
+            // If online, try to sync all pending queue items
+            try {
+                await OfflineQueue.syncAll();
+            } catch (e) {
+                console.warn(`[${MODULE_NAME}] ⚠️ Could not sync queue on save:`, e.message);
+            }
+        }
+        
+        // Broadcast to parent frame (fire-and-forget — ok if no parent)
+        try {
             if (window.parent && window.parent !== window) {
                 window.parent.postMessage({
-                    type: 'SETTINGS_SAVE',
-                    requestId: requestId,
+                    type: 'SETTINGS_UPDATED',
                     module: MODULE_NAME,
                     settings: userSettings,
                     timestamp: Date.now()
                 }, '*');
-            } else {
-                clearTimeout(timeoutId);
-                window.removeEventListener('message', handler);
-                reject(new Error('No parent window'));
             }
+        } catch (e) { /* no parent — that's fine */ }
+        
+        // Also broadcast to all frames in the same window (chat, etc.)
+        try {
+            window.dispatchEvent(new CustomEvent('settingsUpdated', {
+                detail: { settings: userSettings, timestamp: Date.now() }
+            }));
+        } catch (e) {}
+        
+        unsavedChanges = false;
+        
+        const event = new CustomEvent('settingsSaved', {
+            detail: { timestamp: Date.now() }
         });
+        window.dispatchEvent(event);
         
-        if (response && response.success) {
-            unsavedChanges = false;
-            
-            if (userSettings.appearance) {
-                applyTheme(userSettings.appearance.theme || 'auto');
-            }
-            
-            await MessageTransport.send(PARENT_MESSAGE_TYPES.SETTINGS_UPDATED, {
-                settings: userSettings
-            });
-            
-            const event = new CustomEvent('settingsSaved', {
-                detail: { timestamp: Date.now() }
-            });
-            window.dispatchEvent(event);
-            
-            return true;
-        }
-        
-        throw new Error('Save failed');
+        return true;
     } catch (error) {
         throw error;
     }
@@ -5813,10 +6012,6 @@ async function saveSettings() {
 // HANDLE LOGOUT - USES authorizedRequest
 // =============================================
 async function handleLogout() {
-    if (currentState !== LifecycleState.ACTIVE) {
-        return false;
-    }
-    
     if (!isAuthenticated) {
         return false;
     }
@@ -7174,8 +7369,9 @@ export {
     clearMediaCache,
     onReady,
     isReady,
-    
-    // Enhanced exports from hardened core
+        OfflineQueue,
+
+        // Enhanced exports from hardened core
     getCoreDiagnostics,
     getHealthMetrics,
     forceRecovery,
@@ -7280,6 +7476,8 @@ window.__resetCore = () => {
     shutdownCore();
     safeSetTimeout(() => initializeCore(), 1000);
 };
+window.__getOfflineQueue = () => OfflineQueue.getDiagnostics();
+window.__syncOfflineQueue = () => OfflineQueue.syncAll();
 window.__getEnvironment = () => IframeEnvironment.getInfo();
 window.__getTransportStatus = () => IframeTransport.getDiagnostics();
 window.__getSessionStatus = () => ({

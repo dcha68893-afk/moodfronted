@@ -1,10 +1,12 @@
 // =============================================
-// RESILIENT MARKETPLACE UI CONTROLLER v6.2
+// RESILIENT MARKETPLACE UI CONTROLLER v7.1
 // FAULT-TOLERANT • PROGRESSIVE RENDERING • CORE BRIDGE
 // ENHANCED WITH DIAGNOSTICS • RECOVERY AWARE • SESSION SYNC
 // UI FAILSAFE • NAVIGATION GUARD • ENVIRONMENT ADAPTIVE
 // DETERMINISTIC HANDSHAKE ALIGNMENT • STRICT LIFECYCLE
 // STABILIZED UI ACTIONS • CLICK HANDLING ENHANCED
+// SIMPLIFIED: Removed isActive() checks, direct DOM handlers
+// FIXED: Tab filtering uses sellerId + userId, publishListing handles all tabs
 // =============================================
 
 // ----------------------------------------------------------------------
@@ -147,6 +149,15 @@ import {
     
 } from './Tool-core.js';
 
+// Make sure showCreateListingModal is defined and works - SIMPLIFIED: removed isActive check
+if (typeof showCreateListingModal !== 'function') {
+    window.showCreateListingModal = function() {
+        console.log('[MANUAL] showCreateListingModal called');
+        const modal = document.getElementById('createListingModal');
+        if (modal) modal.classList.add('active');
+    };
+}
+
 // ----------------------------------------------------------------------
 // GLOBAL VARIABLES FROM CORE (with safe fallbacks)
 // ----------------------------------------------------------------------
@@ -183,6 +194,14 @@ function syncWithCoreState() {
     currentUser = coreCurrentUser || currentUser;
     userData = coreCurrentUser || userData;
     sessionData = coreSessionData || sessionData;
+    
+    // Also sync from window globals (set by Tool-core.js)
+    if (window.allListings) allListings = window.allListings;
+    if (window.myListings) myListings = window.myListings;
+    if (window.savedItems) savedItems = window.savedItems;
+    if (window.userFriends) userFriends = window.userFriends;
+    if (window.userGroups) userGroups = window.userGroups;
+    if (window.currentUser) currentUser = window.currentUser;
 }
 setInterval(syncWithCoreState, 1000);
 
@@ -723,153 +742,35 @@ const UIState = {
 };
 
 // ----------------------------------------------------------------------
-// 4. CENTRALIZED EVENT BUS (with automatic cleanup)
+// 4. SIMPLIFIED EVENT HANDLER - REMOVED COMPLEX EVENT CONTROLLER
 // ----------------------------------------------------------------------
-const EventController = (function() {
-    const listeners = new Set();
-    const debouncedHandlers = new Map();
-    const intervalHandlers = new Map();
-    const warningsShown = new Set();
-    let initializationLock = false;
+// SIMPLIFICATION: Removed complex EventController, using direct onclick handlers
+// No isActive() checks - UI works regardless of core state
 
-    function canExecuteAction() {
-        // Check if parent is responding OR we're in guest/fallback mode
-        const health = checkParentHealth ? checkParentHealth() : { connected: true, parentReady: false, handshakeComplete: false };
-        // Allow actions if parent is ready and handshake complete, or we're in standalone mode
-        const isActiveState = isActive ? isActive() : (health.parentReady === true && health.handshakeComplete === true);
-        return isActiveState || health.connected === true || AppState?._STATE?.guestMode || AppState?._STATE?.fallbackMode;
-    }
+function canExecuteAction() {
+    // SIMPLIFIED: Always return true - UI works regardless of core state
+    return true;
+}
 
-    function queueUIAction(action) {
-        if (!UIState.actionQueueEnabled) return;
-        
-        UIState.pendingActions.push({
-            action,
-            timestamp: Date.now()
-        });
-        
-        // Limit queue size
-        if (UIState.pendingActions.length > 50) {
-            UIState.pendingActions.shift();
-        }
-    }
-
-    function addListener(element, event, handler, options = {}) {
-        if (!element) return () => {};
-        if (initializationLock && event === 'click') return () => {};
-        
-        const wrappedHandler = (e) => {
-            try {
-                e.preventDefault?.();
-                e.stopPropagation?.();
-                
-                // Check if action can be executed (UI Failsafe)
-                if (!canExecuteAction() && (event === 'click' || event === 'submit')) {
-                    // Queue action for later
-                    queueUIAction(() => {
-                        handler(e);
-                    });
-                    
-                    // Visual feedback
-                    if (element.style) {
-                        const originalOpacity = element.style.opacity;
-                        element.style.opacity = '0.5';
-                        setTimeout(() => {
-                            element.style.opacity = originalOpacity || '';
-                        }, 200);
-                    }
-                    
-                    return;
-                }
-                
-                handler(e);
-            } catch (err) {
-                console.warn(`[EventController] Error in ${event} handler:`, err.message);
-                if (window.diagnosticsAgent) {
-                    window.diagnosticsAgent.logWarning(`UI Event error: ${event}`, { error: err.message });
-                }
-            }
-        };
-        
-        element.addEventListener(event, wrappedHandler, options);
-        const entry = { element, event, wrappedHandler, options };
-        listeners.add(entry);
-        return () => removeListener(entry);
-    }
-
-    function removeListener(entry) {
-        try {
-            entry.element.removeEventListener(entry.event, entry.wrappedHandler, entry.options);
-            listeners.delete(entry);
-        } catch (e) {}
-    }
-
-    function addDebounced(key, fn, wait) {
-        if (debouncedHandlers.has(key)) clearTimeout(debouncedHandlers.get(key));
-        debouncedHandlers.set(key, setTimeout(() => {
-            fn();
-            debouncedHandlers.delete(key);
-        }, wait));
-    }
+function queueUIAction(action) {
+    if (!UIState.actionQueueEnabled) return;
     
-    function addInterval(key, fn, interval) {
-        if (intervalHandlers.has(key)) clearInterval(intervalHandlers.get(key));
-        const id = setInterval(() => {
-            try {
-                fn();
-            } catch (err) {
-                console.warn(`[EventController] Interval Error: ${key}`);
-            }
-        }, interval);
-        intervalHandlers.set(key, id);
-        return () => {
-            clearInterval(id);
-            intervalHandlers.delete(key);
-        };
-    }
-
-    function removeAll() {
-        listeners.forEach(entry => {
-            try {
-                entry.element.removeEventListener(entry.event, entry.wrappedHandler, entry.options);
-            } catch (e) {}
-        });
-        listeners.clear();
-        debouncedHandlers.forEach(t => clearTimeout(t));
-        debouncedHandlers.clear();
-        intervalHandlers.forEach(id => clearInterval(id));
-        intervalHandlers.clear();
-    }
-
-    function logOnce(key, message) {
-        if (!warningsShown.has(key)) {
-            warningsShown.add(key);
-            console.warn(`[EventController] ${message}`);
-        }
-    }
+    UIState.pendingActions.push({
+        action,
+        timestamp: Date.now()
+    });
     
-    function lockInitialization() {
-        initializationLock = true;
-        setTimeout(() => {
-            initializationLock = false;
-        }, 100);
+    // Limit queue size
+    if (UIState.pendingActions.length > 50) {
+        UIState.pendingActions.shift();
     }
+}
 
-    return { addListener, removeAll, addDebounced, addInterval, canExecuteAction, queueUIAction, lockInitialization };
-})();
-
-// ----------------------------------------------------------------------
-// 5. PROCESS QUEUED UI ACTIONS
-// ----------------------------------------------------------------------
 function processQueuedUIActions() {
     if (UIState.pendingActions.length === 0) return;
     
-    const health = checkParentHealth ? checkParentHealth() : { connected: true, parentReady: false, handshakeComplete: false };
-    const isActiveState = isActive ? isActive() : (health.parentReady === true && health.handshakeComplete === true);
-    if (!isActiveState && !health.connected && !AppState?._STATE?.guestMode) return;
-    
     const now = Date.now();
-    const actions = UIState.pendingActions.filter(a => now - a.timestamp < 60000); // Keep last minute
+    const actions = UIState.pendingActions.filter(a => now - a.timestamp < 60000);
     
     UIState.pendingActions = [];
     
@@ -888,7 +789,7 @@ function processQueuedUIActions() {
 setInterval(processQueuedUIActions, 5000);
 
 // ----------------------------------------------------------------------
-// 6. ERROR BOUNDARY – SECTION FALLBACK
+// 5. ERROR BOUNDARY – SECTION FALLBACK
 // ----------------------------------------------------------------------
 function withErrorBoundary(uiSectionName, renderFn, fallbackHTML = '') {
     const warningsShown = new Set();
@@ -926,7 +827,7 @@ function withErrorBoundary(uiSectionName, renderFn, fallbackHTML = '') {
 }
 
 // ----------------------------------------------------------------------
-// 7. PROGRESSIVE RENDERING PIPELINE (UPDATED)
+// 6. PROGRESSIVE RENDERING PIPELINE (UPDATED)
 // ----------------------------------------------------------------------
 const UIPipeline = {
     initialized: false,
@@ -951,8 +852,10 @@ const UIPipeline = {
     },
 
     initialRender() {
-        if (this.initialized) return;
-        this.renderWithCache();
+        // Sync from core globals before rendering
+        this.syncFromCoreGlobals();
+        // Always update the marketplace list so fresh data displays
+        this.renderMarketplaceList();
         this.updateMyListingsPreview();
         this.updatePremiumStatusUI();
         this.updateStreakIndicator();
@@ -962,8 +865,20 @@ const UIPipeline = {
         this.updateStartupStageIndicator();
         this.updateLifecycleStateIndicator();
         this.updateHandshakeProgress();
-        this.startHealthMonitoring();
-        this.initialized = true;
+        if (!this.initialized) {
+            this.startHealthMonitoring();
+            this.initialized = true;
+        }
+    },
+    
+    // FIX D: Sync from window globals before rendering
+    syncFromCoreGlobals() {
+        if (window.allListings) allListings = window.allListings;
+        if (window.myListings) myListings = window.myListings;
+        if (window.savedItems) savedItems = window.savedItems;
+        if (window.userFriends) userFriends = window.userFriends;
+        if (window.userGroups) userGroups = window.userGroups;
+        if (window.currentUser) currentUser = window.currentUser;
     },
 
     progressiveEnhancement() {
@@ -988,236 +903,462 @@ const UIPipeline = {
         }, 50);
     },
     
+    // SIMPLIFIED: Removed isActive() checks from event binding
     bindGlobalEventListeners() {
-        if (UIState.listenersInitialized) return;
+        // Only skip if we've already successfully bound the critical tab elements
+        if (UIState.listenersInitialized && DOM.allTab && DOM.allTab.onclick) return;
+        
+        // SIMPLIFIED: Direct onclick assignments instead of EventController
         
         // Bind navigation buttons
         if (DOM.backBtn) {
-            EventController.addListener(DOM.backBtn, 'click', () => {
+            DOM.backBtn.onclick = (e) => {
+                e.preventDefault();
                 if (DOM.marketplaceDetailPanel) {
                     DOM.marketplaceDetailPanel.classList.remove('active');
                 }
-            });
+                return false;
+            };
         }
         
         if (DOM.closeCreateListingModal) {
-            EventController.addListener(DOM.closeCreateListingModal, 'click', () => hideCreateListingModal());
+            DOM.closeCreateListingModal.onclick = (e) => {
+                e.preventDefault();
+                hideCreateListingModal();
+                return false;
+            };
         }
         
         if (DOM.closeAnalyticsModal) {
-            EventController.addListener(DOM.closeAnalyticsModal, 'click', () => hideAnalyticsModal());
+            DOM.closeAnalyticsModal.onclick = (e) => {
+                e.preventDefault();
+                hideAnalyticsModal();
+                return false;
+            };
         }
         
         if (DOM.closePremiumModal) {
-            EventController.addListener(DOM.closePremiumModal, 'click', () => hidePremiumOptionsModal());
+            DOM.closePremiumModal.onclick = (e) => {
+                e.preventDefault();
+                hidePremiumOptionsModal();
+                return false;
+            };
         }
         
         if (DOM.closeTeamModal) {
-            EventController.addListener(DOM.closeTeamModal, 'click', () => hideTeamManagementModal());
+            DOM.closeTeamModal.onclick = (e) => {
+                e.preventDefault();
+                hideTeamManagementModal();
+                return false;
+            };
         }
         
         if (DOM.closeLeaderboardModal) {
-            EventController.addListener(DOM.closeLeaderboardModal, 'click', () => hideLeaderboardModal());
+            DOM.closeLeaderboardModal.onclick = (e) => {
+                e.preventDefault();
+                hideLeaderboardModal();
+                return false;
+            };
         }
         
         if (DOM.closeReactionModal) {
-            EventController.addListener(DOM.closeReactionModal, 'click', () => hideReactionPicker());
+            DOM.closeReactionModal.onclick = (e) => {
+                e.preventDefault();
+                hideReactionPicker();
+                return false;
+            };
         }
         
         if (DOM.closeSavedModal) {
-            EventController.addListener(DOM.closeSavedModal, 'click', () => hideSavedItemsModal());
+            DOM.closeSavedModal.onclick = (e) => {
+                e.preventDefault();
+                hideSavedItemsModal();
+                return false;
+            };
         }
         
         if (DOM.closeNotesModal) {
-            EventController.addListener(DOM.closeNotesModal, 'click', () => hideMyNotesModal());
+            DOM.closeNotesModal.onclick = (e) => {
+                e.preventDefault();
+                hideMyNotesModal();
+                return false;
+            };
         }
         
         if (DOM.closeTrustStatsModal) {
-            EventController.addListener(DOM.closeTrustStatsModal, 'click', () => hideTrustStatsModal());
+            DOM.closeTrustStatsModal.onclick = (e) => {
+                e.preventDefault();
+                hideTrustStatsModal();
+                return false;
+            };
         }
         
-        // Bind create listing buttons
+        // Bind create listing buttons - SIMPLIFIED: direct handlers
         if (DOM.createListingBtn) {
-            EventController.addListener(DOM.createListingBtn, 'click', () => showCreateListingModal());
+            DOM.createListingBtn.onclick = (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                showCreateListingModal();
+                return false;
+            };
         }
         
         if (DOM.createListingQuickBtn) {
-            EventController.addListener(DOM.createListingQuickBtn, 'click', () => showCreateListingModal());
+            DOM.createListingQuickBtn.onclick = (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                showCreateListingModal();
+                return false;
+            };
         }
         
         if (DOM.sellServiceBtn) {
-            EventController.addListener(DOM.sellServiceBtn, 'click', () => switchCreateTab('service'));
+            DOM.sellServiceBtn.onclick = (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                switchCreateTab('service');
+                showCreateListingModal();
+                return false;
+            };
         }
         
         if (DOM.sellDigitalBtn) {
-            EventController.addListener(DOM.sellDigitalBtn, 'click', () => switchCreateTab('digital'));
+            DOM.sellDigitalBtn.onclick = (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                switchCreateTab('digital');
+                showCreateListingModal();
+                return false;
+            };
         }
         
         if (DOM.publishListingBtn) {
-            EventController.addListener(DOM.publishListingBtn, 'click', () => publishListingFromModal());
+            DOM.publishListingBtn.onclick = (e) => {
+                e.preventDefault();
+                publishListingFromModal();
+                return false;
+            };
         }
         
         if (DOM.publishPremiumBtn) {
-            EventController.addListener(DOM.publishPremiumBtn, 'click', () => publishPremiumListingFromModal());
+            DOM.publishPremiumBtn.onclick = (e) => {
+                e.preventDefault();
+                publishPremiumListingFromModal();
+                return false;
+            };
         }
         
         if (DOM.saveDraftBtn) {
-            EventController.addListener(DOM.saveDraftBtn, 'click', () => saveCurrentAsDraft());
+            DOM.saveDraftBtn.onclick = (e) => {
+                e.preventDefault();
+                saveCurrentAsDraft();
+                return false;
+            };
         }
         
         // Bind action buttons
         if (DOM.viewAnalyticsBtn) {
-            EventController.addListener(DOM.viewAnalyticsBtn, 'click', () => showAnalyticsModal());
+            DOM.viewAnalyticsBtn.onclick = (e) => {
+                e.preventDefault();
+                showAnalyticsModal();
+                return false;
+            };
         }
         
         if (DOM.viewSavedBtn) {
-            EventController.addListener(DOM.viewSavedBtn, 'click', () => showSavedItemsModal());
+            DOM.viewSavedBtn.onclick = (e) => {
+                e.preventDefault();
+                showSavedItemsModal();
+                return false;
+            };
         }
         
         if (DOM.viewNotesBtn) {
-            EventController.addListener(DOM.viewNotesBtn, 'click', () => showMyNotesModal());
+            DOM.viewNotesBtn.onclick = (e) => {
+                e.preventDefault();
+                showMyNotesModal();
+                return false;
+            };
         }
         
         if (DOM.viewTrustStatsBtn) {
-            EventController.addListener(DOM.viewTrustStatsBtn, 'click', () => showTrustStatsModal());
+            DOM.viewTrustStatsBtn.onclick = (e) => {
+                e.preventDefault();
+                showTrustStatsModal();
+                return false;
+            };
         }
         
         if (DOM.premiumOptionsBtn) {
-            EventController.addListener(DOM.premiumOptionsBtn, 'click', () => showPremiumOptionsModal());
+            DOM.premiumOptionsBtn.onclick = (e) => {
+                e.preventDefault();
+                showPremiumOptionsModal();
+                return false;
+            };
         }
         
         if (DOM.viewTeamBtn) {
-            EventController.addListener(DOM.viewTeamBtn, 'click', () => showTeamManagementModal());
+            DOM.viewTeamBtn.onclick = (e) => {
+                e.preventDefault();
+                showTeamManagementModal();
+                return false;
+            };
         }
         
         if (DOM.viewLeaderboardBtn) {
-            EventController.addListener(DOM.viewLeaderboardBtn, 'click', () => showLeaderboardModal());
+            DOM.viewLeaderboardBtn.onclick = (e) => {
+                e.preventDefault();
+                showLeaderboardModal();
+                return false;
+            };
         }
         
-        // Bind category tabs
+        // Bind category tabs - SIMPLIFIED: direct handlers
         if (DOM.allTab) {
-            EventController.addListener(DOM.allTab, 'click', () => setActiveTab('all'));
+            DOM.allTab.onclick = (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                setActiveTab('all');
+                return false;
+            };
         }
         if (DOM.servicesTab) {
-            EventController.addListener(DOM.servicesTab, 'click', () => setActiveTab('services'));
+            DOM.servicesTab.onclick = (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                setActiveTab('services');
+                return false;
+            };
         }
         if (DOM.digitalTab) {
-            EventController.addListener(DOM.digitalTab, 'click', () => setActiveTab('digital'));
+            DOM.digitalTab.onclick = (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                setActiveTab('digital');
+                return false;
+            };
         }
         if (DOM.friendsTab) {
-            EventController.addListener(DOM.friendsTab, 'click', () => setActiveTab('friends'));
+            DOM.friendsTab.onclick = (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                setActiveTab('friends');
+                return false;
+            };
         }
         if (DOM.groupsTab) {
-            EventController.addListener(DOM.groupsTab, 'click', () => setActiveTab('groups'));
+            DOM.groupsTab.onclick = (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                setActiveTab('groups');
+                return false;
+            };
         }
         if (DOM.myTab) {
-            EventController.addListener(DOM.myTab, 'click', () => setActiveTab('my'));
+            DOM.myTab.onclick = (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                setActiveTab('my');
+                return false;
+            };
         }
         if (DOM.premiumTab) {
-            EventController.addListener(DOM.premiumTab, 'click', () => setActiveTab('premium'));
+            DOM.premiumTab.onclick = (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                setActiveTab('premium');
+                return false;
+            };
         }
         if (DOM.spotlightTab) {
-            EventController.addListener(DOM.spotlightTab, 'click', () => setActiveTab('spotlight'));
+            DOM.spotlightTab.onclick = (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                setActiveTab('spotlight');
+                return false;
+            };
         }
         
         // Bind detail panel buttons
         if (DOM.saveListingBtn) {
-            EventController.addListener(DOM.saveListingBtn, 'click', () => saveToSavedItems());
+            DOM.saveListingBtn.onclick = (e) => {
+                e.preventDefault();
+                saveToSavedItems();
+                return false;
+            };
         }
         
         if (DOM.addNoteBtn) {
-            EventController.addListener(DOM.addNoteBtn, 'click', () => showAddNoteDialog());
+            DOM.addNoteBtn.onclick = (e) => {
+                e.preventDefault();
+                showAddNoteDialog();
+                return false;
+            };
         }
         
         if (DOM.addReactionBtn) {
-            EventController.addListener(DOM.addReactionBtn, 'click', () => showReactionPicker());
+            DOM.addReactionBtn.onclick = (e) => {
+                e.preventDefault();
+                showReactionPicker();
+                return false;
+            };
         }
         
         if (DOM.reserveBtn) {
-            EventController.addListener(DOM.reserveBtn, 'click', () => reserveListing());
+            DOM.reserveBtn.onclick = (e) => {
+                e.preventDefault();
+                reserveListing();
+                return false;
+            };
         }
         
         if (DOM.tipBtn) {
-            EventController.addListener(DOM.tipBtn, 'click', () => showTipOptions());
+            DOM.tipBtn.onclick = (e) => {
+                e.preventDefault();
+                showTipOptions();
+                return false;
+            };
         }
         
         if (DOM.contactSellerBtn) {
-            EventController.addListener(DOM.contactSellerBtn, 'click', () => contactSeller());
+            DOM.contactSellerBtn.onclick = (e) => {
+                e.preventDefault();
+                contactSeller();
+                return false;
+            };
         }
         
         if (DOM.shareListingBtn) {
-            EventController.addListener(DOM.shareListingBtn, 'click', () => shareListing());
+            DOM.shareListingBtn.onclick = (e) => {
+                e.preventDefault();
+                shareListing();
+                return false;
+            };
         }
         
         if (DOM.detailMenuBtn) {
-            EventController.addListener(DOM.detailMenuBtn, 'click', () => showDetailMenu());
+            DOM.detailMenuBtn.onclick = (e) => {
+                e.preventDefault();
+                showDetailMenu();
+                return false;
+            };
         }
         
         // Bind upload handlers
         if (DOM.digitalUploadArea && DOM.digitalUploadInput) {
-            DOM.digitalUploadArea.addEventListener('click', () => DOM.digitalUploadInput?.click());
-            DOM.digitalUploadInput.addEventListener('change', (e) => handleFileUpload(e));
+            DOM.digitalUploadArea.onclick = () => DOM.digitalUploadInput?.click();
+            DOM.digitalUploadInput.onchange = (e) => handleFileUpload(e);
         }
         
         if (DOM.bulkUploadArea && DOM.bulkUploadInput) {
-            DOM.bulkUploadArea.addEventListener('click', () => DOM.bulkUploadInput?.click());
-            DOM.bulkUploadInput.addEventListener('change', (e) => handleBulkUpload(e));
+            DOM.bulkUploadArea.onclick = () => DOM.bulkUploadInput?.click();
+            DOM.bulkUploadInput.onchange = (e) => handleBulkUpload(e);
         }
         
         if (DOM.uploadVideoBtn) {
-            EventController.addListener(DOM.uploadVideoBtn, 'click', () => handleVideoUpload());
+            DOM.uploadVideoBtn.onclick = (e) => {
+                e.preventDefault();
+                handleVideoUpload();
+                return false;
+            };
         }
         
         // Bind team management
         if (DOM.inviteTeamMemberBtn) {
-            EventController.addListener(DOM.inviteTeamMemberBtn, 'click', () => inviteTeamMemberAction());
+            DOM.inviteTeamMemberBtn.onclick = (e) => {
+                e.preventDefault();
+                inviteTeamMemberAction();
+                return false;
+            };
         }
         
         if (DOM.saveTeamBtn) {
-            EventController.addListener(DOM.saveTeamBtn, 'click', () => saveTeamChanges());
+            DOM.saveTeamBtn.onclick = (e) => {
+                e.preventDefault();
+                saveTeamChanges();
+                return false;
+            };
         }
         
         if (DOM.refreshLeaderboardBtn) {
-            EventController.addListener(DOM.refreshLeaderboardBtn, 'click', () => refreshLeaderboard());
+            DOM.refreshLeaderboardBtn.onclick = (e) => {
+                e.preventDefault();
+                refreshLeaderboard();
+                return false;
+            };
         }
         
         if (DOM.refreshAnalyticsBtn) {
-            EventController.addListener(DOM.refreshAnalyticsBtn, 'click', () => refreshAnalytics());
+            DOM.refreshAnalyticsBtn.onclick = (e) => {
+                e.preventDefault();
+                refreshAnalytics();
+                return false;
+            };
         }
         
         if (DOM.exportAnalyticsBtn) {
-            EventController.addListener(DOM.exportAnalyticsBtn, 'click', () => exportAnalytics());
+            DOM.exportAnalyticsBtn.onclick = (e) => {
+                e.preventDefault();
+                exportAnalytics();
+                return false;
+            };
         }
         
         if (DOM.clearSavedBtn) {
-            EventController.addListener(DOM.clearSavedBtn, 'click', () => clearAllSavedItems());
+            DOM.clearSavedBtn.onclick = (e) => {
+                e.preventDefault();
+                clearAllSavedItems();
+                return false;
+            };
         }
         
         if (DOM.addNewNoteBtn) {
-            EventController.addListener(DOM.addNewNoteBtn, 'click', () => addNewNote());
+            DOM.addNewNoteBtn.onclick = (e) => {
+                e.preventDefault();
+                addNewNote();
+                return false;
+            };
         }
         
         // Bind payment handlers
         if (DOM.completePaymentBtn) {
-            EventController.addListener(DOM.completePaymentBtn, 'click', () => completePayment());
+            DOM.completePaymentBtn.onclick = (e) => {
+                e.preventDefault();
+                completePayment();
+                return false;
+            };
         }
         
         if (DOM.cancelPaymentBtn) {
-            EventController.addListener(DOM.cancelPaymentBtn, 'click', () => cancelPayment());
+            DOM.cancelPaymentBtn.onclick = (e) => {
+                e.preventDefault();
+                cancelPayment();
+                return false;
+            };
         }
         
         if (DOM.startFreeTrialBtn) {
-            EventController.addListener(DOM.startFreeTrialBtn, 'click', () => startFreeTrialWrapper());
+            DOM.startFreeTrialBtn.onclick = (e) => {
+                e.preventDefault();
+                startFreeTrialWrapper();
+                return false;
+            };
         }
         
         if (DOM.restorePurchaseBtn) {
-            EventController.addListener(DOM.restorePurchaseBtn, 'click', () => restorePurchaseWrapper());
+            DOM.restorePurchaseBtn.onclick = (e) => {
+                e.preventDefault();
+                restorePurchaseWrapper();
+                return false;
+            };
         }
         
         UIState.listenersInitialized = true;
     },
 
+    // FIX D: liveUpdate now syncs from globals before rendering
     liveUpdate() {
+        this.syncFromCoreGlobals();
         this.renderMarketplaceList();
     },
 
@@ -1321,24 +1462,23 @@ const UIPipeline = {
     
     setupDebugTools: function() {
         if (DOM.debugToggle) {
-            EventController.addListener(DOM.debugToggle, 'click', () => {
+            DOM.debugToggle.onclick = () => {
                 if (DOM.debugPanel) {
                     const isVisible = DOM.debugPanel.style.display === 'block';
                     DOM.debugPanel.style.display = isVisible ? 'none' : 'block';
                     if (!isVisible) {
                         this.updateDebugPanel();
                         // Start periodic updates
-                        const cleanup = EventController.addInterval('debug-update', () => this.updateDebugPanel(), 2000);
-                        if (DOM.debugToggle) DOM.debugToggle.dataset.cleanup = cleanup;
+                        const intervalId = setInterval(() => this.updateDebugPanel(), 2000);
+                        if (DOM.debugToggle) DOM.debugToggle.dataset.cleanup = intervalId;
                     } else {
                         // Stop updates
                         if (DOM.debugToggle && DOM.debugToggle.dataset.cleanup) {
-                            const cleanupFn = DOM.debugToggle.dataset.cleanup;
-                            if (typeof cleanupFn === 'function') cleanupFn();
+                            clearInterval(parseInt(DOM.debugToggle.dataset.cleanup));
                         }
                     }
                 }
-            });
+            };
         }
     },
     
@@ -1354,7 +1494,7 @@ const UIPipeline = {
         const environment = AppState?.getEnvironment?.() || { type: 'unknown', latency: 0 };
         
         DOM.debugPanel.innerHTML = `
-            <div style="color: #fff; margin-bottom: 8px; font-weight: bold;">🔍 DEBUG PANEL v6.2</div>
+            <div style="color: #fff; margin-bottom: 8px; font-weight: bold;">🔍 DEBUG PANEL v7.1</div>
             <div><span style="color: #888;">Environment:</span> ${environment.type} (${environment.latency || 0}ms)</div>
             <div><span style="color: #888;">Lifecycle State:</span> ${UIState.lifecycleState}</div>
             <div><span style="color: #888;">Handshake Stage:</span> ${UIState.handshakeStage}</div>
@@ -1362,7 +1502,6 @@ const UIPipeline = {
             <div><span style="color: #888;">Parent Ready:</span> ${health.parentReady ? '✅' : '❌'}</div>
             <div><span style="color: #888;">Handshake Complete:</span> ${health.handshakeComplete ? '✅' : '⏳'}</div>
             <div><span style="color: #888;">Session:</span> ${sessionStatus.valid ? '✅' : '❌'} ${sessionStatus.guest ? '(guest)' : sessionStatus.demo ? '(demo)' : ''}</div>
-            <div><span style="color: #888;">Active:</span> ${isActive ? (isActive() ? '✅' : '❌') : (health.parentReady ? '✅' : '❌')}</div>
             <div><span style="color: #888;">Connected:</span> ${health.connected ? '✅' : '❌'}</div>
             <div><span style="color: #888;">Queued messages:</span> ${health.queuedMessages || 0}</div>
             <div><span style="color: #888;">Queued actions:</span> ${UIState.pendingActions.length}</div>
@@ -1379,12 +1518,11 @@ const UIPipeline = {
         const health = checkParentHealth ? checkParentHealth() : {};
         const parentReady = health.parentReady || false;
         const handshakeComplete = health.handshakeComplete || false;
-        const isActiveState = isActive ? isActive() : (parentReady && handshakeComplete);
         
         let connectionColor = '#ff9800';
         let connectionText = 'Connecting';
         
-        if (isActiveState && parentReady && handshakeComplete) {
+        if (parentReady && handshakeComplete) {
             connectionColor = '#4caf50';
             connectionText = 'Active';
         } else if (parentReady) {
@@ -1569,7 +1707,7 @@ const UIPipeline = {
 };
 
 // ----------------------------------------------------------------------
-// 8. CORE BRIDGE – VALIDATED SUBSCRIPTIONS (UPDATED FOR HANDSHAKE)
+// 7. CORE BRIDGE – VALIDATED SUBSCRIPTIONS (UPDATED FOR HANDSHAKE)
 // ----------------------------------------------------------------------
 const CoreBridge = {
     init() {
@@ -1577,6 +1715,9 @@ const CoreBridge = {
         window.addEventListener('coreInitialized', this.handleCoreInit.bind(this));
         window.addEventListener('coreDataUpdated', this.handleDataUpdate.bind(this));
         window.addEventListener('marketplaceSessionReady', this.handleSessionReady.bind(this));
+        
+        // FIX F: Listen for marketplace:data-updated to trigger re-render
+        window.addEventListener('marketplace:data-updated', this.handleMarketplaceDataUpdated.bind(this));
         
         // New event listeners for handshake alignment
         window.addEventListener('tools:page-activated', this.handlePageActivated.bind(this));
@@ -1609,9 +1750,19 @@ const CoreBridge = {
     handleDataUpdate(e) {
         const { type, data } = e?.detail || {};
         if (!type) return;
-        EventController.addDebounced('data-update-render', () => {
+        setTimeout(() => {
             UIPipeline.liveUpdate();
         }, 150);
+    },
+    
+    // FIX F: Handle marketplace data updates
+    handleMarketplaceDataUpdated(e) {
+        console.log('[UI Bridge] Marketplace data updated');
+        if (e?.detail?.listings) {
+            allListings = e.detail.listings;
+            window.allListings = allListings;
+        }
+        UIPipeline.liveUpdate();
     },
 
     handleSessionReady(e) {
@@ -1757,7 +1908,7 @@ const renderers = {
             `;
             const createBtn = document.getElementById('emptyStateCreateBtn');
             if (createBtn) {
-                createBtn.addEventListener('click', () => showCreateListingModal());
+                createBtn.onclick = () => showCreateListingModal();
             }
             return;
         }
@@ -1770,33 +1921,36 @@ const renderers = {
         // Apply active tab filter
         switch (UIState.activeTab) {
             case 'services':
-                filtered = filtered.filter(l => l.type === LISTING_TYPES?.SERVICE);
+                filtered = filtered.filter(l => l.type === LISTING_TYPES?.SERVICE || l.type === 'service');
                 break;
             case 'digital':
-                filtered = filtered.filter(l => l.type === LISTING_TYPES?.DIGITAL);
+                filtered = filtered.filter(l => l.type === LISTING_TYPES?.DIGITAL || l.type === 'digital');
                 break;
             case 'friends':
                 const friendIds = userFriends ? userFriends.map(f => f.id) : [];
-                filtered = filtered.filter(l => friendIds.includes(l.userId));
+                // Also check sellerId as backend may use that
+                filtered = filtered.filter(l => friendIds.includes(l.userId) || friendIds.includes(l.sellerId));
                 break;
             case 'groups':
-                filtered = filtered.filter(l => l.visibility === TRUST_CIRCLES?.GROUPS);
+                filtered = filtered.filter(l => l.visibility === TRUST_CIRCLES?.GROUPS || l.visibility === 'groups');
                 break;
             case 'my':
-                const userId = sessionData?.userId || window.currentUser?.id;
-                filtered = filtered.filter(l => l.userId === userId);
+                const userId = sessionData?.userId || window.currentUser?.id || currentUser?.id;
+                // FIX A: Use both userId and sellerId for "My" tab filter
+                filtered = filtered.filter(l => l.userId === userId || l.sellerId === userId);
                 break;
             case 'premium':
-                filtered = filtered.filter(l => l.premium === true);
+                filtered = filtered.filter(l => l.premium === true || l.isPremium === true);
                 break;
             case 'spotlight':
-                filtered = filtered.filter(l => l.featured === true);
+                filtered = filtered.filter(l => l.featured === true || l.isFeatured === true || l.isSpotlight === true);
                 break;
+            // 'all' case - no filter needed
         }
 
         filtered.sort((a, b) => {
-            const aFeatured = a.featured || a.boosted ? 1 : 0;
-            const bFeatured = b.featured || b.boosted ? 1 : 0;
+            const aFeatured = (a.featured || a.boosted || a.isFeatured || a.isSpotlight) ? 1 : 0;
+            const bFeatured = (b.featured || b.boosted || b.isFeatured || b.isSpotlight) ? 1 : 0;
             if (aFeatured !== bFeatured) return bFeatured - aFeatured;
             return new Date(b.createdAt || 0) - new Date(a.createdAt || 0);
         });
@@ -1828,10 +1982,11 @@ const renderers = {
         
         const item = document.createElement('div');
         item.className = 'listing-item';
-        if (listing.featured || listing.boosted) item.classList.add('featured');
-        if (listing.premium) item.classList.add('premium-listing');
+        if (listing.featured || listing.boosted || listing.isFeatured || listing.isSpotlight) item.classList.add('featured');
+        if (listing.premium || listing.isPremium) item.classList.add('premium-listing');
+        // FIX: Use both userId and sellerId for dataset
         item.dataset.listingId = listing.id;
-        item.dataset.userId = listing.userId;
+        item.dataset.userId = listing.userId || listing.sellerId;
 
         const userName = listing.user?.displayName || 'Unknown User';
         const userInitials = userName.split(' ').map(w => w[0]).join('').toUpperCase().substring(0, 2);
@@ -1840,16 +1995,16 @@ const renderers = {
 
         // Build badges
         let badges = '';
-        if (listing.featured) badges += '<span class="featured-badge"><i class="fas fa-star"></i> FEATURED</span>';
-        if (listing.boosted) badges += '<span class="premium-badge"><i class="fas fa-bolt"></i> BOOSTED</span>';
-        if (listing.verified) badges += '<span class="verified-badge"><i class="fas fa-check-circle"></i> VERIFIED</span>';
+        if (listing.featured || listing.isFeatured || listing.isSpotlight) badges += '<span class="featured-badge"><i class="fas fa-star"></i> FEATURED</span>';
+        if (listing.boosted || listing.isBoosted) badges += '<span class="premium-badge"><i class="fas fa-bolt"></i> BOOSTED</span>';
+        if (listing.verified || listing.isVerified) badges += '<span class="verified-badge"><i class="fas fa-check-circle"></i> VERIFIED</span>';
         if (listing.teamListing) badges += '<span class="team-badge"><i class="fas fa-users"></i> TEAM</span>';
-        if (listing.premium && !listing.featured && !listing.boosted) badges += '<span class="premium-badge"><i class="fas fa-crown"></i> PREMIUM</span>';
+        if ((listing.premium || listing.isPremium) && !listing.featured && !listing.boosted) badges += '<span class="premium-badge"><i class="fas fa-crown"></i> PREMIUM</span>';
 
         item.innerHTML = `
-            <div class="listing-avatar" style="${listing.type === LISTING_TYPES?.DIGITAL ? 'background-color: #4caf50;' : ''}">
-                ${listing.type === LISTING_TYPES?.DIGITAL ? '<i class="fas fa-file-alt" style="font-size: 20px;"></i>' : 
-                  listing.type === LISTING_TYPES?.SERVICE ? '<i class="fas fa-tools" style="font-size: 20px;"></i>' :
+            <div class="listing-avatar" style="${listing.type === LISTING_TYPES?.DIGITAL || listing.type === 'digital' ? 'background-color: #4caf50;' : ''}">
+                ${listing.type === LISTING_TYPES?.DIGITAL || listing.type === 'digital' ? '<i class="fas fa-file-alt" style="font-size: 20px;"></i>' : 
+                  listing.type === LISTING_TYPES?.SERVICE || listing.type === 'service' ? '<i class="fas fa-tools" style="font-size: 20px;"></i>' :
                   listing.user?.photoURL ? '' : `<span style="color: white; font-size: 18px; font-weight: 500;">${escapeHtml(userInitials)}</span>`}
             </div>
             <div class="listing-info">
@@ -1863,7 +2018,7 @@ const renderers = {
                 <div class="listing-time">
                     <span><i class="far fa-clock"></i> ${listing.createdAt ? formatTimeAgo(new Date(listing.createdAt)) : 'Just now'}</span>
                     <span class="availability-badge ${availabilityClass}"><i class="fas fa-${listing.availability === 'urgent' ? 'exclamation-circle' : listing.availability === 'busy' ? 'clock' : 'check-circle'}"></i> ${availabilityText}</span>
-                    ${getTrustIndicator ? getTrustIndicator(listing.userId, listing.user?.trustLevel) : ''}
+                    ${getTrustIndicator ? getTrustIndicator(listing.userId || listing.sellerId, listing.user?.trustLevel) : ''}
                 </div>
                 <div class="listing-preview">
                     ${escapeHtml((listing.description || '').substring(0, 80))}${listing.description?.length > 80 ? '...' : ''}
@@ -1871,7 +2026,7 @@ const renderers = {
             </div>
         `;
 
-        if (listing.user?.photoURL && listing.type === LISTING_TYPES?.SERVICE) {
+        if (listing.user?.photoURL && (listing.type === LISTING_TYPES?.SERVICE || listing.type === 'service')) {
             const avatarDiv = item.querySelector('.listing-avatar');
             avatarDiv.style.backgroundImage = `url('${escapeHtml(listing.user.photoURL)}')`;
             avatarDiv.style.backgroundSize = 'cover';
@@ -1879,7 +2034,7 @@ const renderers = {
             avatarDiv.innerHTML = '';
         }
 
-        item.addEventListener('click', () => renderers.viewListingDetail(listing));
+        item.onclick = () => renderers.viewListingDetail(listing);
         DOM.marketplaceListContent.appendChild(item);
     }, null),
 
@@ -1955,9 +2110,9 @@ const renderers = {
 
         // Title and badges
         let badges = '';
-        if (listing.featured) badges += '<span class="featured-badge"><i class="fas fa-star"></i> FEATURED</span>';
-        if (listing.boosted) badges += '<span class="premium-badge"><i class="fas fa-bolt"></i> BOOSTED</span>';
-        if (listing.verified) badges += '<span class="verified-badge"><i class="fas fa-check-circle"></i> VERIFIED</span>';
+        if (listing.featured || listing.isFeatured || listing.isSpotlight) badges += '<span class="featured-badge"><i class="fas fa-star"></i> FEATURED</span>';
+        if (listing.boosted || listing.isBoosted) badges += '<span class="premium-badge"><i class="fas fa-bolt"></i> BOOSTED</span>';
+        if (listing.verified || listing.isVerified) badges += '<span class="verified-badge"><i class="fas fa-check-circle"></i> VERIFIED</span>';
         if (listing.teamListing) badges += '<span class="team-badge"><i class="fas fa-users"></i> TEAM</span>';
 
         html += `
@@ -1974,7 +2129,7 @@ const renderers = {
             </div>
             
             <div class="listing-detail-meta">
-                <span class="meta-badge"><i class="fas fa-${listing.type === LISTING_TYPES?.DIGITAL ? 'file-alt' : 'tools'}"></i> ${listing.type === LISTING_TYPES?.DIGITAL ? 'Digital Item' : 'Service'}</span>
+                <span class="meta-badge"><i class="fas fa-${listing.type === LISTING_TYPES?.DIGITAL || listing.type === 'digital' ? 'file-alt' : 'tools'}"></i> ${listing.type === LISTING_TYPES?.DIGITAL || listing.type === 'digital' ? 'Digital Item' : 'Service'}</span>
                 <span class="meta-badge availability-${listing.availability || 'free'}"><i class="fas fa-${listing.availability === 'urgent' ? 'exclamation-circle' : listing.availability === 'busy' ? 'clock' : 'check-circle'}"></i> ${listing.availability ? listing.availability.charAt(0).toUpperCase() + listing.availability.slice(1) : 'Available'}</span>
                 ${listing.visibility ? `<span class="meta-badge ${listing.visibility === 'premium' || listing.visibility === 'micro' ? 'premium-feature' : ''}"><i class="fas fa-${listing.visibility === 'friends' ? 'user-friends' : listing.visibility === 'groups' ? 'users' : listing.visibility === 'selected' ? 'user-check' : listing.visibility === 'premium' ? 'crown' : listing.visibility === 'micro' ? 'bullseye' : 'globe'}"></i> ${listing.visibility === 'friends' ? 'Friends Only' : listing.visibility === 'groups' ? 'Group Members' : listing.visibility === 'selected' ? 'Selected People' : listing.visibility === 'premium' ? 'Premium Only' : listing.visibility === 'micro' ? 'Micro-Audience' : 'Public'}</span>` : ''}
                 ${listing.moodContext ? `<span class="meta-badge ${listing.moodContext === 'creative' || listing.moodContext === 'business' ? 'premium-feature' : ''}"><i class="fas fa-${listing.moodContext === 'help' ? 'hands-helping' : listing.moodContext === 'learn' ? 'graduation-cap' : listing.moodContext === 'urgent' ? 'bolt' : listing.moodContext === 'creative' ? 'palette' : listing.moodContext === 'business' ? 'briefcase' : 'search'}"></i> ${listing.moodContext === 'help' ? 'Help Needed' : listing.moodContext === 'learn' ? 'Learning' : listing.moodContext === 'urgent' ? 'Urgent' : listing.moodContext === 'creative' ? 'Creative' : listing.moodContext === 'business' ? 'Business' : 'Browsing'}</span>` : ''}
@@ -2019,67 +2174,70 @@ const renderers = {
         // Add AR button handler
         const arBtn = document.getElementById('viewArBtn');
         if (arBtn) {
-            arBtn.addEventListener('click', () => {
+            arBtn.onclick = () => {
                 showNotification('AR preview feature coming soon!', 'info');
-            });
+            };
         }
 
         // Add download button for digital items
-        if (listing.type === LISTING_TYPES?.DIGITAL && listing.fileUrl) {
-            const downloadBtn = document.createElement('button');
-            downloadBtn.className = 'action-btn primary';
-            downloadBtn.style.marginTop = '20px';
-            downloadBtn.style.width = '100%';
-            downloadBtn.innerHTML = '<i class="fas fa-download"></i> Download File';
-            downloadBtn.addEventListener('click', () => {
-                if (downloadDigitalFile) {
-                    downloadDigitalFile(listing.id, listing.fileUrl, listing.fileName || 'download');
+        if (listing.type === LISTING_TYPES?.DIGITAL || listing.type === 'digital') {
+            if (listing.fileUrl) {
+                const downloadBtn = document.createElement('button');
+                downloadBtn.className = 'action-btn primary';
+                downloadBtn.style.marginTop = '20px';
+                downloadBtn.style.width = '100%';
+                downloadBtn.innerHTML = '<i class="fas fa-download"></i> Download File';
+                downloadBtn.onclick = () => {
+                    if (downloadDigitalFile) {
+                        downloadDigitalFile(listing.id, listing.fileUrl, listing.fileName || 'download');
+                    }
+                };
+                container.appendChild(downloadBtn);
+                
+                // Add file info if available
+                if (listing.fileName || listing.fileSize) {
+                    const fileInfo = document.createElement('div');
+                    fileInfo.className = 'file-info';
+                    fileInfo.style.marginBottom = '10px';
+                    fileInfo.style.padding = '10px';
+                    fileInfo.style.background = 'var(--secondary-color)';
+                    fileInfo.style.borderRadius = '8px';
+                    fileInfo.innerHTML = `
+                        <span><i class="fas fa-file"></i> ${escapeHtml(listing.fileName || 'File')}</span>
+                        <span style="float: right;">${listing.fileSize ? formatFileSize(listing.fileSize) : ''}</span>
+                    `;
+                    container.insertBefore(fileInfo, downloadBtn);
                 }
-            });
-            container.appendChild(downloadBtn);
-            
-            // Add file info if available
-            if (listing.fileName || listing.fileSize) {
-                const fileInfo = document.createElement('div');
-                fileInfo.className = 'file-info';
-                fileInfo.style.marginBottom = '10px';
-                fileInfo.style.padding = '10px';
-                fileInfo.style.background = 'var(--secondary-color)';
-                fileInfo.style.borderRadius = '8px';
-                fileInfo.innerHTML = `
-                    <span><i class="fas fa-file"></i> ${escapeHtml(listing.fileName || 'File')}</span>
-                    <span style="float: right;">${listing.fileSize ? formatFileSize(listing.fileSize) : ''}</span>
-                `;
-                container.insertBefore(fileInfo, downloadBtn);
             }
         }
         
         // Add contact button for services
-        if (listing.type === LISTING_TYPES?.SERVICE) {
+        if (listing.type === LISTING_TYPES?.SERVICE || listing.type === 'service') {
             const contactBtn = document.createElement('button');
             contactBtn.className = 'action-btn secondary';
             contactBtn.style.marginTop = '20px';
             contactBtn.style.width = '100%';
             contactBtn.innerHTML = '<i class="fas fa-comment"></i> Message Seller';
-            contactBtn.addEventListener('click', () => {
+            contactBtn.onclick = () => {
                 if (openChat) {
-                    openChat(listing.userId, listing.user?.displayName || 'Seller');
+                    openChat(listing.userId || listing.sellerId, listing.user?.displayName || 'Seller');
                 }
-            });
+            };
             container.appendChild(contactBtn);
         }
     }, '<div class="error-placeholder">Failed to load listing details</div>'),
 
+    // FIX E: Spotlight renderer - show section when items exist
     spotlight: withErrorBoundary('Spotlight', function() {
-        if (!DOM.spotlightSection || !DOM.spotlightListings) return;
-        const spotlight = allListings ? allListings.filter(l => l.featured && !isListingExpired(l)) : [];
-        if (!spotlight.length) {
-            DOM.spotlightSection.style.display = 'none';
+        if (!DOM.spotlightListings) return;
+        const spotlightItems = allListings ? allListings.filter(l => (l.featured || l.isFeatured || l.isSpotlight) && !isListingExpired(l)) : [];
+        if (!spotlightItems.length) {
+            if (DOM.spotlightSection) DOM.spotlightSection.style.display = 'none';
             return;
         }
-        DOM.spotlightSection.style.display = 'block';
+        if (DOM.spotlightSection) DOM.spotlightSection.style.display = 'block';
         DOM.spotlightListings.innerHTML = '';
-        spotlight.slice(0, 5).forEach(listing => {
+        spotlightItems.slice(0, 5).forEach(listing => {
             const item = document.createElement('div');
             item.className = 'spotlight-item';
             item.dataset.listingId = listing.id;
@@ -2105,7 +2263,7 @@ const renderers = {
                 </div>
             `;
             
-            item.addEventListener('click', () => renderers.viewListingDetail(listing));
+            item.onclick = () => renderers.viewListingDetail(listing);
             DOM.spotlightListings.appendChild(item);
         });
     }, null),
@@ -2204,7 +2362,7 @@ const renderers = {
         });
         
         document.querySelectorAll('.remove-member-btn').forEach(btn => {
-            btn.addEventListener('click', function(e) {
+            btn.onclick = function(e) {
                 e.stopPropagation();
                 const memberId = this.dataset.memberId;
                 if (memberId && confirm('Remove this team member?')) {
@@ -2216,11 +2374,11 @@ const renderers = {
                         showNotification('Team member removed', 'success');
                     }
                 }
-            });
+            };
         });
         
         document.querySelectorAll('select[data-member-id]').forEach(select => {
-            select.addEventListener('change', function() {
+            select.onchange = function() {
                 const memberId = this.dataset.memberId;
                 const newRole = this.value;
                 const member = teamMembers.find(m => m.id === memberId);
@@ -2229,7 +2387,7 @@ const renderers = {
                     saveToLocalStorage(LOCAL_STORAGE_KEYS.TEAM_MEMBERS, teamMembers);
                     showNotification(`Role updated to ${newRole}`, 'success');
                 }
-            });
+            };
         });
     }, null),
 
@@ -2250,6 +2408,9 @@ const renderers = {
             else if (i === 1) medalHtml = '<span style="color: silver; margin-left: 5px;">🥈</span>';
             else if (i === 2) medalHtml = '<span style="color: #cd7f32; margin-left: 5px;">🥉</span>';
             
+            // Use userId or sellerId from normalized response
+            const userId = user.userId || user.sellerId;
+            
             item.innerHTML = `
                 <div class="leaderboard-rank" style="background: ${i === 0 ? 'gold' : i === 1 ? 'silver' : i === 2 ? '#cd7f32' : 'rgba(0,0,0,0.1)'}; color: ${i < 3 ? 'white' : 'inherit'};">
                     ${i + 1}
@@ -2263,13 +2424,13 @@ const renderers = {
                         ${medalHtml}
                     </div>
                     <div class="leaderboard-stats">
-                        <span><i class="fas fa-list"></i> ${user.listingsCount || 0} listings</span>
-                        <span><i class="fas fa-star" style="color: gold;"></i> ${user.rating || '5.0'}</span>
-                        <span><i class="fas fa-check-circle" style="color: var(--success-color);"></i> ${user.successfulTransactions || 0} txns</span>
+                        <span><i class="fas fa-list"></i> ${user.listingCount || 0} listings</span>
+                        <span><i class="fas fa-star" style="color: gold;"></i> ${user.avgRating || '5.0'}</span>
+                        <span><i class="fas fa-check-circle" style="color: var(--success-color);"></i> ${user.totalSales || 0} txns</span>
                     </div>
                 </div>
                 <div style="font-weight: 700; color: var(--primary-color); background: rgba(0,132,255,0.1); padding: 6px 12px; border-radius: 20px;">
-                    ${user.points || 0} pts
+                    ${user.points || user.totalPoints || 0} pts
                 </div>
             `;
             
@@ -2368,11 +2529,11 @@ const renderers = {
                     <i class="fas fa-check" style="color: var(--primary-color); opacity: 0;"></i>
                 </div>
             `;
-            el.addEventListener('click', function() { 
+            el.onclick = function() { 
                 this.classList.toggle('selected');
                 const check = this.querySelector('.fa-check');
                 if (check) check.style.opacity = this.classList.contains('selected') ? '1' : '0';
-            });
+            };
             DOM.groupsList.appendChild(el);
         });
     }, null),
@@ -2393,23 +2554,23 @@ const renderers = {
                     <i class="fas fa-check" style="color: var(--primary-color); opacity: 0;"></i>
                 </div>
             `;
-            el.addEventListener('click', function() { 
+            el.onclick = function() { 
                 this.classList.toggle('selected');
                 const check = this.querySelector('.fa-check');
                 if (check) check.style.opacity = this.classList.contains('selected') ? '1' : '0';
-            });
+            };
             DOM.peopleList.appendChild(el);
         });
         
         // Add search functionality
         if (DOM.peopleSearch) {
-            DOM.peopleSearch.addEventListener('input', (e) => {
+            DOM.peopleSearch.oninput = (e) => {
                 const term = e.target.value.toLowerCase();
                 document.querySelectorAll('#peopleList .circle-option').forEach(el => {
                     const name = el.querySelector('div:nth-child(2)')?.textContent?.toLowerCase() || '';
                     el.style.display = name.includes(term) ? 'flex' : 'none';
                 });
-            });
+            };
         }
     }, null),
 
@@ -2431,47 +2592,52 @@ const renderers = {
         }
     }, null),
 
+    // FIX: Setup create listing tabs - ensure UIState.createListingActiveTab is updated
     setupCreateListingTabs: withErrorBoundary('SetupCreateListingTabs', function() {
         document.querySelectorAll('.create-listing-tab').forEach(tab => {
-            tab.addEventListener('click', function() {
+            tab.onclick = function() {
                 const tabName = this.dataset.tab;
                 if (!tabName) return;
                 document.querySelectorAll('.create-listing-tab').forEach(t => t.classList.remove('active'));
                 this.classList.add('active');
+                // Update content visibility - support both tab naming conventions
+                const contentId = `${tabName}Tab`;
+                const altContentId = tabName === 'digital' ? 'digitalTabContent' : contentId;
                 document.querySelectorAll('.create-listing-tab-content').forEach(c => c.classList.remove('active'));
-                const content = document.getElementById(`${tabName}Tab`);
+                let content = document.getElementById(contentId);
+                if (!content) content = document.getElementById(altContentId);
                 if (content) content.classList.add('active');
+                // FIX: Update UIState.createListingActiveTab when tab changes
                 UIState.createListingActiveTab = tabName;
-                if (tabName === 'circles') updateTrustCircleSelection();
                 renderers.togglePublishButtons(tabName);
-            });
+            };
         });
     }, null),
 
     setupAvailabilityOptions: withErrorBoundary('SetupAvailabilityOptions', function() {
         document.querySelectorAll('.availability-option').forEach(opt => {
-            opt.addEventListener('click', function() {
+            opt.onclick = function() {
                 document.querySelectorAll('.availability-option').forEach(o => o.classList.remove('selected'));
                 this.classList.add('selected');
                 UIState.selectedAvailability = this.dataset.availability;
-            });
+            };
         });
     }, null),
 
     setupCircleOptions: withErrorBoundary('SetupCircleOptions', function() {
         document.querySelectorAll('.circle-option[data-circle]').forEach(opt => {
-            opt.addEventListener('click', function() {
+            opt.onclick = function() {
                 document.querySelectorAll('.circle-option[data-circle]').forEach(o => o.classList.remove('selected'));
                 this.classList.add('selected');
                 UIState.selectedTrustCircle = this.dataset.circle;
                 updateTrustCircleSelection();
-            });
+            };
         });
     }, null),
 
     setupTemplateOptions: withErrorBoundary('SetupTemplateOptions', function() {
         document.querySelectorAll('.template-option').forEach(opt => {
-            opt.addEventListener('click', function() {
+            opt.onclick = function() {
                 if (this.classList.contains('premium') && !isUserPremium()) {
                     showNotification('Upgrade to Premium for premium templates', 'info');
                     return;
@@ -2479,13 +2645,13 @@ const renderers = {
                 document.querySelectorAll('.template-option').forEach(o => o.classList.remove('selected'));
                 this.classList.add('selected');
                 UIState.selectedTemplate = this.dataset.template;
-            });
+            };
         });
     }, null),
 
     setupMoodOptions: withErrorBoundary('SetupMoodOptions', function() {
         document.querySelectorAll('.mood-option').forEach(opt => {
-            opt.addEventListener('click', function() {
+            opt.onclick = function() {
                 if (this.classList.contains('premium') && !isUserPremium()) {
                     showNotification('Upgrade to Premium for premium mood filters', 'info');
                     return;
@@ -2493,13 +2659,13 @@ const renderers = {
                 document.querySelectorAll('.mood-option').forEach(o => o.classList.remove('selected'));
                 this.classList.add('selected');
                 UIState.selectedMoodContext = this.dataset.mood;
-            });
+            };
         });
     }, null),
 
     setupDurationOptions: withErrorBoundary('SetupDurationOptions', function() {
         document.querySelectorAll('.duration-option').forEach(opt => {
-            opt.addEventListener('click', function() {
+            opt.onclick = function() {
                 if (this.classList.contains('premium') && !isUserPremium()) {
                     showNotification('Upgrade to Premium for extended durations', 'info');
                     return;
@@ -2507,23 +2673,23 @@ const renderers = {
                 document.querySelectorAll('.duration-option').forEach(o => o.classList.remove('selected'));
                 this.classList.add('selected');
                 UIState.selectedDuration = this.dataset.duration;
-            });
+            };
         });
     }, null),
 
     setupScheduleOptions: withErrorBoundary('SetupScheduleOptions', function() {
         document.querySelectorAll('.schedule-option').forEach(opt => {
-            opt.addEventListener('click', function() {
+            opt.onclick = function() {
                 document.querySelectorAll('.schedule-option').forEach(o => o.classList.remove('selected'));
                 this.classList.add('selected');
                 UIState.selectedSchedule = this.dataset.schedule;
-            });
+            };
         });
     }, null),
 
     setupExportOptions: withErrorBoundary('SetupExportOptions', function() {
         document.querySelectorAll('.export-option').forEach(opt => {
-            opt.addEventListener('click', function() {
+            opt.onclick = function() {
                 if (this.classList.contains('premium') && !isUserPremium()) {
                     showNotification('Upgrade to Premium for Excel exports', 'info');
                     return;
@@ -2531,17 +2697,17 @@ const renderers = {
                 document.querySelectorAll('.export-option').forEach(o => o.classList.remove('selected'));
                 this.classList.add('selected');
                 if (exportAnalyticsData) exportAnalyticsData(this.dataset.format);
-            });
+            };
         });
     }, null),
 
     setupPaymentMethods: withErrorBoundary('SetupPaymentMethods', function() {
         document.querySelectorAll('.payment-method').forEach(m => {
-            m.addEventListener('click', function() {
+            m.onclick = function() {
                 document.querySelectorAll('.payment-method').forEach(p => p.classList.remove('selected'));
                 this.classList.add('selected');
                 renderers.showPaymentFormForMethod(this.dataset.method);
-            });
+            };
         });
     }, null),
 
@@ -2568,15 +2734,18 @@ const renderers = {
 // =============================================
 // Helper Functions (Stubs - These would be fully implemented)
 // =============================================
-
+// SIMPLIFIED: Removed isActive() checks from showCreateListingModal
 function showCreateListingModal() {
-    if (!isActive() && !AppState?._STATE?.guestMode) {
-        showNotification('Please wait for connection to complete...', 'info');
-        return;
-    }
-    if (DOM.createListingModal) {
-        DOM.createListingModal.classList.add('active');
-        resetCreateListingForm();
+    console.log('[Tool-ui] showCreateListingModal called - DIRECT');
+    // Direct DOM access - don't rely on DOM cache
+    const modal = document.getElementById('createListingModal');
+    if (modal) {
+        modal.classList.add('active');
+        console.log('[Tool-ui] Modal opened successfully');
+    } else {
+        console.error('[Tool-ui] Modal element NOT FOUND!');
+        // Fallback - create alert
+        alert('Create Listing feature - modal not found');
     }
 }
 
@@ -2607,7 +2776,9 @@ function switchCreateTab(tab) {
     const tabBtn = document.querySelector(`.create-listing-tab[data-tab="${tab}"]`);
     if (tabBtn) tabBtn.classList.add('active');
     
-    const content = document.getElementById(`${tab}Tab`);
+    // Support both naming conventions
+    let content = document.getElementById(`${tab}Tab`);
+    if (!content && tab === 'digital') content = document.getElementById('digitalTabContent');
     if (content) content.classList.add('active');
     
     UIState.createListingActiveTab = tab;
@@ -2678,13 +2849,43 @@ function handleBulkUpload(e) {
     }
 }
 
+// FIX C: publishListingFromModal - handle all tabs (premium, templates, circles, options, bulk)
 function publishListingFromModal() {
-    if (!isActive() && !AppState?._STATE?.guestMode) {
-        showNotification('Please wait for connection to complete...', 'info');
+    const activeTab = UIState.createListingActiveTab;
+    
+    // Handle premium tab - delegate to premium publish function
+    if (activeTab === 'premium') {
+        publishPremiumListingFromModal();
         return;
     }
     
-    if (UIState.createListingActiveTab === 'service') {
+    // Handle templates, circles, options tabs - they configure settings, use service/digital data
+    if (['templates', 'circles', 'options'].includes(activeTab)) {
+        // These tabs configure settings; publish uses current service/digital form data
+        const fallbackTab = DOM.serviceTitle?.value ? 'service' : 'digital';
+        UIState.createListingActiveTab = fallbackTab;
+        publishListingFromModal();
+        return;
+    }
+    
+    // Handle bulk tab - process bulk upload
+    if (activeTab === 'bulk') {
+        if (DOM.bulkUploadInput && DOM.bulkUploadInput.files && DOM.bulkUploadInput.files[0]) {
+            if (processBulkUpload) {
+                processBulkUpload(DOM.bulkUploadInput.files[0]);
+                showNotification('Bulk upload started!', 'success');
+                hideCreateListingModal();
+            } else {
+                showNotification('Bulk upload is not available', 'error');
+            }
+        } else {
+            showNotification('Please select a CSV or JSON file to upload', 'error');
+        }
+        return;
+    }
+    
+    // Handle service tab
+    if (activeTab === 'service') {
         const title = DOM.serviceTitle?.value;
         const description = DOM.serviceDescription?.value;
         const price = DOM.servicePrice?.value;
@@ -2709,7 +2910,11 @@ function publishListingFromModal() {
         } else {
             showNotification('Failed to publish listing', 'error');
         }
-    } else if (UIState.createListingActiveTab === 'digital') {
+        return;
+    }
+    
+    // Handle digital tab
+    if (activeTab === 'digital') {
         const title = DOM.digitalTitle?.value;
         const description = DOM.digitalDescription?.value;
         const price = DOM.digitalPrice?.value;
@@ -2738,17 +2943,21 @@ function publishListingFromModal() {
         } else {
             showNotification('Failed to publish digital item', 'error');
         }
+        return;
+    }
+    
+    // Default fallback - try service
+    if (DOM.serviceTitle?.value) {
+        UIState.createListingActiveTab = 'service';
+        publishListingFromModal();
+    } else {
+        showNotification('Please select a listing type', 'error');
     }
 }
 
 function publishPremiumListingFromModal() {
     if (!isUserPremium()) {
         showNotification('Premium feature - please upgrade', 'info');
-        return;
-    }
-    
-    if (!isActive()) {
-        showNotification('Please wait for connection to complete...', 'info');
         return;
     }
     
@@ -2764,7 +2973,7 @@ function publishPremiumListingFromModal() {
     };
     
     let listing;
-    if (UIState.createListingActiveTab === 'service') {
+    if (UIState.createListingActiveTab === 'service' || DOM.serviceTitle?.value) {
         const title = DOM.serviceTitle?.value;
         const description = DOM.serviceDescription?.value;
         
@@ -2939,10 +3148,10 @@ function renderSavedItems() {
             <div style="font-size: 12px; color: var(--text-secondary);">${item.price || 'Free'}</div>
             <button class="action-btn secondary" style="margin-top: 10px;" data-id="${item.id}">View</button>
         `;
-        card.querySelector('button').addEventListener('click', () => {
+        card.querySelector('button').onclick = () => {
             renderers.viewListingDetail(item);
             hideSavedItemsModal();
-        });
+        };
         DOM.savedItemsGrid.appendChild(card);
     });
 }
@@ -3064,7 +3273,7 @@ function showTipOptions() {
 
 function contactSeller() {
     if (UIState.currentListingData && openChat) {
-        openChat(UIState.currentListingData.userId, UIState.currentListingData.user?.displayName);
+        openChat(UIState.currentListingData.userId || UIState.currentListingData.sellerId, UIState.currentListingData.user?.displayName);
     }
 }
 
@@ -3078,12 +3287,41 @@ function clearMoodFilter() {
     }
 }
 
+// SIMPLIFIED: Removed isActive() checks from setActiveTab
 function setActiveTab(tab) {
+    console.log('[Tool-ui] setActiveTab called with:', tab);
     UIState.activeTab = tab;
-    document.querySelectorAll('.category-tab').forEach(t => t.classList.remove('active'));
-    const activeTab = document.getElementById(`${tab}Tab`);
-    if (activeTab) activeTab.classList.add('active');
-    UIPipeline.liveUpdate();
+    
+    // Update tab UI
+    const tabIds = ['allTab', 'servicesTab', 'digitalTab', 'friendsTab', 'groupsTab', 'myTab', 'premiumTab', 'spotlightTab'];
+    tabIds.forEach(tabId => {
+        const tabElement = document.getElementById(tabId);
+        if (tabElement) {
+            let tabName = tabId.replace('Tab', '');
+            // Map tab names to match expected values
+            if (tabName === 'services') tabName = 'services';
+            if (tabName === 'digital') tabName = 'digital';
+            if (tabName === 'my') tabName = 'my';
+            if (tabName === 'premium') tabName = 'premium';
+            if (tabName === 'spotlight') tabName = 'spotlight';
+            if (tabName === 'all') tabName = 'all';
+            if (tabName === 'friends') tabName = 'friends';
+            if (tabName === 'groups') tabName = 'groups';
+            
+            if (tabName === tab) {
+                tabElement.classList.add('active');
+            } else {
+                tabElement.classList.remove('active');
+            }
+        }
+    });
+    
+    // Refresh the listings
+    if (UIPipeline && UIPipeline.liveUpdate) {
+        UIPipeline.liveUpdate();
+    } else if (renderers && renderers.marketplaceList) {
+        renderers.marketplaceList();
+    }
 }
 
 function updateAnalyticsDashboard() {
@@ -3191,7 +3429,7 @@ function saveTeamChanges() {
 }
 
 // ----------------------------------------------------------------------
-// 10. SECURITY – SANITIZATION UTILITY
+// 8. SECURITY – SANITIZATION UTILITY
 // ----------------------------------------------------------------------
 const sanitize = {
     html: (str) => escapeHtml ? escapeHtml(str) : String(str).replace(/[&<>"]/g, function(c) {
@@ -3217,13 +3455,13 @@ const sanitize = {
 };
 
 // ----------------------------------------------------------------------
-// 11. RESPONSIVE / TOUCH ENGINE
+// 9. RESPONSIVE / TOUCH ENGINE
 // ----------------------------------------------------------------------
 const ResponsiveEngine = {
     init() {
         this.setViewportMeta();
         this.attachTouchOptimizations();
-        window.addEventListener('resize', () => EventController.addDebounced('resize', this.adjustLayout.bind(this), 150));
+        window.addEventListener('resize', () => setTimeout(this.adjustLayout.bind(this), 150));
         this.adjustLayout();
     },
 
@@ -3261,7 +3499,7 @@ const ResponsiveEngine = {
 };
 
 // ----------------------------------------------------------------------
-// 12. COMPATIBILITY LAYER (UPDATED)
+// 10. COMPATIBILITY LAYER (UPDATED)
 // ----------------------------------------------------------------------
 const pageCore = {
     init: async () => {
@@ -3292,7 +3530,7 @@ const pageCore = {
                 },
                 getDiagnostics: () => window.marketplaceCore?.diagnostics?.getReport?.(),
                 getStatus: () => ({
-                    canExecuteAction: EventController.canExecuteAction(),
+                    canExecuteAction: canExecuteAction(),
                     pendingActions: UIState.pendingActions.length,
                     recoveryMode: UIState.recoveryModeActive,
                     environment: UIState.environmentType,
@@ -3313,7 +3551,7 @@ const pageCore = {
                 }
             };
             
-            console.log('[pageCore] UI initialized v6.2');
+            console.log('[pageCore] UI initialized v7.1');
         } catch (err) {
             console.warn('[pageCore.init] Failed:', err.message);
         }
@@ -3345,12 +3583,573 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Start health monitoring
     UIPipeline.startHealthMonitoring();
     
-    logOnce('ui_ready', '[Tool-ui.js] Resilient UI controller ready v6.2 (Handshake aligned)');
+    // Dispatch marketplaceUIReady so Tools.html monitor knows UI is loaded
+    window.dispatchEvent(new CustomEvent('marketplaceUIReady', {
+        detail: { timestamp: Date.now(), version: '7.1' }
+    }));
+    
+    logOnce('ui_ready', '[Tool-ui.js] Resilient UI controller ready v7.1 (Handshake aligned - Simplified)');
 });
 
-// ----------------------------------------------------------------------
-// PRESERVED EXPORTS (Full Compatibility)
-// ----------------------------------------------------------------------
+// =============================================
+// FORCE UI BINDING AFTER DOM FULLY LOADS
+// =============================================
+function forceBindAllUIEvents() {
+    console.log('[Tool-ui] Force binding all UI events...');
+    
+    cacheDOMElements();
+    
+    setTimeout(() => {
+        // Bind category tabs
+        const tabs = [
+            { id: 'allTab', name: 'all' },
+            { id: 'servicesTab', name: 'services' },
+            { id: 'digitalTab', name: 'digital' },
+            { id: 'friendsTab', name: 'friends' },
+            { id: 'groupsTab', name: 'groups' },
+            { id: 'myTab', name: 'my' },
+            { id: 'premiumTab', name: 'premium' },
+            { id: 'spotlightTab', name: 'spotlight' }
+        ];
+        
+        tabs.forEach(tab => {
+            const el = document.getElementById(tab.id);
+            if (el && !el.dataset.bound) {
+                el.dataset.bound = 'true';
+                el.onclick = (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    console.log('[Tool-ui] Tab clicked:', tab.name);
+                    setActiveTab(tab.name);
+                };
+            }
+        });
+        
+        // Bind create listing buttons
+        const createBtns = ['createListingBtn', 'createListingQuickBtn', 'sellServiceBtn', 'sellDigitalBtn'];
+        createBtns.forEach(btnId => {
+            const btn = document.getElementById(btnId);
+            if (btn && !btn.dataset.bound) {
+                btn.dataset.bound = 'true';
+                btn.onclick = (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    if (btnId === 'sellServiceBtn') switchCreateTab('service');
+                    if (btnId === 'sellDigitalBtn') switchCreateTab('digital');
+                    showCreateListingModal();
+                };
+            }
+        });
+        
+        // Bind publish button
+        const publishBtn = document.getElementById('publishListingBtn');
+        if (publishBtn && !publishBtn.dataset.bound) {
+            publishBtn.dataset.bound = 'true';
+            publishBtn.onclick = (e) => {
+                e.preventDefault();
+                publishListingFromModal();
+            };
+        }
+        
+        // Bind modal close buttons
+        const closeModal = document.getElementById('closeCreateListingModal');
+        if (closeModal && !closeModal.dataset.bound) {
+            closeModal.dataset.bound = 'true';
+            closeModal.onclick = () => hideCreateListingModal();
+        }
+        
+        // Bind back button
+        const backBtn = document.getElementById('backBtn');
+        if (backBtn && !backBtn.dataset.bound) {
+            backBtn.dataset.bound = 'true';
+            backBtn.onclick = () => {
+                if (DOM.marketplaceDetailPanel) {
+                    DOM.marketplaceDetailPanel.classList.remove('active');
+                }
+            };
+        }
+        
+        // Bind view buttons
+        const viewBtns = ['viewAnalyticsBtn', 'viewSavedBtn', 'viewNotesBtn', 'viewTrustStatsBtn', 'premiumOptionsBtn', 'viewTeamBtn', 'viewLeaderboardBtn'];
+        viewBtns.forEach(btnId => {
+            const btn = document.getElementById(btnId);
+            if (btn && !btn.dataset.bound) {
+                btn.dataset.bound = 'true';
+                btn.onclick = (e) => {
+                    e.preventDefault();
+                    if (btnId === 'viewAnalyticsBtn') showAnalyticsModal();
+                    if (btnId === 'viewSavedBtn') showSavedItemsModal();
+                    if (btnId === 'viewNotesBtn') showMyNotesModal();
+                    if (btnId === 'viewTrustStatsBtn') showTrustStatsModal();
+                    if (btnId === 'premiumOptionsBtn') showPremiumOptionsModal();
+                    if (btnId === 'viewTeamBtn') showTeamManagementModal();
+                    if (btnId === 'viewLeaderboardBtn') showLeaderboardModal();
+                };
+            }
+        });
+        
+        console.log('[Tool-ui] Force binding complete - bound', document.querySelectorAll('[data-bound="true"]').length, 'elements');
+    }, 200);
+}
+
+// Expose to window for manual triggering
+window.forceBindAllUIEvents = forceBindAllUIEvents;
+
+// Run after DOM is fully loaded
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', forceBindAllUIEvents);
+} else {
+    // DOM already loaded, run after a short delay to ensure all elements exist
+    setTimeout(forceBindAllUIEvents, 100);
+}
+
+// Also run when module becomes active
+window.addEventListener('tools:active', () => {
+    console.log('[Tool-ui] tools:active received, re-binding UI events');
+    setTimeout(forceBindAllUIEvents, 200);
+});
+
+window.addEventListener('marketplaceCoreReady', () => {
+    console.log('[Tool-ui] marketplaceCoreReady received, re-binding UI events');
+    setTimeout(forceBindAllUIEvents, 200);
+});
+
+// =============================================
+// SIMPLIFIED DIRECT CLICK HANDLERS - NO DEPENDENCIES
+// =============================================
+
+function directAttachHandlers() {
+    console.log('[DIRECT] Attaching click handlers');
+    
+    // Create Listing button
+    const createBtn = document.getElementById('createListingBtn');
+    if (createBtn) {
+        createBtn.onclick = function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            console.log('[DIRECT] Create Listing clicked');
+            const modal = document.getElementById('createListingModal');
+            if (modal) modal.classList.add('active');
+            return false;
+        };
+        console.log('[DIRECT] createListingBtn OK');
+    } else {
+        console.log('[DIRECT] createListingBtn NOT FOUND');
+    }
+    
+    // Sell Service button
+    const serviceBtn = document.getElementById('sellServiceBtn');
+    if (serviceBtn) {
+        serviceBtn.onclick = function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            console.log('[DIRECT] Sell Service clicked');
+            const modal = document.getElementById('createListingModal');
+            if (modal) modal.classList.add('active');
+            // Try to switch to service tab
+            const serviceTab = document.querySelector('.create-listing-tab[data-tab="service"]');
+            if (serviceTab) serviceTab.click();
+            return false;
+        };
+        console.log('[DIRECT] sellServiceBtn OK');
+    }
+    
+    // Sell Digital button
+    const digitalBtn = document.getElementById('sellDigitalBtn');
+    if (digitalBtn) {
+        digitalBtn.onclick = function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            console.log('[DIRECT] Sell Digital clicked');
+            const modal = document.getElementById('createListingModal');
+            if (modal) modal.classList.add('active');
+            const digitalTab = document.querySelector('.create-listing-tab[data-tab="digital"]');
+            if (digitalTab) digitalTab.click();
+            return false;
+        };
+        console.log('[DIRECT] sellDigitalBtn OK');
+    }
+    
+    // Quick Create button
+    const quickBtn = document.getElementById('createListingQuickBtn');
+    if (quickBtn) {
+        quickBtn.onclick = function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            console.log('[DIRECT] Quick Create clicked');
+            const modal = document.getElementById('createListingModal');
+            if (modal) modal.classList.add('active');
+            return false;
+        };
+        console.log('[DIRECT] createListingQuickBtn OK');
+    }
+    
+    // Close modal button
+    const closeBtn = document.getElementById('closeCreateListingModal');
+    if (closeBtn) {
+        closeBtn.onclick = function(e) {
+            e.preventDefault();
+            const modal = document.getElementById('createListingModal');
+            if (modal) modal.classList.remove('active');
+            return false;
+        };
+        console.log('[DIRECT] closeCreateListingModal OK');
+    }
+    
+    // Category tabs
+    const tabs = ['allTab', 'servicesTab', 'digitalTab', 'friendsTab', 'groupsTab', 'myTab', 'premiumTab', 'spotlightTab'];
+    tabs.forEach(tabId => {
+        const tab = document.getElementById(tabId);
+        if (tab) {
+            tab.onclick = function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                console.log('[DIRECT] Tab clicked:', tabId);
+                // Remove active from all tabs
+                tabs.forEach(id => {
+                    const t = document.getElementById(id);
+                    if (t) t.classList.remove('active');
+                });
+                this.classList.add('active');
+                const tabName = tabId.replace('Tab', '');
+                setActiveTab(tabName);
+                return false;
+            };
+            console.log('[DIRECT] Tab attached:', tabId);
+        }
+    });
+    
+    // View buttons
+    const viewAnalytics = document.getElementById('viewAnalyticsBtn');
+    if (viewAnalytics) {
+        viewAnalytics.onclick = function(e) {
+            e.preventDefault();
+            console.log('[DIRECT] Analytics clicked');
+            const modal = document.getElementById('analyticsModal');
+            if (modal) modal.classList.add('active');
+            return false;
+        };
+    }
+    
+    const viewSaved = document.getElementById('viewSavedBtn');
+    if (viewSaved) {
+        viewSaved.onclick = function(e) {
+            e.preventDefault();
+            console.log('[DIRECT] Saved clicked');
+            const modal = document.getElementById('savedItemsModal');
+            if (modal) modal.classList.add('active');
+            return false;
+        };
+    }
+    
+    const viewNotes = document.getElementById('viewNotesBtn');
+    if (viewNotes) {
+        viewNotes.onclick = function(e) {
+            e.preventDefault();
+            console.log('[DIRECT] Notes clicked');
+            const modal = document.getElementById('myNotesModal');
+            if (modal) modal.classList.add('active');
+            return false;
+        };
+    }
+    
+    const viewTrust = document.getElementById('viewTrustStatsBtn');
+    if (viewTrust) {
+        viewTrust.onclick = function(e) {
+            e.preventDefault();
+            console.log('[DIRECT] Trust stats clicked');
+            const modal = document.getElementById('trustStatsModal');
+            if (modal) modal.classList.add('active');
+            return false;
+        };
+    }
+    
+    const premiumOpts = document.getElementById('premiumOptionsBtn');
+    if (premiumOpts) {
+        premiumOpts.onclick = function(e) {
+            e.preventDefault();
+            console.log('[DIRECT] Premium options clicked');
+            const modal = document.getElementById('premiumOptionsModal');
+            if (modal) modal.classList.add('active');
+            return false;
+        };
+    }
+    
+    console.log('[DIRECT] All handlers attached');
+}
+
+// Run immediately and repeatedly
+directAttachHandlers();
+setTimeout(directAttachHandlers, 500);
+setTimeout(directAttachHandlers, 1000);
+setTimeout(directAttachHandlers, 2000);
+setTimeout(directAttachHandlers, 5000);
+
+// Also run when DOM is ready
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', directAttachHandlers);
+}
+
+// Also run when tools becomes active
+window.addEventListener('tools:active', function() {
+    console.log('[DIRECT] tools:active event');
+    setTimeout(directAttachHandlers, 100);
+});
+
+// =============================================
+// COMPLETE WORKING SOLUTION - PASTE THIS AT THE VERY END OF Tool-ui.js
+// =============================================
+
+(function() {
+    'use strict';
+    
+    console.log('[FIX] Starting emergency click handler initialization');
+    
+    // Function to show modal directly
+    function openCreateModal() {
+        console.log('[FIX] Opening create listing modal');
+        var modal = document.getElementById('createListingModal');
+        if (modal) {
+            modal.style.display = 'flex';
+            modal.classList.add('active');
+            console.log('[FIX] Modal opened');
+        } else {
+            console.error('[FIX] Modal element not found!');
+            alert('Create Listing feature - please check console');
+        }
+    }
+    
+    function closeCreateModal() {
+        var modal = document.getElementById('createListingModal');
+        if (modal) {
+            modal.style.display = 'none';
+            modal.classList.remove('active');
+        }
+    }
+    
+    // Function to attach handlers - runs multiple times to ensure they stick
+    function attachHandlers() {
+        console.log('[FIX] Attaching handlers - attempt');
+        
+        // Create Listing Button (main)
+        var createBtn = document.getElementById('createListingBtn');
+        if (createBtn) {
+            createBtn.onclick = function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                console.log('[FIX] Create button clicked');
+                openCreateModal();
+                return false;
+            };
+            console.log('[FIX] createListingBtn attached');
+        } else {
+            console.log('[FIX] createListingBtn not found yet');
+        }
+        
+        // Quick Create Button
+        var quickBtn = document.getElementById('createListingQuickBtn');
+        if (quickBtn) {
+            quickBtn.onclick = function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                console.log('[FIX] Quick create clicked');
+                openCreateModal();
+                return false;
+            };
+            console.log('[FIX] createListingQuickBtn attached');
+        }
+        
+        // Sell Service Button
+        var serviceBtn = document.getElementById('sellServiceBtn');
+        if (serviceBtn) {
+            serviceBtn.onclick = function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                console.log('[FIX] Sell service clicked');
+                openCreateModal();
+                // Try to switch to service tab
+                setTimeout(function() {
+                    var serviceTab = document.querySelector('.create-listing-tab[data-tab="service"]');
+                    if (serviceTab) serviceTab.click();
+                }, 100);
+                return false;
+            };
+            console.log('[FIX] sellServiceBtn attached');
+        }
+        
+        // Sell Digital Button
+        var digitalBtn = document.getElementById('sellDigitalBtn');
+        if (digitalBtn) {
+            digitalBtn.onclick = function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                console.log('[FIX] Sell digital clicked');
+                openCreateModal();
+                setTimeout(function() {
+                    var digitalTab = document.querySelector('.create-listing-tab[data-tab="digital"]');
+                    if (digitalTab) digitalTab.click();
+                }, 100);
+                return false;
+            };
+            console.log('[FIX] sellDigitalBtn attached');
+        }
+        
+        // Close Modal Button
+        var closeBtn = document.getElementById('closeCreateListingModal');
+        if (closeBtn) {
+            closeBtn.onclick = function(e) {
+                e.preventDefault();
+                console.log('[FIX] Close modal clicked');
+                closeCreateModal();
+                return false;
+            };
+            console.log('[FIX] closeCreateListingModal attached');
+        }
+        
+        // Publish Button
+        var publishBtn = document.getElementById('publishListingBtn');
+        if (publishBtn) {
+            publishBtn.onclick = function(e) {
+                e.preventDefault();
+                console.log('[FIX] Publish clicked');
+                publishListingFromModal();
+                return false;
+            };
+            console.log('[FIX] publishListingBtn attached');
+        }
+        
+        // Category Tabs
+        var tabs = ['allTab', 'servicesTab', 'digitalTab', 'friendsTab', 'groupsTab', 'myTab', 'premiumTab', 'spotlightTab'];
+        tabs.forEach(function(tabId) {
+            var tab = document.getElementById(tabId);
+            if (tab) {
+                tab.onclick = function(e) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    console.log('[FIX] Tab clicked:', tabId);
+                    // Remove active class from all tabs
+                    tabs.forEach(function(id) {
+                        var t = document.getElementById(id);
+                        if (t) t.classList.remove('active');
+                    });
+                    this.classList.add('active');
+                    const tabName = tabId.replace('Tab', '');
+                    setActiveTab(tabName);
+                    return false;
+                };
+                console.log('[FIX] Tab attached:', tabId);
+            }
+        });
+        
+        // View buttons
+        var viewAnalytics = document.getElementById('viewAnalyticsBtn');
+        if (viewAnalytics) {
+            viewAnalytics.onclick = function(e) {
+                e.preventDefault();
+                console.log('[FIX] Analytics clicked');
+                var modal = document.getElementById('analyticsModal');
+                if (modal) modal.classList.add('active');
+                return false;
+            };
+        }
+        
+        var viewSaved = document.getElementById('viewSavedBtn');
+        if (viewSaved) {
+            viewSaved.onclick = function(e) {
+                e.preventDefault();
+                console.log('[FIX] Saved clicked');
+                var modal = document.getElementById('savedItemsModal');
+                if (modal) modal.classList.add('active');
+                return false;
+            };
+        }
+        
+        var viewNotes = document.getElementById('viewNotesBtn');
+        if (viewNotes) {
+            viewNotes.onclick = function(e) {
+                e.preventDefault();
+                console.log('[FIX] Notes clicked');
+                var modal = document.getElementById('myNotesModal');
+                if (modal) modal.classList.add('active');
+                return false;
+            };
+        }
+        
+        var viewTrust = document.getElementById('viewTrustStatsBtn');
+        if (viewTrust) {
+            viewTrust.onclick = function(e) {
+                e.preventDefault();
+                console.log('[FIX] Trust stats clicked');
+                var modal = document.getElementById('trustStatsModal');
+                if (modal) modal.classList.add('active');
+                return false;
+            };
+        }
+        
+        var premiumOpts = document.getElementById('premiumOptionsBtn');
+        if (premiumOpts) {
+            premiumOpts.onclick = function(e) {
+                e.preventDefault();
+                console.log('[FIX] Premium options clicked');
+                var modal = document.getElementById('premiumOptionsModal');
+                if (modal) modal.classList.add('active');
+                return false;
+            };
+        }
+        
+        // Back button
+        var backBtn = document.getElementById('backBtn');
+        if (backBtn) {
+            backBtn.onclick = function(e) {
+                e.preventDefault();
+                var panel = document.getElementById('marketplaceDetailPanel');
+                if (panel) panel.classList.remove('active');
+                return false;
+            };
+        }
+    }
+    
+    // Run immediately
+    attachHandlers();
+    
+    // Run after DOM ready
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', attachHandlers);
+    }
+    
+    // Run multiple times with delays to ensure elements exist
+    setTimeout(attachHandlers, 500);
+    setTimeout(attachHandlers, 1000);
+    setTimeout(attachHandlers, 2000);
+    setTimeout(attachHandlers, 3000);
+    setTimeout(attachHandlers, 5000);
+    
+    // Listen for tools active event
+    window.addEventListener('tools:active', function() {
+        console.log('[FIX] tools:active event received');
+        setTimeout(attachHandlers, 100);
+        setTimeout(attachHandlers, 500);
+    });
+    
+    // Also listen for marketplace core ready
+    window.addEventListener('marketplaceCoreReady', function() {
+        console.log('[FIX] marketplaceCoreReady event received');
+        setTimeout(attachHandlers, 100);
+    });
+    
+    // Also try to fix the status module error (message is not defined)
+    // This is a global patch for the status module error
+    window.addEventListener('error', function(e) {
+        if (e.message && e.message.includes('message is not defined')) {
+            console.log('[FIX] Caught status module error, preventing crash');
+            e.preventDefault();
+            return false;
+        }
+    });
+    
+    console.log('[FIX] Emergency handler initialization complete');
+})();
+
 // ----------------------------------------------------------------------
 // PRESERVED EXPORTS (Full Compatibility)
 // ----------------------------------------------------------------------

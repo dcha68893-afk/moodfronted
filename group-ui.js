@@ -1,4 +1,3 @@
-
 // =============================================
 // GROUPS UI FUNCTIONS - RESILIENT UI CONTROLLER
 // COMPLETE PRODUCTION-READY IMPLEMENTATION
@@ -2396,6 +2395,239 @@ export function setupEventListeners() {
     setupInviteActions();
     setupCopyShareButtons();
     setupNotificationClose();
+    // FIXED: toolbar buttons had no listeners
+    setupToolbarButtons();
+    // FIXED: posting rules visibility toggle
+    setupPostingRulesVisibility();
+    // FIXED: members tab in create group
+    setupMembersTab();
+}
+
+/**
+ * Setup toolbar quick-action buttons (Discover / Invites / Events)
+ * FIXED: These three buttons had absolutely no event listeners anywhere.
+ */
+export function setupToolbarButtons() {
+    const discoverBtn = safeGetElement('#discoverGroupsBtn');
+    if (discoverBtn) {
+        registerUIEventListener(discoverBtn, 'click', () => {
+            const panel = document.getElementById('discoverPanel');
+            if (panel) {
+                panel.style.display = 'flex';
+                if (typeof loadDiscoverGroups === 'function') loadDiscoverGroups('', 'all');
+            }
+        });
+    }
+    const invitesBtn = safeGetElement('#groupInvitesBtn');
+    if (invitesBtn) {
+        registerUIEventListener(invitesBtn, 'click', () => {
+            const panel = document.getElementById('invitePanel');
+            if (panel) {
+                panel.style.display = 'flex';
+                if (typeof loadReceivedInvites === 'function') loadReceivedInvites();
+            }
+        });
+    }
+    const eventsBtn = safeGetElement('#groupEventsBtn');
+    if (eventsBtn) {
+        registerUIEventListener(eventsBtn, 'click', () => {
+            const panel = document.getElementById('eventsPanel');
+            if (panel) {
+                panel.style.display = 'flex';
+                if (typeof loadGroupEvents === 'function') loadGroupEvents('upcoming');
+            }
+        });
+    }
+    // Backdrop click closes panels
+    ['discoverPanel','eventsPanel','invitePanel'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) {
+            el.addEventListener('click', (e) => {
+                if (e.target === el) el.style.display = 'none';
+            });
+        }
+    });
+    // Discover filter tabs
+    document.querySelectorAll('.discover-filter').forEach(btn => {
+        btn.addEventListener('click', function() {
+            document.querySelectorAll('.discover-filter').forEach(b => {
+                b.style.background = 'none';
+                b.style.color = 'var(--text-primary)';
+                b.classList.remove('active');
+            });
+            this.style.background = 'var(--primary-color,#6c63ff)';
+            this.style.color = '#fff';
+            this.classList.add('active');
+            const q = document.getElementById('discoverSearchInput')?.value || '';
+            if (typeof loadDiscoverGroups === 'function') loadDiscoverGroups(q, this.dataset.purpose);
+        });
+    });
+    let discoverDebounce;
+    document.getElementById('discoverSearchInput')?.addEventListener('input', function() {
+        clearTimeout(discoverDebounce);
+        discoverDebounce = setTimeout(() => {
+            const purpose = document.querySelector('.discover-filter.active')?.dataset.purpose || 'all';
+            if (typeof loadDiscoverGroups === 'function') loadDiscoverGroups(this.value, purpose);
+        }, 350);
+    });
+    // Events tabs
+    document.querySelectorAll('.evt-tab').forEach(btn => {
+        btn.addEventListener('click', function() {
+            document.querySelectorAll('.evt-tab').forEach(b => {
+                b.style.background = 'var(--bg-tertiary,#252537)';
+                b.style.color = 'var(--text-secondary)';
+            });
+            this.style.background = 'var(--primary-color,#6c63ff)';
+            this.style.color = '#fff';
+            if (this.dataset.etab === 'create') {
+                if (typeof renderCreateEventForm === 'function') renderCreateEventForm();
+            } else {
+                if (typeof loadGroupEvents === 'function') loadGroupEvents(this.dataset.etab);
+            }
+        });
+    });
+    // Invite tabs
+    document.querySelectorAll('.inv-tab').forEach(btn => {
+        btn.addEventListener('click', function() {
+            document.querySelectorAll('.inv-tab').forEach(b => {
+                b.style.background = 'var(--bg-tertiary,#252537)';
+                b.style.color = 'var(--text-secondary)';
+            });
+            this.style.background = 'var(--primary-color,#6c63ff)';
+            this.style.color = '#fff';
+            if (this.dataset.invtab === 'received') { if (typeof loadReceivedInvites === 'function') loadReceivedInvites(); }
+            else if (this.dataset.invtab === 'invite') { if (typeof loadInviteFriendsTab === 'function') loadInviteFriendsTab(); }
+            else if (this.dataset.invtab === 'sent') { if (typeof loadSentInvites === 'function') loadSentInvites(); }
+        });
+    });
+}
+
+/**
+ * Setup posting rules show/hide
+ * FIXED: was never called, quiet hours and scheduled sections never toggled
+ */
+export function setupPostingRulesVisibility() {
+    const sel = safeGetElement('#postingRulesSelect');
+    if (sel) {
+        const update = () => {
+            const v = sel.value;
+            const q = safeGetElement('#quietHoursSection');
+            const s = safeGetElement('#scheduledPostingSection');
+            if (q) q.style.display = v === 'quiet_hours' ? '' : 'none';
+            if (s) s.style.display = v === 'scheduled' ? '' : 'none';
+        };
+        registerUIEventListener(sel, 'change', update);
+        update();
+    }
+    // Admin posting mode too
+    const adminSel = safeGetElement('#adminPostingMode');
+    if (adminSel) {
+        const update = () => {
+            const v = adminSel.value;
+            const q = safeGetElement('#adminQuietHoursSection');
+            const s = safeGetElement('#adminScheduledPostingSection');
+            if (q) q.style.display = v === 'quiet_hours' ? '' : 'none';
+            if (s) s.style.display = v === 'scheduled' ? '' : 'none';
+        };
+        registerUIEventListener(adminSel, 'change', update);
+        update();
+    }
+}
+
+// State for create-group members tab
+window._cgSelectedMembers = window._cgSelectedMembers || new Set();
+window._cgFriendsAll = window._cgFriendsAll || [];
+
+/**
+ * Setup members tab inside create group modal
+ * FIXED: tab content existed but friends were never loaded and no selection logic
+ */
+export function setupMembersTab() {
+    const searchInput = safeGetElement('#memberSearchInput');
+    if (searchInput) {
+        registerUIEventListener(searchInput, 'input', function() {
+            const q = this.value.toLowerCase();
+            renderFriendsPickerList(window._cgFriendsAll.filter(f =>
+                f.displayName.toLowerCase().includes(q) || (f.username||'').toLowerCase().includes(q)
+            ));
+        });
+    }
+}
+
+export async function loadFriendsForMembersTab() {
+    const list = safeGetElement('#friendsPickerList');
+    if (!list) return;
+    if (window._cgFriendsAll.length > 0) { renderFriendsPickerList(window._cgFriendsAll); return; }
+    list.innerHTML = '<div style="text-align:center;padding:20px;color:var(--text-secondary)"><i class="fas fa-spinner fa-spin"></i> Loading friends…</div>';
+    try {
+        const token = localStorage.getItem('auth_token') || sessionStorage.getItem('auth_token') || '';
+        const res = await fetch('/api/friends', { headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' } });
+        const data = await res.json();
+        const raw = data?.data?.friends || data?.data || data?.friends || [];
+        window._cgFriendsAll = raw.map(f => ({
+            id: f.id,
+            displayName: f.displayName || [f.firstName, f.lastName].filter(Boolean).join(' ') || f.username || 'Unknown',
+            username: f.username || '',
+            avatar: f.avatar || null,
+            online: f.status === 'online',
+        }));
+        renderFriendsPickerList(window._cgFriendsAll);
+    } catch (_) {
+        list.innerHTML = '<div style="text-align:center;padding:20px;color:var(--text-secondary)"><i class="fas fa-exclamation-circle"></i> Could not load friends.</div>';
+    }
+}
+
+export function renderFriendsPickerList(friends) {
+    const list = safeGetElement('#friendsPickerList');
+    if (!list) return;
+    if (!friends.length) {
+        list.innerHTML = '<div style="text-align:center;padding:20px;color:var(--text-secondary)"><i class="fas fa-user-friends"></i><p>No friends found. Add friends first.</p></div>';
+        return;
+    }
+    list.innerHTML = '';
+    friends.forEach(f => {
+        const item = document.createElement('div');
+        const sel = window._cgSelectedMembers.has(f.id);
+        item.style.cssText = 'display:flex;align-items:center;gap:10px;padding:9px 10px;border-radius:8px;cursor:pointer;transition:background .15s;' + (sel ? 'background:var(--bg-secondary);border:1px solid var(--primary-color,#6c63ff);border-radius:8px;' : 'border:1px solid transparent;');
+        const initials = f.displayName.split(' ').map(w=>w[0]).join('').toUpperCase().slice(0,2)||'U';
+        item.innerHTML = `
+            <div style="width:36px;height:36px;border-radius:50%;background:var(--primary-color,#6c63ff);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:13px;flex-shrink:0;${f.avatar?'background-image:url('+f.avatar+');background-size:cover;':''}">${f.avatar?'':initials}</div>
+            <div style="flex:1;min-width:0">
+                <div style="font-weight:600;font-size:13px;color:var(--text-primary)">${f.displayName}</div>
+                <div style="font-size:11px;color:var(--text-secondary)">${f.username?'@'+f.username:''} · <span style="color:${f.online?'#48bb78':'var(--text-secondary)'}">●</span> ${f.online?'Online':'Offline'}</div>
+            </div>
+            <div style="width:20px;height:20px;border-radius:50%;border:2px solid ${sel?'var(--primary-color,#6c63ff)':'var(--border-color)'};background:${sel?'var(--primary-color,#6c63ff)':'none'};display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:11px;color:#fff;">${sel?'✓':''}</div>
+        `;
+        item.addEventListener('click', () => {
+            if (window._cgSelectedMembers.has(f.id)) {
+                window._cgSelectedMembers.delete(f.id);
+            } else {
+                window._cgSelectedMembers.add(f.id);
+            }
+            renderFriendsPickerList(friends);
+            renderSelectedMembersChips();
+        });
+        list.appendChild(item);
+    });
+}
+
+export function renderSelectedMembersChips() {
+    const bar = safeGetElement('#selectedMembersChips');
+    if (!bar) return;
+    bar.innerHTML = '';
+    window._cgSelectedMembers.forEach(id => {
+        const f = window._cgFriendsAll.find(x => x.id === id);
+        if (!f) return;
+        const chip = document.createElement('div');
+        chip.style.cssText = 'display:inline-flex;align-items:center;gap:5px;padding:3px 10px;background:var(--primary-color,#6c63ff)22;border:1px solid var(--primary-color,#6c63ff);border-radius:20px;font-size:12px;color:var(--text-primary);';
+        chip.innerHTML = `${f.displayName} <span style="cursor:pointer;opacity:.7">✕</span>`;
+        chip.querySelector('span').addEventListener('click', () => {
+            window._cgSelectedMembers.delete(id);
+            renderFriendsPickerList(window._cgFriendsAll);
+            renderSelectedMembersChips();
+        });
+        bar.appendChild(chip);
+    });
 }
 
 /**
@@ -2573,20 +2805,27 @@ export function resetCreateGroupForm() {
  * Setup create group tabs
  */
 export function setupCreateGroupTabs() {
+    // FIXED: HTML tab IDs are #basicTab, #settingsTab, #purposeTab, #themeTab, #membersTab
+    // Old code looked for #createGroupTabBasic etc. which never existed — all tabs showed blank.
+    const TAB_ID_MAP = {
+        basic: 'basicTab',
+        settings: 'settingsTab',
+        purpose: 'purposeTab',
+        theme: 'themeTab',
+        members: 'membersTab',
+    };
     safeGetElements('.create-group-tab').forEach(tab => {
         registerUIEventListener(tab, 'click', function() {
             const tabId = this.dataset.tab;
-            
             safeGetElements('.create-group-tab').forEach(t => t.classList.remove('active'));
             this.classList.add('active');
-            
-            safeGetElements('.create-group-tab-content').forEach(content => {
-                content.classList.remove('active');
-            });
-            
-            const targetContent = safeGetElement(`#createGroupTab${tabId.charAt(0).toUpperCase() + tabId.slice(1)}`);
-            if (targetContent) {
-                targetContent.classList.add('active');
+            safeGetElements('.create-group-tab-content').forEach(content => content.classList.remove('active'));
+            const targetId = TAB_ID_MAP[tabId] || (tabId + 'Tab');
+            const targetContent = safeGetElement(`#${targetId}`);
+            if (targetContent) targetContent.classList.add('active');
+            // Load friends when members tab is activated
+            if (tabId === 'members' && typeof loadFriendsForMembersTab === 'function') {
+                loadFriendsForMembersTab();
             }
         });
     });
@@ -2763,25 +3002,51 @@ export function setupPostingRulesSelect() {
  * Setup friend selection modal
  */
 export function setupFriendSelectionModal() {
+    // Close (×) button
     const friendSelectionClose = safeGetElement('#friendSelectionClose');
     if (friendSelectionClose) {
         registerUIEventListener(friendSelectionClose, 'click', () => {
-            const friendSelectionModal = safeGetElement('#friendSelectionModal');
-            if (friendSelectionModal) {
-                friendSelectionModal.classList.remove('active');
-            }
+            const m = safeGetElement('#friendSelectionModal');
+            if (m) m.classList.remove('active');
         });
     }
-    
+
+    // FIXED: Cancel button had no listener
+    const cancelFriendSelectionBtn = safeGetElement('#cancelFriendSelectionBtn');
+    if (cancelFriendSelectionBtn) {
+        registerUIEventListener(cancelFriendSelectionBtn, 'click', () => {
+            const m = safeGetElement('#friendSelectionModal');
+            if (m) m.classList.remove('active');
+        });
+    }
+
+    // FIXED: Confirm button — was just showing a count toast, never sent invites
     const confirmFriendSelectionBtn = safeGetElement('#confirmFriendSelectionBtn');
     if (confirmFriendSelectionBtn) {
-        registerUIEventListener(confirmFriendSelectionBtn, 'click', () => {
-            const friendSelectionModal = safeGetElement('#friendSelectionModal');
-            if (friendSelectionModal) {
-                friendSelectionModal.classList.remove('active');
-            }
-            if (typeof showNotification === 'function') {
-                showNotification(`${selectedFriends ? selectedFriends.length : 0} friends selected`, 'success');
+        registerUIEventListener(confirmFriendSelectionBtn, 'click', async () => {
+            const m = safeGetElement('#friendSelectionModal');
+            if (m) m.classList.remove('active');
+            const count = selectedFriends ? selectedFriends.length : 0;
+            if (count === 0) return;
+            // If we have an existing group open, send invites immediately
+            if (selectedGroup && selectedGroup.id) {
+                let sent = 0, failed = 0;
+                for (const friendId of (selectedFriends || [])) {
+                    try {
+                        const result = await GroupCore.inviteToGroup(selectedGroup.id, friendId, 'member');
+                        if (result && result.success) sent++; else failed++;
+                    } catch (_) { failed++; }
+                }
+                if (typeof showNotification === 'function') {
+                    if (sent > 0) showNotification(`${sent} invitation${sent > 1 ? 's' : ''} sent`, 'success');
+                    if (failed > 0) showNotification(`${failed} invitation${failed > 1 ? 's' : ''} failed`, 'error');
+                }
+                selectedFriends = [];
+            } else {
+                // During group creation — invites sent after create in createGroupOnline()
+                if (typeof showNotification === 'function') {
+                    showNotification(`${count} friend${count > 1 ? 's' : ''} will be invited on group creation`, 'info');
+                }
             }
         });
     }
@@ -2791,15 +3056,87 @@ export function setupFriendSelectionModal() {
  * Setup create group modal
  */
 export function setupCreateGroupModal() {
+    // Close (×) button at top
     const createGroupClose = safeGetElement('#createGroupClose');
     if (createGroupClose) {
         registerUIEventListener(createGroupClose, 'click', () => {
-            const createGroupModal = safeGetElement('#createGroupModal');
-            if (createGroupModal) {
-                createGroupModal.classList.remove('active');
+            const m = safeGetElement('#createGroupModal');
+            if (m) m.classList.remove('active');
+        });
+    }
+
+    // FIXED: closeCreateGroupModal is the actual × button id in the HTML
+    const closeCreateGroupModal = safeGetElement('#closeCreateGroupModal');
+    if (closeCreateGroupModal) {
+        registerUIEventListener(closeCreateGroupModal, 'click', () => {
+            const m = safeGetElement('#createGroupModal');
+            if (m) m.classList.remove('active');
+        });
+    }
+
+    // FIXED: Cancel button — had no listener at all
+    const cancelCreateGroupBtn = safeGetElement('#cancelCreateGroupBtn');
+    if (cancelCreateGroupBtn) {
+        registerUIEventListener(cancelCreateGroupBtn, 'click', () => {
+            const m = safeGetElement('#createGroupModal');
+            if (m) m.classList.remove('active');
+        });
+    }
+
+    // FIXED: Create Group button — had no listener at all
+    const createGroupBtnModal = safeGetElement('#createGroupBtnModal');
+    if (createGroupBtnModal) {
+        registerUIEventListener(createGroupBtnModal, 'click', async () => {
+            const nameInput = safeGetElement('#groupNameInput');
+            if (!nameInput || !nameInput.value.trim()) {
+                if (typeof showNotification === 'function') showNotification('Please enter a group name', 'error');
+                return;
+            }
+            const btn = safeGetElement('#createGroupBtnModal');
+            if (btn) { btn.disabled = true; btn.textContent = 'Creating…'; }
+            try {
+                const groupData = typeof collectGroupFormData === 'function' ? collectGroupFormData() : {};
+                // Attach selected members from the members tab
+                if (window._cgSelectedMembers && window._cgSelectedMembers.size > 0) {
+                    groupData.memberIds = [...window._cgSelectedMembers];
+                }
+                if (typeof createGroupOnline === 'function') {
+                    await createGroupOnline(groupData);
+                }
+                window._cgSelectedMembers = new Set();
+            } catch (e) {
+                if (typeof showNotification === 'function') showNotification('Failed to create group: ' + e.message, 'error');
+            } finally {
+                if (btn) { btn.disabled = false; btn.textContent = 'Create Group'; }
             }
         });
     }
+
+    // Theme option selection (visual feedback)
+    safeGetElements('.theme-option').forEach(opt => {
+        registerUIEventListener(opt, 'click', function () {
+            safeGetElements('.theme-option').forEach(o => {
+                o.style.outline = 'none'; o.classList.remove('selected');
+                const ic = o.querySelector('i'); if (ic) ic.style.display = 'none';
+            });
+            this.style.outline = '3px solid var(--primary-color,#6c63ff)';
+            this.classList.add('selected');
+            const ic = this.querySelector('i'); if (ic) ic.style.display = 'inline';
+        });
+    });
+
+    // Mood option selection
+    safeGetElements('.mood-option').forEach(opt => {
+        registerUIEventListener(opt, 'click', function () {
+            safeGetElements('.mood-option').forEach(o => {
+                o.style.outline = 'none'; o.classList.remove('selected');
+                const ic = o.querySelector('i'); if (ic) ic.style.display = 'none';
+            });
+            this.style.outline = '3px solid var(--primary-color,#6c63ff)';
+            this.classList.add('selected');
+            const ic = this.querySelector('i'); if (ic) ic.style.display = 'inline';
+        });
+    });
 }
 
 /**
@@ -2915,12 +3252,38 @@ export function setupMoodSelectButtons() {
  * Setup save group settings
  */
 export function setupSaveGroupSettings() {
-    const saveGroupSettingsBtn = safeGetElement('#saveGroupSettingsBtn');
-    if (saveGroupSettingsBtn) {
-        registerUIEventListener(saveGroupSettingsBtn, 'click', () => {
-            if (selectedGroup && typeof saveGroupSettings === 'function') {
-                saveGroupSettings(selectedGroup);
+    // FIXED: HTML uses #saveAdminSettingsBtn, not #saveGroupSettingsBtn
+    const saveBtn = safeGetElement('#saveAdminSettingsBtn') || safeGetElement('#saveGroupSettingsBtn');
+    if (saveBtn) {
+        registerUIEventListener(saveBtn, 'click', async () => {
+            if (!selectedGroup) {
+                if (typeof showNotification === 'function') showNotification('No group selected', 'error');
+                return;
             }
+            saveBtn.disabled = true;
+            saveBtn.textContent = 'Saving…';
+            try {
+                if (typeof saveGroupSettings === 'function') {
+                    await saveGroupSettings(selectedGroup);
+                }
+                if (typeof showNotification === 'function') showNotification('Settings saved', 'success');
+                const m = safeGetElement('#adminManagementModal');
+                if (m) m.classList.remove('active');
+            } catch (e) {
+                if (typeof showNotification === 'function') showNotification('Save failed: ' + e.message, 'error');
+            } finally {
+                saveBtn.disabled = false;
+                saveBtn.textContent = 'Save Changes';
+            }
+        });
+    }
+
+    // FIXED: Close/Cancel button in admin modal
+    const closeAdminBtn = safeGetElement('#closeAdminManagementBtn');
+    if (closeAdminBtn) {
+        registerUIEventListener(closeAdminBtn, 'click', () => {
+            const m = safeGetElement('#adminManagementModal');
+            if (m) m.classList.remove('active');
         });
     }
 }
@@ -3130,6 +3493,340 @@ export function cleanupUISession() {
 // =============================================
 // WINDOW EXPOSURES FOR HTML ACCESS - SECURE
 // =============================================
+
+
+// ═══════════════════════════════════════════════════════════════
+// DISCOVER / EVENTS / INVITE PANEL FUNCTIONS
+// All three toolbar panels are fully implemented here.
+// ═══════════════════════════════════════════════════════════════
+
+function getAuthToken() {
+    return localStorage.getItem('auth_token') || sessionStorage.getItem('auth_token') || '';
+}
+
+async function panelFetch(path, opts = {}) {
+    const headers = { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + getAuthToken(), ...(opts.headers||{}) };
+    const res = await fetch(path, { ...opts, headers });
+    return res.json().catch(() => ({}));
+}
+
+function panelCard(innerHTML) {
+    const d = document.createElement('div');
+    d.style.cssText = 'background:var(--bg-tertiary,#252537);border-radius:12px;padding:14px 16px;margin-bottom:10px;border:1px solid var(--border-color,#2a2a3e);';
+    d.innerHTML = innerHTML;
+    return d;
+}
+
+function panelEmpty(icon, msg) {
+    return `<div style="text-align:center;padding:40px 20px;color:var(--text-secondary)"><i class="${icon}" style="font-size:36px;display:block;margin-bottom:12px"></i>${msg}</div>`;
+}
+
+function panelLoader() {
+    return '<div style="text-align:center;padding:30px;color:var(--text-secondary)"><i class="fas fa-spinner fa-spin"></i> Loading…</div>';
+}
+
+function timeAgo(d) {
+    if (!d) return '';
+    const s = Math.floor((Date.now() - new Date(d)) / 1000);
+    if (s < 60) return 'just now';
+    if (s < 3600) return Math.floor(s/60) + 'm ago';
+    if (s < 86400) return Math.floor(s/3600) + 'h ago';
+    return Math.floor(s/86400) + 'd ago';
+}
+
+// ── DISCOVER ──────────────────────────────────────────────────
+export async function loadDiscoverGroups(query = '', purpose = 'all') {
+    const container = document.getElementById('discoverResults');
+    if (!container) return;
+    container.innerHTML = panelLoader();
+    try {
+        let url = '/api/groups/search?limit=20';
+        if (query) url += '&query=' + encodeURIComponent(query);
+        if (purpose && purpose !== 'all') url += '&purpose=' + purpose;
+        const data = await panelFetch(url);
+        const groups = data?.data?.groups || data?.groups || [];
+        if (!groups.length) { container.innerHTML = panelEmpty('fas fa-search', 'No public groups found.'); return; }
+        container.innerHTML = '';
+        groups.forEach(g => {
+            const initials = (g.name||'G').split(' ').map(w=>w[0]).join('').toUpperCase().slice(0,2);
+            const card = panelCard(`
+                <div style="display:flex;align-items:center;gap:12px">
+                    <div style="width:44px;height:44px;border-radius:50%;background:var(--primary-color,#6c63ff);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:15px;flex-shrink:0;${g.avatar?'background-image:url('+g.avatar+');background-size:cover;':''}">${g.avatar?'':initials}</div>
+                    <div style="flex:1;min-width:0">
+                        <div style="font-weight:700;font-size:14px;color:var(--text-primary)">${g.name}</div>
+                        <div style="font-size:12px;color:var(--text-secondary);margin-top:2px">${(g.description||'').slice(0,70)}</div>
+                        <div style="margin-top:5px;display:flex;gap:6px;flex-wrap:wrap">
+                            <span style="padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;background:var(--primary-color,#6c63ff)22;color:var(--primary-color,#6c63ff)">👥 ${g.stats?.totalMembers||0}</span>
+                            ${g.purpose?'<span style="padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;background:#48bb7822;color:#48bb78">'+g.purpose+'</span>':''}
+                        </div>
+                    </div>
+                    <button data-gid="${g.id}" data-gname="${g.name}" style="padding:7px 14px;border-radius:8px;background:var(--primary-color,#6c63ff);color:#fff;border:none;cursor:pointer;font-size:13px;font-weight:600;flex-shrink:0">Join</button>
+                </div>
+            `);
+            card.querySelector('[data-gid]').addEventListener('click', async function() {
+                const btn = this; btn.disabled = true; btn.textContent = 'Joining…';
+                try {
+                    const res = await panelFetch('/api/groups/' + btn.dataset.gid + '/join', { method:'POST', body:'{}' });
+                    if (res.success) {
+                        btn.textContent = '✓ Joined'; btn.style.background = '#48bb78';
+                        if (typeof showNotification === 'function') showNotification('Joined "' + btn.dataset.gname + '"!', 'success');
+                        if (typeof syncGroupsFromServer === 'function') syncGroupsFromServer().catch(()=>{});
+                    } else { btn.disabled = false; btn.textContent = 'Join'; if (typeof showNotification === 'function') showNotification(res.message||'Failed', 'error'); }
+                } catch (_) { btn.disabled = false; btn.textContent = 'Join'; }
+            });
+            container.appendChild(card);
+        });
+    } catch (_) { container.innerHTML = panelEmpty('fas fa-exclamation-circle', 'Failed to load groups.'); }
+}
+
+// ── EVENTS ────────────────────────────────────────────────────
+export async function loadGroupEvents(filter = 'upcoming') {
+    const body = document.getElementById('eventsBody');
+    if (!body) return;
+    body.innerHTML = panelLoader();
+    try {
+        const gid = window.selectedGroup?.id;
+        const url = gid ? '/api/groups/' + gid + '/events?filter=' + filter : '/api/events?filter=' + filter + '&limit=20';
+        const data = await panelFetch(url);
+        const events = data?.data?.events || data?.events || (Array.isArray(data?.data) ? data.data : []);
+        if (!events.length) { body.innerHTML = panelEmpty('fas fa-calendar-times', 'No ' + filter + ' events.'); return; }
+        body.innerHTML = '';
+        events.forEach(ev => {
+            const dt = ev.startDate || ev.date || ev.startTime;
+            const dateStr = dt ? new Date(dt).toLocaleString() : 'Date TBD';
+            body.appendChild(panelCard(`
+                <div style="font-weight:700;font-size:15px;color:var(--text-primary);margin-bottom:5px">📅 ${ev.title||ev.name||'Untitled Event'}</div>
+                <div style="font-size:12px;color:var(--text-secondary);margin-bottom:8px">${(ev.description||'').slice(0,100)}</div>
+                <div style="display:flex;gap:8px;flex-wrap:wrap">
+                    <span style="padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;background:var(--primary-color,#6c63ff)22;color:var(--primary-color,#6c63ff)">🕐 ${dateStr}</span>
+                    ${ev.location?'<span style="padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;background:#48bb7822;color:#48bb78">📍 '+ev.location+'</span>':''}
+                    ${ev.attendees?.length?'<span style="padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;background:#f6ad5522;color:#f6ad55">👥 '+ev.attendees.length+' attending</span>':''}
+                </div>
+            `));
+        });
+    } catch (_) { body.innerHTML = panelEmpty('fas fa-exclamation-circle', 'Could not load events.'); }
+}
+
+export function renderCreateEventForm() {
+    const body = document.getElementById('eventsBody');
+    if (!body) return;
+    const div = document.createElement('div');
+    div.style.cssText = 'display:flex;flex-direction:column;gap:12px;';
+    div.innerHTML = `
+        <div><label style="font-size:12px;color:var(--text-secondary);display:block;margin-bottom:4px">Event Title *</label>
+        <input id="evtTitle" placeholder="e.g. Weekly Study Session" style="width:100%;padding:10px 14px;border-radius:8px;background:var(--bg-tertiary,#252537);border:1px solid var(--border-color);color:var(--text-primary);font-size:14px;outline:none;box-sizing:border-box;"></div>
+        <div><label style="font-size:12px;color:var(--text-secondary);display:block;margin-bottom:4px">Description</label>
+        <textarea id="evtDesc" rows="2" placeholder="What's this event about?" style="width:100%;padding:10px 14px;border-radius:8px;background:var(--bg-tertiary,#252537);border:1px solid var(--border-color);color:var(--text-primary);font-size:14px;outline:none;box-sizing:border-box;resize:vertical;"></textarea></div>
+        <div style="display:flex;gap:10px">
+            <div style="flex:1"><label style="font-size:12px;color:var(--text-secondary);display:block;margin-bottom:4px">Start *</label><input id="evtStart" type="datetime-local" style="width:100%;padding:10px 14px;border-radius:8px;background:var(--bg-tertiary,#252537);border:1px solid var(--border-color);color:var(--text-primary);font-size:13px;outline:none;box-sizing:border-box;"></div>
+            <div style="flex:1"><label style="font-size:12px;color:var(--text-secondary);display:block;margin-bottom:4px">End</label><input id="evtEnd" type="datetime-local" style="width:100%;padding:10px 14px;border-radius:8px;background:var(--bg-tertiary,#252537);border:1px solid var(--border-color);color:var(--text-primary);font-size:13px;outline:none;box-sizing:border-box;"></div>
+        </div>
+        <div><label style="font-size:12px;color:var(--text-secondary);display:block;margin-bottom:4px">Location</label>
+        <input id="evtLoc" placeholder="e.g. Zoom, Room 101" style="width:100%;padding:10px 14px;border-radius:8px;background:var(--bg-tertiary,#252537);border:1px solid var(--border-color);color:var(--text-primary);font-size:14px;outline:none;box-sizing:border-box;"></div>
+        <button id="evtSaveBtn" style="width:100%;padding:12px;border-radius:8px;background:var(--primary-color,#6c63ff);color:#fff;border:none;cursor:pointer;font-size:14px;font-weight:600;">Create Event</button>
+    `;
+    body.innerHTML = '';
+    body.appendChild(div);
+    document.getElementById('evtSaveBtn').addEventListener('click', async function() {
+        const title = document.getElementById('evtTitle')?.value.trim();
+        if (!title) { if (typeof showNotification === 'function') showNotification('Event title required', 'error'); return; }
+        this.disabled = true; this.textContent = 'Creating…';
+        try {
+            const gid = window.selectedGroup?.id;
+            const url = gid ? '/api/groups/' + gid + '/events' : '/api/events';
+            const res = await panelFetch(url, { method:'POST', body: JSON.stringify({ title, description: document.getElementById('evtDesc')?.value||'', startDate: document.getElementById('evtStart')?.value||null, endDate: document.getElementById('evtEnd')?.value||null, location: document.getElementById('evtLoc')?.value||'' }) });
+            if (res.success) {
+                if (typeof showNotification === 'function') showNotification('Event created!', 'success');
+                document.querySelector('.evt-tab[data-etab="upcoming"]')?.click();
+            } else { throw new Error(res.message||'Failed'); }
+        } catch (e) { if (typeof showNotification === 'function') showNotification('Failed: '+e.message, 'error'); this.disabled = false; this.textContent = 'Create Event'; }
+    });
+}
+
+// ── INVITES ───────────────────────────────────────────────────
+export async function loadReceivedInvites() {
+    const body = document.getElementById('inviteBody');
+    if (!body) return;
+    body.innerHTML = panelLoader();
+    try {
+        const data = await panelFetch('/api/groups/invitations?status=pending');
+        const invites = data?.data?.invitations || data?.invitations || (Array.isArray(data?.data) ? data.data : []);
+        if (!invites.length) { body.innerHTML = panelEmpty('fas fa-envelope-open', 'No pending invitations.'); return; }
+        body.innerHTML = '';
+        invites.forEach(inv => {
+            const gname = inv.group?.name || inv.groupName || 'Group #' + inv.groupId;
+            const inviter = inv.inviter?.username || inv.inviterName || 'Someone';
+            const initials = gname.split(' ').map(w=>w[0]).join('').toUpperCase().slice(0,2);
+            const card = panelCard(`
+                <div style="display:flex;align-items:center;gap:12px;margin-bottom:10px">
+                    <div style="width:44px;height:44px;border-radius:50%;background:var(--primary-color,#6c63ff);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;flex-shrink:0;${inv.group?.avatar?'background-image:url('+inv.group.avatar+');background-size:cover;':''}">${inv.group?.avatar?'':initials}</div>
+                    <div style="flex:1"><div style="font-weight:700;font-size:14px;color:var(--text-primary)">${gname}</div>
+                    <div style="font-size:12px;color:var(--text-secondary)">Invited by @${inviter} · ${timeAgo(inv.createdAt)}</div>
+                    ${inv.group?.description?'<div style="font-size:12px;color:var(--text-secondary);margin-top:2px">'+inv.group.description.slice(0,70)+'</div>':''}</div>
+                </div>
+                <div style="display:flex;gap:8px">
+                    <button data-inv="${inv.id}" data-action="decline" data-name="${gname}" style="flex:1;padding:8px;border-radius:8px;background:none;border:1px solid var(--border-color);cursor:pointer;color:var(--text-primary);font-weight:600;font-size:13px">Decline</button>
+                    <button data-inv="${inv.id}" data-action="accept" data-name="${gname}" style="flex:1;padding:8px;border-radius:8px;background:var(--primary-color,#6c63ff);border:none;cursor:pointer;color:#fff;font-weight:600;font-size:13px">Accept & Join</button>
+                </div>
+            `);
+            card.querySelectorAll('[data-inv]').forEach(btn => {
+                btn.addEventListener('click', async function() {
+                    const accept = this.dataset.action === 'accept';
+                    this.disabled = true; this.textContent = accept ? 'Joining…' : 'Declining…';
+                    try {
+                        const res = await panelFetch('/api/group-members/invitations/' + this.dataset.inv + '/' + (accept?'accept':'reject'), { method:'POST', body:'{}' });
+                        if (res.success) {
+                            if (typeof showNotification === 'function') showNotification(accept ? 'Joined "'+this.dataset.name+'"!' : 'Declined', 'success');
+                            card.style.opacity = '0.4'; setTimeout(() => card.remove(), 500);
+                            if (accept && typeof syncGroupsFromServer === 'function') syncGroupsFromServer().catch(()=>{});
+                        } else throw new Error(res.message||'Failed');
+                    } catch (e) { this.disabled = false; this.textContent = accept ? 'Accept & Join' : 'Decline'; if (typeof showNotification === 'function') showNotification('Failed: '+e.message, 'error'); }
+                });
+            });
+            body.appendChild(card);
+        });
+    } catch (_) { body.innerHTML = panelEmpty('fas fa-exclamation-circle', 'Could not load invitations.'); }
+}
+
+window._invSelFriends = window._invSelFriends || new Set();
+window._invFriendsAll = window._invFriendsAll || [];
+
+export async function loadInviteFriendsTab() {
+    const body = document.getElementById('inviteBody');
+    if (!body) return;
+    window._invSelFriends.clear();
+    const gid = window.selectedGroup?.id;
+    body.innerHTML = `
+        ${!gid ? '<div style="margin-bottom:10px"><label style="font-size:12px;color:var(--text-secondary);display:block;margin-bottom:4px">Select Group</label><select id="invGroupSel" style="width:100%;padding:10px 14px;border-radius:8px;background:var(--bg-tertiary,#252537);border:1px solid var(--border-color);color:var(--text-primary);font-size:14px;outline:none;box-sizing:border-box;"><option value="">Loading groups…</option></select></div>' : ''}
+        <input id="invFriendSearch" placeholder="Search friends…" style="width:100%;padding:10px 14px;border-radius:8px;background:var(--bg-tertiary,#252537);border:1px solid var(--border-color);color:var(--text-primary);font-size:14px;outline:none;box-sizing:border-box;margin-bottom:10px;">
+        <div id="invFriendsList" style="max-height:260px;overflow-y:auto;">${panelLoader()}</div>
+        <div id="invSelBar" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:10px;min-height:30px;"></div>
+        <button id="invSendBtn" style="display:none;width:100%;padding:12px;border-radius:8px;background:var(--primary-color,#6c63ff);color:#fff;border:none;cursor:pointer;font-size:14px;font-weight:600;margin-top:10px">Send Invitations</button>
+    `;
+    if (!gid) {
+        panelFetch('/api/groups/user').then(data => {
+            const groups = data?.data?.groups || data?.data?.myGroups || data?.groups || [];
+            const sel = document.getElementById('invGroupSel');
+            if (sel) sel.innerHTML = '<option value="">— Pick a group —</option>' + groups.map(g=>'<option value="'+g.id+'">'+g.name+'</option>').join('');
+        }).catch(()=>{});
+    }
+    try {
+        const data = await panelFetch('/api/friends');
+        window._invFriendsAll = (data?.data?.friends || data?.data || data?.friends || []).map(f => ({
+            id: f.id, displayName: f.displayName || [f.firstName,f.lastName].filter(Boolean).join(' ') || f.username || 'Unknown',
+            username: f.username||'', avatar: f.avatar||null, online: f.status==='online',
+        }));
+        renderInvFriendsList(window._invFriendsAll);
+    } catch (_) {
+        const el = document.getElementById('invFriendsList');
+        if (el) el.innerHTML = panelEmpty('fas fa-exclamation-circle', 'Could not load friends.');
+    }
+    let dt;
+    document.getElementById('invFriendSearch')?.addEventListener('input', function() {
+        clearTimeout(dt); dt = setTimeout(() => {
+            const q = this.value.toLowerCase();
+            renderInvFriendsList(window._invFriendsAll.filter(f => f.displayName.toLowerCase().includes(q) || f.username.toLowerCase().includes(q)));
+        }, 250);
+    });
+    document.getElementById('invSendBtn')?.addEventListener('click', sendPanelInvites);
+}
+
+function renderInvFriendsList(friends) {
+    const list = document.getElementById('invFriendsList');
+    if (!list) return;
+    if (!friends.length) { list.innerHTML = panelEmpty('fas fa-user-friends', 'No friends found.'); return; }
+    list.innerHTML = '';
+    friends.forEach(f => {
+        const sel = window._invSelFriends.has(f.id);
+        const item = document.createElement('div');
+        item.style.cssText = 'display:flex;align-items:center;gap:10px;padding:9px 10px;border-radius:8px;cursor:pointer;transition:background .15s;border:2px solid '+(sel?'var(--primary-color,#6c63ff)':'transparent')+';';
+        const initials = f.displayName.split(' ').map(w=>w[0]).join('').toUpperCase().slice(0,2)||'U';
+        item.innerHTML = `
+            <div style="width:38px;height:38px;border-radius:50%;background:var(--primary-color,#6c63ff);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:13px;flex-shrink:0;${f.avatar?'background-image:url('+f.avatar+');background-size:cover;':''}">${f.avatar?'':initials}</div>
+            <div style="flex:1"><div style="font-weight:600;font-size:13px;color:var(--text-primary)">${f.displayName}</div><div style="font-size:11px;color:var(--text-secondary)">${f.username?'@'+f.username:''} · <span style="color:${f.online?'#48bb78':'var(--text-secondary)'}">●</span> ${f.online?'Online':'Offline'}</div></div>
+            <div style="width:20px;height:20px;border-radius:50%;border:2px solid ${sel?'var(--primary-color,#6c63ff)':'var(--border-color)'};background:${sel?'var(--primary-color,#6c63ff)':'none'};display:flex;align-items:center;justify-content:center;font-size:11px;color:#fff;flex-shrink:0;">${sel?'✓':''}</div>
+        `;
+        item.addEventListener('click', () => {
+            if (window._invSelFriends.has(f.id)) window._invSelFriends.delete(f.id); else window._invSelFriends.add(f.id);
+            renderInvFriendsList(friends);
+            renderInvSelBar();
+            const btn = document.getElementById('invSendBtn');
+            if (btn) { btn.style.display = window._invSelFriends.size > 0 ? 'block' : 'none'; btn.textContent = 'Send ' + window._invSelFriends.size + ' Invitation' + (window._invSelFriends.size > 1 ? 's' : ''); }
+        });
+        list.appendChild(item);
+    });
+}
+
+function renderInvSelBar() {
+    const bar = document.getElementById('invSelBar');
+    if (!bar) return;
+    bar.innerHTML = '';
+    window._invSelFriends.forEach(id => {
+        const f = window._invFriendsAll.find(x => x.id === id);
+        if (!f) return;
+        const chip = document.createElement('div');
+        chip.style.cssText = 'display:inline-flex;align-items:center;gap:5px;padding:3px 10px;background:var(--primary-color,#6c63ff)22;border:1px solid var(--primary-color,#6c63ff);border-radius:20px;font-size:12px;color:var(--text-primary);';
+        chip.innerHTML = f.displayName + ' <span style="cursor:pointer;opacity:.7">✕</span>';
+        chip.querySelector('span').addEventListener('click', () => { window._invSelFriends.delete(id); renderInvFriendsList(window._invFriendsAll); renderInvSelBar(); const btn = document.getElementById('invSendBtn'); if (btn) { btn.style.display = window._invSelFriends.size > 0 ? 'block' : 'none'; } });
+        bar.appendChild(chip);
+    });
+}
+
+async function sendPanelInvites() {
+    const gid = window.selectedGroup?.id || document.getElementById('invGroupSel')?.value;
+    if (!gid) { if (typeof showNotification === 'function') showNotification('Select a group first', 'error'); return; }
+    if (!window._invSelFriends.size) { if (typeof showNotification === 'function') showNotification('No friends selected', 'error'); return; }
+    const btn = document.getElementById('invSendBtn');
+    if (btn) { btn.disabled = true; btn.textContent = 'Sending…'; }
+    let sent = 0, failed = 0;
+    for (const fid of window._invSelFriends) {
+        try {
+            const res = await panelFetch('/api/group-members/' + gid + '/invitations', { method:'POST', body: JSON.stringify({ inviteeId: fid, role:'member' }) });
+            if (res.success) sent++; else failed++;
+        } catch (_) { failed++; }
+    }
+    if (btn) { btn.disabled = false; }
+    if (sent > 0 && typeof showNotification === 'function') showNotification(sent + ' invitation' + (sent>1?'s':'') + ' sent!', 'success');
+    if (failed > 0 && typeof showNotification === 'function') showNotification(failed + ' failed', 'error');
+    window._invSelFriends.clear();
+    loadInviteFriendsTab();
+}
+
+export async function loadSentInvites() {
+    const body = document.getElementById('inviteBody');
+    if (!body) return;
+    body.innerHTML = panelLoader();
+    try {
+        const gid = window.selectedGroup?.id;
+        const url = gid ? '/api/group-members/' + gid + '/invitations' : '/api/groups/invitations/sent';
+        const data = await panelFetch(url);
+        const invites = data?.data?.invitations || data?.invitations || (Array.isArray(data?.data) ? data.data : []);
+        if (!invites.length) { body.innerHTML = panelEmpty('fas fa-paper-plane', 'No sent invitations.'); return; }
+        body.innerHTML = '';
+        invites.forEach(inv => {
+            const tname = inv.targetUser?.username || 'User #' + inv.targetUserId;
+            const card = panelCard(`
+                <div style="display:flex;align-items:center;gap:12px">
+                    <div style="font-size:24px;flex-shrink:0">📨</div>
+                    <div style="flex:1"><div style="font-weight:600;font-size:13px;color:var(--text-primary)">@${tname}</div><div style="font-size:12px;color:var(--text-secondary)">Sent ${timeAgo(inv.createdAt)}</div></div>
+                    <div style="display:flex;align-items:center;gap:8px">
+                        <span style="padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;background:#f6ad5522;color:#f6ad55">${inv.status||'pending'}</span>
+                        ${inv.status==='pending'?'<button data-cinv="'+inv.id+'" style="padding:5px 10px;border-radius:7px;background:none;border:1px solid var(--border-color);cursor:pointer;color:var(--text-primary);font-size:12px;">Cancel</button>':''}
+                    </div>
+                </div>
+            `);
+            card.querySelector('[data-cinv]')?.addEventListener('click', async function() {
+                this.disabled = true; this.textContent = '…';
+                try {
+                    const res = await panelFetch('/api/group-members/invitations/' + this.dataset.cinv, { method:'DELETE' });
+                    if (res.success) { if (typeof showNotification === 'function') showNotification('Invitation cancelled', 'success'); card.style.opacity = '0.4'; setTimeout(()=>card.remove(), 500); }
+                    else throw new Error(res.message);
+                } catch (e) { this.disabled = false; this.textContent = 'Cancel'; if (typeof showNotification === 'function') showNotification('Failed: '+e.message, 'error'); }
+            });
+            body.appendChild(card);
+        });
+    } catch (_) { body.innerHTML = panelEmpty('fas fa-exclamation-circle', 'Could not load.'); }
+}
 
 if (typeof window !== 'undefined') {
     const secureExpose = (name, fn) => {

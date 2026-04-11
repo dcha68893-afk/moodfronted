@@ -1333,14 +1333,6 @@
             </div>
             
             <div class="input-area">
-                <!-- Formatting Toolbar -->
-                <div class="formatting-toolbar" id="formattingToolbar">
-                    <button class="format-btn" data-tag="b" title="Bold"><b>B</b></button>
-                    <button class="format-btn" data-tag="i" title="Italic"><i>I</i></button>
-                    <button class="format-btn" data-tag="code" title="Code"><i class="fas fa-code"></i></button>
-                    <button class="format-btn" data-tag="pre" title="Code Block"><i class="fas fa-file-code"></i></button>
-                </div>
-                
                 <!-- Attachment Options -->
                 <div class="attachment-options" id="attachmentOptions">
                     <button class="attachment-option" data-type="image">
@@ -1373,23 +1365,12 @@
                     </button>
                 </div>
                 
-                <div class="input-actions">
-                    <!-- Schedule button -->
-                    <button class="schedule-btn" id="scheduleBtn" title="Schedule message">
-                        <i class="fas fa-clock"></i>
-                    </button>
-                    <button class="input-action-btn" id="emojiBtn" title="Emoji">
+                <div class="message-input-container">
+                    <!-- Left icon: emoji -->
+                    <button class="input-icon-left" id="emojiBtn" title="Emoji">
                         <i class="far fa-smile"></i>
                     </button>
-                    <button class="input-action-btn" id="attachBtn" title="Attach">
-                        <i class="fas fa-paperclip"></i>
-                    </button>
-                    <button class="input-action-btn" id="formatBtn" title="Formatting">
-                        <i class="fas fa-font"></i>
-                    </button>
-                </div>
-                
-                <div class="message-input-container">
+                    
                     <!-- Reply indicator -->
                     <div class="reply-indicator" id="replyIndicator" style="display: none;">
                         <i class="fas fa-reply"></i>
@@ -1402,7 +1383,12 @@
                     <!-- Attachment preview -->
                     <div class="attachment-preview" id="attachmentPreview" style="display: none;"></div>
                     
-                    <textarea class="message-input" id="messageInput" placeholder="Type a message... (Enter to send, Shift+Enter new line)" rows="1"></textarea>
+                    <textarea class="message-input" id="messageInput" placeholder="Type a message..." rows="1"></textarea>
+                    
+                    <!-- Right icon: attach/upload -->
+                    <button class="input-icon-right" id="attachBtn" title="Attach file">
+                        <i class="fas fa-paperclip"></i>
+                    </button>
                     
                     <!-- Recording Indicator -->
                     <div class="recording-indicator" id="recordingIndicator" style="display: none;">
@@ -1420,35 +1406,24 @@
                     </div>
                 </div>
                 
-                <!-- Message options dropdown -->
-                <div class="message-actions" id="sendOptions" style="display: none; bottom: 70px; right: 20px;">
-                    <button class="action-item" data-action="send-normal">
+                <!-- Send button with send-mode popup -->
+                <div style="position:relative;">
+                    <!-- Send mode popup: appears on long-press or right-click of send button -->
+                    <div class="send-mode-popup" id="sendModePopup">
+                        <button id="sendNowBtn">
+                            <i class="fas fa-paper-plane"></i>
+                            Send now
+                        </button>
+                        <button id="scheduleFromSendBtn">
+                            <i class="fas fa-clock"></i>
+                            Schedule
+                        </button>
+                    </div>
+                    <button class="send-button" id="sendButton">
                         <i class="fas fa-paper-plane"></i>
-                        Send normally
-                    </button>
-                    <button class="action-item" data-action="send-view-once">
-                        <i class="fas fa-eye"></i>
-                        View once
-                    </button>
-                    <button class="action-item" data-action="send-expire-1h">
-                        <i class="fas fa-hourglass-half"></i>
-                        Expire in 1 hour
-                    </button>
-                    <button class="action-item" data-action="send-expire-1d">
-                        <i class="fas fa-calendar-day"></i>
-                        Expire in 1 day
-                    </button>
-                    <button class="action-item" data-action="send-note">
-                        <i class="fas fa-sticky-note"></i>
-                        Note to self
+                        <div class="scheduled-badge" id="scheduleBadge" style="display: none;">⏰</div>
                     </button>
                 </div>
-                
-                <button class="send-button" id="sendButton">
-                    <i class="fas fa-paper-plane"></i>
-                    <!-- Schedule badge -->
-                    <div class="scheduled-badge" id="scheduleBadge" style="display: none;">⏰</div>
-                </button>
             </div>
         </div>
     </div>
@@ -1507,25 +1482,25 @@
         </button>
     </div>
     
-    <!-- Contact List (Hidden by default) -->
-    <div class="sidebar hidden" id="contactsSidebar">
-        <div class="sidebar-header">
-            <h2>Contacts</h2>
-            <button class="new-chat-btn" id="backToChatsFromContactsBtn">
+    <!-- Contact List (Friends Panel for New Chat) -->
+    <div class="sidebar" id="contactsSidebar" style="display:flex;flex-direction:column;">
+        <div class="sidebar-header" style="display:flex;align-items:center;gap:10px;padding:15px 20px;border-bottom:1px solid var(--border-color);">
+            <button class="chat-action-btn" id="backToChatsFromContactsBtn" title="Back" style="flex-shrink:0;">
                 <i class="fas fa-arrow-left"></i>
             </button>
+            <h2 style="flex:1;font-size:18px;font-weight:700;color:var(--text-primary);">Start Chat</h2>
         </div>
-        <div class="search-container">
+        <div class="search-container" style="padding:10px 16px;">
             <div class="search-box">
-                <input type="text" class="search-input" id="contactSearch" placeholder="Search contacts...">
+                <input type="text" class="search-input" id="contactSearch" placeholder="Search friends...">
                 <i class="fas fa-search search-icon"></i>
             </div>
         </div>
-        <div class="contacts-list" id="contactsList">
-            <!-- Contacts will be loaded here -->
+        <div class="contacts-list" id="contactsList" style="flex:1;overflow-y:auto;">
+            <!-- Friends will be loaded here -->
             <div class="empty-state subtle">
                 <i class="fas fa-address-book empty-icon" style="opacity: 0.3;"></i>
-                <div class="empty-title" style="font-size: 14px;">Loading contacts...</div>
+                <div class="empty-title" style="font-size: 14px;">Loading friends...</div>
             </div>
         </div>
     </div>
@@ -1647,6 +1622,113 @@
                     location.reload();
                 }
             };
+            
+            // =============================================
+            // SEND MODE POPUP — Send now / Schedule
+            // =============================================
+            (function() {
+                const sendBtn = document.getElementById('sendButton');
+                const popup   = document.getElementById('sendModePopup');
+                const sendNowBtn = document.getElementById('sendNowBtn');
+                const scheduleFromSendBtn = document.getElementById('scheduleFromSendBtn');
+                if (!sendBtn || !popup) return;
+
+                let holdTimer = null;
+
+                // Long-press to open popup
+                sendBtn.addEventListener('mousedown', function(e) {
+                    holdTimer = setTimeout(() => {
+                        popup.classList.add('active');
+                    }, 500);
+                });
+                sendBtn.addEventListener('touchstart', function(e) {
+                    holdTimer = setTimeout(() => {
+                        popup.classList.add('active');
+                    }, 500);
+                }, { passive: true });
+                sendBtn.addEventListener('mouseup', function() { clearTimeout(holdTimer); });
+                sendBtn.addEventListener('touchend', function() { clearTimeout(holdTimer); });
+
+                // Right-click also opens popup
+                sendBtn.addEventListener('contextmenu', function(e) {
+                    e.preventDefault();
+                    popup.classList.add('active');
+                });
+
+                // Click outside to close
+                document.addEventListener('click', function(e) {
+                    if (!popup.contains(e.target) && e.target !== sendBtn) {
+                        popup.classList.remove('active');
+                    }
+                });
+
+                // Send now — just fires normal send
+                if (sendNowBtn) {
+                    sendNowBtn.addEventListener('click', function() {
+                        popup.classList.remove('active');
+                        // Trigger the normal send
+                        const core = window.messagesCore;
+                        if (core && core.sendMessage) core.sendMessage();
+                        else if (window.messagesUI) {
+                            // fire via sendButton click without reopening popup
+                            sendBtn._skipPopup = true;
+                            sendBtn.click();
+                            sendBtn._skipPopup = false;
+                        }
+                    });
+                }
+
+                // Schedule — open schedule modal
+                if (scheduleFromSendBtn) {
+                    scheduleFromSendBtn.addEventListener('click', function() {
+                        popup.classList.remove('active');
+                        const scheduleModal = document.getElementById('scheduleModal');
+                        if (scheduleModal) {
+                            scheduleModal.classList.add('active');
+                            // populate defaults
+                            const now = new Date();
+                            now.setMinutes(now.getMinutes() + 10);
+                            const dateEl = document.getElementById('scheduleDate');
+                            const timeEl = document.getElementById('scheduleTime');
+                            if (dateEl) dateEl.value = now.toISOString().slice(0, 10);
+                            if (timeEl) timeEl.value = now.toTimeString().slice(0, 5);
+                            // copy current message text to schedule modal
+                            const msgInput = document.getElementById('messageInput');
+                            const schedMsg = document.getElementById('scheduleMessage');
+                            if (msgInput && schedMsg) schedMsg.value = msgInput.value;
+                        }
+                    });
+                }
+            })();
+
+            // =============================================
+            // CONTACTS SEARCH FILTER
+            // =============================================
+            (function() {
+                const searchEl = document.getElementById('contactSearch');
+                if (!searchEl) return;
+                searchEl.addEventListener('input', function() {
+                    const q = this.value.toLowerCase().trim();
+                    const items = document.querySelectorAll('#contactsList .contact-item');
+                    items.forEach(item => {
+                        const name = (item.dataset.contactName || '').toLowerCase();
+                        item.style.display = (!q || name.includes(q)) ? '' : 'none';
+                    });
+                    // Also hide group headers if all children hidden
+                    document.querySelectorAll('#contactsList .contact-group').forEach(grp => {
+                        const visible = grp.querySelectorAll('.contact-item:not([style*="none"])').length;
+                        grp.style.display = visible ? '' : 'none';
+                    });
+                });
+            })();
+
+            // =============================================
+            // CONTACTS PANEL: hide by default, shown on new-chat click
+            // =============================================
+            (function() {
+                const cs = document.getElementById('contactsSidebar');
+                if (cs) { cs.classList.add('hidden'); cs.style.pointerEvents = 'none'; }
+            })();
             
             // Add helper for report submission
             window.submitReport = function() {

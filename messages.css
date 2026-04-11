@@ -2499,3 +2499,228 @@ emoji-picker {
         height: 42px;
     }
 }
+/* =============================================
+   PATCH v5.0 - UI OVERHAUL FIXES
+   ============================================= */
+
+/* 1. Smaller sidebar name */
+.chat-item-name {
+    font-weight: 600;
+    font-size: 13px !important;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 140px;
+}
+
+/* 2. Real profile photo in chat items */
+.chat-item-avatar img.avatar-photo {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    border-radius: 50%;
+    display: block;
+}
+
+.chat-item-avatar {
+    flex-shrink: 0;
+    background-color: var(--secondary-color);
+    background-image: none;
+}
+
+/* 3. Sidebar time format - smaller */
+.chat-item-time {
+    font-size: 11px !important;
+    color: var(--text-secondary);
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
+/* 4. Contacts panel (friends list for new chat) - replaces sidebar on mobile, replaces chat-panel area on desktop */
+#contactsSidebar {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: var(--bg-color);
+    z-index: 200;
+    display: flex;
+    flex-direction: column;
+    transform: translateX(0);
+    transition: transform 0.3s ease;
+}
+
+#contactsSidebar.hidden {
+    transform: translateX(-100%);
+    display: flex !important;
+    pointer-events: none;
+}
+
+@media (min-width: 769px) {
+    /* On desktop: friends panel slides in over the chat-panel area (right side) */
+    #contactsSidebar {
+        left: 380px; /* after sidebar width */
+        width: calc(100% - 380px);
+    }
+    #contactsSidebar.hidden {
+        transform: translateX(100%);
+    }
+}
+
+/* 5. Input area redesign — emoji left, attach left, send right, no format/schedule buttons */
+.input-area {
+    padding: 10px 12px !important;
+    gap: 8px !important;
+    align-items: flex-end !important;
+}
+
+/* Hide formatting toolbar completely */
+.formatting-toolbar {
+    display: none !important;
+}
+
+/* Hide format button and schedule button */
+#formatBtn,
+#scheduleBtn,
+.schedule-btn {
+    display: none !important;
+}
+
+/* Make the text area taller */
+.message-input {
+    min-height: 52px !important;
+    max-height: 140px !important;
+    padding: 14px 50px 14px 50px !important;
+    border-radius: 26px !important;
+    font-size: 15px !important;
+}
+
+/* New input layout: icons inside the textarea */
+.message-input-container {
+    position: relative;
+    flex: 1;
+}
+
+/* Left icon (emoji) inside text box */
+.input-icon-left {
+    position: absolute;
+    left: 12px;
+    bottom: 12px;
+    z-index: 10;
+    background: none;
+    border: none;
+    color: var(--text-secondary);
+    font-size: 20px;
+    cursor: pointer;
+    width: 28px;
+    height: 28px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    transition: color 0.2s;
+}
+.input-icon-left:hover { color: var(--primary-color); }
+
+/* Right icon (attach/upload) inside text box */
+.input-icon-right {
+    position: absolute;
+    right: 12px;
+    bottom: 12px;
+    z-index: 10;
+    background: none;
+    border: none;
+    color: var(--text-secondary);
+    font-size: 20px;
+    cursor: pointer;
+    width: 28px;
+    height: 28px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    transition: color 0.2s;
+}
+.input-icon-right:hover { color: var(--primary-color); }
+
+/* Hide old .input-actions row */
+.input-actions {
+    display: none !important;
+}
+
+/* Send button with schedule dropdown */
+.send-button {
+    position: relative;
+    flex-shrink: 0;
+    width: 46px !important;
+    height: 46px !important;
+    border-radius: 50% !important;
+    font-size: 16px !important;
+    align-self: flex-end;
+    margin-bottom: 3px;
+}
+
+/* Send options popup (send now / schedule) */
+.send-mode-popup {
+    position: absolute;
+    bottom: 58px;
+    right: 0;
+    background: white;
+    border-radius: 12px;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.15);
+    overflow: hidden;
+    min-width: 180px;
+    z-index: 500;
+    display: none;
+}
+.send-mode-popup.active { display: block; }
+
+.send-mode-popup button {
+    width: 100%;
+    padding: 12px 16px;
+    background: none;
+    border: none;
+    cursor: pointer;
+    text-align: left;
+    font-size: 14px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    transition: background 0.15s;
+}
+.send-mode-popup button:hover { background: var(--secondary-color); }
+.send-mode-popup button i { color: var(--primary-color); width: 16px; }
+
+/* Call navigation — instant transition, no flicker */
+.call-initiating {
+    pointer-events: none;
+    opacity: 0.7;
+}
+
+/* Chat header call buttons — clear and accessible */
+#voiceCallBtn, #videoCallBtn {
+    color: var(--primary-color);
+    transition: all 0.15s;
+}
+#voiceCallBtn:hover, #videoCallBtn:hover {
+    background: rgba(0,132,255,0.1);
+    transform: scale(1.1);
+}
+
+/* Mobile: contacts panel is full screen */
+@media (max-width: 768px) {
+    #contactsSidebar {
+        left: 0;
+        width: 100%;
+    }
+    #contactsSidebar.hidden {
+        transform: translateX(-100%);
+    }
+}
+
+/* Emoji picker repositioning for new layout */
+.emoji-picker-container {
+    bottom: 80px !important;
+    left: 12px !important;
+}

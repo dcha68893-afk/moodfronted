@@ -689,6 +689,12 @@ function _saveAuthToStorage(token, user = null) {
 }
 
 function _clearAuthFromStorage() {
+    // Skip clearing during self-tests
+    if (window._selfTestMode) {
+        console.log('[TOKEN] Skipping storage clear - self-test mode active');
+        return true;
+    }
+    
     try {
         localStorage.removeItem(AUTH_STORAGE_KEY);
         localStorage.removeItem('moodchat_token');
@@ -1116,21 +1122,32 @@ if (url.startsWith('http://') || url.startsWith('https://')) {
                 referrerPolicy: options.referrerPolicy || 'strict-origin-when-cross-origin'
             };
             
-            if (requiresAuth) {
-    const token = getUserToken('coreFetch');
+            // In coreFetch function, when building headers
+if (requiresAuth) {
+    // CRITICAL: Try multiple sources for token
+    let token = getUserToken('coreFetch');
     
-    // CRITICAL FIX: ALWAYS use Bearer token, even in production
-    // Cookie-based auth doesn't work because cookies aren't set
+    if (!token) {
+        try {
+            const stored = localStorage.getItem('kynecta_auth');
+            if (stored) {
+                const parsed = JSON.parse(stored);
+                token = parsed.token;
+            }
+        } catch(e) {}
+    }
+    
+    if (!token) {
+        token = localStorage.getItem('token') || 
+                localStorage.getItem('moodchat_token') || 
+                localStorage.getItem('accessToken');
+    }
+    
     if (token && typeof token === 'string' && token.length > 20) {
         fetchOptions.headers['Authorization'] = `Bearer ${token}`;
-        
-        if (!_authHeaderLogged) {
-            console.log(`[API] 🔐 Auth header attached for: ${endpointPath} (token length: ${token.length}) - Mode: ${isProduction() ? 'PRODUCTION' : 'DEVELOPMENT'}`);
-            _authHeaderLogged = true;
-            setTimeout(() => { _authHeaderLogged = false; }, 60000);
-        }
-    } else if (!token) {
-        console.warn(`[API] ⚠️ No token available for protected endpoint: ${endpointPath}`);
+        console.log(`[API] 🔐 Auth header attached for: ${endpointPath} (token length: ${token.length})`);
+    } else {
+        console.warn(`[API] ⚠️ No token for protected endpoint: ${endpointPath}`);
     }
 }
             
@@ -1307,23 +1324,40 @@ const timeoutId = setTimeout(() => {
                         _401logged = true;
                     }
                     
-                    // Try to refresh token if possible
                     if (retryCount < MAX_RETRIES && TokenManager && TokenManager.getRefreshToken()) {
-                        console.log(`[API] ðŸ”„ Attempting token refresh (attempt ${retryCount + 1}/${MAX_RETRIES})`);
-                        const refreshResult = await refreshTokenIfNeeded();
-                        
-                        if (refreshResult && refreshResult.success) {
-                            console.log('[API] âœ… Token refresh successful, retrying request');
-                            retryCount++;
-                            return executeRequest();
-                        } else {
-                            console.warn('[AUTH] No refresh token or refresh failed â€” forcing logout');
-                            clearUserToken('401.response');
-                        }
-                    } else {
-                        console.warn('[AUTH] No refresh token available â€” forcing logout');
-                        clearUserToken('401.response');
-                    }
+    console.log(`[API] 🔄 Attempting token refresh (attempt ${retryCount + 1}/${MAX_RETRIES})`);
+    const refreshResult = await refreshTokenIfNeeded();
+    
+    if (refreshResult && refreshResult.success) {
+        console.log('[API] ✅ Token refresh successful, retrying request');
+        retryCount++;
+        return executeRequest();
+    } else {
+        console.warn('[AUTH] No refresh token available — checking stored token');
+        // Only clear if storage also has no token
+        const storedToken = _getTokenFromStorage();
+        if (!storedToken) {
+            clearUserToken('401.response');
+        } else {
+            // Restore from storage without clearing
+            AUTH_TOKEN = storedToken;
+            TOKEN_READY = true;
+            console.log('[API] Restored token from storage after 401');
+        }
+    }
+} else {
+    console.warn('[AUTH] No refresh token available — checking stored token');
+    // Only clear if storage also has no token
+    const storedToken = _getTokenFromStorage();
+    if (!storedToken) {
+        clearUserToken('401.response');
+    } else {
+        // Restore from storage without clearing
+        AUTH_TOKEN = storedToken;
+        TOKEN_READY = true;
+        console.log('[API] Restored token from storage after 401');
+    }
+}
                     
                     if (typeof window !== 'undefined') {
                         window.dispatchEvent(new CustomEvent('auth:unauthorized', {
@@ -3476,7 +3510,6 @@ abortAllRequests = function() {
 // ============================================================================
 // PUBLIC ENDPOINTS
 // ============================================================================
-
 const PUBLIC_ENDPOINTS = [
     '/api/status', '/status', '/health', '/api/health',
     '/api/auth/login', '/auth/login',
@@ -3498,16 +3531,39 @@ const AUTH_ENDPOINTS = [
     '/api/auth/verify', '/auth/verify'
 ];
 
+// IMPORTANT: These are NOT public - they require authentication
+const PROTECTED_STATUS_PATHS = [
+    '/api/status/my', '/status/my',
+    '/api/status/friends', '/status/friends',
+    '/api/status/stats', '/status/stats',
+    '/api/status/user', '/status/user'
+];
+
 isPublicEndpoint = function(endpoint) {
     if (!endpoint || typeof endpoint !== 'string') return false;
     
     const normalized = endpoint.startsWith('/') ? endpoint : '/' + endpoint;
     
-    return PUBLIC_ENDPOINTS.some(publicEndpoint => 
+    // First, check if this is a protected sub-path
+    for (const protectedPath of PROTECTED_STATUS_PATHS) {
+        if (normalized === protectedPath || normalized.startsWith(protectedPath + '/')) {
+            console.log(`[API] 🔒 Protected endpoint (requires auth): ${normalized}`);
+            return false;
+        }
+    }
+    
+    // Check public endpoints
+    const isPublic = PUBLIC_ENDPOINTS.some(publicEndpoint => 
         normalized === publicEndpoint ||
         normalized.startsWith(publicEndpoint + '/') ||
         normalized.startsWith(publicEndpoint + '?')
     );
+    
+    if (isPublic) {
+        console.log(`[API] 🌐 Public endpoint: ${normalized}`);
+    }
+    
+    return isPublic;
 };
 
 isAuthEndpoint = function(endpoint) {
@@ -3549,11 +3605,33 @@ getAuthHeaders = function(endpoint) {
             return {};
         }
         
-        const token = getUserToken('getAuthHeaders');
+        // CRITICAL FIX: Always check localStorage directly
+        let token = getUserToken('getAuthHeaders');
+        
+        // If no token in memory, try localStorage directly
+        if (!token) {
+            try {
+                const stored = localStorage.getItem('kynecta_auth');
+                if (stored) {
+                    const parsed = JSON.parse(stored);
+                    token = parsed.token;
+                }
+            } catch(e) {}
+        }
+        
+        // Also try other keys
+        if (!token) {
+            token = localStorage.getItem('token') || 
+                    localStorage.getItem('moodchat_token') || 
+                    localStorage.getItem('accessToken');
+        }
+        
         if (token) {
+            console.log(`[AUTH] ✅ Attaching token for ${endpoint} (length: ${token.length})`);
             return { 'Authorization': `Bearer ${token}` };
         }
         
+        console.warn(`[AUTH] ⚠️ No token available for ${endpoint}`);
         return {};
     } catch (error) {
         console.error('[AUTH] Get auth headers error:', error);
@@ -6478,37 +6556,41 @@ checkNetworkStatus = async function() {
         } else {
             results.failed++;
         }
-        
         const testToken = '';
-        const testUser = { id: 'test', name: 'Test User' };
-        
-        try {
-            _saveAuthToStorage(testToken, testUser);
-            
-            const retrievedToken = _getTokenFromStorage();
-            const retrievedUser = _getUserFromStorage();
-            
-            const tokenMatches = retrievedToken === testToken;
-            const userMatches = JSON.stringify(retrievedUser) === JSON.stringify(testUser);
-            
-            results.tests.push({ 
-                name: 'token persistence', 
-                passed: tokenMatches && userMatches,
-                details: `Token: ${tokenMatches}, User: ${userMatches}`
-            });
-            
-            if (tokenMatches && userMatches) {
-                results.passed++;
-            } else {
-                results.failed++;
-            }
-            
-            _clearAuthFromStorage();
-        } catch (e) {
-            results.tests.push({ name: 'token persistence', passed: false, details: e.message });
-            results.failed++;
-        }
-        
+const testUser = { id: 'test', name: 'Test User' };
+
+// Enable self-test mode to prevent actual storage clearing
+window._selfTestMode = true;
+
+try {
+    _saveAuthToStorage(testToken, testUser);
+    
+    const retrievedToken = _getTokenFromStorage();
+    const retrievedUser = _getUserFromStorage();
+    
+    const tokenMatches = retrievedToken === testToken;
+    const userMatches = JSON.stringify(retrievedUser) === JSON.stringify(testUser);
+    
+    results.tests.push({ 
+        name: 'token persistence', 
+        passed: tokenMatches && userMatches,
+        details: `Token: ${tokenMatches}, User: ${userMatches}`
+    });
+    
+    if (tokenMatches && userMatches) {
+        results.passed++;
+    } else {
+        results.failed++;
+    }
+    
+    _clearAuthFromStorage();
+} catch (e) {
+    results.tests.push({ name: 'token persistence', passed: false, details: e.message });
+    results.failed++;
+} finally {
+    // Always disable self-test mode
+    window._selfTestMode = false;
+}
         results.tests.push({ 
             name: 'parent sync initialization', 
             passed: typeof _initParentMessageListeners === 'function',

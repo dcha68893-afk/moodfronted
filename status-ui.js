@@ -169,14 +169,35 @@ function getLifecycleStateEnum() {
 }
 
 function ensureUIActive(actionName) {
+    // FIX: Tab switching, navigation, and filter actions never need a lifecycle gate —
+    // blocking them causes the entire UI to appear frozen even when the session is valid.
+    const freeActions = ['tab', 'filter', 'myStatusPreview', 'viewStatus', 'network-recovery',
+                         'memoryTimeline', 'stats', 'showSchedule', 'highlights', 'highlightsEditor',
+                         'drafts', 'viewMyStatus', 'editStatus'];
+    if (freeActions.some(f => actionName === f || actionName.startsWith(f))) {
+        return true;
+    }
+
     const lifecycle = getLifecycleState();
     const LifecycleState = getLifecycleStateEnum();
-    if (!lifecycle || lifecycle.state !== LifecycleState.ACTIVE) {
-        UILogger.warn('Lifecycle', `Blocked UI action: ${actionName} - not ACTIVE (state: ${lifecycle?.state || 'unknown'})`);
-        showNotification('Please wait, connecting...', 'info');
-        return false;
+    const core = getCore();
+    const sessionReady = core && core.isSessionReady ? core.isSessionReady() : false;
+    
+    // Allow if ACTIVE OR session is ready (core may be active even if lifecycle says otherwise)
+    if ((lifecycle && lifecycle.state === LifecycleState.ACTIVE) || sessionReady) {
+        return true;
     }
-    return true;
+
+    // FIX: Also allow if we have any valid session data stored (handles timing issues)
+    try {
+        const storedToken = localStorage.getItem('kynecta_auth') || localStorage.getItem('token') ||
+                            localStorage.getItem('moodchat_token') || localStorage.getItem('accessToken');
+        if (storedToken) return true;
+    } catch(e) {}
+    
+    UILogger.warn('Lifecycle', `Blocked UI action: ${actionName} - not ACTIVE (state: ${lifecycle?.state || 'unknown'}, sessionReady: ${sessionReady})`);
+    showNotification('Please wait, connecting...', 'info');
+    return false;
 }
 
 function isSessionReady() {
@@ -243,6 +264,7 @@ let userData = null;
 let statuses = [];
 let myStatuses = [];
 let friendsStatuses = [];
+let friendsList = [];
 let closeFriendsStatuses = [];
 let pinnedStatuses = [];
 let mutedStatuses = [];
@@ -273,7 +295,6 @@ let isBackgroundInitialized = false;
 let isTokenReady = false;
 let parentReady = false;
 
-// Update syncDataFromCore to use the correct API
 function syncDataFromCore() {
     const core = getCore();
     
@@ -290,6 +311,22 @@ function syncDataFromCore() {
         const newMyStatuses = core.getMyStatuses();
         if (newMyStatuses !== myStatuses) {
             myStatuses = newMyStatuses;
+        }
+    }
+    
+    // Sync friends statuses
+    if (core && core.getFriendsStatuses) {
+        const newFriendsStatuses = core.getFriendsStatuses();
+        if (newFriendsStatuses !== friendsStatuses) {
+            friendsStatuses = newFriendsStatuses;
+        }
+    }
+    
+    // Sync friends list
+    if (core && core.getFriendsList) {
+        const newFriendsList = core.getFriendsList();
+        if (newFriendsList !== friendsList) {
+            friendsList = newFriendsList;
         }
     }
     
@@ -339,6 +376,46 @@ function syncDataFromCore() {
     if (core && core.getMoodChartData) {
         moodChartData = core.getMoodChartData();
     }
+}
+
+// Populate friends in create status modal
+function populateFriendsInCreateModal() {
+    const friendsContainer = document.getElementById('friendsListContainer');
+    if (!friendsContainer) return;
+    
+    if (!friendsList || friendsList.length === 0) {
+        friendsContainer.innerHTML = `
+            <div class="empty-state-small">
+                <i class="fas fa-user-friends"></i>
+                <p>No friends to share with</p>
+            </div>
+        `;
+        return;
+    }
+    
+    friendsContainer.innerHTML = '';
+    friendsList.slice(0, 20).forEach(friend => {
+        const friendEl = document.createElement('div');
+        friendEl.className = 'friend-select-item';
+        friendEl.dataset.friendId = friend.id;
+        friendEl.innerHTML = `
+            <div class="friend-avatar">
+                ${friend.photoURL ? `<img src="${friend.photoURL}" alt="${friend.displayName}">` : `<span>${(friend.displayName || 'U')[0]}</span>`}
+            </div>
+            <div class="friend-name">${escapeHtml(friend.displayName || 'User')}</div>
+            <div class="friend-checkbox"><i class="far fa-square"></i></div>
+        `;
+        friendEl.addEventListener('click', () => {
+            friendEl.classList.toggle('selected');
+            const checkbox = friendEl.querySelector('.friend-checkbox i');
+            if (friendEl.classList.contains('selected')) {
+                checkbox.className = 'fas fa-check-square';
+            } else {
+                checkbox.className = 'far fa-square';
+            }
+        });
+        friendsContainer.appendChild(friendEl);
+    });
 }
 
 // Subscribe to status state changes
@@ -668,6 +745,22 @@ const UIFailsafe = {
     },
     
     _setupLifecycleCheck() {
+        // FIX: Force-enable UI after 3 seconds if a session token is present,
+        // regardless of lifecycle state — prevents permanently frozen UI.
+        let forceEnabled = false;
+        const forceEnableTimer = setTimeout(() => {
+            if (forceEnabled) return;
+            try {
+                const hasToken = !!(localStorage.getItem('kynecta_auth') || localStorage.getItem('token') ||
+                                   localStorage.getItem('moodchat_token') || localStorage.getItem('accessToken'));
+                if (hasToken) {
+                    forceEnabled = true;
+                    this._enableUI();
+                    UILogger.info('UIFailsafe', 'UI force-enabled after timeout (session token found)');
+                }
+            } catch(e) {}
+        }, 3000);
+
         this._lifecycleCheckInterval = setInterval(() => {
             try {
                 const lifecycle = getLifecycleState();
@@ -675,6 +768,10 @@ const UIFailsafe = {
                 if (lifecycle) {
                     UILogger.updateLifecycleState(lifecycle.state);
                     if (lifecycle.state === LifecycleState.ACTIVE) {
+                        if (!forceEnabled) {
+                            forceEnabled = true;
+                            clearTimeout(forceEnableTimer);
+                        }
                         this._enableUI();
                     }
                 }
@@ -685,28 +782,59 @@ const UIFailsafe = {
     },
     
     _enableUI() {
-        this.disabledButtons.clear();
-        const protectedElements = [
-            'createStatusBtn', 'viewMyStatusBtn', 'editMyStatusBtn',
-            'viewHighlightsBtn', 'createHighlightBtn', 'viewTimelineBtn',
-            'viewStatsBtn', 'viewDraftsBtn', 'viewScheduledBtn',
-            'myStatusPreview', 'postStatusBtn', 'saveDraftBtn', 'scheduleStatusBtn',
-            'shareStatusBtn', 'saveStatusBtn', 'reportStatusBtn'
-        ];
-        protectedElements.forEach(id => {
-            const el = document.getElementById(id);
-            if (el) {
-                el.disabled = false;
-                el.style.opacity = '1';
-                el.style.pointerEvents = 'auto';
-                el.removeAttribute('aria-disabled');
-            }
-        });
-        const waitingOverlay = document.getElementById('handshakeWaitingOverlay');
-        if (waitingOverlay) waitingOverlay.remove();
-        UILogger.info('UIFailsafe', 'UI enabled (ACTIVE state)');
-    },
+    this.disabledButtons.clear();
+    const protectedElements = [
+        'createStatusBtn', 'viewMyStatusBtn', 'editMyStatusBtn',
+        'viewHighlightsBtn', 'createHighlightBtn', 'viewTimelineBtn',
+        'viewStatsBtn', 'viewDraftsBtn', 'viewScheduledBtn',
+        'myStatusPreview', 'postStatusBtn', 'saveDraftBtn', 'scheduleStatusBtn',
+        'shareStatusBtn', 'saveStatusBtn', 'reportStatusBtn',
+        // Also enable navigation buttons
+        'allTab', 'friendsTab', 'closeFriendsTab', 'pinnedTab', 'mutedTab', 'microCirclesTab',
+        'clearFiltersBtn', 'viewerBackBtn', 'pauseResumeBtn'
+    ];
+    protectedElements.forEach(id => {
+        const el = document.getElementById(id);
+        if (el) {
+            el.disabled = false;
+            el.style.opacity = '1';
+            el.style.pointerEvents = 'auto';
+            el.removeAttribute('aria-disabled');
+        }
+    });
     
+    // Also enable all category buttons
+    document.querySelectorAll('.category-btn').forEach(btn => {
+        btn.disabled = false;
+        btn.style.opacity = '1';
+        btn.style.pointerEvents = 'auto';
+    });
+    
+    // Enable quick action buttons
+    document.querySelectorAll('.quick-action-btn').forEach(btn => {
+        btn.disabled = false;
+        btn.style.opacity = '1';
+        btn.style.pointerEvents = 'auto';
+    });
+    
+    const waitingOverlay = document.getElementById('handshakeWaitingOverlay');
+    if (waitingOverlay) waitingOverlay.remove();
+    
+    // CRITICAL: Re-bind all handlers after enabling UI
+    setTimeout(() => {
+        this._rebindAllHandlers();
+        // Also trigger initial render
+        if (typeof renderStatusListInstantlyUI === 'function') {
+            renderStatusListInstantlyUI();
+        }
+        if (typeof updateMyStatusPreviewUI === 'function') {
+            updateMyStatusPreviewUI();
+        }
+    }, 100);
+    
+    UILogger.info('UIFailsafe', 'UI enabled (ACTIVE state)');
+},
+
     _setupGlobalErrorHandler() {
         window.addEventListener('error', (event) => {
             this.handleError('global', event.error || event.message);
@@ -796,7 +924,8 @@ const UIFailsafe = {
             'saveDraftBtn': handleSaveDraft,
             'scheduleStatusBtn': handleScheduleClick,
             'closeScheduleModal': () => closeModal('scheduleModal'),
-            'confirmScheduleBtn': handleConfirmSchedule,
+'cancelScheduleBtn': () => closeModal('scheduleModal'),
+'confirmScheduleBtn': handleConfirmSchedule,
             'viewHighlightsBtn': showHighlightsModal,
             'closeHighlightsModal': () => closeModal('highlightsModal'),
             'createHighlightBtn': showHighlightsEditor,
@@ -2345,21 +2474,24 @@ const InitialRender = {
             streakCountEl.textContent = streakCount || 0;
         }
     },
-
-    renderMoodChart() {
-        const chart = UIElements.getElement('moodChart');
-        if (!chart) return;
-        chart.innerHTML = '';
-        const data = moodChartData.length > 0 ? moodChartData.slice(-7) : generateSampleMoodData();
-        data.forEach((day) => {
-            const bar = document.createElement('div');
-            bar.className = 'mood-bar';
-            bar.style.backgroundColor = statusMoods[day.mood]?.color || 'var(--mood-happy)';
-            bar.style.height = `${day.value}%`;
-            bar.title = `${statusMoods[day.mood]?.name || 'Happy'} (${day.value}%)`;
-            chart.appendChild(bar);
-        });
-    },
+renderMoodChart() {
+    const chart = UIElements.getElement('moodChart');
+    if (!chart) return;
+    chart.innerHTML = '';
+    const data = moodChartData.length > 0 ? moodChartData.slice(-7) : [];
+    if (data.length === 0) {
+        chart.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-secondary);font-size:12px">Post statuses to see mood chart</div>';
+        return;
+    }
+    data.forEach((day) => {
+        const bar = document.createElement('div');
+        bar.className = 'mood-bar';
+        bar.style.backgroundColor = statusMoods[day.mood]?.color || 'var(--mood-happy)';
+        bar.style.height = `${day.value}%`;
+        bar.title = `${statusMoods[day.mood]?.name || 'Happy'} (${day.value}%)`;
+        chart.appendChild(bar);
+    });
+},
 
     createEmptyState() {
         const isAuth = isAuthenticated();
@@ -3122,14 +3254,16 @@ async function handleStatusAction(action, statusData, button) {
 // =============================================
 // BUTTON HANDLER FUNCTIONS - WITH LIFECYCLE GUARD
 // =============================================
-
 function handleCreateStatusClick() {
-    if (!ensureUIActive('createStatus')) {
+    // FIX: Allow create if session token present, even if lifecycle hasn't reached ACTIVE yet
+    const hasToken = (() => {
+        try {
+            return !!(localStorage.getItem('kynecta_auth') || localStorage.getItem('token') ||
+                      localStorage.getItem('moodchat_token') || localStorage.getItem('accessToken'));
+        } catch(e) { return false; }
+    })();
+    if (!ensureUIActive('createStatus') && !hasToken) {
         showNotification('Please wait, connecting...', 'info');
-        return;
-    }
-    if (!isAuthenticated()) {
-        showNotification('Please sign in to create a status', 'error');
         return;
     }
     const modal = UIElements.createStatusModal;
@@ -3137,6 +3271,18 @@ function handleCreateStatusClick() {
         modal.classList.add('active');
         const textTab = UIElements.querySelector('.create-status-tab[data-tab="text"]');
         if (textTab) textTab.click();
+        
+        // Load friends into the modal
+        populateFriendsInCreateModal();
+        
+        // Also try to fetch fresh friends list from core
+        const core = getCore();
+        if (core && core.loadFriendsList) {
+            core.loadFriendsList().then(() => {
+                syncDataFromCore();
+                populateFriendsInCreateModal();
+            }).catch(() => {});
+        }
     }
 }
 
@@ -3578,17 +3724,60 @@ function renderStatusesListUI(container, statusesList) {
 // BASIC EVENT LISTENERS SETUP
 // =============================================
 function setupBasicEventListeners() {
-    const categoryContainer = document.querySelector('.category-tabs');
+    // FIX: was '.category-tabs' — HTML uses '.status-categories'
+    const categoryContainer = document.querySelector('.status-categories');
     if (categoryContainer && !categoryContainer._hasListener) {
         categoryContainer._hasListener = true;
         categoryContainer.addEventListener('click', (e) => {
             const tab = e.target.closest('.category-btn');
             if (!tab) return;
-            UIElements.querySelectorAll('.category-btn').forEach(btn => btn.classList.remove('active'));
+            document.querySelectorAll('.category-btn').forEach(btn => btn.classList.remove('active'));
             tab.classList.add('active');
             updateCurrentSectionUI();
             UIStateManager.set('currentTab', tab.id);
         });
+    }
+
+    // FIX: Also bind each tab individually as a robust fallback
+    ['allTab','friendsTab','closeFriendsTab','pinnedTab','mutedTab','microCirclesTab','myStatusTab'].forEach(tabId => {
+        const tab = document.getElementById(tabId);
+        if (tab && !tab._tabDirectBound) {
+            tab._tabDirectBound = true;
+            tab.addEventListener('click', () => {
+                document.querySelectorAll('.category-btn').forEach(b => b.classList.remove('active'));
+                tab.classList.add('active');
+                updateCurrentSectionUI();
+                UIStateManager.set('currentTab', tab.id);
+            });
+        }
+    });
+
+    // FIX: Bind quick-action buttons directly
+    const viewTimelineBtn = document.getElementById('viewTimelineBtn');
+    if (viewTimelineBtn && !viewTimelineBtn._directBound) {
+        viewTimelineBtn._directBound = true;
+        viewTimelineBtn.addEventListener('click', () => {
+            if (typeof showMemoryTimelineModal === 'function') showMemoryTimelineModal();
+        });
+    }
+    const viewStatsBtn = document.getElementById('viewStatsBtn');
+    if (viewStatsBtn && !viewStatsBtn._directBound) {
+        viewStatsBtn._directBound = true;
+        viewStatsBtn.addEventListener('click', () => {
+            if (typeof showStatsModal === 'function') showStatsModal();
+        });
+    }
+    const viewScheduledBtn = document.getElementById('viewScheduledBtn');
+    if (viewScheduledBtn && !viewScheduledBtn._directBound) {
+        viewScheduledBtn._directBound = true;
+        viewScheduledBtn.addEventListener('click', () => {
+            if (typeof showScheduleModal === 'function') showScheduleModal();
+        });
+    }
+    const createStatusBtn = document.getElementById('createStatusBtn');
+    if (createStatusBtn && !createStatusBtn._directBound) {
+        createStatusBtn._directBound = true;
+        createStatusBtn.addEventListener('click', handleCreateStatusClick);
     }
     const createStatusTabs = document.querySelector('.create-status-tabs');
     if (createStatusTabs && !createStatusTabs._hasListener) {
@@ -3616,6 +3805,62 @@ function setupBasicEventListeners() {
             }
         });
     }
+// In setupBasicEventListeners(), add these:
+const saveBtn = document.getElementById('saveStatusBtn') || document.querySelector('[data-action="save"]');
+if (saveBtn && !saveBtn._bound) {
+    saveBtn._bound = true;
+    saveBtn.addEventListener('click', () => {
+        if (typeof submitStatus === 'function') submitStatus();
+        else if (window.StatusCore?.submitStatus) window.StatusCore.submitStatus();
+    });
+}
+
+const draftBtn = document.getElementById('draftPostBtn') || document.querySelector('[data-action="draft"]');
+if (draftBtn && !draftBtn._bound) {
+    draftBtn._bound = true;
+    draftBtn.addEventListener('click', () => {
+        if (typeof saveDraftFromUI === 'function') saveDraftFromUI();
+        else {
+            const data = collectStatusFormData();
+            if (data && window.StatusCore?.saveDraft) window.StatusCore.saveDraft(data);
+            showNotification('Draft saved', 'success');
+            closeModal('createStatusModal');
+        }
+    });
+}
+
+const scheduleBtn = document.getElementById('scheduleStatusBtn') || document.querySelector('[data-action="schedule"]');
+if (scheduleBtn && !scheduleBtn._bound) {
+    scheduleBtn._bound = true;
+    scheduleBtn.addEventListener('click', () => {
+        const scheduleModal = document.getElementById('scheduleModal') || document.querySelector('.schedule-modal');
+        if (scheduleModal) scheduleModal.classList.add('active');
+    });
+}
+const cancelScheduleBtn = document.getElementById('cancelScheduleBtn');
+if (cancelScheduleBtn && !cancelScheduleBtn._bound) {
+    cancelScheduleBtn._bound = true;
+    cancelScheduleBtn.addEventListener('click', () => closeModal('scheduleModal'));
+}
+
+const confirmScheduleBtn = document.getElementById('confirmScheduleBtn');
+if (confirmScheduleBtn && !confirmScheduleBtn._bound) {
+    confirmScheduleBtn._bound = true;
+    confirmScheduleBtn.addEventListener('click', () => {
+        const scheduledTime = document.getElementById('scheduleDateTime')?.value;
+        if (!scheduledTime) { showNotification('Please select a date and time', 'warning'); return; }
+        const data = collectStatusFormData();
+        if (data) {
+            data.scheduledAt = new Date(scheduledTime).toISOString();
+            data.isScheduled = true;
+            if (window.StatusCore?.saveScheduled) window.StatusCore.saveScheduled(data);
+            showNotification('Status scheduled!', 'success');
+            closeModal('scheduleModal');
+            closeModal('createStatusModal');
+        }
+    });
+}
+
     const mediaUploadArea = UIElements.getElement('mediaUploadArea');
     const mediaFileInput = UIElements.getElement('mediaFileInput');
     if (mediaUploadArea && !mediaUploadArea._hasListener) {
@@ -3754,6 +3999,23 @@ function setupEventListeners() {
             }
         });
     }
+        // Wire intent buttons (Feedback, Achievement, Advice, Happy, Motivated) in create status form
+    const intentContainers = document.querySelectorAll('.intent-options, .intent-grid');
+    intentContainers.forEach(function(container) {
+        if (container._intentBound) return;
+        container._intentBound = true;
+        container.addEventListener('click', function(e) {
+            const btn = e.target.closest('.intent-option');
+            if (!btn) return;
+            container.querySelectorAll('.intent-option').forEach(function(b) { 
+                b.classList.remove('selected', 'active'); 
+            });
+            btn.classList.add('selected', 'active');
+            // Store selected intent for postStatus to pick up
+            const intentInput = document.getElementById('selectedIntent');
+            if (intentInput) intentInput.value = btn.dataset.intent || '';
+        });
+    });
     const scheduledStatusesList = UIElements.getElement('scheduledStatusesList');
     if (scheduledStatusesList && !scheduledStatusesList._hasListener) {
         scheduledStatusesList._hasListener = true;
@@ -4687,32 +4949,63 @@ function showMemoryTimelineModal() {
     }
 }
 
-function loadMemoryTimelineContent() {
+function loadMemoryTimelineContent(activeFilter = 'all') {
+    const core = getCore();
+if ((!myStatuses || myStatuses.length === 0) && core && core.getMyStatuses) {
+    myStatuses = core.getMyStatuses();
+}
     const content = UIElements.getElement('memoryTimelineContent');
     if (!content) return;
+
+    const filterContainer = UIElements.memoryTimelineModal?.querySelector('.timeline-filters-container') 
+    || document.querySelector('.timeline-filters-container');
+if (filterContainer && !filterContainer._filterBound) {
+        filterContainer._filterBound = true;
+        filterContainer.addEventListener('click', (e) => {
+            const btn = e.target.closest('.timeline-filter-btn');
+            if (!btn) return;
+            filterContainer.querySelectorAll('.timeline-filter-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            loadMemoryTimelineContent(btn.dataset.filter || 'all');
+        });
+    }
+
     content.innerHTML = '';
     if (!myStatuses || myStatuses.length === 0) {
-        content.innerHTML = `
-            <div class="empty-state">
-                <i class="fas fa-history"></i>
-                <p>No status history yet</p>
-                <p class="subtext">Your posted statuses will appear here</p>
-            </div>
-        `;
+        content.innerHTML = `<div class="empty-state"><i class="fas fa-history"></i><p>No status history yet</p><p class="subtext">Your posted statuses will appear here</p></div>`;
         return;
     }
+
+    // Filter by intent/mood based on activeFilter
+    const FILTER_MAP = {
+        'motivational': s => s.intent === 'motivational' || s.moodType === 'energetic' || s.moodType === 'excited',
+        'reflective':   s => s.intent === 'reflective' || s.moodType === 'nostalgic',
+        'achievements': s => s.intent === 'achievement' || s.moodType === 'proud',
+        'happy':        s => s.moodType === 'happy' || s.intent === 'happy',
+        'motivated':    s => s.moodType === 'energetic' || s.intent === 'motivated',
+        'all':          () => true,
+    };
+    const filterFn = FILTER_MAP[activeFilter] || FILTER_MAP['all'];
+    const filtered = myStatuses.filter(filterFn);
+
+    if (filtered.length === 0) {
+        content.innerHTML = `<div class="empty-state"><i class="fas fa-filter"></i><p>No statuses match this filter</p></div>`;
+        return;
+    }
+
     const grouped = {};
-    myStatuses.forEach(status => {
+    filtered.forEach(status => {
         const date = new Date(status.createdAt);
         const monthYear = date.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
         if (!grouped[monthYear]) grouped[monthYear] = [];
         grouped[monthYear].push(status);
     });
+
     Object.entries(grouped).forEach(([monthYear, monthStatuses]) => {
         const section = document.createElement('div');
         section.className = 'timeline-month';
         let daysHtml = '';
-        monthStatuses.slice(0, 10).forEach(status => {
+        monthStatuses.forEach(status => {
             const date = new Date(status.createdAt);
             const day = date.getDate();
             const month = date.toLocaleDateString('en-US', { month: 'short' });
@@ -4720,16 +5013,12 @@ function loadMemoryTimelineContent() {
                 <div class="timeline-day" data-status-id="${status.id}">
                     <div class="timeline-date">${day} ${month}</div>
                     <div class="timeline-status">${UISanitizer.sanitizeHTML(getStatusPreviewText(status))}</div>
-                </div>
-            `;
+                </div>`;
         });
-        section.innerHTML = `
-            <div class="timeline-month-header">${monthYear}</div>
-            <div class="timeline-days">${daysHtml}</div>
-        `;
+        section.innerHTML = `<div class="timeline-month-header">${monthYear}</div><div class="timeline-days">${daysHtml}</div>`;
         section.querySelectorAll('.timeline-day').forEach(dayEl => {
             dayEl.addEventListener('click', () => {
-                const statusId = dayEl.dataset.statusId;
+                const statusId = parseInt(dayEl.dataset.statusId);
                 const status = myStatuses.find(s => s.id === statusId);
                 if (status) {
                     showStatusViewer(status);
@@ -4780,25 +5069,27 @@ function showStatsModal() {
 function loadStatsContent() {
     const content = UIElements.getElement('statsContent');
     if (!content) return;
+    
     const totalStatuses = myStatuses.length;
-    const totalViews = myStatuses.reduce((sum, s) => sum + (s.views || 0), 0);
-    const totalReactions = myStatuses.reduce((sum, s) => sum + (s.reactions || 0), 0);
-    const avgViewTime = myStatuses.length > 0 
-        ? Math.round(myStatuses.reduce((sum, s) => sum + (s.avgViewTime || 0), 0) / myStatuses.length) 
-        : 0;
+    const totalViews = myStatuses.reduce(function(sum, s) { return sum + (s.viewCount || s.views || 0); }, 0);
+    const totalReactions = myStatuses.reduce(function(sum, s) { return sum + (s.likeCount || s.reactions || 0) + (s.commentCount || 0); }, 0);
     const engagementRate = totalViews > 0 ? Math.round((totalReactions / totalViews) * 100) : 0;
+    const avgViewsPerStatus = totalStatuses > 0 ? Math.round(totalViews / totalStatuses) : 0;
+
     const totalStatusesStat = UIElements.getElement('totalStatusesStat');
     const totalViewsStat = UIElements.getElement('totalViewsStat');
     const totalReactionsStat = UIElements.getElement('totalReactionsStat');
     const streakStat = UIElements.getElement('streakStat');
     const avgViewTimeStat = UIElements.getElement('avgViewTimeStat');
     const engagementRateStat = UIElements.getElement('engagementRateStat');
+    
     if (totalStatusesStat) totalStatusesStat.textContent = totalStatuses;
     if (totalViewsStat) totalViewsStat.textContent = totalViews;
     if (totalReactionsStat) totalReactionsStat.textContent = totalReactions;
     if (streakStat) streakStat.textContent = streakCount || 0;
-    if (avgViewTimeStat) avgViewTimeStat.textContent = avgViewTime + 's';
+    if (avgViewTimeStat) avgViewTimeStat.textContent = avgViewsPerStatus + 'x';
     if (engagementRateStat) engagementRateStat.textContent = engagementRate + '%';
+    
     updateStatsChart();
     loadRecentViewers();
 }
@@ -4806,30 +5097,44 @@ function loadStatsContent() {
 function updateStatsChart() {
     const chart = UIElements.getElement('viewsChart');
     if (!chart) return;
-    const data = [];
-    for (let i = 29; i >= 0; i--) {
-        const date = new Date();
-        date.setDate(date.getDate() - i);
-        data.push({
-            date: date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-            views: Math.floor(Math.random() * 100) + 10
-        });
-    }
     chart.innerHTML = '';
-    const maxViews = Math.max(...data.map(d => d.views));
+
+    if (!myStatuses || myStatuses.length === 0) {
+        chart.innerHTML = '<div class="empty-state" style="height:100px;display:flex;align-items:center;justify-content:center;"><p style="color:var(--text-secondary)">No data yet</p></div>';
+        return;
+    }
+
+    // Build real per-day view counts from myStatuses
+    const dayMap = {};
+    const now = new Date();
+    for (let i = 29; i >= 0; i--) {
+        const d = new Date(now);
+        d.setDate(d.getDate() - i);
+        const key = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+        dayMap[key] = 0;
+    }
+    
+    myStatuses.forEach(function(s) {
+        const d = new Date(s.createdAt);
+        const key = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+        if (dayMap.hasOwnProperty(key)) {
+            dayMap[key] += (s.viewCount || s.views || 0);
+        }
+    });
+
+    const data = Object.entries(dayMap).map(function([date, views]) { return { date, views }; });
+    const maxViews = Math.max(...data.map(function(d) { return d.views; }), 1);
     const container = document.createElement('div');
-    container.style.display = 'flex';
-    container.style.alignItems = 'flex-end';
-    container.style.gap = '2px';
-    container.style.height = '200px';
-    container.style.width = '100%';
-    data.forEach((item) => {
+    container.style.cssText = 'display:flex;align-items:flex-end;gap:2px;height:200px;width:100%';
+    
+    data.forEach(function(item) {
         const bar = document.createElement('div');
         bar.style.flex = '1';
         bar.style.height = (item.views / maxViews * 100) + '%';
-        bar.style.backgroundColor = 'var(--primary-color)';
+        bar.style.minHeight = item.views > 0 ? '4px' : '1px';
+        bar.style.backgroundColor = item.views > 0 ? 'var(--primary-color)' : 'var(--border-color)';
         bar.style.borderRadius = '2px 2px 0 0';
-        bar.title = `${item.date}: ${item.views} views`;
+        bar.title = item.date + ': ' + item.views + ' views';
         container.appendChild(bar);
     });
     chart.appendChild(container);
@@ -4839,21 +5144,30 @@ function loadRecentViewers() {
     const list = UIElements.getElement('recentViewersList');
     if (!list) return;
     list.innerHTML = '';
-    const viewers = [
-        { name: 'Alex Johnson', time: '2 hours ago', avatar: 'AJ' },
-        { name: 'Sam Wilson', time: '5 hours ago', avatar: 'SW' },
-        { name: 'Taylor Swift', time: '1 day ago', avatar: 'TS' }
-    ];
-    viewers.forEach(viewer => {
+    
+    // Top statuses by views from real data
+    if (!myStatuses || myStatuses.length === 0) {
+        list.innerHTML = '<div class="empty-state"><p>No viewer data yet</p></div>';
+        return;
+    }
+    
+    const topStatuses = myStatuses
+        .filter(function(s) { return (s.viewCount || s.views || 0) > 0; })
+        .sort(function(a, b) { return (b.viewCount || b.views || 0) - (a.viewCount || a.views || 0); })
+        .slice(0, 5);
+    
+    if (topStatuses.length === 0) {
+        list.innerHTML = '<div style="padding:15px;color:var(--text-secondary);text-align:center">No views recorded yet</div>';
+        return;
+    }
+    
+    topStatuses.forEach(function(s) {
         const item = document.createElement('div');
         item.className = 'viewer-item';
-        item.innerHTML = `
-            <div class="viewer-avatar">${viewer.avatar}</div>
-            <div class="viewer-info">
-                <div class="viewer-name">${viewer.name}</div>
-                <div class="viewer-time">${viewer.time}</div>
-            </div>
-        `;
+        const preview = (s.text || s.content || s.question || 'Status').substring(0, 40);
+        const date = new Date(s.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+        const viewCount = s.viewCount || s.views || 0;
+        item.innerHTML = '<div class="viewer-avatar" style="background:var(--primary-color);color:#fff;font-size:11px">' + viewCount + '</div><div class="viewer-info"><div class="viewer-name">' + UISanitizer.sanitizeHTML(preview) + '</div><div class="viewer-time">' + date + ' · ' + viewCount + ' views</div></div>';
         list.appendChild(item);
     });
 }
@@ -5178,7 +5492,11 @@ function updateMoodChartUI() {
     const chart = UIElements.getElement('moodChart');
     if (!chart) return;
     chart.innerHTML = '';
-    const data = moodChartData.length > 0 ? moodChartData : generateSampleMoodData();
+    const data = moodChartData.length > 0 ? moodChartData : [];
+    if (data.length === 0) {
+        chart.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-secondary);font-size:12px">Post statuses to see mood chart</div>';
+        return;
+    }
     data.slice(-14).forEach((day) => {
         const bar = document.createElement('div');
         bar.className = 'mood-bar';
@@ -5326,47 +5644,85 @@ document.addEventListener('DOMContentLoaded', async function() {
             }, 200);
         }
         // Wait for handshake to complete
-        else {
-            UILogger.info('Init', 'Waiting for handshake to complete');
-            
-            // Poll for handshake completion
-            let checkCount = 0;
-            const maxChecks = 30; // 30 seconds max wait
-            const checkInterval = setInterval(() => {
-                checkCount++;
-                const currentLifecycle = getLifecycleState();
-                const isSessionActive = core && core.isSessionReady && core.isSessionReady();
-                
-                if ((currentLifecycle && currentLifecycle.state === LifecycleState.ACTIVE) || isSessionActive) {
-                    clearInterval(checkInterval);
-                    UILogger.info('Init', 'Handshake completed - finalizing UI');
-                    
-                    syncDataFromCore();
-                    renderStatusListInstantlyUI();
-                    updateMyStatusPreviewUI();
-                    
-                    enableProtectedUI();
-                    UIRenderPipeline.updateHandshakeStatus('connected');
-                    
-                    setTimeout(() => {
-                        setupEventListeners();
-                        ProgressiveEnhancement.execute();
-                        UIRenderPipeline.setStage('liveUpdate');
-                        LiveUpdateEngine.initialize();
-                        updateMoodChartUI();
-                        updateMyStatusPreviewUI();
-                        updateCurrentSectionUI();
-                        SkeletonLoader.hideAll();
-                        UILogger.info('Init', 'UI fully initialized');
-                    }, 200);
-                } else if (checkCount >= maxChecks) {
-                    clearInterval(checkInterval);
-                    UILogger.warn('Init', 'Handshake timeout - using cached data');
-                    UIRenderPipeline.updateHandshakeStatus('failed');
-                    SkeletonLoader.hideAll();
-                }
-            }, 1000);
+else {
+    UILogger.info('Init', 'Waiting for handshake to complete');
+    
+    let finalized = false;
+    let pollingInterval = null;
+    let pollCount = 0;
+    const MAX_POLLS = 30; // 15 seconds max fallback polling
+    
+    // Event-driven activation handler
+    const onModuleActive = () => {
+        if (finalized) return;
+        finalized = true;
+        
+        if (pollingInterval) clearInterval(pollingInterval);
+        
+        UILogger.info('Init', 'Module active event received - finalizing UI');
+        
+        syncDataFromCore();
+        renderStatusListInstantlyUI();
+        updateMyStatusPreviewUI();
+        
+        enableProtectedUI();
+        UIRenderPipeline.updateHandshakeStatus('connected');
+        
+        setTimeout(() => {
+            setupEventListeners();
+            ProgressiveEnhancement.execute();
+            UIRenderPipeline.setStage('liveUpdate');
+            LiveUpdateEngine.initialize();
+            updateMoodChartUI();
+            updateMyStatusPreviewUI();
+            updateCurrentSectionUI();
+            SkeletonLoader.hideAll();
+            UILogger.info('Init', 'UI fully initialized');
+        }, 200);
+    };
+    
+    // Listen for module active event
+document.addEventListener('moduleActive', () => {
+    UILogger.info('Init', 'Module active event received');
+    enableProtectedUI();
+    setupEventListeners();
+    renderStatusListInstantlyUI();
+    updateMyStatusPreviewUI();
+    updateCurrentSectionUI();
+});
+
+document.addEventListener('statusLifecycleChange', (e) => {
+    UILogger.info('Init', `Lifecycle change: ${e.detail?.state}`);
+    if (e.detail && e.detail.state === 'ACTIVE') {
+        UILogger.info('Init', 'ACTIVE state - enabling UI');
+        enableProtectedUI();
+        setupEventListeners();
+        renderStatusListInstantlyUI();
+        updateMyStatusPreviewUI();
+        updateCurrentSectionUI();
+    }
+});
+
+    // Fallback polling (in case events don't fire)
+    pollingInterval = setInterval(() => {
+        pollCount++;
+        const currentLifecycle = getLifecycleState();
+        const isSessionActive = core && core.isSessionReady && core.isSessionReady();
+        
+        if ((currentLifecycle && currentLifecycle.state === LifecycleState.ACTIVE) || isSessionActive) {
+            if (!finalized) {
+                onModuleActive();
+            }
+        } else if (pollCount >= MAX_POLLS) {
+            clearInterval(pollingInterval);
+            if (!finalized) {
+                UILogger.warn('Init', 'Handshake timeout - using cached data');
+                UIRenderPipeline.updateHandshakeStatus('failed');
+                SkeletonLoader.hideAll();
+            }
         }
+    }, 500); // Check every 500ms instead of 1000ms for faster response
+}
         
         // Show connecting status after 2 seconds if still waiting
         setTimeout(() => {
@@ -5440,6 +5796,28 @@ window.addEventListener('beforeunload', cleanupUI);
 window.addEventListener('pagehide', cleanupUI);
 
 function updateUserUIInstantly() {}
+
+// Add this near the end of status-ui.js, before the exports
+function retryBindHandlers() {
+    UILogger.info('UI', 'Manually retrying handler binding');
+    UIFailsafe._rebindAllHandlers();
+    setupEventListeners();
+    enableProtectedUI();
+    
+    // Force re-render
+    if (typeof renderStatusListInstantlyUI === 'function') {
+        renderStatusListInstantlyUI();
+    }
+    if (typeof updateMyStatusPreviewUI === 'function') {
+        updateMyStatusPreviewUI();
+    }
+    if (typeof updateCurrentSectionUI === 'function') {
+        updateCurrentSectionUI();
+    }
+}
+
+// Expose to window for debugging
+window.retryBindHandlers = retryBindHandlers;
 
 // =============================================
 // EXPORTS

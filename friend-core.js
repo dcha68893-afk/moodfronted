@@ -1689,23 +1689,45 @@ const ParentCommunicationManager = {
                 return;
             }
             markMessageProcessed(message.id);
-            
-            Logger.debug('ParentCommunication', 'Message received', { type: message.type, id: message.id });
-            
-            if (message.type === 'PARENT_READY') {
-                handleParentReady(message);
-                return;
+
+                    Logger.debug('ParentCommunication', 'Message received', { type: message.type, id: message.id });
+        
+        // ── OFFLINE-FIRST: Apply per-key setting changes immediately ──
+        if (message.type === 'SETTING_CHANGED' || message.type === 'SETTINGS_UPDATED') {
+            const payload = message.payload || message;
+
+            if (message.type === 'SETTING_CHANGED' && payload.section && payload.key !== undefined) {
+                const { section, key, value } = payload;
+                applySettingToFriendModule(section, key, value);
+                window.dispatchEvent(new CustomEvent('settingChanged', { detail: { section, key, value, timestamp: Date.now() } }));
             }
-            
-            if (message.type === 'AUTH_READY') {
-                handleAuthReady(message);
-                return;
+            if (message.type === 'SETTINGS_UPDATED' && payload.settings) {
+                const s = payload.settings;
+                Object.entries(s).forEach(([sec, secVal]) => {
+                    if (secVal && typeof secVal === 'object')
+                        Object.entries(secVal).forEach(([k, v]) => applySettingToFriendModule(sec, k, v));
+                });
+                window.dispatchEvent(new CustomEvent('settingsUpdated', { detail: { settings: s, timestamp: Date.now() } }));
             }
-            
-            if (message.type === 'SESSION_DATA') {
-                this._handleSessionData(message);
-                return;
-            }
+            return;
+        }
+
+        // applySettingToFriendModule is defined at top-level below
+        
+        if (message.type === 'PARENT_READY') {
+            handleParentReady(message);
+            return;
+        }
+        
+        if (message.type === 'AUTH_READY') {
+            handleAuthReady(message);
+            return;
+        }
+        
+        if (message.type === 'SESSION_DATA') {
+            this._handleSessionData(message);
+            return;
+        }
             
             if (message.type === 'ACK' && message.payload?.messageId) {
                 this._handleAck(message.payload.messageId);
@@ -5374,6 +5396,12 @@ const ParentCoordinator = {
                     case 'USER_PROFILE_UPDATED':
                         this.handleProfileUpdated(message);
                         break;
+                    case 'REQUEST_FRIENDS_LIST': {
+                        // Parent is asking for current friends list
+                        const allFriends = FriendCacheManager.getAllFriends();
+                        window.parent.postMessage({ type: 'FRIENDS_DATA', friends: allFriends }, '*');
+                        break;
+                    }
                 }
             }, 0);
         });
@@ -6062,6 +6090,9 @@ async function loadFriendsFromBackend() {
             window.dispatchEvent(new CustomEvent('friendsUpdated', { 
                 detail: { friends: validFriends, count: validFriends.length }
             }));
+
+            // Notify parent with full friends list (single send — parent listens for FRIENDS_DATA)
+            window.parent.postMessage({ type: 'FRIENDS_DATA', friends: validFriends }, '*');
             
             clearFriendsLoading();
             return { success: true, count: validFriends.length };
@@ -6072,6 +6103,8 @@ async function loadFriendsFromBackend() {
             FriendCacheManager.syncToGlobals();
             updateFriendCounts?.();
             window.dispatchEvent(new CustomEvent('friendsUpdated', { detail: { friends: cached, cached: true } }));
+            // Send cached friends to parent too
+            window.parent.postMessage({ type: 'FRIENDS_DATA', friends: cached }, '*');
             clearFriendsLoading();
             return { success: true, count: cached.length, cached: true };
         }
@@ -8956,3 +8989,90 @@ window.debugUserDiscovery = function() {
 // ✅ FIXED: Duplicate AUTH_READY warning suppressed (silent return)
 // ✅ FIXED: Polling deduplication with _fetchInFlight guard
 // =============================================
+
+// ── TOP-LEVEL: accessible from all closures ──────────────────────────────────
+function applySettingToFriendModule(section, key, value) {
+    if (section === 'appearance') {
+        if (key === 'theme') {
+            var theme = value === 'auto' ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light') : value;
+            document.documentElement.setAttribute('data-theme', theme);
+            document.body.setAttribute('data-theme', theme);
+        }
+        if (key === 'fontSize') document.documentElement.style.fontSize = value + 'px';
+        if (key === 'language') { window.__appLanguage = value; document.documentElement.setAttribute('lang', value); }
+        if (key === 'accentColor') document.documentElement.style.setProperty('--accent-color', value);
+        if (key === 'compactMode') { document.documentElement.setAttribute('data-compact', value ? 'true' : 'false'); document.body.classList.toggle('compact-mode', !!value); }
+        if (key === 'animationsEnabled' || key === 'animations') { document.documentElement.setAttribute('data-animations', value ? 'true' : 'false'); document.body.classList.toggle('no-animations', !value); }
+    }
+    if (section === 'notifications') {
+        if (key === 'soundEnabled' || key === 'notificationSound') window.__notificationSoundEnabled = value;
+        if (key === 'vibrationEnabled' || key === 'notificationVibration') window.__vibrationEnabled = value;
+        if (key === 'enableNotifications' || key === 'messageNotifications') window.__messageNotificationsEnabled = value;
+        if (key === 'groupNotifications') window.__groupNotificationsEnabled = value;
+        if (key === 'callNotifications') window.__callNotificationsEnabled = value;
+        if (key === 'mentionNotifications') window.__mentionNotificationsEnabled = value;
+        if (key === 'desktopEnabled') window.__desktopNotificationsEnabled = value;
+    }
+    if (section === 'privacy') {
+        if (key === 'whoCanAddMe') window.__whoCanAddMe = value;
+        if (key === 'canMessageMe') window.__canMessageMe = value;
+        if (key === 'onlineStatus') window.__showOnlineStatus = value;
+        if (key === 'lastSeen') window.__showLastSeen = value;
+        if (key === 'readReceipts') { window.__readReceiptsEnabled = value; document.documentElement.setAttribute('data-read-receipts', value ? 'true' : 'false'); }
+        if (key === 'typingIndicators') { window.__typingIndicatorsEnabled = value; document.documentElement.setAttribute('data-typing-indicators', value ? 'true' : 'false'); }
+        if (key === 'contactDiscovery') window.__contactDiscovery = value;
+    }
+    if (section === 'friends') {
+        if (key === 'friendRequestNotifications') window.__friendRequestNotifications = value;
+        if (key === 'autoAcceptFriends') window.__autoAcceptFriends = value;
+        if (key === 'allowRequestMessage') window.__allowRequestMessage = value;
+        if (key === 'showOnlineStatus') window.__showOnlineStatus = value;
+        if (key === 'sortFriendsBy') window.__sortFriendsBy = value;
+        if (key === 'friendLimitWarning') window.__friendLimitWarning = value;
+        if (key === 'discoverByPhone') window.__discoverByPhone = value;
+        if (key === 'discoverByEmail') window.__discoverByEmail = value;
+        if (key === 'friendSuggestions') window.__friendSuggestions = value;
+        if (key === 'friendRequestPrivacy') window.__friendRequestPrivacy = value;
+    }
+    if (section === 'chat') {
+        if (key === 'enterToSend' || key === 'enterKeySends') window.__enterToSend = value;
+        if (key === 'showTimestamps') { window.__showTimestamps = value; document.documentElement.setAttribute('data-show-timestamps', value ? 'true' : 'false'); }
+        if (key === 'messagePreviews') window.__messagePreviews = value;
+        if (key === 'allowReactions') { window.__allowReactions = value; document.documentElement.setAttribute('data-allow-reactions', value ? 'true' : 'false'); }
+        if (key === 'mediaAutoDownload') window.__mediaAutoDownload = value;
+    }
+    if (section === 'profile') {
+        if (key === 'displayName') window.__currentUserDisplayName = value;
+        if (key === 'photoUrl') window.__currentUserAvatar = value;
+        if (key === 'lastSeen') window.__showLastSeen = value;
+        if (key === 'profileVisibility') window.__profileVisibility = value;
+        if (key === 'currentMood') window.__currentMood = value;
+    }
+    if (section === 'security') {
+        if (key === 'sessionTimeout') window.__sessionTimeout = value;
+    }
+    if (section === 'mood') {
+        if (key === 'currentMood') { window.__currentMood = value; document.documentElement.setAttribute('data-mood', value); }
+        if (key === 'autoMoodDetection') window.__autoMoodDetection = value;
+        if (key === 'shareMoodStatus') window.__shareMoodStatus = value;
+        if (key === 'showMoodTo') window.__showMoodTo = value;
+    }
+    if (section === 'status') {
+        if (key === 'whoCanViewMyStatus') window.__whoCanViewMyStatus = value;
+        if (key === 'autoExpireStatus') window.__autoExpireStatus = value;
+        if (key === 'allowStatusReplies') window.__allowStatusReplies = value;
+        if (key === 'showStatusTo') window.__showStatusTo = value;
+    }
+    if (section === 'advanced') {
+        if (key === 'developerMode' || key === 'developerTools') window.__developerMode = value;
+        if (key === 'debugLogging' || key === 'debugMode') window.__debugLogging = value;
+        if (key === 'performanceMode') { window.__performanceMode = value; document.documentElement.setAttribute('data-performance-mode', value ? 'true' : 'false'); }
+        if (key === 'dataSaver') window.__dataSaver = value;
+        if (key === 'offlineMode') window.__offlineMode = value;
+        if (key === 'reduceMotion') { document.documentElement.setAttribute('data-reduce-motion', value ? 'true' : 'false'); document.body.classList.toggle('reduce-motion', !!value); }
+        if (key === 'experimentalFeatures') window.__experimentalFeatures = value;
+    }
+    if (section === 'storage') {
+        if (key === 'autoClearCache') window.__autoClearCache = value;
+    }
+}
