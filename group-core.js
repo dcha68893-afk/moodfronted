@@ -5600,14 +5600,29 @@ const createGroupOnline = async function(groupData) {
         const createGroupModal = safeGetElement('#createGroupModal');
         const friendSelectionModal = safeGetElement('#friendSelectionModal');
 
-        if (createGroupModal) createGroupModal.classList.remove('active');
-        if (friendSelectionModal) friendSelectionModal.classList.remove('active');
+        if (createGroupModal) {
+            createGroupModal.classList.remove('active');
+            createGroupModal.style.display = 'none';
+        }
+        if (friendSelectionModal) {
+            friendSelectionModal.classList.remove('active');
+            friendSelectionModal.style.display = 'none';
+        }
 
-        // FIXED: Send real invitations to every selected friend via the invite API
-        if (selectedFriends.length > 0) {
+        // FIXED: Send real invitations to every selected friend via the invite API.
+        // Also read window.__pendingGroupInvites which is set by the UI Members tab
+        // (window._cgSelectedMembers) since that Set lives outside this module scope.
+        const allInvites = [
+            ...new Set([
+                ...(selectedFriends || []),
+                ...(window.__pendingGroupInvites || [])
+            ])
+        ];
+        if (allInvites.length > 0) {
             const groupId = newGroup.id || newGroup.group?.id;
             if (groupId) {
-                for (const friendId of selectedFriends) {
+                for (const friendId of allInvites) {
+                    if (!friendId) continue;
                     try {
                         await secureApiCall(`/group-members/${groupId}/invitations`, {
                             method: 'POST',
@@ -5615,13 +5630,16 @@ const createGroupOnline = async function(groupData) {
                             headers: { 'Content-Type': 'application/json' }
                         });
                     } catch (inviteErr) {
-                        console.warn(`[createGroupOnline] Failed to invite friend ${friendId}:`, inviteErr.message);
+                        // Silently continue — restricted users may reject; non-friends may 403
+                        debugLog(`[createGroupOnline] Invite failed for ${friendId}:`, inviteErr.message);
                     }
                 }
             }
         }
 
         selectedFriends = [];
+        // Clear the UI-level pending invites
+        try { window.__pendingGroupInvites = []; } catch(_) {}
         showGroupDetails(newGroup, 'my_group');
         
         // Use safeSend for parent communication

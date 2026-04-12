@@ -713,7 +713,7 @@ function sendChildReady() {
 // =============================================
 // [PARENT_READY HANDLER]
 // =============================================
-function handleParentReady(message) {
+function handleParentReady(message, event) {
     if (parentReadyReceived) {
         console.warn('[Lifecycle] PARENT_READY already received — ignoring');
         return;
@@ -722,6 +722,13 @@ function handleParentReady(message) {
     if (currentState !== LIFECYCLE_STATES.WAIT_PARENT) {
         console.warn(`[Lifecycle] PARENT_READY received in invalid state: ${currentState} — ignoring`);
         return;
+    }
+
+    // PRODUCTION FIX: Learn origin from the event so cross-origin parent is trusted
+    if (event && event.origin) {
+        SecurityValidator.learnTrustedOrigin(event.origin);
+    } else if (message && message._origin) {
+        SecurityValidator.learnTrustedOrigin(message._origin);
     }
 
     console.log('[Lifecycle] PARENT_READY received - extracting session');
@@ -988,7 +995,11 @@ function sendMessageInternal(message) {
     }
     
     try {
-        window.parent.postMessage(validatedMessage, window.location.origin);
+        // PRODUCTION FIX: In cross-origin production iframes, window.location.origin
+        // doesn't match the parent's origin so postMessage is silently dropped.
+        // Use '*' as target — the parent validates messages on its end.
+        const targetOrigin = PRODUCTION ? '*' : window.location.origin;
+        window.parent.postMessage(validatedMessage, targetOrigin);
         Logger.debug('sendMessage', 'Sent', { type: validatedMessage.type, id: validatedMessage.id });
         DiagnosticsAgent.trackSend(validatedMessage.type);
         return true;
@@ -1558,13 +1569,52 @@ const SecurityValidator = {
         Logger.info('SecurityValidator', 'Initialized with strict origin policy');
     },
     
+    // PRODUCTION FIX: Trust https production origins and onrender.com
+    _dynamicTrusted: new Set(),
+
+    learnTrustedOrigin(origin) {
+        if (origin && typeof origin === 'string' && origin.startsWith('https://')) {
+            this._dynamicTrusted.add(origin);
+            Logger.info('SecurityValidator', `Dynamically trusted origin: ${origin}`);
+        }
+    },
+
     isOriginTrusted(origin) {
         if (!origin) return false;
-        
+
+        // Always trust same origin
         if (origin === window.location.origin) return true;
-        if (origin === 'http://localhost' || origin === 'http://127.0.0.1') return true;
+
+        // Always trust localhost variants
+        if (origin === 'http://localhost' || origin === 'http://127.0.0.1' ||
+            origin === 'http://localhost:3000' || origin === 'http://localhost:4000' ||
+            origin === 'http://127.0.0.1:3000' || origin === 'http://127.0.0.1:4000') return true;
+
+        // Trust 'null' (file:// or sandboxed iframe)
         if (origin === 'null') return true;
-        
+
+        // PRODUCTION FIX: Trust known Render.com origins explicitly
+        const KNOWN_ORIGINS = [
+            'https://moodfronted.onrender.com',
+            'https://moodchat-fy56.onrender.com'
+        ];
+        if (KNOWN_ORIGINS.includes(origin)) return true;
+
+        // Trust any *.onrender.com HTTPS origin
+        try {
+            const url = new URL(origin);
+            if (url.protocol === 'https:' && url.hostname.endsWith('.onrender.com')) return true;
+            // Trust same-hostname different port
+            const selfUrl = new URL(window.location.href);
+            if (url.hostname === selfUrl.hostname) return true;
+        } catch(e) {}
+
+        // Trust origins learned dynamically after first valid handshake
+        if (this._dynamicTrusted.has(origin)) return true;
+
+        // Trust origins pre-registered in _trustedOrigins set
+        if (this._trustedOrigins && this._trustedOrigins.has(origin)) return true;
+
         return false;
     },
     
@@ -1715,7 +1765,9 @@ const ParentCommunicationManager = {
         // applySettingToFriendModule is defined at top-level below
         
         if (message.type === 'PARENT_READY') {
-            handleParentReady(message);
+            // PRODUCTION FIX: stamp origin on message so handleParentReady can learn it
+            message._origin = event.origin;
+            handleParentReady(message, event);
             return;
         }
         
@@ -5220,8 +5272,8 @@ const KnectaAuth = {
     },
     
     secureApiCallFallback: async function(apiPath, options = {}, requireAuth = true) {
-        this.showLoading(requireAuth);
-        
+        // PRODUCTION FIX: Do NOT call showLoading(true) here — it causes a
+        // loading overlay flash on every background sync (contacts, friends, etc.)
         try {
             let token = null;
             if (requireAuth) {
@@ -5248,7 +5300,7 @@ const KnectaAuth = {
             
             return response.json();
         } finally {
-            this.showLoading(false);
+            // PRODUCTION FIX: showLoading(false) removed — we never called showLoading(true) above
         }
     },
     
@@ -5382,7 +5434,9 @@ const ParentCoordinator = {
                         this.handleSessionInvalidated(message);
                         break;
                     case 'PARENT_READY':
-                        handleParentReady(message);
+                        // PRODUCTION FIX: pass raw event so origin can be learned
+                        message._origin = event.origin;
+                        handleParentReady(message, event);
                         break;
                     case 'AUTH_READY':
                         handleAuthReady(message);
@@ -5397,9 +5451,26 @@ const ParentCoordinator = {
                         this.handleProfileUpdated(message);
                         break;
                     case 'REQUEST_FRIENDS_LIST': {
-                        // Parent is asking for current friends list
                         const allFriends = FriendCacheManager.getAllFriends();
                         window.parent.postMessage({ type: 'FRIENDS_DATA', friends: allFriends }, '*');
+                        break;
+                    }
+                    // SETTINGS FIX: handle per-key setting changes from parent
+                    case 'SETTING_CHANGED': {
+                        const p = message.payload || message;
+                        if (p.section && p.key !== undefined) {
+                            applySettingToFriendModule(p.section, p.key, p.value);
+                            window.dispatchEvent(new CustomEvent('settingChanged', { detail: { section: p.section, key: p.key, value: p.value, timestamp: Date.now() } }));
+                        }
+                        break;
+                    }
+                    case 'SETTINGS_UPDATED': {
+                        const s = (message.payload || message).settings || {};
+                        Object.entries(s).forEach(([sec, secVal]) => {
+                            if (secVal && typeof secVal === 'object')
+                                Object.entries(secVal).forEach(([k, v]) => applySettingToFriendModule(sec, k, v));
+                        });
+                        window.dispatchEvent(new CustomEvent('settingsUpdated', { detail: { settings: s, timestamp: Date.now() } }));
                         break;
                     }
                 }
@@ -5995,12 +6066,38 @@ function loadCachedDataInstantly() {
         }
         
         const cachedFriends = FriendCacheManager.getAllFriends();
-        const hasRealFriends = cachedFriends.length > 0 && cachedFriends.some(f => !f.isDemo);
-        if (hasRealFriends) {
-            // Only sync if we have real friends already cached
-        }
-        
         FriendCacheManager.syncToGlobals();
+        
+        // PRODUCTION FIX: Fire friendsUpdated immediately so UI renders from cache
+        // before the module reaches ACTIVE state. This prevents blank screens on tab click.
+        if (cachedFriends.length > 0) {
+            window.dispatchEvent(new CustomEvent('friendsUpdated', {
+                detail: { friends: cachedFriends, count: cachedFriends.length, source: 'cache', instant: true }
+            }));
+        }
+
+        // PRODUCTION FIX: Also fire cached requests and sent requests immediately
+        const cachedRequests = FriendCacheManager.getAllRequests();
+        if (cachedRequests.length > 0) {
+            window.dispatchEvent(new CustomEvent('requestsUpdated', {
+                detail: { requests: cachedRequests, count: cachedRequests.length, cached: true }
+            }));
+        }
+
+        const cachedSentRequests = FriendCacheManager.getAllSentRequests();
+        if (cachedSentRequests.length > 0) {
+            window.dispatchEvent(new CustomEvent('sentRequestsUpdated', {
+                detail: { requests: cachedSentRequests, count: cachedSentRequests.length, cached: true }
+            }));
+        }
+
+        const cachedAllUsers = FriendCacheManager.getAllUsers();
+        if (cachedAllUsers.length > 0) {
+            window._allUsersCache = cachedAllUsers;
+            window.dispatchEvent(new CustomEvent('allUsersLoaded', {
+                detail: { users: cachedAllUsers, count: cachedAllUsers.length, cached: true }
+            }));
+        }
         
         const contactsData = SafeStorage.getItem(LOCAL_STORAGE_KEYS.CONTACTS);
         if (contactsData) contacts = JSON.parse(contactsData) || [];
@@ -7894,8 +7991,9 @@ function startParallelDataLoading() {
     
     backgroundTasksStarted = true;
     
-    KnectaAuth.showLoading?.(true);
-    
+    // PRODUCTION FIX: Do NOT call KnectaAuth.showLoading(true) — it shows a
+    // full-screen blocking spinner overlay. Data loads silently in background.
+
     const loaders = [
         loadFriendsFromBackend(),
         loadFriendRequestsFromBackend(),
@@ -7910,7 +8008,7 @@ function startParallelDataLoading() {
     Promise.allSettled(loaders).then(() => {
         updateCurrentSection?.();
         showNotification?.('Friends data loaded', 'success');
-        KnectaAuth.showLoading?.(false);
+        // PRODUCTION FIX: No showLoading(false) needed since we removed showLoading(true)
     });
 }
 

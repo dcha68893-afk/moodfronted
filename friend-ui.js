@@ -259,6 +259,7 @@ function navigateToCallModule(userId, userName, callType = 'voice') {
         userId: numericUserId,
         userName: displayName,
         callType: callType,
+        returnTo: 'friends',
         timestamp: Date.now(),
         source: 'friends-module'
     };
@@ -1138,13 +1139,15 @@ export const RenderPipeline = {
         // Always update counts on these events - no lifecycle guard needed
         window.addEventListener('updateFriendCounts', () => updateFriendCounts());
 
-        window.addEventListener('friendsUpdated', () => {
+        window.addEventListener('friendsUpdated', (event) => {
             updateFriendCounts();
+            // PRODUCTION FIX: render from cache even before ACTIVE state (instant=true means from cache)
+            const fromCache = event.detail?.instant || event.detail?.cached;
             this.queueRender('friends', debounce(() => {
                 if (UIState.activeSection === 'friendsSection') renderFriends();
                 else if (UIState.activeSection === 'allFriendsSection') renderAllFriendsList();
-                else renderAllFriendsList(); // default: refresh all-friends so it's ready
-            }, 300));
+                else renderAllFriendsList();
+            }, fromCache ? 0 : 300));
         });
 
         // Catch any data load completion events and update counts
@@ -1771,9 +1774,26 @@ export const renderAllFriendsList = function() {
     const _temporaryArray = Array.isArray(window.temporaryFriends) ? window.temporaryFriends : (Array.isArray(temporaryFriends) ? temporaryFriends : []);
     const _hasData = _friendArray.length + _pinnedArray.length + _contactArray.length + _temporaryArray.length > 0;
 
-    // Only block if truly no data and not active yet
+    // PRODUCTION FIX: If we have cached data, always render it even before ACTIVE state.
+    // Previously this returned null when !isUIActive(), causing blank screens on tab click.
     if (!_hasData && !isUIActive()) {
-        // Leave existing HTML (hardcoded loading state) in place
+        // Show skeleton loader instead of blank/null so user sees something immediately
+        if (domElements.allFriendsList && !domElements.allFriendsList.querySelector('.skeleton-item')) {
+            domElements.allFriendsList.innerHTML = `
+                <div class="skeleton-item" style="display:flex;align-items:center;padding:12px 16px;gap:12px;opacity:0.5;">
+                    <div style="width:44px;height:44px;border-radius:50%;background:var(--border-color,#e0e0e0);flex-shrink:0;"></div>
+                    <div style="flex:1;"><div style="height:12px;background:var(--border-color,#e0e0e0);border-radius:4px;margin-bottom:6px;width:60%;"></div><div style="height:10px;background:var(--border-color,#e0e0e0);border-radius:4px;width:40%;"></div></div>
+                </div>
+                <div class="skeleton-item" style="display:flex;align-items:center;padding:12px 16px;gap:12px;opacity:0.35;">
+                    <div style="width:44px;height:44px;border-radius:50%;background:var(--border-color,#e0e0e0);flex-shrink:0;"></div>
+                    <div style="flex:1;"><div style="height:12px;background:var(--border-color,#e0e0e0);border-radius:4px;margin-bottom:6px;width:70%;"></div><div style="height:10px;background:var(--border-color,#e0e0e0);border-radius:4px;width:45%;"></div></div>
+                </div>
+                <div class="skeleton-item" style="display:flex;align-items:center;padding:12px 16px;gap:12px;opacity:0.2;">
+                    <div style="width:44px;height:44px;border-radius:50%;background:var(--border-color,#e0e0e0);flex-shrink:0;"></div>
+                    <div style="flex:1;"><div style="height:12px;background:var(--border-color,#e0e0e0);border-radius:4px;margin-bottom:6px;width:50%;"></div><div style="height:10px;background:var(--border-color,#e0e0e0);border-radius:4px;width:35%;"></div></div>
+                </div>
+            `;
+        }
         return null;
     }
     
@@ -4994,7 +5014,7 @@ function bindAllEvents() {
                 await simulateContactSync();
                 await loadContactsFromBackend();
                 renderContacts();
-                showNotification('Contacts synced successfully', 'success');
+                // Sync runs silently in background - no toast shown to user
             } catch (error) {
                 console.warn('Contact sync failed:', error);
                 showNotification('Failed to sync contacts', 'error');
@@ -5649,6 +5669,30 @@ function initializeUI() {
     window.addEventListener('lifecycleChanged', () => {
         if (!_eventHandlersBound) {
             bindAllEvents();
+        }
+    });
+
+    // ── Settings sync: apply per-key changes dispatched by friend-core ──────
+    window.addEventListener('settingChanged', function(e) {
+        const { section, key, value } = e.detail || {};
+        if (section && key !== undefined && typeof applySettingToFriendModule === 'function') {
+            applySettingToFriendModule(section, key, value);
+            if (section === 'appearance' && key === 'theme') {
+                // Force a repaint so the theme CSS variables take effect immediately
+                document.documentElement.style.display = 'none';
+                void document.documentElement.offsetHeight;
+                document.documentElement.style.display = '';
+            }
+        }
+    });
+    window.addEventListener('settingsUpdated', function(e) {
+        const { settings } = e.detail || {};
+        if (settings && typeof settings === 'object' && typeof applySettingToFriendModule === 'function') {
+            Object.entries(settings).forEach(([sec, secVal]) => {
+                if (secVal && typeof secVal === 'object') {
+                    Object.entries(secVal).forEach(([k, v]) => applySettingToFriendModule(sec, k, v));
+                }
+            });
         }
     });
 }

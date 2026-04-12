@@ -2408,38 +2408,46 @@ export function setupEventListeners() {
  * FIXED: These three buttons had absolutely no event listeners anywhere.
  */
 export function setupToolbarButtons() {
+    // ── FIX: removed `typeof fn === 'function'` guards.
+    // ES-module imports are module-scoped bindings — typeof always returns
+    // 'function' at parse time but the guard silently blocks calls when the
+    // binding is a live-binding that hasn't been resolved. Direct calls work.
+
     const discoverBtn = safeGetElement('#discoverGroupsBtn');
     if (discoverBtn) {
         registerUIEventListener(discoverBtn, 'click', () => {
             const panel = document.getElementById('discoverPanel');
             if (panel) {
                 panel.style.display = 'flex';
-                if (typeof loadDiscoverGroups === 'function') loadDiscoverGroups('', 'all');
+                loadDiscoverGroups('', 'all');
             }
         });
     }
+
     const invitesBtn = safeGetElement('#groupInvitesBtn');
     if (invitesBtn) {
         registerUIEventListener(invitesBtn, 'click', () => {
             const panel = document.getElementById('invitePanel');
             if (panel) {
                 panel.style.display = 'flex';
-                if (typeof loadReceivedInvites === 'function') loadReceivedInvites();
+                loadReceivedInvites();
             }
         });
     }
+
     const eventsBtn = safeGetElement('#groupEventsBtn');
     if (eventsBtn) {
         registerUIEventListener(eventsBtn, 'click', () => {
             const panel = document.getElementById('eventsPanel');
             if (panel) {
                 panel.style.display = 'flex';
-                if (typeof loadGroupEvents === 'function') loadGroupEvents('upcoming');
+                loadGroupEventsPanel('upcoming');
             }
         });
     }
-    // Backdrop click closes panels
-    ['discoverPanel','eventsPanel','invitePanel'].forEach(id => {
+
+    // Backdrop click closes any panel
+    ['discoverPanel', 'eventsPanel', 'invitePanel'].forEach(id => {
         const el = document.getElementById(id);
         if (el) {
             el.addEventListener('click', (e) => {
@@ -2447,9 +2455,10 @@ export function setupToolbarButtons() {
             });
         }
     });
-    // Discover filter tabs
+
+    // ── Discover filter tabs ──────────────────────────────────────
     document.querySelectorAll('.discover-filter').forEach(btn => {
-        btn.addEventListener('click', function() {
+        btn.addEventListener('click', function () {
             document.querySelectorAll('.discover-filter').forEach(b => {
                 b.style.background = 'none';
                 b.style.color = 'var(--text-primary)';
@@ -2459,20 +2468,22 @@ export function setupToolbarButtons() {
             this.style.color = '#fff';
             this.classList.add('active');
             const q = document.getElementById('discoverSearchInput')?.value || '';
-            if (typeof loadDiscoverGroups === 'function') loadDiscoverGroups(q, this.dataset.purpose);
+            loadDiscoverGroups(q, this.dataset.purpose);
         });
     });
+
     let discoverDebounce;
-    document.getElementById('discoverSearchInput')?.addEventListener('input', function() {
+    document.getElementById('discoverSearchInput')?.addEventListener('input', function () {
         clearTimeout(discoverDebounce);
         discoverDebounce = setTimeout(() => {
             const purpose = document.querySelector('.discover-filter.active')?.dataset.purpose || 'all';
-            if (typeof loadDiscoverGroups === 'function') loadDiscoverGroups(this.value, purpose);
+            loadDiscoverGroups(this.value, purpose);
         }, 350);
     });
-    // Events tabs
+
+    // ── Events tabs ───────────────────────────────────────────────
     document.querySelectorAll('.evt-tab').forEach(btn => {
-        btn.addEventListener('click', function() {
+        btn.addEventListener('click', function () {
             document.querySelectorAll('.evt-tab').forEach(b => {
                 b.style.background = 'var(--bg-tertiary,#252537)';
                 b.style.color = 'var(--text-secondary)';
@@ -2480,24 +2491,25 @@ export function setupToolbarButtons() {
             this.style.background = 'var(--primary-color,#6c63ff)';
             this.style.color = '#fff';
             if (this.dataset.etab === 'create') {
-                if (typeof renderCreateEventForm === 'function') renderCreateEventForm();
+                renderCreateEventForm();
             } else {
-                if (typeof loadGroupEvents === 'function') loadGroupEvents(this.dataset.etab);
+                loadGroupEventsPanel(this.dataset.etab);
             }
         });
     });
-    // Invite tabs
+
+    // ── Invitation tabs ───────────────────────────────────────────
     document.querySelectorAll('.inv-tab').forEach(btn => {
-        btn.addEventListener('click', function() {
+        btn.addEventListener('click', function () {
             document.querySelectorAll('.inv-tab').forEach(b => {
                 b.style.background = 'var(--bg-tertiary,#252537)';
                 b.style.color = 'var(--text-secondary)';
             });
             this.style.background = 'var(--primary-color,#6c63ff)';
             this.style.color = '#fff';
-            if (this.dataset.invtab === 'received') { if (typeof loadReceivedInvites === 'function') loadReceivedInvites(); }
-            else if (this.dataset.invtab === 'invite') { if (typeof loadInviteFriendsTab === 'function') loadInviteFriendsTab(); }
-            else if (this.dataset.invtab === 'sent') { if (typeof loadSentInvites === 'function') loadSentInvites(); }
+            if (this.dataset.invtab === 'received')    loadReceivedInvites();
+            else if (this.dataset.invtab === 'invite') loadInviteFriendsTab();
+            else if (this.dataset.invtab === 'sent')   loadSentInvites();
         });
     });
 }
@@ -2719,6 +2731,7 @@ export function setupCreateGroupButton() {
             }
             
             createGroupModal.classList.add('active');
+            createGroupModal.style.display = 'flex';
             
             const basicTab = safeGetElement('.create-group-tab[data-tab="basic"]');
             if (basicTab) basicTab.click();
@@ -2823,8 +2836,8 @@ export function setupCreateGroupTabs() {
             const targetId = TAB_ID_MAP[tabId] || (tabId + 'Tab');
             const targetContent = safeGetElement(`#${targetId}`);
             if (targetContent) targetContent.classList.add('active');
-            // Load friends when members tab is activated
-            if (tabId === 'members' && typeof loadFriendsForMembersTab === 'function') {
+            // Load friends when members tab is activated (direct call, no typeof guard)
+            if (tabId === 'members') {
                 loadFriendsForMembersTab();
             }
         });
@@ -3070,7 +3083,7 @@ export function setupCreateGroupModal() {
     if (closeCreateGroupModal) {
         registerUIEventListener(closeCreateGroupModal, 'click', () => {
             const m = safeGetElement('#createGroupModal');
-            if (m) m.classList.remove('active');
+            if (m) { m.classList.remove('active'); m.style.display = 'none'; }
         });
     }
 
@@ -3079,7 +3092,11 @@ export function setupCreateGroupModal() {
     if (cancelCreateGroupBtn) {
         registerUIEventListener(cancelCreateGroupBtn, 'click', () => {
             const m = safeGetElement('#createGroupModal');
-            if (m) m.classList.remove('active');
+            if (m) { m.classList.remove('active'); m.style.display = 'none'; }
+            // Reset members selection
+            if (window._cgSelectedMembers) window._cgSelectedMembers.clear();
+            const chips = safeGetElement('#selectedMembersChips');
+            if (chips) chips.innerHTML = '';
         });
     }
 
@@ -3095,17 +3112,23 @@ export function setupCreateGroupModal() {
             const btn = safeGetElement('#createGroupBtnModal');
             if (btn) { btn.disabled = true; btn.textContent = 'Creating…'; }
             try {
-                const groupData = typeof collectGroupFormData === 'function' ? collectGroupFormData() : {};
-                // Attach selected members from the members tab
+                const groupData = collectGroupFormData();
+                // Bridge Members-tab selections into the core invite flow.
+                // createGroupOnline reads `selectedFriends` from core scope;
+                // we patch window.__pendingGroupInvites so the post-create
+                // invite loop in createGroupOnline can read our selections.
                 if (window._cgSelectedMembers && window._cgSelectedMembers.size > 0) {
                     groupData.memberIds = [...window._cgSelectedMembers];
+                    // Also expose as a global for the core to pick up
+                    window.__pendingGroupInvites = [...window._cgSelectedMembers];
                 }
-                if (typeof createGroupOnline === 'function') {
-                    await createGroupOnline(groupData);
-                }
+                await createGroupOnline(groupData);
                 window._cgSelectedMembers = new Set();
+                // Ensure modal closes via both mechanisms
+                const modal = safeGetElement('#createGroupModal');
+                if (modal) { modal.classList.remove('active'); modal.style.display = 'none'; }
             } catch (e) {
-                if (typeof showNotification === 'function') showNotification('Failed to create group: ' + e.message, 'error');
+                showNotification('Failed to create group: ' + (e.message || 'Unknown error'), 'error');
             } finally {
                 if (btn) { btn.disabled = false; btn.textContent = 'Create Group'; }
             }
@@ -3580,7 +3603,13 @@ export async function loadDiscoverGroups(query = '', purpose = 'all') {
 }
 
 // ── EVENTS ────────────────────────────────────────────────────
-export async function loadGroupEvents(filter = 'upcoming') {
+// Alias so setupToolbarButtons can call loadGroupEventsPanel without
+// clashing with the loadGroupEvents imported from group-core.js
+export const loadGroupEventsPanel = async function(filter) {
+    return _loadGroupEventsPanelImpl(filter);
+};
+
+async function _loadGroupEventsPanelImpl(filter = 'upcoming') {
     const body = document.getElementById('eventsBody');
     if (!body) return;
     body.innerHTML = panelLoader();
@@ -3781,8 +3810,17 @@ async function sendPanelInvites() {
     let sent = 0, failed = 0;
     for (const fid of window._invSelFriends) {
         try {
-            const res = await panelFetch('/api/group-members/' + gid + '/invitations', { method:'POST', body: JSON.stringify({ inviteeId: fid, role:'member' }) });
-            if (res.success) sent++; else failed++;
+            const res = await panelFetch('/api/group-members/' + gid + '/invitations', {
+                method: 'POST',
+                body: JSON.stringify({ inviteeId: fid, role: 'member' })
+            });
+            // success OR "invitation sent" means the backend handled it
+            // (restricted users get an invitation; unrestricted users may be added directly)
+            if (res.success || res.message?.toLowerCase().includes('invited') || res.message?.toLowerCase().includes('sent')) {
+                sent++;
+            } else {
+                failed++;
+            }
         } catch (_) { failed++; }
     }
     if (btn) { btn.disabled = false; }

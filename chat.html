@@ -282,7 +282,11 @@
         // ENVIRONMENT DETECTION & SESSION PROTECTION
         // ======================================================================
         window.__getApiBase = function() {
-            return 'http://localhost:4000/api';
+            const host = window.location.hostname;
+            if (host === 'localhost' || host === '127.0.0.1' || host.startsWith('192.168.') || host.startsWith('10.')) {
+                return 'http://localhost:4000/api';
+            }
+            return 'https://moodchat-fy56.onrender.com/api';
         };
 
         // Session protection - prevent clearing critical auth keys
@@ -298,7 +302,20 @@
         })();
 
         // ======================================================================
-        // MODULE → IFRAME ID MAP  (outer scope — used by dispatchEventToModules
+        // TRUSTED ORIGIN HELPER
+        // ======================================================================
+        function isTrustedOrigin(origin) {
+            if (!origin || origin === 'null') return true; // sandboxed iframes
+            try {
+                const url = new URL(origin);
+                if (url.hostname === 'localhost' || url.hostname === '127.0.0.1') return true;
+                if (url.protocol === 'https:' && url.hostname.endsWith('.onrender.com')) return true;
+                if (url.origin === window.location.origin) return true;
+            } catch(e) {}
+            return false;
+        }
+
+        // ======================================================================
         // AND any code inside the message listener)
         // ======================================================================
         const moduleToIframeId = {
@@ -473,7 +490,7 @@
             if (!messagesIframe) return;
             
             window.addEventListener('message', function(event) {
-                if (event.origin !== window.location.origin && event.origin !== 'http://127.0.0.1:5500' && event.origin !== 'http://localhost:5500') {
+                if (!isTrustedOrigin(event.origin)) {
                     return;
                 }
                 const data = event.data || {};
@@ -946,45 +963,34 @@
 
 async function refreshCallHistoryForUser(userId) {
     if (!cachedToken) return [];
+    const callsIframe = document.getElementById('callsIframe');
     try {
         console.log('[Parent] Refreshing call history for user:', userId);
         const baseUrl = window.__getApiBase ? window.__getApiBase() : 'http://localhost:4000/api';
-        
-        // Send empty history first to clear loading state
-        const callsIframe = document.getElementById('callsIframe');
+
+        // Send loading indicator (not empty data — that causes flicker)
         if (callsIframe && callsIframe.contentWindow) {
             callsIframe.contentWindow.postMessage({
                 type: 'CALL_HISTORY_UPDATE',
-                payload: { calls: [], loading: false, timestamp: Date.now() }
+                payload: { calls: [], loading: true, timestamp: Date.now() }
             }, '*');
         }
-        
-        // Try primary endpoint
+
+        // Try /calls/history first, fall back to /calls?limit=50
         let response = await fetch(`${baseUrl}/calls/history?limit=50`, {
             headers: { 'Authorization': `Bearer ${cachedToken}` }
         });
-        
-        // Try alternative if primary fails
-        if (!response.ok && response.status === 500) {
-            console.log('[Parent] Primary endpoint failed (500), trying alternative');
-            response = await fetch(`${baseUrl}/calls/user/${userId}/history?limit=50`, {
-                headers: { 'Authorization': `Bearer ${cachedToken}` }
-            });
-        }
-        
-        // Try another alternative
+        // If history endpoint not wired in routes, fall back to getUserCalls
         if (!response.ok && response.status === 404) {
-            console.log('[Parent] Trying alternative endpoint');
-            response = await fetch(`${baseUrl}/calls?userId=${userId}&limit=50`, {
+            response = await fetch(`${baseUrl}/calls?limit=50&page=1`, {
                 headers: { 'Authorization': `Bearer ${cachedToken}` }
             });
         }
-        
+
         if (response.ok) {
             const data = await response.json();
-            const calls = data?.data?.calls || data?.calls || data?.data || [];
+            const calls = data?.data?.calls || data?.calls || [];
             console.log('[Parent] Loaded call history:', Array.isArray(calls) ? calls.length : 0, 'calls');
-            
             if (callsIframe && callsIframe.contentWindow) {
                 callsIframe.contentWindow.postMessage({
                     type: 'CALL_HISTORY_UPDATE',
@@ -993,7 +999,7 @@ async function refreshCallHistoryForUser(userId) {
             }
             return Array.isArray(calls) ? calls : [];
         } else {
-            console.warn('[Parent] Failed to load call history:', response.status);
+            console.warn('[Parent] Failed to load call history:', response.status, response.statusText);
             if (callsIframe && callsIframe.contentWindow) {
                 callsIframe.contentWindow.postMessage({
                     type: 'CALL_HISTORY_UPDATE',
@@ -1003,7 +1009,6 @@ async function refreshCallHistoryForUser(userId) {
         }
     } catch (err) {
         console.warn('[Parent] Failed to refresh call history:', err);
-        const callsIframe = document.getElementById('callsIframe');
         if (callsIframe && callsIframe.contentWindow) {
             callsIframe.contentWindow.postMessage({
                 type: 'CALL_HISTORY_UPDATE',
@@ -1018,7 +1023,7 @@ async function refreshCallHistoryForUser(userId) {
                 try {
                     const refreshToken = localStorage.getItem('refreshToken');
                     if (!refreshToken) return false;
-                    const response = await fetch('http://localhost:4000/api/auth/refresh', {
+                    const response = await fetch(`${window.__getApiBase()}/auth/refresh`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ refreshToken }),
@@ -1061,7 +1066,7 @@ async function refreshCallHistoryForUser(userId) {
             });
 
             window.addEventListener('message', async function(event) {
-                if (event.origin !== window.location.origin && event.origin !== 'http://127.0.0.1:5500' && event.origin !== 'http://localhost:5500') {
+                if (!isTrustedOrigin(event.origin)) {
                     return;
                 }
 
@@ -1370,6 +1375,22 @@ async function refreshCallHistoryForUser(userId) {
                     }
                 }
 
+                // ======================================================================
+                // HIDE/SHOW SIDEBAR ICONS — sent by calls module during active call
+                // ======================================================================
+                if (data.type === 'HIDE_SIDEBAR_ICONS') {
+                    document.querySelectorAll('.nav-icon, .mobile-nav-icon, .sidebar-nav .nav-item').forEach(function(el) {
+                        el.style.opacity = '0.3';
+                        el.style.pointerEvents = 'none';
+                    });
+                }
+                if (data.type === 'SHOW_SIDEBAR_ICONS') {
+                    document.querySelectorAll('.nav-icon, .mobile-nav-icon, .sidebar-nav .nav-item').forEach(function(el) {
+                        el.style.opacity = '';
+                        el.style.pointerEvents = '';
+                    });
+                }
+
                 if (data.type === 'DIRECT_CHAT_REQUEST') {
                     const chatPayload = {
                         userId: data.payload.userId,
@@ -1427,6 +1448,100 @@ async function refreshCallHistoryForUser(userId) {
                 if (data.type === 'REFRESH_CALL_HISTORY') {
                     const userId = data.payload?.userId || cachedUserId;
                     if (userId) await refreshCallHistoryForUser(userId);
+                }
+
+                // ======================================================================
+                // CALL_INITIATE — calls-core sends this when user starts a call.
+                // We POST to /calls, get the real DB UUID back, and send
+                // CALL_INITIATED to the calls iframe with the server callId.
+                // ======================================================================
+                if (data.type === 'CALL_INITIATE') {
+                    const localCallId = data.payload?.callId;
+                    const callType = data.payload?.callType || data.payload?.type || 'audio';
+                    const calleeId = data.payload?.calleeId;
+                    const participantIds = data.payload?.participantIds;
+                    const isGroupCall = data.payload?.isGroupCall || false;
+                    // Track which page initiated the call so we can return there after
+                    const callOriginPage = data.payload?.returnTo || window.__currentPage || window.__lastActivePage || 'calls';
+                    window.__pendingCallOrigin = callOriginPage;
+                    const baseUrl = window.__getApiBase ? window.__getApiBase() : 'http://localhost:4000/api';
+                    let token = cachedToken;
+                    try {
+                        if (!token) token = localStorage.getItem('token') || localStorage.getItem('moodchat_token') || localStorage.getItem('accessToken');
+                    } catch(e) {}
+
+                    try {
+                        const body = {
+                            callType: callType === 'voice' ? 'audio' : callType,
+                            isGroupCall: isGroupCall,
+                        };
+                        if (isGroupCall && participantIds) {
+                            body.participantIds = participantIds;
+                        } else if (calleeId) {
+                            body.participantIds = [parseInt(calleeId)];
+                        }
+
+                        const resp = await fetch(`${baseUrl}/calls`, {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'Authorization': `Bearer ${token}`
+                            },
+                            body: JSON.stringify(body)
+                        });
+                        const respData = await resp.json();
+
+                        if (resp.ok && (respData.data?.call?.id || respData.data?.callId)) {
+                            const serverCallId = respData.data?.call?.id || respData.data?.callId;
+                            // Store mapping: localCallId → server UUID
+                            window.__callIdMap = window.__callIdMap || {};
+                            window.__callIdMap[localCallId] = serverCallId;
+
+                            const callsIframe = document.getElementById('callsIframe');
+                            if (callsIframe && callsIframe.contentWindow) {
+                                callsIframe.contentWindow.postMessage({
+                                    type: 'CALL_INITIATED',
+                                    payload: {
+                                        ...(respData.data?.call || respData.data),
+                                        callId: serverCallId,   // real DB UUID
+                                        localCallId: localCallId,
+                                        callType: callType,
+                                        returnTo: callOriginPage,
+                                        success: true
+                                    }
+                                }, '*');
+                            }
+                        } else {
+                            console.warn('[Parent] CALL_INITIATE failed:', respData);
+                            const callsIframe = document.getElementById('callsIframe');
+                            if (callsIframe && callsIframe.contentWindow) {
+                                callsIframe.contentWindow.postMessage({
+                                    type: 'CALL_INITIATED',
+                                    payload: { success: false, error: respData?.message || 'Failed to start call', localCallId }
+                                }, '*');
+                            }
+                        }
+                    } catch(err) {
+                        console.error('[Parent] CALL_INITIATE error:', err);
+                        const callsIframe = document.getElementById('callsIframe');
+                        if (callsIframe && callsIframe.contentWindow) {
+                            callsIframe.contentWindow.postMessage({
+                                type: 'CALL_INITIATED',
+                                payload: { success: false, error: err.message, localCallId }
+                            }, '*');
+                        }
+                    }
+                }
+
+                // Translate local callId to server UUID for any API_REQUEST to /calls/:id/end|accept|reject
+                if (data.type === 'API_REQUEST' && window.__callIdMap) {
+                    let ep = data.payload?.endpoint || '';
+                    // Replace local call_TIMESTAMP_random IDs with server UUIDs
+                    Object.entries(window.__callIdMap).forEach(([local, server]) => {
+                        if (ep.includes(local)) {
+                            data.payload.endpoint = ep.replace(local, server);
+                        }
+                    });
                 }
 
                 if (data.type === 'GET_FRIENDS_LIST') {

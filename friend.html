@@ -242,25 +242,15 @@
         }
 
         /* ========== CONNECTION OVERLAY ========== */
-        .connection-overlay {
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background: rgba(0, 0, 0, 0.85);
-            backdrop-filter: blur(5px);
-            display: none;
-            justify-content: center;
-            align-items: center;
-            z-index: 100000;
-            opacity: 0;
-            transition: opacity 0.3s ease;
-        }
-
+        /* PRODUCTION FIX: connection-overlay permanently disabled — it blocks
+           the entire UI during WAIT_PARENT handshake in cross-origin iframes.
+           The fix is in SecurityValidator.isOriginTrusted() instead. */
+        .connection-overlay,
         .connection-overlay.active {
-            display: flex;
-            opacity: 1;
+            display: none !important;
+            opacity: 0 !important;
+            pointer-events: none !important;
+            visibility: hidden !important;
         }
 
         .connection-content {
@@ -459,22 +449,13 @@
         }
 
         /* ========== LOADING OVERLAY ========== */
-        .loading-overlay {
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background: rgba(0, 0, 0, 0.1);
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            z-index: 9999;
-            display: none;
-        }
-
+        /* PRODUCTION FIX: loading-overlay permanently disabled — KnectaAuth.showLoading()
+           calls removed from startParallelDataLoading. Data loads silently in background. */
+        .loading-overlay,
         .loading-overlay.active {
-            display: flex;
+            display: none !important;
+            pointer-events: none !important;
+            visibility: hidden !important;
         }
 
         .loading-spinner {

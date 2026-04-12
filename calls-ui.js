@@ -209,14 +209,27 @@ async function requestMediaPermissions(callType) {
         const userId = data.userId || data.user_id || data.id;
         const userName = data.userName || data.name || data.user_name || 'User';
         const callType = data.callType || data.type || data.call_type || 'voice';
-        const returnTo = data.returnTo || 'messages';
+        // Determine where the call was started from:
+        //   'friends'   → came from Friends page  → return to friends page after call
+        //   'messages'  → came from Messages/chat  → return to messages page (specific chat) after call
+        //   'calls'     → came from Calls sidebar  → stay on calls page after call
+        const source = data.source || data.origin || data.from || 'calls';
+        let returnTo = data.returnTo || source;
+        // Normalise known source labels
+        if (returnTo === 'friends-page' || returnTo === 'friends' || returnTo === 'friend') returnTo = 'friends';
+        else if (returnTo === 'messages' || returnTo === 'chat' || returnTo === 'message') returnTo = 'messages';
+        else returnTo = 'calls';
+
+        // For messages origin we may also receive the target conversationId / chatUserId
+        const chatUserId = data.chatUserId || data.conversationUserId || null;
         
-        console.log('[Calls UI][Early] Received OPEN_CALL_WITH_USER:', { userId, userName, callType, returnTo });
+        console.log('[Calls UI][Early] Received OPEN_CALL_WITH_USER:', { userId, userName, callType, returnTo, chatUserId });
         
         if (!userId) return;
         
         // Store returnTo so endCall can navigate back
         window.__pendingCallReturnTo = returnTo;
+        window.__pendingCallChatUserId = chatUserId || userId; // for messages return
         
         // Store for processing
         pendingOpenCall = { userId, userName, callType };
@@ -281,7 +294,7 @@ async function loadCallHistory() {
         // Use numeric userId
         const userId = window.__CHILD_SESSION__?.userId || 8;
         
-        const response = await fetch(`http://localhost:4000/api/calls/history?limit=50`, {
+        const response = await fetch(`${(window.__getApiBase && window.__getApiBase()) || 'http://localhost:4000/api'}/calls/history?limit=50`, {
             headers: {
                 'Authorization': `Bearer ${token}`,
                 'Content-Type': 'application/json'
@@ -326,16 +339,25 @@ function displayCallHistory(calls) {
     // Build each call item using DOM API (avoids innerHTML sanitizer mangling)
     function buildCallItem(call) {
         const otherParticipant = (call.otherParticipants && call.otherParticipants[0]) || call.caller;
-        const name = (otherParticipant && (otherParticipant.displayName || otherParticipant.username)) || 'Unknown';
+        const currentUserId = window.__CHILD_SESSION__?.userId;
+        const otherId = call.callerId == currentUserId ? call.receiverId : call.callerId;
+        const contactMatch = (UIState.contacts || window.__cachedCallContacts || []).find(c => c.id == otherId || c.userId == otherId);
+        const name = (otherParticipant && (otherParticipant.displayName || otherParticipant.username))
+            || (contactMatch && (contactMatch.displayName || contactMatch.username || contactMatch.name))
+            || (call.callerInfo?.username) || (call.calleeInfo?.username)
+            || ('User #' + (otherId || '?'));
         const initials = name.split(' ').map(function(n){ return n[0]; }).join('').toUpperCase().substring(0, 2);
-        const isMissed = call.status === 'missed';
-        const isIncoming = call.direction === 'incoming';
+        const isOutgoing = call.callerId == currentUserId;
+        const isMissed = call.status === 'missed' && !isOutgoing;
+        const isIncoming = !isOutgoing;
+        const direction = isOutgoing ? 'outgoing' : (isMissed ? 'missed' : 'incoming');
         const iconClass = call.type === 'video' ? 'fa-video' : 'fa-phone';
-        const statusIconClass = isMissed ? 'fa-phone-slash' : (isIncoming ? 'fa-arrow-down' : 'fa-arrow-up');
-        const statusClass = isMissed ? 'missed' : (isIncoming ? 'incoming' : 'outgoing');
+        // Direction arrow icons with distinct colors via CSS class
+        const statusIconClass = isMissed ? 'fa-phone-slash' : (isOutgoing ? 'fa-arrow-up' : 'fa-arrow-down');
+        const directionLabel = isMissed ? 'Missed' : (isOutgoing ? 'Outgoing' : 'Incoming');
 
         const item = document.createElement('div');
-        item.className = 'call-history-item' + (isMissed ? ' missed' : '');
+        item.className = 'call-history-item ' + direction;
         item.dataset.callId = call.id || '';
 
         const avatarDiv = document.createElement('div');
@@ -351,8 +373,13 @@ function displayCallHistory(calls) {
         const nameDiv = document.createElement('div');
         nameDiv.className = 'call-name';
         nameDiv.textContent = name;
+
+        // Status icon with direction color
         const statusIcon = document.createElement('span');
-        statusIcon.className = 'call-status-icon ' + statusClass;
+        statusIcon.className = 'call-status-icon ' + direction;
+        statusIcon.title = directionLabel;
+        statusIcon.style.marginLeft = '6px';
+        statusIcon.style.fontSize = '11px';
         const statusI = document.createElement('i');
         statusI.className = 'fas ' + statusIconClass;
         statusIcon.appendChild(statusI);
@@ -383,13 +410,21 @@ function displayCallHistory(calls) {
 
         const callBtn = document.createElement('button');
         callBtn.className = 'call-action-btn';
-        callBtn.dataset.userId = (otherParticipant && otherParticipant.id) ? String(otherParticipant.id) : '';
+        callBtn.title = 'Call back';
+        const callBtnUserId = String((otherParticipant && otherParticipant.id) ? otherParticipant.id : (otherId || ''));
+        callBtn.dataset.userId = callBtnUserId;
         callBtn.dataset.userName = name;
-        callBtn.dataset.callType = call.type || 'audio';
+        callBtn.dataset.callType = call.type || 'voice';
         const btnI = document.createElement('i');
         btnI.className = 'fas fa-phone';
         callBtn.appendChild(btnI);
-        callBtn.addEventListener('click', handleCallActionClick);
+        callBtn.addEventListener('click', function(e) {
+            e.stopPropagation();
+            // Call-back from history stays in calls page
+            window.__pendingCallReturnTo = 'calls';
+            window.__pendingCallChatUserId = null;
+            handleCallActionClick.call(callBtn, e);
+        });
 
         item.appendChild(avatarDiv);
         item.appendChild(infoDiv);
@@ -437,9 +472,11 @@ function handleCallActionClick(e) {
     const callType = this.dataset.callType || 'voice';
     
     if (userId) {
-        // Trigger call with this user
+        // Call history is in the calls page - return to calls after call ends
+        window.__pendingCallReturnTo = 'calls';
+        window.__pendingCallChatUserId = null;
         const event = new CustomEvent('OPEN_CALL_WITH_USER', {
-            detail: { userId, userName, callType, source: 'call-history' }
+            detail: { userId, userName, callType, source: 'calls', returnTo: 'calls' }
         });
         window.dispatchEvent(event);
     }
@@ -640,6 +677,15 @@ function handleCallActionClick(e) {
         if (fallbackModeActive) {
             showNotification('Limited connectivity - Please retry later', 'warning');
             return false;
+        }
+        
+        // Media actions are allowed in any active call state — don't block on coreReady
+        const mediaActions = ['toggleMute', 'toggleVideo', 'toggleScreenShare'];
+        if (mediaActions.includes(actionName)) {
+            const activeStates = ['connected', 'ongoing', 'active', 'call_ready', 'in_call', 'ACTIVE', 'initiating'];
+            if (activeStates.includes(UIState.callState) || UIState.callActive === true || !!UIState.activeCallId) {
+                return true;
+            }
         }
         
         // Use core's assertActive if available
@@ -2426,14 +2472,14 @@ renderContactsList: function(contacts) {
         let html = '';
         contacts.forEach(contact => {
             // CRITICAL: Extract name correctly from various formats
-            const name = contact.displayName || contact.username || contact.name || contact.fullName || 'Unknown';
+            const name = contact.displayName || contact.username || contact.name || contact.fullName || ('User #' + (contact.id || contact.userId));
             const userId = contact.id || contact.userId;
-            const initials = name !== 'Unknown' ? name.split(' ').map(n => n[0]).join('').toUpperCase().substring(0, 2) : '?';
+            const initials = name ? name.split(' ').map(n => n[0]).join('').toUpperCase().substring(0, 2) : '?';
             const bgColor = '#6c5ce7';
             const status = contact.status || (contact.isOnline ? 'online' : 'offline');
             
             html += `
-                <div class="contact-item" data-id="${userId}">
+                <div class="contact-item" data-id="${userId}" data-name="${this.sanitizeHTML(name)}">
                     <div class="contact-checkbox-container">
                         <input type="checkbox" class="contact-checkbox" id="contact-${userId}" value="${userId}">
                     </div>
@@ -2449,6 +2495,14 @@ renderContactsList: function(contacts) {
                             <span class="status-dot"></span>
                             ${status === 'online' ? 'Online' : (status === 'away' ? 'Away' : 'Offline')}
                         </div>
+                    </div>
+                    <div class="contact-call-actions">
+                        <button class="contact-audio-call-btn" data-user-id="${userId}" data-user-name="${this.sanitizeHTML(name)}" title="Audio call">
+                            <i class="fas fa-phone"></i>
+                        </button>
+                        <button class="contact-video-call-btn" data-user-id="${userId}" data-user-name="${this.sanitizeHTML(name)}" title="Video call">
+                            <i class="fas fa-video"></i>
+                        </button>
                     </div>
                 </div>
             `;
@@ -2469,6 +2523,34 @@ renderContactsList: function(contacts) {
         document.querySelectorAll('.contact-item').forEach(item => {
             item.removeEventListener('click', this.handleContactItemClick);
             item.addEventListener('click', this.handleContactItemClick);
+        });
+
+        // Attach direct call button handlers
+        document.querySelectorAll('.contact-audio-call-btn').forEach(btn => {
+            btn.addEventListener('click', function(e) {
+                e.stopPropagation();
+                const userId = btn.dataset.userId;
+                const userName = btn.dataset.userName || 'User';
+                if (userId && typeof startCallWithUser === 'function') {
+                    startCallWithUser(userId, userName, 'voice');
+                } else {
+                    const event = new CustomEvent('OPEN_CALL_WITH_USER', { detail: { userId, userName, callType: 'voice' } });
+                    window.dispatchEvent(event);
+                }
+            });
+        });
+        document.querySelectorAll('.contact-video-call-btn').forEach(btn => {
+            btn.addEventListener('click', function(e) {
+                e.stopPropagation();
+                const userId = btn.dataset.userId;
+                const userName = btn.dataset.userName || 'User';
+                if (userId && typeof startCallWithUser === 'function') {
+                    startCallWithUser(userId, userName, 'video');
+                } else {
+                    const event = new CustomEvent('OPEN_CALL_WITH_USER', { detail: { userId, userName, callType: 'video' } });
+                    window.dispatchEvent(event);
+                }
+            });
         });
         
         console.log('[Calls UI] Contacts rendered:', contacts.length);
@@ -2547,12 +2629,12 @@ sanitizeHTML: function(str) {
                 
                 let html = '';
                 contacts.slice(0, 20).forEach(contact => {
-                    const name = contact.name || 'Unknown';
+                    const name = contact.displayName || contact.username || contact.name || ('User #' + contact.id);
                     const initials = name.split(' ').map(n => n[0]).join('').toUpperCase().substring(0, 2);
                     const bgColor = '#6c5ce7'; // Default color
                     
                     html += `
-                        <div class="contact-item" data-id="${SecuritySanitizer.sanitizeString(contact.id)}">
+                        <div class="contact-item" data-id="${SecuritySanitizer.sanitizeString(contact.id)}" data-name="${SecuritySanitizer.sanitizeString(name)}">
                             <div class="contact-checkbox-container">
                                 <input type="checkbox" class="contact-checkbox" id="contact-${SecuritySanitizer.sanitizeString(contact.id)}">
                             </div>
@@ -2569,6 +2651,14 @@ sanitizeHTML: function(str) {
                                     <span class="status-dot"></span>
                                     ${SecuritySanitizer.sanitizeString(contact.status || 'Offline')}
                                 </div>
+                            </div>
+                            <div class="contact-call-actions">
+                                <button class="contact-audio-call-btn" data-user-id="${SecuritySanitizer.sanitizeString(contact.id)}" data-user-name="${SecuritySanitizer.sanitizeString(name)}" title="Audio call">
+                                    <i class="fas fa-phone"></i>
+                                </button>
+                                <button class="contact-video-call-btn" data-user-id="${SecuritySanitizer.sanitizeString(contact.id)}" data-user-name="${SecuritySanitizer.sanitizeString(name)}" title="Video call">
+                                    <i class="fas fa-video"></i>
+                                </button>
                             </div>
                         </div>
                     `;
@@ -2598,6 +2688,43 @@ sanitizeHTML: function(str) {
             document.querySelectorAll('.contact-item').forEach(item => {
                 item.removeEventListener('click', handleContactClick);
                 item.addEventListener('click', handleContactClick);
+            });
+            // Wire audio/video call buttons in the contacts list
+            document.querySelectorAll('.contact-audio-call-btn').forEach(btn => {
+                btn.addEventListener('click', function(e) {
+                    e.stopPropagation();
+                    const userId = btn.dataset.userId;
+                    const userName = btn.dataset.userName || 'User';
+                    if (!userId) return;
+                    // Calls page contact list → return to calls after call ends
+                    window.__pendingCallReturnTo = 'calls';
+                    window.__pendingCallChatUserId = null;
+                    if (typeof startCallWithUser === 'function') {
+                        startCallWithUser(userId, userName, 'voice');
+                    } else {
+                        window.dispatchEvent(new CustomEvent('OPEN_CALL_WITH_USER', {
+                            detail: { userId, userName, callType: 'voice', source: 'calls', returnTo: 'calls' }
+                        }));
+                    }
+                });
+            });
+            document.querySelectorAll('.contact-video-call-btn').forEach(btn => {
+                btn.addEventListener('click', function(e) {
+                    e.stopPropagation();
+                    const userId = btn.dataset.userId;
+                    const userName = btn.dataset.userName || 'User';
+                    if (!userId) return;
+                    // Calls page contact list → return to calls after call ends
+                    window.__pendingCallReturnTo = 'calls';
+                    window.__pendingCallChatUserId = null;
+                    if (typeof startCallWithUser === 'function') {
+                        startCallWithUser(userId, userName, 'video');
+                    } else {
+                        window.dispatchEvent(new CustomEvent('OPEN_CALL_WITH_USER', {
+                            detail: { userId, userName, callType: 'video', source: 'calls', returnTo: 'calls' }
+                        }));
+                    }
+                });
             });
         },
         
@@ -3247,12 +3374,19 @@ const timer = setInterval(() => {
             UIState.callParticipants = callData.participants || [];
             UIState.callStartTime = Date.now();
             UIState.callType = callData.callType;
+            UIState.callActive = true;
+            UIState.callState = 'initiating';
             
             if (elements.callContainer) {
                 elements.callContainer.classList.add('active');
             }
             if (elements.sidebar) {
                 elements.sidebar.style.display = 'none';
+            }
+            
+            // Hide sidebar icons in parent frame
+            if (window.parent && window.parent !== window) {
+                window.parent.postMessage({ type: 'HIDE_SIDEBAR_ICONS', module: 'calls' }, '*');
             }
             
             const participantNames = UIState.callParticipants.map(p => p.name).join(', ') || 'Call';
@@ -3290,17 +3424,37 @@ const timer = setInterval(() => {
         },
         
         handleCallEnded: function(callData) {
+            // Reset state FIRST
+            UIState.activeCallId = null;
+            UIState.callActive = false;
+            UIState.callState = 'idle';
+            UIState.callParticipants = [];
+            UIState.callStartTime = null;
+            UIState.callType = null;
+            window._currentIncomingCallId = null;
+
             if (elements.callContainer) {
                 elements.callContainer.classList.remove('active');
             }
             if (elements.sidebar) {
                 elements.sidebar.style.display = 'flex';
             }
+            if (elements.incomingCallModal) {
+                elements.incomingCallModal.classList.remove('active');
+                UIState.activeModals && UIState.activeModals.delete('incomingCallModal');
+            }
             
             if (UIState.callDurationInterval) {
                 clearInterval(UIState.callDurationInterval);
                 UIState.callDurationInterval = null;
             }
+            
+            // Stop local stream tracks
+            if (UIState.localStream) {
+                UIState.localStream.getTracks().forEach(t => t.stop());
+                UIState.localStream = null;
+            }
+            UIState.remoteStreams.clear();
             
             if (elements.videoGrid) {
                 elements.videoGrid.innerHTML = '';
@@ -3317,27 +3471,45 @@ const timer = setInterval(() => {
                 UIEventHandlers.disableFocusMode();
             }
             
-            UIState.activeCallId = null;
-            UIState.callParticipants = [];
-            UIState.callStartTime = null;
-            UIState.callType = null;
-            UIState.localStream = null;
-            UIState.remoteStreams.clear();
-            
             UIState.currentView = 'sidebar';
             
-            // FIX: Navigate back to messages module immediately after call ends.
-            // The parent chat.html handles SWITCH_MODULE and will restore the
-            // exact chat the user had open before the call — user won't notice
-            // any navigation happened.
+            // Restore sidebar icons to parent
             if (window.parent && window.parent !== window) {
-                window.parent.postMessage({
-                    type: 'SWITCH_MODULE',
-                    module: 'messages',
-                    payload: { returnFromCall: true },
-                    timestamp: Date.now()
-                }, '*');
+                window.parent.postMessage({ type: 'SHOW_SIDEBAR_ICONS', module: 'calls' }, '*');
             }
+
+            // ── Navigate back to the correct screen based on call origin ──────
+            const returnTo = window.__pendingCallReturnTo || 'calls';
+            const chatUserId = window.__pendingCallChatUserId || null;
+
+            // Clear stored origin so next call starts fresh
+            window.__pendingCallReturnTo = null;
+            window.__pendingCallChatUserId = null;
+
+            if (window.parent && window.parent !== window) {
+                if (returnTo === 'messages' && chatUserId) {
+                    // Return to messages module AND open the specific chat
+                    window.parent.postMessage({
+                        type: 'SWITCH_MODULE',
+                        module: 'messages',
+                        payload: { returnFromCall: true, openChatWith: chatUserId },
+                        timestamp: Date.now()
+                    }, '*');
+                } else if (returnTo === 'friends') {
+                    // Return to friends/contacts page
+                    window.parent.postMessage({
+                        type: 'SWITCH_MODULE',
+                        module: 'friends',
+                        payload: { returnFromCall: true },
+                        timestamp: Date.now()
+                    }, '*');
+                }
+                // If returnTo === 'calls' we stay here — no SWITCH_MODULE needed
+            }
+            // ──────────────────────────────────────────────────────────────────
+
+            // Refresh call history
+            setTimeout(() => UIEventHandlers.refreshCallHistoryAfterCall && UIEventHandlers.refreshCallHistoryAfterCall(), 800);
 
             setTimeout(() => {
                 UIEventHandlers.showPrivateNotesModal();
@@ -3510,9 +3682,13 @@ const timer = setInterval(() => {
                 return true;
             }
             
-            if (event.origin !== window.location.origin && 
-                !event.origin.includes('localhost') && 
-                !event.origin.includes('127.0.0.1')) {
+            const origin = event.origin || '';
+            // Trust same-origin, localhost, and production onrender.com origins
+            if (origin !== window.location.origin && 
+                !origin.includes('localhost') && 
+                !origin.includes('127.0.0.1') &&
+                !(origin.startsWith('https://') && origin.endsWith('.onrender.com')) &&
+                origin !== 'null') {
                 return false;
             }
             
@@ -4594,9 +4770,9 @@ const timer = setInterval(() => {
             if (!canPerformAction('toggleScreenShare')) return;
             
             if (UIState.isScreenSharing) {
-                this.stopScreenShare();
+                UIEventHandlers.stopScreenShare();
             } else {
-                this.startScreenShare();
+                UIEventHandlers.startScreenShare();
             }
         },
         
@@ -4678,7 +4854,7 @@ const timer = setInterval(() => {
         return;
     }
     
-    if (confirm('End the call?')) {
+    {
         const callId = UIState.activeCallId;
         const startTime = UIState.callStartTime;
         const duration = startTime ? Math.floor((Date.now() - startTime) / 1000) : 0;
@@ -4723,7 +4899,7 @@ const timer = setInterval(() => {
         const token = window.__CHILD_SESSION__?.token || localStorage.getItem('token');
         if (token && numericCallId) {
             try {
-                const response = await fetch(`http://localhost:4000/api/calls/${numericCallId}/end`, {
+                const response = await fetch(`${(window.__getApiBase && window.__getApiBase()) || 'http://localhost:4000/api'}/calls/${numericCallId}/end`, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
@@ -4818,13 +4994,29 @@ const timer = setInterval(() => {
         // Navigate back
         setTimeout(() => {
             if (window.parent && window.parent !== window) {
-                const returnTo = window.__pendingCallReturnTo || 'messages';
-                window.parent.postMessage({
-                    type: 'CHILD_CLOSING',
-                    module: 'calls',
-                    returnTo: returnTo,
-                    timestamp: Date.now()
-                }, '*');
+                window.parent.postMessage({ type: 'SHOW_SIDEBAR_ICONS', module: 'calls' }, '*');
+                const returnTo = window.__pendingCallReturnTo || 'calls';
+                const chatUserId = window.__pendingCallChatUserId || null;
+                // Clear
+                window.__pendingCallReturnTo = null;
+                window.__pendingCallChatUserId = null;
+
+                if (returnTo === 'messages' && chatUserId) {
+                    window.parent.postMessage({
+                        type: 'SWITCH_MODULE',
+                        module: 'messages',
+                        payload: { returnFromCall: true, openChatWith: chatUserId },
+                        timestamp: Date.now()
+                    }, '*');
+                } else if (returnTo === 'friends') {
+                    window.parent.postMessage({
+                        type: 'SWITCH_MODULE',
+                        module: 'friends',
+                        payload: { returnFromCall: true },
+                        timestamp: Date.now()
+                    }, '*');
+                }
+                // If 'calls' — stay; no SWITCH_MODULE needed
             }
         }, 800);
     }
@@ -5124,22 +5316,6 @@ refreshCallHistoryAfterCall: function() {
             }
         },
         
-        declineIncomingCall: function() {
-            if (elements.incomingCallModal.dataset.timer) {
-                clearInterval(parseInt(elements.incomingCallModal.dataset.timer));
-            }
-            
-            elements.incomingCallModal.classList.remove('active');
-            UIState.activeModals.delete('incomingCallModal');
-            
-            if (coreInstance && coreInstance.declineCall) {
-                coreInstance.declineCall();
-            }
-            
-            showNotification('Call declined', 'info');
-        },
-        
-
         acceptIncomingCall: function() {
     this.acceptIncomingCallGeneric(false);
 },
@@ -5223,13 +5399,48 @@ declineIncomingCall: async function() {
     
     const callId = window._currentIncomingCallId || UIState.activeCallId;
     
+    // Hide incoming call modal
     if (elements.incomingCallModal) {
         elements.incomingCallModal.classList.remove('active');
-        UIState.activeModals.delete('incomingCallModal');
+        UIState.activeModals && UIState.activeModals.delete('incomingCallModal');
     }
     
+    // Reset all call state so the UI unfreezes
+    UIState.activeCallId = null;
+    UIState.callActive = false;
+    UIState.callState = 'idle';
+    UIState.callParticipants = [];
+    UIState.callStartTime = null;
+    window._currentIncomingCallId = null;
+
+    // Hide call container, show sidebar
+    if (elements.callContainer) elements.callContainer.classList.remove('active');
+    if (elements.sidebar) elements.sidebar.style.display = 'flex';
+
+    // Stop local stream if acquired
+    if (UIState.localStream) {
+        UIState.localStream.getTracks().forEach(t => t.stop());
+        UIState.localStream = null;
+    }
+
+    // Stop call timer
+    if (UIState.callDurationInterval) {
+        clearInterval(UIState.callDurationInterval);
+        UIState.callDurationInterval = null;
+    }
+
+    // Clear video grid
+    if (elements.videoGrid) {
+        elements.videoGrid.innerHTML = '';
+        if (elements.offlineCallPlaceholder) elements.offlineCallPlaceholder.style.display = 'flex';
+    }
+
+    // Restore parent sidebar icons
+    if (window.parent && window.parent !== window) {
+        window.parent.postMessage({ type: 'SHOW_SIDEBAR_ICONS', module: 'calls' }, '*');
+    }
+
     if (callId) {
-        // FIX: Send CALL_REJECT to mark as missed in database
         if (coreInstance && coreInstance.sendAction) {
             await coreInstance.sendAction('CALL_REJECT', {
                 callId: callId,
@@ -5241,12 +5452,15 @@ declineIncomingCall: async function() {
         }
     }
     
-    // Clear the call state
+    // Reset core state
     if (coreInstance && coreInstance.resetCallState) {
         coreInstance.resetCallState();
     }
     
     showNotification('Call declined', 'info');
+
+    // Refresh history after a moment
+    setTimeout(() => UIEventHandlers.refreshCallHistoryAfterCall && UIEventHandlers.refreshCallHistoryAfterCall(), 800);
 },
         generateVoiceCallLink: function() {
             UIEventHandlers.generateCallLink('voice');
@@ -5510,47 +5724,22 @@ declineIncomingCall: async function() {
     // ==================== UI PANEL HANDLERS ====================
     const UIPanelHandlers = {
         openParticipantsPanel: function() {
-            if (!UIState.activeCallId && !coreInstance?.isInCall?.()) {
-                showNotification('Join a call to see participants', 'info');
-                return;
-            }
-            
             this.createParticipantsPanel();
         },
         
         openChatPanel: function() {
-            if (!UIState.activeCallId && !coreInstance?.isInCall?.()) {
-                showNotification('Join a call to use chat', 'info');
-                return;
-            }
-            
             this.createChatPanel();
         },
         
         openWhiteboardPanel: function() {
-            if (!UIState.activeCallId && !coreInstance?.isInCall?.()) {
-                showNotification('Join a call to use whiteboard', 'info');
-                return;
-            }
-            
             this.createWhiteboardPanel();
         },
         
         openNotesPanel: function() {
-            if (!UIState.activeCallId && !coreInstance?.isInCall?.()) {
-                showNotification('Join a call to use notes', 'info');
-                return;
-            }
-            
             this.createNotesPanel();
         },
         
         openPollsPanel: function() {
-            if (!UIState.activeCallId && !coreInstance?.isInCall?.()) {
-                showNotification('Join a call to create polls', 'info');
-                return;
-            }
-            
             this.createPollsPanel();
         },
         
@@ -5561,511 +5750,466 @@ declineIncomingCall: async function() {
         createParticipantsPanel: function() {
             const existingPanel = document.querySelector('.feature-panel');
             if (existingPanel) existingPanel.remove();
-            
+
             const panel = document.createElement('div');
             panel.className = 'feature-panel participants-panel';
-            
-            const participants = UIState.callParticipants || window.AppState?.callParticipants || [];
-            const participantCount = participants.length + 1;
-            
-            let participantsHtml = '';
-            participants.forEach(participant => {
-                const name = participant.name || 'Participant';
-                const initials = name.split(' ').map(n => n[0]).join('').toUpperCase() || '?';
-                const bgColor = '#6c5ce7';
-                
-                participantsHtml += `
-                    <div class="participant-item">
-                        <div class="participant-avatar" style="background-color: ${bgColor}">
-                            ${SecuritySanitizer.sanitizeString(initials)}
+
+            // Get real participants from call state
+            const currentUserId = window.__CHILD_SESSION__?.userId;
+            const currentUsername = window.__CHILD_SESSION__?.username || 'You';
+            const callParticipants = UIState.callParticipants || callsState?.callParticipants || [];
+            const contacts = UIState.contacts || window.__cachedCallContacts || [];
+
+            // Build participant rows
+            const participantRows = callParticipants.map(function(p) {
+                const contact = contacts.find(function(c){ return c.id === p.id || c.userId === p.id; });
+                const name = p.name || p.username || (contact && (contact.displayName || contact.username)) || ('User ' + p.id);
+                const initials = name.split(' ').map(function(n){ return n[0]; }).join('').toUpperCase().substring(0,2) || '??';
+                const isOnline = p.isOnline !== undefined ? p.isOnline : true;
+                return `<div class="participant-item" data-id="${p.id}">
+                    <div class="participant-avatar" style="background-color:#6c5ce7">${initials}</div>
+                    <div class="participant-info">
+                        <div class="participant-name">${name}</div>
+                        <div class="participant-status ${isOnline ? 'online' : 'offline'}">
+                            <span class="status-dot"></span> ${isOnline ? 'Connected' : 'Disconnected'}
                         </div>
-                        <div class="participant-info">
-                            <div class="participant-name">${SecuritySanitizer.sanitizeString(name)}</div>
-                            <div class="participant-status online">
-                                <span class="status-dot"></span> Online
-                            </div>
-                        </div>
-                        ${participant.isPremium ? '<span class="premium-badge">PRO</span>' : ''}
                     </div>
-                `;
-            });
-            
+                    ${p.isHost ? '<span class="host-badge">Host</span>' : ''}
+                    <button class="participant-action-btn mute-participant" data-id="${p.id}" title="Mute"><i class="fas fa-microphone-slash"></i></button>
+                </div>`;
+            }).join('');
+
             panel.innerHTML = `
                 <div class="panel-header">
-                    <h4>Participants (${participantCount})</h4>
-                    <button class="panel-close-btn" aria-label="Close panel">
-                        <i class="fas fa-times"></i>
-                    </button>
+                    <h4><i class="fas fa-users"></i> Participants (${callParticipants.length + 1})</h4>
+                    <button class="panel-close-btn" aria-label="Close panel"><i class="fas fa-times"></i></button>
                 </div>
                 <div class="panel-content">
-                    <div class="participant-item">
-                        <div class="participant-avatar" style="background-color: #6c5ce7">Y</div>
+                    <div class="participant-item self">
+                        <div class="participant-avatar" style="background-color:#6c5ce7">${currentUsername.substring(0,2).toUpperCase()}</div>
                         <div class="participant-info">
-                            <div class="participant-name">You (Host)</div>
-                            <div class="participant-status online">
-                                <span class="status-dot"></span> Online
-                            </div>
+                            <div class="participant-name">${currentUsername} (You)</div>
+                            <div class="participant-status online"><span class="status-dot"></span> Connected</div>
                         </div>
-                        <span class="premium-badge">PRO</span>
+                        <span class="host-badge">You</span>
                     </div>
-                    ${participantsHtml}
+                    ${participantRows || '<div class="empty-participants"><i class="fas fa-user-plus"></i><p>No other participants yet</p></div>'}
                 </div>
-            `;
-            
+                <div class="panel-footer">
+                    <button class="panel-action-btn invite-btn" id="inviteParticipantBtn">
+                        <i class="fas fa-user-plus"></i> Invite
+                    </button>
+                </div>`;
+
             document.body.appendChild(panel);
-            
-            panel.querySelector('.panel-close-btn')?.addEventListener('click', () => panel.remove());
-            
+            panel.querySelector('.panel-close-btn').addEventListener('click', () => { panel.remove(); UIState.activePanels.delete('participantsPanel'); });
+            panel.querySelector('#inviteParticipantBtn')?.addEventListener('click', () => {
+                showNotification('Share the call link to invite participants', 'info');
+                if (window.callCore && window.callCore.getCallLink) {
+                    window.callCore.getCallLink().then(function(link){ if(link){ navigator.clipboard?.writeText(link); showNotification('Call link copied!', 'success'); }});
+                }
+            });
             UIState.activePanels.add('participantsPanel');
         },
-        
+
         createChatPanel: function() {
             const existingPanel = document.querySelector('.feature-panel');
             if (existingPanel) existingPanel.remove();
-            
+
             const panel = document.createElement('div');
             panel.className = 'feature-panel chat-panel';
+            const now = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            const currentUsername = window.__CHILD_SESSION__?.username || 'You';
+
+            // Load chat history from state
+            const chatMessages = UIState.callChatMessages || [];
+            const messagesHtml = chatMessages.map(function(m) {
+                const isSelf = m.senderId === (window.__CHILD_SESSION__?.userId);
+                return `<div class="chat-message ${isSelf ? 'self' : 'other'}">
+                    <div class="message-sender">${isSelf ? 'You' : (m.senderName || 'Participant')}</div>
+                    <div class="message-content">${m.text}</div>
+                    <div class="message-time">${new Date(m.timestamp).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}</div>
+                </div>`;
+            }).join('');
+
             panel.innerHTML = `
                 <div class="panel-header">
-                    <h4>In-Call Chat</h4>
-                    <button class="panel-close-btn" aria-label="Close panel">
-                        <i class="fas fa-times"></i>
-                    </button>
+                    <h4><i class="fas fa-comment"></i> In-Call Chat</h4>
+                    <button class="panel-close-btn" aria-label="Close panel"><i class="fas fa-times"></i></button>
                 </div>
                 <div class="panel-content">
                     <div class="chat-messages" id="chatMessagesPanel">
                         <div class="chat-message system">
-                            <div class="message-content">Chat started.</div>
-                            <div class="message-time">${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>
+                            <div class="message-content">Chat started • ${now}</div>
                         </div>
+                        ${messagesHtml}
                     </div>
                     <div class="chat-input-container">
-                        <input type="text" class="chat-input" id="chatInputPanel" 
-                               placeholder="Type a message..." aria-label="Chat message">
-                        <button class="chat-send-btn" id="chatSendPanel" aria-label="Send message">
-                            <i class="fas fa-paper-plane"></i>
-                        </button>
+                        <input type="text" class="chat-input" id="chatInputPanel" placeholder="Type a message..." aria-label="Chat message">
+                        <button class="chat-send-btn" id="chatSendPanel" aria-label="Send message"><i class="fas fa-paper-plane"></i></button>
                     </div>
-                </div>
-            `;
-            
+                </div>`;
+
             document.body.appendChild(panel);
-            
-            panel.querySelector('.panel-close-btn').addEventListener('click', () => {
-                panel.remove();
-                UIState.activePanels.delete('chatPanel');
-            });
-            
+            panel.querySelector('.panel-close-btn').addEventListener('click', () => { panel.remove(); UIState.activePanels.delete('chatPanel'); });
+
             const chatInput = panel.querySelector('#chatInputPanel');
             const chatSend = panel.querySelector('#chatSendPanel');
-            
-            chatSend.addEventListener('click', () => {
+            const messagesContainer = panel.querySelector('.chat-messages');
+
+            const sendMessage = () => {
                 const message = chatInput.value.trim();
-                if (message) {
-                    if (coreInstance && coreInstance.sendChatMessage) {
-                        coreInstance.sendChatMessage(message);
-                    }
-                    
-                    const msgEl = document.createElement('div');
-                    msgEl.className = 'chat-message self';
-                    msgEl.innerHTML = `
-                        <div class="message-sender">You</div>
-                        <div class="message-content">${SecuritySanitizer.sanitizeString(message)}</div>
-                        <div class="message-time">${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>
-                    `;
-                    panel.querySelector('.chat-messages').appendChild(msgEl);
-                    panel.querySelector('.chat-messages').scrollTop = panel.querySelector('.chat-messages').scrollHeight;
-                    
-                    chatInput.value = '';
+                if (!message) return;
+                // Send via core
+                if (coreInstance && coreInstance.sendChatMessage) {
+                    coreInstance.sendChatMessage(message);
+                } else if (window.parent && window.parent !== window) {
+                    window.parent.postMessage({ type: 'CALL_CHAT_MESSAGE', payload: { message, senderId: window.__CHILD_SESSION__?.userId, senderName: currentUsername, timestamp: Date.now() }}, '*');
                 }
-            });
-            
-            chatInput.addEventListener('keypress', (e) => {
-                if (e.key === 'Enter') {
-                    chatSend.click();
-                }
-            });
-            
+                // Append locally
+                const msgEl = document.createElement('div');
+                msgEl.className = 'chat-message self';
+                msgEl.innerHTML = `<div class="message-sender">You</div><div class="message-content">${message}</div><div class="message-time">${new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}</div>`;
+                messagesContainer.appendChild(msgEl);
+                messagesContainer.scrollTop = messagesContainer.scrollHeight;
+                // Store in state
+                if (!UIState.callChatMessages) UIState.callChatMessages = [];
+                UIState.callChatMessages.push({ senderId: window.__CHILD_SESSION__?.userId, senderName: 'You', text: message, timestamp: Date.now() });
+                chatInput.value = '';
+            };
+
+            chatSend.addEventListener('click', sendMessage);
+            chatInput.addEventListener('keypress', (e) => { if (e.key === 'Enter') sendMessage(); });
+
+            // Listen for incoming messages
+            window.__callChatPanelRef = panel;
+            messagesContainer.scrollTop = messagesContainer.scrollHeight;
             UIState.activePanels.add('chatPanel');
         },
-        
+
         createWhiteboardPanel: function() {
             const existingPanel = document.querySelector('.feature-panel');
             if (existingPanel) existingPanel.remove();
-            
+
             const panel = document.createElement('div');
             panel.className = 'feature-panel whiteboard-panel';
             panel.innerHTML = `
                 <div class="panel-header">
-                    <h4>Shared Whiteboard</h4>
-                    <button class="panel-close-btn" aria-label="Close panel">
-                        <i class="fas fa-times"></i>
-                    </button>
+                    <h4><i class="fas fa-chalkboard"></i> Shared Whiteboard</h4>
+                    <button class="panel-close-btn" aria-label="Close panel"><i class="fas fa-times"></i></button>
                 </div>
                 <div class="panel-content">
                     <div class="whiteboard-toolbar">
-                        <div class="tool-btn active" data-tool="pen" title="Pen">
-                            <i class="fas fa-pen"></i>
-                        </div>
-                        <div class="tool-btn" data-tool="eraser" title="Eraser">
-                            <i class="fas fa-eraser"></i>
-                        </div>
-                        <div class="tool-btn" data-tool="text" title="Text">
-                            <i class="fas fa-font"></i>
-                        </div>
-                        <div class="tool-btn" data-tool="line" title="Line">
-                            <i class="fas fa-slash"></i>
-                        </div>
-                        <div class="tool-btn" data-tool="rectangle" title="Rectangle">
-                            <i class="fas fa-square"></i>
-                        </div>
-                        <div class="tool-btn" data-tool="circle" title="Circle">
-                            <i class="fas fa-circle"></i>
-                        </div>
-                        <div class="tool-color" style="background-color: #000000;" data-color="#000000" title="Black"></div>
-                        <div class="tool-color selected" style="background-color: #ff3b30;" data-color="#ff3b30" title="Red"></div>
-                        <div class="tool-color" style="background-color: #007aff;" data-color="#007aff" title="Blue"></div>
-                        <div class="tool-color" style="background-color: #34c759;" data-color="#34c759" title="Green"></div>
-                        <div class="tool-color" style="background-color: #ff9500;" data-color="#ff9500" title="Orange"></div>
-                        <input type="range" class="tool-size-slider" min="1" max="20" value="3" title="Brush size">
-                        <button class="tool-btn" id="clearWhiteboard" title="Clear whiteboard">
-                            <i class="fas fa-trash"></i>
-                        </button>
+                        <button class="tool-btn active" data-tool="pen" title="Pen"><i class="fas fa-pen"></i></button>
+                        <button class="tool-btn" data-tool="eraser" title="Eraser"><i class="fas fa-eraser"></i></button>
+                        <button class="tool-btn" data-tool="text" title="Text"><i class="fas fa-font"></i></button>
+                        <button class="tool-btn" data-tool="line" title="Line"><i class="fas fa-slash"></i></button>
+                        <button class="tool-btn" data-tool="rect" title="Rectangle"><i class="fas fa-square"></i></button>
+                        <span class="toolbar-sep"></span>
+                        <input type="color" id="wbColorPicker" value="#ff3b30" title="Color" style="width:32px;height:32px;padding:2px;cursor:pointer;border:none;background:none;">
+                        <input type="range" id="wbSizeSlider" min="1" max="20" value="3" title="Size" style="width:60px;">
+                        <button class="tool-btn" id="wbUndoBtn" title="Undo"><i class="fas fa-undo"></i></button>
+                        <button class="tool-btn" id="wbClearBtn" title="Clear"><i class="fas fa-trash"></i></button>
+                        <button class="tool-btn" id="wbSaveBtn" title="Save image"><i class="fas fa-download"></i></button>
                     </div>
-                    <canvas class="whiteboard-canvas" width="800" height="500"></canvas>
-                    <div class="whiteboard-status">
-                        <span>Whiteboard ready.</span>
-                    </div>
-                </div>
-            `;
-            
+                    <canvas id="wbCanvas" style="background:#fff;cursor:crosshair;touch-action:none;width:100%;max-height:420px;display:block;" width="800" height="420"></canvas>
+                </div>`;
+
             document.body.appendChild(panel);
-            
-            const canvas = panel.querySelector('.whiteboard-canvas');
+
+            const canvas = panel.querySelector('#wbCanvas');
             const ctx = canvas.getContext('2d');
-            let drawing = false;
-            let currentColor = '#ff3b30';
-            let currentSize = 3;
-            
-            canvas.addEventListener('mousedown', (e) => {
-                drawing = true;
-                ctx.beginPath();
-                ctx.moveTo(e.offsetX, e.offsetY);
-            });
-            
-            canvas.addEventListener('mousemove', (e) => {
+            let drawing = false, lastX = 0, lastY = 0, currentTool = 'pen';
+            let currentColor = '#ff3b30', currentSize = 3;
+            const history = [];
+
+            const saveHistory = () => history.push(canvas.toDataURL());
+            const getPos = (e) => {
+                const rect = canvas.getBoundingClientRect();
+                const scaleX = canvas.width / rect.width, scaleY = canvas.height / rect.height;
+                const src = e.touches ? e.touches[0] : e;
+                return { x: (src.clientX - rect.left) * scaleX, y: (src.clientY - rect.top) * scaleY };
+            };
+
+            const startDraw = (e) => { drawing = true; saveHistory(); const p = getPos(e); lastX = p.x; lastY = p.y; };
+            const draw = (e) => {
                 if (!drawing) return;
-                ctx.strokeStyle = currentColor;
-                ctx.lineWidth = currentSize;
-                ctx.lineTo(e.offsetX, e.offsetY);
-                ctx.stroke();
-            });
-            
-            canvas.addEventListener('mouseup', () => {
-                drawing = false;
-            });
-            
-            canvas.addEventListener('mouseleave', () => {
-                drawing = false;
-            });
-            
-            panel.querySelectorAll('.tool-btn[data-tool]').forEach(btn => {
-                btn.addEventListener('click', () => {
-                    panel.querySelectorAll('.tool-btn[data-tool]').forEach(b => b.classList.remove('active'));
-                    btn.classList.add('active');
-                });
-            });
-            
-            panel.querySelectorAll('.tool-color').forEach(colorBtn => {
-                colorBtn.addEventListener('click', () => {
-                    panel.querySelectorAll('.tool-color').forEach(c => c.classList.remove('selected'));
-                    colorBtn.classList.add('selected');
-                    currentColor = colorBtn.dataset.color;
-                });
-            });
-            
-            panel.querySelector('.tool-size-slider').addEventListener('input', (e) => {
-                currentSize = parseInt(e.target.value);
-            });
-            
-            panel.querySelector('#clearWhiteboard').addEventListener('click', () => {
-                if (confirm('Clear the entire whiteboard?')) {
-                    ctx.clearRect(0, 0, canvas.width, canvas.height);
-                }
-            });
-            
-            panel.querySelector('.panel-close-btn').addEventListener('click', () => {
-                panel.remove();
-                UIState.activePanels.delete('whiteboardPanel');
-            });
-            
+                e.preventDefault();
+                const p = getPos(e);
+                ctx.beginPath();
+                if (currentTool === 'eraser') { ctx.globalCompositeOperation = 'destination-out'; ctx.lineWidth = currentSize * 5; }
+                else { ctx.globalCompositeOperation = 'source-over'; ctx.strokeStyle = currentColor; ctx.lineWidth = currentSize; }
+                ctx.moveTo(lastX, lastY); ctx.lineTo(p.x, p.y); ctx.stroke();
+                lastX = p.x; lastY = p.y;
+            };
+            const stopDraw = () => { drawing = false; };
+
+            canvas.addEventListener('mousedown', startDraw); canvas.addEventListener('mousemove', draw); canvas.addEventListener('mouseup', stopDraw); canvas.addEventListener('mouseleave', stopDraw);
+            canvas.addEventListener('touchstart', startDraw, {passive:false}); canvas.addEventListener('touchmove', draw, {passive:false}); canvas.addEventListener('touchend', stopDraw);
+
+            panel.querySelectorAll('.tool-btn[data-tool]').forEach(btn => btn.addEventListener('click', () => { panel.querySelectorAll('.tool-btn[data-tool]').forEach(b => b.classList.remove('active')); btn.classList.add('active'); currentTool = btn.dataset.tool; }));
+            panel.querySelector('#wbColorPicker').addEventListener('input', (e) => { currentColor = e.target.value; });
+            panel.querySelector('#wbSizeSlider').addEventListener('input', (e) => { currentSize = parseInt(e.target.value); });
+            panel.querySelector('#wbUndoBtn').addEventListener('click', () => { if (history.length > 0) { const img = new Image(); img.onload = () => { ctx.clearRect(0,0,canvas.width,canvas.height); ctx.drawImage(img,0,0); }; img.src = history.pop(); } });
+            panel.querySelector('#wbClearBtn').addEventListener('click', () => { if (confirm('Clear whiteboard?')) { saveHistory(); ctx.clearRect(0,0,canvas.width,canvas.height); } });
+            panel.querySelector('#wbSaveBtn').addEventListener('click', () => { const a = document.createElement('a'); a.download = 'whiteboard.png'; a.href = canvas.toDataURL(); a.click(); });
+            panel.querySelector('.panel-close-btn').addEventListener('click', () => { panel.remove(); UIState.activePanels.delete('whiteboardPanel'); });
             UIState.activePanels.add('whiteboardPanel');
         },
-        
+
         createNotesPanel: function() {
             const existingPanel = document.querySelector('.feature-panel');
             if (existingPanel) existingPanel.remove();
-            
+
             const panel = document.createElement('div');
             panel.className = 'feature-panel notes-panel';
+            const savedNotes = UIState.callNotes || localStorage.getItem('call_notes_' + (UIState.activeCallId || 'default')) || '';
+            const now = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
             panel.innerHTML = `
                 <div class="panel-header">
-                    <h4>Shared Notes</h4>
-                    <button class="panel-close-btn" aria-label="Close panel">
-                        <i class="fas fa-times"></i>
-                    </button>
+                    <h4><i class="fas fa-sticky-note"></i> Call Notes</h4>
+                    <button class="panel-close-btn" aria-label="Close panel"><i class="fas fa-times"></i></button>
                 </div>
                 <div class="panel-content">
-                    <div class="notes-editor-container">
-                        <textarea class="notes-editor" id="sharedNotesEditor" 
-                                  placeholder="Start taking notes...">Meeting Notes:\n- \n- \n-</textarea>
-                        <div class="notes-toolbar">
-                            <button class="notes-btn" data-action="bold" title="Bold">
-                                <i class="fas fa-bold"></i>
-                            </button>
-                            <button class="notes-btn" data-action="italic" title="Italic">
-                                <i class="fas fa-italic"></i>
-                            </button>
-                            <button class="notes-btn" data-action="list" title="Bullet list">
-                                <i class="fas fa-list-ul"></i>
-                            </button>
-                            <button class="notes-btn" data-action="save" title="Save notes">
-                                <i class="fas fa-save"></i> Save
-                            </button>
-                        </div>
+                    <div class="notes-meta" style="font-size:11px;color:#888;padding:4px 8px">${now} · Auto-saved locally</div>
+                    <textarea class="notes-editor" id="sharedNotesEditor" placeholder="Take notes during this call..." style="width:100%;min-height:280px;padding:12px;font-size:14px;border:none;outline:none;resize:vertical;background:transparent;">${savedNotes}</textarea>
+                    <div class="notes-toolbar" style="display:flex;gap:8px;padding:8px;border-top:1px solid rgba(255,255,255,.1)">
+                        <button class="notes-btn" id="saveNotesBtn" style="flex:1;padding:8px;background:#6c5ce7;color:#fff;border:none;border-radius:8px;cursor:pointer"><i class="fas fa-save"></i> Save</button>
+                        <button class="notes-btn" id="copyNotesBtn" style="padding:8px 12px;background:rgba(255,255,255,.1);color:#fff;border:none;border-radius:8px;cursor:pointer"><i class="fas fa-copy"></i> Copy</button>
+                        <button class="notes-btn" id="clearNotesBtn" style="padding:8px 12px;background:rgba(255,0,0,.2);color:#ff6b6b;border:none;border-radius:8px;cursor:pointer"><i class="fas fa-trash"></i></button>
                     </div>
-                    <div class="notes-history">
-                        <h5>Previous Notes</h5>
-                        <div class="notes-history-list">
-                            <div class="notes-history-item">
-                                <div class="notes-history-date">Today, ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>
-                                <div class="notes-history-preview">Meeting notes...</div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            `;
-            
+                </div>`;
+
             document.body.appendChild(panel);
-            
-            panel.querySelector('.panel-close-btn').addEventListener('click', () => {
-                panel.remove();
-                UIState.activePanels.delete('notesPanel');
+
+            const editor = panel.querySelector('#sharedNotesEditor');
+            const storageKey = 'call_notes_' + (UIState.activeCallId || 'default');
+
+            // Auto-save on every keystroke
+            editor.addEventListener('input', () => {
+                UIState.callNotes = editor.value;
+                localStorage.setItem(storageKey, editor.value);
             });
-            
-            panel.querySelector('[data-action="save"]').addEventListener('click', () => {
-                const notes = panel.querySelector('#sharedNotesEditor').value;
-                if (notes.trim() && coreInstance && coreInstance.saveNotes) {
-                    coreInstance.saveNotes(notes);
-                    showNotification('Notes saved', 'success');
-                }
+
+            panel.querySelector('#saveNotesBtn').addEventListener('click', () => {
+                UIState.callNotes = editor.value;
+                localStorage.setItem(storageKey, editor.value);
+                if (coreInstance && coreInstance.saveNotes) coreInstance.saveNotes(editor.value);
+                showNotification('Notes saved', 'success');
             });
-            
+            panel.querySelector('#copyNotesBtn').addEventListener('click', () => {
+                navigator.clipboard?.writeText(editor.value).then(() => showNotification('Copied to clipboard', 'success'));
+            });
+            panel.querySelector('#clearNotesBtn').addEventListener('click', () => {
+                if (confirm('Clear all notes?')) { editor.value = ''; UIState.callNotes = ''; localStorage.removeItem(storageKey); }
+            });
+            panel.querySelector('.panel-close-btn').addEventListener('click', () => { panel.remove(); UIState.activePanels.delete('notesPanel'); });
             UIState.activePanels.add('notesPanel');
         },
-        
+
         createPollsPanel: function() {
             const existingPanel = document.querySelector('.feature-panel');
             if (existingPanel) existingPanel.remove();
-            
+
             const panel = document.createElement('div');
             panel.className = 'feature-panel polls-panel';
+
+            // Real polls state stored in UIState
+            if (!UIState.callPolls) UIState.callPolls = [];
+
+            const renderPolls = () => {
+                const list = panel.querySelector('#activePolls');
+                if (!list) return;
+                if (UIState.callPolls.length === 0) {
+                    list.innerHTML = '<div style="text-align:center;padding:24px;color:#888"><i class="fas fa-poll" style="font-size:32px;margin-bottom:8px"></i><p>No active polls yet</p></div>';
+                    return;
+                }
+                list.innerHTML = UIState.callPolls.map((poll, pi) => {
+                    const totalVotes = poll.options.reduce((s,o) => s + (o.votes||0), 0);
+                    return `<div class="poll-item" style="background:rgba(255,255,255,.05);border-radius:12px;padding:12px;margin-bottom:8px">
+                        <div style="font-weight:600;margin-bottom:8px">${poll.question}</div>
+                        ${poll.options.map((opt, oi) => {
+                            const pct = totalVotes > 0 ? Math.round((opt.votes||0)/totalVotes*100) : 0;
+                            const voted = poll.myVote === oi;
+                            return `<div class="poll-option-row" style="margin-bottom:6px">
+                                <button onclick="window.__votePoll(${pi},${oi})" style="width:100%;text-align:left;background:${voted?'rgba(108,92,231,.4)':'rgba(255,255,255,.05)'};border:${voted?'1px solid #6c5ce7':'1px solid transparent'};border-radius:8px;padding:8px 10px;color:#fff;cursor:pointer;position:relative;overflow:hidden">
+                                    <div style="position:absolute;top:0;left:0;height:100%;width:${pct}%;background:rgba(108,92,231,.2);transition:width .3s"></div>
+                                    <span style="position:relative">${opt.text} ${voted?'✓':''}</span>
+                                    <span style="position:relative;float:right;font-size:12px;color:#888">${pct}% (${opt.votes||0})</span>
+                                </button>
+                            </div>`;
+                        }).join('')}
+                        <div style="font-size:11px;color:#888;margin-top:4px">${totalVotes} vote${totalVotes!==1?'s':''}</div>
+                    </div>`;
+                }).join('');
+            };
+
+            window.__votePoll = (pollIdx, optionIdx) => {
+                const poll = UIState.callPolls[pollIdx];
+                if (!poll) return;
+                if (poll.myVote !== undefined) { showNotification('You already voted', 'info'); return; }
+                if (!poll.options[optionIdx]) return;
+                poll.options[optionIdx].votes = (poll.options[optionIdx].votes || 0) + 1;
+                poll.myVote = optionIdx;
+                // Broadcast via core
+                if (window.parent && window.parent !== window) {
+                    window.parent.postMessage({ type: 'CALL_POLL_VOTE', payload: { pollIdx, optionIdx, callId: UIState.activeCallId }}, '*');
+                }
+                renderPolls();
+            };
+
             panel.innerHTML = `
                 <div class="panel-header">
-                    <h4>Polls</h4>
-                    <button class="panel-close-btn" aria-label="Close panel">
-                        <i class="fas fa-times"></i>
-                    </button>
+                    <h4><i class="fas fa-poll"></i> Polls</h4>
+                    <button class="panel-close-btn" aria-label="Close panel"><i class="fas fa-times"></i></button>
                 </div>
                 <div class="panel-content">
-                    <div class="polls-tabs">
-                        <button class="polls-tab active" data-tab="create">Create Poll</button>
-                        <button class="polls-tab" data-tab="active">Active Polls</button>
-                        <button class="polls-tab" data-tab="results">Results</button>
-                    </div>
-                    
-                    <div class="polls-tab-content active" data-tab="create">
-                        <div class="poll-form">
-                            <input type="text" class="poll-question-input" placeholder="Enter your poll question...">
-                            <div class="poll-options">
-                                <input type="text" class="poll-option-input" placeholder="Option 1">
-                                <input type="text" class="poll-option-input" placeholder="Option 2">
-                                <button class="add-option-btn">Add Option</button>
-                            </div>
-                            <div class="poll-settings">
-                                <label>
-                                    <input type="checkbox" checked> Multiple choices allowed
-                                </label>
-                                <label>
-                                    <input type="checkbox"> Anonymous voting
-                                </label>
-                            </div>
-                            <button class="create-poll-btn">Create Poll</button>
+                    <div id="activePolls" style="margin-bottom:16px"></div>
+                    <div style="background:rgba(255,255,255,.05);border-radius:12px;padding:12px">
+                        <div style="font-weight:600;margin-bottom:8px"><i class="fas fa-plus-circle"></i> Create Poll</div>
+                        <input type="text" id="pollQuestion" placeholder="Poll question..." style="width:100%;padding:8px;background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.2);border-radius:8px;color:#fff;margin-bottom:8px">
+                        <div id="pollOptionsContainer">
+                            <input type="text" class="poll-opt" placeholder="Option 1" style="width:100%;padding:6px 8px;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.15);border-radius:6px;color:#fff;margin-bottom:4px">
+                            <input type="text" class="poll-opt" placeholder="Option 2" style="width:100%;padding:6px 8px;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.15);border-radius:6px;color:#fff;margin-bottom:4px">
                         </div>
+                        <button id="addPollOptBtn" style="background:none;border:1px dashed rgba(255,255,255,.3);color:#888;padding:4px 10px;border-radius:6px;cursor:pointer;margin-bottom:8px;font-size:12px">+ Add option</button>
+                        <button id="createPollBtn" style="width:100%;padding:10px;background:#6c5ce7;color:#fff;border:none;border-radius:8px;cursor:pointer;font-weight:600">Create Poll</button>
                     </div>
-                    
-                    <div class="polls-tab-content" data-tab="active">
-                        <div class="active-polls-list">
-                            <div class="poll-item">
-                                <div class="poll-question">What time works best for our next meeting?</div>
-                                <div class="poll-options">
-                                    <div class="poll-option">
-                                        <input type="radio" name="poll1" id="poll1-1">
-                                        <label for="poll1-1">Monday 10 AM</label>
-                                    </div>
-                                    <div class="poll-option">
-                                        <input type="radio" name="poll1" id="poll1-2">
-                                        <label for="poll1-2">Tuesday 2 PM</label>
-                                    </div>
-                                    <div class="poll-option">
-                                        <input type="radio" name="poll1" id="poll1-3">
-                                        <label for="poll1-3">Wednesday 11 AM</label>
-                                    </div>
-                                </div>
-                                <button class="vote-btn">Vote</button>
-                            </div>
-                        </div>
-                    </div>
-                    
-                    <div class="polls-tab-content" data-tab="results">
-                        <div class="poll-results">
-                            <div class="poll-result-item">
-                                <div class="poll-question">Favorite meeting platform?</div>
-                                <div class="result-bar">
-                                    <div class="result-fill" style="width: 60%">Zoom (60%)</div>
-                                </div>
-                                <div class="result-bar">
-                                    <div class="result-fill" style="width: 30%">Google Meet (30%)</div>
-                                </div>
-                                <div class="result-bar">
-                                    <div class="result-fill" style="width: 10%">Teams (10%)</div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            `;
-            
+                </div>`;
+
             document.body.appendChild(panel);
-            
-            panel.querySelector('.panel-close-btn').addEventListener('click', () => {
-                panel.remove();
-                UIState.activePanels.delete('pollsPanel');
+            renderPolls();
+
+            panel.querySelector('#addPollOptBtn').addEventListener('click', () => {
+                const container = panel.querySelector('#pollOptionsContainer');
+                const count = container.querySelectorAll('.poll-opt').length + 1;
+                const input = document.createElement('input');
+                input.type = 'text'; input.className = 'poll-opt'; input.placeholder = 'Option ' + count;
+                input.style.cssText = 'width:100%;padding:6px 8px;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.15);border-radius:6px;color:#fff;margin-bottom:4px';
+                container.appendChild(input);
             });
-            
-            panel.querySelectorAll('.polls-tab').forEach(tab => {
-                tab.addEventListener('click', function() {
-                    const tabName = this.dataset.tab;
-                    
-                    panel.querySelectorAll('.polls-tab').forEach(t => t.classList.remove('active'));
-                    this.classList.add('active');
-                    
-                    panel.querySelectorAll('.polls-tab-content').forEach(content => {
-                        content.classList.remove('active');
-                        if (content.dataset.tab === tabName) {
-                            content.classList.add('active');
-                        }
-                    });
-                });
-            });
-            
-            panel.querySelector('.add-option-btn').addEventListener('click', () => {
-                const optionsContainer = panel.querySelector('.poll-options');
-                const newInput = document.createElement('input');
-                newInput.type = 'text';
-                newInput.className = 'poll-option-input';
-                newInput.placeholder = `Option ${optionsContainer.children.length + 1}`;
-                optionsContainer.insertBefore(newInput, panel.querySelector('.add-option-btn'));
-            });
-            
-            panel.querySelector('.create-poll-btn').addEventListener('click', () => {
-                const question = panel.querySelector('.poll-question-input').value;
-                if (question.trim() && coreInstance && coreInstance.createPoll) {
-                    const options = Array.from(panel.querySelectorAll('.poll-option-input'))
-                        .map(input => input.value)
-                        .filter(v => v.trim());
-                    coreInstance.createPoll(question, options);
+
+            panel.querySelector('#createPollBtn').addEventListener('click', () => {
+                const question = panel.querySelector('#pollQuestion').value.trim();
+                const options = Array.from(panel.querySelectorAll('.poll-opt')).map(i => i.value.trim()).filter(Boolean);
+                if (!question) { showNotification('Enter a poll question', 'warning'); return; }
+                if (options.length < 2) { showNotification('Add at least 2 options', 'warning'); return; }
+                const newPoll = { question, options: options.map(t => ({text:t,votes:0})), createdAt: Date.now(), myVote: undefined };
+                UIState.callPolls.push(newPoll);
+                // Broadcast
+                if (window.parent && window.parent !== window) {
+                    window.parent.postMessage({ type: 'CALL_POLL_CREATED', payload: { poll: newPoll, callId: UIState.activeCallId }}, '*');
                 }
+                showNotification('Poll created!', 'success');
+                renderPolls();
+                panel.querySelector('#pollQuestion').value = '';
+                panel.querySelectorAll('.poll-opt').forEach((i,idx) => { i.value = ''; if(idx>1) i.remove(); });
             });
-            
+
+            panel.querySelector('.panel-close-btn').addEventListener('click', () => { panel.remove(); UIState.activePanels.delete('pollsPanel'); });
             UIState.activePanels.add('pollsPanel');
         },
-        
+
         createRelationshipPanel: function() {
             const existingPanel = document.querySelector('.feature-panel');
             if (existingPanel) existingPanel.remove();
-            
+
             const panel = document.createElement('div');
             panel.className = 'feature-panel relationship-panel';
+
+            // Gather real stats from call history
+            const callHistory = UIState.callHistory || [];
+            const currentUserId = window.__CHILD_SESSION__?.userId;
+            const contacts = UIState.contacts || window.__cachedCallContacts || [];
+
+            // Compute real stats
+            const completedCalls = callHistory.filter(c => c.status === 'completed');
+            const totalDuration = completedCalls.reduce((s, c) => s + (c.duration || 0), 0);
+            const avgDuration = completedCalls.length > 0 ? Math.round(totalDuration / completedCalls.length) : 0;
+            const avgMins = Math.floor(avgDuration / 60), avgSecs = avgDuration % 60;
+            const missedCalls = callHistory.filter(c => c.status === 'missed').length;
+
+            // Contact frequency map
+            const contactFreq = {};
+            callHistory.forEach(call => {
+                const otherId = call.callerId === currentUserId ? call.receiverId : call.callerId;
+                if (otherId) contactFreq[otherId] = (contactFreq[otherId] || 0) + 1;
+            });
+            const topContactId = Object.keys(contactFreq).sort((a,b) => contactFreq[b]-contactFreq[a])[0];
+            const topContact = contacts.find(c => String(c.id) === String(topContactId));
+            const topContactName = topContact ? (topContact.displayName || topContact.username) : (topContactId ? '#'+topContactId : 'N/A');
+
+            // Day frequency
+            const dayNames = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+            const dayFreq = [0,0,0,0,0,0,0];
+            callHistory.forEach(call => { if (call.startedAt) dayFreq[new Date(call.startedAt).getDay()]++; });
+            const maxDay = Math.max(...dayFreq) || 1;
+            const busiestDay = dayNames[dayFreq.indexOf(Math.max(...dayFreq))];
+            const chartBars = dayFreq.map((count, i) => `<div class="chart-bar" style="height:${Math.round(count/maxDay*80)+10}%;position:relative" title="${count} calls">
+                <div style="position:absolute;bottom:100%;width:100%;text-align:center;font-size:9px;color:#888">${count||''}</div>
+                ${dayNames[i]}
+            </div>`).join('');
+
             panel.innerHTML = `
                 <div class="panel-header">
-                    <h4>Relationship Insights</h4>
-                    <button class="panel-close-btn" aria-label="Close panel">
-                        <i class="fas fa-times"></i>
-                    </button>
+                    <h4><i class="fas fa-chart-line"></i> Relationship Insights</h4>
+                    <button class="panel-close-btn" aria-label="Close panel"><i class="fas fa-times"></i></button>
                 </div>
                 <div class="panel-content">
                     <div class="insight-cards">
                         <div class="insight-card">
                             <div class="insight-title">Total Calls</div>
-                            <div class="insight-value">47</div>
-                            <div class="insight-description">With all contacts</div>
-                            <span class="insight-trend trend-up">+12%</span>
+                            <div class="insight-value">${callHistory.length}</div>
+                            <div class="insight-description">All time</div>
                         </div>
                         <div class="insight-card">
-                            <div class="insight-title">Average Duration</div>
-                            <div class="insight-value">24m</div>
-                            <div class="insight-description">Per call</div>
-                            <span class="insight-trend trend-neutral">0%</span>
+                            <div class="insight-title">Avg Duration</div>
+                            <div class="insight-value">${avgMins}m ${avgSecs}s</div>
+                            <div class="insight-description">Per completed call</div>
                         </div>
                         <div class="insight-card">
-                            <div class="insight-title">Busiest Day</div>
-                            <div class="insight-value">Wednesday</div>
-                            <div class="insight-description">Most calls scheduled</div>
+                            <div class="insight-title">Missed Calls</div>
+                            <div class="insight-value" style="color:${missedCalls>0?'#e74c3c':'#2ecc71'}">${missedCalls}</div>
+                            <div class="insight-description">Unanswered</div>
                         </div>
                         <div class="insight-card">
-                            <div class="insight-title">Favorite Contact</div>
-                            <div class="insight-value">Sarah</div>
-                            <div class="insight-description">15 calls this month</div>
-                            <span class="insight-trend trend-up">+3</span>
+                            <div class="insight-title">Top Contact</div>
+                            <div class="insight-value" style="font-size:16px">${topContactName}</div>
+                            <div class="insight-description">${topContactId ? contactFreq[topContactId]+' calls' : 'No calls yet'}</div>
                         </div>
                     </div>
                     <div class="relationship-chart">
-                        <h5>Call Frequency (Last 30 days)</h5>
-                        <div class="chart-container">
-                            <div class="chart-bar" style="height: 80%">Mon</div>
-                            <div class="chart-bar" style="height: 60%">Tue</div>
-                            <div class="chart-bar" style="height: 90%">Wed</div>
-                            <div class="chart-bar" style="height: 70%">Thu</div>
-                            <div class="chart-bar" style="height: 50%">Fri</div>
-                            <div class="chart-bar" style="height: 40%">Sat</div>
-                            <div class="chart-bar" style="height: 30%">Sun</div>
+                        <h5>Call Frequency by Day <span style="font-size:11px;color:#888">(busiest: ${busiestDay})</span></h5>
+                        <div class="chart-container" style="display:flex;align-items:flex-end;gap:4px;height:80px;padding:0 4px">
+                            ${callHistory.length > 0 ? chartBars : '<div style="color:#888;font-size:12px;align-self:center;width:100%;text-align:center">No call history yet</div>'}
                         </div>
                     </div>
-                </div>
-            `;
-            
+                </div>`;
+
             document.body.appendChild(panel);
-            
-            panel.querySelector('.panel-close-btn').addEventListener('click', () => {
-                panel.remove();
-                UIState.activePanels.delete('relationshipPanel');
-            });
-            
+
+            // Load real call history if not already loaded
+            if (callHistory.length === 0 && window.parent && window.parent !== window) {
+                window.parent.postMessage({ type: 'REFRESH_CALL_HISTORY', payload: { userId: currentUserId }}, '*');
+            }
+
+            panel.querySelector('.panel-close-btn').addEventListener('click', () => { panel.remove(); UIState.activePanels.delete('relationshipPanel'); });
             UIState.activePanels.add('relationshipPanel');
         }
-    };
+    };  // end UIPanelHandlers
 
-    // Add escapeHtml function before createNotification if not already defined
-function escapeHtml(str) {
-    if (!str) return '';
-    return str
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#39;');
-}
+
+
+    function escapeHtml(str) {
+        if (!str) return '';
+        return String(str)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    }
     // ==================== NOTIFICATION SYSTEM ====================
     function createNotification({ type = 'info', title, message, duration = 3000 } = {}) {
     try {
@@ -6245,45 +6389,56 @@ function setupFriendsListListener() {
         if (data && data.type === 'FRIENDS_LIST_UPDATE') {
             const friends = data.payload?.friends || [];
             console.log('[Calls UI] Received FRIENDS_LIST_UPDATE:', friends.length, 'friends');
-            
+            // Always update if non-empty; preserve cache across refresh
             if (friends.length > 0) {
-                // Transform friends to contacts format
-                const contacts = friends.map(friend => ({
+                const contacts = friends.map(function(friend) { return {
                     id: friend.id,
                     userId: friend.id,
-                    name: friend.displayName || friend.username || friend.name,
-                    displayName: friend.displayName || friend.username,
-                    username: friend.username,
+                    name: friend.displayName || friend.username || friend.name || 'User',
+                    displayName: friend.displayName || friend.username || friend.name || 'User',
+                    username: friend.username || friend.name || 'User',
                     status: friend.status || (friend.isOnline ? 'online' : 'offline'),
                     isOnline: friend.isOnline || friend.status === 'online',
                     avatar: friend.avatar,
                     isPremium: friend.isPremium || false
-                }));
-                
+                }; });
                 UIState.contacts = contacts;
-                
-                // Update contacts list if modal is open
-                if (elements.contactsList && contacts.length > 0) {
-                    if (typeof RenderingPipeline !== 'undefined' && RenderingPipeline.renderContactsList) {
-                        RenderingPipeline.renderContactsList(contacts);
-                    } else if (window.callsUI && window.callsUI.renderContactsList) {
-                        window.callsUI.renderContactsList(contacts);
-                    }
+                window.__cachedCallContacts = contacts;
+                if (typeof RenderingPipeline !== 'undefined' && RenderingPipeline.renderContactsList) {
+                    RenderingPipeline.renderContactsList(contacts);
+                } else if (window.callsUI && window.callsUI.renderContactsList) {
+                    window.callsUI.renderContactsList(contacts);
                 }
             }
         }
         
         // Handle CONTACTS_UPDATE
         if (data && data.type === 'CONTACTS_UPDATE') {
-            const contacts = data.payload?.contacts || [];
-            console.log('[Calls UI] Received CONTACTS_UPDATE:', contacts.length, 'contacts');
-            
+            const rawContacts = data.payload?.contacts || [];
+            console.log('[Calls UI] Received CONTACTS_UPDATE:', rawContacts.length, 'contacts');
+            // Normalize every contact so displayName/username are always present
+            const contacts = rawContacts.map(function(c) { return {
+                id:          c.id || c.userId,
+                userId:      c.id || c.userId,
+                name:        c.displayName || c.username || c.name || ('User #' + (c.id || c.userId)),
+                displayName: c.displayName || c.username || c.name || ('User #' + (c.id || c.userId)),
+                username:    c.username || c.name || c.displayName || '',
+                status:      c.status || (c.isOnline ? 'online' : 'offline'),
+                isOnline:    c.isOnline || c.status === 'online',
+                avatar:      c.avatar || c.photoURL || '',
+                isPremium:   c.isPremium || false
+            }; });
             if (contacts.length > 0) {
                 UIState.contacts = contacts;
-                if (elements.contactsList && contacts.length > 0) {
-                    if (typeof RenderingPipeline !== 'undefined' && RenderingPipeline.renderContactsList) {
-                        RenderingPipeline.renderContactsList(contacts);
-                    }
+                window.__cachedCallContacts = contacts;
+                if (typeof RenderingPipeline !== 'undefined' && RenderingPipeline.renderContactsList) {
+                    RenderingPipeline.renderContactsList(contacts);
+                }
+            } else if (window.__cachedCallContacts && window.__cachedCallContacts.length > 0) {
+                // Restore from cache so friends don't vanish on refresh
+                UIState.contacts = window.__cachedCallContacts;
+                if (typeof RenderingPipeline !== 'undefined' && RenderingPipeline.renderContactsList) {
+                    RenderingPipeline.renderContactsList(window.__cachedCallContacts);
                 }
             }
         }
@@ -6316,6 +6471,107 @@ function escapeHtmlForCall(str) {
 // Call this in initializeUISystem
 setupFriendsListListener();
 
+// ==================== SETTINGS SYNC LISTENER ====================
+// Listen for settings changes broadcast by the parent and apply them
+// to the local in-page toggles (emotional context, focus mode, etc.)
+(function setupCallsSettingsListener() {
+    function applyCallUISetting(section, key, value) {
+        // --- calls section: sync in-page toggle checkboxes ---
+        if (section === 'calls') {
+            const map = {
+                emotionalContext:   'emotionalContextToggle',
+                callIntention:      'callIntentionToggle',
+                inCallChat:         'inCallChatToggle',
+                whiteboard:         'whiteboardToggle',
+                polls:              'pollsToggle',
+                sharedNotes:        'notesToggle',
+                focusMode:          'focusModeToggle',
+                liveReactions:      'liveReactionsToggle',
+                // alternate key names
+                emotionalContextEnabled: 'emotionalContextToggle',
+                callIntentionEnabled:    'callIntentionToggle',
+                inCallChatEnabled:       'inCallChatToggle',
+                whiteboardEnabled:       'whiteboardToggle',
+                pollsEnabled:            'pollsToggle',
+                notesEnabled:            'notesToggle',
+                focusModeEnabled:        'focusModeToggle',
+                liveReactionsEnabled:    'liveReactionsToggle'
+            };
+            const elId = map[key];
+            if (elId) {
+                const el = document.getElementById(elId);
+                if (el) el.checked = !!value;
+            }
+            // Video quality / audio quality cosmetic indicator
+            if (key === 'videoQuality' || key === 'audioQuality' || key === 'voiceQuality') {
+                window['__' + key] = value;
+            }
+        }
+        // --- appearance: theme, font size, accent colour ---
+        if (section === 'appearance') {
+            if (key === 'theme') {
+                const t = value === 'auto'
+                    ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
+                    : value;
+                document.documentElement.setAttribute('data-theme', t);
+                document.body.setAttribute('data-theme', t);
+            }
+            if (key === 'fontSize') document.documentElement.style.fontSize = value + 'px';
+            if (key === 'accentColor') document.documentElement.style.setProperty('--accent-color', value);
+            if (key === 'compactMode') {
+                document.documentElement.setAttribute('data-compact', value ? 'true' : 'false');
+                document.body.classList.toggle('compact-mode', !!value);
+            }
+            if (key === 'animationsEnabled' || key === 'animations') {
+                document.documentElement.setAttribute('data-animations', value ? 'true' : 'false');
+                document.body.classList.toggle('no-animations', !value);
+            }
+        }
+        // --- notifications ---
+        if (section === 'notifications') {
+            if (key === 'soundEnabled' || key === 'notificationSound') window.__notificationSoundEnabled = value;
+            if (key === 'callNotifications') window.__callNotificationsEnabled = value;
+        }
+    }
+
+    window.addEventListener('message', function(event) {
+        const data = event.data;
+        if (!data || typeof data !== 'object') return;
+
+        if (data.type === 'SETTING_CHANGED') {
+            const { section, key, value } = data.payload || data;
+            if (section && key !== undefined) applyCallUISetting(section, key, value);
+        }
+
+        if (data.type === 'SETTINGS_UPDATED') {
+            const settings = (data.payload || data).settings || {};
+            Object.entries(settings).forEach(function([sec, secVal]) {
+                if (secVal && typeof secVal === 'object') {
+                    Object.entries(secVal).forEach(function([k, v]) {
+                        applyCallUISetting(sec, k, v);
+                    });
+                }
+            });
+        }
+    });
+
+    // Also listen for the CustomEvent version dispatched by applySettingToCallsModule
+    window.addEventListener('settingChanged', function(e) {
+        const { section, key, value } = e.detail || {};
+        if (section && key !== undefined) applyCallUISetting(section, key, value);
+    });
+    window.addEventListener('settingsUpdated', function(e) {
+        const settings = (e.detail || {}).settings || {};
+        Object.entries(settings).forEach(function([sec, secVal]) {
+            if (secVal && typeof secVal === 'object') {
+                Object.entries(secVal).forEach(function([k, v]) {
+                    applyCallUISetting(sec, k, v);
+                });
+            }
+        });
+    });
+})();
+
     async function initializeUISystem() {
         if (UIState.initialized) {
             if (DEBUG) {
@@ -6327,6 +6583,28 @@ setupFriendsListListener();
         if (DEBUG) {
             logOnce('info', 'Initializing UI system');
         }
+
+        // ── Inject contact call-button styles ─────────────────────────────────
+        if (!document.getElementById('kyn-contact-call-btn-styles')) {
+            const s = document.createElement('style');
+            s.id = 'kyn-contact-call-btn-styles';
+            s.textContent = `
+                .contact-item { display:flex; align-items:center; gap:10px; padding:10px 12px; cursor:pointer; border-radius:10px; transition:background 0.15s; }
+                .contact-item:hover { background: rgba(108,92,231,0.08); }
+                .contact-call-actions { display:flex; gap:6px; margin-left:auto; flex-shrink:0; }
+                .contact-audio-call-btn, .contact-video-call-btn {
+                    width:34px; height:34px; border-radius:50%; border:none; cursor:pointer;
+                    display:flex; align-items:center; justify-content:center;
+                    font-size:13px; transition:all 0.18s;
+                }
+                .contact-audio-call-btn { background:#10b981; color:#fff; }
+                .contact-audio-call-btn:hover { background:#059669; transform:scale(1.1); }
+                .contact-video-call-btn { background:#6c5ce7; color:#fff; }
+                .contact-video-call-btn:hover { background:#5a4bd1; transform:scale(1.1); }
+            `;
+            document.head.appendChild(s);
+        }
+        // ──────────────────────────────────────────────────────────────────────
         
         cacheElements();
         await RenderingPipeline.execute();
@@ -6388,6 +6666,12 @@ window.addEventListener('message', function(event) {
         const hasError = data.payload?.error;
         
         console.log('[Calls UI] CALL_HISTORY_UPDATE received:', calls.length, 'calls, loading:', isLoading, 'error:', hasError);
+
+        // Store in UIState so panels (Relationship etc.) can use it
+        if (calls && calls.length > 0) {
+            UIState.callHistory = calls;
+            window.__cachedCallHistory = calls;
+        }
         
         const allCallsList = document.getElementById('allCallsList');
         if (!allCallsList) return;
@@ -6429,14 +6713,24 @@ window.addEventListener('message', function(event) {
         
         calls.forEach(function(call) {
             const otherParticipant = (call.otherParticipants && call.otherParticipants[0]) || call.caller;
-            const name = (otherParticipant && (otherParticipant.displayName || otherParticipant.username)) || 'Unknown';
+            const currentUserId = window.__CHILD_SESSION__?.userId;
+            const otherId = call.callerId == currentUserId ? call.receiverId : call.callerId;
+            const contactMatch = (UIState.contacts || window.__cachedCallContacts || []).find(c => c.id == otherId || c.userId == otherId);
+            const name = (otherParticipant && (otherParticipant.displayName || otherParticipant.username))
+                || (contactMatch && (contactMatch.displayName || contactMatch.username || contactMatch.name))
+                || (call.callerInfo?.username) || (call.calleeInfo?.username)
+                || ('User #' + (otherId || '?'));
             const initials = name.split(' ').map(function(n){ return n[0]; }).join('').toUpperCase().substring(0, 2);
-            const isMissed = call.status === 'missed';
-            const isIncoming = call.direction === 'incoming';
+            const isOutgoing = call.callerId == currentUserId;
+            const isMissed = call.status === 'missed' && !isOutgoing;
+            const direction = isOutgoing ? 'outgoing' : (isMissed ? 'missed' : 'incoming');
             const iconClass = call.type === 'video' ? 'fa-video' : 'fa-phone';
+            // Direction arrow icon: outgoing = arrow-up-right, incoming = arrow-down-left, missed = slash
+            const statusIconClass = isMissed ? 'fa-phone-slash' : (isOutgoing ? 'fa-arrow-up' : 'fa-arrow-down');
+            // Direction label colour via CSS class (missed=red, outgoing=green, incoming=blue)
             
             const item = document.createElement('div');
-            item.className = 'call-history-item' + (isMissed ? ' missed' : '');
+            item.className = 'call-history-item ' + direction;
             
             let timeDisplay = '';
             try {
@@ -6444,13 +6738,20 @@ window.addEventListener('message', function(event) {
             } catch(e) {
                 timeDisplay = '';
             }
+
+            const directionLabel = isMissed ? 'Missed' : (isOutgoing ? 'Outgoing' : 'Incoming');
             
             item.innerHTML = `
                 <div class="call-avatar" style="background-color: #6c5ce7">
                     <span>${escapeHtmlForCall(initials)}</span>
                 </div>
                 <div class="call-info">
-                    <div class="call-name">${escapeHtmlForCall(name)}</div>
+                    <div class="call-name">
+                        ${escapeHtmlForCall(name)}
+                        <span class="call-status-icon ${escapeHtmlForCall(direction)}" title="${escapeHtmlForCall(directionLabel)}" style="margin-left:6px;font-size:11px">
+                            <i class="fas ${statusIconClass}"></i>
+                        </span>
+                    </div>
                     <div class="call-details">
                         <i class="fas ${iconClass}"></i>
                         <span>${call.type === 'video' ? 'Video call' : 'Voice call'}</span>
@@ -6459,7 +6760,7 @@ window.addEventListener('message', function(event) {
                     </div>
                     <div class="call-time">${escapeHtmlForCall(timeDisplay)}</div>
                 </div>
-                <button class="call-action-btn" data-user-id="${otherParticipant?.id || ''}" data-user-name="${escapeHtmlForCall(name)}">
+                <button class="call-action-btn" data-user-id="${escapeHtmlForCall(String(otherParticipant?.id || otherId || ''))}" data-user-name="${escapeHtmlForCall(name)}" data-call-type="${call.type || 'voice'}" title="Call back">
                     <i class="fas fa-phone"></i>
                 </button>
             `;
@@ -6470,7 +6771,12 @@ window.addEventListener('message', function(event) {
         // Attach click handlers
         document.querySelectorAll('.call-action-btn').forEach(function(btn) {
             btn.removeEventListener('click', handleCallActionClick);
-            btn.addEventListener('click', handleCallActionClick);
+            btn.addEventListener('click', function(e) {
+                // Call-back from history stays in calls page
+                window.__pendingCallReturnTo = 'calls';
+                window.__pendingCallChatUserId = null;
+                handleCallActionClick.call(btn, e);
+            });
         });
     }
 });

@@ -469,7 +469,29 @@ window.__CALLS_IFRAME__ = {
         }
 
         .call-history-item.missed {
-            opacity: 0.8;
+            opacity: 1;
+            border-left: 3px solid #d63031;
+        }
+
+        .call-history-item.outgoing {
+            border-left: 3px solid #00b894;
+        }
+
+        .call-history-item.incoming {
+            border-left: 3px solid #0984e3;
+        }
+
+        .call-history-item.outgoing .call-status-icon { color: #00b894; }
+        .call-history-item.incoming .call-status-icon { color: #0984e3; }
+        .call-history-item.missed   .call-status-icon { color: #d63031; }
+
+        .call-history-item.missed .call-avatar {
+            animation: missedPulse 1.5s ease infinite;
+        }
+
+        @keyframes missedPulse {
+            0%, 100% { box-shadow: 0 0 0 0 rgba(214, 48, 49, 0.4); }
+            50%       { box-shadow: 0 0 0 6px rgba(214, 48, 49, 0); }
         }
 
         .call-avatar {

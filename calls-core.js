@@ -3525,6 +3525,8 @@ if (message.type === 'SETTING_CHANGED' || message.type === 'SETTINGS_UPDATED') {
         callsState.iceCandidates = [];
         callsState.iceRestartCount = 0;
         callsState.callData = null;
+        callsState.pendingCallReturnTo = null;
+        callsState.pendingCallSource = null;
     }
     
     // ==================== CALL STATE GOVERNOR (REAL) ====================
@@ -4096,6 +4098,11 @@ initiateCall: async function(callType, participants = []) {
         
         const callId = `call_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
         
+        // Sync call origin from global flag set by calls-ui before initiateCall
+        if (window.__pendingCallReturnTo && !callsState.pendingCallReturnTo) {
+            callsState.pendingCallReturnTo = window.__pendingCallReturnTo;
+        }
+        
         // Set active call
         setActiveCall(callId, callType, participants);
         
@@ -4115,6 +4122,8 @@ initiateCall: async function(callType, participants = []) {
             participantIds: isGroupCall ? participants.map(p => typeof p === 'object' ? p.id : parseInt(p)) : null,
             calleeId: (!isGroupCall && participants[0]) ? (typeof participants[0] === 'object' ? participants[0].id : parseInt(participants[0])) : null,
             isGroupCall: isGroupCall,
+            returnTo: callsState.pendingCallReturnTo || window.__pendingCallOrigin || 'calls',
+            callSource: callsState.pendingCallSource || 'calls',
             timestamp: Date.now()
         }, true);
 
@@ -4268,13 +4277,14 @@ endCall: async function(callId, options = {}) {
     logCall(MODULE, 'Ending call', { callId, duration, status });
     
     try {
-        // Extract numeric call ID
-        let numericCallId = callId;
-        if (callId && typeof callId === 'string' && callId.startsWith('call_')) {
-            const parts = callId.split('_');
-            if (parts.length >= 2) {
-                numericCallId = parts[1];
-            }
+        // Use server UUID (real DB id) if available; fall back to passed callId
+        // callsState.serverCallId is set in handleCallInitiated when parent responds
+        let numericCallId = callsState.serverCallId || callId;
+        // Strip local call_TIMESTAMP_random format if no server UUID available
+        if (numericCallId && typeof numericCallId === 'string' && numericCallId.startsWith('call_')) {
+            // Still local ID — no server UUID was received. Use whatever we have.
+            // The chat.html __callIdMap will translate it via the API_REQUEST intercept.
+            numericCallId = numericCallId; // keep as-is; chat.html translates it
         }
         
         // Send detailed call end info
@@ -6800,13 +6810,18 @@ _escapeHtml: function(text) {
         return;
     }
     
-    // Success path
+    // Success path — callData.callId is the real server UUID from /calls/start
     callsState.callData = callData;
     callsState.callState = 'initiated';
-    callsState.activeCallId = callData.callId;
-    callsState.callParticipants = callData.participants || [];
+    // If server returned a real UUID (not our local call_ string), use it
+    const serverCallId = callData.callId || callData.id || callData.serverCallId;
+    const localCallId = callData.localCallId || callsState.activeCallId;
+    callsState.activeCallId = serverCallId || localCallId;
+    callsState.localCallId = localCallId;   // keep local id for reference
+    callsState.serverCallId = serverCallId; // real DB UUID
+    callsState.callParticipants = callData.participants || callData.call?.participants || [];
     callsState.callStartTime = Date.now();
-    callsState.callType = callData.callType;
+    callsState.callType = callData.callType || callData.call?.type;
     callsState.callActive = true;
     
     if (callsState.callInvitationTimer) {
@@ -7137,7 +7152,9 @@ _videoCallHandler: null,
     }
     
     // Reject/Decline call button
-    const rejectBtn = document.getElementById('rejectCallBtn') || 
+    // calls.html uses id="declineCallBtn"; keep rejectCallBtn as legacy fallback
+    const rejectBtn = document.getElementById('declineCallBtn') ||
+                      document.getElementById('rejectCallBtn') || 
                       document.querySelector('[data-action="reject-call"]') ||
                       document.querySelector('.reject-call-btn');
     if (rejectBtn) {
@@ -7228,15 +7245,31 @@ _videoCallHandler: null,
 },
 
 _closeCallUI: function() {
-    // Hide call modal or overlay
-    const callModal = document.getElementById('callModal') || 
-                      document.querySelector('.call-modal') ||
-                      document.querySelector('.call-overlay');
-    if (callModal) {
-        callModal.style.display = 'none';
-        callModal.classList.add('hidden');
+    // Hide incoming call modal — calls.html uses #incomingCallModal (not #callModal)
+    const incomingModal = document.getElementById('incomingCallModal') ||
+                          document.getElementById('callModal') ||
+                          document.querySelector('.incoming-call-modal') ||
+                          document.querySelector('.call-modal') ||
+                          document.querySelector('.call-overlay');
+    if (incomingModal) {
+        incomingModal.style.display = 'none';
+        incomingModal.classList.remove('active');
+        incomingModal.classList.add('hidden');
     }
-    
+
+    // Also hide the new-call modal if open
+    const newCallModal = document.getElementById('newCallModal');
+    if (newCallModal) {
+        newCallModal.classList.remove('active');
+    }
+
+    // Remove active class from call container so it collapses back
+    const callContainer = document.getElementById('callContainer') ||
+                          document.querySelector('.call-container');
+    if (callContainer) {
+        callContainer.classList.remove('active');
+    }
+
     // Reset incoming call tracking
     window._currentIncomingCallId = null;
 },
@@ -8576,6 +8609,30 @@ function applySettingToCallsModule(section, key, value) {
         if (key === 'videoQuality') window.__videoQuality = value;
         if (key === 'voiceQuality') window.__voiceQuality = value;
         if (key === 'allowScreenShare') window.__allowScreenShare = value;
+        // Sync the in-page settings panel toggle checkboxes
+        const callsToggleMap = {
+            emotionalContext: 'emotionalContextToggle',
+            emotionalContextEnabled: 'emotionalContextToggle',
+            callIntention: 'callIntentionToggle',
+            callIntentionEnabled: 'callIntentionToggle',
+            inCallChat: 'inCallChatToggle',
+            inCallChatEnabled: 'inCallChatToggle',
+            whiteboard: 'whiteboardToggle',
+            whiteboardEnabled: 'whiteboardToggle',
+            polls: 'pollsToggle',
+            pollsEnabled: 'pollsToggle',
+            sharedNotes: 'notesToggle',
+            notesEnabled: 'notesToggle',
+            focusMode: 'focusModeToggle',
+            focusModeEnabled: 'focusModeToggle',
+            liveReactions: 'liveReactionsToggle',
+            liveReactionsEnabled: 'liveReactionsToggle'
+        };
+        var toggleId = callsToggleMap[key];
+        if (toggleId) {
+            var toggleEl = document.getElementById(toggleId);
+            if (toggleEl) toggleEl.checked = !!value;
+        }
     }
     if (section === 'chat') {
         if (key === 'enterToSend' || key === 'enterKeySends') window.__enterToSend = value;
