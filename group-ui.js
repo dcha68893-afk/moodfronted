@@ -3939,3 +3939,52 @@ if (typeof document !== 'undefined') {
 // NO DUPLICATES, NO ERRORS, FULLY PRODUCTION READY
 // VERSION 5.0.1 - SYNCED WITH CORE V9.0.1
 // =============================================
+// =============================================
+// SETTINGS LIVE-APPLY BRIDGE (UI Layer)
+// =============================================
+(function installSettingsUIBridge() {
+    function applyUISettingChange(section, key, value) {
+        if (section === "appearance") {
+            if (key === "theme") {
+                var t = value === "auto" ? (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light") : value;
+                document.documentElement.setAttribute("data-theme", t);
+                document.body.setAttribute("data-theme", t);
+                document.body.classList.toggle("dark-theme", t === "dark");
+                document.documentElement.style.colorScheme = t;
+            }
+            if (key === "fontSize") document.documentElement.style.fontSize = parseInt(value) + "px";
+            if (key === "accentColor") { document.documentElement.style.setProperty("--accent-color", value); document.documentElement.style.setProperty("--primary-color", value); }
+            if (key === "compactMode") { document.documentElement.setAttribute("data-compact", value ? "true" : "false"); document.body.classList.toggle("compact-mode", !!value); }
+            if (key === "animationsEnabled" || key === "animations") { document.body.classList.toggle("no-animations", !value); document.documentElement.setAttribute("data-animations", value ? "true" : "false"); }
+            if (key === "language") document.documentElement.setAttribute("lang", value);
+        }
+        if (section === "advanced") {
+            if (key === "reduceMotion") { document.body.classList.toggle("reduce-motion", !!value); document.documentElement.setAttribute("data-reduce-motion", value ? "true" : "false"); }
+            if (key === "performanceMode") document.documentElement.setAttribute("data-performance-mode", value ? "true" : "false");
+        }
+        if (section === "mood" && key === "currentMood") document.documentElement.setAttribute("data-mood", value);
+    }
+    function applyAll(settings) {
+        if (!settings || typeof settings !== "object") return;
+        Object.entries(settings).forEach(function(se) {
+            var sec = se[0], secVal = se[1];
+            if (secVal && typeof secVal === "object") {
+                Object.entries(secVal).forEach(function(ke) { try { applyUISettingChange(sec, ke[0], ke[1]); } catch(e) {} });
+            }
+        });
+    }
+    window.addEventListener("settingChanged", function(e) { try { var d = e.detail; applyUISettingChange(d.section, d.key, d.value); } catch(err) {} });
+    window.addEventListener("settingsUpdated", function(e) { try { applyAll(e.detail && e.detail.settings); } catch(err) {} });
+    window.addEventListener("message", function(e) {
+        try {
+            var data = e.data;
+            if (!data || typeof data !== "object") return;
+            if (data.type === "SETTING_CHANGED") { var p = data.payload || data; if (p.section && p.key !== undefined) applyUISettingChange(p.section, p.key, p.value); }
+            if (data.type === "SETTINGS_UPDATED") { applyAll((data.payload && data.payload.settings) || data.settings); }
+        } catch(err) {}
+    });
+    try {
+        var cached = localStorage.getItem("knecta_settings_cache");
+        if (cached) { var parsed = JSON.parse(cached); var settings = (parsed && parsed.data) ? parsed.data : parsed; if (parsed.timestamp && (Date.now() - parsed.timestamp) < 86400000) applyAll(settings); }
+    } catch(e) {}
+})();

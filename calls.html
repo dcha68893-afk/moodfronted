@@ -413,7 +413,6 @@ window.__CALLS_IFRAME__ = {
 
         .sync-indicator.syncing {
             color: var(--primary-color);
-            animation: spin 2s infinite linear;
         }
 
         .sync-indicator.connecting {
@@ -434,7 +433,6 @@ window.__CALLS_IFRAME__ = {
 
         .sync-indicator.recovering {
             color: var(--warning-color);
-            animation: pulse 2s infinite;
         }
 
         .calls-section {
@@ -578,15 +576,12 @@ window.__CALLS_IFRAME__ = {
         .loading-spinner {
             width: 40px;
             height: 40px;
-            border: 3px solid var(--border-color);
-            border-top-color: var(--primary-color);
-            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
             margin: 0 auto 15px;
-            animation: spin 1s infinite linear;
-        }
-
-        @keyframes spin {
-            to { transform: rotate(360deg); }
+            color: var(--primary-color);
+            font-size: 28px;
         }
 
         @keyframes pulse {
@@ -1899,7 +1894,6 @@ window.__CALLS_IFRAME__ = {
             font-size: 48px;
             margin-bottom: 20px;
             color: var(--primary-color);
-            animation: spin 2s infinite linear;
         }
 
         .reconnect-progress {
@@ -2111,7 +2105,6 @@ window.__CALLS_IFRAME__ = {
             font-size: 48px;
             color: var(--primary-color);
             margin-bottom: 10px;
-            animation: spin 2s infinite linear;
         }
 
         /* Skeleton Loading */
@@ -2120,7 +2113,7 @@ window.__CALLS_IFRAME__ = {
         }
 
         .skeleton-pulse {
-            animation: skeleton-pulse 1.5s ease-in-out infinite;
+            opacity: 0.7;
         }
 
         @keyframes skeleton-pulse {
@@ -2131,9 +2124,7 @@ window.__CALLS_IFRAME__ = {
 
         .skeleton-item {
             height: 60px;
-            background: linear-gradient(90deg, var(--border-color) 25%, var(--secondary-color) 50%, var(--border-color) 75%);
-            background-size: 200% 100%;
-            animation: skeleton-shimmer 1.5s infinite;
+            background: var(--border-color);
             border-radius: 8px;
             margin-bottom: 10px;
         }
@@ -2504,7 +2495,7 @@ window.__CALLS_IFRAME__ = {
                             <p class="subtext">Connect to the internet to load contacts</p>
                         </div>
                         <div class="loading-placeholder" id="contactsLoading">
-                            <div class="loading-spinner"></div>
+                            <div class="loading-spinner"><i class="fas fa-users"></i></div>
                             <p>Loading contacts...</p>
                         </div>
                     </div>
@@ -2928,7 +2919,7 @@ window.__CALLS_IFRAME__ = {
                                     <p class="subtext">Connect to the internet to sync your call history</p>
                                 </div>
                                 <div class="loading-placeholder" id="callsLoading" style="display: none;">
-                                    <div class="loading-spinner"></div>
+                                    <div class="loading-spinner"><i class="fas fa-phone"></i></div>
                                     <p>Loading calls...</p>
                                 </div>
                                 <!-- Default empty state - shown immediately -->
@@ -2968,29 +2959,53 @@ window.__CALLS_IFRAME__ = {
         
         <!-- Call Container -->
         <div class="call-container" id="callContainer">
-            <!-- Focus Mode Button -->
-            <button class="focus-mode-btn control-btn" id="focusModeBtn" title="Focus Mode" style="display: none;">
-                <i class="fas fa-eye"></i>
-            </button>
-            
-            <!-- Call Header -->
-            <div class="call-header" id="callHeader">
-                <div class="call-info-bar">
-                    <div class="call-type-icon" id="callTypeIcon">
-                        <i class="fas fa-phone"></i>
-                    </div>
-                    <div class="call-info-text">
-                        <h4 id="callWithName">Ready to call</h4>
-                        <p id="callStatusText">Select a contact to start</p>
-                        <div id="callMoodIndicator" style="display: none;"></div>
-                        <div id="callIntentionIndicator" style="display: none;"></div>
+            <!-- Structured Call Header Bar -->
+            <div id="callHeaderBar" style="
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                padding: 12px 20px;
+                background: rgba(0,0,0,0.85);
+                border-bottom: 1px solid rgba(255,255,255,0.1);
+                z-index: 50;
+                flex-shrink: 0;
+                min-height: 60px;
+            ">
+                <div style="display:flex;align-items:center;gap:12px;">
+                    <div id="callTypeIcon" style="
+                        width:38px;height:38px;border-radius:50%;
+                        background:rgba(255,255,255,0.15);
+                        display:flex;align-items:center;justify-content:center;
+                        color:white;font-size:16px;
+                    "><i class="fas fa-phone"></i></div>
+                    <div>
+                        <div id="callWithName" style="color:white;font-weight:600;font-size:16px;line-height:1.2;">Ready to call</div>
+                        <div id="callStatusText" style="color:rgba(255,255,255,0.65);font-size:12px;">Select a contact to start</div>
+                        <div id="callSourceCtx" style="color:rgba(255,255,255,0.40);font-size:10px;margin-top:1px;display:none;"></div>
                     </div>
                 </div>
-                <div class="call-duration" id="callDuration">00:00</div>
+                <div id="callDuration" style="
+                    color:white;font-size:15px;font-weight:600;
+                    background:rgba(255,255,255,0.12);
+                    padding:5px 14px;border-radius:20px;
+                ">--:--</div>
+                <div style="display:flex;gap:8px;align-items:center;">
+                    <button id="focusModeBtn" class="control-btn" title="Focus Mode" style="display:none;width:36px;height:36px;font-size:15px;">
+                        <i class="fas fa-eye"></i>
+                    </button>
+                    <button id="callHeaderEndBtn" class="control-btn danger" title="End Call" style="width:36px;height:36px;font-size:15px;display:none;">
+                        <i class="fas fa-phone-slash"></i>
+                    </button>
+                </div>
+                <div id="callMoodIndicator" style="display:none;"></div>
+                <div id="callIntentionIndicator" style="display:none;"></div>
             </div>
+
+            <!-- Legacy call-header hidden, kept for JS compat -->
+            <div class="call-header" id="callHeader" style="display:none;"></div>
             
             <!-- Video Grid -->
-            <div class="video-grid" id="videoGrid">
+            <div class="video-grid" id="videoGrid" style="padding-top:10px;">
                 <!-- Video containers will be added dynamically -->
                 <div class="offline-call-placeholder" id="offlineCallPlaceholder" style="display: flex;">
                     <i class="fas fa-phone"></i>

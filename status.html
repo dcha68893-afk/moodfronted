@@ -1859,6 +1859,56 @@
             }
         });
         
+        // FIX: Emergency direct bindings as inline fallback (fires before ES modules)
+        document.addEventListener('DOMContentLoaded', function() {
+            // Cancel / close buttons that must ALWAYS work regardless of module load state
+            var closeCreateBtn = document.getElementById('closeCreateStatusModal');
+            if (closeCreateBtn) closeCreateBtn.addEventListener('click', function() {
+                var m = document.getElementById('createStatusModal');
+                if (m) m.classList.remove('active');
+            });
+            var closeHighBtn = document.getElementById('closeHighlightsModal');
+            if (closeHighBtn) closeHighBtn.addEventListener('click', function() {
+                var m = document.getElementById('highlightsModal');
+                if (m) m.classList.remove('active');
+            });
+            var closeDraftsBtn = document.getElementById('closeDraftsModal');
+            if (closeDraftsBtn) closeDraftsBtn.addEventListener('click', function() {
+                var m = document.getElementById('draftsModal');
+                if (m) m.classList.remove('active');
+            });
+            var closeTimelineBtn = document.getElementById('closeMemoryTimelineModal');
+            if (closeTimelineBtn) closeTimelineBtn.addEventListener('click', function() {
+                var m = document.getElementById('memoryTimelineModal');
+                if (m) m.classList.remove('active');
+            });
+            var closeStatsBtn = document.getElementById('closeStatsModal');
+            if (closeStatsBtn) closeStatsBtn.addEventListener('click', function() {
+                var m = document.getElementById('statsModal');
+                if (m) m.classList.remove('active');
+            });
+            var closeScheduleBtn = document.getElementById('closeScheduleModal');
+            if (closeScheduleBtn) closeScheduleBtn.addEventListener('click', function() {
+                var m = document.getElementById('scheduleModal');
+                if (m) m.classList.remove('active');
+            });
+            var cancelScheduleBtn2 = document.getElementById('cancelScheduleBtn');
+            if (cancelScheduleBtn2) cancelScheduleBtn2.addEventListener('click', function() {
+                var m = document.getElementById('scheduleModal');
+                if (m) m.classList.remove('active');
+            });
+            var cancelHighlightBtn2 = document.getElementById('cancelHighlightBtn');
+            if (cancelHighlightBtn2) cancelHighlightBtn2.addEventListener('click', function() {
+                var m = document.getElementById('highlightsEditorModal');
+                if (m) { m.classList.remove('active'); m.style.display = 'none'; }
+            });
+            var cancelStatsBtn2 = document.getElementById('cancelStatsModalBtn');
+            if (cancelStatsBtn2) cancelStatsBtn2.addEventListener('click', function() {
+                var m = document.getElementById('statsModal');
+                if (m) m.classList.remove('active');
+            });
+        });
+
         // Enable debug mode if URL parameter present
         if (window.location.search.includes('debug=true')) {
             window.__IFRAME_DEBUG__ = true;
@@ -1875,11 +1925,13 @@
         // Ensure all buttons have proper disabled states during initialization
         document.addEventListener('DOMContentLoaded', () => {
             // Disable action buttons initially (will be enabled after auth)
+            // FIX: Only disable auth-required buttons initially.
+            // viewHighlightsBtn and viewDraftsBtn must remain clickable (they open modals, not API calls).
             const actionButtons = [
                 'createStatusBtn', 'postStatusBtn', 'saveDraftBtn', 
                 'scheduleStatusBtn', 'viewMyStatusBtn', 'editMyStatusBtn',
-                'viewHighlightsBtn', 'createHighlightBtn', 'viewTimelineBtn',
-                'viewStatsBtn', 'viewDraftsBtn', 'viewScheduledBtn'
+                'createHighlightBtn', 'viewTimelineBtn',
+                'viewStatsBtn', 'viewScheduledBtn'
             ];
             
             actionButtons.forEach(id => {
@@ -2201,16 +2253,23 @@
                 </div>
             </div>
             
-            <div style="padding: 20px; border-top: 1px solid var(--border-color); display: flex; justify-content: space-between;">
+            <div style="padding: 16px 20px; border-top: 1px solid var(--border-color); display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap;">
                 <button class="action-btn secondary" id="saveDraftBtn">
                     <i class="fas fa-save"></i> Save Draft
                 </button>
-                <button class="action-btn primary" id="postStatusBtn">
-                    <i class="fas fa-paper-plane"></i> Post Status
-                </button>
-                <button class="action-btn success" id="scheduleStatusBtn">
-                    <i class="fas fa-clock"></i> Schedule
-                </button>
+                <div style="display: flex; gap: 8px; align-items: center;">
+                    <button class="action-btn ghost" id="cancelCreateStatusBtn"
+                        style="color: var(--text-secondary); background: transparent; border: 1px solid var(--border-color);"
+                        onclick="document.getElementById('createStatusModal')?.classList.remove('active')">
+                        <i class="fas fa-times"></i> Cancel
+                    </button>
+                    <button class="action-btn success" id="scheduleStatusBtn">
+                        <i class="fas fa-clock"></i> Schedule
+                    </button>
+                    <button class="action-btn primary" id="postStatusBtn">
+                        <i class="fas fa-paper-plane"></i> Post Status
+                    </button>
+                </div>
             </div>
         </div>
     </div>
@@ -2356,6 +2415,12 @@
             </div>
             <div class="memory-timeline-content" id="memoryTimelineContent">
                 <!-- Timeline will be loaded here -->
+            </div>
+            <div style="padding: 12px 20px; border-top: 1px solid var(--border-color); display: flex; justify-content: flex-end;">
+                <button class="action-btn secondary" style="min-width: 100px;"
+                    onclick="document.getElementById('memoryTimelineModal')?.classList.remove('active')">
+                    <i class="fas fa-times"></i> Close
+                </button>
             </div>
         </div>
     </div>

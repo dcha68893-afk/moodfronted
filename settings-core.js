@@ -11,16 +11,17 @@ function __isValidSession(session) {
 
   if (!session.token || typeof session.token !== 'string') return false;
 
-  if (
-    session.userId === undefined ||
-    session.userId === null ||
-    session.userId === 'user' ||
-    session.userId === 'default' ||
-    typeof session.userId !== 'number'
-  ) return false;
+  const userId = session.userId;
+  if (userId === undefined || userId === null) return false;
+  if (userId === 'user' || userId === 'default' || userId === '' || userId === 'null' || userId === 'undefined') return false;
+  // Accept both number and numeric string (e.g. "42" or 42)
+  if (typeof userId === 'number' && (isNaN(userId) || userId === 0)) return false;
+  if (typeof userId === 'string' && (isNaN(Number(userId)) || Number(userId) === 0)) return false;
+  if (typeof userId !== 'number' && typeof userId !== 'string') return false;
 
   return true;
 }
+
 
 // =============================================
 // INITIALIZATION GUARD - PREVENT MULTIPLE INITIALIZATIONS
@@ -174,15 +175,25 @@ function authorizedRequest(endpoint, options = {}) {
         pendingRequests.set(requestId, { resolve, reject, timeoutId });
         window.addEventListener('message', handler);
         
-        // Send request to parent
+        // Send request to parent - use payload wrapper so chat.html reads it correctly
         window.parent.postMessage({
             type: 'API_REQUEST',
             requestId: requestId,
+            source: MODULE_NAME,
             module: MODULE_NAME,
             endpoint: normalizeEndpoint(endpoint),
             method: method,
+            body: options.body,
             data: options.body,
             headers: options.headers || {},
+            payload: {
+                requestId: requestId,
+                endpoint: normalizeEndpoint(endpoint),
+                method: method,
+                body: options.body,
+                data: options.body,
+                source: MODULE_NAME
+            },
             timestamp: Date.now()
         }, '*');
     });
@@ -852,16 +863,30 @@ function sendChildReady() {
 // STRICT PARENT_READY HANDLER - ACTIVATION GATE WITH SESSION VALIDATION
 // =============================================
 function handleParentReady(message) {
-    if (currentState !== LifecycleState.WAIT_PARENT) {
+    // Accept both WAIT_PARENT (normal flow) and ACTIVE (standalone/forced mode)
+    // so the real parent session is applied even when standalone mode pre-activated us
+    const acceptableStates = [LifecycleState.WAIT_PARENT, LifecycleState.ACTIVE];
+    if (!acceptableStates.includes(currentState)) {
         if (DEBUG) {
-            console.log(`[${MODULE_NAME}] 📥 PARENT_READY ignored (state: ${currentState}, expected WAIT_PARENT)`);
+            console.log(`[${MODULE_NAME}] 📥 PARENT_READY ignored (state: ${currentState})`);
         }
         return false;
     }
     
     if (parentReadyReceived) {
-        if (DEBUG) {
-            console.log(`[${MODULE_NAME}] 📥 PARENT_READY ignored (already received)`);
+        // If already received but we got a new one with a different session, still apply it
+        const newSessionData = message.session || message.payload?.session || message;
+        if (newSessionData && __isValidSession(newSessionData)) {
+            const newSessionId = newSessionData.sessionId || `${newSessionData.token}_${newSessionData.userId}`;
+            if (_lastSessionId !== newSessionId) {
+                _lastSessionId = newSessionId;
+                _currentValidSession = newSessionData;
+                applySession(newSessionData);
+                isAuthenticated = true;
+                authCheckComplete = true;
+                processRequestQueue();
+                loadSettingsAfterActivation();
+            }
         }
         return false;
     }
@@ -875,7 +900,8 @@ function handleParentReady(message) {
     // CRITICAL: Validate session before activating
     if (sessionData) {
         if (!__isValidSession(sessionData)) {
-            console.warn(`[${MODULE_NAME}] ⚠️ PARENT_READY with invalid session - cannot activate, staying in WAIT_PARENT`);
+            console.warn(`[${MODULE_NAME}] ⚠️ PARENT_READY with invalid session - cannot activate, staying in ${currentState}`);
+            parentReadyReceived = false; // allow retry
             return false;
         }
         
@@ -890,7 +916,8 @@ function handleParentReady(message) {
         
         applySession(sessionData);
     } else {
-        console.warn(`[${MODULE_NAME}] ⚠️ PARENT_READY without session data - cannot activate, staying in WAIT_PARENT`);
+        console.warn(`[${MODULE_NAME}] ⚠️ PARENT_READY without session data`);
+        parentReadyReceived = false; // allow retry
         return false;
     }
     
@@ -898,22 +925,18 @@ function handleParentReady(message) {
     window.parentReadyReceived = true;
     window.parentCommunicationReady = true;
     
-    // ONLY transition to ACTIVE if session is valid
-    if (__isValidSession(sessionData)) {
+    // Ensure we're ACTIVE
+    if (currentState !== LifecycleState.ACTIVE) {
         setState(LifecycleState.ACTIVE, 'parent_ready_received_valid_session');
-    } else {
-        console.warn(`[${MODULE_NAME}] ⚠️ Cannot activate - session validation failed, staying in WAIT_PARENT`);
-        return false;
     }
     
     flushQueue();
     
-    // Only load settings if auth is ready
-    if (isAuthenticated) {
-        loadSettingsAfterActivation();
-    } else {
-        console.log(`[${MODULE_NAME}] ⏳ Waiting for authentication before loading settings`);
-    }
+    // Mark authenticated and load settings
+    isAuthenticated = true;
+    authCheckComplete = true;
+    processRequestQueue();
+    loadSettingsAfterActivation();
     
     onModuleActive();
     
@@ -1433,8 +1456,8 @@ function setupMessageListener() {
             // Process queued requests
             processRequestQueue();
             
-            // If parent is already ready and we have valid session, load settings
-            if (parentReadyReceived && currentState === LifecycleState.ACTIVE && __isValidSession(_currentValidSession)) {
+            // Load settings if we're ACTIVE (regardless of parentReadyReceived — standalone mode reaches ACTIVE without it)
+            if (currentState === LifecycleState.ACTIVE) {
                 loadSettingsAfterActivation();
                 startBackgroundTasks();
             }
@@ -1463,10 +1486,10 @@ function setupMessageListener() {
         // SESSION_DATA HANDLER WITH VALIDATION
         // =============================================
         if (data.type === 'SESSION_DATA') {
-            const sessionData = data.session || data.payload?.session || data;
+            const sessionData = data.session || data.payload?.session || data.payload || data;
             
             if (!__isValidSession(sessionData)) {
-                console.warn(`[${MODULE_NAME}] ⚠️ Ignored invalid SESSION_DATA`, {
+                if (DEBUG) console.warn(`[${MODULE_NAME}] ⚠️ Ignored invalid SESSION_DATA`, {
                     hasToken: !!sessionData.token,
                     userId: sessionData.userId,
                     tokenType: typeof sessionData.token
@@ -1475,18 +1498,26 @@ function setupMessageListener() {
             }
             
             const sessionId = sessionData.sessionId || `${sessionData.token}_${sessionData.userId}`;
-            if (_lastSessionId === sessionId && _currentValidSession) {
-                if (DEBUG) {
-                    console.log(`[${MODULE_NAME}] 📥 Duplicate SESSION_DATA ignored`);
-                }
+            if (_lastSessionId === sessionId && _currentValidSession && isAuthenticated) {
+                if (DEBUG) console.log(`[${MODULE_NAME}] 📥 Duplicate SESSION_DATA ignored`);
                 return;
             }
             _lastSessionId = sessionId;
             _currentValidSession = sessionData;
             
             applySession(sessionData);
-            console.log(`[${MODULE_NAME}] ✅ Valid SESSION_DATA applied`);
             
+            // Mark authenticated so API calls can proceed
+            if (!isAuthenticated) {
+                isAuthenticated = true;
+                authCheckComplete = true;
+                processRequestQueue();
+                if (currentState === LifecycleState.ACTIVE) {
+                    loadSettingsAfterActivation();
+                }
+            }
+            
+            console.log(`[${MODULE_NAME}] ✅ Valid SESSION_DATA applied`);
             return;
         }
         
@@ -7443,6 +7474,40 @@ let domContentLoadedFired = false;
 document.addEventListener('DOMContentLoaded', function() {
     if (domContentLoadedFired) return;
     domContentLoadedFired = true;
+    
+    // === CACHE-FIRST: Load settings from localStorage immediately so UI renders fast ===
+    try {
+        const cached = localStorage.getItem('knecta_settings_cache');
+        if (cached) {
+            const parsed = JSON.parse(cached);
+            const data = (parsed && parsed.data) ? parsed.data : parsed;
+            if (data && typeof data === 'object' && Object.keys(data).length > 0) {
+                const ageMs = parsed.timestamp ? (Date.now() - parsed.timestamp) : Infinity;
+                if (ageMs < 86400000) { // < 24h
+                    SettingsState.data = data;
+                    SettingsState.loaded = true;
+                    // Apply appearance/theme immediately before any async work
+                    if (data.appearance?.theme) {
+                        const t = data.appearance.theme;
+                        const resolved = t === 'auto'
+                            ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
+                            : t;
+                        document.documentElement.setAttribute('data-theme', resolved);
+                    }
+                    if (data.appearance?.fontSize) {
+                        document.documentElement.style.fontSize = data.appearance.fontSize + 'px';
+                    }
+                    if (data.appearance?.accentColor) {
+                        document.documentElement.style.setProperty('--accent-color', data.appearance.accentColor);
+                    }
+                    if (data.appearance?.compactMode) {
+                        document.body.classList.toggle('compact-mode', !!data.appearance.compactMode);
+                    }
+                    console.log('[settings-core] ✅ Cache-first settings loaded instantly');
+                }
+            }
+        }
+    } catch(e) {}
     
     try {
         initLog('DOMContentLoaded - starting core initialization');

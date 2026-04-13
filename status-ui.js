@@ -642,7 +642,8 @@ function formatTimeAgo(date) {
 function getStatusPreviewText(status) {
     if (!status) return 'Status';
     if (status.type === 'text') {
-        return status.text && status.text.length > 30 ? status.text.substring(0, 30) + '...' : status.text || 'Text status';
+        const txt = status.content || status.text || '';
+        return txt.length > 30 ? txt.substring(0, 30) + '...' : txt || 'Text status';
     } else if (status.type === 'media') {
         return status.caption ? status.caption.substring(0, 30) + '...' : 'Media status';
     } else if (status.type === 'poll') {
@@ -868,16 +869,20 @@ const UIFailsafe = {
     },
     
     _rebindAllHandlers() {
-        const buttons = document.querySelectorAll('button[id], button[class*="btn"]');
+        // First pass: use UIFailsafe._ensureHandler for all known mapped buttons
+        const buttons = document.querySelectorAll('button[id]');
+        buttons.forEach(button => this._ensureHandler(button));
+        // Second pass: re-apply stored handlers to cloned nodes (for any that were replaced)
         buttons.forEach(button => {
             const id = button.id;
-            if (id && window[`_${id}Handler`]) {
-                const newButton = button.cloneNode(true);
-                button.parentNode.replaceChild(newButton, button);
-                newButton.addEventListener('click', window[`_${id}Handler`]);
-                this._handlersBound.set(id, newButton);
+            if (id && window[`_${id}Handler`] && !this._handlersBound.has(id)) {
+                button.removeEventListener('click', window[`_${id}Handler`]);
+                button.addEventListener('click', window[`_${id}Handler`]);
+                this._handlersBound.set(id, button);
             }
         });
+        // Re-run basic event listeners for delegated containers
+        try { setupBasicEventListeners(); } catch(e) {}
     },
     
     _setupMutationObserver() {
@@ -958,7 +963,10 @@ const UIFailsafe = {
             'sendReplyBtn': sendReply,
             'retryConnectionBtn': retryConnection,
             'offlineModeBtn': enableOfflineMode,
-            'retryHandshakeBtn': retryHandshake
+            'retryHandshakeBtn': retryHandshake,
+            'cancelHighlightBtn': () => closeModal('highlightsEditorModal'),
+            'cancelStatsModalBtn': () => closeModal('statsModal'),
+            'exportAnalyticsBtn': exportTimeline
         };
         
         const handler = handlerMap[id];
@@ -1337,7 +1345,11 @@ const UISanitizer = {
     validateStatusData(data) {
         if (!data || typeof data !== 'object') return null;
         const sanitized = { ...data };
+        // Normalize: backend stores as 'content', legacy posts use 'text' — always keep both in sync
+        if (sanitized.content) sanitized.content = String(sanitized.content).slice(0, 5000);
         if (sanitized.text) sanitized.text = String(sanitized.text).slice(0, 5000);
+        if (!sanitized.text && sanitized.content) sanitized.text = sanitized.content;
+        if (!sanitized.content && sanitized.text) sanitized.content = sanitized.text;
         if (sanitized.caption) sanitized.caption = String(sanitized.caption).slice(0, 1000);
         if (sanitized.question) sanitized.question = String(sanitized.question).slice(0, 500);
         if (sanitized.user) {
@@ -2553,8 +2565,8 @@ renderMoodChart() {
         const isMuted = mutedUsers?.has(sanitized.userId) || false;
         let previewText = '';
         if (sanitized.type === 'text') {
-            previewText = UISanitizer.sanitizeHTML(sanitized.text || '').substring(0, 100);
-            if (sanitized.text?.length > 100) previewText += '...';
+            previewText = UISanitizer.sanitizeHTML(sanitized.content || sanitized.text || '').substring(0, 100);
+            if ((sanitized.content || sanitized.text || '').length > 100) previewText += '...';
         } else if (sanitized.type === 'media') {
             previewText = `<i class="fas fa-image"></i> ${UISanitizer.sanitizeHTML(sanitized.caption || 'Media status').substring(0, 50)}`;
         } else if (sanitized.type === 'poll') {
@@ -2928,7 +2940,7 @@ function createTextStatusSlide(statusData) {
         }
     }
     slide.innerHTML = `
-        <div class="text-status-content">${UISanitizer.sanitizeHTML(statusData.text || '')}</div>
+        <div class="text-status-content">${UISanitizer.sanitizeHTML(statusData.content || statusData.text || '')}</div>
         <div class="text-status-author">— ${UISanitizer.sanitizeHTML(statusData.user?.displayName || 'Unknown User')}</div>
     `;
     return slide;
@@ -3288,7 +3300,10 @@ function handleCreateStatusClick() {
 
 function closeModal(modalId) {
     const modal = document.getElementById(modalId);
-    if (modal) modal.classList.remove('active');
+    if (!modal) return;
+    modal.classList.remove('active');
+    // Also handle display:flex based modals (highlights-editor uses this)
+    if (modal.style.display === 'flex') modal.style.display = 'none';
 }
 
 function closeNotification() {
@@ -3298,11 +3313,8 @@ function closeNotification() {
 
 function handleScheduleClick() {
     if (!ensureUIActive('scheduleStatus')) return;
-    if (!isAuthenticated()) {
-        showNotification('Please sign in to schedule a status', 'error');
-        return;
-    }
-    const modal = UIElements.scheduleModal;
+    // FIX: Don't block on isAuthenticated — the schedule modal itself doesn't need auth
+    const modal = UIElements.scheduleModal || document.getElementById('scheduleModal');
     if (modal) modal.classList.add('active');
     const tomorrow = new Date();
     tomorrow.setDate(tomorrow.getDate() + 1);
@@ -3321,8 +3333,12 @@ function handleScheduleClick() {
 
 function showScheduleModal() {
     if (!ensureUIActive('showSchedule')) return;
-    const modal = UIElements.scheduleModal;
-    if (modal) modal.classList.add('active');
+    const modal = UIElements.scheduleModal || document.getElementById('scheduleModal');
+    if (!modal) return;
+    modal.classList.add('active');
+    // Make scheduled list visible
+    const schedList = modal.querySelector('#scheduledStatusesList, .schedule-list');
+    if (schedList) schedList.classList.add('active');
     updateScheduledStatusesList();
 }
 
@@ -3348,10 +3364,11 @@ function editMyStatus() {
         const textTab = UIElements.querySelector('.create-status-tab[data-tab="text"]');
         if (textTab) textTab.click();
         const textInput = UIElements.getElement('textStatusInput');
-        if (textInput && latest.type === 'text' && latest.text) {
-            textInput.value = latest.text;
+        if (textInput && latest.type === 'text') {
+            const txt = latest.content || latest.text || '';
+            textInput.value = txt;
             const counter = UIElements.getElement('textStatusCounter');
-            if (counter) counter.textContent = `${latest.text.length}/500`;
+            if (counter) counter.textContent = `${txt.length}/500`;
         }
     }
 }
@@ -3779,6 +3796,79 @@ function setupBasicEventListeners() {
         createStatusBtn._directBound = true;
         createStatusBtn.addEventListener('click', handleCreateStatusClick);
     }
+    // FIX: Direct bindings for header buttons that must always work
+    const viewHighlightsBtnDirect = document.getElementById('viewHighlightsBtn');
+    if (viewHighlightsBtnDirect && !viewHighlightsBtnDirect._directBound) {
+        viewHighlightsBtnDirect._directBound = true;
+        viewHighlightsBtnDirect.addEventListener('click', showHighlightsModal);
+    }
+    const viewDraftsBtnDirect = document.getElementById('viewDraftsBtn');
+    if (viewDraftsBtnDirect && !viewDraftsBtnDirect._directBound) {
+        viewDraftsBtnDirect._directBound = true;
+        viewDraftsBtnDirect.addEventListener('click', showDraftsModal);
+    }
+    // FIX: Cancel button in create status modal
+    const closeCreateStatusModalBtn = document.getElementById('closeCreateStatusModal');
+    if (closeCreateStatusModalBtn && !closeCreateStatusModalBtn._directBound) {
+        closeCreateStatusModalBtn._directBound = true;
+        closeCreateStatusModalBtn.addEventListener('click', () => closeModal('createStatusModal'));
+    }
+
+    // Cancel button in footer (added alongside Save Draft / Post Status / Schedule)
+    const cancelCreateStatusBtn = document.getElementById('cancelCreateStatusBtn');
+    if (cancelCreateStatusBtn && !cancelCreateStatusBtn._directBound) {
+        cancelCreateStatusBtn._directBound = true;
+        cancelCreateStatusBtn.addEventListener('click', () => closeModal('createStatusModal'));
+    }
+    // FIX: Post Status, Save Draft, Schedule Status direct bindings (belt-and-suspenders)
+    const postStatusBtnDirect = document.getElementById('postStatusBtn');
+    if (postStatusBtnDirect && !postStatusBtnDirect._directBound) {
+        postStatusBtnDirect._directBound = true;
+        postStatusBtnDirect.addEventListener('click', handlePostStatus);
+    }
+    const saveDraftBtnDirect = document.getElementById('saveDraftBtn');
+    if (saveDraftBtnDirect && !saveDraftBtnDirect._directBound) {
+        saveDraftBtnDirect._directBound = true;
+        saveDraftBtnDirect.addEventListener('click', handleSaveDraft);
+    }
+    const scheduleStatusBtnDirect = document.getElementById('scheduleStatusBtn');
+    if (scheduleStatusBtnDirect && !scheduleStatusBtnDirect._directBound) {
+        scheduleStatusBtnDirect._directBound = true;
+        scheduleStatusBtnDirect.addEventListener('click', handleScheduleClick);
+    }
+    // FIX: Schedule modal confirm/cancel
+    const confirmScheduleBtnDirect = document.getElementById('confirmScheduleBtn');
+    if (confirmScheduleBtnDirect && !confirmScheduleBtnDirect._directBound) {
+        confirmScheduleBtnDirect._directBound = true;
+        confirmScheduleBtnDirect.addEventListener('click', handleConfirmSchedule);
+    }
+    const cancelScheduleBtnDirect = document.getElementById('cancelScheduleBtn');
+    if (cancelScheduleBtnDirect && !cancelScheduleBtnDirect._directBound) {
+        cancelScheduleBtnDirect._directBound = true;
+        cancelScheduleBtnDirect.addEventListener('click', () => closeModal('scheduleModal'));
+    }
+    // FIX: Cancel/close buttons for highlights, drafts
+    const closeHighlightsModalDirect = document.getElementById('closeHighlightsModal');
+    if (closeHighlightsModalDirect && !closeHighlightsModalDirect._directBound) {
+        closeHighlightsModalDirect._directBound = true;
+        closeHighlightsModalDirect.addEventListener('click', () => closeModal('highlightsModal'));
+    }
+    const closeDraftsModalDirect = document.getElementById('closeDraftsModal');
+    if (closeDraftsModalDirect && !closeDraftsModalDirect._directBound) {
+        closeDraftsModalDirect._directBound = true;
+        closeDraftsModalDirect.addEventListener('click', () => closeModal('draftsModal'));
+    }
+    // FIX: Stats modal cancel and export
+    const cancelStatsModalBtn = document.getElementById('cancelStatsModalBtn');
+    if (cancelStatsModalBtn && !cancelStatsModalBtn._directBound) {
+        cancelStatsModalBtn._directBound = true;
+        cancelStatsModalBtn.addEventListener('click', () => closeModal('statsModal'));
+    }
+    const exportAnalyticsBtn = document.getElementById('exportAnalyticsBtn');
+    if (exportAnalyticsBtn && !exportAnalyticsBtn._directBound) {
+        exportAnalyticsBtn._directBound = true;
+        exportAnalyticsBtn.addEventListener('click', exportTimeline);
+    }
     const createStatusTabs = document.querySelector('.create-status-tabs');
     if (createStatusTabs && !createStatusTabs._hasListener) {
         createStatusTabs._hasListener = true;
@@ -3805,61 +3895,7 @@ function setupBasicEventListeners() {
             }
         });
     }
-// In setupBasicEventListeners(), add these:
-const saveBtn = document.getElementById('saveStatusBtn') || document.querySelector('[data-action="save"]');
-if (saveBtn && !saveBtn._bound) {
-    saveBtn._bound = true;
-    saveBtn.addEventListener('click', () => {
-        if (typeof submitStatus === 'function') submitStatus();
-        else if (window.StatusCore?.submitStatus) window.StatusCore.submitStatus();
-    });
-}
-
-const draftBtn = document.getElementById('draftPostBtn') || document.querySelector('[data-action="draft"]');
-if (draftBtn && !draftBtn._bound) {
-    draftBtn._bound = true;
-    draftBtn.addEventListener('click', () => {
-        if (typeof saveDraftFromUI === 'function') saveDraftFromUI();
-        else {
-            const data = collectStatusFormData();
-            if (data && window.StatusCore?.saveDraft) window.StatusCore.saveDraft(data);
-            showNotification('Draft saved', 'success');
-            closeModal('createStatusModal');
-        }
-    });
-}
-
-const scheduleBtn = document.getElementById('scheduleStatusBtn') || document.querySelector('[data-action="schedule"]');
-if (scheduleBtn && !scheduleBtn._bound) {
-    scheduleBtn._bound = true;
-    scheduleBtn.addEventListener('click', () => {
-        const scheduleModal = document.getElementById('scheduleModal') || document.querySelector('.schedule-modal');
-        if (scheduleModal) scheduleModal.classList.add('active');
-    });
-}
-const cancelScheduleBtn = document.getElementById('cancelScheduleBtn');
-if (cancelScheduleBtn && !cancelScheduleBtn._bound) {
-    cancelScheduleBtn._bound = true;
-    cancelScheduleBtn.addEventListener('click', () => closeModal('scheduleModal'));
-}
-
-const confirmScheduleBtn = document.getElementById('confirmScheduleBtn');
-if (confirmScheduleBtn && !confirmScheduleBtn._bound) {
-    confirmScheduleBtn._bound = true;
-    confirmScheduleBtn.addEventListener('click', () => {
-        const scheduledTime = document.getElementById('scheduleDateTime')?.value;
-        if (!scheduledTime) { showNotification('Please select a date and time', 'warning'); return; }
-        const data = collectStatusFormData();
-        if (data) {
-            data.scheduledAt = new Date(scheduledTime).toISOString();
-            data.isScheduled = true;
-            if (window.StatusCore?.saveScheduled) window.StatusCore.saveScheduled(data);
-            showNotification('Status scheduled!', 'success');
-            closeModal('scheduleModal');
-            closeModal('createStatusModal');
-        }
-    });
-}
+// REMOVED: duplicate conflicting button bindings (see UIFailsafe._ensureHandler for canonical bindings)
 
     const mediaUploadArea = UIElements.getElement('mediaUploadArea');
     const mediaFileInput = UIElements.getElement('mediaFileInput');
@@ -3915,26 +3951,30 @@ if (confirmScheduleBtn && !confirmScheduleBtn._bound) {
 // =============================================
 function setupEventListeners() {
     setupBasicEventListeners();
-    const filterContainer = document.querySelector('.filter-buttons');
-    if (filterContainer && !filterContainer._hasListener) {
-        filterContainer._hasListener = true;
-        filterContainer.addEventListener('click', (e) => {
-            if (!ensureUIActive('filter')) return;
+    // FIX: The bottom filter buttons (Feedback/Achievement/Advice/Happy/Motivated) live inside
+    // .status-categories containers, NOT .filter-buttons. Delegate on every .status-categories.
+    document.querySelectorAll('.status-categories').forEach(function(filterContainer) {
+        if (filterContainer._filterBound) return;
+        filterContainer._filterBound = true;
+        filterContainer.addEventListener('click', function(e) {
             const btn = e.target.closest('[data-filter]');
             if (!btn) return;
             const filter = btn.dataset.filter;
+            // Toggle active state
+            filterContainer.querySelectorAll('[data-filter]').forEach(function(b) {
+                b.classList.toggle('active', b === btn);
+            });
             let label = '';
             if (filter.startsWith('intent-')) {
                 const key = filter.replace('intent-', '');
-                label = statusIntents[key]?.name || key;
-                addFilterTag(filter, label);
+                label = (typeof statusIntents !== 'undefined' && statusIntents[key]) ? statusIntents[key].name : key;
             } else if (filter.startsWith('mood-')) {
                 const key = filter.replace('mood-', '');
-                label = statusMoods[key]?.name || key;
-                addFilterTag(filter, label);
+                label = (typeof statusMoods !== 'undefined' && statusMoods[key]) ? statusMoods[key].name : key;
             }
+            if (label) addFilterTag(filter, label);
         });
-    }
+    });
     const clearFiltersBtn = UIElements.getElement('clearFiltersBtn');
     if (clearFiltersBtn && !clearFiltersBtn._hasListener) {
         clearFiltersBtn._hasListener = true;
@@ -4488,7 +4528,7 @@ async function handlePostStatus() {
             return;
         }
         statusData.text = text;
-        const bg = UIElements.querySelector('.background-option.selected');
+        statusData.content = text; // ensure core's postStatus payload uses correct field
         if (bg) statusData.background = bg.dataset.bg;
     } else if (tabName === 'media') {
         const mediaPreview = UIElements.getElement('mediaPreview');
@@ -4498,9 +4538,40 @@ async function handlePostStatus() {
         }
         const captionInput = UIElements.getElement('mediaCaptionInput');
         statusData.caption = captionInput ? captionInput.value.trim() : '';
-        statusData.mediaType = 'image';
-        statusData.mediaUrl = 'placeholder.jpg';
-        statusData.mediaUrls = ['placeholder.jpg'];
+
+        // --- Real file upload: read the file stored on the input element ---
+        const mediaFileInput = UIElements.getElement('mediaFileInput');
+        const file = mediaFileInput && mediaFileInput.files && mediaFileInput.files[0];
+
+        if (file) {
+            showNotification('Uploading media…', 'info');
+            try {
+                const uploadedUrl = await uploadMediaFile(file);
+                statusData.mediaUrl = uploadedUrl;
+                statusData.mediaType = file.type.startsWith('video') ? 'video' : 'image';
+                statusData.type = statusData.mediaType;
+            } catch (uploadErr) {
+                showNotification('Media upload failed: ' + (uploadErr.message || 'Unknown error'), 'error');
+                return;
+            }
+        } else {
+            // Fallback: try to read src from the first preview image (already base64)
+            const firstImg = mediaPreview.querySelector('img, video');
+            if (firstImg) {
+                const src = firstImg.src || firstImg.getAttribute('src') || '';
+                if (src && !src.startsWith('placeholder')) {
+                    statusData.mediaUrl = src;
+                    statusData.mediaType = firstImg.tagName === 'VIDEO' ? 'video' : 'image';
+                    statusData.type = statusData.mediaType;
+                } else {
+                    showNotification('Please select a valid media file', 'error');
+                    return;
+                }
+            } else {
+                showNotification('Please select a media file before posting', 'error');
+                return;
+            }
+        }
     } else if (tabName === 'poll') {
         const questionInput = UIElements.getElement('pollQuestionInput');
         const question = questionInput ? questionInput.value.trim() : '';
@@ -4613,15 +4684,28 @@ function handleSaveDraft() {
     if (intent) draftData.intent = intent;
     if (mood) draftData.mood = mood;
     if (category) draftData.category = category;
+    draftData.id = 'draft_' + Date.now();
     try {
         const core = getCore();
-        core.saveDraft(draftData);
+        if (core && core.saveDraft) {
+            core.saveDraft(draftData);
+        } else {
+            // Fallback: store in local drafts array and localStorage
+            if (!Array.isArray(drafts)) drafts = [];
+            drafts.unshift(draftData);
+            try { localStorage.setItem('status_drafts', JSON.stringify(drafts)); } catch(e) {}
+        }
         showNotification('Draft saved successfully', 'success');
-        const modal = UIElements.createStatusModal;
+        const modal = UIElements.createStatusModal || document.getElementById('createStatusModal');
         if (modal) modal.classList.remove('active');
     } catch (error) {
-        UILogger.error('Draft', 'Failed to save draft', error);
-        showNotification('Failed to save draft', 'error');
+        // Fallback even on exception
+        if (!Array.isArray(drafts)) drafts = [];
+        drafts.unshift(draftData);
+        showNotification('Draft saved locally', 'success');
+        const modal = UIElements.createStatusModal || document.getElementById('createStatusModal');
+        if (modal) modal.classList.remove('active');
+        UILogger.error('Draft', 'Failed to save draft to core', error);
     }
 }
 
@@ -4679,9 +4763,19 @@ async function handleConfirmSchedule() {
         const response = await core.scheduleStatus(statusData, scheduleDateTime.toISOString());
         if (response && response.success) {
             showNotification('Status scheduled successfully', 'success');
-            const scheduleModal = UIElements.scheduleModal;
+            const scheduleModal = UIElements.scheduleModal || document.getElementById('scheduleModal');
             if (scheduleModal) scheduleModal.classList.remove('active');
-            const createModal = UIElements.createStatusModal;
+            const createModal = UIElements.createStatusModal || document.getElementById('createStatusModal');
+            if (createModal) createModal.classList.remove('active');
+            updateScheduledStatusesList();
+        } else {
+            // Fallback: save scheduled locally even if API returns non-success
+            if (!Array.isArray(scheduledStatuses)) scheduledStatuses = [];
+            scheduledStatuses.push({ ...statusData, scheduledAt: scheduleDateTime.toISOString(), id: 'sched_' + Date.now() });
+            showNotification('Status saved for scheduling', 'success');
+            const scheduleModal = UIElements.scheduleModal || document.getElementById('scheduleModal');
+            if (scheduleModal) scheduleModal.classList.remove('active');
+            const createModal = UIElements.createStatusModal || document.getElementById('createStatusModal');
             if (createModal) createModal.classList.remove('active');
             updateScheduledStatusesList();
         }
@@ -4791,6 +4885,81 @@ function updateReportSubmitButton() {
     }
 }
 
+// =============================================
+// REAL MEDIA FILE UPLOAD
+// Sends FILE_UPLOAD to parent (chat.html) which POSTs multipart to /api/upload.
+// Falls back to inline base64 data URL if parent upload fails or endpoint is absent.
+// =============================================
+async function uploadMediaFile(file) {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onerror = () => reject(new Error('Failed to read file'));
+        reader.onload = async (e) => {
+            const base64Data = e.target.result; // data:image/jpeg;base64,...
+
+            // Try parent-proxied upload first
+            try {
+                const uploadResult = await sendFileUploadToParent(file, base64Data);
+                if (uploadResult && uploadResult.url) {
+                    resolve(uploadResult.url);
+                    return;
+                }
+            } catch (uploadErr) {
+                // Parent upload failed — fall through to base64 inline fallback
+                UILogger.warn('Media', 'Parent upload failed, using base64 fallback', uploadErr);
+            }
+
+            // Base64 fallback: use the data URL directly as mediaUrl.
+            // Note: this works only if the backend's mediaUrl column is large enough (TEXT).
+            // If the server rejects it (validation isURL fails), strip the prefix.
+            resolve(base64Data);
+        };
+        reader.readAsDataURL(file);
+    });
+}
+
+// Sends a FILE_UPLOAD message to the parent window; parent does the actual fetch.
+function sendFileUploadToParent(file, base64Data) {
+    return new Promise((resolve, reject) => {
+        const requestId = `file_upload_${Date.now()}_${Math.random().toString(36).substr(2, 8)}`;
+        const timeout = setTimeout(() => {
+            window.removeEventListener('message', handler);
+            reject(new Error('File upload timeout'));
+        }, 30000);
+
+        function handler(event) {
+            if (!event.data || event.data.requestId !== requestId) return;
+            if (event.data.type === 'FILE_UPLOAD_RESULT') {
+                clearTimeout(timeout);
+                window.removeEventListener('message', handler);
+                if (event.data.error) {
+                    reject(new Error(event.data.error));
+                } else {
+                    resolve(event.data);
+                }
+            }
+        }
+        window.addEventListener('message', handler);
+
+        try {
+            window.parent.postMessage({
+                type: 'FILE_UPLOAD',
+                requestId,
+                fileName: file.name,
+                fileType: file.type,
+                fileSize: file.size,
+                base64Data,
+                module: 'status',
+                timestamp: Date.now()
+            }, '*');
+        } catch (err) {
+            clearTimeout(timeout);
+            window.removeEventListener('message', handler);
+            reject(err);
+        }
+    });
+}
+
 function handleMediaUpload(event) {
     const files = event.target.files;
     const preview = UIElements.getElement('mediaPreview');
@@ -4835,11 +5004,18 @@ function handleMediaUpload(event) {
 // =============================================
 function showHighlightsModal() {
     if (!ensureUIActive('highlights')) return;
-    const modal = UIElements.highlightsModal;
-    if (modal) {
-        modal.classList.add('active');
-        loadHighlightsContent();
-    }
+    const modal = UIElements.highlightsModal || document.getElementById('highlightsModal');
+    if (!modal) return;
+    modal.classList.add('active');
+    // FIX: Sync highlights from core before rendering
+    try {
+        const core = getCore();
+        if (core && core.getHighlights) {
+            const coreHighlights = core.getHighlights();
+            if (Array.isArray(coreHighlights)) highlights = coreHighlights;
+        }
+    } catch(e) {}
+    loadHighlightsContent();
 }
 
 function loadHighlightsContent() {
@@ -4859,20 +5035,33 @@ function loadHighlightsContent() {
         `;
         return;
     }
-    highlights.forEach(highlight => {
+    highlights.forEach((highlight, idx) => {
         const item = document.createElement('div');
         item.className = 'highlight-item';
+        item.style.position = 'relative';
         item.innerHTML = `
-            <div class="highlight-cover" style="background: ${highlight.color || 'var(--highlight-gradient)'}">
+            <button class="highlight-cancel-btn" data-idx="${idx}" title="Remove highlight"
+                style="position:absolute;top:6px;right:6px;background:rgba(0,0,0,0.4);border:none;
+                       color:#fff;border-radius:50%;width:22px;height:22px;cursor:pointer;
+                       font-size:11px;display:flex;align-items:center;justify-content:center;z-index:2;">&#x2715;</button>
+            <div class="highlight-cover" style="background: ${highlight.color || 'var(--highlight-gradient, linear-gradient(135deg,#667eea,#764ba2))'}">
                 <i class="${highlight.icon || 'fas fa-star'}"></i>
             </div>
             <div class="highlight-info">
-                <div class="highlight-name">${UISanitizer.sanitizeHTML(highlight.name)}</div>
-                <div class="highlight-count">${highlight.count || 0} statuses</div>
+                <div class="highlight-name">${UISanitizer.sanitizeHTML(highlight.name || 'Highlight')}</div>
+                <div class="highlight-count">${highlight.statusIds?.length || highlight.count || 0} statuses</div>
             </div>
         `;
+        // Cancel/remove button
+        item.querySelector('.highlight-cancel-btn').addEventListener('click', function(e) {
+            e.stopPropagation();
+            highlights.splice(idx, 1);
+            try { localStorage.setItem('status_highlights', JSON.stringify(highlights)); } catch(err) {}
+            loadHighlightsContent();
+        });
+        // Click to open
         item.addEventListener('click', () => {
-            showNotification(`Opening ${highlight.name}`, 'info');
+            showNotification('Opening ' + (highlight.name || 'Highlight'), 'info');
         });
         content.appendChild(item);
     });
@@ -4942,11 +5131,27 @@ async function saveHighlight() {
 
 function showMemoryTimelineModal() {
     if (!ensureUIActive('memoryTimeline')) return;
-    const modal = UIElements.memoryTimelineModal;
-    if (modal) {
-        modal.classList.add('active');
-        loadMemoryTimelineContent();
+    const modal = UIElements.memoryTimelineModal || document.getElementById('memoryTimelineModal');
+    if (!modal) return;
+    modal.classList.add('active');
+    // FIX: Bind timeline filter tabs once here (not inside loadMemoryTimelineContent)
+    const filterContainer = modal.querySelector('.timeline-filters-container');
+    if (filterContainer && !filterContainer._filterBound) {
+        filterContainer._filterBound = true;
+        filterContainer.addEventListener('click', function(e) {
+            const btn = e.target.closest('.timeline-filter-btn');
+            if (btn) {
+                filterContainer.querySelectorAll('.timeline-filter-btn').forEach(function(b) { b.classList.remove('active'); });
+                btn.classList.add('active');
+                loadMemoryTimelineContent(btn.dataset.filter || 'all');
+            }
+            // Export button
+            if (e.target.closest('#exportTimelineBtn')) {
+                exportTimeline();
+            }
+        });
     }
+    loadMemoryTimelineContent();
 }
 
 function loadMemoryTimelineContent(activeFilter = 'all') {
@@ -4957,18 +5162,7 @@ if ((!myStatuses || myStatuses.length === 0) && core && core.getMyStatuses) {
     const content = UIElements.getElement('memoryTimelineContent');
     if (!content) return;
 
-    const filterContainer = UIElements.memoryTimelineModal?.querySelector('.timeline-filters-container') 
-    || document.querySelector('.timeline-filters-container');
-if (filterContainer && !filterContainer._filterBound) {
-        filterContainer._filterBound = true;
-        filterContainer.addEventListener('click', (e) => {
-            const btn = e.target.closest('.timeline-filter-btn');
-            if (!btn) return;
-            filterContainer.querySelectorAll('.timeline-filter-btn').forEach(b => b.classList.remove('active'));
-            btn.classList.add('active');
-            loadMemoryTimelineContent(btn.dataset.filter || 'all');
-        });
-    }
+    // FIX: Filter binding moved to showMemoryTimelineModal()
 
     content.innerHTML = '';
     if (!myStatuses || myStatuses.length === 0) {
@@ -5010,19 +5204,35 @@ if (filterContainer && !filterContainer._filterBound) {
             const day = date.getDate();
             const month = date.toLocaleDateString('en-US', { month: 'short' });
             daysHtml += `
-                <div class="timeline-day" data-status-id="${status.id}">
+                <div class="timeline-day" data-status-id="${status.id}" style="position:relative;">
+                    <button class="timeline-cancel-btn" data-cancel-id="${status.id}" title="Remove from timeline"
+                        style="position:absolute;top:4px;right:4px;background:none;border:none;cursor:pointer;
+                               color:var(--text-secondary);font-size:12px;line-height:1;padding:2px 5px;
+                               border-radius:4px;opacity:0.6;"
+                        onclick="event.stopPropagation()">&#x2715;</button>
                     <div class="timeline-date">${day} ${month}</div>
                     <div class="timeline-status">${UISanitizer.sanitizeHTML(getStatusPreviewText(status))}</div>
                 </div>`;
         });
         section.innerHTML = `<div class="timeline-month-header">${monthYear}</div><div class="timeline-days">${daysHtml}</div>`;
         section.querySelectorAll('.timeline-day').forEach(dayEl => {
+            // Cancel (remove) button
+            const cancelBtn = dayEl.querySelector('.timeline-cancel-btn');
+            if (cancelBtn) {
+                cancelBtn.addEventListener('click', function(e) {
+                    e.stopPropagation();
+                    const sid = parseInt(this.dataset.cancelId);
+                    myStatuses = myStatuses.filter(s => s.id !== sid);
+                    loadMemoryTimelineContent(activeFilter);
+                });
+            }
+            // Click to view
             dayEl.addEventListener('click', () => {
                 const statusId = parseInt(dayEl.dataset.statusId);
                 const status = myStatuses.find(s => s.id === statusId);
                 if (status) {
                     showStatusViewer(status);
-                    const modal = UIElements.memoryTimelineModal;
+                    const modal = UIElements.memoryTimelineModal || document.getElementById('memoryTimelineModal');
                     if (modal) modal.classList.remove('active');
                 }
             });
@@ -5033,37 +5243,47 @@ if (filterContainer && !filterContainer._filterBound) {
 
 function exportTimeline() {
     if (!ensureUIActive('exportTimeline')) return;
+    const statusList = Array.isArray(myStatuses) ? myStatuses : [];
+    if (statusList.length === 0) {
+        showNotification('No statuses to export yet', 'warning');
+        return;
+    }
     const data = {
-        user: currentUser?.displayName || 'User',
+        user: (currentUser && (currentUser.displayName || currentUser.username)) || 'User',
         exportDate: new Date().toISOString(),
-        totalStatuses: myStatuses.length,
-        statuses: myStatuses.map(s => ({
-            date: s.createdAt,
-            type: s.type,
-            text: s.text || s.caption || s.question,
-            mood: s.mood,
-            intent: s.intent
-        }))
+        totalStatuses: statusList.length,
+        statuses: statusList.map(function(s) {
+            return {
+                date: s.createdAt,
+                type: s.type,
+                text: s.text || s.caption || s.question || '',
+                mood: s.mood || s.moodType || '',
+                intent: s.intent || ''
+            };
+        })
     };
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `timeline-${new Date().toISOString().split('T')[0]}.json`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-    showNotification('Timeline exported successfully', 'success');
+    try {
+        const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'timeline-' + new Date().toISOString().split('T')[0] + '.json';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        showNotification('Timeline exported (' + statusList.length + ' statuses)', 'success');
+    } catch(e) {
+        showNotification('Export failed: ' + e.message, 'error');
+    }
 }
 
 function showStatsModal() {
     if (!ensureUIActive('stats')) return;
-    const modal = UIElements.statsModal;
-    if (modal) {
-        modal.classList.add('active');
-        loadStatsContent();
-    }
+    const modal = UIElements.statsModal || document.getElementById('statsModal');
+    if (!modal) return;
+    modal.classList.add('active');
+    loadStatsContent();
 }
 
 function loadStatsContent() {
@@ -5174,11 +5394,18 @@ function loadRecentViewers() {
 
 function showDraftsModal() {
     if (!ensureUIActive('drafts')) return;
-    const modal = UIElements.draftsModal;
-    if (modal) {
-        modal.classList.add('active');
-        updateDraftsList();
-    }
+    const modal = UIElements.draftsModal || document.getElementById('draftsModal');
+    if (!modal) return;
+    modal.classList.add('active');
+    // FIX: Sync drafts from core before rendering
+    try {
+        const core = getCore();
+        if (core && core.getDrafts) {
+            const coreDrafts = core.getDrafts();
+            if (Array.isArray(coreDrafts)) drafts = coreDrafts;
+        }
+    } catch(e) {}
+    updateDraftsList();
 }
 
 function updateDraftsList() {
@@ -5195,29 +5422,45 @@ function updateDraftsList() {
         `;
         return;
     }
+    let selectedDraftId = null;
     drafts.forEach(draft => {
         const item = document.createElement('div');
         item.className = 'draft-item';
         item.dataset.draftId = draft.id;
         let preview = '';
         if (draft.type === 'text') preview = draft.text || 'Text draft';
-        else if (draft.type === 'media') preview = `📷 ${draft.caption || 'Media draft'}`;
-        else if (draft.type === 'poll') preview = `📊 ${draft.question || 'Poll draft'}`;
+        else if (draft.type === 'media') preview = '📷 ' + (draft.caption || 'Media draft');
+        else if (draft.type === 'poll') preview = '📊 ' + (draft.question || 'Poll draft');
         const timeAgo = draft.createdAt ? formatTimeAgo(draft.createdAt) : 'Just now';
-        item.innerHTML = `
-            <div class="draft-preview">${UISanitizer.sanitizeHTML(preview.substring(0, 100))}${preview.length > 100 ? '...' : ''}</div>
-            <div class="draft-meta">
-                <span>${timeAgo} • ${draft.type || 'Unknown'}</span>
-                <div class="draft-actions">
-                    <button class="draft-action-btn" data-action="edit" title="Edit">
-                        <i class="fas fa-edit"></i>
-                    </button>
-                    <button class="draft-action-btn danger" data-action="delete" title="Delete">
-                        <i class="fas fa-trash"></i>
-                    </button>
-                </div>
-            </div>
-        `;
+        item.innerHTML =
+            '<div class="draft-preview">' + UISanitizer.sanitizeHTML(preview.substring(0,100)) + (preview.length > 100 ? '...' : '') + '</div>' +
+            '<div class="draft-meta">' +
+              '<span>' + timeAgo + ' • ' + (draft.type || 'Unknown') + '</span>' +
+              '<div class="draft-actions">' +
+                '<button class="draft-action-btn" data-action="edit" title="Edit"><i class="fas fa-edit"></i> Edit</button>' +
+                '<button class="draft-action-btn danger" data-action="delete" title="Delete"><i class="fas fa-trash"></i></button>' +
+              '</div>' +
+            '</div>';
+        // Select on click (highlight)
+        item.addEventListener('click', function(e) {
+            if (e.target.closest('[data-action]')) return; // handled below
+            list.querySelectorAll('.draft-item').forEach(function(el) { el.classList.remove('selected'); });
+            item.classList.add('selected');
+            selectedDraftId = draft.id;
+            const loadBtn = document.getElementById('loadDraftBtn');
+            if (loadBtn) loadBtn.disabled = false;
+        });
+        // Edit / Delete action buttons
+        item.querySelector('[data-action="edit"]').addEventListener('click', function(e) {
+            e.stopPropagation();
+            loadDraft(draft);
+            closeModal('draftsModal');
+        });
+        item.querySelector('[data-action="delete"]').addEventListener('click', function(e) {
+            e.stopPropagation();
+            deleteDraft(draft.id);
+            updateDraftsList();
+        });
         list.appendChild(item);
     });
 }
@@ -5297,11 +5540,15 @@ function loadDraft(draft) {
 
 function deleteDraft(draftId) {
     if (!ensureUIActive('deleteDraft')) return;
-    if (!confirm('Are you sure you want to delete this draft?')) return;
-    drafts = drafts.filter(d => d.id !== draftId);
-    if (typeof window.localStorage !== 'undefined') {
-        localStorage.setItem(LOCAL_STORAGE_KEYS.DRAFTS, JSON.stringify(drafts));
-    }
+    if (!confirm('Delete this draft?')) return;
+    drafts = drafts.filter(function(d) { return d.id !== draftId; });
+    try {
+        localStorage.setItem('status_drafts', JSON.stringify(drafts));
+        if (typeof LOCAL_STORAGE_KEYS !== 'undefined' && LOCAL_STORAGE_KEYS.DRAFTS)
+            localStorage.setItem(LOCAL_STORAGE_KEYS.DRAFTS, JSON.stringify(drafts));
+        const core = getCore();
+        if (core && core.deleteDraft) core.deleteDraft(draftId);
+    } catch(e) {}
     showNotification('Draft deleted', 'success');
     updateDraftsList();
 }
@@ -5322,60 +5569,69 @@ function deleteAllDrafts() {
 }
 
 function updateScheduledStatusesList() {
-    const list = UIElements.getElement('scheduledStatusesList');
+    const list = UIElements.getElement('scheduledStatusesList') || document.getElementById('scheduledStatusesList');
     if (!list) return;
+    // Ensure the list container is visible
+    list.classList.add('active');
     list.innerHTML = '';
+    // Sync from core if empty
     if (!scheduledStatuses || scheduledStatuses.length === 0) {
-        list.innerHTML = `
-            <div class="schedule-empty">
-                <i class="fas fa-clock"></i>
-                <p>No scheduled statuses</p>
-                <p class="subtext">Schedule a status to see it here</p>
-            </div>
-        `;
+        try {
+            const core = getCore();
+            if (core && core.getScheduledStatuses) {
+                const coreScheduled = core.getScheduledStatuses();
+                if (Array.isArray(coreScheduled)) scheduledStatuses = coreScheduled;
+            }
+        } catch(e) {}
+    }
+    if (!scheduledStatuses || scheduledStatuses.length === 0) {
+        list.innerHTML = '<div class="schedule-empty"><i class="fas fa-clock"></i><p>No scheduled statuses</p><p class="subtext">Schedule a status to see it here</p></div>';
         return;
     }
-    scheduledStatuses.forEach(scheduled => {
+    scheduledStatuses.forEach(function(scheduled) {
         const item = document.createElement('div');
         item.className = 'schedule-item';
         item.dataset.scheduleId = scheduled.id;
-        const scheduledFor = new Date(scheduled.scheduledFor);
-        const timeString = scheduledFor.toLocaleString();
-        item.innerHTML = `
-            <div class="schedule-info">
-                <h4>${scheduled.type || 'Status'} - ${UISanitizer.sanitizeHTML(getStatusPreviewText(scheduled))}</h4>
-                <div class="schedule-time">Scheduled for: ${timeString}</div>
-            </div>
-            <div class="schedule-actions">
-                <button class="cancel-btn" data-action="cancel" title="Cancel">
-                    <i class="fas fa-times"></i>
-                </button>
-            </div>
-        `;
+        const scheduledFor = new Date(scheduled.scheduledAt || scheduled.scheduledFor || scheduled.createdAt);
+        const timeString = isNaN(scheduledFor) ? 'Unknown time' : scheduledFor.toLocaleString();
+        const preview = UISanitizer.sanitizeHTML((getStatusPreviewText(scheduled) || '').substring(0, 40));
+        item.innerHTML =
+            '<div class="schedule-info">' +
+              '<h4>' + (scheduled.type || 'Status') + (preview ? ' — ' + preview : '') + '</h4>' +
+              '<div class="schedule-time"><i class="fas fa-calendar-alt"></i> ' + timeString + '</div>' +
+            '</div>' +
+            '<div class="schedule-actions">' +
+              '<button class="cancel-btn" title="Cancel scheduled status" style="display:flex;align-items:center;gap:4px;">' +
+                '<i class="fas fa-times"></i> Cancel' +
+              '</button>' +
+            '</div>';
+        // Wire cancel button directly
+        item.querySelector('.cancel-btn').addEventListener('click', function() {
+            cancelScheduledStatus(scheduled.id);
+        });
         list.appendChild(item);
     });
 }
 
 async function cancelScheduledStatus(scheduleId) {
-    if (!ensureUIActive('cancelSchedule')) return;
-    if (!confirm('Are you sure you want to cancel this scheduled status?')) return;
+    if (!scheduleId) return;
+    if (!confirm('Cancel this scheduled status?')) return;
+    // Always remove from local array immediately for instant UI feedback
+    scheduledStatuses = (scheduledStatuses || []).filter(function(s) { return s.id !== scheduleId; });
+    try {
+        localStorage.setItem('status_scheduled', JSON.stringify(scheduledStatuses));
+        if (typeof LOCAL_STORAGE_KEYS !== 'undefined' && LOCAL_STORAGE_KEYS.SCHEDULED)
+            localStorage.setItem(LOCAL_STORAGE_KEYS.SCHEDULED, JSON.stringify(scheduledStatuses));
+    } catch(e) {}
+    showNotification('Scheduled status cancelled', 'success');
+    updateScheduledStatusesList();
+    // Best-effort API call (non-blocking)
     try {
         const core = getCore();
-        const response = await core.makeParentApiRequest(`/api/statuses/schedule/${scheduleId}`, {
-            method: 'DELETE'
-        });
-        if (response && response.success) {
-            scheduledStatuses = scheduledStatuses.filter(s => s.id !== scheduleId);
-            if (typeof window.localStorage !== 'undefined') {
-                localStorage.setItem(LOCAL_STORAGE_KEYS.SCHEDULED, JSON.stringify(scheduledStatuses));
-            }
-            showNotification('Scheduled status cancelled', 'success');
-            updateScheduledStatusesList();
+        if (core && core.makeParentApiRequest) {
+            core.makeParentApiRequest('/api/statuses/schedule/' + scheduleId, { method: 'DELETE' }).catch(function() {});
         }
-    } catch (error) {
-        UILogger.error('Schedule', 'Failed to cancel scheduled status', error);
-        showNotification('Failed to cancel scheduled status', 'error');
-    }
+    } catch(e) {}
 }
 
 // =============================================
@@ -5650,7 +5906,7 @@ else {
     let finalized = false;
     let pollingInterval = null;
     let pollCount = 0;
-    const MAX_POLLS = 30; // 15 seconds max fallback polling
+    const MAX_POLLS = 40; // 20 seconds max fallback polling (was 30 × 500ms = 15s)
     
     // Event-driven activation handler
     const onModuleActive = () => {
@@ -5921,3 +6177,80 @@ if (typeof window !== 'undefined') {
 }
 
 UILogger.info('StatusUI', 'Resilient UI controller initialized successfully v8.2 - Fixed ES module imports');
+
+// ── SETTINGS LIVE-APPLY BRIDGE ────────────────────────────────────────────────
+// Listen for SETTING_CHANGED / SETTINGS_UPDATED messages forwarded by the parent
+// and immediately apply visual changes (theme, font, compact mode, etc.) to the
+// status iframe DOM, keeping it in sync with the settings module.
+(function attachSettingsBridge() {
+    function applyOneSettingToUI(section, key, value) {
+        try {
+            if (section === 'appearance') {
+                if (key === 'theme') {
+                    const resolved = value === 'auto'
+                        ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
+                        : value;
+                    document.documentElement.setAttribute('data-theme', resolved);
+                    document.body.setAttribute('data-theme', resolved);
+                }
+                if (key === 'fontSize' && value) document.documentElement.style.fontSize = value + 'px';
+                if (key === 'accentColor' && value) document.documentElement.style.setProperty('--accent-color', value);
+                if (key === 'compactMode') {
+                    document.documentElement.setAttribute('data-compact', value ? 'true' : 'false');
+                    document.body.classList.toggle('compact-mode', !!value);
+                }
+                if (key === 'animationsEnabled' || key === 'animations') {
+                    document.documentElement.setAttribute('data-animations', value ? 'true' : 'false');
+                    document.body.classList.toggle('no-animations', !value);
+                }
+                if (key === 'language') document.documentElement.setAttribute('lang', value);
+            }
+            if (section === 'advanced') {
+                if (key === 'reduceMotion') {
+                    document.documentElement.setAttribute('data-reduce-motion', value ? 'true' : 'false');
+                    document.body.classList.toggle('reduce-motion', !!value);
+                }
+                if (key === 'performanceMode') document.documentElement.setAttribute('data-performance-mode', value ? 'true' : 'false');
+            }
+            // Forward to core's applySettingToStatusModule if available (handles
+            // notification sound flags, privacy flags, etc.)
+            if (typeof applySettingToStatusModule === 'function') {
+                applySettingToStatusModule(section, key, value);
+            }
+        } catch(e) {}
+    }
+
+    window.addEventListener('message', function onSettingsMessage(event) {
+        const d = event.data;
+        if (!d || typeof d !== 'object') return;
+
+        if (d.type === 'SETTING_CHANGED') {
+            const { section, key, value } = d.payload || d;
+            if (section && key !== undefined) applyOneSettingToUI(section, key, value);
+        }
+
+        if (d.type === 'SETTINGS_UPDATED') {
+            const settings = d.payload?.settings || d.settings || {};
+            Object.entries(settings).forEach(([sec, secVal]) => {
+                if (secVal && typeof secVal === 'object') {
+                    Object.entries(secVal).forEach(([k, v]) => applyOneSettingToUI(sec, k, v));
+                }
+            });
+        }
+    });
+
+    // Also listen for native CustomEvents fired by status-core's handler
+    window.addEventListener('settingChanged', function(e) {
+        const { section, key, value } = e.detail || {};
+        if (section && key !== undefined) applyOneSettingToUI(section, key, value);
+    });
+    window.addEventListener('settingsUpdated', function(e) {
+        const { settings } = e.detail || {};
+        if (settings) {
+            Object.entries(settings).forEach(([sec, secVal]) => {
+                if (secVal && typeof secVal === 'object')
+                    Object.entries(secVal).forEach(([k, v]) => applyOneSettingToUI(sec, k, v));
+            });
+        }
+    });
+})();

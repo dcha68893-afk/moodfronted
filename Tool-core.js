@@ -3867,12 +3867,11 @@ function onModuleActive() {
     heartbeatResponder.start();
     loadUserSettings().catch(() => {});
     
-    // Initialize marketplace if session is ready and valid
-    if (sessionClient.isReady ? sessionClient.isReady() : false) {
-        if (__isValidSession(sessionClient.getSession())) {
-            marketplace.initialize().catch(() => {});
-        }
-    }
+    // FIX: Always initialize marketplace on ACTIVE regardless of session state
+    // The marketplace.initialize() is guarded internally; it just won't show data
+    // until a session arrives, but it MUST start now.
+    isAuthReady = true; // FIX: Unblock all API calls immediately on ACTIVE
+    marketplace.initialize().catch(() => {});
     
     window.dispatchEvent(new CustomEvent('tools:active', {
         detail: {
@@ -5212,7 +5211,10 @@ export async function secureApiCall(method, endpoint, data = null, options = {})
         return null;
     }
     
-    if (!(sessionClient.isReady ? sessionClient.isReady() : false)) {
+    // FIX: Don't block on isAuthReady — just try with whatever token is available
+    // If no token, fall back to cache for GET requests
+    const token = sessionClient.getToken ? sessionClient.getToken() : null;
+    if (!token) {
         if (method !== 'GET' || endpoint.includes('/auth/')) {
             safeSend('NEED_REFRESH', {
                 reason: 'api_call_without_session',
@@ -5227,10 +5229,6 @@ export async function secureApiCall(method, endpoint, data = null, options = {})
             } catch {}
         }
         return null;
-    }
-    
-    if (!isAuthReady) {
-        return queueApiCall(method, endpoint, data, options);
     }
     
     try {
@@ -6106,12 +6104,12 @@ export function formatFileSize(bytes) {
     }
 }
 
-export function createServiceListing(title, description, options = {}) {
+export async function createServiceListing(title, description, options = {}) {
     try {
         if (!hasValidUser()) throw new Error('User not authenticated');
         if (!isActive()) throw new Error('Module not active');
         
-        const user = sessionClient.getUser ? sessionClient.getUser() : null;
+        const user = sessionClient.getUser ? sessionClient.getUser() : window.currentUser || null;
         const userId = user?.id;
         const userObj = user || { displayName: 'User' };
         
@@ -6120,11 +6118,12 @@ export function createServiceListing(title, description, options = {}) {
         const listing = {
             id: listingId,
             userId: userId,
+            sellerId: userId,
             user: userObj,
             type: LISTING_TYPES.SERVICE,
             title: title,
             description: description,
-            price: options.price,
+            price: options.price ? parseFloat(options.price) : 0,
             availability: options.availability || AVAILABILITY.FREE,
             visibility: options.visibility || TRUST_CIRCLES.FRIENDS,
             moodContext: options.moodContext,
@@ -6134,20 +6133,39 @@ export function createServiceListing(title, description, options = {}) {
             expiresAt: options.expiresAt || new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
             privateNotes: options.privateNotes,
             teamNotes: options.teamNotes,
+            available: true,
+            savedBy: [],
+            views: 0,
             createdAt: new Date().toISOString(),
             updatedAt: new Date().toISOString()
         };
         
+        // Add to local state immediately (optimistic update)
         myListings.unshift(listing);
-        safeStorage.set(LOCAL_STORAGE_KEYS.MY_LISTINGS, myListings);
         allListings.unshift(listing);
+        window.allListings = allListings;
+        window.myListings = myListings;
+        safeStorage.set(LOCAL_STORAGE_KEYS.MY_LISTINGS, myListings);
         safeStorage.set(LOCAL_STORAGE_KEYS.ALL_LISTINGS, allListings);
         
+        // Fire event to update UI immediately
+        window.dispatchEvent(new CustomEvent('marketplace:data-updated', { detail: { listings: allListings } }));
+        
+        // Send to backend
         try {
-            safeApiCall('POST', '/api/marketplace/listings', listing).then(response => {
-                if (response && response.listing) listing.id = response.listing.id || listingId;
-            }).catch(() => queueForSync(listing, 'listing'));
-        } catch {
+            const response = await safeApiCall('POST', '/api/marketplace/listings', {
+                title: listing.title,
+                description: listing.description,
+                price: listing.price,
+                category: 'services',
+                type: 'service',
+                images: [],
+                available: true
+            });
+            if (response && response.data?.listing) {
+                listing.id = response.data.listing.id || listingId;
+            }
+        } catch (e) {
             queueForSync(listing, 'listing');
         }
         
@@ -6155,17 +6173,18 @@ export function createServiceListing(title, description, options = {}) {
         updateTrustStats('listingCreated');
         
         return listing;
-    } catch {
+    } catch (err) {
+        console.error('[createServiceListing]', err);
         return null;
     }
 }
 
-export function createDigitalListing(title, description, fileData, options = {}) {
+export async function createDigitalListing(title, description, fileData, options = {}) {
     try {
         if (!hasValidUser()) throw new Error('User not authenticated');
         if (!isActive()) throw new Error('Module not active');
         
-        const user = sessionClient.getUser ? sessionClient.getUser() : null;
+        const user = sessionClient.getUser ? sessionClient.getUser() : window.currentUser || null;
         const userId = user?.id;
         const userObj = user || { displayName: 'User' };
         
@@ -6174,16 +6193,17 @@ export function createDigitalListing(title, description, fileData, options = {})
         const listing = {
             id: listingId,
             userId: userId,
+            sellerId: userId,
             user: userObj,
             type: LISTING_TYPES.DIGITAL,
             title: title,
             description: description,
-            price: options.price,
+            price: options.price ? parseFloat(options.price) : 0,
             mediaUrl: fileData?.url || '',
             fileUrl: fileData?.url || '',
-            fileName: fileData?.name || '',
-            fileSize: fileData?.size || 0,
-            fileType: fileData?.type || '',
+            fileName: fileData?.name || (fileData instanceof File ? fileData.name : ''),
+            fileSize: fileData?.size || (fileData instanceof File ? fileData.size : 0),
+            fileType: fileData?.type || (fileData instanceof File ? fileData.type : ''),
             visibility: options.visibility || TRUST_CIRCLES.FRIENDS,
             moodContext: options.moodContext,
             template: options.template,
@@ -6192,20 +6212,39 @@ export function createDigitalListing(title, description, fileData, options = {})
             expiresAt: options.expiresAt || new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
             privateNotes: options.privateNotes,
             teamNotes: options.teamNotes,
+            available: true,
+            savedBy: [],
+            views: 0,
             createdAt: new Date().toISOString(),
             updatedAt: new Date().toISOString()
         };
         
+        // Add to local state immediately (optimistic update)
         myListings.unshift(listing);
-        safeStorage.set(LOCAL_STORAGE_KEYS.MY_LISTINGS, myListings);
         allListings.unshift(listing);
+        window.allListings = allListings;
+        window.myListings = myListings;
+        safeStorage.set(LOCAL_STORAGE_KEYS.MY_LISTINGS, myListings);
         safeStorage.set(LOCAL_STORAGE_KEYS.ALL_LISTINGS, allListings);
         
+        // Fire event to update UI immediately
+        window.dispatchEvent(new CustomEvent('marketplace:data-updated', { detail: { listings: allListings } }));
+        
+        // Send to backend
         try {
-            safeApiCall('POST', '/api/marketplace/listings', listing).then(response => {
-                if (response && response.listing) listing.id = response.listing.id || listingId;
-            }).catch(() => queueForSync(listing, 'listing'));
-        } catch {
+            const response = await safeApiCall('POST', '/api/marketplace/listings', {
+                title: listing.title,
+                description: listing.description,
+                price: listing.price,
+                category: 'digital',
+                type: 'digital',
+                images: [],
+                available: true
+            });
+            if (response && response.data?.listing) {
+                listing.id = response.data.listing.id || listingId;
+            }
+        } catch (e) {
             queueForSync(listing, 'listing');
         }
         
@@ -6213,7 +6252,8 @@ export function createDigitalListing(title, description, fileData, options = {})
         updateTrustStats('listingCreated');
         
         return listing;
-    } catch {
+    } catch (err) {
+        console.error('[createDigitalListing]', err);
         return null;
     }
 }
@@ -7039,3 +7079,53 @@ export function updateSetting(section, key, value) {
 }
 
 export default marketplace;
+// =============================================
+// SETTINGS CACHE BOOTSTRAP - OFFLINE-FIRST
+// =============================================
+(function bootstrapToolsSettingsFromCache() {
+    function applySettingToToolsModule(section, key, value) {
+        if (section === 'appearance') {
+            if (key === 'theme') {
+                var theme = value === 'auto' ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light') : value;
+                document.documentElement.setAttribute('data-theme', theme);
+                document.body.setAttribute('data-theme', theme);
+            }
+            if (key === 'fontSize') document.documentElement.style.fontSize = parseInt(value) + 'px';
+            if (key === 'accentColor') document.documentElement.style.setProperty('--accent-color', value);
+            if (key === 'compactMode') { document.documentElement.setAttribute('data-compact', value ? 'true' : 'false'); document.body.classList.toggle('compact-mode', !!value); }
+            if (key === 'animationsEnabled' || key === 'animations') { document.documentElement.setAttribute('data-animations', value ? 'true' : 'false'); document.body.classList.toggle('no-animations', !value); }
+            if (key === 'language') { window.__appLanguage = value; document.documentElement.setAttribute('lang', value); }
+        }
+        if (section === 'advanced') {
+            if (key === 'performanceMode') document.documentElement.setAttribute('data-performance-mode', value ? 'true' : 'false');
+            if (key === 'reduceMotion') { document.documentElement.setAttribute('data-reduce-motion', value ? 'true' : 'false'); document.body.classList.toggle('reduce-motion', !!value); }
+            if (key === 'developerMode' || key === 'developerTools') window.__developerMode = value;
+        }
+        if (section === 'notifications') {
+            if (key === 'enableNotifications' || key === 'messageNotifications') window.__messageNotificationsEnabled = value;
+            if (key === 'notificationSound' || key === 'soundEnabled') window.__notificationSoundEnabled = value;
+        }
+        if (section === 'mood' && key === 'currentMood') { window.__currentMood = value; document.documentElement.setAttribute('data-mood', value); }
+    }
+    try {
+        var cached = localStorage.getItem('knecta_settings_cache');
+        if (!cached) return;
+        var parsed = JSON.parse(cached);
+        var settings = (parsed && parsed.data) ? parsed.data : parsed;
+        if (!settings || typeof settings !== 'object') return;
+        if (parsed.timestamp && (Date.now() - parsed.timestamp) > 86400000) return;
+        Object.entries(settings).forEach(function(se) {
+            var section = se[0], sectionVal = se[1];
+            if (!sectionVal || typeof sectionVal !== 'object') return;
+            Object.entries(sectionVal).forEach(function(ke) {
+                try { applySettingToToolsModule(section, ke[0], ke[1]); } catch(e) {}
+            });
+        });
+        console.log('[Tool-core] ✅ Settings bootstrapped from cache');
+    } catch(e) {}
+    window.addEventListener('online', function() {
+        try {
+            window.parent && window.parent.postMessage({ type: 'CHILD_READY', module: 'tools', source: 'tools', timestamp: Date.now() }, '*');
+        } catch(e) {}
+    });
+})();

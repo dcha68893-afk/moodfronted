@@ -5584,3 +5584,34 @@ function applySettingToMessagesModule(section, key, value) {
         if (key === 'showStatusTo') window.__showStatusTo = value;
     }
 }
+// =============================================
+// SETTINGS CACHE BOOTSTRAP - OFFLINE-FIRST
+// Reads knecta_settings_cache from localStorage at startup so settings
+// are applied instantly, before the parent sends SETTINGS_UPDATED.
+// =============================================
+(function bootstrapSettingsFromCache() {
+    try {
+        var cached = localStorage.getItem('knecta_settings_cache');
+        if (!cached) return;
+        var parsed = JSON.parse(cached);
+        // Accept both {data:{...}} and flat {section:{...}} shapes
+        var settings = (parsed && parsed.data) ? parsed.data : parsed;
+        if (!settings || typeof settings !== 'object') return;
+        // Skip if stale (> 24 hours)
+        if (parsed.timestamp && (Date.now() - parsed.timestamp) > 86400000) return;
+        Object.entries(settings).forEach(function(sectionEntry) {
+            var section = sectionEntry[0], sectionVal = sectionEntry[1];
+            if (!sectionVal || typeof sectionVal !== 'object') return;
+            Object.entries(sectionVal).forEach(function(keyEntry) {
+                try { applySettingToMessagesModule(section, keyEntry[0], keyEntry[1]); } catch(e) {}
+            });
+        });
+        console.log('[messages-core] ✅ Settings bootstrapped from cache');
+    } catch(e) {}
+    // Also listen for online event to re-request fresh settings
+    window.addEventListener('online', function() {
+        try {
+            window.parent && window.parent.postMessage({ type: 'CHILD_READY', module: 'messages', source: 'messages', timestamp: Date.now() }, '*');
+        } catch(e) {}
+    });
+})();

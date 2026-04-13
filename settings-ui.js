@@ -3230,7 +3230,12 @@ export function loadAppearanceSection(container) {
 export function loadStorageSection(container) {
     debugLog('Loading storage section');
     const settings = SettingsState.getSection('storage') || DEFAULT_SETTINGS.storage;
-    const usage = calculateStorageUsage();
+    const storageSettings = SettingsState.getSection('storage') || DEFAULT_SETTINGS.storage;
+    const usageBytes = calculateStorageUsage();
+    const usage = {
+        total: typeof usageBytes === 'number' ? usageBytes : (storageSettings.totalStorageUsed || 0),
+        limit: storageSettings.storageTotal || 1073741824
+    };
     
     container.innerHTML = `
         <div class="settings-section">
@@ -3614,7 +3619,7 @@ export function loadBackupSection(container) {
     const backupNowBtn = document.getElementById('backupNowBtn');
     if (backupNowBtn) backupNowBtn.addEventListener('click', async () => {
         try {
-            await SettingsState.save();
+            SettingsState._saveToCache();
             await SettingsState.update('backup', 'lastBackup', Date.now());
             showNotification('Backup created successfully', 'success');
             loadBackupSection(container);

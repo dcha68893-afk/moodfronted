@@ -9174,3 +9174,29 @@ function applySettingToFriendModule(section, key, value) {
         if (key === 'autoClearCache') window.__autoClearCache = value;
     }
 }
+// =============================================
+// SETTINGS CACHE BOOTSTRAP - OFFLINE-FIRST
+// =============================================
+(function bootstrapSettingsFromCache() {
+    try {
+        var cached = localStorage.getItem('knecta_settings_cache');
+        if (!cached) return;
+        var parsed = JSON.parse(cached);
+        var settings = (parsed && parsed.data) ? parsed.data : parsed;
+        if (!settings || typeof settings !== 'object') return;
+        if (parsed.timestamp && (Date.now() - parsed.timestamp) > 86400000) return;
+        Object.entries(settings).forEach(function(sectionEntry) {
+            var section = sectionEntry[0], sectionVal = sectionEntry[1];
+            if (!sectionVal || typeof sectionVal !== 'object') return;
+            Object.entries(sectionVal).forEach(function(keyEntry) {
+                try { applySettingToFriendModule(section, keyEntry[0], keyEntry[1]); } catch(e) {}
+            });
+        });
+        console.log('[friend-core] ✅ Settings bootstrapped from cache');
+    } catch(e) {}
+    window.addEventListener('online', function() {
+        try {
+            window.parent && window.parent.postMessage({ type: 'CHILD_READY', module: 'friends', source: 'friends', timestamp: Date.now() }, '*');
+        } catch(e) {}
+    });
+})();

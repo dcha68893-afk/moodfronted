@@ -59,6 +59,7 @@
             color: #9ca3af;
             transition: all 0.2s;
             font-size: 20px;
+            position: relative;
         }
 
         .nav-icon:hover {
@@ -69,6 +70,83 @@
         .nav-icon.active {
             background: #7c3aed;
             color: white;
+        }
+
+        /* Call button animations */
+        .nav-icon[data-page="calls"].call-incoming {
+            animation: callPulse 1s ease infinite;
+            background: rgba(124, 58, 237, 0.3);
+        }
+
+        @keyframes callPulse {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.1); background: rgba(124, 58, 237, 0.5); }
+        }
+
+        /* Call active indicator */
+        .call-active-indicator {
+            position: absolute;
+            top: -2px;
+            right: -2px;
+            width: 12px;
+            height: 12px;
+            background: #10b981;
+            border-radius: 50%;
+            border: 2px solid white;
+            animation: callActivePulse 1.5s infinite;
+        }
+
+        @keyframes callActivePulse {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.5; transform: scale(1.2); }
+        }
+
+        /* Incoming call notification */
+        .incoming-call-toast {
+            position: fixed;
+            bottom: 80px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            color: white;
+            padding: 12px 20px;
+            border-radius: 50px;
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            z-index: 10000;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.2);
+            animation: slideUp 0.3s ease;
+        }
+
+        .incoming-call-toast button {
+            background: white;
+            border: none;
+            padding: 6px 16px;
+            border-radius: 20px;
+            cursor: pointer;
+            font-weight: 500;
+        }
+
+        .incoming-call-toast button.accept {
+            background: #10b981;
+            color: white;
+        }
+
+        .incoming-call-toast button.decline {
+            background: #ef4444;
+            color: white;
+        }
+
+        @keyframes slideUp {
+            from {
+                opacity: 0;
+                transform: translateX(-50%) translateY(20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateX(-50%) translateY(0);
+            }
         }
 
         .iframe-container {
@@ -305,7 +383,7 @@
         // TRUSTED ORIGIN HELPER
         // ======================================================================
         function isTrustedOrigin(origin) {
-            if (!origin || origin === 'null') return true; // sandboxed iframes
+            if (!origin || origin === 'null') return true;
             try {
                 const url = new URL(origin);
                 if (url.hostname === 'localhost' || url.hostname === '127.0.0.1') return true;
@@ -316,7 +394,7 @@
         }
 
         // ======================================================================
-        // AND any code inside the message listener)
+        // MODULE MAPPINGS
         // ======================================================================
         const moduleToIframeId = {
             'messages': 'messagesIframe',
@@ -330,7 +408,7 @@
         };
 
         // ======================================================================
-        // CENTRALIZED EVENT DISPATCHER (CORE FEATURE)
+        // CENTRALIZED EVENT DISPATCHER
         // ======================================================================
         
         function dispatchEventToModules(event) {
@@ -354,7 +432,7 @@
                     try {
                         iframe.contentWindow.postMessage(enrichedEvent, '*');
                         modulesSent.push(moduleName);
-                        console.log(`📡 Event "${enrichedEvent.type}" dispatched to module: ${moduleName}`, enrichedEvent.payload);
+                        // console.log(`📡 Event "${enrichedEvent.type}" dispatched to module: ${moduleName}`, enrichedEvent.payload);
                     } catch (error) {
                         console.error(`Failed to dispatch event to ${moduleName}:`, error);
                     }
@@ -362,7 +440,7 @@
             });
             
             if (modulesSent.length > 0) {
-                console.log(`✅ Event "${enrichedEvent.type}" broadcast to ${modulesSent.length} module(s):`, modulesSent);
+                // console.log(`✅ Event "${enrichedEvent.type}" broadcast to ${modulesSent.length} module(s):`, modulesSent);
             } else {
                 console.warn(`⚠️ Event "${enrichedEvent.type}" had no targets (no iframes available)`);
             }
@@ -389,6 +467,7 @@
                 }, '*');
             }
         }
+        
         function sendFriendsToMessagesIframe(friends) {
             const iframe = document.getElementById('messagesIframe') || document.getElementById('messageIframe');
             if (iframe && iframe.contentWindow) {
@@ -398,6 +477,7 @@
                 }, '*');
             }
         }
+        
         function sendFriendsToGroupIframe(friends) {
             const iframe = document.getElementById('groupIframe') || document.getElementById('groupsIframe');
             if (iframe && iframe.contentWindow) {
@@ -407,15 +487,28 @@
                 }, '*');
             }
         }
+        
         function sendFriendsToCallsIframe(friends) {
             const iframe = document.getElementById('callsIframe');
             if (iframe && iframe.contentWindow) {
+                const friendsToSend = friends || (typeof cachedFriendsList !== 'undefined' ? cachedFriendsList : []);
+                const formattedFriends = friendsToSend.map(friend => ({
+                    id: friend.id || friend.userId,
+                    name: friend.displayName || friend.username || friend.name || 'User',
+                    displayName: friend.displayName || friend.username || friend.name,
+                    username: friend.username,
+                    avatar: friend.avatar || friend.photoURL,
+                    online: friend.online || false,
+                    status: friend.status || (friend.online ? 'online' : 'offline')
+                }));
                 iframe.contentWindow.postMessage({
                     type: 'CONTACTS_UPDATE',
-                    payload: { contacts: friends || (typeof cachedFriendsList !== 'undefined' ? cachedFriendsList : []), timestamp: Date.now() }
+                    payload: { contacts: formattedFriends, timestamp: Date.now() }
                 }, '*');
+                // console.log(`[Parent] Sent ${formattedFriends.length} contacts to calls module`);
             }
         }
+        
         function sendFriendsToToolsIframe(friends) {
             const iframe = document.getElementById('toolsIframe');
             if (iframe && iframe.contentWindow) {
@@ -430,14 +523,11 @@
         // NAVIGATION HANDLERS
         // ======================================================================
 
-        // Track current & previous page so CHILD_CLOSING can return to the right place
         window.__currentPage = 'messages';
         window.__lastActivePage = 'messages';
 
-        // Central navigation function — always use this to switch modules
         function navigateToPage(page) {
             if (!page) return;
-            // Record history before switching
             if (window.__currentPage !== page) {
                 window.__lastActivePage = window.__currentPage || 'messages';
                 window.__currentPage = page;
@@ -453,6 +543,17 @@
             if (page === 'group')    setTimeout(() => sendFriendsToGroupIframe(), 300);
             if (page === 'status')   setTimeout(() => sendFriendsToStatusIframe(), 300);
             if (page === 'tools')    setTimeout(() => sendFriendsToToolsIframe(), 300);
+
+            // Re-send session + settings to the tab being activated.
+            // Modules that loaded before auth was ready get their session immediately here.
+            const iframeId = moduleToIframeId[page];
+            if (iframeId) {
+                const iframe = document.getElementById(iframeId);
+                if (iframe && iframe.contentWindow && window.__cachedToken && window.__cachedUserId) {
+                    window.__sendSessionToModule(iframe, page);
+                    setTimeout(() => window.__pushSettingsToModule(iframe, page), 150);
+                }
+            }
         }
 
         document.querySelectorAll('.nav-icon, .mobile-nav-icon').forEach(btn => {
@@ -462,7 +563,6 @@
             });
         });
 
-        // Mobile Back Button Handler
         const mobileBackBtn = document.getElementById('mobileBackBtn');
         if (mobileBackBtn) {
             mobileBackBtn.addEventListener('click', () => {
@@ -490,14 +590,10 @@
             if (!messagesIframe) return;
             
             window.addEventListener('message', function(event) {
-                if (!isTrustedOrigin(event.origin)) {
-                    return;
-                }
+                if (!isTrustedOrigin(event.origin)) return;
                 const data = event.data || {};
                 if (data.type === 'CHAT_OPENED' || data.type === 'CONVERSATION_OPENED') {
-                    if (window.innerWidth <= 768) {
-                        document.body.classList.add('chat-panel-active');
-                    }
+                    if (window.innerWidth <= 768) document.body.classList.add('chat-panel-active');
                 }
                 if (data.type === 'CHAT_LIST_SHOWN' || data.type === 'CHAT_CLOSED' || data.type === 'GO_BACK_TO_CHAT_LIST') {
                     if (window.innerWidth <= 768) {
@@ -508,80 +604,15 @@
                     }
                 }
             });
-            
-            messagesIframe.addEventListener('load', function() {
-                try {
-                    const iframeDoc = messagesIframe.contentDocument || messagesIframe.contentWindow.document;
-                    if (iframeDoc) {
-                        const script = iframeDoc.createElement('script');
-                        script.textContent = `
-                            (function() {
-                                function notifyChatState(state, data) {
-                                    window.parent.postMessage({
-                                        type: state === 'open' ? 'CHAT_OPENED' : 'CHAT_CLOSED',
-                                        payload: data || {}
-                                    }, '*');
-                                }
-                                let lastPath = window.location.pathname;
-                                setInterval(function() {
-                                    if (window.location.pathname !== lastPath) {
-                                        lastPath = window.location.pathname;
-                                        if (lastPath.includes('/chat/') || lastPath.includes('/conversation/')) {
-                                            notifyChatState('open', { path: lastPath });
-                                        } else {
-                                            notifyChatState('closed', { path: lastPath });
-                                        }
-                                    }
-                                }, 500);
-                                document.addEventListener('click', function(e) {
-                                    let target = e.target.closest('.chat-item, .conversation-item, [data-chat-id], [data-conversation-id]');
-                                    if (target) {
-                                        setTimeout(function() {
-                                            if (window.location.pathname.includes('/chat/') || window.location.pathname.includes('/conversation/')) {
-                                                notifyChatState('open', { chatId: target.dataset.chatId });
-                                            }
-                                        }, 100);
-                                    }
-                                });
-                                window.addEventListener('message', function(e) {
-                                    if (e.data && e.data.type === 'GO_BACK_TO_CHAT_LIST') {
-                                        if (window.history.length > 1) {
-                                            window.history.back();
-                                        }
-                                        window.parent.postMessage({ type: 'CHAT_LIST_SHOWN' }, '*');
-                                    }
-                                });
-                            })();
-                        `;
-                        iframeDoc.head.appendChild(script);
-                    }
-                } catch(e) {
-                    console.warn('[Parent] Cannot inject into iframe due to cross-origin:', e);
-                }
-            });
         }
         
         document.addEventListener('DOMContentLoaded', function() {
             setupChatPanelDetection();
-            
-            if (window.innerWidth <= 768) {
-                const messagesContainer = document.getElementById('messagesContent');
-                if (messagesContainer && !messagesContainer.classList.contains('hidden')) {
-                    document.body.classList.remove('chat-panel-active');
-                }
-            }
+            if (window.innerWidth <= 768) document.body.classList.remove('chat-panel-active');
         });
         
         window.addEventListener('resize', function() {
-            if (window.innerWidth > 768) {
-                document.body.classList.remove('chat-panel-active');
-            } else {
-                const messagesContainer = document.getElementById('messagesContent');
-                if (messagesContainer && !messagesContainer.classList.contains('hidden')) {
-                } else {
-                    document.body.classList.remove('chat-panel-active');
-                }
-            }
+            if (window.innerWidth > 768) document.body.classList.remove('chat-panel-active');
         });
     </script>
     <script src="js/app.core.eventbus.js"></script>
@@ -599,7 +630,7 @@
         // PARENT ORCHESTRATION - CORE FUNCTIONALITY
         // ======================================================================
         (function originalParentFormat() {
-            console.log('📡 Parent broadcaster started');
+            // console.log('📡 Parent broadcaster started');
 
             let cachedToken = null;
             let cachedUserId = null;
@@ -607,7 +638,13 @@
             let cachedFriendsList = [];
             let apiReady = false;
 
-            // Wait for API to be ready
+            // FIX: Expose internal variables as live window getters so navigateToPage
+            // (which lives outside this IIFE) can access them without a ReferenceError.
+            Object.defineProperty(window, '__cachedToken',  { get: () => cachedToken,  configurable: true });
+            Object.defineProperty(window, '__cachedUserId', { get: () => cachedUserId, configurable: true });
+            window.__sendSessionToModule  = (iframe, mod) => { if (typeof sendSessionToModule  === 'function') sendSessionToModule(iframe, mod); };
+            window.__pushSettingsToModule = (iframe, mod) => { if (typeof pushSettingsToModule === 'function') pushSettingsToModule(iframe, mod); };
+
             function waitForApi() {
                 return new Promise((resolve) => {
                     if (window.api && window.api.get) {
@@ -650,8 +687,6 @@
                 requestThrottle.set(endpoint, now);
                 return true;
             }
-
-            // moduleToIframeId is declared in outer scope (above dispatchEventToModules)
 
             const endpointMappings = {
                 '/group/user': '/groups/user',
@@ -696,6 +731,15 @@
                 '/status/trending': '/status/trending',
                 '/api/status/public': '/status/public',
                 '/status/public': '/status/public',
+                '/api/status/highlights': '/status/highlights',
+                '/status/highlights': '/status/highlights',
+                '/api/status/friends': '/status/friends',
+                '/status/friends': '/status/friends',
+                '/api/status/drafts': '/status/drafts',
+                '/status/drafts': '/status/drafts',
+                '/api/status/scheduled': '/status/scheduled',
+                '/status/scheduled': '/status/scheduled',
+                '/api/auth/me': '/auth/me',
                 '/calls': '/calls/history',
                 '/calls/': '/calls/history'
             };
@@ -705,7 +749,7 @@
                               localStorage.getItem('moodchat_token') || 
                               localStorage.getItem('accessToken');
                 if (!token) {
-                    console.log('[Parent] No token found in localStorage');
+                    // console.log('[Parent] No token found in localStorage');
                     return null;
                 }
 
@@ -754,7 +798,7 @@
                     cachedToken = session.token;
                     cachedUserId = session.userId;
                     cachedUser = session.user || { id: session.userId, userId: session.userId, username: 'User' };
-                    console.log('[Parent] ✅ Session cache updated:', { userId: cachedUserId });
+                    // console.log('[Parent] ✅ Session cache updated:', { userId: cachedUserId });
                     requestFriendsFromFriendIframe();
                 } else {
                     cachedToken = null;
@@ -763,18 +807,11 @@
                 }
             }
 
-            // Friends are sourced from friend-core iframe via FRIENDS_DATA message.
-            // Parent no longer fetches /api/friends directly on startup to avoid
-            // ERR_EMPTY_RESPONSE during server startup and duplicate console noise.
             function requestFriendsFromFriendIframe() {
                 const friendsIframe = document.getElementById('friendsIframe');
                 if (friendsIframe && friendsIframe.contentWindow) {
                     friendsIframe.contentWindow.postMessage({ type: 'REQUEST_FRIENDS_LIST', source: 'parent' }, '*');
                 }
-            }
-
-            async function fetchAndBroadcastFriendsList() {
-                requestFriendsFromFriendIframe();
             }
 
             function broadcastFriendsToAllModules(friends) {
@@ -783,62 +820,7 @@
                 sendFriendsToGroupIframe(friends);
                 sendFriendsToStatusIframe(friends);
                 sendFriendsToToolsIframe(friends);
-                console.log('[Parent] Sent FRIENDS_LIST_UPDATE to all modules:', (friends || []).length, 'friends');
-            }
-
-            function sendFriendsToCallsIframe(friends = null) {
-                const callsIframe = document.getElementById('callsIframe');
-                if (callsIframe && callsIframe.contentWindow) {
-                    const friendsToSend = friends || cachedFriendsList;
-                    callsIframe.contentWindow.postMessage({
-                        type: 'CONTACTS_UPDATE',
-                        payload: { contacts: friendsToSend, source: 'parent', timestamp: Date.now() }
-                    }, '*');
-                }
-            }
-
-            function sendFriendsToMessagesIframe(friends = null) {
-                const messagesIframe = document.getElementById('messagesIframe');
-                if (messagesIframe && messagesIframe.contentWindow) {
-                    const friendsToSend = friends || cachedFriendsList;
-                    messagesIframe.contentWindow.postMessage({
-                        type: 'FRIENDS_LIST_UPDATE',
-                        payload: { friends: friendsToSend, timestamp: Date.now() }
-                    }, '*');
-                }
-            }
-
-            function sendFriendsToGroupIframe(friends = null) {
-                const groupIframe = document.getElementById('groupIframe');
-                if (groupIframe && groupIframe.contentWindow) {
-                    const friendsToSend = friends || cachedFriendsList;
-                    groupIframe.contentWindow.postMessage({
-                        type: 'FRIENDS_LIST_UPDATE',
-                        payload: { friends: friendsToSend, timestamp: Date.now() }
-                    }, '*');
-                }
-            }
-
-            function sendFriendsToStatusIframe(friends = null) {
-                const statusIframe = document.getElementById('statusIframe');
-                if (statusIframe && statusIframe.contentWindow) {
-                    const friendsToSend = friends || cachedFriendsList;
-                    statusIframe.contentWindow.postMessage({
-                        type: 'FRIENDS_LIST_UPDATE',
-                        payload: { friends: friendsToSend, timestamp: Date.now() }
-                    }, '*');
-                }
-            }
-
-            function sendFriendsToToolsIframe(friends = null) {
-                const toolsIframe = document.getElementById('toolsIframe');
-                if (toolsIframe && toolsIframe.contentWindow) {
-                    const friendsToSend = friends || cachedFriendsList;
-                    toolsIframe.contentWindow.postMessage({
-                        type: 'FRIENDS_LIST_UPDATE',
-                        payload: { friends: friendsToSend, timestamp: Date.now() }
-                    }, '*');
-                }
+                // // console.log('[Parent] Sent FRIENDS_LIST_UPDATE to all modules:', (friends || []).length, 'friends');
             }
 
             function sendSessionToModule(iframe, moduleName) {
@@ -854,14 +836,14 @@
                             payload: { protocol: 'KYN-8.0', state: 'READY', message: 'Parent ready (no session)', session: null, userId: null },
                             timestamp: Date.now()
                         }, '*');
-                        console.log(`[Parent] Sent PARENT_READY to settings (no session)`);
+                        // [suppressed] sent PARENT_READY to settings (no session)
                     } else {
-                        console.log(`[Parent] No session for ${moduleName}, skipping`);
+                        // [suppressed] no session for module
                     }
                     return;
                 }
                 if (!iframe || !iframe.contentWindow) {
-                    console.log(`[Parent] No iframe for ${moduleName}`);
+                    // [suppressed] no iframe for module
                     return;
                 }
 
@@ -927,7 +909,7 @@
                     timestamp: Date.now()
                 }, '*');
 
-                console.log(`📡 Sent session to ${moduleName} (userId: ${cachedUserId})`);
+                // console.log(`📡 Sent session to ${moduleName} (userId: ${cachedUserId})`);
                 
                 setTimeout(() => {
                     if (moduleName === 'calls') sendFriendsToCallsIframe();
@@ -941,83 +923,98 @@
             let lastSessionSend = 0;
             const SESSION_SEND_INTERVAL = 30000;
 
+            // ── Read cached settings from localStorage ──────────────────────
+            function getCachedSettings() {
+                try {
+                    const raw = localStorage.getItem('knecta_settings_cache');
+                    return raw ? JSON.parse(raw) : null;
+                } catch(e) { return null; }
+            }
+
+            // ── Push the full cached settings object to one module iframe ───
+            function pushSettingsToModule(iframe, moduleName) {
+                if (!iframe || !iframe.contentWindow) return;
+                const settings = getCachedSettings();
+                if (!settings) return;
+                iframe.contentWindow.postMessage({
+                    type: 'SETTINGS_UPDATED',
+                    source: 'parent',
+                    target: moduleName,
+                    payload: { settings, timestamp: Date.now() },
+                    timestamp: Date.now()
+                }, '*');
+            }
+
             function sendToAllModulesIfNeeded(force = false) {
                 const now = Date.now();
-                if (!force && now - lastSessionSend < SESSION_SEND_INTERVAL) {
-                    console.log('[Parent] Skipping session send - too soon');
-                    return;
-                }
-                if (!cachedToken || !cachedUserId) {
-                    console.log('[Parent] No session available');
-                    return;
-                }
+                if (!force && now - lastSessionSend < SESSION_SEND_INTERVAL) return;
+                if (!cachedToken || !cachedUserId) return;
                 lastSessionSend = now;
                 Object.entries(moduleToIframeId).forEach(([moduleName, iframeId]) => {
                     const iframe = document.getElementById(iframeId);
                     if (iframe && iframe.contentWindow) {
                         sendSessionToModule(iframe, moduleName);
+                        // Also push cached settings so every module has fresh preferences
+                        setTimeout(() => pushSettingsToModule(iframe, moduleName), 200);
                     }
                 });
                 setTimeout(() => requestFriendsFromFriendIframe(), 1000);
             }
 
-async function refreshCallHistoryForUser(userId) {
-    if (!cachedToken) return [];
-    const callsIframe = document.getElementById('callsIframe');
-    try {
-        console.log('[Parent] Refreshing call history for user:', userId);
-        const baseUrl = window.__getApiBase ? window.__getApiBase() : 'http://localhost:4000/api';
+            async function refreshCallHistoryForUser(userId) {
+                if (!cachedToken) return [];
+                const callsIframe = document.getElementById('callsIframe');
+                try {
+                    console.log('[Parent] Refreshing call history for user:', userId);
+                    const baseUrl = window.__getApiBase ? window.__getApiBase() : 'http://localhost:4000/api';
 
-        // Send loading indicator (not empty data — that causes flicker)
-        if (callsIframe && callsIframe.contentWindow) {
-            callsIframe.contentWindow.postMessage({
-                type: 'CALL_HISTORY_UPDATE',
-                payload: { calls: [], loading: true, timestamp: Date.now() }
-            }, '*');
-        }
+                    if (callsIframe && callsIframe.contentWindow) {
+                        callsIframe.contentWindow.postMessage({
+                            type: 'CALL_HISTORY_UPDATE',
+                            payload: { calls: [], loading: true, timestamp: Date.now() }
+                        }, '*');
+                    }
 
-        // Try /calls/history first, fall back to /calls?limit=50
-        let response = await fetch(`${baseUrl}/calls/history?limit=50`, {
-            headers: { 'Authorization': `Bearer ${cachedToken}` }
-        });
-        // If history endpoint not wired in routes, fall back to getUserCalls
-        if (!response.ok && response.status === 404) {
-            response = await fetch(`${baseUrl}/calls?limit=50&page=1`, {
-                headers: { 'Authorization': `Bearer ${cachedToken}` }
-            });
-        }
+                    let response = await fetch(`${baseUrl}/calls/history?limit=50`, {
+                        headers: { 'Authorization': `Bearer ${cachedToken}` }
+                    });
+                    if (!response.ok && response.status === 404) {
+                        response = await fetch(`${baseUrl}/calls?limit=50&page=1`, {
+                            headers: { 'Authorization': `Bearer ${cachedToken}` }
+                        });
+                    }
 
-        if (response.ok) {
-            const data = await response.json();
-            const calls = data?.data?.calls || data?.calls || [];
-            console.log('[Parent] Loaded call history:', Array.isArray(calls) ? calls.length : 0, 'calls');
-            if (callsIframe && callsIframe.contentWindow) {
-                callsIframe.contentWindow.postMessage({
-                    type: 'CALL_HISTORY_UPDATE',
-                    payload: { calls: Array.isArray(calls) ? calls : [], loading: false, timestamp: Date.now() }
-                }, '*');
+                    if (response.ok) {
+                        const data = await response.json();
+                        const calls = data?.data?.calls || data?.calls || [];
+                        console.log('[Parent] Loaded call history:', Array.isArray(calls) ? calls.length : 0, 'calls');
+                        if (callsIframe && callsIframe.contentWindow) {
+                            callsIframe.contentWindow.postMessage({
+                                type: 'CALL_HISTORY_UPDATE',
+                                payload: { calls: Array.isArray(calls) ? calls : [], loading: false, timestamp: Date.now() }
+                            }, '*');
+                        }
+                        return Array.isArray(calls) ? calls : [];
+                    } else {
+                        console.warn('[Parent] Failed to load call history:', response.status, response.statusText);
+                        if (callsIframe && callsIframe.contentWindow) {
+                            callsIframe.contentWindow.postMessage({
+                                type: 'CALL_HISTORY_UPDATE',
+                                payload: { calls: [], loading: false, error: true, timestamp: Date.now() }
+                            }, '*');
+                        }
+                    }
+                } catch (err) {
+                    console.warn('[Parent] Failed to refresh call history:', err);
+                    if (callsIframe && callsIframe.contentWindow) {
+                        callsIframe.contentWindow.postMessage({
+                            type: 'CALL_HISTORY_UPDATE',
+                            payload: { calls: [], loading: false, error: true, timestamp: Date.now() }
+                        }, '*');
+                    }
+                }
+                return [];
             }
-            return Array.isArray(calls) ? calls : [];
-        } else {
-            console.warn('[Parent] Failed to load call history:', response.status, response.statusText);
-            if (callsIframe && callsIframe.contentWindow) {
-                callsIframe.contentWindow.postMessage({
-                    type: 'CALL_HISTORY_UPDATE',
-                    payload: { calls: [], loading: false, error: true, timestamp: Date.now() }
-                }, '*');
-            }
-        }
-    } catch (err) {
-        console.warn('[Parent] Failed to refresh call history:', err);
-        if (callsIframe && callsIframe.contentWindow) {
-            callsIframe.contentWindow.postMessage({
-                type: 'CALL_HISTORY_UPDATE',
-                payload: { calls: [], loading: false, error: true, timestamp: Date.now() }
-            }, '*');
-        }
-    }
-    return [];
-}
 
             async function refreshAuthToken() {
                 try {
@@ -1065,14 +1062,170 @@ async function refreshCallHistoryForUser(userId) {
                 }
             });
 
+            // ======================================================================
+            // MAIN MESSAGE HANDLER - INCLUDING CALL HANDLING
+            // ======================================================================
             window.addEventListener('message', async function(event) {
-                if (!isTrustedOrigin(event.origin)) {
-                    return;
-                }
+                if (!isTrustedOrigin(event.origin)) return;
 
                 const data = event.data || {};
                 if (!data || typeof data !== 'object') return;
 
+                // ======================================================================
+                // CALL HANDLING — UNIFIED, DEDUP-LOCKED, SOURCE-AWARE
+                // ======================================================================
+                //
+                // Design rules:
+                //  1. Only ONE code path sends OPEN_CALL_WITH_USER to the calls iframe.
+                //     That path is __dispatchCallToIframe().
+                //  2. A 2-second dedup lock prevents duplicate triggers from
+                //     SWITCH_MODULE(calls) + INITIATE_CALL arriving simultaneously.
+                //  3. Every call trigger stores __callReturnContext with:
+                //       returnTo   : 'messages' | 'friends' | 'calls'
+                //       chatUserId : the user to re-open (messages only)
+                //       userName   : display name
+                //       source     : the originating module string
+                //  4. CALL_ENDED_RETURN reads __callReturnContext and navigates
+                //     back to the correct module + re-opens the correct view.
+                // ======================================================================
+
+                if (!window.__callDispatchLock) window.__callDispatchLock = { ts: 0, userId: null };
+
+                function __isCallDuplicate(userId) {
+                    const lock = window.__callDispatchLock;
+                    return lock.userId === String(userId) && (Date.now() - lock.ts) < 2000;
+                }
+
+                function __dispatchCallToIframe(userId, userName, callType, returnTo, chatUserId, source) {
+                    if (__isCallDuplicate(userId)) {
+                        console.log('[Parent] ⏭ Duplicate call dispatch suppressed for userId', userId);
+                        return;
+                    }
+                    window.__callDispatchLock = { ts: Date.now(), userId: String(userId) };
+
+                    // Normalise returnTo
+                    if (returnTo === 'friends-page' || returnTo === 'friend') returnTo = 'friends';
+                    else if (returnTo === 'chat' || returnTo === 'message') returnTo = 'messages';
+                    else if (returnTo !== 'messages' && returnTo !== 'friends') returnTo = 'calls';
+
+                    // Persist return context (used by CALL_ENDED_RETURN)
+                    const ctx = { returnTo, chatUserId: chatUserId || userId, userName, source, ts: Date.now() };
+                    window.__callReturnContext = ctx;
+                    try { sessionStorage.setItem('call_return_ctx', JSON.stringify(ctx)); } catch(e) {}
+
+                    console.log(`[Parent] 📞 Dispatching call → user=${userName}(${userId}) type=${callType} returnTo=${returnTo} source=${source}`);
+
+                    navigateToPage('calls');
+
+                    const callsIframe = document.getElementById('callsIframe');
+                    if (!callsIframe) return;
+
+                    const payload = {
+                        userId, userName, callType,
+                        returnTo, chatUserId: chatUserId || userId,
+                        source, timestamp: Date.now()
+                    };
+
+                    // Send once after a short delay (lets the iframe activate).
+                    // Do NOT also attach an onLoad listener — that caused the duplicate.
+                    // If the iframe needs to reload it will pick up the pending_call from sessionStorage.
+                    try { sessionStorage.setItem('pending_call', JSON.stringify(payload)); } catch(e) {}
+
+                    setTimeout(() => {
+                        if (callsIframe.contentWindow) {
+                            callsIframe.contentWindow.postMessage({
+                                type: 'OPEN_CALL_WITH_USER',
+                                payload,
+                                source: 'parent-frame'
+                            }, '*');
+                        }
+                    }, 400);
+                }
+
+                // ── Trigger 1: SWITCH_MODULE → calls (from messages chat header buttons)
+                if (data.type === 'SWITCH_MODULE' && data.module === 'calls') {
+                    const p = data.payload || {};
+                    __dispatchCallToIframe(
+                        p.userId, p.userName || 'User', p.callType || 'voice',
+                        p.returnTo || 'messages', p.chatUserId || p.userId, 'messages-module'
+                    );
+                    return; // stop here — don't fall through to other SWITCH_MODULE handler
+                }
+
+                // ── Trigger 2: INITIATE_CALL (legacy path from some message components)
+                if (data.type === 'INITIATE_CALL') {
+                    const p = data.payload || {};
+                    __dispatchCallToIframe(
+                        p.userId, p.userName || 'User', p.callType || 'voice',
+                        'messages', p.userId, 'messages-module'
+                    );
+                }
+
+                // ── Handle CALL_ENDED_RETURN — navigate back to the correct module
+                if (data.type === 'CALL_ENDED_RETURN') {
+                    let ctx = window.__callReturnContext;
+                    if (!ctx) {
+                        try { const s = sessionStorage.getItem('call_return_ctx'); if (s) ctx = JSON.parse(s); } catch(e) {}
+                    }
+                    // Clean up
+                    window.__callReturnContext = null;
+                    window.__callDispatchLock = { ts: 0, userId: null };
+                    try { sessionStorage.removeItem('call_return_ctx'); } catch(e) {}
+
+                    const returnTo = ctx?.returnTo || 'calls';
+                    console.log(`[Parent] 📞 Call ended → returnTo=${returnTo}`, ctx);
+
+                    if (returnTo === 'messages') {
+                        navigateToPage('messages');
+                        if (ctx?.chatUserId) {
+                            const msgIframe = document.getElementById('messagesIframe');
+                            if (msgIframe && msgIframe.contentWindow) {
+                                setTimeout(() => {
+                                    msgIframe.contentWindow.postMessage({
+                                        type: 'OPEN_CHAT_WITH_USER',
+                                        payload: {
+                                            userId: ctx.chatUserId,
+                                            userName: ctx.userName || 'User',
+                                            returnFromCall: true,
+                                            timestamp: Date.now()
+                                        },
+                                        source: 'parent-frame'
+                                    }, '*');
+                                    if (window.innerWidth <= 768) document.body.classList.add('chat-panel-active');
+                                }, 300);
+                            }
+                        }
+                    } else if (returnTo === 'friends') {
+                        navigateToPage('friends');
+                        const friendsIframe = document.getElementById('friendsIframe');
+                        if (friendsIframe && friendsIframe.contentWindow) {
+                            setTimeout(() => {
+                                friendsIframe.contentWindow.postMessage({
+                                    type: 'RETURN_FROM_CALL',
+                                    payload: { returnFromCall: true, timestamp: Date.now() },
+                                    source: 'parent-frame'
+                                }, '*');
+                            }, 300);
+                        }
+                    } else {
+                        // returnTo === 'calls' — stay on calls, just show sidebar
+                        navigateToPage('calls');
+                        const callsIframe = document.getElementById('callsIframe');
+                        if (callsIframe && callsIframe.contentWindow) {
+                            setTimeout(() => {
+                                callsIframe.contentWindow.postMessage({
+                                    type: 'SHOW_CALLS_SIDEBAR',
+                                    payload: { timestamp: Date.now() },
+                                    source: 'parent-frame'
+                                }, '*');
+                            }, 200);
+                        }
+                    }
+                }
+
+                // ======================================================================
+                // VERIFY SESSION HANDLER
+                // ======================================================================
                 if (data.type === 'VERIFY_SESSION') {
                     console.log('[Parent] VERIFY_SESSION received from module:', data.source);
                     const requestId = data.payload?.requestId || data.requestId;
@@ -1092,13 +1245,12 @@ async function refreshCallHistoryForUser(userId) {
                     return;
                 }
 
+                // ======================================================================
+                // CHILD READY HANDLER
+                // ======================================================================
                 if (data.type === 'CHILD_READY') {
                     const targetModule = data.module || data.source || data.payload?.module || null;
-                    console.log(`📡 CHILD_READY from ${targetModule || 'unknown'}`);
-                    
-                    if (targetModule) {
-                        registerModule(targetModule);
-                    }
+                    if (targetModule) registerModule(targetModule);
                     
                     if (targetModule && moduleToIframeId[targetModule]) {
                         const iframe = document.getElementById(moduleToIframeId[targetModule]);
@@ -1111,12 +1263,18 @@ async function refreshCallHistoryForUser(userId) {
                                     sendSessionToModule(iframe, targetModule);
                                 }
                             }
+                            // Push cached settings 300ms after session so the module
+                            // starts with the right theme/font/preferences immediately
+                            setTimeout(() => pushSettingsToModule(iframe, targetModule), 300);
                         }
                     } else {
                         sendToAllModulesIfNeeded(true);
                     }
                 }
 
+                // ======================================================================
+                // FRIEND EVENTS
+                // ======================================================================
                 if (data.type === 'FRIEND_ACCEPTED' || data.type === 'FRIEND_REJECTED' || data.type === 'FRIEND_REMOVED') {
                     console.log(`[Parent] Broadcasting ${data.type} event to all modules`, data.payload);
                     setTimeout(() => requestFriendsFromFriendIframe(), 500);
@@ -1128,34 +1286,43 @@ async function refreshCallHistoryForUser(userId) {
                 }
 
                 // ======================================================================
-                // EXISTING SETTINGS_UPDATED HANDLER (full settings object)
+                // SETTINGS HANDLERS
                 // ======================================================================
                 if (data.type === 'SETTINGS_UPDATED') {
-                    console.log('[Parent] SETTINGS_UPDATED received, broadcasting to all modules');
                     const settings = data.settings || data.payload?.settings || {};
+                    // 1. Persist to localStorage cache so tab switches restore correct values
+                    try { localStorage.setItem('knecta_settings_cache', JSON.stringify(settings)); } catch(e) {}
+                    // 2. Apply appearance changes to parent document immediately
                     if (settings.appearance?.theme || settings.theme) {
                         const theme = settings.appearance?.theme || settings.theme;
                         document.documentElement.setAttribute('data-theme', theme);
                         document.body.setAttribute('data-theme', theme);
                         try { localStorage.setItem('app_theme', theme); } catch(e) {}
                     }
+                    // 3. Broadcast full SETTINGS_UPDATED to all modules
                     dispatchEventToModules({
                         type: 'SETTINGS_UPDATED',
-                        payload: { settings: settings, timestamp: Date.now() },
+                        payload: { settings, timestamp: Date.now() },
                         originalSource: 'settings'
+                    });
+                    // 4. Also fire individual SETTING_CHANGED for every section/key so
+                    //    modules that only listen on that path also pick it up
+                    Object.entries(settings).forEach(([section, secVal]) => {
+                        if (secVal && typeof secVal === 'object') {
+                            Object.entries(secVal).forEach(([key, value]) => {
+                                dispatchEventToModules({
+                                    type: 'SETTING_CHANGED',
+                                    payload: { section, key, value, timestamp: Date.now() },
+                                    originalSource: 'settings'
+                                });
+                            });
+                        }
                     });
                 }
 
-                // ======================================================================
-                // NEW SETTINGS_GLOBAL_UPDATE HANDLER (per-key broadcast, works offline)
-                // ======================================================================
                 if (data.type === 'SETTINGS_GLOBAL_UPDATE') {
-                    // Immediate per-key update from settings module (fires even offline)
                     const { section, key, value } = data;
-                    
-                    console.log(`[Parent] SETTINGS_GLOBAL_UPDATE received: ${section}.${key} =`, value);
-                    
-                    // ── Apply all settings to parent document ──────────────────
+                    // 1. Apply to parent document
                     if (section === 'appearance') {
                         if (key === 'theme') {
                             const resolvedTheme = value === 'auto'
@@ -1176,8 +1343,14 @@ async function refreshCallHistoryForUser(userId) {
                         if (key === 'performanceMode') document.documentElement.setAttribute('data-performance-mode', value ? 'true' : 'false');
                     }
                     if (section === 'mood' && key === 'currentMood') document.documentElement.setAttribute('data-mood', value);
-
-                    // ── Broadcast the single key change to all module iframes ──
+                    // 2. Persist into the settings cache so tab switches restore it
+                    try {
+                        const existing = JSON.parse(localStorage.getItem('knecta_settings_cache') || '{}');
+                        if (!existing[section]) existing[section] = {};
+                        existing[section][key] = value;
+                        localStorage.setItem('knecta_settings_cache', JSON.stringify(existing));
+                    } catch(e) {}
+                    // 3. Broadcast SETTING_CHANGED to all modules
                     dispatchEventToModules({
                         type: 'SETTING_CHANGED',
                         payload: { section, key, value, timestamp: Date.now() },
@@ -1185,26 +1358,138 @@ async function refreshCallHistoryForUser(userId) {
                     });
                 }
 
-                // API_REQUEST handler with Bearer token
+                // ======================================================================
+                // STORAGE PROXY HANDLERS (for iframed modules using StorageProxy)
+                // Modules postMessage STORAGE_GET/SET/REMOVE/CLEAR — parent handles
+                // real localStorage access and sends back STORAGE_RESULT.
+                // ======================================================================
+                if (data.type === 'STORAGE_GET') {
+                    let storedValue = null;
+                    try { storedValue = localStorage.getItem(data.key); } catch(e) {}
+                    try {
+                        event.source.postMessage({
+                            type: 'STORAGE_RESULT',
+                            requestId: data.requestId,
+                            value: storedValue,
+                            error: null
+                        }, '*');
+                    } catch(e) {}
+                    return;
+                }
+
+                if (data.type === 'STORAGE_SET') {
+                    try {
+                        if (data.key && data.value !== undefined) {
+                            localStorage.setItem(data.key, data.value);
+                        }
+                    } catch(e) {
+                        console.warn('[Parent] STORAGE_SET failed:', data.key, e.message);
+                    }
+                    return;
+                }
+
+                if (data.type === 'STORAGE_REMOVE') {
+                    try { if (data.key) localStorage.removeItem(data.key); } catch(e) {}
+                    return;
+                }
+
+                if (data.type === 'STORAGE_CLEAR') {
+                    // Only clear module-specific keys to avoid wiping auth tokens
+                    try {
+                        const prefix = data.prefix || 'knecta_';
+                        const keysToRemove = [];
+                        for (let i = 0; i < localStorage.length; i++) {
+                            const k = localStorage.key(i);
+                            if (k && k.startsWith(prefix)) keysToRemove.push(k);
+                        }
+                        keysToRemove.forEach(k => localStorage.removeItem(k));
+                    } catch(e) {}
+                    return;
+                }
+
+                // ======================================================================
+                // FILE UPLOAD PROXY HANDLER
+                // Modules can't do multipart POST directly (CORS, auth). They send
+                // FILE_UPLOAD with base64 data; parent does the real fetch to /api/upload
+                // and returns FILE_UPLOAD_RESULT with the hosted URL.
+                // Falls back gracefully if /api/upload doesn't exist.
+                // ======================================================================
+                if (data.type === 'FILE_UPLOAD') {
+                    const { requestId, fileName, fileType, fileSize, base64Data } = data;
+                    const replySource = event.source;
+
+                    const sendResult = (payload) => {
+                        try {
+                            if (replySource && replySource.postMessage) {
+                                replySource.postMessage({ type: 'FILE_UPLOAD_RESULT', requestId, ...payload }, '*');
+                            }
+                        } catch(e) {}
+                    };
+
+                    try {
+                        const baseUrl = window.__getApiBase ? window.__getApiBase() : 'http://localhost:4000/api';
+                        let token = null;
+                        try {
+                            token = localStorage.getItem('token') ||
+                                    localStorage.getItem('moodchat_token') ||
+                                    localStorage.getItem('accessToken');
+                        } catch(e) {}
+
+                        // Convert base64 dataURL back to Blob
+                        const [meta, b64] = base64Data.split(',');
+                        const mime = (meta.match(/:(.*?);/) || [])[1] || fileType || 'application/octet-stream';
+                        const binary = atob(b64);
+                        const bytes = new Uint8Array(binary.length);
+                        for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+                        const blob = new Blob([bytes], { type: mime });
+
+                        const formData = new FormData();
+                        formData.append('file', blob, fileName || 'upload');
+                        formData.append('type', mime.split('/')[0]); // 'image' or 'video'
+
+                        const headers = {};
+                        if (token) headers['Authorization'] = 'Bearer ' + token;
+
+                        const uploadRes = await fetch(baseUrl + '/upload', {
+                            method: 'POST',
+                            headers,
+                            body: formData,
+                            credentials: 'include'
+                        });
+
+                        if (uploadRes.ok) {
+                            const json = await uploadRes.json().catch(() => ({}));
+                            const url = json.url || json.data?.url || json.fileUrl || json.mediaUrl;
+                            if (url) {
+                                sendResult({ url, success: true });
+                                return;
+                            }
+                        }
+                        // Upload endpoint not available or returned no URL — signal failure so
+                        // the module falls back to inline base64
+                        sendResult({ error: 'Upload endpoint unavailable', success: false });
+                    } catch(uploadErr) {
+                        sendResult({ error: uploadErr.message || 'Upload failed', success: false });
+                    }
+                    return;
+                }
+
+                // ======================================================================
+                // API REQUEST HANDLER
+                // ======================================================================
                 if (data.type === 'API_REQUEST') {
                     let endpoint = data.payload?.endpoint || data.endpoint;
                     if (!endpoint) {
                         console.error('[Parent] API_REQUEST missing endpoint:', data);
                         return;
                     }
-                    if (endpointMappings[endpoint]) {
-                        endpoint = endpointMappings[endpoint];
-                    }
-                    if (endpoint.startsWith('/api/')) {
-                        endpoint = endpoint.substring(4);
-                    }
-                    if (!endpoint.startsWith('/')) {
-                        endpoint = '/' + endpoint;
-                    }
+                    if (endpointMappings[endpoint]) endpoint = endpointMappings[endpoint];
+                    if (endpoint.startsWith('/api/')) endpoint = endpoint.substring(4);
+                    if (!endpoint.startsWith('/')) endpoint = '/' + endpoint;
 
                     const requestId = data.payload?.requestId || data.requestId;
                     const method = data.payload?.method || data.method || 'GET';
-                    const body = data.payload?.body || data.body;
+                    const body = data.payload?.body || data.payload?.data || data.body || data.data || null;
                     const params = data.payload?.params || data.params || null;
                     const sourceModule = data.source || data.payload?.source || 'unknown';
                     
@@ -1217,7 +1502,7 @@ async function refreshCallHistoryForUser(userId) {
                         } catch(e) {}
                     }
                     
-                    console.log(`[Parent] API_REQUEST from ${sourceModule}: ${method} ${endpoint} - token: ${token ? 'YES' : 'NO'}`);
+                    // // [suppressed] API_REQUEST log
 
                     try {
                         const baseUrl = window.__getApiBase ? window.__getApiBase() : 'http://localhost:4000/api';
@@ -1233,11 +1518,7 @@ async function refreshCallHistoryForUser(userId) {
                             'Accept': 'application/json'
                         };
                         
-                        if (token) {
-                            headers['Authorization'] = `Bearer ${token}`;
-                        } else {
-                            console.warn(`[Parent] ⚠️ No token for ${sourceModule} request: ${endpoint}`);
-                        }
+                        if (token) headers['Authorization'] = `Bearer ${token}`;
                         
                         const fetchOptions = {
                             method: method,
@@ -1299,96 +1580,45 @@ async function refreshCallHistoryForUser(userId) {
                     }
                 }
 
-                if (data.type === 'SWITCH_MODULE') {
-                    console.log('[Parent] Switching to module:', data.module);
-                    const targetModuleName = data.module;
-                    // Remember where we came from so the module can navigate back after finishing
-                    const returnTo = data.payload?.returnTo || window.__currentPage || window.__lastActivePage || 'messages';
+                // ======================================================================
+                // MODULE SWITCHING
+                // ======================================================================
+                if (data.type === 'SWITCH_MODULE' && data.module !== 'calls') {
+                    const targetModule = data.module;
+                    console.log('[Parent] Switching to module:', targetModule, data.payload);
+                    navigateToPage(targetModule);
 
-                    // Use navigateToPage to keep __lastActivePage tracking consistent
-                    navigateToPage(targetModuleName);
-
-                    if (targetModuleName === 'calls' && data.payload && data.payload.userId) {
-                        console.log('[Parent] 🎯 Switching to CALLS module with user:', data.payload);
-                        const callPayload = {
-                            userId: data.payload.userId,
-                            userName: data.payload.userName || data.payload.name || data.payload.displayName || 'User',
-                            callType: data.payload.callType || 'voice',
-                            returnTo: returnTo,
-                            timestamp: Date.now(),
-                            source: data.payload.source || 'friends-module'
-                        };
-                        sessionStorage.setItem('pending_call', JSON.stringify(callPayload));
-                        window.__pendingCall = callPayload;
-                        const callsIframe = document.getElementById('callsIframe');
-                        if (callsIframe && callsIframe.contentWindow) {
-                            callsIframe.contentWindow.postMessage({
-                                type: 'OPEN_CALL_WITH_USER',
-                                payload: callPayload,
-                                source: 'parent-frame',
-                                timestamp: Date.now()
-                            }, '*');
-                        }
-                    }
-
-                    if (targetModuleName === 'messages' && data.payload && data.payload.userId) {
-                        console.log('[Parent] 🎯 Switching to MESSAGES module with user:', data.payload);
-                        const chatPayload = {
-                            userId: data.payload.userId,
-                            userName: data.payload.userName || data.payload.name || data.payload.displayName || 'User',
-                            timestamp: data.payload.timestamp || Date.now(),
-                            source: data.payload.source || 'friends-module'
-                        };
-                        sessionStorage.setItem('pending_chat', JSON.stringify(chatPayload));
-                        window.__pendingChat = chatPayload;
-                        const messagesIframe = document.getElementById('messagesIframe');
-                        if (messagesIframe && messagesIframe.contentWindow) {
-                            messagesIframe.contentWindow.postMessage({
-                                type: 'OPEN_CHAT_WITH_USER',
-                                payload: chatPayload,
-                                source: 'parent-frame',
-                                timestamp: Date.now()
-                            }, '*');
-                            if (window.innerWidth <= 768) {
-                                document.body.classList.add('chat-panel-active');
+                    // After returning from a call → re-open the correct chat/friend view
+                    if (data.payload?.returnFromCall) {
+                        if (targetModule === 'messages' && data.payload?.openChatWith) {
+                            const msgIframe = document.getElementById('messagesIframe');
+                            if (msgIframe && msgIframe.contentWindow) {
+                                setTimeout(() => {
+                                    msgIframe.contentWindow.postMessage({
+                                        type: 'OPEN_CHAT_WITH_USER',
+                                        payload: {
+                                            userId: data.payload.openChatWith,
+                                            returnFromCall: true,
+                                            timestamp: Date.now()
+                                        },
+                                        source: 'parent-frame'
+                                    }, '*');
+                                    if (window.innerWidth <= 768) document.body.classList.add('chat-panel-active');
+                                }, 300);
+                            }
+                        } else if (targetModule === 'friends') {
+                            const friendsIframe = document.getElementById('friendsIframe');
+                            if (friendsIframe && friendsIframe.contentWindow) {
+                                setTimeout(() => {
+                                    friendsIframe.contentWindow.postMessage({
+                                        type: 'RETURN_FROM_CALL',
+                                        payload: { returnFromCall: true, timestamp: Date.now() },
+                                        source: 'parent-frame'
+                                    }, '*');
+                                }, 300);
                             }
                         }
                     }
-                }
-
-                // ======================================================================
-                // CHILD_CLOSING — module sends this when done (call ended, back pressed, etc.)
-                // Prefers data.returnTo, then __lastActivePage, then 'messages'.
-                // ======================================================================
-                if (data.type === 'CHILD_CLOSING') {
-                    const returnPage = data.returnTo || window.__lastActivePage || 'messages';
-                    console.log(`[Parent] CHILD_CLOSING from ${data.module || data.childId || 'unknown'}, returning to: ${returnPage}`);
-                    navigateToPage(returnPage);
-                    // Tell the messages iframe the call ended so it can restore the chat panel
-                    if (returnPage === 'messages') {
-                        const messagesIframe = document.getElementById('messagesIframe');
-                        if (messagesIframe && messagesIframe.contentWindow) {
-                            setTimeout(() => {
-                                messagesIframe.contentWindow.postMessage({ type: 'CALL_ENDED_RETURN', timestamp: Date.now() }, '*');
-                            }, 200);
-                        }
-                    }
-                }
-
-                // ======================================================================
-                // HIDE/SHOW SIDEBAR ICONS — sent by calls module during active call
-                // ======================================================================
-                if (data.type === 'HIDE_SIDEBAR_ICONS') {
-                    document.querySelectorAll('.nav-icon, .mobile-nav-icon, .sidebar-nav .nav-item').forEach(function(el) {
-                        el.style.opacity = '0.3';
-                        el.style.pointerEvents = 'none';
-                    });
-                }
-                if (data.type === 'SHOW_SIDEBAR_ICONS') {
-                    document.querySelectorAll('.nav-icon, .mobile-nav-icon, .sidebar-nav .nav-item').forEach(function(el) {
-                        el.style.opacity = '';
-                        el.style.pointerEvents = '';
-                    });
                 }
 
                 if (data.type === 'DIRECT_CHAT_REQUEST') {
@@ -1413,31 +1643,46 @@ async function refreshCallHistoryForUser(userId) {
                 }
 
                 if (data.type === 'DIRECT_CALL_REQUEST') {
-                    const returnTo = window.__currentPage || window.__lastActivePage || 'messages';
-                    const callPayload = {
-                        userId: data.payload.userId,
-                        userName: data.payload.userName || data.payload.name || 'User',
-                        callType: data.payload.callType || 'voice',
-                        returnTo: returnTo,
-                        timestamp: Date.now()
-                    };
+                    const p = data.payload || {};
+                    // Capture the page user came FROM (before navigating to calls)
+                    const returnTo = (window.__currentPage && window.__currentPage !== 'calls')
+                        ? window.__currentPage
+                        : (window.__lastActivePage || 'friends');
                     sendFriendsToCallsIframe();
-                    const callsIframe = document.getElementById('callsIframe');
-                    if (callsIframe && callsIframe.contentWindow) {
-                        callsIframe.contentWindow.postMessage({
-                            type: 'OPEN_CALL_WITH_USER',
-                            payload: callPayload,
-                            source: 'parent-frame',
-                            timestamp: Date.now()
-                        }, '*');
-                        document.querySelectorAll('.iframe-container').forEach(c => c.classList.add('hidden'));
-                        const callsContainer = document.getElementById('callsContent');
-                        if (callsContainer) callsContainer.classList.remove('hidden');
-                        document.querySelectorAll('.nav-icon, .mobile-nav-icon').forEach(btn => {
-                            if (btn.dataset.page === 'calls') btn.classList.add('active');
-                            else btn.classList.remove('active');
-                        });
+                    __dispatchCallToIframe(
+                        p.userId, p.userName || p.name || 'User', p.callType || 'voice',
+                        returnTo, p.userId, 'friends-module'
+                    );
+                }
+
+                if (data.type === 'CHILD_CLOSING') {
+                    const returnPage = data.returnTo || window.__lastActivePage || 'messages';
+                    console.log(`[Parent] CHILD_CLOSING from ${data.module || data.childId || 'unknown'}, returning to: ${returnPage}`);
+                    navigateToPage(returnPage);
+                    if (returnPage === 'messages') {
+                        const messagesIframe = document.getElementById('messagesIframe');
+                        if (messagesIframe && messagesIframe.contentWindow) {
+                            setTimeout(() => {
+                                messagesIframe.contentWindow.postMessage({ type: 'CALL_ENDED_RETURN', timestamp: Date.now() }, '*');
+                            }, 200);
+                        }
                     }
+                }
+
+                // ======================================================================
+                // SIDEBAR CONTROL
+                // ======================================================================
+                if (data.type === 'HIDE_SIDEBAR_ICONS') {
+                    document.querySelectorAll('.nav-icon, .mobile-nav-icon, .sidebar-nav .nav-item').forEach(function(el) {
+                        el.style.opacity = '0.3';
+                        el.style.pointerEvents = 'none';
+                    });
+                }
+                if (data.type === 'SHOW_SIDEBAR_ICONS') {
+                    document.querySelectorAll('.nav-icon, .mobile-nav-icon, .sidebar-nav .nav-item').forEach(function(el) {
+                        el.style.opacity = '';
+                        el.style.pointerEvents = '';
+                    });
                 }
 
                 if (data.type === 'API_RESPONSE' && data.status === 401) {
@@ -1451,9 +1696,7 @@ async function refreshCallHistoryForUser(userId) {
                 }
 
                 // ======================================================================
-                // CALL_INITIATE — calls-core sends this when user starts a call.
-                // We POST to /calls, get the real DB UUID back, and send
-                // CALL_INITIATED to the calls iframe with the server callId.
+                // CALL INITIATE - POST to /calls
                 // ======================================================================
                 if (data.type === 'CALL_INITIATE') {
                     const localCallId = data.payload?.callId;
@@ -1461,7 +1704,6 @@ async function refreshCallHistoryForUser(userId) {
                     const calleeId = data.payload?.calleeId;
                     const participantIds = data.payload?.participantIds;
                     const isGroupCall = data.payload?.isGroupCall || false;
-                    // Track which page initiated the call so we can return there after
                     const callOriginPage = data.payload?.returnTo || window.__currentPage || window.__lastActivePage || 'calls';
                     window.__pendingCallOrigin = callOriginPage;
                     const baseUrl = window.__getApiBase ? window.__getApiBase() : 'http://localhost:4000/api';
@@ -1493,7 +1735,6 @@ async function refreshCallHistoryForUser(userId) {
 
                         if (resp.ok && (respData.data?.call?.id || respData.data?.callId)) {
                             const serverCallId = respData.data?.call?.id || respData.data?.callId;
-                            // Store mapping: localCallId → server UUID
                             window.__callIdMap = window.__callIdMap || {};
                             window.__callIdMap[localCallId] = serverCallId;
 
@@ -1503,10 +1744,11 @@ async function refreshCallHistoryForUser(userId) {
                                     type: 'CALL_INITIATED',
                                     payload: {
                                         ...(respData.data?.call || respData.data),
-                                        callId: serverCallId,   // real DB UUID
+                                        callId: serverCallId,
                                         localCallId: localCallId,
                                         callType: callType,
                                         returnTo: callOriginPage,
+                                        receiverOnline: respData.data?.receiverOnline !== false,
                                         success: true
                                     }
                                 }, '*');
@@ -1533,10 +1775,9 @@ async function refreshCallHistoryForUser(userId) {
                     }
                 }
 
-                // Translate local callId to server UUID for any API_REQUEST to /calls/:id/end|accept|reject
+                // Translate local callId to server UUID for API requests
                 if (data.type === 'API_REQUEST' && window.__callIdMap) {
                     let ep = data.payload?.endpoint || '';
-                    // Replace local call_TIMESTAMP_random IDs with server UUIDs
                     Object.entries(window.__callIdMap).forEach(([local, server]) => {
                         if (ep.includes(local)) {
                             data.payload.endpoint = ep.replace(local, server);
@@ -1555,7 +1796,6 @@ async function refreshCallHistoryForUser(userId) {
                     requestFriendsFromFriendIframe();
                 }
 
-                // Receive full friends list from friend-core iframe (single source of truth)
                 if (data.type === 'FRIENDS_DATA') {
                     const incoming = data.friends || data.payload?.friends || [];
                     if (Array.isArray(incoming) && incoming.length > 0) {
@@ -1564,7 +1804,6 @@ async function refreshCallHistoryForUser(userId) {
                     }
                 }
 
-                // Handle FETCH_LISTINGS request from Tool-core sendWithResponse()
                 if (data.type === 'FETCH_LISTINGS') {
                     const requestId = data.payload?.requestId;
                     if (!requestId) return;
@@ -1594,6 +1833,7 @@ async function refreshCallHistoryForUser(userId) {
                 }
             });
 
+            // WebSocket call event listeners
             if (window.wsService && typeof window.wsService.on === 'function') {
                 window.wsService.on('call:incoming', function(callData) {
                     const callsFrame = document.getElementById('callsIframe');
@@ -1622,17 +1862,62 @@ async function refreshCallHistoryForUser(userId) {
                     }
                     setTimeout(() => refreshCallHistoryForUser(cachedUserId), 500);
                 });
+                // Forward backend stale-cleanup events so frontend state fully resets
+                window.wsService.on('call_force_ended', function(callData) {
+                    const callsFrame = document.getElementById('callsIframe');
+                    if (callsFrame && callsFrame.contentWindow) {
+                        callsFrame.contentWindow.postMessage({ type: 'CALL_FORCE_ENDED', payload: callData }, '*');
+                    }
+                    setTimeout(() => refreshCallHistoryForUser(cachedUserId), 500);
+                });
+            }
+
+            // Calls iframe load handler
+            const callsIframe = document.getElementById('callsIframe');
+            if (callsIframe) {
+                callsIframe.addEventListener('load', function() {
+                    console.log('[Parent] Calls iframe loaded, sending initial data');
+                    
+                    if (cachedToken && cachedUserId) {
+                        const sessionData = {
+                            token: cachedToken,
+                            userId: cachedUserId,
+                            user: cachedUser,
+                            authenticated: true
+                        };
+                        callsIframe.contentWindow.postMessage({
+                            type: 'SESSION_DATA',
+                            payload: sessionData,
+                            timestamp: Date.now()
+                        }, '*');
+                    }
+                    
+                    setTimeout(() => sendFriendsToCallsIframe(), 500);
+                    
+                    const pendingCall = sessionStorage.getItem('pending_call');
+                    if (pendingCall) {
+                        try {
+                            const callData = JSON.parse(pendingCall);
+                            callsIframe.contentWindow.postMessage({
+                                type: 'OPEN_CALL_WITH_USER',
+                                payload: callData,
+                                source: 'parent-frame',
+                                timestamp: Date.now()
+                            }, '*');
+                            sessionStorage.removeItem('pending_call');
+                        } catch(e) {}
+                    }
+                });
             }
 
             setTimeout(() => {
                 sendToAllModulesIfNeeded(true);
                 requestFriendsFromFriendIframe();
-                if (cachedUserId) {
-                    setTimeout(() => refreshCallHistoryForUser(cachedUserId), 2000);
-                }
+                if (cachedUserId) setTimeout(() => refreshCallHistoryForUser(cachedUserId), 2000);
             }, 1000);
         })();
 
+        // Pending chat and call handlers on DOMContentLoaded
         document.addEventListener('DOMContentLoaded', function() {
             const pendingChat = sessionStorage.getItem('pending_chat');
             if (pendingChat) {

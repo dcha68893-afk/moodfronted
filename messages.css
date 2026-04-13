@@ -517,10 +517,114 @@ body {
 }
 
 .message-bubble.received {
-    background-color: var(--chat-bubble-received);
-    color: var(--message-text-received);
+    background-color: #e8e8ed;
+    color: #1c1c1e;
     border-bottom-left-radius: 4px;
 }
+
+/* ── sent vs received message alignment ── */
+.message.sent {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    margin-bottom: 6px;
+}
+
+.message.received {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    margin-bottom: 6px;
+}
+
+.message.sent .message-bubble {
+    background: #0084ff;
+    color: #fff;
+    border-radius: 18px 18px 4px 18px;
+}
+
+.message.received .message-bubble {
+    background: #e8e8ed;
+    color: #1c1c1e;
+    border-radius: 18px 18px 18px 4px;
+}
+
+/* Sticky context menu */
+.msg-ctx-menu {
+    position: fixed;
+    background: #fff;
+    border-radius: 14px;
+    box-shadow: 0 6px 28px rgba(0,0,0,0.18);
+    z-index: 99999;
+    min-width: 180px;
+    overflow: hidden;
+    animation: ctxFadeIn .15s ease;
+    padding: 6px 0;
+}
+
+@keyframes ctxFadeIn {
+    from { opacity: 0; transform: scale(0.92) translateY(6px); }
+    to   { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+.msg-ctx-menu .ctx-reactions {
+    display: flex;
+    align-items: center;
+    padding: 8px 12px;
+    gap: 6px;
+    border-bottom: 1px solid #f0f0f0;
+}
+
+.msg-ctx-menu .ctx-reactions span {
+    font-size: 22px;
+    cursor: pointer;
+    transition: transform .15s;
+    border-radius: 50%;
+    padding: 2px;
+}
+
+.msg-ctx-menu .ctx-reactions span:hover { transform: scale(1.35); }
+
+.msg-ctx-menu .ctx-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 11px 16px;
+    cursor: pointer;
+    font-size: 14px;
+    color: #1c1c1e;
+    transition: background .15s;
+    border: none;
+    background: none;
+    width: 100%;
+    text-align: left;
+}
+
+.msg-ctx-menu .ctx-item:hover { background: #f5f5f7; }
+.msg-ctx-menu .ctx-item.danger { color: #ff3b30; }
+.msg-ctx-menu .ctx-item i { width: 18px; text-align: center; }
+.msg-ctx-menu hr { border: none; border-top: 1px solid #f0f0f0; margin: 4px 0; }
+
+/* multi-send cancel button */
+.multi-send-cancel-btn {
+    background: #ff3b30;
+    color: #fff;
+    border: none;
+    border-radius: 10px;
+    padding: 10px 20px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background .2s;
+    margin: 0 16px 12px 16px;
+    width: calc(100% - 32px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+}
+
+.multi-send-cancel-btn:hover { background: #d0281f; }
 
 .message-text {
     font-size: 15px;
@@ -1137,28 +1241,113 @@ body {
 .recording-bar:nth-child(4) { animation-delay: 0.4s; height: 12px; }
 .recording-bar:nth-child(5) { animation-delay: 0.5s; height: 8px; }
 
-/* Emoji Picker */
+/* Emoji Picker Container - Fixed positioning with scroll */
 .emoji-picker-container {
     position: absolute;
-    bottom: 80px;
-    right: 20px;
+    bottom: 70px;
+    left: 12px;
+    background: white;
+    border-radius: 16px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
     z-index: 1000;
     display: none;
-    animation: fadeIn 0.3s ease;
+    width: 320px;
+    max-height: 280px;
+    overflow-y: auto;
+    overflow-x: hidden;
+    border: 1px solid rgba(0, 0, 0, 0.1);
 }
 
 .emoji-picker-container.active {
     display: block;
 }
 
-emoji-picker {
-    width: 350px;
-    height: 400px;
-    --background: var(--bg-color);
-    --border-color: var(--border-color);
-    --emoji-size: 24px;
-    --category-emoji-size: 20px;
-    --indicator-color: var(--primary-color);
+/* Emoji Grid Layout */
+.emoji-grid {
+    display: grid;
+    grid-template-columns: repeat(8, 1fr);
+    gap: 6px;
+    padding: 12px;
+    background: white;
+    border-radius: 16px;
+}
+
+/* Individual Emoji Items */
+.emoji-item {
+    cursor: pointer;
+    font-size: 24px;
+    text-align: center;
+    padding: 8px 4px;
+    border-radius: 8px;
+    transition: all 0.2s ease;
+    user-select: none;
+}
+
+.emoji-item:hover {
+    background: rgba(0, 0, 0, 0.08);
+    transform: scale(1.1);
+}
+
+/* Custom scrollbar for emoji picker */
+.emoji-picker-container::-webkit-scrollbar {
+    width: 6px;
+}
+
+.emoji-picker-container::-webkit-scrollbar-track {
+    background: #f1f1f1;
+    border-radius: 3px;
+}
+
+.emoji-picker-container::-webkit-scrollbar-thumb {
+    background: #c1c1c1;
+    border-radius: 3px;
+}
+
+.emoji-picker-container::-webkit-scrollbar-thumb:hover {
+    background: #a8a8a8;
+}
+
+/* Dark theme support */
+[data-theme="dark"] .emoji-picker-container {
+    background: #2d2d2d;
+    border-color: #404040;
+}
+
+[data-theme="dark"] .emoji-grid {
+    background: #2d2d2d;
+}
+
+[data-theme="dark"] .emoji-item:hover {
+    background: rgba(255, 255, 255, 0.1);
+}
+
+[data-theme="dark"] .emoji-picker-container::-webkit-scrollbar-track {
+    background: #3d3d3d;
+}
+
+[data-theme="dark"] .emoji-picker-container::-webkit-scrollbar-thumb {
+    background: #666;
+}
+
+/* Mobile optimization */
+@media (max-width: 768px) {
+    .emoji-picker-container {
+        width: 280px;
+        max-height: 240px;
+        bottom: 65px;
+        left: 8px;
+    }
+    
+    .emoji-grid {
+        grid-template-columns: repeat(7, 1fr);
+        gap: 4px;
+        padding: 10px;
+    }
+    
+    .emoji-item {
+        font-size: 22px;
+        padding: 6px 2px;
+    }
 }
 
 @media (max-width: 768px) {
@@ -2006,6 +2195,98 @@ emoji-picker {
     to { opacity: 1; transform: translateY(0); }
 }
 
+/* Call button states */
+#voiceCallBtn, #videoCallBtn {
+    transition: all 0.2s ease;
+    position: relative;
+}
+
+#voiceCallBtn:hover, #videoCallBtn:hover {
+    background: rgba(0, 132, 255, 0.1);
+    transform: scale(1.05);
+}
+
+#voiceCallBtn.call-initiating, #videoCallBtn.call-initiating {
+    animation: callPulse 1s ease infinite;
+    pointer-events: none;
+    opacity: 0.7;
+}
+
+#voiceCallBtn:disabled, #videoCallBtn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+@keyframes callPulse {
+    0%, 100% { transform: scale(1); }
+    50% { transform: scale(1.15); background: rgba(0, 132, 255, 0.2); }
+}
+
+/* Active call indicator */
+.call-active-indicator {
+    position: absolute;
+    top: -5px;
+    right: -5px;
+    width: 12px;
+    height: 12px;
+    background-color: #4caf50;
+    border-radius: 50%;
+    border: 2px solid white;
+    animation: callActivePulse 1.5s infinite;
+}
+
+@keyframes callActivePulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.5; transform: scale(1.2); }
+}
+
+/* Call notification toast */
+.call-notification {
+    position: fixed;
+    bottom: 100px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    padding: 12px 24px;
+    border-radius: 50px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    z-index: 10000;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.2);
+    animation: slideUp 0.3s ease;
+}
+
+.call-notification button {
+    background: white;
+    border: none;
+    padding: 6px 16px;
+    border-radius: 20px;
+    cursor: pointer;
+    font-weight: 500;
+}
+
+.call-notification button.accept {
+    background: #4caf50;
+    color: white;
+}
+
+.call-notification button.decline {
+    background: #f44336;
+    color: white;
+}
+
+@keyframes slideUp {
+    from {
+        opacity: 0;
+        transform: translateX(-50%) translateY(20px);
+    }
+    to {
+        opacity: 1;
+        transform: translateX(-50%) translateY(0);
+    }
+}
 /* ADDITIONAL CSS FOR MISSING FEATURES */
 .offline-overlay {
     position: fixed;
@@ -2312,16 +2593,21 @@ emoji-picker {
 
 .chat-item-name {
     font-weight: 500;
-    font-size: 14px;
+    font-size: 13px;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
     color: var(--text-primary);
+    max-width: 140px;
 }
 
-/* Hide time in chat list - only show in chat panel */
+/* Show compact time in chat list */
 .chat-item-time {
-    display: none;
+    display: block;
+    font-size: 10px;
+    color: var(--text-secondary);
+    white-space: nowrap;
+    flex-shrink: 0;
 }
 
 .chat-item-preview {
@@ -2724,3 +3010,79 @@ emoji-picker {
     bottom: 80px !important;
     left: 12px !important;
 }
+
+/* ═══════════════════════════════════════════════
+   PATCH v5.0 — All feature fixes
+   ═══════════════════════════════════════════════ */
+
+/* ── Call buttons: active/initiating feedback ── */
+#voiceCallBtn.call-initiating,
+#videoCallBtn.call-initiating {
+    animation: callPulse 0.8s ease infinite;
+    pointer-events: none;
+    opacity: 0.7;
+}
+@keyframes callPulse {
+    0%,100% { transform: scale(1); }
+    50%      { transform: scale(1.18); }
+}
+
+/* ── Category tab: active must be clear ── */
+.category-tab.active {
+    color: var(--primary-color, #0084ff) !important;
+    border-bottom-color: var(--primary-color, #0084ff) !important;
+    font-weight: 600;
+}
+
+/* ── Message bubbles: strong sent / received distinction ── */
+.message.sent  .message-bubble,
+.message-bubble.sent {
+    background: #0084ff !important;
+    color: #fff !important;
+    border-radius: 18px 18px 4px 18px !important;
+    box-shadow: 0 1px 3px rgba(0,132,255,0.25);
+}
+
+.message.received .message-bubble,
+.message-bubble.received {
+    background: #e8e8ed !important;
+    color: #1c1c1e !important;
+    border-radius: 18px 18px 18px 4px !important;
+}
+
+/* ── Dark theme overrides ── */
+[data-theme="dark"] .message.sent .message-bubble,
+[data-theme="dark"] .message-bubble.sent {
+    background: #0a5abf !important;
+    color: #fff !important;
+}
+
+[data-theme="dark"] .message.received .message-bubble,
+[data-theme="dark"] .message-bubble.received {
+    background: #3a3a3c !important;
+    color: #f2f2f7 !important;
+}
+
+[data-theme="dark"] .msg-ctx-menu {
+    background: #2c2c2e;
+    box-shadow: 0 6px 28px rgba(0,0,0,0.5);
+}
+
+[data-theme="dark"] .msg-ctx-menu .ctx-item {
+    color: #f2f2f7;
+}
+
+[data-theme="dark"] .msg-ctx-menu .ctx-item:hover { background: #3a3a3c; }
+[data-theme="dark"] .msg-ctx-menu hr { border-top-color: #3a3a3c; }
+[data-theme="dark"] .msg-ctx-menu .ctx-reactions { border-bottom-color: #3a3a3c; }
+
+/* ── Chat list item hover ── */
+.chat-item:hover { background: rgba(0,0,0,0.04); }
+[data-theme="dark"] .chat-item:hover { background: rgba(255,255,255,0.06); }
+
+/* ── Unread items get bold name + blue time ── */
+.chat-item.has-unread .chat-item-name { font-weight: 700; }
+
+/* ── Multi-send cancel btn dark theme ── */
+[data-theme="dark"] .multi-send-cancel-btn { background: #b02020; }
+[data-theme="dark"] .multi-send-cancel-btn:hover { background: #8c1919; }

@@ -1,5 +1,6 @@
 // =============================================
-// MESSAGES-UI.js - HARDENED PRODUCTION UI ENGINE v4.3.4
+// MESSAGES-UI.js - HARDENED PRODUCTION UI ENGINE v4.3.5
+// FIXED: Duplicate function declarations removed
 // FIXED: Properly syncs with MessagesCore (capital M)
 // FIXED: Session state synchronization
 // FIXED: Lifecycle state detection
@@ -13,7 +14,7 @@
     // =============================================
     // CONSTANTS & CONFIGURATION
     // =============================================
-    const VERSION = '4.3.4';
+    const VERSION = '4.3.5';
     const APP_NAME = 'kynecta-messages-ui';
     const SOURCE_CHILD = 'CHILD';
     const FRAME_ID = 'messagesIframe';
@@ -150,13 +151,23 @@
     // GET CORE REFERENCE (WORKS WITH BOTH CASES)
     // =============================================
     function getMessagesCore() {
-        // Try window.MessagesCore first (capital M - what core exports)
         if (window.MessagesCore && typeof window.MessagesCore === 'object') {
             return window.MessagesCore;
         }
-        // Fallback to window.messagesCore
         if (window.messagesCore && typeof window.messagesCore === 'object') {
             return window.messagesCore;
+        }
+        return null;
+    }
+
+    // Helper function to get current user ID
+    function getCurrentUserId() {
+        const core = getMessagesCore();
+        if (core && core.getCurrentUserId) {
+            return core.getCurrentUserId();
+        }
+        if (core && core.SessionManager && core.SessionManager.getCurrentUserId) {
+            return core.SessionManager.getCurrentUserId();
         }
         return null;
     }
@@ -393,7 +404,6 @@
             } catch (e) {}
         },
 
-        // FIXED: Get core instance with proper case handling
         _getCore() {
             return getMessagesCore();
         },
@@ -415,7 +425,6 @@
             return false;
         },
         
-        // FIXED: Check session validity from core
         isSessionValid() {
             const core = this._getCore();
             if (core && core.isAuthenticated) {
@@ -424,7 +433,6 @@
             return false;
         },
         
-        // FIXED: Get session user ID from core
         getSessionUserId() {
             const core = this._getCore();
             if (core && core.getCurrentUserId) {
@@ -442,7 +450,6 @@
             return false;
         },
         
-        // FIXED: Get lifecycle state from core
         getLifecycleState() {
             const core = this._getCore();
             if (core && core.getState) {
@@ -454,7 +461,6 @@
                 return state || 'UNKNOWN';
             }
             
-            // Fallback: check if core is ready directly
             if (this.isCoreReady()) {
                 return LIFECYCLE_STATES.ACTIVE;
             }
@@ -462,30 +468,25 @@
             return 'UNKNOWN';
         },
         
-        // FIXED: Check if core has valid session
         hasValidSession() {
             const core = this._getCore();
             
-            // Method 1: Use isAuthenticated
             if (core && core.isAuthenticated && core.isAuthenticated()) {
                 this._cachedCoreSessionValid = true;
                 return true;
             }
             
-            // Method 2: Check SessionManager directly
             if (core && core.SessionManager && core.SessionManager.isAuthenticated?.()) {
                 this._cachedCoreSessionValid = true;
                 return true;
             }
             
-            // Method 3: Check getState
             const coreState = core?.getState?.();
             if (coreState && coreState.hasValidSession === true) {
                 this._cachedCoreSessionValid = true;
                 return true;
             }
             
-            // Method 4: Check getCurrentUserId
             const userId = core?.getCurrentUserId?.();
             if (userId && typeof userId === 'number' && userId !== 0) {
                 this._cachedCoreSessionValid = true;
@@ -527,7 +528,6 @@
                 el.removeAttribute('disabled');
             });
             
-            // Also enable chat panel input specifically
             const messageInput = document.getElementById('messageInput');
             if (messageInput) messageInput.disabled = false;
             const sendButton = document.getElementById('sendButton');
@@ -626,7 +626,6 @@
                 if (core.SessionManager && core.SessionManager.isAuthenticated?.()) {
                     isValid = true;
                 }
-                // Check direct userId
                 const directUserId = core.getCurrentUserId?.();
                 if (directUserId && typeof directUserId === 'number' && directUserId !== 0) {
                     isValid = true;
@@ -638,7 +637,6 @@
                 isValid = false;
             }
             
-            // CRITICAL FIX: If core has valid session, force state to be valid
             if (coreValid && !this.state.sessionValid) {
                 console.log('[UIStateManager] Force setting sessionValid true - core has valid session');
                 isValid = true;
@@ -677,7 +675,6 @@
         },
         
         _forceSyncSessionState() {
-            // Force a direct check and sync with core
             const coreHasSession = UIFailsafe.hasValidSession();
             const coreUserId = getMessagesCore()?.getCurrentUserId?.();
             
@@ -696,7 +693,6 @@
                     this._triggerRealDataFetch();
                     return true;
                 } else if (this.state.sessionValid === false && coreHasSession) {
-                    // Fix: if core has session but UI state says false
                     console.log('[UIStateManager] Fixing mismatched session state - core has session but UI says false');
                     this.state.sessionValid = true;
                     this.state.coreSessionValid = true;
@@ -721,7 +717,6 @@
                 this._notifyListeners('lifecycleState', lifecycleState);
                 this._updateLifecycleUI(lifecycleState);
             } else if (lifecycleState === 'UNKNOWN' && this.state.coreSessionValid) {
-                // Fix: If core has session but lifecycle is UNKNOWN, set to ACTIVE
                 this.state.lifecycleState = LIFECYCLE_STATES.ACTIVE;
                 this._notifyListeners('lifecycleState', LIFECYCLE_STATES.ACTIVE);
                 this._updateLifecycleUI(LIFECYCLE_STATES.ACTIVE);
@@ -790,13 +785,11 @@
         _triggerRealDataFetch() {
             const core = getMessagesCore();
             
-            // Check if core is actually ACTIVE before triggering fetch
             const coreState = core?.getState?.();
             const coreIsActive = coreState?.state === 'ACTIVE';
             
             if (!coreIsActive) {
                 console.log('[messagesUI] Core not ACTIVE yet, scheduling retry for data fetch');
-                // Retry after a short delay
                 setTimeout(() => {
                     const coreStateRetry = getMessagesCore()?.getState?.();
                     if (coreStateRetry?.state === 'ACTIVE') {
@@ -817,8 +810,6 @@
             }
             if (core && core.FriendManager && core.FriendManager.fetchFriends) {
                 core.FriendManager.fetchFriends().then(() => {
-                    // FIXED: If user has no friends, fall back to fetching all users
-                    // so the "Start Chat" contact picker is never empty.
                     const friends = core.getFriends ? core.getFriends() : [];
                     if (!friends || friends.length === 0) {
                         core.FriendManager._fetchAllUsersAsFallback?.();
@@ -1039,7 +1030,6 @@
         _startPeriodicSync() {
             setInterval(() => {
                 UIFailsafe.queueAction(() => {
-                    // First, force sync session state from core
                     this._forceSyncSessionState();
                     
                     const lifecycleState = UIFailsafe.getLifecycleState();
@@ -1048,7 +1038,6 @@
                         this._notifyListeners('lifecycleState', lifecycleState);
                         this._updateLifecycleUI(lifecycleState);
                     } else if (lifecycleState === 'UNKNOWN' && this.state.coreSessionValid) {
-                        // Fix: If core has session but lifecycle is UNKNOWN, set to ACTIVE
                         this.state.lifecycleState = LIFECYCLE_STATES.ACTIVE;
                         this._notifyListeners('lifecycleState', LIFECYCLE_STATES.ACTIVE);
                         this._updateLifecycleUI(LIFECYCLE_STATES.ACTIVE);
@@ -1067,7 +1056,6 @@
                             this._triggerRealDataFetch();
                         }
                     } else if (sessionValid && !this.state.sessionValid) {
-                        // Fix: If sessionValid from core is true but UI state says false
                         console.log('[UIStateManager] Periodic sync - fixing mismatched session state');
                         this.state.sessionValid = true;
                         this._notifyListeners('sessionValid', true);
@@ -1085,7 +1073,7 @@
                         this._notifyListeners('parentReady', true);
                     }
                 });
-            }, 2000); // Check every 2 seconds
+            }, 2000);
         },
         
         _initializeActiveUI() {
@@ -1208,12 +1196,10 @@
                 if (user && user.id && typeof user.id === 'number') {
                     UIFailsafe.safeAddClass(indicator, 'authenticated');
                     UIFailsafe.safeSetText(text, `Logged in as ${user.displayName || user.username || 'User'}`);
-                    // FIX: hide immediately — user does not need to see this on screen
                     UIFailsafe.safeSetStyle(indicator, 'display', 'none');
                 } else {
                     UIFailsafe.safeAddClass(indicator, 'authenticating');
                     UIFailsafe.safeSetText(text, 'Connecting...');
-                    // FIX: keep hidden — happens in background
                     UIFailsafe.safeSetStyle(indicator, 'display', 'none');
                 }
             }
@@ -1222,8 +1208,6 @@
         _updateConnectionUI(ready, quality) {
             const tokenStatus = UIFailsafe.safeGetElement('tokenStatus');
             if (tokenStatus) {
-                // FIX: token/connection status is internal - never show on screen.
-                // All states run in background silently.
                 UIFailsafe.safeSetStyle(tokenStatus, 'display', 'none');
             }
             
@@ -1303,68 +1287,61 @@
     }.init();
 
     function updateChatHeader(chat) {
-    const nameEl = document.getElementById('chatFriendName');
-    const avatarEl = document.getElementById('chatFriendAvatar');
-    const statusEl = document.getElementById('chatStatusText');
-    const indicatorEl = document.getElementById('chatStatusIndicator');
-    
-    if (nameEl) {
-        nameEl.textContent = chat.friendName || chat.name || 'User';
-    }
-    if (statusEl) {
-        // FIX: use smart last-seen label instead of just "Online" / "Offline"
-        const core = getMessagesCore();
-        if (core && core.formatLastSeen) {
-            statusEl.textContent = core.formatLastSeen(chat.lastSeen || null, !!chat.online);
-        } else {
-            statusEl.textContent = chat.online ? 'Active now' : 'Offline';
+        const nameEl = document.getElementById('chatFriendName');
+        const avatarEl = document.getElementById('chatFriendAvatar');
+        const statusEl = document.getElementById('chatStatusText');
+        const indicatorEl = document.getElementById('chatStatusIndicator');
+        
+        if (nameEl) {
+            nameEl.textContent = chat.friendName || chat.name || 'User';
         }
-    }
-    if (indicatorEl) {
-        indicatorEl.className = `chat-status ${chat.online ? 'online' : 'offline'}`;
-    }
-    
-    if (avatarEl) {
-        // Clear existing content
-        avatarEl.innerHTML = '';
-        
-        // Try to get avatar from multiple sources
-        let avatarUrl = chat.friendAvatar || chat.avatar;
-        
-        // If no avatar, try to get from current user's profile picture
-        if (!avatarUrl && window.currentUser && window.currentUser.avatar) {
-            avatarUrl = window.currentUser.avatar;
+        if (statusEl) {
+            const core = getMessagesCore();
+            if (core && core.formatLastSeen) {
+                statusEl.textContent = core.formatLastSeen(chat.lastSeen || null, !!chat.online);
+            } else {
+                statusEl.textContent = chat.online ? 'Active now' : 'Offline';
+            }
+        }
+        if (indicatorEl) {
+            indicatorEl.className = `chat-status ${chat.online ? 'online' : 'offline'}`;
         }
         
-        // If still no avatar, check session
-        if (!avatarUrl && window.__CHILD_SESSION__ && window.__CHILD_SESSION__.user) {
-            avatarUrl = window.__CHILD_SESSION__.user.avatar || window.__CHILD_SESSION__.user.photoURL;
+        if (avatarEl) {
+            avatarEl.innerHTML = '';
+            
+            let avatarUrl = chat.friendAvatar || chat.avatar;
+            
+            if (!avatarUrl && window.currentUser && window.currentUser.avatar) {
+                avatarUrl = window.currentUser.avatar;
+            }
+            
+            if (!avatarUrl && window.__CHILD_SESSION__ && window.__CHILD_SESSION__.user) {
+                avatarUrl = window.__CHILD_SESSION__.user.avatar || window.__CHILD_SESSION__.user.photoURL;
+            }
+            
+            if (avatarUrl) {
+                const img = document.createElement('img');
+                img.src = avatarUrl;
+                img.alt = chat.friendName || 'User';
+                img.style.width = '100%';
+                img.style.height = '100%';
+                img.style.objectFit = 'cover';
+                img.style.borderRadius = '50%';
+                img.onerror = () => {
+                    avatarEl.innerHTML = `<i class="fas fa-user"></i>`;
+                    if (indicatorEl) avatarEl.appendChild(indicatorEl);
+                };
+                avatarEl.appendChild(img);
+            } else {
+                const name = chat.friendName || chat.name || 'U';
+                const initial = name.charAt(0).toUpperCase();
+                avatarEl.innerHTML = `<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#667eea,#764ba2);color:white;font-weight:bold;font-size:18px;">${initial}</div>`;
+            }
+            
+            if (indicatorEl) avatarEl.appendChild(indicatorEl);
         }
-        
-        if (avatarUrl) {
-            const img = document.createElement('img');
-            img.src = avatarUrl;
-            img.alt = chat.friendName || 'User';
-            img.style.width = '100%';
-            img.style.height = '100%';
-            img.style.objectFit = 'cover';
-            img.style.borderRadius = '50%';
-            img.onerror = () => {
-                // Fallback to initials
-                avatarEl.innerHTML = `<i class="fas fa-user"></i>`;
-                if (indicatorEl) avatarEl.appendChild(indicatorEl);
-            };
-            avatarEl.appendChild(img);
-        } else {
-            // Show initials as fallback
-            const name = chat.friendName || chat.name || 'U';
-            const initial = name.charAt(0).toUpperCase();
-            avatarEl.innerHTML = `<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#667eea,#764ba2);color:white;font-weight:bold;font-size:18px;">${initial}</div>`;
-        }
-        
-        if (indicatorEl) avatarEl.appendChild(indicatorEl);
     }
-}
 
     // =============================================
     // UI RENDERER (ENHANCED WITH DETERMINISTIC LIFECYCLE & REAL DATA)
@@ -1506,9 +1483,7 @@
         _canRender() {
             const lifecycleState = UIStateManager.getState('lifecycleState');
             const sessionValid = UIStateManager.getState('sessionValid');
-            // If core has valid session but UI state is not yet updated, still allow render
             const coreHasSession = UIFailsafe.hasValidSession();
-            // Also allow render if core itself reports ACTIVE state
             const core = typeof getMessagesCore === 'function' ? getMessagesCore() : null;
             const coreIsActive = core?.getState?.()?.state === 'ACTIVE';
             return (lifecycleState === LIFECYCLE_STATES.ACTIVE && sessionValid) || coreHasSession || coreIsActive;
@@ -1543,9 +1518,6 @@
             const container = UIFailsafe.safeGetElement('messagesContainer');
             if (!container) return;
 
-            // FIXED: Always clear first to prevent duplicate message accumulation.
-            // Previously _renderMessageBatches used innerHTML += in a loop without
-            // clearing, so every re-render appended a full duplicate copy.
             container.innerHTML = '';
 
             if (!this._canRender()) {
@@ -1617,7 +1589,7 @@
 
         _createTextMessageTemplate(message, currentUser) {
             const core = getMessagesCore();
-            const currentUserId = core?.getCurrentUserId?.();
+            const currentUserId = core?.getCurrentUserId?.() || getCurrentUserId();
             const isSent = String(message.senderId) === String(currentUserId);
             const status = message.status || 'sent';
             const statusIcon = status === 'sending' ? 'fa-clock' :
@@ -1657,7 +1629,7 @@
 
         _createImageMessageTemplate(message, currentUser) {
             const core = getMessagesCore();
-            const currentUserId = core?.getCurrentUserId?.();
+            const currentUserId = core?.getCurrentUserId?.() || getCurrentUserId();
             const isSent = String(message.senderId) === String(currentUserId);
             const status = message.status || 'sent';
             const statusIcon = status === 'sending' ? 'fa-clock' :
@@ -1690,7 +1662,7 @@
 
         _createVideoMessageTemplate(message, currentUser) {
             const core = getMessagesCore();
-            const currentUserId = core?.getCurrentUserId?.();
+            const currentUserId = core?.getCurrentUserId?.() || getCurrentUserId();
             const isSent = String(message.senderId) === String(currentUserId);
             const status = message.status || 'sent';
             const statusIcon = status === 'sending' ? 'fa-clock' :
@@ -1723,7 +1695,7 @@
 
         _createAudioMessageTemplate(message, currentUser) {
             const core = getMessagesCore();
-            const currentUserId = core?.getCurrentUserId?.();
+            const currentUserId = core?.getCurrentUserId?.() || getCurrentUserId();
             const isSent = String(message.senderId) === String(currentUserId);
             const status = message.status || 'sent';
             const statusIcon = status === 'sending' ? 'fa-clock' :
@@ -1760,7 +1732,7 @@
 
         _createFileMessageTemplate(message, currentUser) {
             const core = getMessagesCore();
-            const currentUserId = core?.getCurrentUserId?.();
+            const currentUserId = core?.getCurrentUserId?.() || getCurrentUserId();
             const isSent = String(message.senderId) === String(currentUserId);
             const status = message.status || 'sent';
             const statusIcon = status === 'sending' ? 'fa-clock' :
@@ -1800,7 +1772,7 @@
 
         _createLocationMessageTemplate(message, currentUser) {
             const core = getMessagesCore();
-            const currentUserId = core?.getCurrentUserId?.();
+            const currentUserId = core?.getCurrentUserId?.() || getCurrentUserId();
             const isSent = String(message.senderId) === String(currentUserId);
             const status = message.status || 'sent';
             const statusIcon = status === 'sending' ? 'fa-clock' :
@@ -1833,7 +1805,7 @@
 
         _createPollMessageTemplate(message, currentUser) {
             const core = getMessagesCore();
-            const currentUserId = core?.getCurrentUserId?.();
+            const currentUserId = core?.getCurrentUserId?.() || getCurrentUserId();
             const isSent = String(message.senderId) === String(currentUserId);
             const status = message.status || 'sent';
             const statusIcon = status === 'sending' ? 'fa-clock' :
@@ -1882,7 +1854,7 @@
 
         _createNoteMessageTemplate(message, currentUser) {
             const core = getMessagesCore();
-            const currentUserId = core?.getCurrentUserId?.();
+            const currentUserId = core?.getCurrentUserId?.() || getCurrentUserId();
             const isSent = String(message.senderId) === String(currentUserId);
             const status = message.status || 'sent';
             const statusIcon = status === 'sending' ? 'fa-clock' :
@@ -2026,7 +1998,6 @@
                     core.formatTime(chat.lastMessageAt) : 
                     chat.lastMessageAt ? new Date(chat.lastMessageAt).toLocaleTimeString() : '';
                 
-                // FIX: truncate last message to 8 words, never show "No messages yet"
                 const _rawLast = (chat.lastMessage || '').trim();
                 const _words = _rawLast.split(/\s+/).filter(Boolean);
                 const lastMsgDisplay = _words.length > 8
@@ -2084,13 +2055,10 @@
             const container = UIFailsafe.safeGetElement('contactsList');
             if (!container) return;
 
-            // Don't gate on _canRender() — contacts panel should always show content
             if (!contacts || contacts.length === 0) {
-                // Try to fetch from core before showing empty state
                 const core = getMessagesCore();
                 const coreFriends = core?.getFriends?.() || [];
                 if (coreFriends.length > 0) {
-                    // Core has friends but we were passed empty — use core's data
                     contacts = coreFriends;
                 } else {
                     UIFailsafe.safeSetHTML(container, `
@@ -2128,14 +2096,13 @@
             UIFailsafe.safeSetHTML(container, html);
         },
 
-                _renderContactItem(contact) {
+        _renderContactItem(contact) {
             const status = contact.online ? 'online' : 'offline';
             const statusText = contact.status || (contact.online ? 'Online' : 'Offline');
             const displayName = contact.displayName || contact.username || contact.name || 'User';
             const avatarUrl = contact.avatar || contact.photoURL || contact.avatarUrl || '';
             const initials = displayName.charAt(0).toUpperCase();
             
-            // Escape the display name to handle special characters
             const escapedName = displayName.replace(/'/g, "\\'").replace(/"/g, '&quot;');
             
             return `
@@ -2231,7 +2198,7 @@
 
             const editItem = menu.querySelector('[data-action="edit"]');
             const deleteItem = menu.querySelector('[data-action="delete"]');
-            const currentUserId = core?.getCurrentUserId?.();
+            const currentUserId = core?.getCurrentUserId?.() || getCurrentUserId();
             
             if (editItem) {
                 UIFailsafe.safeSetStyle(editItem, 'display', message.senderId === currentUserId ? 'flex' : 'none');
@@ -2470,7 +2437,6 @@
             let html = '';
             chats.forEach(chat => {
                 const core = getMessagesCore();
-                // FIX: safely access multiSendSelectedChats which may not always be a Set
                 const selectedSet = core?.multiSendSelectedChats;
                 const isSelected = selectedSet instanceof Set ? selectedSet.has(chat.id) : false;
                 const name = chat.friendName || chat.name || 'Chat';
@@ -2516,303 +2482,553 @@
     }.init();
 
     // =============================================
-// CALL BUTTON HANDLERS (ADD TO messages-ui.js)
-// =============================================
+    // CALL BUTTON HANDLERS (COMPLETE REAL IMPLEMENTATION)
+    // =============================================
 
-function setupCallHandlers() {
-    const voiceCallBtn = document.getElementById('voiceCallBtn');
-    const videoCallBtn = document.getElementById('videoCallBtn');
-    
-    if (voiceCallBtn) {
-        voiceCallBtn.addEventListener('click', function() {
-            const activeChat = ChatManager.getActiveChat ? ChatManager.getActiveChat() : null;
-            if (!activeChat) return;
-            const receiverId = activeChat.friendId || activeChat.pendingReceiverId;
-            const receiverName = activeChat.friendName || 'User';
-            if (!receiverId) return;
-            if (window.parent && window.parent !== window) {
-                window.parent.postMessage({
-                    type: 'SWITCH_MODULE', module: 'calls',
-                    payload: { userId: receiverId, userName: receiverName, callType: 'voice', returnTo: 'messages' },
-                    timestamp: Date.now()
-                }, '*');
-            } else {
-                window.open(`/calls.html?userId=${receiverId}&name=${encodeURIComponent(receiverName)}&type=voice`, '_blank');
+    function setupCallHandlers() {
+        const voiceCallBtn = document.getElementById('voiceCallBtn');
+        const videoCallBtn = document.getElementById('videoCallBtn');
+        
+        if (!voiceCallBtn && !videoCallBtn) {
+            console.log('[CallHandler] Call buttons not found in DOM');
+            return;
+        }
+        
+        function getActiveChatInfo() {
+            const core = getMessagesCore();
+            if (!core) return null;
+            
+            let activeChat = core.getCurrentConversation?.();
+            
+            if (!activeChat && core.ChatManager) {
+                activeChat = core.ChatManager.getActiveChat?.();
+            }
+            
+            if (!activeChat && window.__currentActiveChat) {
+                activeChat = window.__currentActiveChat;
+            }
+            
+            if (!activeChat) {
+                const selectedChat = document.querySelector('.chat-item.selected');
+                if (selectedChat && selectedChat.dataset.chatId) {
+                    const chatId = selectedChat.dataset.chatId;
+                    activeChat = core.getConversation?.(chatId);
+                }
+            }
+            
+            if (!activeChat) return null;
+            
+            const receiverId = activeChat.friendId || 
+                              activeChat.pendingReceiverId || 
+                              activeChat.otherUserId ||
+                              activeChat.userId || 
+                              activeChat.participantId ||
+                              activeChat.id;
+            
+            const receiverName = activeChat.friendName || 
+                                activeChat.name || 
+                                activeChat.displayName || 
+                                activeChat.userName || 
+                                'User';
+            
+            const receiverAvatar = activeChat.friendAvatar || 
+                                  activeChat.avatar || 
+                                  activeChat.photoURL;
+            
+            if (!receiverId) return null;
+            
+            return { 
+                receiverId: parseInt(receiverId), 
+                receiverName, 
+                receiverAvatar,
+                chatId: activeChat.id 
+            };
+        }
+        
+        async function fetchUserDetails(userId) {
+            try {
+                const core = getMessagesCore();
+                if (core && core.FriendManager) {
+                    const friend = core.FriendManager.getFriend(userId);
+                    if (friend) {
+                        return {
+                            name: friend.displayName || friend.username || friend.name,
+                            avatar: friend.avatar || friend.photoURL
+                        };
+                    }
+                }
+                
+                const response = await fetch(`/api/users/${userId}`);
+                if (response.ok) {
+                    const user = await response.json();
+                    return {
+                        name: user.displayName || user.username,
+                        avatar: user.avatar
+                    };
+                }
+            } catch (e) {
+                console.warn('[CallHandler] Could not fetch user details:', e);
+            }
+            return { name: 'User', avatar: null };
+        }
+        
+        async function initiateCall(callType) {
+            if (window._callInProgress) {
+                UIRenderer.showNotification('Call already in progress...', 'warning');
+                return;
+            }
+            
+            let info = getActiveChatInfo();
+            
+            if (!info) {
+                await new Promise(resolve => setTimeout(resolve, 300));
+                info = getActiveChatInfo();
+                
+                if (!info) {
+                    UIRenderer.showNotification('Open a chat first before calling', 'warning');
+                    return;
+                }
+            }
+            
+            window._callInProgress = true;
+            if (voiceCallBtn) {
+                voiceCallBtn.disabled = true;
+                voiceCallBtn.classList.add('call-initiating');
+            }
+            if (videoCallBtn) {
+                videoCallBtn.disabled = true;
+                videoCallBtn.classList.add('call-initiating');
+            }
+            
+            try {
+                const userDetails = await fetchUserDetails(info.receiverId);
+                const finalUserName = userDetails.name || info.receiverName;
+                const finalUserAvatar = userDetails.avatar || info.receiverAvatar;
+                
+                window.__messageChatReturnUserId = info.receiverId;
+                window.__messageChatReturnName = finalUserName;
+                window.__messageChatReturnId = info.chatId;
+                
+                console.log(`[CallHandler] Initiating ${callType} call with:`, {
+                    userId: info.receiverId,
+                    userName: finalUserName,
+                    chatId: info.chatId
+                });
+                
+                if (window.parent && window.parent !== window) {
+                    window.parent.postMessage({
+                        type: 'SWITCH_MODULE',
+                        module: 'calls',
+                        payload: {
+                            userId: info.receiverId,
+                            userName: finalUserName,
+                            userAvatar: finalUserAvatar,
+                            callType: callType,
+                            returnTo: 'messages',
+                            chatUserId: info.receiverId,
+                            chatId: info.chatId,
+                            source: 'messages-module',
+                            timestamp: Date.now()
+                        },
+                        timestamp: Date.now()
+                    }, '*');
+                    
+                    setTimeout(() => {
+                        window.parent.postMessage({
+                            type: 'INITIATE_CALL',
+                            payload: {
+                                userId: info.receiverId,
+                                userName: finalUserName,
+                                callType: callType,
+                                source: 'messages'
+                            }
+                        }, '*');
+                    }, 100);
+                    
+                    UIRenderer.showNotification(`Starting ${callType} call...`, 'info');
+                    return;
+                }
+                
+                const callUrl = `/calls.html?userId=${info.receiverId}&name=${encodeURIComponent(finalUserName)}&type=${callType}&returnTo=messages`;
+                window.open(callUrl, '_blank');
+                UIRenderer.showNotification(`Opening ${callType} call in new tab...`, 'info');
+                
+            } catch (error) {
+                console.error('[CallHandler] Error initiating call:', error);
+                UIRenderer.showNotification(`Failed to start ${callType} call: ${error.message}`, 'error');
+            } finally {
+                setTimeout(() => {
+                    window._callInProgress = false;
+                    if (voiceCallBtn) {
+                        voiceCallBtn.disabled = false;
+                        voiceCallBtn.classList.remove('call-initiating');
+                    }
+                    if (videoCallBtn) {
+                        videoCallBtn.disabled = false;
+                        videoCallBtn.classList.remove('call-initiating');
+                    }
+                }, 3000);
+            }
+        }
+        
+        if (voiceCallBtn) {
+            const newVoiceBtn = voiceCallBtn.cloneNode(true);
+            voiceCallBtn.parentNode?.replaceChild(newVoiceBtn, voiceCallBtn);
+            
+            newVoiceBtn.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                initiateCall('voice');
+            });
+        }
+        
+        if (videoCallBtn) {
+            const newVideoBtn = videoCallBtn.cloneNode(true);
+            videoCallBtn.parentNode?.replaceChild(newVideoBtn, videoCallBtn);
+            
+            newVideoBtn.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                initiateCall('video');
+            });
+        }
+        
+        console.log('[CallHandler] Call handlers initialized');
+    }
+
+    // CALL RETURN HANDLER - re-opens the same chat after call ends
+    function setupCallReturnHandler() {
+        window.addEventListener('message', (event) => {
+            const data = event.data || {};
+            
+            if (data.type === 'CALL_ENDED_RETURN' || data.type === 'CALL_ENDED') {
+                console.log('[CallHandler] Call ended, returning to chat');
+                
+                const returnUserId = window.__messageChatReturnUserId;
+                const returnChatId = window.__messageChatReturnId;
+                const returnName = window.__messageChatReturnName;
+                
+                if (returnUserId && window.messagesUI?.loadChatByFriendId) {
+                    setTimeout(() => {
+                        window.messagesUI.loadChatByFriendId(returnUserId, returnName || '');
+                    }, 300);
+                } else if (returnChatId && window.messagesUI?.openChat) {
+                    setTimeout(() => {
+                        window.messagesUI.openChat({ id: returnChatId });
+                    }, 300);
+                }
+                
+                delete window.__messageChatReturnUserId;
+                delete window.__messageChatReturnId;
+                delete window.__messageChatReturnName;
+            }
+            
+            if (data.type === 'INCOMING_CALL') {
+                const { callerId, callerName, callType } = data.payload || {};
+                console.log(`[CallHandler] Incoming ${callType} call from ${callerName || callerId}`);
+                UIRenderer.showNotification(`Incoming ${callType} call from ${callerName || 'Someone'}...`, 'info');
+            }
+        });
+        
+        window.addEventListener('incomingCall', (event) => {
+            const { callerId, callerName, callType } = event.detail || {};
+            console.log(`[CallHandler] Incoming call via event:`, event.detail);
+            UIRenderer.showNotification(`Incoming ${callType} call from ${callerName || callerId}`, 'info');
+        });
+    }
+
+    // Call quality monitoring
+    function setupCallQualityMonitoring() {
+        let callActive = false;
+        let qualityInterval = null;
+        
+        window.addEventListener('callStarted', () => {
+            callActive = true;
+            qualityInterval = setInterval(() => {
+                if (callActive) {
+                    const connection = navigator.connection;
+                    if (connection) {
+                        const downlink = connection.downlink || 0;
+                        if (downlink < 1) {
+                            UIRenderer.showNotification('Poor connection quality', 'warning');
+                        }
+                    }
+                }
+            }, 5000);
+        });
+        
+        window.addEventListener('callEnded', () => {
+            callActive = false;
+            if (qualityInterval) {
+                clearInterval(qualityInterval);
+                qualityInterval = null;
             }
         });
     }
-    
-    if (videoCallBtn) {
-        videoCallBtn.addEventListener('click', function() {
-            const activeChat = ChatManager.getActiveChat ? ChatManager.getActiveChat() : null;
-            if (!activeChat) return;
-            const receiverId = activeChat.friendId || activeChat.pendingReceiverId;
-            const receiverName = activeChat.friendName || 'User';
-            if (!receiverId) return;
-            if (window.parent && window.parent !== window) {
-                window.parent.postMessage({
-                    type: 'SWITCH_MODULE', module: 'calls',
-                    payload: { userId: receiverId, userName: receiverName, callType: 'video', returnTo: 'messages' },
-                    timestamp: Date.now()
-                }, '*');
-            } else {
-                window.open(`/calls.html?userId=${receiverId}&name=${encodeURIComponent(receiverName)}&type=video`, '_blank');
-            }
-        });
-    }
-}
 
-// =============================================
-// MESSAGE ACTIONS MENU (FIXED)
-// =============================================
+    // =============================================
+    // MESSAGE ACTIONS MENU (FIXED)
+    // =============================================
 
-let currentActionMessage = null;
-let actionMenuTimeout = null;
+    let currentActionMessage = null;
+    let actionMenuTimeout = null;
 
-function showMessageActions(message, x, y) {
-    // Clear any existing timeout
-    if (actionMenuTimeout) {
-        clearTimeout(actionMenuTimeout);
-    }
-    
-    // Remove existing menu if any
-    const existingMenu = document.getElementById('dynamicMessageActions');
-    if (existingMenu) {
-        existingMenu.remove();
-    }
-    
-    // Store current message
-    currentActionMessage = message;
-    
-    // Create menu
-    const menu = document.createElement('div');
-    menu.id = 'dynamicMessageActions';
-    menu.className = 'message-actions-menu';
-    menu.style.cssText = `
-        position: fixed;
-        left: ${x}px;
-        top: ${y}px;
-        background: white;
-        border-radius: 12px;
-        box-shadow: 0 4px 20px rgba(0,0,0,0.15);
-        z-index: 10000;
-        min-width: 180px;
-        overflow: hidden;
-        animation: fadeIn 0.2s ease;
-    `;
-    
-    // Determine if user can edit/delete this message
-    const currentUserId = getCurrentUserId();
-    const canEdit = message.senderId === currentUserId;
-    const canDelete = message.senderId === currentUserId;
-    
-    menu.innerHTML = `
-        <div style="padding: 8px 0;">
-            ${canEdit ? `
-                <div class="menu-item" data-action="reply" style="padding: 10px 16px; display: flex; align-items: center; gap: 12px; cursor: pointer; transition: background 0.2s;">
-                    <i class="fas fa-reply" style="width: 20px; color: #0084ff;"></i>
-                    <span>Reply</span>
+    function showMessageActions(message, x, y) {
+        if (actionMenuTimeout) {
+            clearTimeout(actionMenuTimeout);
+        }
+        
+        const existingMenu = document.getElementById('dynamicMessageActions');
+        if (existingMenu) {
+            existingMenu.remove();
+        }
+        
+        currentActionMessage = message;
+        
+        const menu = document.createElement('div');
+        menu.id = 'dynamicMessageActions';
+        menu.className = 'message-actions-menu';
+        menu.style.cssText = `
+            position: fixed;
+            left: ${x}px;
+            top: ${y}px;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.15);
+            z-index: 10000;
+            min-width: 180px;
+            overflow: hidden;
+            animation: fadeIn 0.2s ease;
+        `;
+        
+        const currentUserId = getCurrentUserId();
+        const canEdit = message.senderId === currentUserId;
+        const canDelete = message.senderId === currentUserId;
+        
+        menu.innerHTML = `
+            <div style="padding: 8px 0;">
+                ${canEdit ? `
+                    <div class="menu-item" data-action="reply" style="padding: 10px 16px; display: flex; align-items: center; gap: 12px; cursor: pointer; transition: background 0.2s;">
+                        <i class="fas fa-reply" style="width: 20px; color: #0084ff;"></i>
+                        <span>Reply</span>
+                    </div>
+                    <div class="menu-item" data-action="edit" style="padding: 10px 16px; display: flex; align-items: center; gap: 12px; cursor: pointer; transition: background 0.2s;">
+                        <i class="fas fa-edit" style="width: 20px; color: #0084ff;"></i>
+                        <span>Edit</span>
+                    </div>
+                ` : ''}
+                <div class="menu-item" data-action="forward" style="padding: 10px 16px; display: flex; align-items: center; gap: 12px; cursor: pointer; transition: background 0.2s;">
+                    <i class="fas fa-share" style="width: 20px; color: #0084ff;"></i>
+                    <span>Forward</span>
                 </div>
-                <div class="menu-item" data-action="edit" style="padding: 10px 16px; display: flex; align-items: center; gap: 12px; cursor: pointer; transition: background 0.2s;">
-                    <i class="fas fa-edit" style="width: 20px; color: #0084ff;"></i>
-                    <span>Edit</span>
+                <div class="menu-item" data-action="copy" style="padding: 10px 16px; display: flex; align-items: center; gap: 12px; cursor: pointer; transition: background 0.2s;">
+                    <i class="fas fa-copy" style="width: 20px; color: #0084ff;"></i>
+                    <span>Copy</span>
                 </div>
-            ` : ''}
-            <div class="menu-item" data-action="forward" style="padding: 10px 16px; display: flex; align-items: center; gap: 12px; cursor: pointer; transition: background 0.2s;">
-                <i class="fas fa-share" style="width: 20px; color: #0084ff;"></i>
-                <span>Forward</span>
-            </div>
-            <div class="menu-item" data-action="copy" style="padding: 10px 16px; display: flex; align-items: center; gap: 12px; cursor: pointer; transition: background 0.2s;">
-                <i class="fas fa-copy" style="width: 20px; color: #0084ff;"></i>
-                <span>Copy</span>
-            </div>
-            <div class="menu-item" data-action="star" style="padding: 10px 16px; display: flex; align-items: center; gap: 12px; cursor: pointer; transition: background 0.2s;">
-                <i class="far fa-star" style="width: 20px; color: #ffd700;"></i>
-                <span>Star</span>
-            </div>
-            <div class="menu-item" data-action="report" style="padding: 10px 16px; display: flex; align-items: center; gap: 12px; cursor: pointer; transition: background 0.2s;">
-                <i class="fas fa-flag" style="width: 20px; color: #ff9500;"></i>
-                <span>Report</span>
-            </div>
-            <div style="height: 1px; background: #e5e5ea; margin: 4px 0;"></div>
-            <div class="menu-item" data-action="react-like" style="padding: 10px 16px; display: flex; align-items: center; gap: 12px; cursor: pointer; transition: background 0.2s;">
-                <span style="font-size: 18px;">👍</span>
-                <span>React</span>
-            </div>
-            <div class="menu-item" data-action="react-love" style="padding: 10px 16px; display: flex; align-items: center; gap: 12px; cursor: pointer; transition: background 0.2s;">
-                <span style="font-size: 18px;">❤️</span>
-                <span>Love</span>
-            </div>
-            <div class="menu-item" data-action="react-laugh" style="padding: 10px 16px; display: flex; align-items: center; gap: 12px; cursor: pointer; transition: background 0.2s;">
-                <span style="font-size: 18px;">😂</span>
-                <span>Laugh</span>
-            </div>
-            ${canDelete ? `
+                <div class="menu-item" data-action="star" style="padding: 10px 16px; display: flex; align-items: center; gap: 12px; cursor: pointer; transition: background 0.2s;">
+                    <i class="far fa-star" style="width: 20px; color: #ffd700;"></i>
+                    <span>Star</span>
+                </div>
+                <div class="menu-item" data-action="report" style="padding: 10px 16px; display: flex; align-items: center; gap: 12px; cursor: pointer; transition: background 0.2s;">
+                    <i class="fas fa-flag" style="width: 20px; color: #ff9500;"></i>
+                    <span>Report</span>
+                </div>
                 <div style="height: 1px; background: #e5e5ea; margin: 4px 0;"></div>
-                <div class="menu-item" data-action="delete" style="padding: 10px 16px; display: flex; align-items: center; gap: 12px; cursor: pointer; transition: background 0.2s;">
-                    <i class="fas fa-trash" style="width: 20px; color: #ff3b30;"></i>
-                    <span style="color: #ff3b30;">Delete</span>
+                <div class="menu-item" data-action="react-like" style="padding: 10px 16px; display: flex; align-items: center; gap: 12px; cursor: pointer; transition: background 0.2s;">
+                    <span style="font-size: 18px;">👍</span>
+                    <span>React</span>
                 </div>
-            ` : ''}
-            <div class="menu-item" data-action="info" style="padding: 10px 16px; display: flex; align-items: center; gap: 12px; cursor: pointer; transition: background 0.2s;">
-                <i class="fas fa-info-circle" style="width: 20px; color: #8e8e93;"></i>
-                <span>Info</span>
+                <div class="menu-item" data-action="react-love" style="padding: 10px 16px; display: flex; align-items: center; gap: 12px; cursor: pointer; transition: background 0.2s;">
+                    <span style="font-size: 18px;">❤️</span>
+                    <span>Love</span>
+                </div>
+                <div class="menu-item" data-action="react-laugh" style="padding: 10px 16px; display: flex; align-items: center; gap: 12px; cursor: pointer; transition: background 0.2s;">
+                    <span style="font-size: 18px;">😂</span>
+                    <span>Laugh</span>
+                </div>
+                ${canDelete ? `
+                    <div style="height: 1px; background: #e5e5ea; margin: 4px 0;"></div>
+                    <div class="menu-item" data-action="delete" style="padding: 10px 16px; display: flex; align-items: center; gap: 12px; cursor: pointer; transition: background 0.2s;">
+                        <i class="fas fa-trash" style="width: 20px; color: #ff3b30;"></i>
+                        <span style="color: #ff3b30;">Delete</span>
+                    </div>
+                ` : ''}
+                <div class="menu-item" data-action="info" style="padding: 10px 16px; display: flex; align-items: center; gap: 12px; cursor: pointer; transition: background 0.2s;">
+                    <i class="fas fa-info-circle" style="width: 20px; color: #8e8e93;"></i>
+                    <span>Info</span>
+                </div>
             </div>
-        </div>
-    `;
-    
-    document.body.appendChild(menu);
-    
-    // Adjust position if off-screen
-    const rect = menu.getBoundingClientRect();
-    if (rect.right > window.innerWidth) {
-        menu.style.left = (window.innerWidth - rect.width - 10) + 'px';
-    }
-    if (rect.bottom > window.innerHeight) {
-        menu.style.top = (window.innerHeight - rect.height - 10) + 'px';
-    }
-    
-    // Add hover styles
-    const style = document.createElement('style');
-    style.textContent = `
-        .menu-item:hover { background: #f0f2f5; }
-        .message-actions-menu { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
-        @keyframes fadeIn {
-            from { opacity: 0; transform: scale(0.95); }
-            to { opacity: 1; transform: scale(1); }
+        `;
+        
+        document.body.appendChild(menu);
+        
+        const rect = menu.getBoundingClientRect();
+        if (rect.right > window.innerWidth) {
+            menu.style.left = (window.innerWidth - rect.width - 10) + 'px';
         }
-    `;
-    document.head.appendChild(style);
-    
-    // Handle menu item clicks
-    menu.querySelectorAll('.menu-item').forEach(item => {
-        item.addEventListener('click', (e) => {
-            e.stopPropagation();
-            const action = item.dataset.action;
-            handleMessageAction(action, currentActionMessage);
-            hideMessageActions();
+        if (rect.bottom > window.innerHeight) {
+            menu.style.top = (window.innerHeight - rect.height - 10) + 'px';
+        }
+        
+        const style = document.createElement('style');
+        style.textContent = `
+            .menu-item:hover { background: #f0f2f5; }
+            .message-actions-menu { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
+            @keyframes fadeIn {
+                from { opacity: 0; transform: scale(0.95); }
+                to { opacity: 1; transform: scale(1); }
+            }
+        `;
+        document.head.appendChild(style);
+        
+        menu.querySelectorAll('.menu-item').forEach(item => {
+            item.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const action = item.dataset.action;
+                handleMessageAction(action, currentActionMessage);
+                hideMessageActions();
+            });
         });
-    });
-    
-    // Auto-hide after 8 seconds — enough time to read and choose an action
-    actionMenuTimeout = setTimeout(() => {
-        hideMessageActions();
-    }, 8000);
-    
-    // Click outside to close
-    const closeHandler = (e) => {
-        if (!menu.contains(e.target)) {
+        
+        actionMenuTimeout = setTimeout(() => {
             hideMessageActions();
-            document.removeEventListener('click', closeHandler);
+        }, 8000);
+        
+        const closeHandler = (e) => {
+            if (!menu.contains(e.target)) {
+                hideMessageActions();
+                document.removeEventListener('click', closeHandler);
+            }
+        };
+        setTimeout(() => {
+            document.addEventListener('click', closeHandler);
+        }, 10);
+    }
+
+    function hideMessageActions() {
+        const menu = document.getElementById('dynamicMessageActions');
+        if (menu) menu.remove();
+        if (actionMenuTimeout) clearTimeout(actionMenuTimeout);
+        currentActionMessage = null;
+    }
+
+    function handleMessageAction(action, message) {
+        if (!message) return;
+        
+        const core = getMessagesCore();
+        
+        switch (action) {
+            case 'reply':
+                setReplyToMessage(message);
+                const input = document.getElementById('messageInput');
+                if (input) input.focus();
+                showNotificationInMessages('Replying to message...', 'info');
+                break;
+                
+            case 'edit':
+                if (core && core.editMessage) {
+                    const newContent = prompt('Edit your message:', message.content);
+                    if (newContent && newContent.trim()) {
+                        core.editMessage(message.id, newContent.trim());
+                    }
+                }
+                break;
+                
+            case 'forward':
+                showForwardModal(message);
+                break;
+                
+            case 'copy':
+                navigator.clipboard.writeText(message.content || '');
+                showNotificationInMessages('Copied to clipboard', 'success');
+                break;
+                
+            case 'star':
+                if (core && core.UIStateManager && core.UIStateManager.toggleStarred) {
+                    const isStarred = core.UIStateManager.toggleStarred(message.id);
+                    showNotificationInMessages(isStarred ? 'Message starred' : 'Message unstarred', 'info');
+                }
+                break;
+                
+            case 'report':
+                showReportModal(message);
+                break;
+                
+            case 'react-like':
+                if (core && core.addReaction) {
+                    core.addReaction(message.id, '👍', true);
+                }
+                break;
+                
+            case 'react-love':
+                if (core && core.addReaction) {
+                    core.addReaction(message.id, '❤️', true);
+                }
+                break;
+                
+            case 'react-laugh':
+                if (core && core.addReaction) {
+                    core.addReaction(message.id, '😂', true);
+                }
+                break;
+                
+            case 'delete':
+                if (confirm('Delete this message?')) {
+                    if (core && core.deleteMessage) {
+                        core.deleteMessage(message.id, false);
+                    }
+                }
+                break;
+                
+            case 'info':
+                showMessageInfo(message);
+                break;
         }
-    };
-    setTimeout(() => {
-        document.addEventListener('click', closeHandler);
-    }, 10);
-}
-
-function hideMessageActions() {
-    const menu = document.getElementById('dynamicMessageActions');
-    if (menu) menu.remove();
-    if (actionMenuTimeout) clearTimeout(actionMenuTimeout);
-    currentActionMessage = null;
-}
-
-function handleMessageAction(action, message) {
-    if (!message) return;
-    
-    const core = getMessagesCore();
-    
-    switch (action) {
-        case 'reply':
-            // Set reply context
-            setReplyToMessage(message);
-            const input = document.getElementById('messageInput');
-            if (input) input.focus();
-            showNotificationInMessages('Replying to message...', 'info');
-            break;
-            
-        case 'edit':
-            if (core && core.editMessage) {
-                const newContent = prompt('Edit your message:', message.content);
-                if (newContent && newContent.trim()) {
-                    core.editMessage(message.id, newContent.trim());
-                }
-            }
-            break;
-            
-        case 'forward':
-            // Show forward modal
-            showForwardModal(message);
-            break;
-            
-        case 'copy':
-            navigator.clipboard.writeText(message.content || '');
-            showNotificationInMessages('Copied to clipboard', 'success');
-            break;
-            
-        case 'star':
-            if (core && core.UIStateManager && core.UIStateManager.toggleStarred) {
-                const isStarred = core.UIStateManager.toggleStarred(message.id);
-                showNotificationInMessages(isStarred ? 'Message starred' : 'Message unstarred', 'info');
-            }
-            break;
-            
-        case 'report':
-            showReportModal(message);
-            break;
-            
-        case 'react-like':
-            if (core && core.addReaction) {
-                core.addReaction(message.id, '👍', true);
-            }
-            break;
-            
-        case 'react-love':
-            if (core && core.addReaction) {
-                core.addReaction(message.id, '❤️', true);
-            }
-            break;
-            
-        case 'react-laugh':
-            if (core && core.addReaction) {
-                core.addReaction(message.id, '😂', true);
-            }
-            break;
-            
-        case 'delete':
-            if (confirm('Delete this message?')) {
-                if (core && core.deleteMessage) {
-                    core.deleteMessage(message.id, false);
-                }
-            }
-            break;
-            
-        case 'info':
-            showMessageInfo(message);
-            break;
     }
-}
 
-function setReplyToMessage(message) {
-    // Store reply context
-    window.replyToMessage = message;
-    
-    // Show reply indicator
-    const replyIndicator = document.getElementById('replyIndicator');
-    const replyText = document.getElementById('replyToText');
-    if (replyIndicator && replyText) {
-        const preview = message.content.length > 50 ? message.content.substring(0, 50) + '...' : message.content;
-        replyText.innerHTML = `<i class="fas fa-reply"></i> Replying to: ${preview}`;
-        replyIndicator.style.display = 'flex';
+    function setReplyToMessage(message) {
+        window.replyToMessage = message;
+        
+        const replyIndicator = document.getElementById('replyIndicator');
+        const replyText = document.getElementById('replyToText');
+        if (replyIndicator && replyText) {
+            const preview = message.content.length > 50 ? message.content.substring(0, 50) + '...' : message.content;
+            replyText.innerHTML = `<i class="fas fa-reply"></i> Replying to: ${preview}`;
+            replyIndicator.style.display = 'flex';
+        }
     }
-}
 
-function cancelReply() {
-    window.replyToMessage = null;
-    const replyIndicator = document.getElementById('replyIndicator');
-    if (replyIndicator) replyIndicator.style.display = 'none';
-}
+    function cancelReply() {
+        window.replyToMessage = null;
+        const replyIndicator = document.getElementById('replyIndicator');
+        if (replyIndicator) replyIndicator.style.display = 'none';
+    }
+
+    function showForwardModal(message) {
+        alert('Forward feature - select a contact to forward this message');
+    }
+
+    function showReportModal(message) {
+        const reportReason = prompt('Please describe the issue with this message:');
+        if (reportReason) {
+            const core = getMessagesCore();
+            if (core && core.reportMessage) {
+                core.reportMessage(message.id, reportReason);
+                showNotificationInMessages('Report submitted', 'success');
+            }
+        }
+    }
+
+    function showMessageInfo(message) {
+        const info = `Message Info:
+ID: ${message.id}
+From: ${message.senderId}
+To: ${message.receiverId}
+Time: ${new Date(message.timestamp).toLocaleString()}
+Status: ${message.status || 'sent'}
+Type: ${message.type || 'text'}`;
+        alert(info);
+    }
 
     // =============================================
     // UI EVENT HANDLERS (ENHANCED WITH DETERMINISTIC LIFECYCLE CHECKS)
@@ -2834,7 +3050,6 @@ function cancelReply() {
         },
 
         _canPerformAction(actionName) {
-            // First check if core has valid session directly
             if (UIFailsafe.hasValidSession()) {
                 return true;
             }
@@ -2866,6 +3081,7 @@ function cancelReply() {
         },
 
         _setupDOMEventListeners() {
+            // Back to chats button
             const backBtn = UIFailsafe.safeGetElement('backToChatsBtn');
             if (backBtn) {
                 backBtn.addEventListener('click', () => {
@@ -2880,6 +3096,7 @@ function cancelReply() {
                 });
             }
 
+            // New chat button
             const newChatBtn = UIFailsafe.safeGetElement('newChatBtn');
             if (newChatBtn) {
                 newChatBtn.addEventListener('click', () => {
@@ -2887,11 +3104,9 @@ function cancelReply() {
                         const contactsSidebar = UIFailsafe.safeGetElement('contactsSidebar');
                         if (!contactsSidebar) return;
 
-                        // Show the friends panel
                         UIFailsafe.safeRemoveClass(contactsSidebar, 'hidden');
                         contactsSidebar.style.pointerEvents = '';
 
-                        // On mobile: also hide main sidebar so friends panel is full-screen
                         const isMobile = window.innerWidth <= 768;
                         if (isMobile) {
                             const sidebar = UIFailsafe.safeGetElement('sidebar');
@@ -2900,7 +3115,6 @@ function cancelReply() {
 
                         UIStateManager.setState('contactsVisible', true);
 
-                        // Show loading state then fetch friends
                         const contactsList = UIFailsafe.safeGetElement('contactsList');
                         if (contactsList && contactsList.children.length === 0) {
                             UIFailsafe.safeSetHTML(contactsList, `
@@ -2921,19 +3135,24 @@ function cancelReply() {
                 });
             }
 
+            // Back from contacts button
             const backFromContacts = UIFailsafe.safeGetElement('backToChatsFromContactsBtn');
             if (backFromContacts) {
                 backFromContacts.addEventListener('click', () => {
                     UIFailsafe.queueAction(() => {
                         const contactsSidebar = UIFailsafe.safeGetElement('contactsSidebar');
                         const sidebar = UIFailsafe.safeGetElement('sidebar');
-                        if (contactsSidebar) { UIFailsafe.safeAddClass(contactsSidebar, 'hidden'); contactsSidebar.style.pointerEvents = 'none'; }
+                        if (contactsSidebar) { 
+                            UIFailsafe.safeAddClass(contactsSidebar, 'hidden'); 
+                            contactsSidebar.style.pointerEvents = 'none'; 
+                        }
                         if (sidebar) UIFailsafe.safeAddClass(sidebar, 'active');
                         UIStateManager.setState('contactsVisible', false);
                     });
                 });
             }
 
+            // Send button
             const sendBtn = UIFailsafe.safeGetElement('sendButton');
             if (sendBtn) {
                 sendBtn.addEventListener('click', async () => {
@@ -2944,53 +3163,115 @@ function cancelReply() {
                 });
             }
 
+            // Emoji button
             const emojiBtn = UIFailsafe.safeGetElement('emojiBtn');
             if (emojiBtn) {
-                // FIXED: Build a real emoji grid the first time the picker opens.
-                // Previously the handler only toggled a state flag; the container
-                // was always empty so the picker never showed any emojis.
                 const _buildEmojiPicker = () => {
                     const container = UIFailsafe.safeGetElement('emojiPickerContainer');
                     if (!container || container.dataset.built) return;
-                    const EMOJIS = [
-                        '😀','😂','😅','😊','😍','🥰','😎','🤔','😢','😡',
-                        '🤗','😜','😇','🥳','😤','😴','🤩','😬','🙄','🤭',
-                        '👍','👎','👌','✌️','🤞','🙏','👏','🤝','💪','👀',
-                        '❤️','🧡','💛','💚','💙','💜','🖤','🤍','💔','💯',
-                        '🔥','✅','❌','⚠️','🎉','🎊','🎶','🌟','💫','⭐',
-                        '😈','👻','💀','🤖','🐶','🐱','🍕','🍔','🍩','☕'
-                    ];
-                    const grid = document.createElement('div');
-                    grid.className = 'emoji-grid';
-                    grid.style.cssText = 'display:grid;grid-template-columns:repeat(10,1fr);gap:4px;padding:8px;max-height:180px;overflow-y:auto;';
-                    EMOJIS.forEach(emoji => {
-                        const span = document.createElement('span');
-                        span.className = 'emoji-item';
-                        span.textContent = emoji;
-                        span.title = emoji;
-                        span.style.cssText = 'cursor:pointer;font-size:20px;text-align:center;padding:4px;border-radius:4px;user-select:none;';
-                        span.addEventListener('mouseenter', () => { span.style.background = 'rgba(0,0,0,0.1)'; });
-                        span.addEventListener('mouseleave', () => { span.style.background = ''; });
-                        span.addEventListener('click', (e) => {
-                            e.stopPropagation();
-                            const input = document.getElementById('messageInput');
-                            if (input) {
-                                const start = input.selectionStart ?? input.value.length;
-                                const end = input.selectionEnd ?? input.value.length;
-                                input.value = input.value.slice(0, start) + emoji + input.value.slice(end);
-                                input.selectionStart = input.selectionEnd = start + emoji.length;
-                                input.focus();
-                                // Trigger input event so auto-resize fires
-                                input.dispatchEvent(new Event('input', { bubbles: true }));
-                            }
-                            // Close picker
-                            UIFailsafe.safeRemoveClass(container, 'active');
-                            UIStateManager.setState('emojiPickerActive', false);
+                    
+                    container.innerHTML = '';
+                    
+                    const EMOJI_CATEGORIES = {
+                        'Smileys & Emotion': ['😀','😂','😅','😊','😍','🥰','😎','🤔','😢','😡','🤗','😜','😇','🥳','😤','😴','🤩','😬','🙄','🤭','😈','👻','💀','🤖'],
+                        'Gestures & Body': ['👍','👎','👌','✌️','🤞','🙏','👏','🤝','💪','👀','❤️','🧡','💛','💚','💙','💜','🖤','🤍','💔','💯'],
+                        'Symbols & Objects': ['🔥','✅','❌','⚠️','🎉','🎊','🎶','🌟','💫','⭐','⚡','💡','🔔','🔕','📌','📍','💎','🎈','🎁','🏆'],
+                        'Food & Drink': ['🍕','🍔','🍩','☕','🍎','🍺','🍷','🍣','🍜','🍦','🍫','🍪','🍯','🥑','🥝','🌮','🥗','🍿','🥤','🍻'],
+                        'Animals & Nature': ['🐶','🐱','🐭','🐹','🐰','🦊','🐻','🐼','🐨','🐸','🐒','🐔','🐧','🐦','🐤','🐴','🐝','🐛','🦋','🐌']
+                    };
+                    
+                    const scrollContainer = document.createElement('div');
+                    scrollContainer.className = 'emoji-scroll-container';
+                    scrollContainer.style.cssText = 'max-height: 260px; overflow-y: auto;';
+                    
+                    for (const [category, emojis] of Object.entries(EMOJI_CATEGORIES)) {
+                        const categoryHeader = document.createElement('div');
+                        categoryHeader.className = 'emoji-category-header';
+                        categoryHeader.textContent = category;
+                        categoryHeader.style.cssText = 'font-size: 12px; font-weight: 600; color: #666; padding: 8px 12px 4px 12px; background: white; position: sticky; top: 0; z-index: 1;';
+                        
+                        if (document.documentElement.getAttribute('data-theme') === 'dark') {
+                            categoryHeader.style.background = '#2d2d2d';
+                            categoryHeader.style.color = '#aaa';
+                        }
+                        
+                        scrollContainer.appendChild(categoryHeader);
+                        
+                        const grid = document.createElement('div');
+                        grid.className = 'emoji-grid';
+                        grid.style.cssText = 'display: grid; grid-template-columns: repeat(8, 1fr); gap: 4px; padding: 4px 12px 12px 12px;';
+                        
+                        emojis.forEach(emoji => {
+                            const span = document.createElement('span');
+                            span.className = 'emoji-item';
+                            span.textContent = emoji;
+                            span.title = emoji;
+                            span.style.cssText = 'cursor: pointer; font-size: 22px; text-align: center; padding: 6px 4px; border-radius: 8px; transition: all 0.2s; user-select: none;';
+                            
+                            span.addEventListener('mouseenter', () => {
+                                span.style.background = 'rgba(0, 0, 0, 0.05)';
+                                span.style.transform = 'scale(1.1)';
+                            });
+                            span.addEventListener('mouseleave', () => {
+                                span.style.background = '';
+                                span.style.transform = 'scale(1)';
+                            });
+                            
+                            span.addEventListener('click', (e) => {
+                                e.stopPropagation();
+                                const input = document.getElementById('messageInput');
+                                if (input) {
+                                    const start = input.selectionStart ?? input.value.length;
+                                    const end = input.selectionEnd ?? input.value.length;
+                                    input.value = input.value.slice(0, start) + emoji + input.value.slice(end);
+                                    input.selectionStart = input.selectionEnd = start + emoji.length;
+                                    input.focus();
+                                    input.dispatchEvent(new Event('input', { bubbles: true }));
+                                }
+                                UIFailsafe.safeRemoveClass(container, 'active');
+                                UIStateManager.setState('emojiPickerActive', false);
+                            });
+                            
+                            grid.appendChild(span);
                         });
-                        grid.appendChild(span);
-                    });
-                    container.appendChild(grid);
+                        
+                        scrollContainer.appendChild(grid);
+                    }
+                    
+                    container.appendChild(scrollContainer);
                     container.dataset.built = '1';
+                    
+                    const style = document.createElement('style');
+                    style.textContent = `
+                        .emoji-category-header {
+                            position: sticky;
+                            top: 0;
+                            background: white;
+                            z-index: 2;
+                            backdrop-filter: blur(4px);
+                        }
+                        [data-theme="dark"] .emoji-category-header {
+                            background: #2d2d2d;
+                        }
+                        .emoji-scroll-container::-webkit-scrollbar {
+                            width: 6px;
+                        }
+                        .emoji-scroll-container::-webkit-scrollbar-track {
+                            background: #f1f1f1;
+                            border-radius: 3px;
+                        }
+                        .emoji-scroll-container::-webkit-scrollbar-thumb {
+                            background: #c1c1c1;
+                            border-radius: 3px;
+                        }
+                        [data-theme="dark"] .emoji-scroll-container::-webkit-scrollbar-track {
+                            background: #3d3d3d;
+                        }
+                        [data-theme="dark"] .emoji-scroll-container::-webkit-scrollbar-thumb {
+                            background: #666;
+                        }
+                    `;
+                    document.head.appendChild(style);
                 };
 
                 emojiBtn.addEventListener('click', (e) => {
@@ -3008,7 +3289,6 @@ function cancelReply() {
                     });
                 });
 
-                // Close picker when clicking outside
                 document.addEventListener('click', (e) => {
                     if (!e.target.closest('#emojiPickerContainer') && !e.target.closest('#emojiBtn')) {
                         const container = UIFailsafe.safeGetElement('emojiPickerContainer');
@@ -3018,6 +3298,7 @@ function cancelReply() {
                 });
             }
 
+            // Format button
             const formatBtn = UIFailsafe.safeGetElement('formatBtn');
             if (formatBtn) {
                 formatBtn.addEventListener('click', () => {
@@ -3030,6 +3311,7 @@ function cancelReply() {
                 });
             }
 
+            // Format buttons
             const formatBtns = UIFailsafe.safeQuerySelectorAll('.format-btn');
             UIFailsafe.safeForEach(formatBtns, (btn) => {
                 btn.addEventListener('click', (e) => {
@@ -3044,12 +3326,9 @@ function cancelReply() {
                 });
             });
 
+            // Attach button
             const attachBtn = UIFailsafe.safeGetElement('attachBtn');
             if (attachBtn) {
-                // FIXED: The old handler called core.toggleAttachmentOptions() and
-                // core.handleAttachment() which do not exist on MessagesCore, so clicking
-                // the attach button did nothing. Replaced with a real <input type="file">
-                // that uploads to /api/messages/:chatId/upload and sends a message.
                 attachBtn.addEventListener('click', () => {
                     UIFailsafe.queueAction(() => {
                         if (!this._canPerformAction('attachment')) return;
@@ -3060,7 +3339,6 @@ function cancelReply() {
                             return;
                         }
 
-                        // Create a hidden file input and click it programmatically
                         const fileInput = document.createElement('input');
                         fileInput.type = 'file';
                         fileInput.accept = 'image/*,video/*,audio/*,application/pdf,text/plain,.doc,.docx,.xls,.xlsx,.zip';
@@ -3072,7 +3350,6 @@ function cancelReply() {
                             try { document.body.removeChild(fileInput); } catch (_) {}
                             if (!file) return;
 
-                            // Size guard: match the 10 MB server limit
                             const MAX_MB = 10;
                             if (file.size > MAX_MB * 1024 * 1024) {
                                 UIRenderer.showNotification(`File too large (max ${MAX_MB} MB)`, 'error');
@@ -3103,7 +3380,6 @@ function cancelReply() {
 
                                 if (res.ok) {
                                     UIRenderer.showNotification('File sent!', 'success');
-                                    // Refresh messages so the uploaded file appears
                                     core?.fetchMessages?.(chat.id);
                                 } else {
                                     UIRenderer.showNotification('Upload failed: ' + (result.message || res.statusText), 'error');
@@ -3119,21 +3395,7 @@ function cancelReply() {
                 });
             }
 
-            // .attachment-option buttons are now unused (replaced by direct file input above),
-            // but kept wired in case the HTML still renders them, to avoid silent JS errors.
-            const attachmentOptions = UIFailsafe.safeQuerySelectorAll('.attachment-option');
-            UIFailsafe.safeForEach(attachmentOptions, (btn) => {
-                btn.addEventListener('click', (e) => {
-                    UIFailsafe.queueAction(() => {
-                        if (!this._canPerformAction('attachment')) return;
-                        // Trigger the same file picker as the main attach button
-                        const attachBtnEl = UIFailsafe.safeGetElement('attachBtn');
-                        if (attachBtnEl) attachBtnEl.click();
-                        UIStateManager.setState('attachmentOptionsActive', false);
-                    });
-                });
-            });
-
+            // Jump to latest button
             const jumpBtn = UIFailsafe.safeGetElement('jumpToLatestBtn');
             if (jumpBtn) {
                 jumpBtn.addEventListener('click', () => {
@@ -3145,6 +3407,7 @@ function cancelReply() {
                 });
             }
 
+            // Chat search button
             const chatSearchBtn = UIFailsafe.safeGetElement('chatSearchBtn');
             if (chatSearchBtn) {
                 chatSearchBtn.addEventListener('click', () => {
@@ -3158,6 +3421,7 @@ function cancelReply() {
                 });
             }
 
+            // Close chat search button
             const closeChatSearch = UIFailsafe.safeGetElement('closeChatSearchBtn');
             if (closeChatSearch) {
                 closeChatSearch.addEventListener('click', () => {
@@ -3172,6 +3436,7 @@ function cancelReply() {
                 });
             }
 
+            // In-chat search input
             const inChatSearch = UIFailsafe.safeGetElement('inChatSearch');
             if (inChatSearch) {
                 inChatSearch.addEventListener('input', (e) => {
@@ -3195,6 +3460,7 @@ function cancelReply() {
                 });
             }
 
+            // Chat filter search
             const chatSearch = UIFailsafe.safeGetElement('chatSearch');
             if (chatSearch) {
                 chatSearch.addEventListener('input', (e) => {
@@ -3205,16 +3471,17 @@ function cancelReply() {
                 });
             }
 
+            // Contact search
             const contactSearch = UIFailsafe.safeGetElement('contactSearch');
             if (contactSearch) {
                 contactSearch.addEventListener('input', (e) => {
                     UIFailsafe.queueAction(() => {
-                        // FIX: Contact search should work regardless of lifecycle state
                         this._filterContacts(e.target.value);
                     });
                 });
             }
 
+            // Category tabs
             const categoryTabs = UIFailsafe.safeQuerySelectorAll('.category-tab');
             UIFailsafe.safeForEach(categoryTabs, (tab) => {
                 tab.addEventListener('click', (e) => {
@@ -3233,6 +3500,7 @@ function cancelReply() {
                 });
             });
 
+            // Multi-send toggle
             const multiSendToggle = UIFailsafe.safeGetElement('multiSendToggleBtn');
             if (multiSendToggle) {
                 multiSendToggle.addEventListener('click', () => {
@@ -3243,6 +3511,7 @@ function cancelReply() {
                 });
             }
 
+            // Close multi-send
             const closeMultiSend = UIFailsafe.safeGetElement('closeMultiSendBtn');
             if (closeMultiSend) {
                 closeMultiSend.addEventListener('click', () => {
@@ -3252,6 +3521,16 @@ function cancelReply() {
                 });
             }
 
+            const multiSendCancelBtn = UIFailsafe.safeGetElement('multiSendCancelBtn');
+            if (multiSendCancelBtn) {
+                multiSendCancelBtn.addEventListener('click', () => {
+                    UIFailsafe.queueAction(() => {
+                        this._closeMultiSend();
+                    });
+                });
+            }
+
+            // Multi-send send button
             const multiSendBtn = UIFailsafe.safeGetElement('multiSendBtn');
             if (multiSendBtn) {
                 multiSendBtn.addEventListener('click', async () => {
@@ -3262,6 +3541,7 @@ function cancelReply() {
                 });
             }
 
+            // Multi-send search
             const multiSendSearch = UIFailsafe.safeGetElement('multiSendSearch');
             if (multiSendSearch) {
                 multiSendSearch.addEventListener('input', (e) => {
@@ -3272,6 +3552,7 @@ function cancelReply() {
                 });
             }
 
+            // Schedule button
             const scheduleBtn = UIFailsafe.safeGetElement('scheduleBtn');
             if (scheduleBtn) {
                 scheduleBtn.addEventListener('click', () => {
@@ -3284,6 +3565,7 @@ function cancelReply() {
                 });
             }
 
+            // Close schedule modal
             const closeSchedule = UIFailsafe.safeGetElement('closeScheduleBtn');
             if (closeSchedule) {
                 closeSchedule.addEventListener('click', () => {
@@ -3328,53 +3610,35 @@ function cancelReply() {
                 });
             }
 
-            const voiceCallBtn = UIFailsafe.safeGetElement('voiceCallBtn');
-            if (voiceCallBtn) {
-                voiceCallBtn.addEventListener('click', () => {
-                    const core = getMessagesCore();
-                    const activeChat = core?.currentChat || (core?.ChatManager?.getActiveChat?.());
-                    if (!activeChat) { this.showNotification('No active chat selected', 'warning'); return; }
-                    const receiverId = activeChat.friendId || activeChat.pendingReceiverId;
-                    const receiverName = activeChat.friendName || 'User';
-                    if (!receiverId) { this.showNotification('Cannot identify call recipient', 'error'); return; }
-                    // Instant navigation — no visual delay
-                    if (window.parent && window.parent !== window) {
-                        window.parent.postMessage({
-                            type: 'SWITCH_MODULE', module: 'calls',
-                            payload: { userId: receiverId, userName: receiverName, callType: 'voice', returnTo: 'messages' },
-                            timestamp: Date.now()
-                        }, '*');
-                    }
-                });
-            }
-
+            // Video call button
             const videoCallBtn = UIFailsafe.safeGetElement('videoCallBtn');
-            if (videoCallBtn) {
+            if (videoCallBtn && !videoCallBtn.__kynCallBound) {
+                videoCallBtn.__kynCallBound = true;
                 videoCallBtn.addEventListener('click', () => {
                     const core = getMessagesCore();
-                    const activeChat = core?.currentChat || (core?.ChatManager?.getActiveChat?.());
-                    if (!activeChat) { this.showNotification('No active chat selected', 'warning'); return; }
-                    const receiverId = activeChat.friendId || activeChat.pendingReceiverId;
-                    const receiverName = activeChat.friendName || 'User';
-                    if (!receiverId) { this.showNotification('Cannot identify call recipient', 'error'); return; }
-                    // Instant navigation — no visual delay
+                    const activeChat = core?.getCurrentConversation?.() || core?.currentChat || window.__currentActiveChat;
+                    if (!activeChat) { UIRenderer.showNotification('Open a chat first before calling', 'warning'); return; }
+                    const receiverId = activeChat.friendId || activeChat.pendingReceiverId || activeChat.otherUserId || activeChat.userId;
+                    const receiverName = activeChat.friendName || activeChat.name || activeChat.displayName || 'User';
+                    if (!receiverId) { UIRenderer.showNotification('Cannot identify call recipient', 'error'); return; }
                     if (window.parent && window.parent !== window) {
                         window.parent.postMessage({
                             type: 'SWITCH_MODULE', module: 'calls',
-                            payload: { userId: receiverId, userName: receiverName, callType: 'video', returnTo: 'messages' },
+                            payload: { userId: receiverId, userName: receiverName, callType: 'video', returnTo: 'messages', chatUserId: receiverId, source: 'messages-module' },
                             timestamp: Date.now()
                         }, '*');
                     }
                 });
             }
 
+            // Chat options button
             const chatOptionsBtn = UIFailsafe.safeGetElement('chatOptionsBtn');
             if (chatOptionsBtn) {
                 chatOptionsBtn.addEventListener('click', () => {
                     UIFailsafe.queueAction(() => {
                         if (!this._canPerformAction('chatOptions')) return;
                         const core = getMessagesCore();
-                        const chat = core?.currentChat;
+                        const chat = core?.getCurrentConversation?.();
                         if (chat && core) {
                             const info = core.showChatInfo?.(chat);
                             this._showChatInfoModal(info);
@@ -3383,6 +3647,7 @@ function cancelReply() {
                 });
             }
 
+            // Close chat info modal
             const closeChatInfo = UIFailsafe.safeGetElement('closeChatInfoBtn');
             if (closeChatInfo) {
                 closeChatInfo.addEventListener('click', () => {
@@ -3393,6 +3658,7 @@ function cancelReply() {
                 });
             }
 
+            // Close thread button
             const closeThread = UIFailsafe.safeGetElement('closeThreadBtn');
             if (closeThread) {
                 closeThread.addEventListener('click', () => {
@@ -3402,6 +3668,7 @@ function cancelReply() {
                 });
             }
 
+            // Thread send button
             const threadSend = UIFailsafe.safeGetElement('threadSendBtn');
             if (threadSend) {
                 threadSend.addEventListener('click', async () => {
@@ -3412,6 +3679,7 @@ function cancelReply() {
                 });
             }
 
+            // Dismiss offline button
             const dismissOffline = UIFailsafe.safeGetElement('dismissOfflineBtn');
             if (dismissOffline) {
                 dismissOffline.addEventListener('click', () => {
@@ -3422,6 +3690,7 @@ function cancelReply() {
                 });
             }
 
+            // Cancel report button
             const cancelReport = UIFailsafe.safeGetElement('cancelReportBtn');
             if (cancelReport) {
                 cancelReport.addEventListener('click', () => {
@@ -3432,6 +3701,7 @@ function cancelReply() {
                 });
             }
 
+            // Submit report button
             const submitReport = UIFailsafe.safeGetElement('submitReportBtn');
             if (submitReport) {
                 submitReport.addEventListener('click', () => {
@@ -3447,6 +3717,7 @@ function cancelReply() {
                 });
             }
 
+            // Cancel recording button
             const cancelRecording = UIFailsafe.safeGetElement('cancelRecordingBtn');
             if (cancelRecording) {
                 cancelRecording.addEventListener('click', () => {
@@ -3477,6 +3748,7 @@ function cancelReply() {
                 });
             }
 
+            // Message action items
             const messageActionItems = UIFailsafe.safeQuerySelectorAll('#messageActions .action-item');
             UIFailsafe.safeForEach(messageActionItems, (item) => {
                 item.addEventListener('click', (e) => {
@@ -3490,6 +3762,7 @@ function cancelReply() {
                 });
             });
 
+            // Retry connection button
             const retryBtn = UIFailsafe.safeGetElement('retryConnectionBtn');
             if (retryBtn) {
                 retryBtn.addEventListener('click', () => {
@@ -3680,7 +3953,7 @@ function cancelReply() {
                         e.preventDefault();
                         if (!this._canPerformAction('searchInChat')) return;
                         const core = getMessagesCore();
-                        if (core?.currentChat) {
+                        if (core?.getCurrentConversation?.()) {
                             const chatSearchBar = UIFailsafe.safeGetElement('chatSearchBar');
                             if (chatSearchBar) UIFailsafe.safeAddClass(chatSearchBar, 'active');
                             const inChatSearch = UIFailsafe.safeGetElement('inChatSearch');
@@ -3845,11 +4118,12 @@ function cancelReply() {
 
         _handleTypingIndicator() {
             const core = getMessagesCore();
-            if (!core?.currentChat) return;
+            const currentChat = core?.getCurrentConversation?.();
+            if (!currentChat) return;
 
             if (!core.isTyping) {
                 core.setIsTyping?.(true);
-                core.sendTyping?.(core.currentChat.id, true);
+                core.sendTyping?.(currentChat.id, true);
 
                 if (core.typingTimeout) {
                     clearTimeout(core.typingTimeout);
@@ -3858,7 +4132,7 @@ function cancelReply() {
                 core.setTypingTimeout?.(setTimeout(() => {
                     if (core) {
                         core.setIsTyping?.(false);
-                        core.sendTyping?.(core.currentChat.id, false);
+                        core.sendTyping?.(currentChat.id, false);
                     }
                 }, 3000));
             }
@@ -4025,7 +4299,6 @@ function cancelReply() {
             const searchTerm = query.toLowerCase().trim();
             
             UIFailsafe.safeForEach(items, (item) => {
-                // FIX: contact-name is now an inline-styled div inside .contact-info
                 const nameEl = item.querySelector('.contact-name') || item.querySelector('[style*="font-weight:600"]');
                 const name = (nameEl?.textContent || item.textContent || '').toLowerCase();
                 UIFailsafe.safeSetStyle(item, 'display', (!searchTerm || name.includes(searchTerm)) ? 'flex' : 'none');
@@ -4051,7 +4324,6 @@ function cancelReply() {
                 UIStateManager.setState('multiSendVisible', false);
             } else {
                 const core = getMessagesCore();
-                // FIX: loadMultiSendChats doesn't exist — use getConversations()
                 const chats = core?.getConversations?.() || [];
                 UIRenderer.renderMultiSendChats(chats);
                 UIFailsafe.safeAddClass(panel, 'active');
@@ -4066,7 +4338,6 @@ function cancelReply() {
             if (panel) {
                 UIFailsafe.safeRemoveClass(panel, 'active');
             }
-            // FIX: core.multiSendSelectedChats is internal state — clear via core's own Set
             const core = getMessagesCore();
             if (core?.multiSendSelectedChats instanceof Set) {
                 core.multiSendSelectedChats.clear();
@@ -4084,7 +4355,6 @@ function cancelReply() {
                 return;
             }
 
-            // FIX: multiSendSelectedChats may be a plain Set on the core object
             const selectedChats = core?.multiSendSelectedChats;
             if (!selectedChats || selectedChats.size === 0) {
                 UIRenderer.showNotification('Select at least one chat to send to', 'error');
@@ -4095,12 +4365,10 @@ function cancelReply() {
             let successCount = 0;
             let failCount = 0;
 
-            // Save currently active chat so we can restore it
             const previousChat = core?.getCurrentConversation?.();
 
             for (const chatId of chatIds) {
                 try {
-                    // Send directly with conversationId option — no need to switch active chat
                     const result = await core.sendMessage(content, { conversationId: chatId });
                     if (result && result.success !== false) {
                         successCount++;
@@ -4195,7 +4463,7 @@ function cancelReply() {
 
             const scheduledMessage = {
                 id: core?.SecurityUtils?.generateMessageId?.() || 'msg_' + Date.now(),
-                chatId: core?.currentChat?.id,
+                chatId: core?.getCurrentConversation?.()?.id,
                 content: messageInput.value,
                 attachment: core?.currentAttachment,
                 scheduleTime: scheduleDateTime,
@@ -4318,13 +4586,9 @@ function cancelReply() {
     // AUTO-OPEN CHAT FROM EXTERNAL REQUEST
     // =============================================
 
-    /**
-     * Sets up listener to automatically open chat when requested from parent
-     */
     function setupAutoOpenChat() {
         console.log('[MessageUI] Setting up auto-open chat listener');
         
-        // Listen for the custom event dispatched by message.html
         window.addEventListener('messages:openChat', function(event) {
             const { userId, userName, recipientId, recipientName } = event.detail || {};
             const targetUserId = userId || recipientId;
@@ -4337,15 +4601,11 @@ function cancelReply() {
                 return;
             }
             
-            // Wait a bit for the UI to be fully loaded
             setTimeout(() => {
                 openChatWithUserInUI(targetUserId, targetUserName);
             }, 500);
         });
 
-        // FIX: Listen for OPEN_CHAT_WITH_USER postMessage from the parent frame (chat.html).
-        // This is the primary path when the user clicks "Start Chat" in the friends module:
-        // friend-ui → SWITCH_MODULE (with payload) → chat.html → OPEN_CHAT_WITH_USER → here.
         window.addEventListener('message', function(event) {
             const msg = event.data || {};
             if (msg.type !== 'OPEN_CHAT_WITH_USER') return;
@@ -4361,23 +4621,17 @@ function cancelReply() {
                 return;
             }
 
-            // Give the UI a moment to settle after the module becomes visible
             setTimeout(() => {
                 openChatWithUserInUI(targetUserId, targetUserName);
             }, 300);
         });
         
-        // Also check sessionStorage for pending chat (from URL params or previous navigation).
-        // FIX: Check BOTH keys — 'open_chat_on_load' (our key) and 'pending_chat' (chat.html's key).
-        // At startup the messages iframe may already be loaded; this catches any value written
-        // before setupAutoOpenChat ran.
         const pendingChatRaw = sessionStorage.getItem('open_chat_on_load') || sessionStorage.getItem('pending_chat');
         if (pendingChatRaw) {
             try {
                 const chatData = JSON.parse(pendingChatRaw);
                 console.log('[MessageUI] Found pending chat in sessionStorage:', chatData);
                 
-                // Clear both keys to avoid processing twice
                 sessionStorage.removeItem('open_chat_on_load');
                 sessionStorage.removeItem('pending_chat');
                 
@@ -4396,7 +4650,6 @@ function cancelReply() {
         const numericUserId = parseInt(userId);
         const core = getMessagesCore();
         
-        // Show chat panel immediately with loading state
         const chatPanel = document.getElementById('chatPanel');
         const sidebar = document.getElementById('sidebar');
         const contactsSidebar = document.getElementById('contactsSidebar');
@@ -4407,7 +4660,6 @@ function cancelReply() {
             chatPanel.classList.remove('hidden');
             UIStateManager.setState('chatVisible', true);
             
-            // Show loading state
             const messagesContainer = document.getElementById('messagesContainer');
             if (messagesContainer) {
                 messagesContainer.innerHTML = `
@@ -4419,7 +4671,6 @@ function cancelReply() {
             }
         }
         
-        // Store friend name for later use
         window.currentFriendName = userName;
         if (window.messagesUI && typeof window.messagesUI.loadChatByFriendId === 'function') {
             console.log('[MessageUI] Using messagesUI.loadChatByFriendId');
@@ -4427,12 +4678,10 @@ function cancelReply() {
             return;
         }
 
-        // Method 2: Try to use core's openConversation
         if (core && typeof core.openConversation === 'function') {
             console.log('[MessageUI] Using core.openConversation');
             core.openConversation(numericUserId);
             
-            // Update header with user name
             setTimeout(() => {
                 const nameEl = document.getElementById('chatFriendName');
                 if (nameEl) nameEl.textContent = userName;
@@ -4441,7 +4690,6 @@ function cancelReply() {
                 const indicatorEl = document.getElementById('chatStatusIndicator');
                 if (indicatorEl) indicatorEl.className = 'chat-status online';
                 
-                // Clear loading
                 const messagesContainer = document.getElementById('messagesContainer');
                 if (messagesContainer && messagesContainer.innerHTML.includes('loading-chat')) {
                     messagesContainer.innerHTML = `
@@ -4456,7 +4704,6 @@ function cancelReply() {
             return;
         }
         
-        // Method 3: Try to use ConversationManager
         if (core && core.ConversationManager && typeof core.ConversationManager.createConversation === 'function') {
             console.log('[MessageUI] Using ConversationManager.createConversation');
             const result = core.ConversationManager.createConversation([numericUserId]);
@@ -4484,7 +4731,7 @@ function cancelReply() {
                     openPanel();
                 }).catch((error) => {
                     console.error('[MessageUI] Failed to open conversation:', error);
-                    openPanel(); // Still open panel even on error
+                    openPanel();
                 });
             } else {
                 openPanel();
@@ -4492,14 +4739,12 @@ function cancelReply() {
             return;
         }
         
-        // Method 4: Try to use window.ChatManager
         if (window.ChatManager && typeof window.ChatManager.openChat === 'function') {
             console.log('[MessageUI] Using ChatManager.openChat');
             window.ChatManager.openChat(numericUserId, userName);
             return;
         }
         
-        // Method 5: Find the user in the friends/conversations list and click
         const selectors = [
             `.contact-item[data-contact-id="${numericUserId}"]`,
             `.friend-item[data-user-id="${numericUserId}"]`,
@@ -4522,7 +4767,6 @@ function cancelReply() {
             }
         }
         
-        // Method 6: Search for the user by name
         const searchInput = document.querySelector('.contact-search, .search-input, #contactSearch, #searchUsers, .user-search, [placeholder*="search"]');
         if (searchInput) {
             console.log('[MessageUI] Searching for user:', userName);
@@ -4560,11 +4804,7 @@ function cancelReply() {
         }
     }
 
-    /**
-     * Helper function for notifications within messages module
-     */
     function showNotificationInMessages(message, type = 'info') {
-        // Try to use the global notification function
         if (window.messagesUI && typeof window.messagesUI.showNotification === 'function') {
             window.messagesUI.showNotification(message, type);
         } else if (typeof window.showNotification === 'function') {
@@ -4583,15 +4823,12 @@ function cancelReply() {
         _ensureStatusIndicators();
         _removeLoadingOverlays();
         
-        // Setup auto-open chat listener
         setupAutoOpenChat();
         
-        // Subscribe to core data events to re-render UI when real data arrives
         const setupCoreSubscriptions = () => {
             const core = getMessagesCore();
             if (!core) return false;
             
-            // Listen for conversations updated (from real backend or demo)
             window.addEventListener('conversationsUpdated', (e) => {
                 const conversations = e.detail?.conversations || core.getConversations?.() || [];
                 if (UIRenderer._canRender()) {
@@ -4601,14 +4838,11 @@ function cancelReply() {
                 }
             });
             
-            // Listen for friends updated — always render, not gated by _canRender()
             window.addEventListener('friendsUpdated', (e) => {
                 const friends = e.detail?.friends || core.getFriends?.() || [];
-                // Always update contacts list regardless of lifecycle state
                 UIRenderer.renderContactsList(friends);
             });
             
-            // Subscribe to ChatManager via core subscribers
             if (core.ChatManager && core.ChatManager.subscribe) {
                 core.ChatManager.subscribe((conversations, activeChat, messages) => {
                     if (UIRenderer._canRender()) {
@@ -4621,7 +4855,6 @@ function cancelReply() {
                 });
             }
             
-            // Subscribe to FriendManager via core subscribers  
             if (core.FriendManager && core.FriendManager.subscribe) {
                 core.FriendManager.subscribe((friends) => {
                     if (UIRenderer._canRender()) {
@@ -4644,50 +4877,25 @@ function cancelReply() {
             if ((lifecycleState === LIFECYCLE_STATES.ACTIVE && hasValidSession) || hasValidSession) {
                 clearInterval(checkCore);
                 
-                // Setup core subscriptions now that core is ready
                 setupCoreSubscriptions();
                 
                 setTimeout(() => {
                     const core = getMessagesCore();
                     UIFailsafe.queueAction(() => {
-                        if (core?.initEmojiPicker) {
-                            core.initEmojiPicker();
-                        }
-                        
-                        if (core?.loadUserSettings) {
-                            core.loadUserSettings();
-                        }
-                        
-                        if (core?.loadChatThemes) {
-                            core.loadChatThemes();
-                        }
-                        
-                        if (core?.loadMessageDrafts) {
-                            core.loadMessageDrafts();
-                        }
-                        
-                        if (core?.loadScheduledMessages) {
-                            core.loadScheduledMessages();
-                        }
-                        
-                        if (core?.loadOfflineQueue) {
-                            core.loadOfflineQueue();
-                        }
-                        
-                        if (core?.setupScrollDetection) {
-                            core.setupScrollDetection();
-                        }
-
-                        if (core?.startBackgroundSync) {
-                            core.startBackgroundSync();
-                        }
+                        if (core?.initEmojiPicker) core.initEmojiPicker();
+                        if (core?.loadUserSettings) core.loadUserSettings();
+                        if (core?.loadChatThemes) core.loadChatThemes();
+                        if (core?.loadMessageDrafts) core.loadMessageDrafts();
+                        if (core?.loadScheduledMessages) core.loadScheduledMessages();
+                        if (core?.loadOfflineQueue) core.loadOfflineQueue();
+                        if (core?.setupScrollDetection) core.setupScrollDetection();
+                        if (core?.startBackgroundSync) core.startBackgroundSync();
 
                         if (core) {
                             core.renderChatsList?.();
                             core.renderContactsList?.();
                         }
                         
-                        // Immediately render any existing conversations from core
                         if (core) {
                             const conversations = core.getConversations?.() || [];
                             const friends = core.getFriends?.() || [];
@@ -4708,12 +4916,8 @@ function cancelReply() {
                 clearInterval(checkCore);
                 setupCoreSubscriptions();
                 const core = getMessagesCore();
-                if (core && core.fetchConversations) {
-                    core.fetchConversations();
-                }
-                if (core && core.FriendManager && core.FriendManager.fetchFriends) {
-                    core.FriendManager.fetchFriends();
-                }
+                if (core && core.fetchConversations) core.fetchConversations();
+                if (core && core.FriendManager && core.FriendManager.fetchFriends) core.FriendManager.fetchFriends();
             } else if (lifecycleState === LIFECYCLE_STATES.WAIT_PARENT) {
                 const waitParentElements = UIFailsafe.safeQuerySelectorAll('.wait-parent-state, .connecting-overlay, .connection-waiting');
                 UIFailsafe.safeForEach(waitParentElements, (el) => {
@@ -4745,9 +4949,7 @@ function cancelReply() {
                 console.log('[UI] 3s timeout - forcing UI enable');
                 UIFailsafe.forceEnableUI();
                 const core = getMessagesCore();
-                if (core && core.fetchConversations) {
-                    core.fetchConversations();
-                }
+                if (core && core.fetchConversations) core.fetchConversations();
             }
         }, 3000);
     }
@@ -4868,11 +5070,9 @@ function cancelReply() {
         renderMultiSendChats: UIRenderer.renderMultiSendChats.bind(UIRenderer),
         updateSelectedCount: UIRenderer.updateSelectedCount.bind(UIRenderer),
         
-        // FIX: Expose toggleMultiSendItem so inline onclick in renderMultiSendChats works
         toggleMultiSendItem: (chatId, rowEl) => {
             const core = getMessagesCore();
             if (!core) return;
-            // Ensure the Set exists
             if (!(core.multiSendSelectedChats instanceof Set)) {
                 core.multiSendSelectedChats = new Set();
             }
@@ -4893,7 +5093,6 @@ function cancelReply() {
             UIRenderer.updateSelectedCount();
         },
         
-        // Legacy alias kept for any existing onclick handlers
         updateMultiSendSelection: (chatId, checked) => {
             const core = getMessagesCore();
             if (!core) return;
@@ -4908,9 +5107,9 @@ function cancelReply() {
         openThread: UIRenderer.openThread.bind(UIRenderer),
         closeThread: UIRenderer.closeThread.bind(UIRenderer),
         
-        showMessageActions: UIRenderer.showMessageActions.bind(UIRenderer),
-        hideMessageActions: UIRenderer.hideMessageActions.bind(UIRenderer),
-        handleMessageAction: UIRenderer.handleMessageAction.bind(UIRenderer),
+        showMessageActions: showMessageActions,
+        hideMessageActions: hideMessageActions,
+        handleMessageAction: handleMessageAction,
         
         getConnectionQuality: () => UIStateManager.getState('connectionQuality'),
         isRecoveryMode: () => UIStateManager.getState('recoveryMode'),
@@ -4921,13 +5120,10 @@ function cancelReply() {
         
         MESSAGE_TYPES: getMessagesCore()?.MESSAGE_TYPES || {},
         
-        // Helper to force sync with core
         forceSyncWithCore: () => UIStateManager._forceSyncSessionState(),
         
-        // Helper to get core instance
         getCore: getMessagesCore,
         
-        // Helper to open chat programmatically
         openChat: (chat) => {
             const core = getMessagesCore();
             if (core && core.openConversation) {
@@ -4935,7 +5131,7 @@ function cancelReply() {
             }
         },
         
-              loadChatByFriendId: (friendId, friendName) => {
+        loadChatByFriendId: (friendId, friendName) => {
             const core = getMessagesCore();
             if (!core) {
                 console.log('[messagesUI] Core not available, retrying in 500ms');
@@ -4948,13 +5144,11 @@ function cancelReply() {
                 return;
             }
 
-            // Store friend name for header update
             const displayName = friendName || 'User';
             window.currentFriendName = displayName;
             
             console.log('[messagesUI] loadChatByFriendId called with:', { friendId, friendName: displayName });
 
-            // Close contacts sidebar, show main sidebar and chat panel immediately
             const contactsSidebar = document.getElementById('contactsSidebar');
             const sidebar = document.getElementById('sidebar');
             const chatPanel = document.getElementById('chatPanel');
@@ -4962,18 +5156,15 @@ function cancelReply() {
             if (contactsSidebar) { contactsSidebar.classList.add('hidden'); contactsSidebar.style.pointerEvents = 'none'; }
             if (sidebar) sidebar.classList.add('active');
             
-            // IMMEDIATELY update chat header with the friend name
             const nameEl = document.getElementById('chatFriendName');
             if (nameEl) {
                 nameEl.textContent = displayName;
             }
             
-            // IMMEDIATELY show chat panel with loading state
             if (chatPanel) {
                 chatPanel.classList.remove('hidden');
                 UIStateManager.setState('chatVisible', true);
                 
-                // Show loading indicator in messages container
                 const messagesContainer = document.getElementById('messagesContainer');
                 if (messagesContainer) {
                     messagesContainer.innerHTML = `
@@ -4991,23 +5182,19 @@ function cancelReply() {
                 return;
             }
 
-            // Helper function to ensure chat panel is fully opened
             const ensureChatPanelOpen = (conversationId) => {
                 console.log('[messagesUI] Ensuring chat panel open with ID:', conversationId);
                 
-                // Make sure chat panel is visible
                 if (chatPanel) {
                     chatPanel.classList.remove('hidden');
                     UIStateManager.setState('chatVisible', true);
                 }
                 
-                // Update chat header with friend info - use the stored name
                 const nameEl = document.getElementById('chatFriendName');
                 if (nameEl) {
                     nameEl.textContent = displayName;
                 }
                 
-                // Try to get additional friend info from core
                 const coreInstance = getMessagesCore();
                 if (coreInstance) {
                     const friends = coreInstance.getFriends ? coreInstance.getFriends() : [];
@@ -5029,7 +5216,6 @@ function cancelReply() {
                             if (indicatorEl) avatarEl.appendChild(indicatorEl);
                         }
                     } else {
-                        // Update avatar with initials
                         const avatarEl = document.getElementById('chatFriendAvatar');
                         if (avatarEl) {
                             const initials = displayName.charAt(0).toUpperCase();
@@ -5040,7 +5226,6 @@ function cancelReply() {
                     }
                 }
                 
-                // Clear loading and show empty chat state if no messages yet
                 const messagesContainer = document.getElementById('messagesContainer');
                 if (messagesContainer && messagesContainer.innerHTML.includes('loading-chat')) {
                     setTimeout(() => {
@@ -5056,7 +5241,6 @@ function cancelReply() {
                     }, 1000);
                 }
                 
-                // Fetch messages for this conversation if we have a valid ID
                 if (conversationId && conversationId !== false && conversationId !== null) {
                     setTimeout(() => {
                         const coreFetch = getMessagesCore();
@@ -5067,7 +5251,6 @@ function cancelReply() {
                 }
             };
 
-            // Use ConversationManager if available
             if (core.ConversationManager?.createConversation) {
                 console.log('[messagesUI] Using ConversationManager.createConversation');
                 const result = core.ConversationManager.createConversation([id]);
@@ -5114,7 +5297,6 @@ function cancelReply() {
             }
         },
         
-        // Helper to view media
         viewMedia: (url, name) => {
             const viewer = document.getElementById('mediaViewer');
             const img = document.getElementById('mediaViewerImage');
@@ -5126,18 +5308,15 @@ function cancelReply() {
             }
         },
         
-        // Helper to close media viewer
         closeMediaViewer: () => {
             const viewer = document.getElementById('mediaViewer');
             if (viewer) viewer.classList.remove('active');
         },
         
-        // Helper to play video
         playVideo: (url) => {
             window.open(url, '_blank');
         },
         
-        // Helper to download file
         downloadFile: (url, name) => {
             const a = document.createElement('a');
             a.href = url;
@@ -5147,12 +5326,10 @@ function cancelReply() {
             document.body.removeChild(a);
         },
         
-        // Helper to open location
         openLocation: (lat, lng) => {
             window.open(`https://www.google.com/maps?q=${lat},${lng}`, '_blank');
         },
         
-        // Helper to play audio
         playAudio: (id, url, duration) => {
             const audio = new Audio(url);
             audio.play();
@@ -5169,7 +5346,6 @@ function cancelReply() {
             };
         },
         
-        // Helper to vote in poll
         voteInPoll: (messageId, optionIndex) => {
             const core = getMessagesCore();
             if (core && core.addReaction) {
@@ -5177,7 +5353,6 @@ function cancelReply() {
             }
         },
         
-        // Helper to save edited message
         saveEditedMessage: (messageId) => {
             const input = document.querySelector(`#editMessageInput_${messageId}`);
             if (input) {
@@ -5189,9 +5364,7 @@ function cancelReply() {
             }
         },
         
-        // Helper to cancel edit
         cancelEditMessage: () => {
-            // Reload messages to revert
             const core = getMessagesCore();
             if (core && core.fetchMessages) {
                 const currentChat = core.getCurrentConversation();
@@ -5204,7 +5377,6 @@ function cancelReply() {
 
     window.messagesUI = messagesUI;
     
-    // Add media viewer close handler
     const closeMediaViewerBtn = document.getElementById('closeMediaViewer');
     if (closeMediaViewerBtn) {
         closeMediaViewerBtn.addEventListener('click', () => {
@@ -5213,7 +5385,108 @@ function cancelReply() {
         });
     }
 
+    // Initialize call handlers
+    setupCallHandlers();
+    setupCallReturnHandler();
+    setupCallQualityMonitoring();
+
     if (typeof module !== 'undefined' && module.exports) {
         module.exports = messagesUI;
     }
+})();
+// =============================================
+// SETTINGS LIVE-APPLY BRIDGE (UI Layer)
+// Applies setting changes to the DOM as they arrive,
+// both from the core's CustomEvents and from direct postMessages.
+// =============================================
+(function installSettingsUIBridge() {
+    function applyUISettingChange(section, key, value) {
+        if (section === 'appearance') {
+            if (key === 'theme') {
+                var t = value === 'auto' ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light') : value;
+                document.documentElement.setAttribute('data-theme', t);
+                document.body.setAttribute('data-theme', t);
+                document.body.classList.toggle('dark-theme', t === 'dark');
+                document.documentElement.style.colorScheme = t;
+            }
+            if (key === 'fontSize') document.documentElement.style.fontSize = parseInt(value) + 'px';
+            if (key === 'accentColor') {
+                document.documentElement.style.setProperty('--accent-color', value);
+                document.documentElement.style.setProperty('--primary-color', value);
+            }
+            if (key === 'compactMode') {
+                document.documentElement.setAttribute('data-compact', value ? 'true' : 'false');
+                document.body.classList.toggle('compact-mode', !!value);
+            }
+            if (key === 'animationsEnabled' || key === 'animations') {
+                document.body.classList.toggle('no-animations', !value);
+                document.documentElement.setAttribute('data-animations', value ? 'true' : 'false');
+            }
+            if (key === 'language') document.documentElement.setAttribute('lang', value);
+        }
+        if (section === 'advanced') {
+            if (key === 'reduceMotion') { document.body.classList.toggle('reduce-motion', !!value); document.documentElement.setAttribute('data-reduce-motion', value ? 'true' : 'false'); }
+            if (key === 'performanceMode') document.documentElement.setAttribute('data-performance-mode', value ? 'true' : 'false');
+        }
+        if (section === 'mood' && key === 'currentMood') document.documentElement.setAttribute('data-mood', value);
+    }
+
+    // Listen for custom events dispatched by core's applySettingToMessagesModule
+    window.addEventListener('settingChanged', function(e) {
+        try { var d = e.detail; applyUISettingChange(d.section, d.key, d.value); } catch(err) {}
+    });
+    window.addEventListener('settingsUpdated', function(e) {
+        try {
+            var s = e.detail && e.detail.settings;
+            if (!s) return;
+            Object.entries(s).forEach(function(se) {
+                var sec = se[0], val = se[1];
+                if (val && typeof val === 'object') {
+                    Object.entries(val).forEach(function(ke) { applyUISettingChange(sec, ke[0], ke[1]); });
+                }
+            });
+        } catch(err) {}
+    });
+
+    // Also listen directly on window.message as a fallback
+    window.addEventListener('message', function(e) {
+        try {
+            var data = e.data;
+            if (!data || typeof data !== 'object') return;
+            if (data.type === 'SETTING_CHANGED') {
+                var p = data.payload || data;
+                if (p.section && p.key !== undefined) applyUISettingChange(p.section, p.key, p.value);
+            }
+            if (data.type === 'SETTINGS_UPDATED') {
+                var settings = (data.payload && data.payload.settings) || data.settings;
+                if (settings && typeof settings === 'object') {
+                    Object.entries(settings).forEach(function(se) {
+                        var sec = se[0], secVal = se[1];
+                        if (secVal && typeof secVal === 'object') {
+                            Object.entries(secVal).forEach(function(ke) { applyUISettingChange(sec, ke[0], ke[1]); });
+                        }
+                    });
+                }
+            }
+        } catch(err) {}
+    });
+
+    // Apply from cache on load
+    try {
+        var cached = localStorage.getItem('knecta_settings_cache');
+        if (cached) {
+            var parsed = JSON.parse(cached);
+            var settings = (parsed && parsed.data) ? parsed.data : parsed;
+            if (settings && typeof settings === 'object') {
+                if (parsed.timestamp && (Date.now() - parsed.timestamp) < 86400000) {
+                    Object.entries(settings).forEach(function(se) {
+                        var sec = se[0], secVal = se[1];
+                        if (secVal && typeof secVal === 'object') {
+                            Object.entries(secVal).forEach(function(ke) { try { applyUISettingChange(sec, ke[0], ke[1]); } catch(e) {} });
+                        }
+                    });
+                }
+            }
+        }
+    } catch(e) {}
 })();

@@ -1,6 +1,6 @@
 // calls-core.js
 // ==================== CALL IFRAME CORE MODULE - DETERMINISTIC LIFECYCLE ====================
-// Version: 9.0.4 - CRITICAL FIXES: Incoming call activeCallId, Group call support, Call link handling
+// Version: 9.1.0 - CRITICAL FIXES: Stale call state recovery, illegal state transitions, auto-cleanup
 // ============================================================================================
 
 (function() {
@@ -1481,6 +1481,7 @@ function applySession(sessionData) {
         CALL_FAILED: 'CALL_FAILED',
         CALL_TIMEOUT: 'CALL_TIMEOUT',
         CALL_BUSY: 'CALL_BUSY',
+        CALL_FORCE_ENDED: 'CALL_FORCE_ENDED',
         
         // WebRTC Signaling (must go through parent → backend)
         SIGNALING_MESSAGE: 'SIGNALING_MESSAGE',
@@ -2307,6 +2308,16 @@ function applySession(sessionData) {
                     return;
                 }
                 
+if (message.type === 'CALL_FORCE_END' || message.type === 'call:force_end') {
+    handleCallForceEnd(message.payload || message.data);
+    return;
+}
+
+if (message.type === MESSAGE_TYPES.CALL_FAILED) {
+    handleCallFailed(message.payload || message.data);
+    return;
+}
+
                 if (message.type === MESSAGE_TYPES.CALL_FAILED) {
                     handleCallFailed(message.payload || message.data);
                     return;
@@ -2314,6 +2325,23 @@ function applySession(sessionData) {
                 
                 if (message.type === MESSAGE_TYPES.CALL_TIMEOUT) {
                     handleCallTimeout(message.payload || message.data);
+                    return;
+                }
+                
+                // CALL_FORCE_ENDED: backend cleaned up a stale call, reset UI immediately
+                if (message.type === 'CALL_FORCE_ENDED' || message.type === MESSAGE_TYPES.CALL_FORCE_ENDED) {
+                    logWarn(MODULE, 'Received CALL_FORCE_ENDED — resetting call state', message.payload);
+                    resetCallState();
+                    callsState.callActive = false;
+                    callsState.callState = 'idle';
+                    callsState.activeCallId = null;
+                    callsState.serverCallId = null;
+                    callsState.callData = null;
+                    if (CallsStateGovernor) {
+                        CallsStateGovernor._transitionLock = false;
+                        CallsStateGovernor._currentState = CALLS_STATE.ACTIVE;
+                    }
+                    notifyListeners('call_force_ended', message.payload || {});
                     return;
                 }
                 
@@ -3517,18 +3545,35 @@ if (message.type === 'SETTING_CHANGED' || message.type === 'SETTINGS_UPDATED') {
     }
     
     function resetCallState() {
-        clearActiveCall();
-        MediaManager.stopLocalStream();
-        WebRTCManager.close();
-        callsState.remoteStream = null;
-        callsState.remoteStreams.clear();
-        callsState.iceCandidates = [];
-        callsState.iceRestartCount = 0;
-        callsState.callData = null;
-        callsState.pendingCallReturnTo = null;
-        callsState.pendingCallSource = null;
+    callsState.callActive = false;
+    callsState.callState = 'idle';
+    callsState.activeCallId = null;
+    callsState.activeCall = null;
+    callsState.callType = null;
+    callsState.callParticipants = [];
+    callsState.callStartTime = null;
+    callsState.connectionState = 'new';
+    callsState.signalingState = 'new';
+    callsState.callData = null;
+    callsState.pendingCallReturnTo = null;
+    callsState.pendingCallSource = null;
+    
+    if (callsState.callInvitationTimer) {
+        clearTimeout(callsState.callInvitationTimer);
+        callsState.callInvitationTimer = null;
     }
     
+    if (MediaManager && MediaManager.stopLocalStream) MediaManager.stopLocalStream();
+    if (WebRTCManager && WebRTCManager.close) WebRTCManager.close();
+    
+    callsState.remoteStream = null;
+    callsState.remoteStreams.clear();
+    callsState.iceCandidates = [];
+    callsState.iceRestartCount = 0;
+    
+    console.log('[CallsCore] Call state fully reset');
+}
+
     // ==================== CALL STATE GOVERNOR (REAL) ====================
     const CallsStateGovernor = {
         _currentState: CALLS_STATE.INIT,
@@ -3606,7 +3651,7 @@ if (message.type === 'SETTING_CHANGED' || message.type === 'SETTINGS_UPDATED') {
         
         _isLegalTransition: function(from, to) {
             const legalTransitions = {
-                [CALLS_STATE.INIT]: [CALLS_STATE.REGISTERING],
+                [CALLS_STATE.INIT]: [CALLS_STATE.REGISTERING, CALLS_STATE.ACTIVE], // ACTIVE added for recovery
                 [CALLS_STATE.REGISTERING]: [CALLS_STATE.REGISTERED, CALLS_STATE.SESSION_PENDING],
                 [CALLS_STATE.REGISTERED]: [CALLS_STATE.SESSION_PENDING, CALLS_STATE.REGISTERING],
                 [CALLS_STATE.SESSION_PENDING]: [CALLS_STATE.SESSION_RECEIVED],
@@ -3614,7 +3659,7 @@ if (message.type === 'SETTING_CHANGED' || message.type === 'SETTINGS_UPDATED') {
                 [CALLS_STATE.ACTIVE]: [CALLS_STATE.CALL_READY, CALLS_STATE.SESSION_RECEIVED],
                 [CALLS_STATE.CALL_READY]: [CALLS_STATE.IN_CALL, CALLS_STATE.ACTIVE],
                 [CALLS_STATE.IN_CALL]: [CALLS_STATE.CALL_READY, CALLS_STATE.TERMINATED],
-                [CALLS_STATE.TERMINATED]: [CALLS_STATE.INIT]
+                [CALLS_STATE.TERMINATED]: [CALLS_STATE.INIT, CALLS_STATE.ACTIVE] // ACTIVE added for recovery
             };
             return legalTransitions[from] ? legalTransitions[from].includes(to) : false;
         },
@@ -4004,6 +4049,8 @@ initiateCall: async function(callType, participants = []) {
         callsState.callType = null;
         callsState.callParticipants = [];
         callsState.callStartTime = null;
+        callsState.serverCallId = null;
+        callsState.localCallId = null;
         
         if (callsState.callInvitationTimer) {
             clearTimeout(callsState.callInvitationTimer);
@@ -4012,6 +4059,14 @@ initiateCall: async function(callType, participants = []) {
         
         if (MediaManager) MediaManager.stopLocalStream();
         if (WebRTCManager) WebRTCManager.close();
+        
+        // CRITICAL FIX: Also fix governor state — INIT→CALL_READY is illegal.
+        // After cleanup, governor must be in ACTIVE so ACTIVE→CALL_READY works.
+        this._transitionLock = false;
+        if (this._currentState !== CALLS_STATE.ACTIVE) {
+            this._previousState = this._currentState;
+            this._currentState = CALLS_STATE.ACTIVE;
+        }
         
         // Small delay to ensure cleanup completes
         await new Promise(resolve => setTimeout(resolve, 100));
@@ -6784,6 +6839,18 @@ _escapeHtml: function(text) {
         // Clean up the call state
         if (callsState.activeCallId === callData.callId || callsState.callActive) {
             resetCallState();
+            callsState.callActive = false;
+            callsState.callState = 'idle';
+            callsState.activeCallId = null;
+            callsState.serverCallId = null;
+            callsState.localCallId = null;
+        }
+        
+        // CRITICAL FIX: Restore governor to ACTIVE so next call attempt works
+        if (CallsStateGovernor) {
+            CallsStateGovernor._transitionLock = false;
+            CallsStateGovernor._previousState = CallsStateGovernor._currentState;
+            CallsStateGovernor._currentState = CALLS_STATE.ACTIVE;
         }
         
         // Clear any pending invitation timer
@@ -6874,6 +6941,56 @@ _escapeHtml: function(text) {
         notifyListeners('call_ended', callData);
     }
     
+// ADD THIS FUNCTION RIGHT AFTER handleCallEnded
+function handleCallForceEnd(callData) {
+    logCall(MODULE, 'Force ending call', callData);
+    
+    // Immediately reset all call state
+    resetCallState();
+    callsState.callActive = false;
+    callsState.callState = 'idle';
+    callsState.activeCallId = null;
+    callsState.activeCall = null;
+    callsState.callType = null;
+    callsState.callParticipants = [];
+    callsState.callStartTime = null;
+    callsState.connectionState = 'new';
+    callsState.signalingState = 'new';
+    callsState.callData = null;
+    
+    // Clear timers
+    if (callsState.callInvitationTimer) {
+        clearTimeout(callsState.callInvitationTimer);
+        callsState.callInvitationTimer = null;
+    }
+    
+    // Clean up media
+    if (MediaManager && MediaManager.stopLocalStream) {
+        MediaManager.stopLocalStream();
+    }
+    if (WebRTCManager && WebRTCManager.close) {
+        WebRTCManager.close();
+    }
+    
+    // Notify UI to close
+    notifyListeners('call_force_ended', callData);
+    notifyListeners('call_ended', callData);
+    
+    // Force UI update
+    if (typeof UIBridge !== 'undefined' && UIBridge._closeCallUI) {
+        UIBridge._closeCallUI();
+    }
+    
+    console.log('[CallsCore] Call force ended by remote user');
+}
+
+function handleCallFailed(callData) {
+    logCall(MODULE, 'handleCallFailed', callData);
+    
+    resetCallState();
+    notifyListeners('call_failed', callData);
+}
+
     function handleCallFailed(callData) {
         logCall(MODULE, 'handleCallFailed', callData);
         
@@ -7900,6 +8017,8 @@ if (msg.type === 'SETTING_CHANGED' || msg.type === 'SETTINGS_UPDATED') {
     callsState.connectionState = 'new';
     callsState.signalingState = 'new';
     callsState.callData = null;
+    callsState.serverCallId = null;
+    callsState.localCallId = null;
     
     // Clear any pending timers
     if (callsState.callInvitationTimer) {
@@ -7915,11 +8034,49 @@ if (msg.type === 'SETTING_CHANGED' || msg.type === 'SETTINGS_UPDATED') {
         WebRTCManager.close();
     }
     
-    // Clear the stale call flag in CallsStateGovernor
-    if (CallsStateGovernor && CallsStateGovernor._currentState === CALLS_STATE.IN_CALL) {
-        CallsStateGovernor.transition(CALLS_STATE.CALL_READY, 'force_reset');
+    // CRITICAL FIX: Restore CallsStateGovernor to ACTIVE so ACTIVE→CALL_READY
+    // transition works on the next call attempt. Without this, governor stays
+    // in INIT after a force-reset and the INIT→CALL_READY transition is illegal.
+    if (CallsStateGovernor) {
+        CallsStateGovernor._transitionLock = false;
+        // Only force to ACTIVE if we're in a state that's past REGISTERING
+        // (i.e. the session was previously valid). This avoids skipping auth.
+        const nonTerminalStates = [
+            CALLS_STATE.CALL_READY,
+            CALLS_STATE.IN_CALL,
+            CALLS_STATE.TERMINATED,
+            CALLS_STATE.ACTIVE
+        ];
+        if (nonTerminalStates.includes(CallsStateGovernor._currentState) ||
+            CallsStateGovernor._currentState === CALLS_STATE.INIT) {
+            CallsStateGovernor._previousState = CallsStateGovernor._currentState;
+            CallsStateGovernor._currentState = CALLS_STATE.ACTIVE;
+        }
     }
     
+    return { success: true };
+},
+clearActiveCall: function() {
+    callsState.callActive = false;
+    callsState.callState = 'idle';
+    callsState.activeCallId = null;
+    callsState.activeCall = null;
+    callsState.callType = null;
+    callsState.callParticipants = [];
+    callsState.callStartTime = null;
+    callsState.connectionState = 'new';
+    callsState.signalingState = 'new';
+    callsState.callData = null;
+    
+    if (callsState.callInvitationTimer) {
+        clearTimeout(callsState.callInvitationTimer);
+        callsState.callInvitationTimer = null;
+    }
+    
+    if (WebRTCManager && WebRTCManager.close) WebRTCManager.close();
+    if (MediaManager && MediaManager.stopLocalStream) MediaManager.stopLocalStream();
+    
+    console.log('[CallsCore] Active call cleared');
     return { success: true };
 },
 
@@ -7979,8 +8136,28 @@ if (msg.type === 'SETTING_CHANGED' || msg.type === 'SETTINGS_UPDATED') {
             }
             
             if (callsState.callActive) {
-                logWarn(MODULE, 'Cannot start call - another call already active');
-                return Promise.resolve({ success: false, reason: 'call_active' });
+                // CRITICAL FIX: If the active call is stale (>90s old with no connection),
+                // auto-reset instead of blocking. This prevents the "already in call" loop
+                // caused by backend cleanup not propagating to frontend state.
+                const callAge = callsState.callStartTime ? Date.now() - callsState.callStartTime : Infinity;
+                if (callAge > 90000) {
+                    logWarn(MODULE, 'Stale callActive detected (>90s), auto-resetting before new call', { callAge, callId: callsState.activeCallId });
+                    if (window.callCore && window.callCore.forceResetCallState) {
+                        window.callCore.forceResetCallState();
+                    } else {
+                        resetCallState();
+                        callsState.callActive = false;
+                        callsState.callState = 'idle';
+                        callsState.activeCallId = null;
+                        if (CallsStateGovernor) {
+                            CallsStateGovernor._transitionLock = false;
+                            CallsStateGovernor._currentState = CALLS_STATE.ACTIVE;
+                        }
+                    }
+                } else {
+                    logWarn(MODULE, 'Cannot start call - another call already active');
+                    return Promise.resolve({ success: false, reason: 'call_active' });
+                }
             }
             
             if (!callsState.session || !__isValidSession(callsState.session)) {
@@ -8002,7 +8179,17 @@ if (msg.type === 'SETTING_CHANGED' || msg.type === 'SETTINGS_UPDATED') {
             }
             
             if (callsState.callActive) {
-                return Promise.resolve({ success: false, reason: 'call_active' });
+                const callAge = callsState.callStartTime ? Date.now() - callsState.callStartTime : Infinity;
+                if (callAge > 90000) {
+                    logWarn(MODULE, 'Stale callActive on group call (>90s), auto-resetting');
+                    resetCallState();
+                    callsState.callActive = false;
+                    callsState.callState = 'idle';
+                    callsState.activeCallId = null;
+                    if (CallsStateGovernor) { CallsStateGovernor._transitionLock = false; CallsStateGovernor._currentState = CALLS_STATE.ACTIVE; }
+                } else {
+                    return Promise.resolve({ success: false, reason: 'call_active' });
+                }
             }
             
             if (!callsState.session || !__isValidSession(callsState.session)) {
@@ -8678,3 +8865,29 @@ function applySettingToCallsModule(section, key, value) {
         if (key === 'showOnlineStatus') window.__showOnlineStatus = value;
     }
 }
+// =============================================
+// SETTINGS CACHE BOOTSTRAP - OFFLINE-FIRST
+// =============================================
+(function bootstrapSettingsFromCache() {
+    try {
+        var cached = localStorage.getItem('knecta_settings_cache');
+        if (!cached) return;
+        var parsed = JSON.parse(cached);
+        var settings = (parsed && parsed.data) ? parsed.data : parsed;
+        if (!settings || typeof settings !== 'object') return;
+        if (parsed.timestamp && (Date.now() - parsed.timestamp) > 86400000) return;
+        Object.entries(settings).forEach(function(sectionEntry) {
+            var section = sectionEntry[0], sectionVal = sectionEntry[1];
+            if (!sectionVal || typeof sectionVal !== 'object') return;
+            Object.entries(sectionVal).forEach(function(keyEntry) {
+                try { applySettingToCallsModule(section, keyEntry[0], keyEntry[1]); } catch(e) {}
+            });
+        });
+        console.log('[calls-core] ✅ Settings bootstrapped from cache');
+    } catch(e) {}
+    window.addEventListener('online', function() {
+        try {
+            window.parent && window.parent.postMessage({ type: 'CHILD_READY', module: 'calls', source: 'calls', timestamp: Date.now() }, '*');
+        } catch(e) {}
+    });
+})();

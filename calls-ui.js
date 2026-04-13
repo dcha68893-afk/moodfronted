@@ -8,6 +8,39 @@
 // Set up immediately when script loads, before any initialization
 // ==================== EARLY OPEN_CALL_WITH_USER LISTENER ====================
 // Set up immediately when script loads, before any initialization
+
+// ==================== UI STATE DEFINITION ====================
+const UIState = {
+    activeCallId: null,
+    callActive: false,
+    callState: 'idle',
+    callParticipants: [],
+    callStartTime: null,
+    callType: null,
+    callDurationInterval: null,
+    localStream: null,
+    remoteStream: null,
+    remoteStreams: new Map(),
+    screenStream: null,
+    isMuted: false,
+    isVideoOff: false,
+    isScreenSharing: false,
+    isSpeakerOn: true,
+    currentFocusMode: false,
+    currentView: 'sidebar',
+    activeModals: new Set(),
+    activePanels: new Set(),
+    cachedElements: new Map(),
+    renderStages: { skeleton: false, initial: false, enhanced: false, live: false },
+    renderCount: 0,
+    contacts: [],
+    callChatMessages: [],
+    callNotes: '',
+    callPolls: [],
+    privateNotes: {},
+    callHistory: []
+};
+
 (function setupEarlyCallListener() {
     'use strict';
     
@@ -57,21 +90,19 @@ async function startCallWithUser(userId, userName, callType) {
     
     const callContainer = document.getElementById('callContainer');
     const sidebar = document.getElementById('sidebar');
-    if (callContainer) {
-        callContainer.classList.add('active');
-    }
-    if (sidebar) {
-        sidebar.style.display = 'none';
-    }
+    if (callContainer) callContainer.classList.add('active');
+    if (sidebar) sidebar.style.display = 'none';
     
+    // Show header end button & update type icon
+    const callHeaderEndBtn = document.getElementById('callHeaderEndBtn');
+    if (callHeaderEndBtn) callHeaderEndBtn.style.display = 'flex';
+    const callTypeIconEl = document.getElementById('callTypeIcon');
+    if (callTypeIconEl) callTypeIconEl.innerHTML = callType === 'video' ? '<i class="fas fa-video"></i>' : '<i class="fas fa-phone"></i>';
+
     const callWithName = document.getElementById('callWithName');
-    if (callWithName) {
-        callWithName.textContent = userName;
-    }
+    if (callWithName) callWithName.textContent = userName;
     const callStatusText = document.getElementById('callStatusText');
-    if (callStatusText) {
-        callStatusText.textContent = 'Initiating call...';
-    }
+    if (callStatusText) callStatusText.textContent = 'Initiating call...';
     
     if (window.callCore && window.callCore.initiateCall) {
         const result = await window.callCore.initiateCall(callType, [parseInt(userId)]);
@@ -204,9 +235,20 @@ async function requestMediaPermissions(callType) {
     }
     
     // Listen for OPEN_CALL_WITH_USER events immediately
+    // Guard against duplicate events (e.g. from both early IIFE + setupOpenCallWithUserListener)
+    if (!window.__earlyCallLock) window.__earlyCallLock = { ts: 0, userId: null };
     window.addEventListener('OPEN_CALL_WITH_USER', function(event) {
         const data = event.detail || event.data || {};
         const userId = data.userId || data.user_id || data.id;
+        // Dedup: same user within 2s = duplicate, skip
+        if (userId) {
+            const lock = window.__earlyCallLock;
+            if (lock.userId === String(userId) && (Date.now() - lock.ts) < 2000) {
+                console.log('[Calls UI][Early] ⏭ Duplicate suppressed for userId', userId);
+                return;
+            }
+            window.__earlyCallLock = { ts: Date.now(), userId: String(userId) };
+        }
         const userName = data.userName || data.name || data.user_name || 'User';
         const callType = data.callType || data.type || data.call_type || 'voice';
         // Determine where the call was started from:
@@ -227,9 +269,14 @@ async function requestMediaPermissions(callType) {
         
         if (!userId) return;
         
-        // Store returnTo so endCall can navigate back
+        // Store returnTo so endCall can navigate back.
+        // Write BOTH the mutable pending vars AND persistent origin backup.
+        // The pending vars may be cleared by intermediate reset code; the
+        // __callOrigin* backup is only cleared at the end of the actual call.
         window.__pendingCallReturnTo = returnTo;
-        window.__pendingCallChatUserId = chatUserId || userId; // for messages return
+        window.__pendingCallChatUserId = chatUserId || userId;
+        window.__callOriginReturnTo = returnTo;           // persistent backup
+        window.__callOriginChatUserId = chatUserId || userId; // persistent backup
         
         // Store for processing
         pendingOpenCall = { userId, userName, callType };
@@ -266,15 +313,10 @@ async function requestMediaPermissions(callType) {
         }
     });
     
-    // Also listen for postMessage events
-    window.addEventListener('message', function(event) {
-        const data = event.data;
-        if (data && (data.type === 'OPEN_CALL_WITH_USER' || data.type === 'START_CALL' || data.type === 'CALL_USER')) {
-            const callData = data.payload || data;
-            const eventObj = new CustomEvent('OPEN_CALL_WITH_USER', { detail: callData });
-            window.dispatchEvent(eventObj);
-        }
-    });
+    // NOTE: postMessage from parent is handled by setupOpenCallWithUserListener.
+    // The early IIFE only handles the CustomEvent path (dispatched internally).
+    // We do NOT re-dispatch postMessage as CustomEvent here — that would cause
+    // duplicate call triggers (early listener + setup listener both firing).
     
     console.log('[Calls UI][Early] OPEN_CALL_WITH_USER listener established');
 })();
@@ -319,139 +361,186 @@ async function loadCallHistory() {
     }
 }
 
+// Call this in initializeUISystem after cacheElements()
+// Add this line inside initializeUISystem:
+loadCachedCallHistory();
+
 function displayCallHistory(calls) {
     const allCallsList = document.getElementById('allCallsList');
     const missedCallsList = document.getElementById('missedCallsList');
     
     if (!allCallsList) return;
     
-    if (!calls || calls.length === 0) {
-        allCallsList.innerHTML = `
-            <div class="offline-state">
-                <i class="fas fa-phone-slash"></i>
-                <p>No recent calls</p>
-                <p class="subtext">Your call history will appear here</p>
-            </div>
-        `;
-        return;
+    // Save to localStorage for persistence
+    if (calls && calls.length > 0) {
+        try {
+            localStorage.setItem('cached_call_history', JSON.stringify({
+                calls: calls,
+                timestamp: Date.now(),
+                userId: window.__CHILD_SESSION__?.userId
+            }));
+        } catch(e) { console.warn('Failed to cache call history:', e); }
     }
     
-    // Build each call item using DOM API (avoids innerHTML sanitizer mangling)
-    function buildCallItem(call) {
+    if (!calls || calls.length === 0) {
+        // Try to load from cache
+        try {
+            const cached = localStorage.getItem('cached_call_history');
+            if (cached) {
+                const parsed = JSON.parse(cached);
+                if (parsed.calls && parsed.calls.length > 0) {
+                    calls = parsed.calls;
+                    console.log('[Calls UI] Loaded call history from cache:', calls.length);
+                }
+            }
+        } catch(e) {}
+        
+        if (!calls || calls.length === 0) {
+            allCallsList.innerHTML = `
+                <div class="offline-state">
+                    <i class="fas fa-phone-slash"></i>
+                    <p>No recent calls</p>
+                    <p class="subtext">Your call history will appear here</p>
+                </div>
+            `;
+            return;
+        }
+    }
+    
+    allCallsList.innerHTML = '';
+    const missedFragment = document.createDocumentFragment();
+    let hasMissed = false;
+    
+    function escapeHtml(str) {
+        if (!str) return '';
+        return String(str)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    }
+    
+    function formatCallDateTime(dateString) {
+        try {
+            const date = new Date(dateString);
+            const now = new Date();
+            const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+            const callDate = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+            
+            const diffDays = Math.floor((today - callDate) / (1000 * 60 * 60 * 24));
+            
+            let dateStr = '';
+            if (diffDays === 0) {
+                dateStr = 'Today';
+            } else if (diffDays === 1) {
+                dateStr = 'Yesterday';
+            } else if (diffDays < 7) {
+                const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+                dateStr = days[date.getDay()];
+            } else {
+                dateStr = date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+            }
+            
+            const timeStr = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            return { dateStr, timeStr };
+        } catch(e) {
+            return { dateStr: 'Unknown', timeStr: '' };
+        }
+    }
+    
+    function getCallDirectionInfo(call) {
+        const currentUserId = window.__CHILD_SESSION__?.userId;
+        const isOutgoing = call.callerId == currentUserId;
+        const isMissed = call.status === 'missed' && !isOutgoing;
+        
+        let directionIcon = '';
+        let directionText = '';
+        let directionColor = '';
+        
+        if (isOutgoing) {
+            directionIcon = '<i class="fas fa-arrow-up"></i>';
+            directionText = 'Outgoing';
+            directionColor = '#10b981';
+        } else if (isMissed) {
+            directionIcon = '<i class="fas fa-phone-slash"></i>';
+            directionText = 'Missed';
+            directionColor = '#ef4444';
+        } else {
+            directionIcon = '<i class="fas fa-arrow-down"></i>';
+            directionText = 'Incoming';
+            directionColor = '#3b82f6';
+        }
+        
+        return { directionIcon, directionText, directionColor, isOutgoing, isMissed };
+    }
+    
+    calls.forEach(function(call) {
         const otherParticipant = (call.otherParticipants && call.otherParticipants[0]) || call.caller;
         const currentUserId = window.__CHILD_SESSION__?.userId;
         const otherId = call.callerId == currentUserId ? call.receiverId : call.callerId;
         const contactMatch = (UIState.contacts || window.__cachedCallContacts || []).find(c => c.id == otherId || c.userId == otherId);
+        
         const name = (otherParticipant && (otherParticipant.displayName || otherParticipant.username))
             || (contactMatch && (contactMatch.displayName || contactMatch.username || contactMatch.name))
             || (call.callerInfo?.username) || (call.calleeInfo?.username)
             || ('User #' + (otherId || '?'));
+        
         const initials = name.split(' ').map(function(n){ return n[0]; }).join('').toUpperCase().substring(0, 2);
-        const isOutgoing = call.callerId == currentUserId;
-        const isMissed = call.status === 'missed' && !isOutgoing;
-        const isIncoming = !isOutgoing;
-        const direction = isOutgoing ? 'outgoing' : (isMissed ? 'missed' : 'incoming');
-        const iconClass = call.type === 'video' ? 'fa-video' : 'fa-phone';
-        // Direction arrow icons with distinct colors via CSS class
-        const statusIconClass = isMissed ? 'fa-phone-slash' : (isOutgoing ? 'fa-arrow-up' : 'fa-arrow-down');
-        const directionLabel = isMissed ? 'Missed' : (isOutgoing ? 'Outgoing' : 'Incoming');
-
+        const directionInfo = getCallDirectionInfo(call);
+        const { dateStr, timeStr } = formatCallDateTime(call.startedAt);
+        
+        let durationDisplay = call.displayDuration || '0:00';
+        if (call.duration && call.duration > 0) {
+            const mins = Math.floor(call.duration / 60);
+            const secs = call.duration % 60;
+            durationDisplay = `${mins}:${secs.toString().padStart(2, '0')}`;
+        }
+        
         const item = document.createElement('div');
-        item.className = 'call-history-item ' + direction;
+        item.className = `call-history-item ${directionInfo.isOutgoing ? 'outgoing' : (directionInfo.isMissed ? 'missed' : 'incoming')}`;
+        item.style.cssText = 'padding: 8px 12px; margin: 4px 8px;';
         item.dataset.callId = call.id || '';
-
-        const avatarDiv = document.createElement('div');
-        avatarDiv.className = 'call-avatar';
-        avatarDiv.style.backgroundColor = '#6c5ce7';
-        const avatarSpan = document.createElement('span');
-        avatarSpan.textContent = initials;
-        avatarDiv.appendChild(avatarSpan);
-
-        const infoDiv = document.createElement('div');
-        infoDiv.className = 'call-info';
-
-        const nameDiv = document.createElement('div');
-        nameDiv.className = 'call-name';
-        nameDiv.textContent = name;
-
-        // Status icon with direction color
-        const statusIcon = document.createElement('span');
-        statusIcon.className = 'call-status-icon ' + direction;
-        statusIcon.title = directionLabel;
-        statusIcon.style.marginLeft = '6px';
-        statusIcon.style.fontSize = '11px';
-        const statusI = document.createElement('i');
-        statusI.className = 'fas ' + statusIconClass;
-        statusIcon.appendChild(statusI);
-        nameDiv.appendChild(statusIcon);
-
-        const detailsDiv = document.createElement('div');
-        detailsDiv.className = 'call-details';
-        const typeI = document.createElement('i');
-        typeI.className = 'fas ' + iconClass;
-        const typeSpan = document.createElement('span');
-        typeSpan.textContent = call.type === 'video' ? 'Video call' : 'Voice call';
-        const dotSpan = document.createElement('span');
-        dotSpan.textContent = '•';
-        const durSpan = document.createElement('span');
-        durSpan.textContent = call.displayDuration || '0:00';
-        detailsDiv.appendChild(typeI);
-        detailsDiv.appendChild(typeSpan);
-        detailsDiv.appendChild(dotSpan);
-        detailsDiv.appendChild(durSpan);
-
-        const timeDiv = document.createElement('div');
-        timeDiv.className = 'call-time';
-        try { timeDiv.textContent = new Date(call.startedAt).toLocaleString(); } catch(e) { timeDiv.textContent = ''; }
-
-        infoDiv.appendChild(nameDiv);
-        infoDiv.appendChild(detailsDiv);
-        infoDiv.appendChild(timeDiv);
-
-        const callBtn = document.createElement('button');
-        callBtn.className = 'call-action-btn';
-        callBtn.title = 'Call back';
-        const callBtnUserId = String((otherParticipant && otherParticipant.id) ? otherParticipant.id : (otherId || ''));
-        callBtn.dataset.userId = callBtnUserId;
-        callBtn.dataset.userName = name;
-        callBtn.dataset.callType = call.type || 'voice';
-        const btnI = document.createElement('i');
-        btnI.className = 'fas fa-phone';
-        callBtn.appendChild(btnI);
-        callBtn.addEventListener('click', function(e) {
-            e.stopPropagation();
-            // Call-back from history stays in calls page
-            window.__pendingCallReturnTo = 'calls';
-            window.__pendingCallChatUserId = null;
-            handleCallActionClick.call(callBtn, e);
-        });
-
-        item.appendChild(avatarDiv);
-        item.appendChild(infoDiv);
-        item.appendChild(callBtn);
-        return item;
-    }
-
-    allCallsList.innerHTML = '';
-    const missedFragment = document.createDocumentFragment();
-    let hasMissed = false;
-
-    if (calls.length === 0) {
-        const empty = document.createElement('div');
-        empty.className = 'offline-state';
-        empty.innerHTML = '<i class="fas fa-phone-slash"></i><p>No recent calls</p>';
-        allCallsList.appendChild(empty);
-    } else {
-        calls.forEach(function(call) {
-            const item = buildCallItem(call);
-            allCallsList.appendChild(item);
-            if (call.status === 'missed') {
-                hasMissed = true;
-                missedFragment.appendChild(buildCallItem(call));
-            }
-        });
-    }
-
+        
+        // REMOVED fake carrier/network info - only real data shown
+        item.innerHTML = `
+            <div class="call-avatar" style="width: 40px; height: 40px; background-color: #6c5ce7; flex-shrink: 0;">
+                <span style="font-size: 14px;">${escapeHtml(initials)}</span>
+            </div>
+            <div class="call-info" style="flex: 1; min-width: 0;">
+                <div class="call-name" style="font-size: 14px; margin-bottom: 2px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
+                    <span style="font-weight: 600;">${escapeHtml(name)}</span>
+                    <span class="call-direction-badge" style="font-size: 10px; padding: 2px 6px; border-radius: 10px; background: ${directionInfo.directionColor}20; color: ${directionInfo.directionColor};">
+                        ${directionInfo.directionIcon} ${directionInfo.directionText}
+                    </span>
+                    ${call.type === 'video' ? '<span style="font-size: 10px; padding: 2px 6px; border-radius: 10px; background: #8b5cf620; color: #8b5cf6;"><i class="fas fa-video"></i> Video</span>' : '<span style="font-size: 10px; padding: 2px 6px; border-radius: 10px; background: #10b98120; color: #10b981;"><i class="fas fa-phone"></i> Voice</span>'}
+                </div>
+                <div class="call-details" style="font-size: 11px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+                    <span style="display: flex; align-items: center; gap: 3px;">
+                        <i class="far fa-clock"></i> ${durationDisplay}
+                    </span>
+                    <span style="display: flex; align-items: center; gap: 3px;">
+                        <i class="far fa-calendar-alt"></i> ${escapeHtml(dateStr)}
+                    </span>
+                    <span style="display: flex; align-items: center; gap: 3px;">
+                        <i class="far fa-clock"></i> ${escapeHtml(timeStr)}
+                    </span>
+                </div>
+            </div>
+            <button class="call-action-btn" data-user-id="${escapeHtml(String(otherParticipant?.id || otherId || ''))}" data-user-name="${escapeHtml(name)}" data-call-type="${call.type || 'voice'}" title="Call back" style="width: 32px; height: 32px; font-size: 14px; flex-shrink: 0;">
+                <i class="fas fa-phone"></i>
+            </button>
+        `;
+        
+        allCallsList.appendChild(item);
+        
+        if (call.status === 'missed') {
+            hasMissed = true;
+            const missedItem = item.cloneNode(true);
+            missedFragment.appendChild(missedItem);
+        }
+    });
+    
     if (missedCallsList) {
         missedCallsList.innerHTML = '';
         if (hasMissed) {
@@ -459,10 +548,41 @@ function displayCallHistory(calls) {
         } else {
             const emptyMissed = document.createElement('div');
             emptyMissed.className = 'offline-state';
-            emptyMissed.innerHTML = '<i class="fas fa-phone-slash"></i><p>No missed calls</p>';
+            emptyMissed.style.padding = '20px';
+            emptyMissed.innerHTML = '<i class="fas fa-phone-slash"></i><p style="font-size: 13px;">No missed calls</p>';
             missedCallsList.appendChild(emptyMissed);
         }
     }
+    
+    // Re-attach click handlers
+    document.querySelectorAll('.call-action-btn').forEach(function(btn) {
+        btn.removeEventListener('click', handleCallActionClick);
+        btn.addEventListener('click', function(e) {
+            window.__pendingCallReturnTo = 'calls';
+            window.__pendingCallChatUserId = null;
+            handleCallActionClick.call(btn, e);
+        });
+    });
+}
+
+function loadCachedCallHistory() {
+    try {
+        const cached = localStorage.getItem('cached_call_history');
+        if (cached) {
+            const parsed = JSON.parse(cached);
+            // Check if cache is less than 24 hours old
+            if (parsed.timestamp && (Date.now() - parsed.timestamp) < 86400000) {
+                if (parsed.calls && parsed.calls.length > 0) {
+                    console.log('[Calls UI] Restoring call history from cache:', parsed.calls.length);
+                    displayCallHistory(parsed.calls);
+                    return true;
+                }
+            }
+        }
+    } catch(e) {
+        console.warn('[Calls UI] Failed to load cached history:', e);
+    }
+    return false;
 }
 
 function handleCallActionClick(e) {
@@ -1245,11 +1365,45 @@ function handleCallActionClick(e) {
             pendingCall.retryTimer = null;
         }
         
-        // Pre-fill UI: show selected user in call modal
-        prefillCallModal(userId, userName, callType);
-        
-        // Open call modal immediately
-        openCallModalForUser(userId, userName, callType);
+        // Update call panel header with source context
+        // (shows the user where this call originated from)
+        const callSource = data.source || data.origin || data.from || 'calls';
+        const returnTo = data.returnTo || callSource;
+        const callSourceCtxEl = document.getElementById('callSourceCtx');
+        if (callSourceCtxEl) {
+            let sourceLabel = '';
+            if (returnTo === 'messages' || returnTo === 'chat' || callSource === 'messages-module') {
+                sourceLabel = '← From Messages';
+            } else if (returnTo === 'friends' || callSource === 'friends-module') {
+                sourceLabel = '← From Friends';
+            }
+            // 'calls' origin = no label needed (already on calls page)
+            if (sourceLabel) {
+                callSourceCtxEl.textContent = sourceLabel;
+                callSourceCtxEl.style.display = 'block';
+            } else {
+                callSourceCtxEl.style.display = 'none';
+            }
+        }
+
+        // Pre-fill UI only when call comes from within the calls module
+        // (no need to pre-fill when user already chose someone in messages/friends)
+        const isExternalSource = (callSource === 'messages-module' || callSource === 'friends-module'
+                                || returnTo === 'messages' || returnTo === 'friends');
+
+        // If the "New Call" contacts picker is open from a previous action, close it —
+        // external calls skip that screen entirely and go straight to dialling.
+        if (isExternalSource && elements.newCallModal && elements.newCallModal.classList.contains('active')) {
+            elements.newCallModal.classList.remove('active');
+            UIState.activeModals && UIState.activeModals.delete('newCallModal');
+        }
+
+        if (!isExternalSource) {
+            prefillCallModal(userId, userName, callType);
+        }
+
+        // Open call modal — skipped when triggered from messages or friends module
+        openCallModalForUser(userId, userName, callType, callSource);
         
         // Attempt to initiate call (will retry if core not ready)
         attemptPendingCall();
@@ -1287,30 +1441,40 @@ function handleCallActionClick(e) {
         }, 100);
     }
     
-    function openCallModalForUser(userId, userName, callType) {
-        // Open the new call modal
+    function openCallModalForUser(userId, userName, callType, source) {
+        // If the call was triggered from messages or friends module, the user already
+        // chose who to call — skip the "New Call" contacts picker modal entirely.
+        const isExternal = source === 'messages-module' || source === 'friends-module'
+                        || source === 'messages'         || source === 'friends'
+                        || source === 'messages-module'  || source === 'parent-frame';
+
+        if (isExternal) {
+            // Just show a brief toast — no modal, no contacts screen
+            showNotification(`Starting ${callType} call with ${userName}...`, 'info');
+            return;
+        }
+
+        // Called from within the calls module — show the contacts picker as normal
         if (elements.newCallModal) {
             elements.newCallModal.classList.add('active');
             UIState.activeModals.add('newCallModal');
             
             // Switch to contacts tab
-            UIEventHandlers.switchNewCallTab('contacts');
+            UIEventHandlers.switchNewCallTab && UIEventHandlers.switchNewCallTab('contacts');
             
-            // Update modal title or show selected user info
+            // Update modal title
             const modalTitle = elements.newCallModal.querySelector('.modal-title');
             if (modalTitle) {
                 modalTitle.innerHTML = `<i class="fas fa-phone-alt"></i> Call ${SecuritySanitizer.sanitizeString(userName)}`;
             }
             
-            // Show a subtle notification that call is being prepared
             showNotification(`Preparing ${callType} call with ${userName}...`, 'info');
         } else {
-            // Fallback: show notification only
             showNotification(`Starting ${callType} call with ${userName}...`, 'info');
         }
     }
     
-    function attemptPendingCall() {
+    async function attemptPendingCall() {
         // Check if there's a pending call
         if (!pendingCall.userId || pendingCall.initiated) {
             return;
@@ -1346,15 +1510,25 @@ function handleCallActionClick(e) {
             return;
         }
         
-        // Check if already in a call
+        // Check if already in a call — but auto-reset if stale
         if (coreInstance.isInCall && coreInstance.isInCall()) {
-            showNotification('You are already in a call. End current call to start a new one.', 'warning');
-            clearPendingCall();
-            return;
+            // Check if this is a genuinely active call or just stale state
+            const callState = coreInstance.getCallState ? coreInstance.getCallState() : null;
+            const callAge = callState?.callStartTime ? Date.now() - callState.callStartTime : Infinity;
+            if (callAge > 90000) {
+                // Stale — reset and continue
+                console.warn('[Calls UI] Stale isInCall detected, auto-resetting before pending call');
+                if (coreInstance.forceResetCallState) coreInstance.forceResetCallState();
+                await new Promise(resolve => setTimeout(resolve, 200));
+            } else {
+                showNotification('You are already in a call. End current call to start a new one.', 'warning');
+                clearPendingCall();
+                return;
+            }
         }
         
         // Core is ready - initiate the call
-        initiateCallWithPendingUser();
+        await initiateCallWithPendingUser();
     }
 
 // In calls-ui.js, around the initiateCallWithPendingUser function
@@ -1410,6 +1584,22 @@ async function initiateCallWithPendingUser() {
                     elements.newCallModal.classList.remove('active');
                     UIState.activeModals.delete('newCallModal');
                 }
+            } else if (result && result.reason === 'call_active') {
+                // CRITICAL FIX: call_active on startCall means stale state — force reset and retry once
+                console.warn('[Calls UI] call_active on startCall, force-resetting and retrying once');
+                if (coreInstance.forceResetCallState) coreInstance.forceResetCallState();
+                await new Promise(resolve => setTimeout(resolve, 300));
+                const retryResult = await coreInstance.startCall(parseInt(userId), callType);
+                if (retryResult && retryResult.success) {
+                    showNotification(`${callType === 'video' ? 'Video call' : 'Voice call'} started with ${userName}`, 'success');
+                    clearPendingCall();
+                    if (elements.newCallModal) {
+                        elements.newCallModal.classList.remove('active');
+                        UIState.activeModals.delete('newCallModal');
+                    }
+                } else {
+                    throw new Error(retryResult?.error || retryResult?.reason || 'Call initiation failed after reset');
+                }
             } else {
                 throw new Error(result?.error || 'Call initiation failed');
             }
@@ -1456,21 +1646,41 @@ async function initiateCallWithPendingUser() {
         UIState.pendingCallUser = null;
     }
     
-    // Listen for OPEN_CALL_WITH_USER events
+    // Listen for OPEN_CALL_WITH_USER events — single unified listener with dedup lock
     function setupOpenCallWithUserListener() {
-        // Listen for custom event
-        window.addEventListener('OPEN_CALL_WITH_USER', handleOpenCallWithUser);
-        
-        // Also listen for message events from parent iframe communication
+        // Dedup lock: drop any duplicate for the same userId within 2 seconds
+        if (!window.__uiCallDispatchLock) window.__uiCallDispatchLock = { ts: 0, userId: null };
+
+        function isUICallDuplicate(userId) {
+            const lock = window.__uiCallDispatchLock;
+            return lock.userId === String(userId) && (Date.now() - lock.ts) < 2000;
+        }
+
+        function guardedHandleOpenCallWithUser(event) {
+            const data = event.detail || event.data || {};
+            const userId = data.userId || data.user_id || data.id;
+            if (!userId) return handleOpenCallWithUser(event);
+            if (isUICallDuplicate(userId)) {
+                console.log('[Calls UI] ⏭ Duplicate OPEN_CALL_WITH_USER suppressed for', userId);
+                return;
+            }
+            window.__uiCallDispatchLock = { ts: Date.now(), userId: String(userId) };
+            handleOpenCallWithUser(event);
+        }
+
+        // CustomEvent path (dispatched internally within calls-ui.js)
+        window.addEventListener('OPEN_CALL_WITH_USER', guardedHandleOpenCallWithUser);
+
+        // postMessage path (from parent iframe)
         window.addEventListener('message', function(event) {
             const data = event.data;
             if (data && (data.type === 'OPEN_CALL_WITH_USER' || data.type === 'START_CALL' || data.type === 'CALL_USER')) {
-                handleOpenCallWithUser({ detail: data.payload || data });
+                guardedHandleOpenCallWithUser({ detail: data.payload || data });
             }
         });
-        
+
         if (DEBUG) {
-            logOnce('info', 'OPEN_CALL_WITH_USER listener established');
+            logOnce('info', 'OPEN_CALL_WITH_USER listener established (dedup-locked)');
         }
     }
 
@@ -2519,39 +2729,36 @@ renderContactsList: function(contacts) {
             elements.contactsLoading.style.display = 'none';
         }
         
-        // Attach click handlers
-        document.querySelectorAll('.contact-item').forEach(item => {
-            item.removeEventListener('click', this.handleContactItemClick);
-            item.addEventListener('click', this.handleContactItemClick);
-        });
-
-        // Attach direct call button handlers
-        document.querySelectorAll('.contact-audio-call-btn').forEach(btn => {
-            btn.addEventListener('click', function(e) {
-                e.stopPropagation();
-                const userId = btn.dataset.userId;
-                const userName = btn.dataset.userName || 'User';
-                if (userId && typeof startCallWithUser === 'function') {
-                    startCallWithUser(userId, userName, 'voice');
-                } else {
-                    const event = new CustomEvent('OPEN_CALL_WITH_USER', { detail: { userId, userName, callType: 'voice' } });
-                    window.dispatchEvent(event);
+        // Attach click handlers via delegation (idempotent - only binds once)
+        if (!elements.contactsList.__callDelegationBound) {
+            elements.contactsList.__callDelegationBound = true;
+            elements.contactsList.addEventListener('click', function(e) {
+                const audioBtn = e.target.closest('.contact-audio-call-btn');
+                if (audioBtn) {
+                    e.stopPropagation();
+                    const uid = audioBtn.dataset.userId;
+                    const uname = audioBtn.dataset.userName || 'User';
+                    if (!uid) return;
+                    window.__pendingCallReturnTo = 'calls';
+                    window.__callOriginReturnTo = 'calls';
+                    if (typeof startCallWithUser === 'function') startCallWithUser(uid, uname, 'voice');
+                    else window.dispatchEvent(new CustomEvent('OPEN_CALL_WITH_USER', { detail: { userId: uid, userName: uname, callType: 'voice', returnTo: 'calls' } }));
+                    return;
+                }
+                const videoBtn = e.target.closest('.contact-video-call-btn');
+                if (videoBtn) {
+                    e.stopPropagation();
+                    const uid = videoBtn.dataset.userId;
+                    const uname = videoBtn.dataset.userName || 'User';
+                    if (!uid) return;
+                    window.__pendingCallReturnTo = 'calls';
+                    window.__callOriginReturnTo = 'calls';
+                    if (typeof startCallWithUser === 'function') startCallWithUser(uid, uname, 'video');
+                    else window.dispatchEvent(new CustomEvent('OPEN_CALL_WITH_USER', { detail: { userId: uid, userName: uname, callType: 'video', returnTo: 'calls' } }));
+                    return;
                 }
             });
-        });
-        document.querySelectorAll('.contact-video-call-btn').forEach(btn => {
-            btn.addEventListener('click', function(e) {
-                e.stopPropagation();
-                const userId = btn.dataset.userId;
-                const userName = btn.dataset.userName || 'User';
-                if (userId && typeof startCallWithUser === 'function') {
-                    startCallWithUser(userId, userName, 'video');
-                } else {
-                    const event = new CustomEvent('OPEN_CALL_WITH_USER', { detail: { userId, userName, callType: 'video' } });
-                    window.dispatchEvent(event);
-                }
-            });
-        });
+        }
         
         console.log('[Calls UI] Contacts rendered:', contacts.length);
         
@@ -2685,47 +2892,60 @@ sanitizeHTML: function(str) {
         },
         
         attachContactEvents: function() {
-            document.querySelectorAll('.contact-item').forEach(item => {
-                item.removeEventListener('click', handleContactClick);
-                item.addEventListener('click', handleContactClick);
-            });
-            // Wire audio/video call buttons in the contacts list
-            document.querySelectorAll('.contact-audio-call-btn').forEach(btn => {
-                btn.addEventListener('click', function(e) {
-                    e.stopPropagation();
-                    const userId = btn.dataset.userId;
-                    const userName = btn.dataset.userName || 'User';
-                    if (!userId) return;
-                    // Calls page contact list → return to calls after call ends
-                    window.__pendingCallReturnTo = 'calls';
-                    window.__pendingCallChatUserId = null;
-                    if (typeof startCallWithUser === 'function') {
-                        startCallWithUser(userId, userName, 'voice');
-                    } else {
-                        window.dispatchEvent(new CustomEvent('OPEN_CALL_WITH_USER', {
-                            detail: { userId, userName, callType: 'voice', source: 'calls', returnTo: 'calls' }
-                        }));
+            // Use event delegation on the contactsList container so buttons fire even after innerHTML re-renders
+            const contactsListEl = elements.contactsList;
+            if (contactsListEl && !contactsListEl.__callDelegationBound) {
+                contactsListEl.__callDelegationBound = true;
+                contactsListEl.addEventListener('click', function(e) {
+                    // Audio call button
+                    const audioBtn = e.target.closest('.contact-audio-call-btn');
+                    if (audioBtn) {
+                        e.stopPropagation();
+                        const userId = audioBtn.dataset.userId;
+                        const userName = audioBtn.dataset.userName || 'User';
+                        if (!userId) return;
+                        console.log('[Calls UI] Audio call btn clicked:', userId, userName);
+                        window.__pendingCallReturnTo = 'calls';
+                        window.__callOriginReturnTo = 'calls';
+                        window.__pendingCallChatUserId = null;
+                        window.__callOriginChatUserId = null;
+                        if (typeof startCallWithUser === 'function') {
+                            startCallWithUser(userId, userName, 'voice');
+                        } else {
+                            window.dispatchEvent(new CustomEvent('OPEN_CALL_WITH_USER', {
+                                detail: { userId, userName, callType: 'voice', source: 'calls', returnTo: 'calls' }
+                            }));
+                        }
+                        return;
+                    }
+                    // Video call button
+                    const videoBtn = e.target.closest('.contact-video-call-btn');
+                    if (videoBtn) {
+                        e.stopPropagation();
+                        const userId = videoBtn.dataset.userId;
+                        const userName = videoBtn.dataset.userName || 'User';
+                        if (!userId) return;
+                        console.log('[Calls UI] Video call btn clicked:', userId, userName);
+                        window.__pendingCallReturnTo = 'calls';
+                        window.__callOriginReturnTo = 'calls';
+                        window.__pendingCallChatUserId = null;
+                        window.__callOriginChatUserId = null;
+                        if (typeof startCallWithUser === 'function') {
+                            startCallWithUser(userId, userName, 'video');
+                        } else {
+                            window.dispatchEvent(new CustomEvent('OPEN_CALL_WITH_USER', {
+                                detail: { userId, userName, callType: 'video', source: 'calls', returnTo: 'calls' }
+                            }));
+                        }
+                        return;
+                    }
+                    // Contact item (checkbox selection)
+                    const contactItem = e.target.closest('.contact-item');
+                    if (contactItem) {
+                        handleContactClick({ currentTarget: contactItem });
                     }
                 });
-            });
-            document.querySelectorAll('.contact-video-call-btn').forEach(btn => {
-                btn.addEventListener('click', function(e) {
-                    e.stopPropagation();
-                    const userId = btn.dataset.userId;
-                    const userName = btn.dataset.userName || 'User';
-                    if (!userId) return;
-                    // Calls page contact list → return to calls after call ends
-                    window.__pendingCallReturnTo = 'calls';
-                    window.__pendingCallChatUserId = null;
-                    if (typeof startCallWithUser === 'function') {
-                        startCallWithUser(userId, userName, 'video');
-                    } else {
-                        window.dispatchEvent(new CustomEvent('OPEN_CALL_WITH_USER', {
-                            detail: { userId, userName, callType: 'video', source: 'calls', returnTo: 'calls' }
-                        }));
-                    }
-                });
-            });
+            }
         },
         
         progressiveEnhancement: function() {
@@ -2980,6 +3200,10 @@ sanitizeHTML: function(str) {
                 case 'call_initiated':
                     this.handleCallInitiated(data);
                     break;
+                case 'call_accepted':
+                    // Receiver answered — now start the timer
+                    this.handleCallAccepted(data);
+                    break;
                 case 'call_started':
                     this.handleCallStarted(data);
                     break;
@@ -2990,6 +3214,7 @@ sanitizeHTML: function(str) {
                 case 'call_rejected':
                 case 'call_failed':
                 case 'call_timeout':
+                case 'call_force_ended':
                     this.handleCallEnded(data);
                     // FIX for Bug 6: Refresh call history after call ends
                     this.refreshCallHistory();
@@ -3372,10 +3597,14 @@ const timer = setInterval(() => {
         handleCallInitiated: function(callData) {
             UIState.activeCallId = callData.callId;
             UIState.callParticipants = callData.participants || [];
-            UIState.callStartTime = Date.now();
+            // ⚠ DO NOT set callStartTime here — timer only starts when receiver answers.
+            // callStartTime stays null until handleCallAccepted fires.
+            UIState.callStartTime = null;
             UIState.callType = callData.callType;
             UIState.callActive = true;
             UIState.callState = 'initiating';
+            // Track whether receiver is online so we can show correct status text
+            UIState.callReceiverOnline = callData.receiverOnline !== false; // default true unless told otherwise
             
             if (elements.callContainer) {
                 elements.callContainer.classList.add('active');
@@ -3394,7 +3623,8 @@ const timer = setInterval(() => {
                 elements.callWithName.textContent = SecuritySanitizer.sanitizeString(participantNames);
             }
             if (elements.callStatusText) {
-                elements.callStatusText.textContent = 'Initiating...';
+                // Show "Ringing..." when receiver is online, "Calling..." when offline
+                elements.callStatusText.textContent = UIState.callReceiverOnline ? 'Ringing...' : 'Calling...';
             }
             
             const icon = UIState.callType === 'video' ? 'fa-video' : 'fa-phone';
@@ -3408,13 +3638,28 @@ const timer = setInterval(() => {
             
             UIState.currentView = 'call';
             
-            UIEventHandlers.startCallTimer();
+            // Timer will start in handleCallAccepted (when receiver picks up)
+            // Show placeholder until then
+            if (elements.callDuration) elements.callDuration.textContent = '--:--';
         },
         
         handleCallStarted: function(callData) {
             if (elements.callStatusText) {
                 elements.callStatusText.textContent = 'Starting...';
             }
+        },
+
+        // Called when the remote party answers the call — THIS is when the timer starts.
+        handleCallAccepted: function(callData) {
+            UIState.callStartTime = Date.now();
+            UIState.callState = 'in-call';
+            if (elements.callStatusText) {
+                elements.callStatusText.textContent = 'In call';
+            }
+            if (elements.callDuration) {
+                elements.callDuration.textContent = '00:00';
+            }
+            UIEventHandlers.startCallTimer();
         },
         
         handleCallConnected: function(callData) {
@@ -3432,6 +3677,12 @@ const timer = setInterval(() => {
             UIState.callStartTime = null;
             UIState.callType = null;
             window._currentIncomingCallId = null;
+            // Clear dedup locks so next call can proceed immediately
+            if (window.__uiCallDispatchLock) window.__uiCallDispatchLock = { ts: 0, userId: null };
+            if (window.__earlyCallLock) window.__earlyCallLock = { ts: 0, userId: null };
+            // Clear call source context label
+            const _srcCtx = document.getElementById('callSourceCtx');
+            if (_srcCtx) _srcCtx.style.display = 'none';
 
             if (elements.callContainer) {
                 elements.callContainer.classList.remove('active');
@@ -3448,6 +3699,8 @@ const timer = setInterval(() => {
                 clearInterval(UIState.callDurationInterval);
                 UIState.callDurationInterval = null;
             }
+            // Reset duration display — shows '--:--' until next call is answered
+            if (elements.callDuration) elements.callDuration.textContent = '--:--';
             
             // Stop local stream tracks
             if (UIState.localStream) {
@@ -3482,9 +3735,11 @@ const timer = setInterval(() => {
             const returnTo = window.__pendingCallReturnTo || 'calls';
             const chatUserId = window.__pendingCallChatUserId || null;
 
-            // Clear stored origin so next call starts fresh
+            // Clear pending vars (origin backup is preserved for the full endCall path)
             window.__pendingCallReturnTo = null;
             window.__pendingCallChatUserId = null;
+            // NOTE: __callOriginReturnTo / __callOriginChatUserId intentionally NOT
+            // cleared here so the full endCall() function can still read them.
 
             if (window.parent && window.parent !== window) {
                 if (returnTo === 'messages' && chatUserId) {
@@ -3662,10 +3917,38 @@ const timer = setInterval(() => {
                     case 'UNAUTHORIZED':
                         this.handleAuthError();
                         break;
+                    case 'CALL_ACCEPTED':
+                        // Remote party answered — start the real timer now
+                        UIEventHandlers.handleCallAccepted && UIEventHandlers.handleCallAccepted(data.payload || {});
+                        break;
+                    case 'CALL_INCOMING':
+                        UIEventHandlers.handleIncomingCall && UIEventHandlers.handleIncomingCall(data.payload || {});
+                        break;
+                    case 'CALL_REJECTED':
+                        UIEventHandlers.handleCallEnded && UIEventHandlers.handleCallEnded(data.payload || {});
+                        break;
+                    case 'CALL_ENDED':
+                        UIEventHandlers.handleCallEnded && UIEventHandlers.handleCallEnded(data.payload || {});
+                        break;
                     case 'OPEN_CALL_WITH_USER':
                     case 'START_CALL':
                     case 'CALL_USER':
-                        handleOpenCallWithUser({ detail: data.payload || data });
+                        // This path is handled by guardedHandleOpenCallWithUser via the 'message' listener
+                        // in setupOpenCallWithUserListener. Calling handleOpenCallWithUser directly here
+                        // would bypass dedup — so we skip it.
+                        break;
+                    case 'SHOW_CALLS_SIDEBAR':
+                        // Sent by parent when returnTo='calls' after a call ends
+                        UIEventHandlers.showCallsSidebar && UIEventHandlers.showCallsSidebar();
+                        break;
+                    case 'CALL_FORCE_ENDED':
+                        // Backend cleaned up a stale call — reset all frontend state
+                        console.warn('[Calls UI] CALL_FORCE_ENDED received — resetting state');
+                        if (coreInstance && coreInstance.forceResetCallState) coreInstance.forceResetCallState();
+                        UIEventHandlers.resetCallUI && UIEventHandlers.resetCallUI();
+                        // Also clear dedup locks so next call works immediately
+                        if (window.__uiCallDispatchLock) window.__uiCallDispatchLock = { ts: 0, userId: null };
+                        if (window.__earlyCallLock) window.__earlyCallLock = { ts: 0, userId: null };
                         break;
                 }
             };
@@ -4188,15 +4471,27 @@ const timer = setInterval(() => {
             }
             
             if (elements.quickVoiceBtn) {
-                this.addListener(elements.quickVoiceBtn, 'click', UIEventHandlers.openNewCallModal);
+                this.addListener(elements.quickVoiceBtn, 'click', function() {
+                    UIEventHandlers.openNewCallModal();
+                    // Pre-switch to contacts tab and store preferred type
+                    window.__quickCallType = 'voice';
+                    setTimeout(() => { UIEventHandlers.switchNewCallTab && UIEventHandlers.switchNewCallTab('contacts'); }, 100);
+                });
             }
             
             if (elements.quickVideoBtn) {
-                this.addListener(elements.quickVideoBtn, 'click', UIEventHandlers.openNewCallModal);
+                this.addListener(elements.quickVideoBtn, 'click', function() {
+                    UIEventHandlers.openNewCallModal();
+                    window.__quickCallType = 'video';
+                    setTimeout(() => { UIEventHandlers.switchNewCallTab && UIEventHandlers.switchNewCallTab('contacts'); }, 100);
+                });
             }
             
             if (elements.quickGroupBtn) {
-                this.addListener(elements.quickGroupBtn, 'click', UIEventHandlers.openNewCallModal);
+                this.addListener(elements.quickGroupBtn, 'click', function() {
+                    UIEventHandlers.openNewCallModal();
+                    setTimeout(() => { UIEventHandlers.switchNewCallTab && UIEventHandlers.switchNewCallTab('groups'); }, 100);
+                });
             }
             
             // ==================== FIXED BUTTON BINDINGS ====================
@@ -4270,6 +4565,11 @@ const timer = setInterval(() => {
             
             if (elements.endCallBtn) {
                 this.addListener(elements.endCallBtn, 'click', UIEventHandlers.endCall);
+            }
+            // Also wire the header end button
+            const callHeaderEndBtn = document.getElementById('callHeaderEndBtn');
+            if (callHeaderEndBtn) {
+                this.addListener(callHeaderEndBtn, 'click', UIEventHandlers.endCall);
             }
             
             if (elements.focusModeBtn) {
@@ -4475,6 +4775,28 @@ const timer = setInterval(() => {
 
     // ==================== UI EVENT HANDLERS ====================
     const UIEventHandlers = {
+        // Show the calls sidebar (list view) — called when returning to calls after a call ends
+        showCallsSidebar: function() {
+            UIState.currentView = 'sidebar';
+            if (elements.sidebar) elements.sidebar.style.display = 'flex';
+            if (elements.callContainer) elements.callContainer.classList.remove('active');
+            if (elements.focusModeBtn) elements.focusModeBtn.style.display = 'none';
+        },
+
+        // Reset all call-related UI back to idle state
+        resetCallUI: function() {
+            UIState.currentView = 'sidebar';
+            if (elements.sidebar) elements.sidebar.style.display = 'flex';
+            if (elements.callContainer) elements.callContainer.classList.remove('active');
+            if (elements.callStatusText) elements.callStatusText.textContent = '';
+            if (elements.callTimer) elements.callTimer.textContent = '0:00';
+            // Clear dedup locks
+            if (window.__uiCallDispatchLock) window.__uiCallDispatchLock = { ts: 0, userId: null };
+            if (window.__earlyCallLock) window.__earlyCallLock = { ts: 0, userId: null };
+            window.__pendingCallReturnTo = null;
+            window.__pendingCallChatUserId = null;
+        },
+
         toggleMenuDots: function(e) {
             e?.stopPropagation();
             if (elements.menuDotsDropdown) {
@@ -4606,10 +4928,14 @@ const timer = setInterval(() => {
         startCallGeneric: function(type) {
             if (!canPerformAction('startCall')) return;
             
+            // Use __quickCallType if set by sidebar buttons
+            const callType = type || window.__quickCallType || 'voice';
+            window.__quickCallType = null;
+            
             const selectedContacts = UIEventHandlers.getSelectedContacts();
             
             if (selectedContacts.length === 0) {
-                showNotification('Please select at least one contact', 'warning');
+                showNotification('Please select at least one contact to call', 'warning');
                 return;
             }
             
@@ -4619,25 +4945,34 @@ const timer = setInterval(() => {
                 return;
             }
             
-            if (coreInstance && coreInstance.initCall) {
-                showNotification(`Starting ${type} call...`, 'info');
-                
-                coreInstance.initCall(type, selectedContacts)
-                    .then(result => {
-                        if (result && result.success) {
-                            showNotification(`${type} call started`, 'success');
-                            clearPendingCall();
-                            UIEventHandlers.closeNewCallModal();
-                        } else {
-                            showNotification(result?.error || 'Failed to start call', 'error');
-                        }
-                    })
-                    .catch(error => {
-                        showNotification('Failed to start call: ' + (error.message || 'Unknown error'), 'error');
-                        UILogger.error('Call failed', error);
-                    });
+            const contact = selectedContacts[0];
+            const userId = contact.id || contact.userId || contact;
+            const userName = contact.name || contact.displayName || contact.username || 'User';
+            
+            // Close modal first
+            UIEventHandlers.closeNewCallModal();
+            
+            // Use startCallWithUser for reliable call initiation
+            if (typeof startCallWithUser === 'function') {
+                window.__pendingCallReturnTo = 'calls';
+                window.__callOriginReturnTo = 'calls';
+                startCallWithUser(userId, userName, callType);
+            } else if (coreInstance && (coreInstance.startCall || coreInstance.initiateCall)) {
+                showNotification(`Starting ${callType} call...`, 'info');
+                const callFn = coreInstance.startCall
+                    ? coreInstance.startCall(parseInt(userId), callType)
+                    : coreInstance.initiateCall(callType, [parseInt(userId)]);
+                callFn.then(result => {
+                    if (result && result.success) {
+                        showNotification(`${callType} call started`, 'success');
+                    } else {
+                        showNotification(result?.error || 'Failed to start call', 'error');
+                    }
+                }).catch(error => {
+                    showNotification('Failed to start call: ' + (error.message || 'Unknown error'), 'error');
+                });
             } else {
-                showNotification('Call system not ready', 'error');
+                showNotification('Call system not ready. Please try again.', 'error');
             }
         },
         // ==================== END FIXED CALL METHODS ====================
@@ -4702,9 +5037,11 @@ const timer = setInterval(() => {
         },
         
         startCallTimer: function() {
-            if (!UIState.callStartTime) return;
-            
-            UIState.callStartTime = Date.now();
+            // callStartTime is set by handleCallAccepted (when receiver picks up).
+            // Do NOT override it here — that would reset the timer on every call.
+            if (!UIState.callStartTime) {
+                UIState.callStartTime = Date.now(); // fallback if somehow missed
+            }
             
             if (UIState.callDurationInterval) {
                 clearInterval(UIState.callDurationInterval);
@@ -4848,177 +5185,190 @@ const timer = setInterval(() => {
             showNotification(`Switched to ${UIState.isSpeakerOn ? 'speaker' : 'headphones'}`, 'info');
         },
 
-        endCall: async function() {
-    if (!UIState.activeCallId && !coreInstance?.isInCall?.()) {
-        showNotification('No active call to end', 'info');
-        return;
-    }
-    
-    {
-        const callId = UIState.activeCallId;
-        const startTime = UIState.callStartTime;
-        const duration = startTime ? Math.floor((Date.now() - startTime) / 1000) : 0;
-        
-        // CRITICAL FIX: Extract numeric call ID from format "call_xxx_yyy" or use as-is
-        let numericCallId = callId;
-        if (callId && typeof callId === 'string' && callId.startsWith('call_')) {
-            // Format: call_1775926577030_vhbtc7 -> extract 1775926577030
-            const parts = callId.split('_');
-            if (parts.length >= 2) {
-                numericCallId = parts[1]; // Take the timestamp part
+         endCall: async function() {
+            if (!UIState.activeCallId && !coreInstance?.isInCall?.()) {
+                showNotification('No active call to end', 'info');
+                return;
             }
-        }
-        
-        // Determine call status
-        let callStatus = 'failed';
-        if (callId) {
-            if (UIState.callState === 'connected' || UIState.callState === 'ongoing') {
-                callStatus = duration > 0 ? 'completed' : 'failed';
-            } else if (UIState.callState === 'initiating' || UIState.callState === 'ringing') {
-                callStatus = 'cancelled';
-            } else if (UIState.callState === 'incoming') {
-                callStatus = 'missed';
-            } else if (duration > 0) {
-                callStatus = 'completed';
-            }
-        }
-        
-        console.log('[Calls UI] Ending call:', { callId, numericCallId, duration, callStatus });
-        
-        // Send to core
-        if (coreInstance && coreInstance.sendAction) {
-            await coreInstance.sendAction('CALL_ENDED', {
-                callId: numericCallId,
-                duration: duration,
-                status: callStatus,
-                timestamp: Date.now()
-            });
-        }
-        
-        // Direct API call with numeric ID only
-        const token = window.__CHILD_SESSION__?.token || localStorage.getItem('token');
-        if (token && numericCallId) {
-            try {
-                const response = await fetch(`${(window.__getApiBase && window.__getApiBase()) || 'http://localhost:4000/api'}/calls/${numericCallId}/end`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'Authorization': `Bearer ${token}`
-                    },
-                    body: JSON.stringify({ 
-                        duration: duration, 
-                        status: callStatus,
-                        endedBy: window.__CHILD_SESSION__?.userId || 8
-                    })
-                });
-                
-                if (response.ok) {
-                    const data = await response.json();
-                    console.log('[Calls UI] Call saved successfully:', data);
-                    showNotification('Call recorded successfully', 'success');
-                } else {
-                    const errorText = await response.text();
-                    console.error('[Calls UI] Failed to save call:', response.status, errorText);
+            
+            const callId = UIState.activeCallId;
+            const startTime = UIState.callStartTime;
+            const duration = startTime ? Math.floor((Date.now() - startTime) / 1000) : 0;
+            
+            let callStatus = 'failed';
+            if (callId) {
+                if (UIState.callState === 'connected' || UIState.callState === 'ongoing') {
+                    callStatus = duration > 0 ? 'completed' : 'failed';
+                } else if (UIState.callState === 'initiating' || UIState.callState === 'ringing') {
+                    callStatus = 'cancelled';
+                } else if (UIState.callState === 'incoming') {
+                    callStatus = 'missed';
+                } else if (duration > 0) {
+                    callStatus = 'completed';
                 }
-            } catch (fetchError) {
-                console.error('[Calls UI] Direct fetch save error:', fetchError);
             }
-        }
-        
-        // Clean up local streams
-        if (UIState.localStream) {
-            UIState.localStream.getTracks().forEach(track => track.stop());
-            UIState.localStream = null;
-        }
-        
-        if (UIState.screenStream) {
-            UIState.screenStream.getTracks().forEach(track => track.stop());
-            UIState.screenStream = null;
-        }
-        
-        if (UIState.callDurationInterval) {
-            clearInterval(UIState.callDurationInterval);
-            UIState.callDurationInterval = null;
-        }
-        
-        // Reset UI state
-        UIState.activeCallId = null;
-        UIState.callParticipants = [];
-        UIState.callStartTime = null;
-        UIState.callType = null;
-        UIState.callActive = false;
-        UIState.callState = 'idle';
-        
-        if (elements.callContainer) {
-            elements.callContainer.classList.remove('active');
-        }
-        if (elements.sidebar) {
-            elements.sidebar.style.display = 'flex';
-        }
-        if (elements.focusModeBtn) {
-            elements.focusModeBtn.style.display = 'none';
-        }
-        
-        if (UIState.currentFocusMode) {
-            this.disableFocusMode();
-        }
-        
-        if (elements.videoGrid) {
-            elements.videoGrid.innerHTML = '';
-            if (elements.offlineCallPlaceholder) {
-                elements.offlineCallPlaceholder.style.display = 'flex';
+            
+            console.log('[Calls UI] Ending call:', { callId, duration, callStatus });
+            
+            if (coreInstance && coreInstance.sendAction) {
+                await coreInstance.sendAction('CALL_ENDED', {
+                    callId: callId,
+                    duration: duration,
+                    status: callStatus,
+                    timestamp: Date.now()
+                });
             }
-        }
-        
-        UIState.currentView = 'sidebar';
-        
-        // Refresh call history
-        setTimeout(() => {
-            this.refreshCallHistoryAfterCall();
-            this.showPrivateNotesModal();
-        }, 1000);
-        
-        // Show notification
-        if (callStatus === 'completed') {
+            
+            const token = window.__CHILD_SESSION__?.token || localStorage.getItem('token');
+            if (token && callId) {
+                try {
+                    const response = await fetch(`${(window.__getApiBase && window.__getApiBase()) || 'http://localhost:4000/api'}/calls/${callId}/end`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                        body: JSON.stringify({ duration: duration, status: callStatus, endedBy: window.__CHILD_SESSION__?.userId || 8 })
+                    });
+                    if (response.ok) console.log('[Calls UI] Call saved successfully');
+                } catch (fetchError) { console.error('[Calls UI] Save error:', fetchError); }
+            }
+            
+            if (UIState.localStream) { UIState.localStream.getTracks().forEach(track => track.stop()); UIState.localStream = null; }
+            if (UIState.screenStream) { UIState.screenStream.getTracks().forEach(track => track.stop()); UIState.screenStream = null; }
+            if (UIState.callDurationInterval) { clearInterval(UIState.callDurationInterval); UIState.callDurationInterval = null; }
+            
+            // CRITICAL: Reset ALL call state variables
+            UIState.activeCallId = null;
+            UIState.callParticipants = [];
+            UIState.callStartTime = null;
+            UIState.callType = null;
+            UIState.callActive = false;
+            UIState.callState = 'idle';
+            UIState.remoteStreams.clear();
+            UIState.remoteStream = null;
+            
+            if (window._incomingCallTimer) { clearInterval(window._incomingCallTimer); window._incomingCallTimer = null; }
+            window._currentIncomingCallId = null;
+            
+            if (elements.callContainer) elements.callContainer.classList.remove('active');
+            if (elements.sidebar) elements.sidebar.style.display = 'flex';
+            if (elements.focusModeBtn) elements.focusModeBtn.style.display = 'none';
+            
+            const callHeaderEndBtnEl = document.getElementById('callHeaderEndBtn');
+            if (callHeaderEndBtnEl) callHeaderEndBtnEl.style.display = 'none';
+            
+            if (UIState.currentFocusMode) this.disableFocusMode();
+            
+            if (elements.videoGrid) {
+                elements.videoGrid.innerHTML = '';
+                if (elements.offlineCallPlaceholder) elements.offlineCallPlaceholder.style.display = 'flex';
+            }
+            
+            UIState.currentView = 'sidebar';
+            
+            // Force core to reset its call state
+            if (coreInstance && coreInstance.clearActiveCall) coreInstance.clearActiveCall();
+            if (coreInstance && coreInstance.resetCallState) coreInstance.resetCallState();
+            if (coreInstance && coreInstance._currentCallId) coreInstance._currentCallId = null;
+            if (coreInstance && coreInstance._callActive) coreInstance._callActive = false;
+            
+            // Refresh call history
+            if (typeof loadCallHistory === 'function') { 
+                await loadCallHistory(); 
+            }
+            
+            if (window.parent && window.parent !== window) {
+                window.parent.postMessage({ type: 'SHOW_SIDEBAR_ICONS', module: 'calls' }, '*');
+                window.parent.postMessage({ type: 'CALL_ENDED_RETURN', timestamp: Date.now() }, '*');
+            }
+            
+            setTimeout(() => this.showPrivateNotesModal(), 500);
+            
             const mins = Math.floor(duration / 60);
             const secs = duration % 60;
             showNotification(`Call ended - Duration: ${mins}:${secs.toString().padStart(2, '0')}`, 'success');
-        } else if (callStatus === 'missed') {
-            showNotification('Missed call', 'warning');
-        } else if (callStatus === 'cancelled') {
-            showNotification('Call cancelled', 'info');
-        } else {
-            showNotification('Call ended', 'info');
-        }
-
-        // Navigate back
-        setTimeout(() => {
-            if (window.parent && window.parent !== window) {
-                window.parent.postMessage({ type: 'SHOW_SIDEBAR_ICONS', module: 'calls' }, '*');
-                const returnTo = window.__pendingCallReturnTo || 'calls';
-                const chatUserId = window.__pendingCallChatUserId || null;
-                // Clear
-                window.__pendingCallReturnTo = null;
-                window.__pendingCallChatUserId = null;
-
-                if (returnTo === 'messages' && chatUserId) {
-                    window.parent.postMessage({
-                        type: 'SWITCH_MODULE',
-                        module: 'messages',
-                        payload: { returnFromCall: true, openChatWith: chatUserId },
-                        timestamp: Date.now()
-                    }, '*');
-                } else if (returnTo === 'friends') {
-                    window.parent.postMessage({
-                        type: 'SWITCH_MODULE',
-                        module: 'friends',
-                        payload: { returnFromCall: true },
-                        timestamp: Date.now()
-                    }, '*');
+            
+            // Navigate back to correct screen
+            setTimeout(() => {
+                if (window.parent && window.parent !== window) {
+                    const returnTo = window.__callOriginReturnTo || window.__pendingCallReturnTo || 'calls';
+                    const chatUserId = window.__callOriginChatUserId || window.__pendingCallChatUserId || null;
+                    
+                    window.__pendingCallReturnTo = null;
+                    window.__pendingCallChatUserId = null;
+                    window.__callOriginReturnTo = null;
+                    window.__callOriginChatUserId = null;
+                    
+                    // FORCE sidebar to show when returning to calls
+                    const sidebar = document.getElementById('sidebar');
+                    const callContainer = document.getElementById('callContainer');
+                    
+                    if (sidebar) sidebar.style.display = 'flex';
+                    if (callContainer) callContainer.classList.remove('active');
+                    
+                    if (returnTo === 'messages' && chatUserId) {
+                        window.parent.postMessage({
+                            type: 'SWITCH_MODULE',
+                            module: 'messages',
+                            payload: { returnFromCall: true, openChatWith: chatUserId },
+                            timestamp: Date.now()
+                        }, '*');
+                    } else if (returnTo === 'friends') {
+                        window.parent.postMessage({
+                            type: 'SWITCH_MODULE',
+                            module: 'friends',
+                            payload: { returnFromCall: true },
+                            timestamp: Date.now()
+                        }, '*');
+                    }
                 }
-                // If 'calls' — stay; no SWITCH_MODULE needed
+                
+                // Also force UI update locally
+                if (elements.sidebar) elements.sidebar.style.display = 'flex';
+                if (elements.callContainer) elements.callContainer.classList.remove('active');
+                UIState.currentView = 'sidebar';
+                
+            }, 800);
+        },
+
+refreshCallHistoryAfterCall: async function() {
+    console.log('[Calls UI] Refreshing call history after call ended');
+    
+    // Request fresh call history from parent
+    if (window.parent && window.parent !== window) {
+        window.parent.postMessage({
+            type: 'REFRESH_CALL_HISTORY',
+            payload: { 
+                userId: window.__CHILD_SESSION__?.userId,
+                timestamp: Date.now()
             }
-        }, 800);
+        }, '*');
+    }
+    
+    // Reload using the API
+    if (typeof loadCallHistory === 'function') {
+        try {
+            const calls = await loadCallHistory();
+            console.log('[Calls UI] Call history refreshed:', calls?.length || 0, 'calls');
+        } catch (err) {
+            console.error('[Calls UI] Failed to refresh call history:', err);
+        }
+    }
+    
+    // Also force core to reset its call state
+    if (coreInstance && coreInstance.resetCallState) {
+        coreInstance.resetCallState();
+    }
+    
+    // Clear any pending call flags
+    if (coreInstance && coreInstance.clearActiveCall) {
+        coreInstance.clearActiveCall();
+    }
+    
+    // Reset core's call active flag
+    if (coreInstance && coreInstance._currentCallId) {
+        coreInstance._currentCallId = null;
+    }
+    if (coreInstance && coreInstance._callActive) {
+        coreInstance._callActive = false;
     }
 },
 
@@ -6200,6 +6550,33 @@ declineIncomingCall: async function() {
     };  // end UIPanelHandlers
 
 
+    // ==================== MOBILE BACK BUTTON SETUP ====================
+    function setupMobileBackButton() {
+        const mobileBackBtn = document.getElementById('mobileBackBtn');
+        if (mobileBackBtn) {
+            mobileBackBtn.addEventListener('click', function() {
+                // Hide call container, show sidebar
+                if (elements.callContainer) elements.callContainer.classList.remove('active');
+                if (elements.sidebar) elements.sidebar.style.display = 'flex';
+                
+                // Reset call state
+                UIState.currentView = 'sidebar';
+                UIState.callActive = false;
+                UIState.callState = 'idle';
+                
+                // Notify parent to show sidebar icons
+                if (window.parent && window.parent !== window) {
+                    window.parent.postMessage({ type: 'SHOW_SIDEBAR_ICONS', module: 'calls' }, '*');
+                }
+                
+                // If in a call, end it
+                if (UIState.activeCallId && coreInstance && coreInstance.endCall) {
+                    coreInstance.endCall(UIState.activeCallId);
+                }
+            });
+        }
+    }
+
 
     function escapeHtml(str) {
         if (!str) return '';
@@ -6609,6 +6986,9 @@ setupFriendsListListener();
         cacheElements();
         await RenderingPipeline.execute();
         
+        // Load cached call history for persistence
+        loadCachedCallHistory();
+        
         if (coreInstance && !fallbackModeActive) {
             CoreIntegration.subscribeToCore();
         }
@@ -6622,6 +7002,9 @@ setupFriendsListListener();
         
         // Set up OPEN_CALL_WITH_USER listener
         setupOpenCallWithUserListener();
+        
+        // Set up mobile back button
+        setupMobileBackButton();
         
         window.dispatchEvent(new CustomEvent('calls.ui.ready', {
             detail: { 

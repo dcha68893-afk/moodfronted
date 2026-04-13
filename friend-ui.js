@@ -265,15 +265,9 @@ function navigateToCallModule(userId, userName, callType = 'voice') {
     };
     
     if (window.parent && window.parent !== window) {
-        // Send OPEN_CALL_WITH_USER event first (this triggers the actual call)
-        window.parent.postMessage({
-            type: 'OPEN_CALL_WITH_USER',
-            payload: callPayload,
-            source: 'friends-ui',
-            timestamp: Date.now()
-        }, '*');
-        
-        // Also send SWITCH_MODULE to ensure navigation
+        // Send ONE combined message: SWITCH_MODULE with the call payload embedded.
+        // chat.html handles navigation AND then forwards OPEN_CALL_WITH_USER to the
+        // calls iframe after the navigation settles — no race condition.
         window.parent.postMessage({
             type: 'SWITCH_MODULE',
             module: 'calls',
@@ -1500,7 +1494,6 @@ export const CoreIntegration = {
         this.subscribe('friendRequestAccepted', (event) => {
             const data = this.validateEventData(event);
             if (data?.friendId) {
-                showNotification('Friend request accepted!', 'success');
                 loadFriendsFromBackend();
                 loadSentRequestsFromBackend();
             }
@@ -2185,7 +2178,6 @@ async function optimisticAcceptRequest(requestData, button) {
         console.log('[UI] Accept request API response:', response);
         
         if (response && response.success) {
-            showNotification(`You are now friends with ${displayName}!`, 'success');
             
             // Force immediate removal from ALL caches
             if (friendRequests && Array.isArray(friendRequests)) {
@@ -4610,7 +4602,6 @@ export const handleRequestAction = function(action, requestData, button) {
                     console.log('[UI] Accept result:', result);
                     
                     if (result && result.success) {
-                        showNotification('Friend request accepted!', 'success');
                         
                         // Refresh all data
                         await Promise.all([

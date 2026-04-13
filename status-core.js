@@ -876,9 +876,15 @@ function setSession(token, user, expiresAt = null) {
     
     logStatus('SUCCESS', 'Session stored in memory');
     
-    // Load statuses after session is established
+    // Load statuses after session is established — debounced to prevent multiple
+    // rapid setSession() calls (AUTH_READY + PARENT_READY + SESSION_DATA) from
+    // firing 3–5 parallel loadStatuses() fetches.
     if (_currentState === LifecycleState.ACTIVE) {
-        loadStatuses();
+        if (setSession._loadDebounce) clearTimeout(setSession._loadDebounce);
+        setSession._loadDebounce = setTimeout(() => {
+            setSession._loadDebounce = null;
+            loadStatuses();
+        }, 150);
     }
     
     return true;
@@ -1295,11 +1301,15 @@ async function loadStatuses() {
         updateStatusState({ loading: false, error: 'Module not active' });
         return;
     }
+
+    // Prevent concurrent calls — if a fetch is already in-flight, skip
+    if (loadStatuses._inFlight) return;
+    loadStatuses._inFlight = true;
     
     updateStatusState({ loading: true, error: null });
     
     try {
-        console.log(`[${MODULE_NAME}] 📤 Loading statuses from backend`);
+        // console.log(`[${MODULE_NAME}] 📤 Loading statuses from backend`);
         const response = await makeApiRequest('/api/status', 'GET');
 
         // Backend wraps data: { success, data: { statuses: [...] } }
@@ -1307,7 +1317,7 @@ async function loadStatuses() {
         // Support both shapes for resilience.
         const statusList = (response && (response.statuses || (response.data && response.data.statuses))) || null;
 
-        console.log(`[${MODULE_NAME}] 📥 Received ${statusList?.length || 0} statuses from backend`);
+        // console.log(`[${MODULE_NAME}] 📥 Received ${statusList?.length || 0} statuses from backend`);
         
         if (statusList && Array.isArray(statusList)) {
             statusCache.clear();
@@ -1343,11 +1353,25 @@ async function loadStatuses() {
         }
     } catch (error) {
         console.error(`[${MODULE_NAME}] Failed to load statuses:`, error);
-        updateStatusState({ 
-            loading: false, 
-            error: error.message || 'Failed to load statuses'
-        });
         logStatus('FAILED', `Load statuses: ${error.message}`);
+
+        // On network failure, serve whatever is in cache so UI isn't empty
+        try {
+            const cachedStatuses = await SafeStorage.getJSON(LOCAL_STORAGE_KEYS.STATUSES);
+            if (cachedStatuses && Array.isArray(cachedStatuses) && cachedStatuses.length > 0) {
+                statuses = cachedStatuses;
+                statusState.statuses = cachedStatuses;
+                statusState.loading = false;
+                logStatus('INFO', `Serving ${cachedStatuses.length} cached statuses after fetch failure`);
+                notifyStatusObservers();
+            } else {
+                updateStatusState({ loading: false, error: error.message || 'Failed to load statuses' });
+            }
+        } catch (_) {
+            updateStatusState({ loading: false, error: error.message || 'Failed to load statuses' });
+        }
+    } finally {
+        loadStatuses._inFlight = false;
     }
 }
 
@@ -1355,45 +1379,59 @@ async function postStatus(statusData) {
     if (!ensureActive('postStatus')) {
         return { success: false, error: 'Module not active' };
     }
-    
     if (!isSessionReady()) {
         return { success: false, error: 'Not authenticated' };
     }
-    
-    // Accept both .content (backend field) and .text (legacy UI field)
-    if (!statusData || (!statusData.content && !statusData.text && !statusData.media && !statusData.mediaUrl)) {
+    if (!statusData || (!(statusData.content || '').trim() && !(statusData.text || '').trim() && !statusData.media && !statusData.mediaUrl)) {
         return { success: false, error: 'Status content required' };
     }
-    
+
     updateStatusState({ loading: true, error: null });
-    
+
+    const rawContent = statusData.content || statusData.text || '';
+
+    const payload = {
+        content: rawContent,
+        type: statusData.type || 'text',
+        moodType: statusData.mood || statusData.moodType || null,
+        mediaUrl: statusData.media || statusData.mediaUrl || null,
+        mediaType: statusData.mediaType || null,
+        background: statusData.background || null,
+        // Send both privacy (string) and isPublic (bool) so backend handles either form
+        privacy: statusData.privacy || (statusData.isPublic === false ? 'friends' : 'public'),
+        isPublic: (statusData.privacy === 'everyone' || statusData.privacy === 'public')
+            ? true
+            : (statusData.isPublic !== undefined ? statusData.isPublic : true),
+        location: statusData.location || null,
+        latitude: statusData.latitude || null,
+        longitude: statusData.longitude || null,
+    };
+
+    // If offline — queue immediately without attempting a doomed request
+    if (!isOnlineGlobal || !navigator.onLine) {
+        try {
+            const queue = await SafeStorage.getJSON(LOCAL_STORAGE_KEYS.OFFLINE_QUEUE) || [];
+            queue.push({ ...payload, _queuedAt: new Date().toISOString() });
+            SafeStorage.setJSON(LOCAL_STORAGE_KEYS.OFFLINE_QUEUE, queue);
+            updateStatusState({ loading: false });
+            logStatus('INFO', 'Status queued offline — will post when connection returns');
+            return { success: true, queued: true, message: 'Queued for posting when online' };
+        } catch (qErr) {
+            updateStatusState({ loading: false, error: 'Failed to queue status offline' });
+            return { success: false, error: 'Offline and queue failed' };
+        }
+    }
+
     try {
-        console.log(`[${MODULE_NAME}] 📤 Posting new status`);
-        
-        const payload = {
-            // Backend expects 'content', frontend may send 'text' — normalise here
-            content: statusData.content || statusData.text || '',
-            type: statusData.type || 'text',
-            moodType: statusData.mood || statusData.moodType || null,
-            mediaUrl: statusData.media || statusData.mediaUrl || null,
-            isPublic: (statusData.privacy === 'everyone' || statusData.privacy === 'public')
-                ? true
-                : (statusData.isPublic !== undefined ? statusData.isPublic : true),
-            location: statusData.location || null,
-            latitude: statusData.latitude || null,
-            longitude: statusData.longitude || null,
-        };
-        
-        // POST /api/status  (chat.html maps /api/status/create → /status but POST / is the same)
+        // console.log(`[${MODULE_NAME}] 📤 Posting new status`);
         const response = await makeApiRequest('/api/status', 'POST', payload);
-        
-        console.log(`[${MODULE_NAME}] 📥 Status posted successfully:`, response);
-        
-        // Handle both { status } and { data: { status } } response shapes
+        // console.log(`[${MODULE_NAME}] 📥 Status posted successfully:`, response);
+
         const newStatus = response?.status || response?.data?.status || null;
-        
         if (newStatus) {
             addStatus(newStatus);
+            // Invalidate TTL so next background refresh picks up the new post
+            SafeStorage.memoryStore.delete(LOCAL_STORAGE_KEYS.LAST_SYNC);
             updateStatusState({ loading: false });
             logStatus('POST', 'Status posted successfully');
             return { success: true, status: newStatus };
@@ -1404,6 +1442,16 @@ async function postStatus(statusData) {
         console.error(`[${MODULE_NAME}] Failed to post status:`, error);
         updateStatusState({ loading: false, error: error.message });
         logStatus('FAILED', `Post status: ${error.message}`);
+        // Queue on network failures so the post isn't lost
+        if (!navigator.onLine || error.message.includes('timeout') || error.message.includes('network') || error.message.includes('fetch')) {
+            try {
+                const queue = await SafeStorage.getJSON(LOCAL_STORAGE_KEYS.OFFLINE_QUEUE) || [];
+                queue.push({ ...payload, _queuedAt: new Date().toISOString() });
+                SafeStorage.setJSON(LOCAL_STORAGE_KEYS.OFFLINE_QUEUE, queue);
+                logStatus('INFO', 'Network error — status queued for retry');
+                return { success: false, queued: true, error: error.message, message: 'Queued for retry when online' };
+            } catch (_) {}
+        }
         return { success: false, error: error.message };
     }
 }
@@ -1418,12 +1466,12 @@ async function markStatusViewed(statusId) {
     }
     
     try {
-        console.log(`[${MODULE_NAME}] 📤 Marking status as viewed: ${statusId}`);
+        // console.log(`[${MODULE_NAME}] 📤 Marking status as viewed: ${statusId}`);
         
         // Correct RESTful endpoint: POST /api/status/:statusId/view
         const response = await makeApiRequest(`/api/status/${statusId}/view`, 'POST', {});
         
-        console.log(`[${MODULE_NAME}] 📥 Status marked as viewed:`, response);
+        // console.log(`[${MODULE_NAME}] 📥 Status marked as viewed:`, response);
         
         if (response && response.success !== false) {
             markStatusViewedLocally(statusId);
@@ -1449,12 +1497,12 @@ async function deleteStatus(statusId) {
     }
     
     try {
-        console.log(`[${MODULE_NAME}] 📤 Deleting status: ${statusId}`);
+        // console.log(`[${MODULE_NAME}] 📤 Deleting status: ${statusId}`);
         
         // Correct RESTful endpoint: DELETE /api/status/:statusId
         const response = await makeApiRequest(`/api/status/${statusId}`, 'DELETE', null);
         
-        console.log(`[${MODULE_NAME}] 📥 Status deleted:`, response);
+        // console.log(`[${MODULE_NAME}] 📥 Status deleted:`, response);
         
         if (response && response.success !== false) {
             removeStatus(statusId);
@@ -1480,11 +1528,11 @@ async function addReaction(statusId, reaction) {
     }
     
     try {
-        console.log(`[${MODULE_NAME}] 📤 Adding reaction ${reaction} to status: ${statusId}`);
+        // console.log(`[${MODULE_NAME}] 📤 Adding reaction ${reaction} to status: ${statusId}`);
         
         const response = await makeApiRequest(`/api/status/${statusId}/like`, 'POST', {});
         
-        console.log(`[${MODULE_NAME}] 📥 Reaction added:`, response);
+        // console.log(`[${MODULE_NAME}] 📥 Reaction added:`, response);
         
         if (response && response.success !== false) {
             const status = statusState.statuses.find(s => s.id === statusId);
@@ -1519,11 +1567,11 @@ async function removeReaction(statusId, reaction) {
     }
     
     try {
-        console.log(`[${MODULE_NAME}] 📤 Removing reaction ${reaction} from status: ${statusId}`);
+        // console.log(`[${MODULE_NAME}] 📤 Removing reaction ${reaction} from status: ${statusId}`);
         
         const response = await makeApiRequest(`/api/status/${statusId}/like`, 'DELETE', null);
         
-        console.log(`[${MODULE_NAME}] 📥 Reaction removed:`, response);
+        // console.log(`[${MODULE_NAME}] 📥 Reaction removed:`, response);
         
         if (response && response.success !== false) {
             const status = statusState.statuses.find(s => s.id === statusId);
@@ -3256,14 +3304,14 @@ function handleParentMessage(event) {
 
             // Handle PARENT_READY
             if (msg.type === 'PARENT_READY') {
-                console.log('[status] 📥 PARENT_READY received via direct handler');
+                // console.log('[status] 📥 PARENT_READY received via direct handler');
                 handleParentReady(msg);
                 return;
             }
 
             // Handle AUTH_READY directly
 if (msg.type === 'AUTH_READY') {
-    console.log('[status] 📥 AUTH_READY received via direct handler');
+    // console.log('[status] 📥 AUTH_READY received via direct handler');
     
     const payload = msg.payload || {};
     const sessionData = payload.session || payload;
@@ -3304,36 +3352,6 @@ if (msg.type === 'AUTH_READY') {
             if (parentReadyResolver) {
                 parentReadyResolver({ type: 'AUTH_READY', timestamp: Date.now() });
             }
-            // =============================================
-// ADD THIS BLOCK INSIDE handleParentMessage function
-// Place it after the other message type checks (like after STATUS_UPDATE)
-// =============================================
-
-// ── OFFLINE-FIRST: Apply per-key setting changes immediately ──
-if (msg.type === 'SETTING_CHANGED' || msg.type === 'SETTINGS_UPDATED') {
-    const payload = msg.payload || msg.data || {};
-
-    if (msg.type === 'SETTING_CHANGED' && payload.section && payload.key !== undefined) {
-        const { section, key, value } = payload;
-        applySettingToStatusModule(section, key, value);
-        window.dispatchEvent(new CustomEvent('settingChanged', { detail: { section, key, value, timestamp: Date.now() } }));
-        EventBus.emit('settingChanged', { section, key, value });
-    }
-
-    if (msg.type === 'SETTINGS_UPDATED' && payload.settings) {
-        const s = payload.settings;
-        Object.entries(s).forEach(([sec, secVal]) => {
-            if (secVal && typeof secVal === 'object')
-                Object.entries(secVal).forEach(([k, v]) => applySettingToStatusModule(sec, k, v));
-        });
-        if (typeof SafeStorage !== 'undefined') SafeStorage.setJSON('user_settings', s);
-        window.dispatchEvent(new CustomEvent('settingsUpdated', { detail: { settings: s, timestamp: Date.now() } }));
-        EventBus.emit('settingsUpdated', { settings: s });
-    }
-
-    return; // Don't process further handlers for these types
-}
-
         }
     }
     return;
@@ -3387,6 +3405,32 @@ if (msg.type === 'SETTING_CHANGED' || msg.type === 'SETTINGS_UPDATED') {
                     } else {
                         addStatus(status);
                     }
+                }
+                return;
+            }
+
+            // ── SETTINGS: Apply per-key or full-settings changes immediately ──
+            if (msg.type === 'SETTING_CHANGED' || msg.type === 'SETTINGS_UPDATED') {
+                const payload = msg.payload || msg.data || {};
+                if (msg.type === 'SETTING_CHANGED' && payload.section && payload.key !== undefined) {
+                    const { section, key, value } = payload;
+                    if (typeof applySettingToStatusModule === 'function') {
+                        applySettingToStatusModule(section, key, value);
+                    }
+                    window.dispatchEvent(new CustomEvent('settingChanged', { detail: { section, key, value, timestamp: Date.now() } }));
+                    if (typeof EventBus !== 'undefined' && EventBus.emit) EventBus.emit('settingChanged', { section, key, value });
+                }
+                if (msg.type === 'SETTINGS_UPDATED' && payload.settings) {
+                    const s = payload.settings;
+                    if (typeof applySettingToStatusModule === 'function') {
+                        Object.entries(s).forEach(([sec, secVal]) => {
+                            if (secVal && typeof secVal === 'object')
+                                Object.entries(secVal).forEach(([k, v]) => applySettingToStatusModule(sec, k, v));
+                        });
+                    }
+                    if (typeof SafeStorage !== 'undefined') SafeStorage.setJSON('user_settings', s);
+                    window.dispatchEvent(new CustomEvent('settingsUpdated', { detail: { settings: s, timestamp: Date.now() } }));
+                    if (typeof EventBus !== 'undefined' && EventBus.emit) EventBus.emit('settingsUpdated', { settings: s });
                 }
                 return;
             }
@@ -3493,12 +3537,12 @@ addMessageHandler('AUTH_VALIDATED', (message) => {
 });
 
 addMessageHandler('PARENT_READY', (message) => {
-    console.log('[status] 📥 PARENT_READY via registered handler');
+    // console.log('[status] 📥 PARENT_READY via registered handler');
     handleParentReady(message);
 });
 
 addMessageHandler('AUTH_READY', (message) => {
-    console.log('[status] 📥 AUTH_READY via registered handler');
+    // console.log('[status] 📥 AUTH_READY via registered handler');
     
     const payload = message.payload || message.data || {};
     const sessionData = payload.session || payload;
@@ -6748,7 +6792,8 @@ const UNIFIED_TOKEN_KEY = 'USER_TOKEN';
 function waitForTokenReady() {
     return new Promise((resolve) => {
         try {
-            if (isTokenReady || isSessionReady()) {
+            // Check all possible token-ready signals immediately
+            if (isTokenReady || isSessionReady() || getSessionToken()) {
                 resolve(true);
                 return;
             }
@@ -6767,9 +6812,24 @@ function waitForTokenReady() {
                 return;
             }
             
+            let resolved = false;
+            // 30-second hard timeout — resolves true optimistically if any token source appears
+            const hardTimeout = setTimeout(() => {
+                if (!resolved) {
+                    resolved = true;
+                    if (getSessionToken()) { resolve(true); } else { resolve(false); }
+                }
+            }, 30000);
+            
             const checkToken = () => {
                 try {
-                    if (isSessionReady() && __isValidSession({ token: getSessionToken(), userId: getSessionUserId() })) {
+                    if (resolved) return;
+                    const tok = getSessionToken();
+                    const ready = (isTokenReady || isSessionReady() || tok) &&
+                                  (tok ? __isValidSession({ token: tok, userId: getSessionUserId() }) : isSessionReady());
+                    if (ready) {
+                        resolved = true;
+                        clearTimeout(hardTimeout);
                         isTokenReady = true;
                         resolve(true);
                         triggerTokenReadyCallbacks();
@@ -6777,7 +6837,7 @@ function waitForTokenReady() {
                     }
                     setTimeout(checkToken, 100);
                 } catch (error) {
-                    resolve(false);
+                    if (!resolved) { resolved = true; clearTimeout(hardTimeout); resolve(false); }
                 }
             };
             
@@ -6788,29 +6848,7 @@ function waitForTokenReady() {
     });
 }
 
-// Add this after the existing waitForTokenReady function
-function waitForTokenReady() {
-    return new Promise((resolve) => {
-        if (isTokenReady || (isSessionReady() && getSessionToken())) {
-            resolve(true);
-            return;
-        }
-        
-        // Check every 100ms
-        const interval = setInterval(() => {
-            if (isTokenReady || (isSessionReady() && getSessionToken())) {
-                clearInterval(interval);
-                resolve(true);
-            }
-        }, 100);
-        
-        // Timeout after 5 seconds
-        setTimeout(() => {
-            clearInterval(interval);
-            resolve(false);
-        }, 5000);
-    });
-}
+// NOTE: duplicate waitForTokenReady removed — the version above is the canonical one
 
 function onTokenReady(callback) {
     try {
@@ -6964,17 +7002,11 @@ const secureApiCall = createErrorBoundary(async function(endpoint, options = {})
     const body = options.body;
     const params = options.params;
     
-    // Use makeApiRequest which sends to parent
-    const response = await makeApiRequest(endpoint, method, body, params);
-    
-    // Return in a format compatible with existing code
-    return {
-        ok: true,
-        status: 200,
-        json: async () => response,
-        text: async () => JSON.stringify(response),
-        headers: new Headers({ 'content-type': 'application/json' })
-    };
+    // Use makeApiRequest which sends to parent and returns the unwrapped data object.
+    // DO NOT wrap in a fake Response — all callers access properties directly
+    // (response?.statuses, response?.data?.user, etc.).
+    const result = await makeApiRequest(endpoint, method, body, params);
+    return result;
 }, 'secureApiCall', null);
 // =============================================
 // GLOBAL STATE VARIABLES
@@ -7196,6 +7228,14 @@ function initializeUIWithCachedData() {
 }
 
 function loadUserFromCache() {
+    try {
+        // Try memoryStore first (synchronous, always available)
+        const raw = SafeStorage.memoryStore.get(LOCAL_STORAGE_KEYS.USER);
+        if (raw) {
+            const parsed = JSON.parse(raw);
+            if (parsed && parsed.id) return parsed;
+        }
+    } catch(e) {}
     return null;
 }
 
@@ -7266,6 +7306,12 @@ async function loadCachedDataInstantly() {
         if (lastPostDateData) {
             try { lastPostDate = new Date(lastPostDateData); } catch { lastPostDate = null; }
         }
+
+        // Restore LAST_SYNC into memoryStore so TTL guard works correctly on first load
+        const lastSyncData = await SafeStorage.get(LOCAL_STORAGE_KEYS.LAST_SYNC);
+        if (lastSyncData) {
+            SafeStorage.memoryStore.set(LOCAL_STORAGE_KEYS.LAST_SYNC, lastSyncData);
+        }
         
     } catch (error) {}
 }
@@ -7322,12 +7368,26 @@ async function startBackgroundInitialization() {
 
 async function loadFreshDataInBackground() {
     try {
+        // --- TTL guard: skip full refresh if data was synced recently (< 60 s) ---
+        const SYNC_TTL_MS = 60_000;
+        const lastSyncRaw = SafeStorage.memoryStore.get(LOCAL_STORAGE_KEYS.LAST_SYNC);
+        if (lastSyncRaw) {
+            const age = Date.now() - parseInt(lastSyncRaw, 10);
+            if (age < SYNC_TTL_MS) {
+                logStatus('INFO', `Skipping background refresh — data is ${Math.round(age/1000)}s old (TTL ${SYNC_TTL_MS/1000}s)`);
+                return;
+            }
+        }
+
         const loadPromises = [];
         if (typeof loadStatusesInBackground !== 'undefined') loadPromises.push(safeApiOperation(() => loadStatusesInBackground()));
         if (typeof loadMyStatusesInBackground !== 'undefined') loadPromises.push(safeApiOperation(() => loadMyStatusesInBackground()));
         if (typeof loadHighlightsInBackground !== 'undefined') loadPromises.push(safeApiOperation(() => loadHighlightsInBackground()));
         if (typeof loadUserDataInBackground !== 'undefined') loadPromises.push(safeApiOperation(() => loadUserDataInBackground()));
         await Promise.allSettled(loadPromises);
+
+        // Stamp the sync time
+        SafeStorage.set(LOCAL_STORAGE_KEYS.LAST_SYNC, String(Date.now()));
     } catch (error) {}
 }
 
@@ -7415,6 +7475,14 @@ async function loadMyStatusesInBackground() {
         }
     } catch (error) {
         logStatus('FAILED', `loadMyStatusesInBackground: ${error.message}`);
+        // Serve cache on failure so UI shows previous statuses
+        try {
+            const cached = await SafeStorage.getJSON(LOCAL_STORAGE_KEYS.MY_STATUSES);
+            if (cached && Array.isArray(cached) && cached.length > 0) {
+                myStatuses = cached;
+                logStatus('INFO', `Serving ${cached.length} cached my-statuses after fetch failure`);
+            }
+        } catch (_) {}
         throw error;
     }
 }
@@ -7451,12 +7519,21 @@ async function loadHighlightsInBackground() {
         const response = await makeApiRequest('/api/status/highlights', 'GET');
         const list = response?.statuses || response?.data?.statuses || [];
         if (Array.isArray(list)) {
-            highlights = list.filter(s => s.metadata && s.metadata.pinned);
+            // highlights endpoint returns top-liked/viewed statuses — keep all of them
+            highlights = list;
             SafeStorage.setJSON(LOCAL_STORAGE_KEYS.HIGHLIGHTS, highlights);
             logStatus('SUCCESS', `Loaded ${highlights.length} highlights`);
         }
     } catch (error) {
         logStatus('FAILED', `loadHighlightsInBackground: ${error.message}`);
+        // Serve cache on failure
+        try {
+            const cached = await SafeStorage.getJSON(LOCAL_STORAGE_KEYS.HIGHLIGHTS);
+            if (cached && Array.isArray(cached) && cached.length > 0) {
+                highlights = cached;
+                logStatus('INFO', `Serving ${cached.length} cached highlights after fetch failure`);
+            }
+        } catch (_) {}
         throw error;
     }
 }
@@ -7477,14 +7554,24 @@ async function loadUserDataInBackground() {
     
     try {
         const response = await secureApiCall('/api/auth/me');
-        const user = response?.data?.user || response?.user;
-        if (user) {
+        // makeApiRequest unwraps { success, data:{user} } → response = { user:{...} }
+        const user = response?.user || response?.data?.user || response;
+        if (user && (user.id || user.userId)) {
             currentUser = user;
             userData = user;
+            // Persist to SafeStorage so loadUserFromCache() can serve it on next load
+            SafeStorage.setJSON(LOCAL_STORAGE_KEYS.USER, user);
             logStatus('SUCCESS', 'User data loaded');
         }
     } catch (error) {
         logStatus('WARNING', `loadUserDataInBackground: ${error.message}`);
+        // Serve cached user on failure
+        const cached = loadUserFromCache();
+        if (cached && !currentUser) {
+            currentUser = cached;
+            userData = cached;
+            logStatus('INFO', 'Serving cached user data after fetch failure');
+        }
     }
 }
 
@@ -8457,39 +8544,70 @@ if (isOnlineGlobal && !state.offlineModeEnabled && parentReady && isSessionReady
 }
 
 async function syncPendingData() {
+    if (!isAuthenticated() || !isSessionReady()) {
+        logStatus('WARNING', 'syncPendingData: skipping — not authenticated');
+        return;
+    }
+
     try {
+        // ── 1. Sync pending reactions with retry ──────────────────────────────
         const reactionsToSync = [...pendingReactions];
+        const failedReactions = [];
         for (const reaction of reactionsToSync) {
-            try {
-                await safeSendAction('ADD_REACTION', { 
-                    statusId: reaction.statusId, 
-                    reaction: reaction.reaction 
-                });
-                pendingReactions = pendingReactions.filter(r => 
-                    !(r.statusId === reaction.statusId && r.reaction === reaction.reaction)
-                );
-            } catch (error) {}
+            let synced = false;
+            for (let attempt = 1; attempt <= 3 && !synced; attempt++) {
+                try {
+                    await makeApiRequest(
+                        `/api/status/${reaction.statusId}/like`,
+                        reaction.remove ? 'DELETE' : 'POST',
+                        {}
+                    );
+                    synced = true;
+                } catch (err) {
+                    if (attempt < 3) {
+                        await new Promise(r => setTimeout(r, 500 * Math.pow(2, attempt - 1)));
+                    }
+                }
+            }
+            if (!synced) failedReactions.push(reaction);
         }
-        
+        // Keep only items that still failed
+        pendingReactions = failedReactions;
         SafeStorage.setJSON(LOCAL_STORAGE_KEYS.PENDING_REACTIONS, pendingReactions);
-        
+
+        // ── 2. Drain offline status queue with retry ──────────────────────────
         const offlineQueue = await SafeStorage.getJSON(LOCAL_STORAGE_KEYS.OFFLINE_QUEUE) || [];
+        const stillQueued = [];
         for (const statusData of offlineQueue) {
-            try {
-                await safeSendAction('UPLOAD_STATUS', statusData);
-            } catch (error) {}
+            let posted = false;
+            for (let attempt = 1; attempt <= 3 && !posted; attempt++) {
+                try {
+                    await makeApiRequest('/api/status', 'POST', statusData);
+                    posted = true;
+                } catch (err) {
+                    if (attempt < 3) {
+                        await new Promise(r => setTimeout(r, 1000 * Math.pow(2, attempt - 1)));
+                    }
+                }
+            }
+            if (!posted) stillQueued.push(statusData);
         }
-        
-        SafeStorage.remove(LOCAL_STORAGE_KEYS.OFFLINE_QUEUE);
+        if (stillQueued.length > 0) {
+            SafeStorage.setJSON(LOCAL_STORAGE_KEYS.OFFLINE_QUEUE, stillQueued);
+            logStatus('WARNING', `syncPendingData: ${stillQueued.length} status(es) still queued after retries`);
+        } else {
+            SafeStorage.remove(LOCAL_STORAGE_KEYS.OFFLINE_QUEUE);
+        }
+
+        // ── 3. Force a fresh data pull (bypassing TTL) ────────────────────────
+        SafeStorage.memoryStore.delete(LOCAL_STORAGE_KEYS.LAST_SYNC); // clear TTL so refresh runs
         await loadFreshDataInBackground();
-        
-        const syncKey = 'pending_data_synced';
-        if (!_loggedMessages.has(syncKey)) {
-            _loggedMessages.add(syncKey);
-            logStatus('SUCCESS', 'Pending data synced');
-        }
-        
-    } catch (error) {}
+
+        logStatus('SUCCESS', 'Pending data synced');
+
+    } catch (error) {
+        logStatus('FAILED', `syncPendingData: ${error.message}`);
+    }
 }
 
 // =============================================
@@ -9875,6 +9993,29 @@ if (document.readyState === 'loading') {
 } else {
     initPageCore();
 }
+
+// ── SETTINGS CACHE BOOTSTRAP ─────────────────────────────────────────────────
+// On load, ask the parent for the cached settings so this module starts with
+// the right theme/font/preferences before the first SETTINGS_UPDATED arrives.
+(function bootstrapSettingsCache() {
+    try {
+        // Request cached settings from parent via StorageProxy (now wired)
+        SafeStorage.getJSON('knecta_settings_cache').then(settings => {
+            if (settings && typeof applySettingToStatusModule === 'function') {
+                Object.entries(settings).forEach(([sec, secVal]) => {
+                    if (secVal && typeof secVal === 'object') {
+                        Object.entries(secVal).forEach(([k, v]) => {
+                            try { applySettingToStatusModule(sec, k, v); } catch(_) {}
+                        });
+                    }
+                });
+                if (typeof logStatus === 'function') {
+                    logStatus('INFO', 'Settings applied from cache on startup');
+                }
+            }
+        }).catch(() => {});
+    } catch(_) {}
+})();
     
     // Also make available as a named export
     if (typeof exports !== 'undefined') {
@@ -9892,16 +10033,16 @@ if (document.readyState === 'loading') {
 }, 0);
 
 function applySettingToStatusModule(section, key, value) {
+    // NOTE: This function is outside the main IIFE, so logStatus is not accessible here.
+    // Use console.log directly for any debug output needed.
     if (section === 'appearance') {
         if (key === 'theme') {
             const theme = value === 'auto' ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light') : value;
             document.documentElement.setAttribute('data-theme', theme);
             document.body.setAttribute('data-theme', theme);
-            logStatus('INFO', `Theme changed to: ${theme}`);
         }
         if (key === 'fontSize') {
             document.documentElement.style.fontSize = value + 'px';
-            logStatus('INFO', `Font size changed to: ${value}px`);
         }
         if (key === 'language') window.__appLanguage = value;
         if (key === 'accentColor') document.documentElement.style.setProperty('--accent-color', value);
@@ -9910,7 +10051,6 @@ function applySettingToStatusModule(section, key, value) {
         if (key === 'soundEnabled' || key === 'notificationSound') {
             window.__notificationSoundEnabled = value;
             if (typeof window.updateNotificationSound === 'function') window.updateNotificationSound(value);
-            logStatus('INFO', `Notification sound: ${value ? 'enabled' : 'disabled'}`);
         }
         if (key === 'vibrationEnabled' || key === 'notificationVibration') window.__vibrationEnabled = value;
         if (key === 'desktopEnabled') {

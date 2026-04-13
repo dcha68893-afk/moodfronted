@@ -2849,8 +2849,8 @@ function handleBulkUpload(e) {
     }
 }
 
-// FIX C: publishListingFromModal - handle all tabs (premium, templates, circles, options, bulk)
-function publishListingFromModal() {
+// FIX C: publishListingFromModal - async/await, handle all tabs
+async function publishListingFromModal() {
     const activeTab = UIState.createListingActiveTab;
     
     // Handle premium tab - delegate to premium publish function
@@ -2895,7 +2895,7 @@ function publishListingFromModal() {
             return;
         }
         
-        const listing = createServiceListing(title, description, {
+        const listing = await createServiceListing(title, description, {
             price: price,
             availability: UIState.selectedAvailability,
             visibility: UIState.selectedTrustCircle,
@@ -2929,7 +2929,7 @@ function publishListingFromModal() {
             return;
         }
         
-        const listing = createDigitalListing(title, description, UIState.selectedDigitalFile, {
+        const listing = await createDigitalListing(title, description, UIState.selectedDigitalFile, {
             price: price,
             visibility: UIState.selectedTrustCircle,
             moodContext: UIState.selectedMoodContext,
@@ -3098,7 +3098,15 @@ function hideTeamManagementModal() {
 function showLeaderboardModal() {
     if (DOM.leaderboardModal) {
         DOM.leaderboardModal.classList.add('active');
-        renderers.leaderboard();
+        // FIX: Load data first, then render
+        if (loadLeaderboard) {
+            loadLeaderboard().then(data => {
+                if (data && Array.isArray(data)) leaderboardData = data;
+                renderers.leaderboard();
+            }).catch(() => renderers.leaderboard());
+        } else {
+            renderers.leaderboard();
+        }
     }
 }
 
@@ -3123,6 +3131,8 @@ function hideReactionPicker() {
 function showSavedItemsModal() {
     if (DOM.savedItemsModal) {
         DOM.savedItemsModal.classList.add('active');
+        // FIX: Sync savedItems from window globals before rendering
+        if (window.savedItems) savedItems = window.savedItems;
         renderSavedItems();
     }
 }
@@ -3202,7 +3212,68 @@ function hideTrustStatsModal() {
 }
 
 function renderTrustStats() {
-    // Implementation would show trust statistics
+    const container = DOM.trustStatsModal ? DOM.trustStatsModal.querySelector('.modal-content, .trust-stats-content, [id*="trustStats"]') : null;
+    const statsEl = document.getElementById('trustStatsContent') || (DOM.trustStatsModal ? DOM.trustStatsModal.querySelector('.modal-body, .stats-body') : null);
+    
+    const target = statsEl || container;
+    if (!target) return;
+    
+    // FIX: Build real stats from local data
+    const totalListings = (window.myListings || myListings || []).length;
+    const totalSaved = (window.savedItems || savedItems || []).length;
+    const ts = trustStats || {};
+    const listingCreated = ts.listingCreated || totalListings || 0;
+    const fileDownloaded = ts.fileDownloaded || 0;
+    const tipReceived = ts.tipReceived || 0;
+    
+    const user = window.currentUser || currentUser || {};
+    const trustLevel = user.trustLevel || 'new';
+    const trustLevelMap = {
+        'new': { label: 'New', color: '#9e9e9e', icon: 'fa-star', score: 10 },
+        'responsive': { label: 'Responsive', color: '#2196F3', icon: 'fa-comments', score: 30 },
+        'reliable': { label: 'Reliable', color: '#4caf50', icon: 'fa-check-circle', score: 60 },
+        'verified': { label: 'Verified', color: '#9c27b0', icon: 'fa-shield-alt', score: 80 },
+        'pro': { label: 'Pro', color: '#ff9800', icon: 'fa-crown', score: 100 }
+    };
+    const tl = trustLevelMap[trustLevel] || trustLevelMap['new'];
+    
+    target.innerHTML = `
+        <div style="padding: 20px;">
+            <div style="display: flex; align-items: center; gap: 16px; margin-bottom: 24px; padding: 16px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 12px; color: white;">
+                <div style="width: 56px; height: 56px; border-radius: 50%; background: rgba(255,255,255,0.2); display: flex; align-items: center; justify-content: center; font-size: 24px;">
+                    <i class="fas ${tl.icon}"></i>
+                </div>
+                <div>
+                    <div style="font-weight: 700; font-size: 18px;">${tl.label} Seller</div>
+                    <div style="font-size: 13px; opacity: 0.9;">Trust Score: ${tl.score}/100</div>
+                    <div style="margin-top: 8px; background: rgba(255,255,255,0.3); border-radius: 4px; height: 6px; width: 160px;">
+                        <div style="width: ${tl.score}%; height: 100%; background: white; border-radius: 4px;"></div>
+                    </div>
+                </div>
+            </div>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+                <div style="padding: 16px; background: var(--secondary-color, #f5f5f5); border-radius: 10px; text-align: center;">
+                    <div style="font-size: 28px; font-weight: 700; color: var(--primary-color, #0084ff);">${listingCreated}</div>
+                    <div style="font-size: 12px; color: var(--text-secondary, #888); margin-top: 4px;"><i class="fas fa-list"></i> Listings Created</div>
+                </div>
+                <div style="padding: 16px; background: var(--secondary-color, #f5f5f5); border-radius: 10px; text-align: center;">
+                    <div style="font-size: 28px; font-weight: 700; color: #4caf50;">${totalSaved}</div>
+                    <div style="font-size: 12px; color: var(--text-secondary, #888); margin-top: 4px;"><i class="fas fa-bookmark"></i> Items Saved</div>
+                </div>
+                <div style="padding: 16px; background: var(--secondary-color, #f5f5f5); border-radius: 10px; text-align: center;">
+                    <div style="font-size: 28px; font-weight: 700; color: #ff9800;">${fileDownloaded}</div>
+                    <div style="font-size: 12px; color: var(--text-secondary, #888); margin-top: 4px;"><i class="fas fa-download"></i> Downloads</div>
+                </div>
+                <div style="padding: 16px; background: var(--secondary-color, #f5f5f5); border-radius: 10px; text-align: center;">
+                    <div style="font-size: 28px; font-weight: 700; color: #e91e63;">${tipReceived}</div>
+                    <div style="font-size: 12px; color: var(--text-secondary, #888); margin-top: 4px;"><i class="fas fa-gift"></i> Tips Received</div>
+                </div>
+            </div>
+            <div style="margin-top: 16px; padding: 12px; background: rgba(76,175,80,0.1); border-radius: 8px; border: 1px solid rgba(76,175,80,0.3);">
+                <div style="font-size: 13px; color: #4caf50;"><i class="fas fa-info-circle"></i> Maintain a high response rate and positive reviews to level up your trust badge.</div>
+            </div>
+        </div>
+    `;
 }
 
 function saveToSavedItems() {
@@ -4149,7 +4220,55 @@ window.addEventListener('tools:active', function() {
     
     console.log('[FIX] Emergency handler initialization complete');
 })();
-
+// =============================================
+// SETTINGS LIVE-APPLY BRIDGE (UI Layer)
+// =============================================
+(function installSettingsUIBridge() {
+    function applyUISettingChange(section, key, value) {
+        if (section === "appearance") {
+            if (key === "theme") {
+                var t = value === "auto" ? (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light") : value;
+                document.documentElement.setAttribute("data-theme", t);
+                document.body.setAttribute("data-theme", t);
+                document.body.classList.toggle("dark-theme", t === "dark");
+                document.documentElement.style.colorScheme = t;
+            }
+            if (key === "fontSize") document.documentElement.style.fontSize = parseInt(value) + "px";
+            if (key === "accentColor") { document.documentElement.style.setProperty("--accent-color", value); document.documentElement.style.setProperty("--primary-color", value); }
+            if (key === "compactMode") { document.documentElement.setAttribute("data-compact", value ? "true" : "false"); document.body.classList.toggle("compact-mode", !!value); }
+            if (key === "animationsEnabled" || key === "animations") { document.body.classList.toggle("no-animations", !value); document.documentElement.setAttribute("data-animations", value ? "true" : "false"); }
+            if (key === "language") document.documentElement.setAttribute("lang", value);
+        }
+        if (section === "advanced") {
+            if (key === "reduceMotion") { document.body.classList.toggle("reduce-motion", !!value); document.documentElement.setAttribute("data-reduce-motion", value ? "true" : "false"); }
+            if (key === "performanceMode") document.documentElement.setAttribute("data-performance-mode", value ? "true" : "false");
+        }
+        if (section === "mood" && key === "currentMood") document.documentElement.setAttribute("data-mood", value);
+    }
+    function applyAll(settings) {
+        if (!settings || typeof settings !== "object") return;
+        Object.entries(settings).forEach(function(se) {
+            var sec = se[0], secVal = se[1];
+            if (secVal && typeof secVal === "object") {
+                Object.entries(secVal).forEach(function(ke) { try { applyUISettingChange(sec, ke[0], ke[1]); } catch(e) {} });
+            }
+        });
+    }
+    window.addEventListener("settingChanged", function(e) { try { var d = e.detail; applyUISettingChange(d.section, d.key, d.value); } catch(err) {} });
+    window.addEventListener("settingsUpdated", function(e) { try { applyAll(e.detail && e.detail.settings); } catch(err) {} });
+    window.addEventListener("message", function(e) {
+        try {
+            var data = e.data;
+            if (!data || typeof data !== "object") return;
+            if (data.type === "SETTING_CHANGED") { var p = data.payload || data; if (p.section && p.key !== undefined) applyUISettingChange(p.section, p.key, p.value); }
+            if (data.type === "SETTINGS_UPDATED") { applyAll((data.payload && data.payload.settings) || data.settings); }
+        } catch(err) {}
+    });
+    try {
+        var cached = localStorage.getItem("knecta_settings_cache");
+        if (cached) { var parsed = JSON.parse(cached); var settings = (parsed && parsed.data) ? parsed.data : parsed; if (parsed.timestamp && (Date.now() - parsed.timestamp) < 86400000) applyAll(settings); }
+    } catch(e) {}
+})();
 // ----------------------------------------------------------------------
 // PRESERVED EXPORTS (Full Compatibility)
 // ----------------------------------------------------------------------
