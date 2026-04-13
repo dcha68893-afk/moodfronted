@@ -488,7 +488,8 @@ function displayCallHistory(calls) {
         
         const initials = name.split(' ').map(function(n){ return n[0]; }).join('').toUpperCase().substring(0, 2);
         const directionInfo = getCallDirectionInfo(call);
-        const { dateStr, timeStr } = formatCallDateTime(call.startedAt);
+        // FIXED: use createdAt as fallback when startedAt is null (e.g. missed/cancelled calls)
+        const { dateStr, timeStr } = formatCallDateTime(call.startedAt || call.createdAt);
         
         let durationDisplay = call.displayDuration || '0:00';
         if (call.duration && call.duration > 0) {
@@ -3219,6 +3220,19 @@ sanitizeHTML: function(str) {
                     // FIX for Bug 6: Refresh call history after call ends
                     this.refreshCallHistory();
                     break;
+                case 'call_cancelled':
+                    // FIXED: Caller cancelled before receiver answered — dismiss incoming modal immediately
+                    if (elements.incomingCallModal && elements.incomingCallModal.classList.contains('active')) {
+                        elements.incomingCallModal.classList.remove('active');
+                        UIState.activeModals.delete('incomingCallModal');
+                        const timerId = parseInt(elements.incomingCallModal.dataset.timer);
+                        if (timerId) clearInterval(timerId);
+                        elements.incomingCallModal.dataset.timer = '';
+                    }
+                    this.handleCallEnded(data);
+                    this.refreshCallHistory();
+                    showNotification('Call was cancelled by the caller', 'info');
+                    break;
                 case 'logout':
                     this.handleLogout();
                     break;
@@ -3404,6 +3418,54 @@ sanitizeHTML: function(str) {
             switch (event) {
                 case 'local_stream_ready':
                     UIState.localStream = data.stream;
+                    // FIXED: attach local stream to local video element immediately
+                    (function attachLocalVideo(stream) {
+                        // Try multiple possible local video element ids
+                        const localVid = document.getElementById('localVideo')
+                            || document.getElementById('selfVideo')
+                            || document.getElementById('pipVideo')
+                            || document.querySelector('.local-video video')
+                            || document.querySelector('.pip-video');
+                        if (localVid && stream) {
+                            localVid.srcObject = stream;
+                            localVid.muted = true; // prevent echo
+                            localVid.autoplay = true;
+                            localVid.playsInline = true;
+                            localVid.play().catch(() => {});
+                            // Also show pip container if video call
+                            const pipContainer = document.getElementById('pipContainer');
+                            if (pipContainer && UIState.callType === 'video') {
+                                pipContainer.style.display = 'block';
+                            }
+                        }
+                        // If no dedicated local video element, add one to videoGrid
+                        if (!localVid && stream && elements.videoGrid) {
+                            const hasLocalContainer = document.getElementById('localVideoContainer');
+                            if (!hasLocalContainer) {
+                                const container = document.createElement('div');
+                                container.id = 'localVideoContainer';
+                                container.className = 'video-container local-video-container';
+                                container.style.cssText = 'position:relative;';
+                                const video = document.createElement('video');
+                                video.id = 'localVideo';
+                                video.className = 'video-element';
+                                video.autoplay = true;
+                                video.playsInline = true;
+                                video.muted = true;
+                                video.srcObject = stream;
+                                const overlay = document.createElement('div');
+                                overlay.className = 'video-overlay';
+                                overlay.innerHTML = '<div class="video-name"><span>You</span></div>';
+                                container.appendChild(video);
+                                container.appendChild(overlay);
+                                elements.videoGrid.appendChild(container);
+                                video.play().catch(() => {});
+                            }
+                        }
+                        // Hide placeholder once we have a stream
+                        const placeholder = document.getElementById('offlineCallPlaceholder');
+                        if (placeholder) placeholder.style.display = 'none';
+                    })(data.stream);
                     break;
                 case 'local_stream_stopped':
                     UIState.localStream = null;
@@ -3506,11 +3568,19 @@ sanitizeHTML: function(str) {
             }
         },
         
-        addRemoteVideo: function(streamId, stream) {
+        addRemoteVideo: function(streamId, stream, participantName) {
             if (!elements.videoGrid) return;
             
+            // Remove existing container for this stream if any
+            const existingContainer = document.querySelector(`.video-container[data-stream-id="${streamId}"]`);
+            if (existingContainer) existingContainer.remove();
+            
+            // Hide placeholder
+            const placeholder = document.getElementById('offlineCallPlaceholder');
+            if (placeholder) placeholder.style.display = 'none';
+            
             const container = document.createElement('div');
-            container.className = 'video-container';
+            container.className = 'video-container remote-video-container';
             container.dataset.streamId = streamId;
             
             const video = document.createElement('video');
@@ -3518,12 +3588,27 @@ sanitizeHTML: function(str) {
             video.autoplay = true;
             video.playsInline = true;
             video.srcObject = stream;
+            // Never mute remote — we want to hear them
+            video.muted = false;
+            
+            // If call is audio-only, hide the video element
+            const hasVideoTracks = stream.getVideoTracks().length > 0;
+            if (!hasVideoTracks) {
+                video.style.display = 'none';
+                // Show avatar fallback
+                const avatar = document.createElement('div');
+                avatar.className = 'video-avatar-fallback';
+                avatar.style.cssText = 'width:80px;height:80px;border-radius:50%;background:var(--primary,#7c3aed);display:flex;align-items:center;justify-content:center;font-size:32px;color:#fff;margin:auto;';
+                const name = participantName || 'Participant';
+                avatar.textContent = name.charAt(0).toUpperCase();
+                container.appendChild(avatar);
+            }
             
             const overlay = document.createElement('div');
             overlay.className = 'video-overlay';
             overlay.innerHTML = `
                 <div class="video-name">
-                    <span>Participant</span>
+                    <span>${participantName || 'Participant'}</span>
                 </div>
             `;
             
@@ -3531,7 +3616,17 @@ sanitizeHTML: function(str) {
             container.appendChild(overlay);
             elements.videoGrid.appendChild(container);
             
-            video.play().catch(e => UILogger.warn('Error playing remote video', e));
+            // Update call status text
+            if (elements.callStatusText) {
+                elements.callStatusText.textContent = 'Connected';
+            }
+            
+            video.play().catch(e => {
+                UILogger.warn('Error playing remote video', e);
+                // Try unmuted play (browser may require interaction)
+                video.muted = false;
+                video.play().catch(() => {});
+            });
         },
         
         addChatMessage: function(sender, message, timestamp) {
@@ -5861,20 +5956,77 @@ declineIncomingCall: async function() {
                 return;
             }
             
-            if (navigator.share) {
-                navigator.share({
-                    title: 'Join my call',
-                    text: 'Join my call using this link',
-                    url: link,
-                })
-                .then(() => showNotification('Call link shared', 'success'))
-                .catch(err => {
-                    UILogger.warn('Error sharing', err);
-                    this.copyCallLink();
-                });
-            } else {
-                this.copyCallLink();
-            }
+            // Remove any existing share modal
+            const existing = document.getElementById('callShareModal');
+            if (existing) existing.remove();
+            
+            const encodedLink = encodeURIComponent(link);
+            const encodedText = encodeURIComponent('Join my call: ' + link);
+            
+            const modal = document.createElement('div');
+            modal.id = 'callShareModal';
+            modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:99999;display:flex;align-items:center;justify-content:center;';
+            modal.innerHTML = `
+                <div style="background:var(--bg-secondary,#1e1e2e);border-radius:16px;padding:24px;width:320px;max-width:90vw;">
+                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:18px;">
+                        <h3 style="margin:0;color:var(--text-primary,#fff);font-size:16px;">Share Call Link</h3>
+                        <button id="closeShareModal" style="background:none;border:none;color:var(--text-secondary,#aaa);cursor:pointer;font-size:20px;">&times;</button>
+                    </div>
+                    <div style="background:var(--bg-tertiary,#2a2a3a);border-radius:8px;padding:10px;margin-bottom:16px;word-break:break-all;font-size:12px;color:var(--text-secondary,#aaa);">${link}</div>
+                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+                        <button id="shareWhatsApp" style="display:flex;align-items:center;gap:8px;padding:12px;background:#25D366;border:none;border-radius:10px;color:#fff;cursor:pointer;font-size:13px;font-weight:600;">
+                            <i class="fab fa-whatsapp" style="font-size:18px;"></i> WhatsApp
+                        </button>
+                        <button id="shareFacebook" style="display:flex;align-items:center;gap:8px;padding:12px;background:#1877F2;border:none;border-radius:10px;color:#fff;cursor:pointer;font-size:13px;font-weight:600;">
+                            <i class="fab fa-facebook-f" style="font-size:18px;"></i> Facebook
+                        </button>
+                        <button id="shareTwitter" style="display:flex;align-items:center;gap:8px;padding:12px;background:#1DA1F2;border:none;border-radius:10px;color:#fff;cursor:pointer;font-size:13px;font-weight:600;">
+                            <i class="fab fa-twitter" style="font-size:18px;"></i> Twitter
+                        </button>
+                        <button id="shareTelegram" style="display:flex;align-items:center;gap:8px;padding:12px;background:#229ED9;border:none;border-radius:10px;color:#fff;cursor:pointer;font-size:13px;font-weight:600;">
+                            <i class="fab fa-telegram-plane" style="font-size:18px;"></i> Telegram
+                        </button>
+                        <button id="shareEmail" style="display:flex;align-items:center;gap:8px;padding:12px;background:#555;border:none;border-radius:10px;color:#fff;cursor:pointer;font-size:13px;font-weight:600;">
+                            <i class="fas fa-envelope" style="font-size:18px;"></i> Email
+                        </button>
+                        <button id="shareCopyLink" style="display:flex;align-items:center;gap:8px;padding:12px;background:var(--primary,#7c3aed);border:none;border-radius:10px;color:#fff;cursor:pointer;font-size:13px;font-weight:600;">
+                            <i class="fas fa-copy" style="font-size:18px;"></i> Copy
+                        </button>
+                    </div>
+                </div>
+            `;
+            document.body.appendChild(modal);
+            
+            // Close on backdrop click or X button
+            modal.addEventListener('click', (e) => { if (e.target === modal) modal.remove(); });
+            document.getElementById('closeShareModal').addEventListener('click', () => modal.remove());
+            
+            document.getElementById('shareWhatsApp').addEventListener('click', () => {
+                window.open(`https://wa.me/?text=${encodedText}`, '_blank', 'noopener');
+                modal.remove();
+            });
+            document.getElementById('shareFacebook').addEventListener('click', () => {
+                window.open(`https://www.facebook.com/sharer/sharer.php?u=${encodedLink}`, '_blank', 'noopener');
+                modal.remove();
+            });
+            document.getElementById('shareTwitter').addEventListener('click', () => {
+                window.open(`https://twitter.com/intent/tweet?text=${encodedText}`, '_blank', 'noopener');
+                modal.remove();
+            });
+            document.getElementById('shareTelegram').addEventListener('click', () => {
+                window.open(`https://t.me/share/url?url=${encodedLink}&text=${encodeURIComponent('Join my call!')}`, '_blank', 'noopener');
+                modal.remove();
+            });
+            document.getElementById('shareEmail').addEventListener('click', () => {
+                window.open(`mailto:?subject=${encodeURIComponent('Join my call')}&body=${encodedText}`, '_blank');
+                modal.remove();
+            });
+            document.getElementById('shareCopyLink').addEventListener('click', () => {
+                navigator.clipboard.writeText(link)
+                    .then(() => showNotification('Call link copied to clipboard!', 'success'))
+                    .catch(() => showNotification('Failed to copy link', 'error'));
+                modal.remove();
+            });
         },
         
         switchCallCategory: function(category) {

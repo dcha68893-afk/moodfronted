@@ -3334,6 +3334,123 @@ window.__CALLS_IFRAME__ = {
             }
         })();
     </script>
-    
+
+    <script>
+    // =============================================
+    // CALLS.HTML — SHARE LINK JOIN HANDLER
+    // When opened via ?call=xxx&type=video or ?callId=xxx&token=xxx
+    // this page IS the calls iframe, so we listen for JOIN_CALL_VIA_LINK
+    // posted from calls-core.js and then tell the parent (chat.html) to
+    // initiate the call via its CALL_INITIATE handler.
+    // =============================================
+    (function() {
+        // Handle JOIN_CALL_VIA_LINK from calls-core.js
+        window.addEventListener('message', function(event) {
+            if (!event.data || event.data.type !== 'JOIN_CALL_VIA_LINK') return;
+            const payload = event.data.payload || {};
+            console.log('[calls.html] JOIN_CALL_VIA_LINK received', payload);
+
+            // Tell parent (chat.html) to orchestrate the call
+            try {
+                window.parent.postMessage({
+                    type: 'CALL_INITIATE',
+                    source: 'calls',
+                    payload: {
+                        callId: payload.callId || ('link-' + Date.now()),
+                        callType: payload.callType || 'audio',
+                        calleeId: payload.calleeId || null,
+                        participantIds: payload.participantIds || null,
+                        isGroupCall: payload.isGroupCall || false,
+                        fromLink: true,
+                        linkCallId: payload.linkCallId || null,
+                        token: payload.token || null,
+                        timestamp: Date.now()
+                    }
+                }, '*');
+            } catch(e) {
+                console.warn('[calls.html] Could not notify parent of join-via-link:', e.message);
+            }
+        });
+
+        // Also handle direct call:cancelled / call_cancelled socket events
+        // forwarded from parent to dismiss the incoming call ring screen immediately
+        window.addEventListener('message', function(event) {
+            if (!event.data) return;
+            const t = event.data.type;
+            if (t === 'CALL_CANCELLED' || t === 'call:cancelled' || t === 'call_cancelled') {
+                // Dismiss incoming call modal immediately
+                const modal = document.getElementById('incomingCallModal');
+                if (modal && modal.classList.contains('active')) {
+                    modal.classList.remove('active');
+                    const timerId = parseInt(modal.dataset.timer || '0');
+                    if (timerId) clearInterval(timerId);
+                    modal.dataset.timer = '';
+                }
+            }
+        });
+
+        // ── WebRTC Signaling Bridge (inbound) ───────────────────────────────
+        // chat.html forwards SIGNAL_OFFER / SIGNAL_ANSWER / ICE_CANDIDATE
+        // from the remote peer (via wsService) into this iframe.
+        // We pass them straight into callCore so it can feed them to RTCPeerConnection.
+        window.addEventListener('message', function(event) {
+            if (!event.data || event.data.source !== 'parent-signal') return;
+            const { type, payload } = event.data;
+
+            if (type === 'SIGNAL_OFFER' || type === 'SIGNAL_ANSWER' || type === 'ICE_CANDIDATE') {
+                console.log('[calls.html] ↓ Incoming WebRTC signal from parent:', type);
+
+                // Route into callCore if available
+                if (window.callCore) {
+                    if (type === 'SIGNAL_OFFER' && typeof window.callCore.handleRemoteOffer === 'function') {
+                        window.callCore.handleRemoteOffer(payload);
+                    } else if (type === 'SIGNAL_ANSWER' && typeof window.callCore.handleRemoteAnswer === 'function') {
+                        window.callCore.handleRemoteAnswer(payload);
+                    } else if (type === 'ICE_CANDIDATE' && typeof window.callCore.handleIceCandidate === 'function') {
+                        window.callCore.handleIceCandidate(payload);
+                    } else {
+                        // Generic fallback — dispatch as a custom event that calls-core.js can listen for
+                        window.dispatchEvent(new CustomEvent('webrtc:signal', { detail: { type, payload } }));
+                    }
+                } else {
+                    // callCore not ready yet — queue the signal for retry
+                    window.__pendingSignals = window.__pendingSignals || [];
+                    window.__pendingSignals.push({ type, payload, ts: Date.now() });
+                    console.log('[calls.html] callCore not ready, signal queued. Queue size:', window.__pendingSignals.length);
+
+                    // Retry once callCore becomes available
+                    let _retries = 0;
+                    const _retryTimer = setInterval(() => {
+                        _retries++;
+                        if (window.callCore || _retries > 20) {
+                            clearInterval(_retryTimer);
+                            if (window.callCore && window.__pendingSignals) {
+                                window.__pendingSignals.forEach(sig => {
+                                    window.dispatchEvent(new CustomEvent('webrtc:signal', { detail: sig }));
+                                });
+                                window.__pendingSignals = [];
+                            }
+                        }
+                    }, 300);
+                }
+            }
+        });
+
+        // ── WebRTC Signaling Bridge (outbound) ──────────────────────────────
+        // calls-core.js fires custom events when it has signals to send.
+        // We catch them and forward to parent (chat.html) which sends via wsService.
+        window.addEventListener('webrtc:sendSignal', function(e) {
+            const { type, payload } = e.detail || {};
+            if (!type || !payload) return;
+            console.log('[calls.html] ↑ Outbound WebRTC signal to parent:', type);
+            try {
+                window.parent.postMessage({ type, payload, source: 'calls-iframe' }, '*');
+            } catch(err) {
+                console.warn('[calls.html] Failed to forward outbound signal to parent:', err.message);
+            }
+        });
+    })();
+    </script>
+
 </body>
 </html>

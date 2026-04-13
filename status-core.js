@@ -1390,22 +1390,31 @@ async function postStatus(statusData) {
 
     const rawContent = statusData.content || statusData.text || '';
 
-    const payload = {
-        content: rawContent,
-        type: statusData.type || 'text',
-        moodType: statusData.mood || statusData.moodType || null,
-        mediaUrl: statusData.media || statusData.mediaUrl || null,
-        mediaType: statusData.mediaType || null,
-        background: statusData.background || null,
-        // Send both privacy (string) and isPublic (bool) so backend handles either form
-        privacy: statusData.privacy || (statusData.isPublic === false ? 'friends' : 'public'),
-        isPublic: (statusData.privacy === 'everyone' || statusData.privacy === 'public')
-            ? true
-            : (statusData.isPublic !== undefined ? statusData.isPublic : true),
-        location: statusData.location || null,
-        latitude: statusData.latitude || null,
-        longitude: statusData.longitude || null,
-    };
+    // Build payload — only include fields that have actual values so that
+    // express-validator's .optional() validators skip them correctly.
+    // Sending null for optional fields (e.g. mediaUrl, moodType) triggers
+    // isURL/isIn validation failures → 400 Bad Request.
+    const payload = { content: rawContent };
+
+    const type = statusData.type || 'text';
+    payload.type = type;
+
+    if (statusData.mood || statusData.moodType) {
+        payload.moodType = statusData.mood || statusData.moodType;
+    }
+    if (statusData.media || statusData.mediaUrl) {
+        payload.mediaUrl = statusData.media || statusData.mediaUrl;
+    }
+    if (statusData.mediaType) payload.mediaType = statusData.mediaType;
+    if (statusData.background) payload.background = statusData.background;
+
+    // privacy: send the string form the backend expects
+    payload.privacy = statusData.privacy || (statusData.isPublic === false ? 'friends' : 'public');
+    payload.isPublic = (payload.privacy === 'public' || payload.privacy === 'everyone');
+
+    if (statusData.location) payload.location = statusData.location;
+    if (statusData.latitude != null) payload.latitude = statusData.latitude;
+    if (statusData.longitude != null) payload.longitude = statusData.longitude;
 
     // If offline — queue immediately without attempting a doomed request
     if (!isOnlineGlobal || !navigator.onLine) {

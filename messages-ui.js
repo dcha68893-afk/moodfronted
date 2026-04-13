@@ -1994,9 +1994,16 @@
                 const draftBadge = hasDraft ? '<span class="draft-badge">Draft</span>' : '';
                 const status = chat.online ? 'online' : 'offline';
                 const core = getMessagesCore();
-                const time = core?.formatTime ? 
-                    core.formatTime(chat.lastMessageAt) : 
-                    chat.lastMessageAt ? new Date(chat.lastMessageAt).toLocaleTimeString() : '';
+                // Robust time: handle string ISO, number ms, or missing
+                const _rawTs = chat.lastMessageAt;
+                let _parsedTs = 0;
+                if (_rawTs) {
+                    _parsedTs = typeof _rawTs === 'number' ? _rawTs : new Date(_rawTs).getTime();
+                    if (isNaN(_parsedTs)) _parsedTs = 0;
+                }
+                const time = _parsedTs > 0
+                    ? (core?.formatTime ? core.formatTime(_parsedTs) : new Date(_parsedTs).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}))
+                    : '';
                 
                 const _rawLast = (chat.lastMessage || '').trim();
                 const _words = _rawLast.split(/\s+/).filter(Boolean);
@@ -2139,8 +2146,24 @@
             const indicatorEl = UIFailsafe.safeGetElement('chatStatusIndicator');
 
             if (nameEl) UIFailsafe.safeSetText(nameEl, chat.friendName || 'User');
-            if (statusEl) UIFailsafe.safeSetText(statusEl, chat.online ? 'Online' : 'Offline');
-            if (indicatorEl) UIFailsafe.safeSetAttribute(indicatorEl, 'class', `chat-status ${chat.online ? 'online' : 'offline'}`);
+            // Use real online status from FriendManager if available
+            const _core = getMessagesCore();
+            let _isOnline = !!chat.online;
+            if (_core && _core.FriendManager) {
+                const _fid = chat.friendId || chat.userId || chat.otherUserId;
+                if (_fid) {
+                    const _friend = _core.FriendManager.getFriend(_fid) || _core.FriendManager.getFriend(parseInt(_fid));
+                    if (_friend) _isOnline = !!_friend.online;
+                }
+            }
+            if (statusEl) {
+                if (_core && _core.formatLastSeen) {
+                    UIFailsafe.safeSetText(statusEl, _core.formatLastSeen(chat.lastSeen || null, _isOnline));
+                } else {
+                    UIFailsafe.safeSetText(statusEl, _isOnline ? 'Active now' : 'Offline');
+                }
+            }
+            if (indicatorEl) UIFailsafe.safeSetAttribute(indicatorEl, 'class', `chat-status ${_isOnline ? 'online' : 'offline'}`);
             
             if (avatarEl) {
                 if (chat.friendAvatar) {
@@ -2774,17 +2797,16 @@
     let actionMenuTimeout = null;
 
     function showMessageActions(message, x, y) {
-        if (actionMenuTimeout) {
-            clearTimeout(actionMenuTimeout);
-        }
-        
+        if (actionMenuTimeout) clearTimeout(actionMenuTimeout);
+
         const existingMenu = document.getElementById('dynamicMessageActions');
-        if (existingMenu) {
-            existingMenu.remove();
-        }
-        
+        if (existingMenu) existingMenu.remove();
+
         currentActionMessage = message;
-        
+
+        const currentUserId = getCurrentUserId();
+        const isOwnMessage = message.senderId == currentUserId;
+
         const menu = document.createElement('div');
         menu.id = 'dynamicMessageActions';
         menu.className = 'message-actions-menu';
@@ -2792,117 +2814,106 @@
             position: fixed;
             left: ${x}px;
             top: ${y}px;
-            background: white;
-            border-radius: 12px;
-            box-shadow: 0 4px 20px rgba(0,0,0,0.15);
+            background: #fff;
+            border-radius: 14px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.18);
             z-index: 10000;
-            min-width: 180px;
+            min-width: 200px;
             overflow: hidden;
-            animation: fadeIn 0.2s ease;
+            animation: _msgActFade 0.18s ease;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
         `;
-        
-        const currentUserId = getCurrentUserId();
-        const canEdit = message.senderId === currentUserId;
-        const canDelete = message.senderId === currentUserId;
-        
+
+        // Emoji quick-react row — only shown for received messages
+        const emojiRow = !isOwnMessage ? `
+            <div style="display:flex;align-items:center;justify-content:space-around;padding:8px 12px;border-bottom:1px solid #f0f0f0;">
+                ${['❤️','👍','😂','😮','😢','🙏'].map(e => `
+                    <span class="msg-quick-emoji" data-emoji="${e}" style="font-size:22px;cursor:pointer;padding:4px;border-radius:50%;transition:transform 0.15s;" title="React ${e}">${e}</span>
+                `).join('')}
+            </div>
+        ` : '';
+
+        const sep = `<div style="height:1px;background:#f0f0f0;margin:2px 0;"></div>`;
+
+        const item = (action, icon, label, color = '#111') => `
+            <div class="msg-menu-item" data-action="${action}" style="padding:11px 16px;display:flex;align-items:center;gap:12px;cursor:pointer;transition:background 0.15s;">
+                <i class="${icon}" style="width:18px;color:${color};font-size:14px;"></i>
+                <span style="font-size:14px;color:${color};">${label}</span>
+            </div>`;
+
         menu.innerHTML = `
-            <div style="padding: 8px 0;">
-                ${canEdit ? `
-                    <div class="menu-item" data-action="reply" style="padding: 10px 16px; display: flex; align-items: center; gap: 12px; cursor: pointer; transition: background 0.2s;">
-                        <i class="fas fa-reply" style="width: 20px; color: #0084ff;"></i>
-                        <span>Reply</span>
-                    </div>
-                    <div class="menu-item" data-action="edit" style="padding: 10px 16px; display: flex; align-items: center; gap: 12px; cursor: pointer; transition: background 0.2s;">
-                        <i class="fas fa-edit" style="width: 20px; color: #0084ff;"></i>
-                        <span>Edit</span>
-                    </div>
-                ` : ''}
-                <div class="menu-item" data-action="forward" style="padding: 10px 16px; display: flex; align-items: center; gap: 12px; cursor: pointer; transition: background 0.2s;">
-                    <i class="fas fa-share" style="width: 20px; color: #0084ff;"></i>
-                    <span>Forward</span>
-                </div>
-                <div class="menu-item" data-action="copy" style="padding: 10px 16px; display: flex; align-items: center; gap: 12px; cursor: pointer; transition: background 0.2s;">
-                    <i class="fas fa-copy" style="width: 20px; color: #0084ff;"></i>
-                    <span>Copy</span>
-                </div>
-                <div class="menu-item" data-action="star" style="padding: 10px 16px; display: flex; align-items: center; gap: 12px; cursor: pointer; transition: background 0.2s;">
-                    <i class="far fa-star" style="width: 20px; color: #ffd700;"></i>
-                    <span>Star</span>
-                </div>
-                <div class="menu-item" data-action="report" style="padding: 10px 16px; display: flex; align-items: center; gap: 12px; cursor: pointer; transition: background 0.2s;">
-                    <i class="fas fa-flag" style="width: 20px; color: #ff9500;"></i>
-                    <span>Report</span>
-                </div>
-                <div style="height: 1px; background: #e5e5ea; margin: 4px 0;"></div>
-                <div class="menu-item" data-action="react-like" style="padding: 10px 16px; display: flex; align-items: center; gap: 12px; cursor: pointer; transition: background 0.2s;">
-                    <span style="font-size: 18px;">👍</span>
-                    <span>React</span>
-                </div>
-                <div class="menu-item" data-action="react-love" style="padding: 10px 16px; display: flex; align-items: center; gap: 12px; cursor: pointer; transition: background 0.2s;">
-                    <span style="font-size: 18px;">❤️</span>
-                    <span>Love</span>
-                </div>
-                <div class="menu-item" data-action="react-laugh" style="padding: 10px 16px; display: flex; align-items: center; gap: 12px; cursor: pointer; transition: background 0.2s;">
-                    <span style="font-size: 18px;">😂</span>
-                    <span>Laugh</span>
-                </div>
-                ${canDelete ? `
-                    <div style="height: 1px; background: #e5e5ea; margin: 4px 0;"></div>
-                    <div class="menu-item" data-action="delete" style="padding: 10px 16px; display: flex; align-items: center; gap: 12px; cursor: pointer; transition: background 0.2s;">
-                        <i class="fas fa-trash" style="width: 20px; color: #ff3b30;"></i>
-                        <span style="color: #ff3b30;">Delete</span>
-                    </div>
-                ` : ''}
-                <div class="menu-item" data-action="info" style="padding: 10px 16px; display: flex; align-items: center; gap: 12px; cursor: pointer; transition: background 0.2s;">
-                    <i class="fas fa-info-circle" style="width: 20px; color: #8e8e93;"></i>
-                    <span>Info</span>
-                </div>
+            ${emojiRow}
+            <div style="padding:4px 0;">
+                ${item('reply',   'fas fa-reply',       'Reply')}
+                ${isOwnMessage ? item('edit', 'fas fa-edit', 'Edit') : ''}
+                ${item('forward', 'fas fa-share',       'Forward')}
+                ${item('copy',    'fas fa-copy',        'Copy')}
+                ${sep}
+                ${item('star',    'far fa-star',        'Star',   '#f59e0b')}
+                ${item('info',    'fas fa-info-circle', 'Info',   '#6b7280')}
+                ${!isOwnMessage ? item('report', 'fas fa-flag', 'Report', '#f97316') : ''}
+                ${sep}
+                ${item('delete',  'fas fa-trash',       isOwnMessage ? 'Delete' : 'Delete for me', '#ef4444')}
             </div>
         `;
-        
+
         document.body.appendChild(menu);
-        
-        const rect = menu.getBoundingClientRect();
-        if (rect.right > window.innerWidth) {
-            menu.style.left = (window.innerWidth - rect.width - 10) + 'px';
+
+        // Inject styles once
+        if (!document.getElementById('_msgActStyles')) {
+            const s = document.createElement('style');
+            s.id = '_msgActStyles';
+            s.textContent = `
+                .msg-menu-item:hover { background: #f5f5f5; }
+                .msg-quick-emoji:hover { transform: scale(1.3); background: #f0f0f0; }
+                @keyframes _msgActFade {
+                    from { opacity: 0; transform: scale(0.93) translateY(-4px); }
+                    to   { opacity: 1; transform: scale(1)    translateY(0); }
+                }
+            `;
+            document.head.appendChild(s);
         }
-        if (rect.bottom > window.innerHeight) {
-            menu.style.top = (window.innerHeight - rect.height - 10) + 'px';
-        }
-        
-        const style = document.createElement('style');
-        style.textContent = `
-            .menu-item:hover { background: #f0f2f5; }
-            .message-actions-menu { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
-            @keyframes fadeIn {
-                from { opacity: 0; transform: scale(0.95); }
-                to { opacity: 1; transform: scale(1); }
-            }
-        `;
-        document.head.appendChild(style);
-        
-        menu.querySelectorAll('.menu-item').forEach(item => {
-            item.addEventListener('click', (e) => {
+
+        // Reposition if out of viewport
+        requestAnimationFrame(() => {
+            const r = menu.getBoundingClientRect();
+            if (r.right  > window.innerWidth)  menu.style.left = (window.innerWidth  - r.width  - 10) + 'px';
+            if (r.bottom > window.innerHeight)  menu.style.top  = (window.innerHeight - r.height - 10) + 'px';
+            if (parseFloat(menu.style.left) < 6) menu.style.left = '6px';
+            if (parseFloat(menu.style.top)  < 6) menu.style.top  = '6px';
+        });
+
+        // Quick emoji reaction clicks
+        menu.querySelectorAll('.msg-quick-emoji').forEach(el => {
+            el.addEventListener('click', e => {
                 e.stopPropagation();
-                const action = item.dataset.action;
-                handleMessageAction(action, currentActionMessage);
+                const emoji = el.dataset.emoji;
+                const core = getMessagesCore();
+                if (core && core.addReaction) core.addReaction(currentActionMessage.id, emoji, true);
                 hideMessageActions();
             });
         });
-        
-        actionMenuTimeout = setTimeout(() => {
-            hideMessageActions();
-        }, 8000);
-        
-        const closeHandler = (e) => {
+
+        // Action item clicks
+        menu.querySelectorAll('.msg-menu-item').forEach(item => {
+            item.addEventListener('click', e => {
+                e.stopPropagation();
+                handleMessageAction(item.dataset.action, currentActionMessage);
+                hideMessageActions();
+            });
+        });
+
+        // 10-second auto-close
+        actionMenuTimeout = setTimeout(hideMessageActions, 10000);
+
+        // Click-outside dismiss
+        const closeHandler = e => {
             if (!menu.contains(e.target)) {
                 hideMessageActions();
                 document.removeEventListener('click', closeHandler);
             }
         };
-        setTimeout(() => {
-            document.addEventListener('click', closeHandler);
-        }, 10);
+        setTimeout(() => document.addEventListener('click', closeHandler), 10);
     }
 
     function hideMessageActions() {
@@ -2988,12 +2999,28 @@
 
     function setReplyToMessage(message) {
         window.replyToMessage = message;
-        
+
         const replyIndicator = document.getElementById('replyIndicator');
         const replyText = document.getElementById('replyToText');
         if (replyIndicator && replyText) {
-            const preview = message.content.length > 50 ? message.content.substring(0, 50) + '...' : message.content;
-            replyText.innerHTML = `<i class="fas fa-reply"></i> Replying to: ${preview}`;
+            const core = getMessagesCore();
+            // Resolve sender name
+            let senderName = 'Unknown';
+            if (core && core.FriendManager) {
+                const f = core.FriendManager.getFriend(message.senderId);
+                if (f) senderName = f.displayName || f.username || 'Unknown';
+            }
+            const currentUserId = getCurrentUserId();
+            if (message.senderId == currentUserId) senderName = 'You';
+
+            const preview = (message.content || '').length > 60
+                ? (message.content || '').substring(0, 60) + '…'
+                : (message.content || '');
+
+            replyText.innerHTML = `
+                <span style="font-weight:600;color:#667eea;">${senderName}</span>
+                <span style="color:#6b7280;margin-left:6px;">${preview}</span>
+            `;
             replyIndicator.style.display = 'flex';
         }
     }
@@ -3009,15 +3036,107 @@
     }
 
     function showReportModal(message) {
-        const reportReason = prompt('Please describe the issue with this message:');
-        if (reportReason) {
+        // Remove any existing modal
+        const existing = document.getElementById('_reportModalOverlay');
+        if (existing) existing.remove();
+
+        const overlay = document.createElement('div');
+        overlay.id = '_reportModalOverlay';
+        overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:20000;display:flex;align-items:center;justify-content:center;';
+
+        overlay.innerHTML = `
+            <div style="background:#fff;border-radius:16px;width:min(340px,90vw);padding:24px;font-family:-apple-system,sans-serif;">
+                <h3 style="margin:0 0 6px;font-size:17px;font-weight:700;">Report Message</h3>
+                <p style="margin:0 0 16px;font-size:13px;color:#6b7280;">What's the issue with this message?</p>
+                <div id="_reportOptions" style="display:flex;flex-direction:column;gap:8px;margin-bottom:16px;">
+                    ${['Spam or scam','Harassment or bullying','Hate speech','Misleading information','Inappropriate content','Other'].map(r => `
+                        <label style="display:flex;align-items:center;gap:10px;padding:10px;border:1.5px solid #e5e7eb;border-radius:10px;cursor:pointer;font-size:14px;">
+                            <input type="radio" name="_reportReason" value="${r}" style="accent-color:#667eea;">
+                            ${r}
+                        </label>
+                    `).join('')}
+                </div>
+                <textarea id="_reportDetail" placeholder="Additional details (optional)" style="width:100%;padding:10px;border:1.5px solid #e5e7eb;border-radius:10px;font-size:13px;resize:vertical;min-height:70px;font-family:inherit;margin-bottom:14px;box-sizing:border-box;"></textarea>
+                <div style="display:flex;gap:8px;">
+                    <button id="_reportCancel" style="flex:1;padding:10px;border:1.5px solid #e5e7eb;border-radius:10px;background:#fff;font-size:14px;cursor:pointer;">Cancel</button>
+                    <button id="_reportSubmit" style="flex:1;padding:10px;border:none;border-radius:10px;background:linear-gradient(135deg,#667eea,#764ba2);color:#fff;font-size:14px;font-weight:600;cursor:pointer;">Report</button>
+                </div>
+            </div>
+        `;
+
+        document.body.appendChild(overlay);
+
+        document.getElementById('_reportCancel').onclick = () => overlay.remove();
+        overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+
+        document.getElementById('_reportSubmit').onclick = () => {
+            const reason = overlay.querySelector('input[name="_reportReason"]:checked')?.value;
+            const detail = document.getElementById('_reportDetail').value.trim();
+            if (!reason) { showNotificationInMessages('Please select a reason', 'error'); return; }
             const core = getMessagesCore();
-            if (core && core.reportMessage) {
-                core.reportMessage(message.id, reportReason);
-                showNotificationInMessages('Report submitted', 'success');
-            }
-        }
+            if (core && core.reportMessage) core.reportMessage(message.id, reason + (detail ? ': ' + detail : ''));
+            showNotificationInMessages('Report submitted. Thank you.', 'success');
+            overlay.remove();
+        };
     }
+
+    // View the profile of the person in the active chat
+    function viewReceiverProfile() {
+        const core = getMessagesCore();
+        const chat = core?.getCurrentConversation?.() || core?.ChatManager?.getActiveChat?.();
+        if (!chat) return;
+
+        const userId   = chat.friendId || chat.otherUserId || chat.userId;
+        const name     = chat.friendName || chat.name || 'User';
+        const avatar   = chat.friendAvatar || chat.avatar || '';
+        const username = chat.friendUsername || chat.username || '';
+
+        let onlineStatus = 'Offline';
+        if (core && core.FriendManager && userId) {
+            const f = core.FriendManager.getFriend(userId) || core.FriendManager.getFriend(parseInt(userId));
+            if (f) onlineStatus = f.online ? 'Active now' : (f.lastSeen ? 'Last seen recently' : 'Offline');
+        }
+
+        const existing = document.getElementById('_profileViewOverlay');
+        if (existing) existing.remove();
+
+        const initials = (name.charAt(0) || '?').toUpperCase();
+        const overlay = document.createElement('div');
+        overlay.id = '_profileViewOverlay';
+        overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:20000;display:flex;align-items:center;justify-content:center;';
+        overlay.innerHTML = `
+            <div style="background:#fff;border-radius:20px;width:min(320px,88vw);overflow:hidden;font-family:-apple-system,sans-serif;box-shadow:0 12px 48px rgba(0,0,0,0.2);">
+                <div style="background:linear-gradient(135deg,#667eea,#764ba2);padding:32px 24px 24px;text-align:center;position:relative;">
+                    <button id="_profileClose" style="position:absolute;top:12px;right:12px;background:rgba(255,255,255,0.2);border:none;border-radius:50%;width:32px;height:32px;color:#fff;font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center;">✕</button>
+                    <div style="width:80px;height:80px;border-radius:50%;overflow:hidden;margin:0 auto 12px;border:3px solid rgba(255,255,255,0.5);background:rgba(255,255,255,0.2);display:flex;align-items:center;justify-content:center;">
+                        ${avatar
+                            ? `<img src="${avatar}" alt="${name}" style="width:100%;height:100%;object-fit:cover;" onerror="this.parentElement.innerHTML='<span style=\\'color:white;font-size:28px;font-weight:700;\\'>${initials}</span>'">`
+                            : `<span style="color:white;font-size:28px;font-weight:700;">${initials}</span>`
+                        }
+                    </div>
+                    <div style="color:#fff;font-size:19px;font-weight:700;">${name}</div>
+                    ${username ? `<div style="color:rgba(255,255,255,0.8);font-size:13px;margin-top:2px;">@${username}</div>` : ''}
+                    <div style="margin-top:8px;display:inline-flex;align-items:center;gap:6px;background:rgba(255,255,255,0.15);padding:4px 12px;border-radius:20px;">
+                        <span style="width:8px;height:8px;border-radius:50%;background:${onlineStatus === 'Active now' ? '#10b981' : '#9ca3af'};display:inline-block;"></span>
+                        <span style="color:#fff;font-size:12px;">${onlineStatus}</span>
+                    </div>
+                </div>
+                <div style="padding:20px 24px;">
+                    <div style="display:flex;gap:10px;">
+                        <button onclick="window.messagesUI?.initiateCall?.('voice'); document.getElementById('_profileViewOverlay')?.remove();" style="flex:1;padding:10px;border:1.5px solid #e5e7eb;border-radius:12px;background:#fff;font-size:13px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px;"><i class="fas fa-phone" style="color:#667eea;"></i> Call</button>
+                        <button onclick="window.messagesUI?.initiateCall?.('video'); document.getElementById('_profileViewOverlay')?.remove();" style="flex:1;padding:10px;border:1.5px solid #e5e7eb;border-radius:12px;background:#fff;font-size:13px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px;"><i class="fas fa-video" style="color:#667eea;"></i> Video</button>
+                    </div>
+                </div>
+            </div>
+        `;
+
+        document.body.appendChild(overlay);
+        document.getElementById('_profileClose').onclick = () => overlay.remove();
+        overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+    }
+
+    // Expose globally
+    window.viewReceiverProfile = viewReceiverProfile;
 
     function showMessageInfo(message) {
         const info = `Message Info:
@@ -4686,7 +4805,15 @@ Type: ${message.type || 'text'}`;
                 const nameEl = document.getElementById('chatFriendName');
                 if (nameEl) nameEl.textContent = userName;
                 const statusEl = document.getElementById('chatStatusText');
-                if (statusEl) statusEl.textContent = 'Online';
+                if (statusEl) {
+                    const _core2 = getMessagesCore();
+                    let _realOnline = false;
+                    if (_core2 && _core2.FriendManager) {
+                        const _f = _core2.FriendManager.getFriend(numericUserId);
+                        if (_f) _realOnline = !!_f.online;
+                    }
+                    statusEl.textContent = _realOnline ? 'Active now' : 'Offline';
+                }
                 const indicatorEl = document.getElementById('chatStatusIndicator');
                 if (indicatorEl) indicatorEl.className = 'chat-status online';
                 
@@ -5372,6 +5499,21 @@ Type: ${message.type || 'text'}`;
                     core.fetchMessages(currentChat.id);
                 }
             }
+        },
+
+        viewReceiverProfile: () => viewReceiverProfile(),
+
+        initiateCall: (callType = 'voice') => {
+            const core = getMessagesCore();
+            const chat = core?.getCurrentConversation?.() || core?.ChatManager?.getActiveChat?.();
+            if (!chat) return;
+            const userId = chat.friendId || chat.otherUserId || chat.userId;
+            const userName = chat.friendName || chat.name || 'User';
+            if (!userId) return;
+            window.parent?.postMessage({
+                type: 'INITIATE_CALL',
+                payload: { userId, userName, callType, returnTo: 'messages' }
+            }, '*');
         }
     };
 

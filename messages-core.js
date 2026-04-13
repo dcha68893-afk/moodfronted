@@ -2717,6 +2717,16 @@
             
             this._notifySubscribers();
             EventBus.emit('message:added', message);
+
+            // Immediately re-render sidebar so chat bubbles up after sort
+            try {
+                const uiConvs = this._conversations;
+                const activeChat = this._activeConversation;
+                const drafts = {};
+                window.dispatchEvent(new CustomEvent('renderChatsList', {
+                    detail: { conversations: uiConvs, currentChat: activeChat, currentCategory: 'all', messageDrafts: drafts }
+                }));
+            } catch(_e) {}
         },
         
         updateMessageStatus: function(messageId, status, details = {}) {
@@ -5159,6 +5169,15 @@
                             }
                             ChatManager._notifySubscribers();
                         }
+                        // Re-sort and re-render sidebar immediately
+                        if (ChatManager._conversations) {
+                            ChatManager._conversations.sort((a, b) => (b.lastMessageAt || 0) - (a.lastMessageAt || 0));
+                            try {
+                                window.dispatchEvent(new CustomEvent('renderChatsList', {
+                                    detail: { conversations: ChatManager._conversations, currentChat: ChatManager._activeConversation, currentCategory: 'all', messageDrafts: {} }
+                                }));
+                            } catch(_e) {}
+                        }
                     }
                 }
             }
@@ -5181,6 +5200,27 @@
                 const messageId = data.payload?.messageId || data.messageId;
                 if (messageId && ChatManager.updateMessageStatus) {
                     ChatManager.updateMessageStatus(messageId, 'read');
+                }
+            }
+
+            // ── FRIEND ONLINE / OFFLINE ── update FriendManager + active chat header
+            if (data && (data.type === 'FRIEND_ONLINE' || data.type === 'FRIEND_OFFLINE' || data.type === 'STATUS_UPDATE')) {
+                const p = data.payload || data;
+                const uid = p.userId || p.id || p.friendId;
+                const isOnline = data.type === 'FRIEND_ONLINE' || p.online === true || p.status === 'online';
+                if (uid && FriendManager) {
+                    FriendManager.updateFriendStatus({ userId: uid, id: uid, online: isOnline, status: isOnline ? 'online' : 'offline', lastSeen: p.lastSeen || null });
+                }
+                // If this user is the currently open chat, update the header live
+                const activeChat = ChatManager?.getActiveChat?.();
+                if (activeChat) {
+                    const chatFriendId = activeChat.friendId || activeChat.otherUserId || activeChat.userId;
+                    if (chatFriendId && String(chatFriendId) === String(uid)) {
+                        const statusEl = document.getElementById('chatStatusText');
+                        const indicatorEl = document.getElementById('chatStatusIndicator');
+                        if (statusEl) statusEl.textContent = isOnline ? 'Active now' : 'Offline';
+                        if (indicatorEl) indicatorEl.className = `chat-status ${isOnline ? 'online' : 'offline'}`;
+                    }
                 }
             }
         });

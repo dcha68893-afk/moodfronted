@@ -1554,7 +1554,7 @@ function applySession(sessionData) {
         ICE_RESTART_TIMEOUT: 5000,
         MAX_ICE_RESTARTS: 3,
         
-        CALL_INVITATION_TIMEOUT: 40000,  // Increased from 30000 to 40000
+        CALL_INVITATION_TIMEOUT: 120000,  // 2 minutes ring timeout
         CALL_CONNECTION_TIMEOUT: 15000,
         
         STORAGE_PREFIX: 'calls_core_',
@@ -2305,6 +2305,13 @@ function applySession(sessionData) {
                 
                 if (message.type === MESSAGE_TYPES.CALL_ENDED) {
                     handleCallEnded(message.payload || message.data);
+                    return;
+                }
+                
+                // FIXED: Handle CALL_CANCELLED so cancelling immediately clears receiver UI
+                if (message.type === 'CALL_CANCELLED' || message.type === 'call:cancelled' || message.type === 'call_cancelled') {
+                    handleCallForceEnd(message.payload || message.data || {});
+                    notifyListeners('call_cancelled', message.payload || message.data || {});
                     return;
                 }
                 
@@ -8890,4 +8897,71 @@ function applySettingToCallsModule(section, key, value) {
             window.parent && window.parent.postMessage({ type: 'CHILD_READY', module: 'calls', source: 'calls', timestamp: Date.now() }, '*');
         } catch(e) {}
     });
+})();
+// =============================================
+// JOIN-VIA-LINK HANDLER
+// When user opens a call link (?call=xxx&type=video), auto-initiate the call
+// =============================================
+(function handleJoinViaLink() {
+    try {
+        const params = new URLSearchParams(window.location.search);
+        const callParam = params.get('call');
+        const typeParam = params.get('type') || 'audio';
+        const tokenParam = params.get('token');
+        const callIdParam = params.get('callId');
+
+        if (!callParam && !callIdParam) return; // Not a join-via-link page load
+
+        // Wait for module to be fully initialized before acting
+        function attemptJoin(attempts) {
+            if (attempts <= 0) {
+                console.warn('[calls-core] Join-via-link: module not ready after waiting');
+                return;
+            }
+            const core = window.callCore;
+            if (!core || !core.isReady || !core.isReady()) {
+                setTimeout(() => attemptJoin(attempts - 1), 500);
+                return;
+            }
+
+            if (callIdParam) {
+                // Joining an existing in-progress call by callId
+                console.log('[calls-core] Join-via-link: joining existing call', callIdParam);
+                // Notify parent to handle the join API call
+                try {
+                    window.parent.postMessage({
+                        type: 'JOIN_CALL_VIA_LINK',
+                        payload: {
+                            callId: callIdParam,
+                            token: tokenParam,
+                            callType: typeParam,
+                            timestamp: Date.now()
+                        }
+                    }, '*');
+                } catch(e) {}
+            } else if (callParam) {
+                // callParam is a generated random ID — we need to start a new call
+                // This path handles when recipient opens a link that just has a random ID
+                // The link holder will already be waiting in the call
+                console.log('[calls-core] Join-via-link: starting call from link', callParam, typeParam);
+                // Notify parent / chat.html to orchestrate the call start
+                try {
+                    window.parent.postMessage({
+                        type: 'JOIN_CALL_VIA_LINK',
+                        payload: {
+                            linkCallId: callParam,
+                            callType: typeParam,
+                            token: tokenParam,
+                            timestamp: Date.now()
+                        }
+                    }, '*');
+                } catch(e) {}
+            }
+        }
+
+        // Start trying after 1s to allow module init
+        setTimeout(() => attemptJoin(10), 1000);
+    } catch(e) {
+        console.warn('[calls-core] Join-via-link error:', e.message);
+    }
 })();

@@ -4529,6 +4529,7 @@ async function handlePostStatus() {
         }
         statusData.text = text;
         statusData.content = text; // ensure core's postStatus payload uses correct field
+        const bg = UIElements.querySelector('.background-option.selected');
         if (bg) statusData.background = bg.dataset.bg;
     } else if (tabName === 'media') {
         const mediaPreview = UIElements.getElement('mediaPreview');

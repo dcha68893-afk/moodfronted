@@ -2301,6 +2301,15 @@ try {
                     }
                 }
                 
+                // Inside app.ui.auth.js, in the login method, after token extraction add:
+
+// Create persistent session via SessionManager
+if (window.SessionManager && token && user) {
+    const rememberMe = credentials.rememberMe !== false;
+    const sessionResult = window.SessionManager.createSession(user, token, rememberMe);
+    console.log('[AuthGateway] Session created:', sessionResult);
+}
+
                 // Handle edge cases - create minimal user if missing
                 if (!user && token) {
                     console.warn('Login successful but no user data, creating minimal user object');
@@ -3115,6 +3124,11 @@ try {
                     }
                 }
                 
+
+// Use SessionManager for logout if available
+if (window.SessionManager) {
+    await window.SessionManager.logout(false);
+}
                 // Clear local auth state IMMEDIATELY
                 await this._updateAuthStateImmediately('unauthenticated', null, null);
                 

@@ -432,16 +432,13 @@
                     try {
                         iframe.contentWindow.postMessage(enrichedEvent, '*');
                         modulesSent.push(moduleName);
-                        // console.log(`📡 Event "${enrichedEvent.type}" dispatched to module: ${moduleName}`, enrichedEvent.payload);
                     } catch (error) {
                         console.error(`Failed to dispatch event to ${moduleName}:`, error);
                     }
                 }
             });
             
-            if (modulesSent.length > 0) {
-                // console.log(`✅ Event "${enrichedEvent.type}" broadcast to ${modulesSent.length} module(s):`, modulesSent);
-            } else {
+            if (modulesSent.length === 0) {
                 console.warn(`⚠️ Event "${enrichedEvent.type}" had no targets (no iframes available)`);
             }
         }
@@ -505,7 +502,6 @@
                     type: 'CONTACTS_UPDATE',
                     payload: { contacts: formattedFriends, timestamp: Date.now() }
                 }, '*');
-                // console.log(`[Parent] Sent ${formattedFriends.length} contacts to calls module`);
             }
         }
         
@@ -544,8 +540,6 @@
             if (page === 'status')   setTimeout(() => sendFriendsToStatusIframe(), 300);
             if (page === 'tools')    setTimeout(() => sendFriendsToToolsIframe(), 300);
 
-            // Re-send session + settings to the tab being activated.
-            // Modules that loaded before auth was ready get their session immediately here.
             const iframeId = moduleToIframeId[page];
             if (iframeId) {
                 const iframe = document.getElementById(iframeId);
@@ -615,6 +609,8 @@
             if (window.innerWidth > 768) document.body.classList.remove('chat-panel-active');
         });
     </script>
+    
+    <!-- Core Scripts -->
     <script src="js/app.core.eventbus.js"></script>
     <script src="js/app.core.store.js"></script>
     <script src="js/app.realtime.socket.js"></script>
@@ -625,21 +621,90 @@
     <script>window.__parentHandlesApiRequests = true;</script>
     <script type="module" src="js/api.core.js"></script>
 
-    <script>
-        // ======================================================================
-        // PARENT ORCHESTRATION - CORE FUNCTIONALITY
-        // ======================================================================
-        (function originalParentFormat() {
-            // console.log('📡 Parent broadcaster started');
+    <!-- ====================================================================== -->
+    <!-- SESSION MANAGER - MUST BE LOADED BEFORE VALIDATION -->
+    <!-- ====================================================================== -->
+    <script src="js/auth.session.manager.js"></script>
 
+    <!-- ====================================================================== -->
+    <!-- SESSION VALIDATION FOR CHAT PAGE - FIXED VERSION -->
+    <!-- ====================================================================== -->
+    <script>
+        (function() {
+            let attempts = 0;
+            const MAX_ATTEMPTS = 20;
+            
+            function validateChatSession() {
+                attempts++;
+                console.log('[Chat] Validating session... attempt', attempts);
+                
+                // Check if SessionManager is loaded
+                if (!window.SessionManager) {
+                    if (attempts < MAX_ATTEMPTS) {
+                        console.warn('[Chat] SessionManager not loaded yet, waiting... attempt', attempts);
+                        setTimeout(validateChatSession, 500);
+                    } else {
+                        console.error('[Chat] SessionManager failed to load after', MAX_ATTEMPTS, 'attempts');
+                        // Fallback: check localStorage directly
+                        const token = localStorage.getItem('token') || localStorage.getItem('moodchat_token');
+                        if (!token) {
+                            console.log('[Chat] No token found, redirecting to index');
+                            window.location.href = 'index.html';
+                        }
+                    }
+                    return;
+                }
+                
+                console.log('[Chat] SessionManager loaded, checking session...');
+                
+                // Check if session is valid
+                const isValid = window.SessionManager.isSessionValid();
+                const shouldPrompt = window.SessionManager.shouldPromptLogin();
+                
+                console.log('[Chat] Session valid:', isValid, 'Should prompt:', shouldPrompt);
+                
+                if (!isValid || shouldPrompt) {
+                    console.log('[Chat] No valid session, redirecting to index');
+                    window.location.href = 'index.html';
+                    return;
+                }
+                
+                // Restore session tokens
+                const session = window.SessionManager.getCurrentSession();
+                if (session && session.token) {
+                    localStorage.setItem('token', session.token);
+                    localStorage.setItem('accessToken', session.token);
+                    localStorage.setItem('moodchat_token', session.token);
+                    localStorage.setItem('USER_TOKEN', session.token);
+                    
+                    if (session.user) {
+                        localStorage.setItem('currentUser', JSON.stringify(session.user));
+                        window.currentUser = session.user;
+                    }
+                    
+                    console.log('[Chat] Session restored');
+                }
+                
+                // Update activity on page load
+                window.SessionManager.updateActivity();
+            }
+            
+            // Run validation immediately
+            validateChatSession();
+        })();
+    </script>
+
+    <!-- ====================================================================== -->
+    <!-- PARENT ORCHESTRATION - CORE FUNCTIONALITY -->
+    <!-- ====================================================================== -->
+    <script>
+        (function originalParentFormat() {
             let cachedToken = null;
             let cachedUserId = null;
             let cachedUser = null;
             let cachedFriendsList = [];
             let apiReady = false;
 
-            // FIX: Expose internal variables as live window getters so navigateToPage
-            // (which lives outside this IIFE) can access them without a ReferenceError.
             Object.defineProperty(window, '__cachedToken',  { get: () => cachedToken,  configurable: true });
             Object.defineProperty(window, '__cachedUserId', { get: () => cachedUserId, configurable: true });
             window.__sendSessionToModule  = (iframe, mod) => { if (typeof sendSessionToModule  === 'function') sendSessionToModule(iframe, mod); };
@@ -748,10 +813,7 @@
                 const token = localStorage.getItem('token') || 
                               localStorage.getItem('moodchat_token') || 
                               localStorage.getItem('accessToken');
-                if (!token) {
-                    // console.log('[Parent] No token found in localStorage');
-                    return null;
-                }
+                if (!token) return null;
 
                 let userId = null;
                 let user = null;
@@ -798,7 +860,6 @@
                     cachedToken = session.token;
                     cachedUserId = session.userId;
                     cachedUser = session.user || { id: session.userId, userId: session.userId, username: 'User' };
-                    // console.log('[Parent] ✅ Session cache updated:', { userId: cachedUserId });
                     requestFriendsFromFriendIframe();
                 } else {
                     cachedToken = null;
@@ -820,7 +881,6 @@
                 sendFriendsToGroupIframe(friends);
                 sendFriendsToStatusIframe(friends);
                 sendFriendsToToolsIframe(friends);
-                // // console.log('[Parent] Sent FRIENDS_LIST_UPDATE to all modules:', (friends || []).length, 'friends');
             }
 
             function sendSessionToModule(iframe, moduleName) {
@@ -836,16 +896,10 @@
                             payload: { protocol: 'KYN-8.0', state: 'READY', message: 'Parent ready (no session)', session: null, userId: null },
                             timestamp: Date.now()
                         }, '*');
-                        // [suppressed] sent PARENT_READY to settings (no session)
-                    } else {
-                        // [suppressed] no session for module
                     }
                     return;
                 }
-                if (!iframe || !iframe.contentWindow) {
-                    // [suppressed] no iframe for module
-                    return;
-                }
+                if (!iframe || !iframe.contentWindow) return;
 
                 const userData = {
                     id: cachedUserId,
@@ -908,8 +962,6 @@
                     userId: cachedUserId,
                     timestamp: Date.now()
                 }, '*');
-
-                // console.log(`📡 Sent session to ${moduleName} (userId: ${cachedUserId})`);
                 
                 setTimeout(() => {
                     if (moduleName === 'calls') sendFriendsToCallsIframe();
@@ -923,7 +975,22 @@
             let lastSessionSend = 0;
             const SESSION_SEND_INTERVAL = 30000;
 
-            // ── Read cached settings from localStorage ──────────────────────
+            (function earlyTokenInit() {
+                try {
+                    const t = localStorage.getItem('token') ||
+                              localStorage.getItem('moodchat_token') ||
+                              localStorage.getItem('accessToken');
+                    if (t && !cachedToken) {
+                        cachedToken = t;
+                        const parts = t.split('.');
+                        if (parts.length === 3) {
+                            const p = JSON.parse(atob(parts[1]));
+                            cachedUserId = p.userId || p.id || p.sub || null;
+                        }
+                    }
+                } catch(e) {}
+            })();
+
             function getCachedSettings() {
                 try {
                     const raw = localStorage.getItem('knecta_settings_cache');
@@ -931,7 +998,6 @@
                 } catch(e) { return null; }
             }
 
-            // ── Push the full cached settings object to one module iframe ───
             function pushSettingsToModule(iframe, moduleName) {
                 if (!iframe || !iframe.contentWindow) return;
                 const settings = getCachedSettings();
@@ -948,13 +1014,13 @@
             function sendToAllModulesIfNeeded(force = false) {
                 const now = Date.now();
                 if (!force && now - lastSessionSend < SESSION_SEND_INTERVAL) return;
+                if (!cachedToken || !cachedUserId) updateSessionCache();
                 if (!cachedToken || !cachedUserId) return;
                 lastSessionSend = now;
                 Object.entries(moduleToIframeId).forEach(([moduleName, iframeId]) => {
                     const iframe = document.getElementById(iframeId);
                     if (iframe && iframe.contentWindow) {
                         sendSessionToModule(iframe, moduleName);
-                        // Also push cached settings so every module has fresh preferences
                         setTimeout(() => pushSettingsToModule(iframe, moduleName), 200);
                     }
                 });
@@ -1063,7 +1129,7 @@
             });
 
             // ======================================================================
-            // MAIN MESSAGE HANDLER - INCLUDING CALL HANDLING
+            // MAIN MESSAGE HANDLER
             // ======================================================================
             window.addEventListener('message', async function(event) {
                 if (!isTrustedOrigin(event.origin)) return;
@@ -1071,24 +1137,7 @@
                 const data = event.data || {};
                 if (!data || typeof data !== 'object') return;
 
-                // ======================================================================
-                // CALL HANDLING — UNIFIED, DEDUP-LOCKED, SOURCE-AWARE
-                // ======================================================================
-                //
-                // Design rules:
-                //  1. Only ONE code path sends OPEN_CALL_WITH_USER to the calls iframe.
-                //     That path is __dispatchCallToIframe().
-                //  2. A 2-second dedup lock prevents duplicate triggers from
-                //     SWITCH_MODULE(calls) + INITIATE_CALL arriving simultaneously.
-                //  3. Every call trigger stores __callReturnContext with:
-                //       returnTo   : 'messages' | 'friends' | 'calls'
-                //       chatUserId : the user to re-open (messages only)
-                //       userName   : display name
-                //       source     : the originating module string
-                //  4. CALL_ENDED_RETURN reads __callReturnContext and navigates
-                //     back to the correct module + re-opens the correct view.
-                // ======================================================================
-
+                // CALL HANDLING
                 if (!window.__callDispatchLock) window.__callDispatchLock = { ts: 0, userId: null };
 
                 function __isCallDuplicate(userId) {
@@ -1103,12 +1152,10 @@
                     }
                     window.__callDispatchLock = { ts: Date.now(), userId: String(userId) };
 
-                    // Normalise returnTo
                     if (returnTo === 'friends-page' || returnTo === 'friend') returnTo = 'friends';
                     else if (returnTo === 'chat' || returnTo === 'message') returnTo = 'messages';
                     else if (returnTo !== 'messages' && returnTo !== 'friends') returnTo = 'calls';
 
-                    // Persist return context (used by CALL_ENDED_RETURN)
                     const ctx = { returnTo, chatUserId: chatUserId || userId, userName, source, ts: Date.now() };
                     window.__callReturnContext = ctx;
                     try { sessionStorage.setItem('call_return_ctx', JSON.stringify(ctx)); } catch(e) {}
@@ -1126,9 +1173,6 @@
                         source, timestamp: Date.now()
                     };
 
-                    // Send once after a short delay (lets the iframe activate).
-                    // Do NOT also attach an onLoad listener — that caused the duplicate.
-                    // If the iframe needs to reload it will pick up the pending_call from sessionStorage.
                     try { sessionStorage.setItem('pending_call', JSON.stringify(payload)); } catch(e) {}
 
                     setTimeout(() => {
@@ -1142,17 +1186,15 @@
                     }, 400);
                 }
 
-                // ── Trigger 1: SWITCH_MODULE → calls (from messages chat header buttons)
                 if (data.type === 'SWITCH_MODULE' && data.module === 'calls') {
                     const p = data.payload || {};
                     __dispatchCallToIframe(
                         p.userId, p.userName || 'User', p.callType || 'voice',
                         p.returnTo || 'messages', p.chatUserId || p.userId, 'messages-module'
                     );
-                    return; // stop here — don't fall through to other SWITCH_MODULE handler
+                    return;
                 }
 
-                // ── Trigger 2: INITIATE_CALL (legacy path from some message components)
                 if (data.type === 'INITIATE_CALL') {
                     const p = data.payload || {};
                     __dispatchCallToIframe(
@@ -1161,13 +1203,11 @@
                     );
                 }
 
-                // ── Handle CALL_ENDED_RETURN — navigate back to the correct module
                 if (data.type === 'CALL_ENDED_RETURN') {
                     let ctx = window.__callReturnContext;
                     if (!ctx) {
                         try { const s = sessionStorage.getItem('call_return_ctx'); if (s) ctx = JSON.parse(s); } catch(e) {}
                     }
-                    // Clean up
                     window.__callReturnContext = null;
                     window.__callDispatchLock = { ts: 0, userId: null };
                     try { sessionStorage.removeItem('call_return_ctx'); } catch(e) {}
@@ -1208,7 +1248,6 @@
                             }, 300);
                         }
                     } else {
-                        // returnTo === 'calls' — stay on calls, just show sidebar
                         navigateToPage('calls');
                         const callsIframe = document.getElementById('callsIframe');
                         if (callsIframe && callsIframe.contentWindow) {
@@ -1223,9 +1262,7 @@
                     }
                 }
 
-                // ======================================================================
                 // VERIFY SESSION HANDLER
-                // ======================================================================
                 if (data.type === 'VERIFY_SESSION') {
                     console.log('[Parent] VERIFY_SESSION received from module:', data.source);
                     const requestId = data.payload?.requestId || data.requestId;
@@ -1245,9 +1282,7 @@
                     return;
                 }
 
-                // ======================================================================
                 // CHILD READY HANDLER
-                // ======================================================================
                 if (data.type === 'CHILD_READY') {
                     const targetModule = data.module || data.source || data.payload?.module || null;
                     if (targetModule) registerModule(targetModule);
@@ -1263,8 +1298,6 @@
                                     sendSessionToModule(iframe, targetModule);
                                 }
                             }
-                            // Push cached settings 300ms after session so the module
-                            // starts with the right theme/font/preferences immediately
                             setTimeout(() => pushSettingsToModule(iframe, targetModule), 300);
                         }
                     } else {
@@ -1272,9 +1305,7 @@
                     }
                 }
 
-                // ======================================================================
                 // FRIEND EVENTS
-                // ======================================================================
                 if (data.type === 'FRIEND_ACCEPTED' || data.type === 'FRIEND_REJECTED' || data.type === 'FRIEND_REMOVED') {
                     console.log(`[Parent] Broadcasting ${data.type} event to all modules`, data.payload);
                     setTimeout(() => requestFriendsFromFriendIframe(), 500);
@@ -1285,28 +1316,21 @@
                     });
                 }
 
-                // ======================================================================
                 // SETTINGS HANDLERS
-                // ======================================================================
                 if (data.type === 'SETTINGS_UPDATED') {
                     const settings = data.settings || data.payload?.settings || {};
-                    // 1. Persist to localStorage cache so tab switches restore correct values
                     try { localStorage.setItem('knecta_settings_cache', JSON.stringify(settings)); } catch(e) {}
-                    // 2. Apply appearance changes to parent document immediately
                     if (settings.appearance?.theme || settings.theme) {
                         const theme = settings.appearance?.theme || settings.theme;
                         document.documentElement.setAttribute('data-theme', theme);
                         document.body.setAttribute('data-theme', theme);
                         try { localStorage.setItem('app_theme', theme); } catch(e) {}
                     }
-                    // 3. Broadcast full SETTINGS_UPDATED to all modules
                     dispatchEventToModules({
                         type: 'SETTINGS_UPDATED',
                         payload: { settings, timestamp: Date.now() },
                         originalSource: 'settings'
                     });
-                    // 4. Also fire individual SETTING_CHANGED for every section/key so
-                    //    modules that only listen on that path also pick it up
                     Object.entries(settings).forEach(([section, secVal]) => {
                         if (secVal && typeof secVal === 'object') {
                             Object.entries(secVal).forEach(([key, value]) => {
@@ -1322,7 +1346,6 @@
 
                 if (data.type === 'SETTINGS_GLOBAL_UPDATE') {
                     const { section, key, value } = data;
-                    // 1. Apply to parent document
                     if (section === 'appearance') {
                         if (key === 'theme') {
                             const resolvedTheme = value === 'auto'
@@ -1343,14 +1366,12 @@
                         if (key === 'performanceMode') document.documentElement.setAttribute('data-performance-mode', value ? 'true' : 'false');
                     }
                     if (section === 'mood' && key === 'currentMood') document.documentElement.setAttribute('data-mood', value);
-                    // 2. Persist into the settings cache so tab switches restore it
                     try {
                         const existing = JSON.parse(localStorage.getItem('knecta_settings_cache') || '{}');
                         if (!existing[section]) existing[section] = {};
                         existing[section][key] = value;
                         localStorage.setItem('knecta_settings_cache', JSON.stringify(existing));
                     } catch(e) {}
-                    // 3. Broadcast SETTING_CHANGED to all modules
                     dispatchEventToModules({
                         type: 'SETTING_CHANGED',
                         payload: { section, key, value, timestamp: Date.now() },
@@ -1358,11 +1379,7 @@
                     });
                 }
 
-                // ======================================================================
-                // STORAGE PROXY HANDLERS (for iframed modules using StorageProxy)
-                // Modules postMessage STORAGE_GET/SET/REMOVE/CLEAR — parent handles
-                // real localStorage access and sends back STORAGE_RESULT.
-                // ======================================================================
+                // STORAGE PROXY HANDLERS
                 if (data.type === 'STORAGE_GET') {
                     let storedValue = null;
                     try { storedValue = localStorage.getItem(data.key); } catch(e) {}
@@ -1394,7 +1411,6 @@
                 }
 
                 if (data.type === 'STORAGE_CLEAR') {
-                    // Only clear module-specific keys to avoid wiping auth tokens
                     try {
                         const prefix = data.prefix || 'knecta_';
                         const keysToRemove = [];
@@ -1407,13 +1423,7 @@
                     return;
                 }
 
-                // ======================================================================
                 // FILE UPLOAD PROXY HANDLER
-                // Modules can't do multipart POST directly (CORS, auth). They send
-                // FILE_UPLOAD with base64 data; parent does the real fetch to /api/upload
-                // and returns FILE_UPLOAD_RESULT with the hosted URL.
-                // Falls back gracefully if /api/upload doesn't exist.
-                // ======================================================================
                 if (data.type === 'FILE_UPLOAD') {
                     const { requestId, fileName, fileType, fileSize, base64Data } = data;
                     const replySource = event.source;
@@ -1435,7 +1445,6 @@
                                     localStorage.getItem('accessToken');
                         } catch(e) {}
 
-                        // Convert base64 dataURL back to Blob
                         const [meta, b64] = base64Data.split(',');
                         const mime = (meta.match(/:(.*?);/) || [])[1] || fileType || 'application/octet-stream';
                         const binary = atob(b64);
@@ -1445,7 +1454,7 @@
 
                         const formData = new FormData();
                         formData.append('file', blob, fileName || 'upload');
-                        formData.append('type', mime.split('/')[0]); // 'image' or 'video'
+                        formData.append('type', mime.split('/')[0]);
 
                         const headers = {};
                         if (token) headers['Authorization'] = 'Bearer ' + token;
@@ -1465,8 +1474,6 @@
                                 return;
                             }
                         }
-                        // Upload endpoint not available or returned no URL — signal failure so
-                        // the module falls back to inline base64
                         sendResult({ error: 'Upload endpoint unavailable', success: false });
                     } catch(uploadErr) {
                         sendResult({ error: uploadErr.message || 'Upload failed', success: false });
@@ -1474,9 +1481,7 @@
                     return;
                 }
 
-                // ======================================================================
                 // API REQUEST HANDLER
-                // ======================================================================
                 if (data.type === 'API_REQUEST') {
                     let endpoint = data.payload?.endpoint || data.endpoint;
                     if (!endpoint) {
@@ -1496,13 +1501,22 @@
                     let token = data.payload?.token || cachedToken;
                     if (!token) {
                         try {
+                            const freshSession = getSessionData();
+                            token = freshSession?.token || null;
+                            if (token && !cachedToken) {
+                                cachedToken = token;
+                                cachedUserId = freshSession.userId;
+                                cachedUser = freshSession.user;
+                            }
+                        } catch(e) {}
+                    }
+                    if (!token) {
+                        try {
                             token = localStorage.getItem('token') || 
                                     localStorage.getItem('moodchat_token') || 
                                     localStorage.getItem('accessToken');
                         } catch(e) {}
                     }
-                    
-                    // // [suppressed] API_REQUEST log
 
                     try {
                         const baseUrl = window.__getApiBase ? window.__getApiBase() : 'http://localhost:4000/api';
@@ -1580,15 +1594,12 @@
                     }
                 }
 
-                // ======================================================================
                 // MODULE SWITCHING
-                // ======================================================================
                 if (data.type === 'SWITCH_MODULE' && data.module !== 'calls') {
                     const targetModule = data.module;
                     console.log('[Parent] Switching to module:', targetModule, data.payload);
                     navigateToPage(targetModule);
 
-                    // After returning from a call → re-open the correct chat/friend view
                     if (data.payload?.returnFromCall) {
                         if (targetModule === 'messages' && data.payload?.openChatWith) {
                             const msgIframe = document.getElementById('messagesIframe');
@@ -1644,7 +1655,6 @@
 
                 if (data.type === 'DIRECT_CALL_REQUEST') {
                     const p = data.payload || {};
-                    // Capture the page user came FROM (before navigating to calls)
                     const returnTo = (window.__currentPage && window.__currentPage !== 'calls')
                         ? window.__currentPage
                         : (window.__lastActivePage || 'friends');
@@ -1669,9 +1679,6 @@
                     }
                 }
 
-                // ======================================================================
-                // SIDEBAR CONTROL
-                // ======================================================================
                 if (data.type === 'HIDE_SIDEBAR_ICONS') {
                     document.querySelectorAll('.nav-icon, .mobile-nav-icon, .sidebar-nav .nav-item').forEach(function(el) {
                         el.style.opacity = '0.3';
@@ -1695,9 +1702,6 @@
                     if (userId) await refreshCallHistoryForUser(userId);
                 }
 
-                // ======================================================================
-                // CALL INITIATE - POST to /calls
-                // ======================================================================
                 if (data.type === 'CALL_INITIATE') {
                     const localCallId = data.payload?.callId;
                     const callType = data.payload?.callType || data.payload?.type || 'audio';
@@ -1775,7 +1779,6 @@
                     }
                 }
 
-                // Translate local callId to server UUID for API requests
                 if (data.type === 'API_REQUEST' && window.__callIdMap) {
                     let ep = data.payload?.endpoint || '';
                     Object.entries(window.__callIdMap).forEach(([local, server]) => {
@@ -1783,6 +1786,34 @@
                             data.payload.endpoint = ep.replace(local, server);
                         }
                     });
+                }
+
+                // ── WebRTC Signaling Bridge (outbound): calls iframe → wsService → remote ──
+                // calls-core.js sends SIGNAL_OFFER / SIGNAL_ANSWER / ICE_CANDIDATE to window.parent
+                // We forward them to the remote peer via wsService.send()
+                if (data.type === 'SIGNAL_OFFER' || data.type === 'SIGNAL_ANSWER' || data.type === 'ICE_CANDIDATE') {
+                    if (window.wsService && typeof window.wsService.send === 'function') {
+                        const wsEventMap = {
+                            'SIGNAL_OFFER':   'call_offer',
+                            'SIGNAL_ANSWER':  'call_answer',
+                            'ICE_CANDIDATE':  'ice_candidate'
+                        };
+                        const wsType = wsEventMap[data.type];
+                        try {
+                            window.wsService.send(wsType, data.payload || {});
+                            console.log(`[Parent] ↑ WebRTC signal forwarded to wsService: ${wsType}`);
+                        } catch(sigErr) {
+                            console.warn('[Parent] Failed to forward WebRTC signal:', sigErr.message);
+                        }
+                    } else {
+                        // Fallback: try emit() if send() not available
+                        if (window.wsService && typeof window.wsService.emit === 'function') {
+                            const wsEventMap = { 'SIGNAL_OFFER':'call_offer', 'SIGNAL_ANSWER':'call_answer', 'ICE_CANDIDATE':'ice_candidate' };
+                            window.wsService.emit(wsEventMap[data.type], data.payload || {});
+                        }
+                        console.warn('[Parent] wsService.send not available for WebRTC signal:', data.type);
+                    }
+                    return;
                 }
 
                 if (data.type === 'GET_FRIENDS_LIST') {
@@ -1862,7 +1893,6 @@
                     }
                     setTimeout(() => refreshCallHistoryForUser(cachedUserId), 500);
                 });
-                // Forward backend stale-cleanup events so frontend state fully resets
                 window.wsService.on('call_force_ended', function(callData) {
                     const callsFrame = document.getElementById('callsIframe');
                     if (callsFrame && callsFrame.contentWindow) {
@@ -1870,7 +1900,29 @@
                     }
                     setTimeout(() => refreshCallHistoryForUser(cachedUserId), 500);
                 });
+
+                // ── WebRTC Signaling Bridge ──────────────────────────────────────
+                // Forward SDP offer/answer and ICE candidates from wsService → calls iframe
+                // and from calls iframe → wsService (so both peers can exchange WebRTC signals)
+
+                function _fwdToCallsIframe(type, payload) {
+                    const f = document.getElementById('callsIframe');
+                    if (f && f.contentWindow) f.contentWindow.postMessage({ type, payload, source: 'parent-signal' }, '*');
+                }
+
+                // Inbound signals from the remote peer (via ws server → wsService → here → iframe)
+                window.wsService.on('call_offer',        d => _fwdToCallsIframe('SIGNAL_OFFER',       d));
+                window.wsService.on('call_answer',       d => _fwdToCallsIframe('SIGNAL_ANSWER',      d));
+                window.wsService.on('ice_candidate',     d => _fwdToCallsIframe('ICE_CANDIDATE',      d));
+                window.wsService.on('call:offer',        d => _fwdToCallsIframe('SIGNAL_OFFER',       d));
+                window.wsService.on('call:answer',       d => _fwdToCallsIframe('SIGNAL_ANSWER',      d));
+                window.wsService.on('call:ice_candidate',d => _fwdToCallsIframe('ICE_CANDIDATE',      d));
             }
+
+            // ── WebRTC outbound signals: calls iframe → wsService → remote peer ──
+            // Handled in the main window.addEventListener('message') listener below.
+            // Signals arrive from calls iframe as SIGNAL_OFFER / SIGNAL_ANSWER / ICE_CANDIDATE
+            // and must be forwarded via wsService.send() to the server.
 
             // Calls iframe load handler
             const callsIframe = document.getElementById('callsIframe');

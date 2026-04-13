@@ -1271,7 +1271,7 @@
                 <button class="chat-action-btn back-btn" id="backToChatsBtn">
                     <i class="fas fa-arrow-left"></i>
                 </button>
-                <div class="chat-info">
+                <div class="chat-info" style="cursor:pointer;" onclick="window.messagesUI?.viewReceiverProfile()">
                     <div class="chat-avatar" id="chatFriendAvatar">
                         <i class="fas fa-user"></i>
                         <div class="chat-status offline" id="chatStatusIndicator"></div>
@@ -1282,10 +1282,6 @@
                     </div>
                 </div>
                 <div class="chat-actions">
-                    <!-- In-chat search button -->
-                    <button class="chat-action-btn" id="chatSearchBtn" title="Search in chat (Ctrl+F)">
-                        <i class="fas fa-search"></i>
-                    </button>
                     <button class="chat-action-btn" id="voiceCallBtn" title="Voice Call">
                         <i class="fas fa-phone"></i>
                     </button>
