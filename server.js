@@ -19,7 +19,15 @@ import cloudinary from "cloudinary";
 import "dotenv/config";
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 4000;
+
+function sendSuccess(res, data, status = 200) {
+  return res.status(status).json({ success: true, data });
+}
+
+function sendError(res, error, status = 500, extra = {}) {
+  return res.status(status).json({ success: false, error, ...extra });
+}
 
 // Fix __dirname in ESM
 const __filename = fileURLToPath(import.meta.url);
@@ -90,17 +98,12 @@ app.post("/api/cloudinary/sign-upload", uploadLimiter, (req, res) => {
     const { filename, fileType, fileSize } = req.body;
 
     if (!filename || !fileType) {
-      return res
-        .status(400)
-        .json({ success: false, error: "Missing filename or type" });
+      return sendError(res, "Missing filename or type", 400);
     }
 
     const maxSize = 10 * 1024 * 1024;
     if (fileSize > maxSize) {
-      return res.status(400).json({
-        success: false,
-        error: "Max file size is 10MB",
-      });
+      return sendError(res, "Max file size is 10MB", 400);
     }
 
     let resourceType = "auto";
@@ -121,8 +124,7 @@ app.post("/api/cloudinary/sign-upload", uploadLimiter, (req, res) => {
 
     const { signature, timestamp } = generateSignature(uploadParams);
 
-    res.json({
-      success: true,
+    sendSuccess(res, {
       params: {
         ...uploadParams,
         signature,
@@ -135,7 +137,7 @@ app.post("/api/cloudinary/sign-upload", uploadLimiter, (req, res) => {
     });
   } catch (err) {
     console.error("❌ Signing error:", err);
-    res.status(500).json({ success: false, error: "Server error" });
+    sendError(res, "Server error", 500);
   }
 });
 
@@ -155,9 +157,7 @@ app.post(
   async (req, res) => {
     try {
       if (!req.file) {
-        return res
-          .status(400)
-          .json({ success: false, error: "No file uploaded" });
+        return sendError(res, "No file uploaded", 400);
       }
 
       // Upload buffer directly to Cloudinary
@@ -176,8 +176,7 @@ app.post(
         uploadStream.end(req.file.buffer);
       });
 
-      res.json({
-        success: true,
+      sendSuccess(res, {
         file: {
           originalName: req.file.originalname,
           size: req.file.size,
@@ -190,7 +189,7 @@ app.post(
       });
     } catch (err) {
       console.error("❌ Upload error:", err);
-      res.status(500).json({ success: false, error: "Upload failed" });
+      sendError(res, "Upload failed", 500);
     }
   }
 );
@@ -201,19 +200,17 @@ app.delete("/api/cloudinary/delete-asset", apiLimiter, async (req, res) => {
     const { publicId } = req.body;
 
     if (!publicId) {
-      return res
-        .status(400)
-        .json({ success: false, error: "publicId required" });
+      return sendError(res, "publicId required", 400);
     }
 
     const result = await cloudinary.uploader.destroy(publicId, {
       invalidate: true,
     });
 
-    res.json({ success: true, result });
+    sendSuccess(res, { result });
   } catch (err) {
     console.error("❌ Delete error:", err);
-    res.status(500).json({ success: false, error: "Server error" });
+    sendError(res, "Server error", 500);
   }
 });
 
@@ -245,7 +242,7 @@ pages.forEach((page) => {
 
 // HEALTH CHECK
 app.get("/health", (req, res) => {
-  res.json({
+  sendSuccess(res, {
     status: "OK",
     timestamp: new Date().toISOString(),
     cloudinary: isCloudinaryConfigured ? "Configured" : "Not Configured",
@@ -254,12 +251,12 @@ app.get("/health", (req, res) => {
 
 // DEFAULT 404 HANDLERS
 app.use("/api/*", (req, res) =>
-  res.status(404).json({ success: false, error: "API not found" })
+  sendError(res, "API not found", 404)
 );
 
 app.use((req, res) => {
   if (req.accepts("html")) res.sendFile(path.join(__dirname, "index.html"));
-  else res.status(404).json({ success: false, error: "Not found" });
+  else sendError(res, "Not found", 404);
 });
 
 // START SERVER

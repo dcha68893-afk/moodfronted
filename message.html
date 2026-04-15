@@ -1521,9 +1521,39 @@
     <script src="/js/vendor/chart.min.js"></script>
     <script src="/js/vendor/pickr.min.js"></script>
     <script src="/js/vendor/marked.min.js"></script>
+    <!-- GLOBAL SAFETY LAYER -->
+    <script src="/js/kynecta.safety.layer.js"></script>
+    <script>
+        (function() {
+            waitForParentReady(8000).then(function() {
+                try {
+                    if (window.parent && window.parent.AppStorage) {
+                        window.AppStorage = window.parent.AppStorage;
+                    }
+                } catch (e) {
+                    console.warn('[message.html] AppStorage bridge failed:', e.message);
+                }
+
+                try {
+                    if (window.parent && typeof window.parent.__getStableSessionData === 'function') {
+                        window.__PARENT_SESSION__ = window.parent.__getStableSessionData();
+                    }
+                } catch (e) {
+                    console.warn('[message.html] Session bridge failed:', e.message);
+                }
+            });
+        })();
+    </script>
+    <script>
+        console.log('[INIT MODULE]', 'messages-iframe');
+    </script>
+    <!-- OFFLINE-FIRST LAYER (load order matters) -->
+    <script src="/js/localStore.messages.js"></script>
+    <script src="/js/messageQueue.manager.js"></script>
+    <script src="/js/messageSync.engine.js"></script>
     <script type="module" src="messages-core.js"></script>
     <script type="module" src="messages-ui.js"></script>
-    
+
     <!-- Inline script for initialization and fallback - SILENT -->
     <script>
         (function() {

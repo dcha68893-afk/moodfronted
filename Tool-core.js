@@ -3884,9 +3884,16 @@ function onModuleActive() {
     setTimeout(function() { forceBindAllUIEvents(); }, 50);
     setTimeout(function() { forceBindAllUIEvents(); }, 500);
 }
-// Force bind all UI events - NO lifecycle gate, works at any time
+
+let _bindLogShown = false;
+let _bindCompleteShown = false;
+
 function forceBindAllUIEvents() {
-    console.log('[Tools] Force binding all UI events (direct DOM)');
+    // Only log once total, not once per call
+    if (!_bindLogShown) {
+        console.log('[Tools] Force binding all UI events (direct DOM)');
+        _bindLogShown = true;
+    }
 
     // ── Helper: open a modal by ID ──────────────────────────────────────
     function openModal(id) {
@@ -3914,13 +3921,11 @@ function forceBindAllUIEvents() {
         if (!el) return;
         el.onclick = function(e) {
             e.preventDefault(); e.stopPropagation();
-            console.log('[Tools] Tab clicked:', tab.name);
             categoryTabs.forEach(function(t) {
                 var te = document.getElementById(t.id);
                 if (te) te.classList.remove('active');
             });
             el.classList.add('active');
-            // Notify Tool-ui.js if setActiveTab is available
             if (typeof window.setActiveTab === 'function') {
                 window.setActiveTab(tab.name);
             } else {
@@ -3948,7 +3953,6 @@ function forceBindAllUIEvents() {
         if (!btn) return;
         btn.onclick = function(e) {
             e.preventDefault(); e.stopPropagation();
-            console.log('[Tools] Button clicked:', id);
             btnMap[id]();
         };
     });
@@ -4002,7 +4006,6 @@ function forceBindAllUIEvents() {
             document.querySelectorAll('.create-listing-tab').forEach(function(t){ t.classList.remove('active'); });
             tab.classList.add('active');
             document.querySelectorAll('.create-listing-tab-content').forEach(function(c){ c.classList.remove('active'); });
-            // The content divs use id like "serviceTab", "digitalTab" etc.
             var content = document.getElementById(tabName + 'Tab') || document.querySelector('.create-listing-tab-content[id="' + tabName + 'Tab"]');
             if (content) content.classList.add('active');
         };
@@ -4018,7 +4021,11 @@ function forceBindAllUIEvents() {
         };
     });
 
-    console.log('[Tools] Direct DOM binding complete');
+    // Only log completion once
+    if (!_bindCompleteShown) {
+        console.log('[Tools] Direct DOM binding complete');
+        _bindCompleteShown = true;
+    }
 
     // Also refresh UI if marketplaceUI is available
     if (window.marketplaceUI && typeof window.marketplaceUI.refresh === 'function') {
@@ -5479,29 +5486,54 @@ export async function loadEnhancedMarketplaceData() {
 }
 
 export async function loadListingsFromBackend() {
+    // FIXED: Load from cache first (offline-first), then fetch from server
     try {
-        if (!isActive()) return;
-        
+        // Step 1 — always hydrate from LocalStoreTools / localStorage immediately
+        const LST = window.LocalStoreTools;
+        if (LST && typeof LST.getAllListings === 'function') {
+            const cached = LST.getAllListings();
+            if (cached && cached.length) {
+                allListings = cached;
+                window.allListings = allListings;
+                window.dispatchEvent(new CustomEvent('marketplace:data-updated', { detail: { listings: allListings, source: 'cache' } }));
+            }
+        }
+        if (!allListings || !allListings.length) {
+            const cached = safeStorage.get ? safeStorage.get(LOCAL_STORAGE_KEYS.ALL_LISTINGS) : null;
+            if (cached) { allListings = cached; window.allListings = allListings; }
+        }
+
+        // Step 2 — attempt server fetch (skip if no token yet but still return cached data)
+        const token = getCentralToken();
+        if (!token && !navigator.onLine) return; // no token + offline = use cache only
+
         const response = await safeApiCall('GET', '/api/marketplace/listings');
         if (response && response.data?.listings) {
             allListings = response.data.listings;
+            window.allListings = allListings;
             safeStorage.set(LOCAL_STORAGE_KEYS.ALL_LISTINGS, allListings);
+            if (LST) LST.saveMany(allListings, LST.STORES.LISTINGS).catch(()=>{});
+            window.dispatchEvent(new CustomEvent('marketplace:data-updated', { detail: { listings: allListings, source: 'server' } }));
         } else if (response && response.listings) {
             allListings = response.listings;
+            window.allListings = allListings;
             safeStorage.set(LOCAL_STORAGE_KEYS.ALL_LISTINGS, allListings);
+            if (LST) LST.saveMany(allListings, LST.STORES.LISTINGS).catch(()=>{});
+            window.dispatchEvent(new CustomEvent('marketplace:data-updated', { detail: { listings: allListings, source: 'server' } }));
         }
-    } catch {
-        throw new Error('Failed to load listings');
+    } catch(e) {
+        // Server fetch failed — cached data was already hydrated above, just log
+        console.warn('[loadListingsFromBackend] Server fetch failed, using cache:', e.message);
     }
 }
 
 export async function loadSpotlightListingsFromBackend() {
     try {
-        if (!isActive()) return;
-        
         const response = await safeApiCall('GET', '/api/marketplace/spotlight');
-        if (response && response.spotlightListings) {
-            safeStorage.set(LOCAL_STORAGE_KEYS.SPOTLIGHT_LISTINGS, response.spotlightListings);
+        const items = response?.data?.listings || response?.spotlightListings || [];
+        if (items.length) {
+            safeStorage.set(LOCAL_STORAGE_KEYS.SPOTLIGHT_LISTINGS, items);
+            window.dispatchEvent(new CustomEvent('marketplace:spotlight-updated', { detail: { listings: items } }));
         }
     } catch {}
 }
@@ -5780,7 +5812,7 @@ export async function processPremiumPayment(listing, options) {
     try {
         if (!isActive()) return false;
         const paymentAmount = calculatePremiumCost(options);
-        const paymentData = { amount: paymentAmount, currency: 'USD', listingId: listing.id, features: options };
+        const paymentData = { amount: paymentAmount, currency: 'KES', listingId: listing.id, features: options };
         const response = await safeApiCall('POST', '/api/payments/process', paymentData);
         return response && response.success;
     } catch {
@@ -5805,7 +5837,7 @@ export async function sendTip(listingId, amount, customAmount = null) {
     try {
         if (!isActive()) return false;
         const finalAmount = customAmount || amount;
-        const tipData = { listingId, amount: finalAmount, currency: 'USD' };
+        const tipData = { listingId, amount: finalAmount, currency: 'KES' };
         const response = await safeApiCall('POST', '/api/marketplace/tips', tipData);
         if (response && response.success) {
             updateAnalyticsData('tipReceived', finalAmount);

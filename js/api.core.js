@@ -618,6 +618,45 @@ const TOKEN_PRIORITY_KEYS = [
     'moodchat_auth_token'
 ];
 
+function getStorageBridge() {
+    if (typeof window !== 'undefined' && window.AppStorage && typeof window.AppStorage.get === 'function') {
+        return window.AppStorage;
+    }
+
+    return {
+        get(key, fallback = null) {
+            try {
+                const raw = localStorage.getItem(key);
+                if (raw === null || raw === undefined) return fallback;
+                try {
+                    return JSON.parse(raw);
+                } catch (_error) {
+                    return raw;
+                }
+            } catch (_error) {
+                return fallback;
+            }
+        },
+        set(key, value) {
+            try {
+                localStorage.setItem(key, typeof value === 'string' ? value : JSON.stringify(value));
+                console.log('[LOCAL SAVE]', key, value);
+                return true;
+            } catch (_error) {
+                return false;
+            }
+        },
+        remove(key) {
+            try {
+                localStorage.removeItem(key);
+                return true;
+            } catch (_error) {
+                return false;
+            }
+        }
+    };
+}
+
 function getAuthToken() {
     // Priority 1: Memory token
     if (AUTH_TOKEN && typeof AUTH_TOKEN === 'string' && AUTH_TOKEN.length > 20) {
@@ -633,14 +672,11 @@ function getAuthToken() {
     
     // Priority 3: Secure storage
     try {
-        const stored = localStorage.getItem(AUTH_STORAGE_KEY);
-        if (stored) {
-            const parsed = JSON.parse(stored);
-            if (parsed && parsed.token && typeof parsed.token === 'string' && parsed.token.length > 20) {
-                AUTH_TOKEN = parsed.token;
-                TOKEN_READY = true;
-                return AUTH_TOKEN;
-            }
+        const stored = getStorageBridge().get(AUTH_STORAGE_KEY, null);
+        if (stored && stored.token && typeof stored.token === 'string' && stored.token.length > 20) {
+            AUTH_TOKEN = stored.token;
+            TOKEN_READY = true;
+            return AUTH_TOKEN;
         }
     } catch (error) {
         console.warn('[TOKEN] Failed to parse stored auth:', error.message);
@@ -649,7 +685,7 @@ function getAuthToken() {
     // Priority 4: Legacy keys
     for (const key of TOKEN_PRIORITY_KEYS) {
         try {
-            const legacyToken = localStorage.getItem(key);
+            const legacyToken = getStorageBridge().get(key, null);
             if (legacyToken && legacyToken.length > 20 && legacyToken !== 'null' && legacyToken !== 'undefined') {
                 AUTH_TOKEN = legacyToken;
                 TOKEN_READY = true;
@@ -676,10 +712,10 @@ function _saveAuthToStorage(token, user = null) {
             version: '24.0.4'
         };
         
-        localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(authData));
+        getStorageBridge().set(AUTH_STORAGE_KEY, authData);
         
         // Also store in legacy location for compatibility
-        localStorage.setItem('moodchat_token', token);
+        getStorageBridge().set('moodchat_token', token);
         
         return true;
     } catch (error) {
@@ -696,13 +732,13 @@ function _clearAuthFromStorage() {
     }
     
     try {
-        localStorage.removeItem(AUTH_STORAGE_KEY);
-        localStorage.removeItem('moodchat_token');
+        getStorageBridge().remove(AUTH_STORAGE_KEY);
+        getStorageBridge().remove('moodchat_token');
         
         // Clear legacy keys
         for (const key of TOKEN_PRIORITY_KEYS) {
             try {
-                localStorage.removeItem(key);
+                getStorageBridge().remove(key);
             } catch (e) {}
         }
         

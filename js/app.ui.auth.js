@@ -25,6 +25,67 @@ if (window.__authGatewayInitialized) {
 window.__authGatewayInitialized = true;
 
 // ============================================================================
+// PERSISTENT AUTH HELPERS - WhatsApp-style session persistence
+// ============================================================================
+function _saveAuthToLocalStorage(token, refreshToken, user, expiresAt) {
+    try {
+        const payload = {
+            token:        token,
+            refreshToken: refreshToken || null,
+            user:         user         || null,
+            expiresAt:    expiresAt    || (Date.now() + 24 * 60 * 60 * 1000),
+            issuedAt:     Date.now()
+        };
+        if (window.AuthStorage && typeof window.AuthStorage.saveAuth === 'function') {
+            window.AuthStorage.saveAuth(payload);
+        } else {
+            localStorage.setItem('kynecta_auth', JSON.stringify(payload));
+        }
+        console.log('[UIAuth] ✅ Auth persisted to localStorage');
+    } catch(e) {
+        console.warn('[UIAuth] ⚠️ Could not persist auth:', e.message);
+    }
+}
+
+function _clearAuthFromLocalStorage() {
+    try {
+        if (window.AuthStorage && typeof window.AuthStorage.clearAuth === 'function') {
+            window.AuthStorage.clearAuth();
+        } else {
+            localStorage.removeItem('kynecta_auth');
+            localStorage.removeItem('accessToken');
+            localStorage.removeItem('refreshToken');
+        }
+        console.log('[UIAuth] ✅ Auth cleared from localStorage');
+    } catch(e) {}
+}
+
+// Listen for auth success events fired by api.auth.js
+window.addEventListener('auth-login-success', function(e) {
+    const d = e && e.detail;
+    if (d && d.token) {
+        _saveAuthToLocalStorage(d.token, d.refreshToken, d.user, d.expiresAt);
+    }
+});
+window.addEventListener('auth-register-success', function(e) {
+    const d = e && e.detail;
+    if (d && d.token) {
+        _saveAuthToLocalStorage(d.token, d.refreshToken, d.user, d.expiresAt);
+    }
+});
+window.addEventListener('auth-logout', function() {
+    _clearAuthFromLocalStorage();
+});
+window.addEventListener('token-refreshed', function(e) {
+    const d = e && e.detail;
+    if (d && d.token) {
+        _saveAuthToLocalStorage(d.token, d.refreshToken, null, d.expiresAt);
+    }
+});
+
+
+
+// ============================================================================
 // GLOBAL CONSTANTS AND CONFIGURATION
 // ============================================================================
 const AUTH_GATEWAY_CONFIG = {

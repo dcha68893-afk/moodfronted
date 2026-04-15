@@ -1,9 +1,9 @@
 // Service Worker for PWA Chat Application
-// Version: 9.0.0 - PERMANENTLY SAFE EDITION
+// Version: 10.0.0 - OFFLINE ICONS + FULL ASSET CACHING
 // Cache Strategy: Cache-First ONLY for static assets
 // Design: Zero API interference, future-proof, authentication-safe
 
-const CACHE_NAME = 'moodchat-static-v9';
+const CACHE_NAME = 'moodchat-static-v10';
 const CACHE_MAX_AGE = 7 * 24 * 60 * 60 * 1000;
 
 const CORE_STATIC_ASSETS = [
@@ -15,7 +15,38 @@ const CORE_STATIC_ASSETS = [
   '/api.js',
   '/Tool.css',
   '/Tool.js',
-  '/group.js'
+  '/group.js',
+
+  // ── Pages ────────────────────────────────────────────────────────────────
+  '/friend.html',
+  '/chat.html',
+
+  // ── Font Awesome: CSS + ALL webfont binaries (icons break offline without these)
+  '/css/vendor/font-awesome.min.css',
+  '/webfonts/fa-solid-900.woff2',
+  '/webfonts/fa-solid-900.woff',
+  '/webfonts/fa-regular-400.woff2',
+  '/webfonts/fa-regular-400.woff',
+  '/webfonts/fa-brands-400.woff2',
+  '/webfonts/fa-brands-400.woff',
+  '/webfonts/fa-light-300.woff2',
+  '/webfonts/fa-light-300.woff',
+  '/webfonts/fa-thin-100.woff2',
+  '/webfonts/fa-thin-100.woff',
+  '/webfonts/fa-duotone-900.woff2',
+  '/webfonts/fa-duotone-900.woff',
+
+  // ── Offline icon fallback (Unicode symbols when FA font unavailable) ──────
+  '/css/offline-icon-fallback.css',
+  '/js/vendor/offline-icon-bootstrap.js',
+
+  // ── App icons ────────────────────────────────────────────────────────────
+  '/icons/moodchat-192.png',
+  '/icons/moodchat-512.png',
+
+  // ── Core app CSS ─────────────────────────────────────────────────────────
+  '/friend.css',
+  '/css/suppress-webgl.css',
 ];
 
 const STATIC_ASSET_PATTERNS = [
@@ -23,7 +54,12 @@ const STATIC_ASSET_PATTERNS = [
   /\/icons\//i,
   /\/images\//i,
   /\/fonts\//i,
-  /\/static\//i
+  /\/static\//i,
+  /\/webfonts\//i,          // Font Awesome glyph binaries
+  /\/css\/vendor\//i,       // Vendor CSS (font-awesome.min.css etc.)
+  /\/js\/vendor\//i,        // Vendor JS
+  /offline-icon-fallback/i,  // Offline icon CSS
+  /offline-icon-bootstrap/i  // Offline icon JS
 ];
 
 const BYPASS_PATTERNS = [
@@ -49,6 +85,10 @@ const HTML_NAVIGATION_PATTERNS = [
   /\/register$/i,
   /\/logout$/i
 ];
+
+// NOTE: Font Awesome is loaded from /css/vendor/ (local) NOT from a CDN.
+// cdnjs.cloudflare.com links in HTML files have been replaced with local paths.
+// This means FA woff2 files are intercepted as static assets (above) and cached.
 
 // Track logged bypass requests to avoid repeated logs
 const loggedBypasses = new Set();
@@ -171,11 +211,42 @@ async function handleApiRequest(request) {
   }
 }
 
+function isFontOrIconAsset(url) {
+  return /\/webfonts\/|font-awesome|\.woff2?$|\.ttf$|\.eot$/i.test(url)
+      || /offline-icon-fallback|offline-icon-bootstrap/i.test(url);
+}
+
 async function handleStaticAsset(request) {
   const cache = await caches.open(CACHE_NAME);
   const requestKey = request.url;
-  
-  // Check if already cached to avoid double caching
+
+  // 🔤 FONT / ICON ASSETS: cache-first, never stale — these never change.
+  //    Without this, going offline with an empty cache shows blank icon boxes.
+  if (isFontOrIconAsset(request.url)) {
+    const cachedFont = await cache.match(request);
+    if (cachedFont) {
+      if (!loggedCacheHits.has(requestKey)) {
+        console.log('[Service Worker] Font/icon from cache:', request.url);
+        loggedCacheHits.add(requestKey);
+      }
+      return cachedFont;
+    }
+    // Not cached yet — fetch, store, return
+    try {
+      const fontResponse = await fetch(request);
+      if (fontResponse.ok) {
+        await cache.put(request, fontResponse.clone());
+        console.log('[Service Worker] Font/icon cached:', request.url);
+      }
+      return fontResponse;
+    } catch (err) {
+      console.warn('[Service Worker] Font fetch failed (offline?):', request.url);
+      // Return empty 200 so CSS doesn't throw — browser will use system font
+      return new Response('', { status: 200, headers: { 'Content-Type': 'font/woff2' } });
+    }
+  }
+
+  // 📦 ALL OTHER STATIC ASSETS: original cache-first logic
   const alreadyCached = await isAlreadyCached(request, cache);
   
   if (alreadyCached) {
@@ -196,7 +267,6 @@ async function handleStaticAsset(request) {
     const networkResponse = await fetch(request);
     
     if (networkResponse.ok) {
-      // Only cache if not already cached to avoid repeated fetches
       if (!alreadyCached) {
         await cache.put(request, networkResponse.clone());
         console.log('[Service Worker] Static asset cached:', request.url);
@@ -204,7 +274,6 @@ async function handleStaticAsset(request) {
       return networkResponse;
     }
     
-    // If network fails but we have cache, use it
     if (alreadyCached) {
       const cachedResponse = await cache.match(request);
       if (cachedResponse) {
@@ -216,7 +285,12 @@ async function handleStaticAsset(request) {
     throw new Error('Network failed and no cache available');
     
   } catch (error) {
-    // 🛡️ Return minimal error response for static assets only
+    // Last resort: try stale cache even if marked stale
+    const staleCache = await cache.match(request);
+    if (staleCache) {
+      console.log('[Service Worker] Serving stale (last resort):', request.url);
+      return staleCache;
+    }
     return new Response('Resource not available', {
       status: 404,
       headers: { 'Content-Type': 'text/plain' }
@@ -241,7 +315,7 @@ function isCacheStale(cachedResponse) {
 // ========== SERVICE WORKER EVENTS ==========
 
 self.addEventListener('install', event => {
-  console.log('[Service Worker] Installing v9.0.0 - PERMANENTLY SAFE EDITION');
+  console.log('[Service Worker] Installing v10.0.0 - OFFLINE ICONS + FULL ASSET CACHING');
   
   event.waitUntil(
     (async () => {
@@ -299,7 +373,7 @@ self.addEventListener('install', event => {
 });
 
 self.addEventListener('activate', event => {
-  console.log('[Service Worker] Activating v9.0.0 - PERMANENTLY SAFE EDITION');
+  console.log('[Service Worker] Activating v10.0.0 - OFFLINE ICONS + FULL ASSET CACHING');
   
   event.waitUntil(
     (async () => {
@@ -321,7 +395,7 @@ self.addEventListener('activate', event => {
         clients.forEach(client => {
           client.postMessage({
             type: 'SW_ACTIVATED',
-            version: '9.0.0',
+            version: '10.0.0',
             safeMode: true,
             timestamp: Date.now()
           });
@@ -405,7 +479,7 @@ self.addEventListener('message', event => {
             event.ports?.[0]?.postMessage({
               type: 'CACHE_INFO',
               count: keys.length,
-              version: '9.0.0',
+              version: '10.0.0',
               timestamp: Date.now(),
               safeMode: true
             });
@@ -423,7 +497,7 @@ self.addEventListener('message', event => {
       event.ports?.[0]?.postMessage({
         type: 'HEALTH_RESPONSE',
         status: 'healthy',
-        version: '9.0.0',
+        version: '10.0.0',
         safeMode: true,
         timestamp: Date.now()
       });
@@ -479,4 +553,4 @@ self.addEventListener('unhandledrejection', event => {
   event.preventDefault();
 });
 
-console.log('[Service Worker] v9.0.0 loaded - PERMANENTLY SAFE MODE ACTIVE');
+console.log('[Service Worker] v10.0.0 loaded - OFFLINE ICONS ACTIVE');

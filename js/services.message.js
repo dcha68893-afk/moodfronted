@@ -1,314 +1,327 @@
 /**
- * Kynecta Message Service
- * Abstraction layer for message-related API calls
- * @version 1.0.0
+ * services.message.js  (Offline-First Edition)
+ * Abstraction layer for message-related operations.
+ * LOCAL STORE is the primary source of truth.
+ * Backend is a delivery + sync layer only.
+ * @version 2.0.0
  */
 
-(function() {
+(function () {
     'use strict';
 
+    // ── UUID helper ──────────────────────────────────────────────────────────
+    function _uuid() {
+        if (window.crypto && window.crypto.randomUUID) return window.crypto.randomUUID();
+        return 'msg-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 9);
+    }
+
+    // ── Wait for a global to appear ──────────────────────────────────────────
+    function _waitFor(getter, timeout = 5000) {
+        return new Promise((resolve) => {
+            const start = Date.now();
+            const check = () => {
+                const v = getter();
+                if (v) return resolve(v);
+                if (Date.now() - start > timeout) return resolve(null);
+                setTimeout(check, 100);
+            };
+            check();
+        });
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
     class MessageService {
         constructor() {
-            this._cache = new Map();
+            this._cache          = new Map();
             this._pendingRequests = new Map();
-            this._retryConfig = {
-                maxRetries: 3,
-                baseDelay: 1000,
-                maxDelay: 10000
-            };
+            this._retryConfig    = { maxRetries: 3, baseDelay: 1000, maxDelay: 10000 };
         }
 
-        /**
-         * Send a message
-         * @param {Object} messageData - Message data
-         * @param {string} messageData.chatId - Chat/conversation ID
-         * @param {string} messageData.content - Message content
-         * @param {string} messageData.type - Message type (text, image, file, etc.)
-         * @param {Object} messageData.metadata - Additional metadata
-         * @returns {Promise} Resolves with sent message
-         */
+        // ── Dependencies (lazy) ──────────────────────────────────────────────
+        get _localStore() { return window.KynectaLocalStore || null; }
+        get _msgQueue()   { return window.KynectaMsgQueue   || null; }
+        get _syncEngine() { return window.KynectaSyncEngine || null; }
+
+        // ════════════════════════════════════════════════════════════════════
+        // SEND MESSAGE — offline-first
+        // ════════════════════════════════════════════════════════════════════
         async sendMessage(messageData) {
+            const localStore = this._localStore;
+
+            // 1. Generate local UUID
+            const localId = _uuid();
+
+            // 2. Save locally as pending
+            const localMsg = localStore ? await localStore.saveMessage({
+                id:          localId,
+                chatId:      messageData.chatId,
+                senderId:    messageData.senderId || this._getCurrentUserId(),
+                content:     messageData.content,
+                type:        messageData.type || 'text',
+                status:      'pending',
+                isLocalOnly: true,
+                createdAt:   Date.now()
+            }) : null;
+
+            // 3. Immediately reflect in UI via store/eventbus
+            if (localMsg) {
+                this._updateStoreMessages(messageData.chatId, localMsg);
+                this._emitEvent('MESSAGE_PENDING', localMsg);
+            }
+
+            // 4. Try to send to backend
             try {
-                const response = await this._makeRequest('POST', '/api/messages', messageData);
-                
-                // Update store if available
-                if (window.KynectaStore) {
-                    const messages = window.KynectaStore.get(`messages.byChat.${messageData.chatId}`) || [];
-                    window.KynectaStore.set(
-                        `messages.byChat.${messageData.chatId}`,
-                        [...messages, response.data]
-                    );
+                const response = await this._makeRequest('POST', '/api/messages', {
+                    ...messageData,
+                    localId
+                });
+
+                const serverMsg = response?.data || response;
+                const serverId  = serverMsg?.id;
+
+                // 5a. On success: confirm local message
+                if (localStore && serverId) {
+                    await localStore.confirmMessage(localId, String(serverId), {
+                        chatId:    serverMsg.chatId || messageData.chatId,
+                        createdAt: serverMsg.createdAt || Date.now()
+                    });
                 }
 
-                // Emit event
-                if (window.KynectaEventBus) {
-                    window.KynectaEventBus.emit('MESSAGE_SENT', response.data);
-                }
+                const finalMsg = { ...(localMsg || {}), serverId: serverId ? String(serverId) : null, status: 'sent', isLocalOnly: false };
 
-                return response.data;
+                this._updateStoreMessages(messageData.chatId, finalMsg);
+                this._emitEvent('MESSAGE_SENT', finalMsg);
+
+                return finalMsg;
+
             } catch (error) {
-                // Queue for offline delivery
-                if (!navigator.onLine) {
-                    return this._queueOfflineMessage('send', messageData);
+                // 5b. On failure: mark failed + enqueue for retry
+                if (localStore) {
+                    await localStore.updateMessageStatus(localId, 'failed');
                 }
-                throw error;
+
+                if (this._msgQueue) {
+                    this._msgQueue.enqueue({ ...messageData, localId, id: localId });
+                } else {
+                    // Fallback to legacy offline queue
+                    this._queueOfflineMessage('send', { ...messageData, localId });
+                }
+
+                this._emitEvent('MESSAGE_FAILED', { localId, error: error.message });
+
+                // Return local message so UI still shows it
+                return localMsg || { id: localId, status: 'failed', ...messageData };
             }
         }
 
-        /**
-         * Get messages for a chat
-         * @param {string} chatId - Chat ID
-         * @param {Object} options - Pagination options
-         * @param {number} options.limit - Messages per page
-         * @param {string} options.before - Cursor for pagination
-         * @returns {Promise} Resolves with messages
-         */
+        // ════════════════════════════════════════════════════════════════════
+        // GET MESSAGES — read from local store first
+        // ════════════════════════════════════════════════════════════════════
         async getMessages(chatId, options = {}) {
-            const cacheKey = `chat_${chatId}_${options.before || 'latest'}`;
-            
-            // Check cache
-            if (this._cache.has(cacheKey)) {
-                const cached = this._cache.get(cacheKey);
-                if (Date.now() - cached.timestamp < 30000) { // 30 second cache
-                    return cached.data;
+            if (!chatId) return [];
+
+            // Always return from local store immediately
+            const localStore = this._localStore;
+            if (localStore) {
+                const localMsgs = await localStore.getMessagesByChat(chatId, {
+                    limit: options.limit || 100,
+                    before: options.before || null
+                });
+
+                if (localMsgs.length > 0) {
+                    this._updateStoreMessages(chatId, null, localMsgs);
+                    // Background sync
+                    if (navigator.onLine && this._syncEngine) {
+                        this._syncEngine.syncChat(chatId, { limit: options.limit || 50 }).catch(() => {});
+                    }
+                    return localMsgs;
                 }
             }
 
-            // Prevent duplicate requests
-            if (this._pendingRequests.has(cacheKey)) {
-                return this._pendingRequests.get(cacheKey);
-            }
+            // No local data — fetch from server
+            const cacheKey = `chat_${chatId}_${options.before || 'latest'}`;
+            if (this._pendingRequests.has(cacheKey)) return this._pendingRequests.get(cacheKey);
 
-            const params = new URLSearchParams({
-                limit: options.limit || 50,
-                ...(options.before && { before: options.before })
-            });
-
-            const requestPromise = this._makeRequest('GET', `/api/chats/${chatId}/messages?${params}`)
-                .then(response => {
-                    this._cache.set(cacheKey, {
-                        data: response.data,
-                        timestamp: Date.now()
-                    });
+            const params = new URLSearchParams({ limit: options.limit || 50, ...(options.before && { before: options.before }) });
+            const requestPromise = this._makeRequest('GET', `/api/messages?chatId=${chatId}&${params}`)
+                .then(async response => {
                     this._pendingRequests.delete(cacheKey);
-                    
-                    // Update store
-                    if (window.KynectaStore) {
-                        const existing = window.KynectaStore.get(`messages.byChat.${chatId}`) || [];
-                        const merged = this._mergeMessages(existing, response.data);
-                        window.KynectaStore.set(`messages.byChat.${chatId}`, merged);
+                    const messages = response?.data?.messages || response?.messages || response?.data || [];
+                    if (localStore && messages.length) {
+                        await localStore.mergeServerMessages(chatId, messages);
+                        const local = await localStore.getMessagesByChat(chatId, options);
+                        this._updateStoreMessages(chatId, null, local);
+                        return local;
                     }
-                    
-                    return response.data;
+                    return messages;
                 })
-                .catch(error => {
-                    this._pendingRequests.delete(cacheKey);
-                    throw error;
-                });
+                .catch(err => { this._pendingRequests.delete(cacheKey); throw err; });
 
             this._pendingRequests.set(cacheKey, requestPromise);
             return requestPromise;
         }
 
-        /**
-         * Delete a message
-         * @param {string} messageId - Message ID
-         * @param {string} chatId - Chat ID (for store updates)
-         * @returns {Promise}
-         */
+        // ════════════════════════════════════════════════════════════════════
+        // DELETE / EDIT / MARK-READ — optimistic local, then server
+        // ════════════════════════════════════════════════════════════════════
         async deleteMessage(messageId, chatId) {
-            const response = await this._makeRequest('DELETE', `/api/messages/${messageId}`);
-            
-            // Update store
-            if (window.KynectaStore && chatId) {
-                const messages = window.KynectaStore.get(`messages.byChat.${chatId}`) || [];
-                const updated = messages.filter(msg => msg.id !== messageId);
-                window.KynectaStore.set(`messages.byChat.${chatId}`, updated);
-            }
+            const localStore = this._localStore;
 
-            // Emit event
-            if (window.KynectaEventBus) {
-                window.KynectaEventBus.emit('MESSAGE_DELETED', { messageId, chatId });
-            }
+            // Optimistic local delete
+            if (localStore) await localStore.deleteMessage(messageId);
+            this._removeFromStore(chatId, messageId);
+            this._emitEvent('MESSAGE_DELETED', { messageId, chatId });
 
-            return response.data;
+            // Background server delete
+            try {
+                await this._makeRequest('DELETE', `/api/messages/${messageId}`);
+            } catch (err) {
+                console.warn('[MessageService] Server delete failed (local already done):', err.message);
+            }
         }
 
-        /**
-         * Edit a message
-         * @param {string} messageId - Message ID
-         * @param {string} content - New content
-         * @param {string} chatId - Chat ID (for store updates)
-         * @returns {Promise}
-         */
         async editMessage(messageId, content, chatId) {
-            const response = await this._makeRequest('PUT', `/api/messages/${messageId}`, { content });
-            
-            // Update store
-            if (window.KynectaStore && chatId) {
-                const messages = window.KynectaStore.get(`messages.byChat.${chatId}`) || [];
-                const updated = messages.map(msg => 
-                    msg.id === messageId ? { ...msg, content, edited: true } : msg
-                );
-                window.KynectaStore.set(`messages.byChat.${chatId}`, updated);
-            }
+            const localStore = this._localStore;
 
-            // Emit event
-            if (window.KynectaEventBus) {
-                window.KynectaEventBus.emit('MESSAGE_EDITED', { messageId, content, chatId });
-            }
+            // Optimistic update
+            if (localStore) await localStore.updateMessage(messageId, { content, edited: true });
+            this._patchInStore(chatId, messageId, { content, edited: true });
+            this._emitEvent('MESSAGE_EDITED', { messageId, content, chatId });
 
-            return response.data;
+            try {
+                const response = await this._makeRequest('PATCH', `/api/messages/${messageId}`, { content });
+                return response?.data;
+            } catch (err) {
+                console.warn('[MessageService] Server edit failed (local already done):', err.message);
+            }
         }
 
-        /**
-         * Mark messages as read
-         * @param {string} chatId - Chat ID
-         * @param {Array} messageIds - Message IDs to mark as read
-         * @returns {Promise}
-         */
         async markAsRead(chatId, messageIds) {
-            const response = await this._makeRequest('POST', `/api/chats/${chatId}/read`, { messageIds });
-            
-            // Update store
+            const localStore = this._localStore;
+            if (localStore && Array.isArray(messageIds)) {
+                for (const id of messageIds) {
+                    await localStore.updateMessageStatus(id, 'read').catch(() => {});
+                }
+            }
+
             if (window.KynectaStore) {
-                const messages = window.KynectaStore.get(`messages.byChat.${chatId}`) || [];
-                const updated = messages.map(msg => 
-                    messageIds.includes(msg.id) ? { ...msg, read: true } : msg
-                );
-                window.KynectaStore.set(`messages.byChat.${chatId}`, updated);
-                
-                // Update unread count
                 const unread = window.KynectaStore.get('messages.unread') || {};
                 delete unread[chatId];
                 window.KynectaStore.set('messages.unread', unread);
             }
 
-            return response.data;
-        }
-
-        /**
-         * Send typing indicator
-         * @param {string} chatId - Chat ID
-         * @param {boolean} isTyping - Typing status
-         */
-        async sendTyping(chatId, isTyping) {
-            if (!navigator.onLine) return;
+            if (!navigator.onLine) return { queued: true };
 
             try {
-                await this._makeRequest('POST', `/api/chats/${chatId}/typing`, { typing: isTyping });
-                
-                // Update store
-                if (window.KynectaStore) {
-                    const typing = window.KynectaStore.get('messages.typing') || {};
-                    if (isTyping) {
-                        typing[chatId] = Date.now();
-                    } else {
-                        delete typing[chatId];
-                    }
-                    window.KynectaStore.set('messages.typing', typing);
-                }
-            } catch (error) {
-                // Silently fail - typing indicators are non-critical
+                return await this._makeRequest('POST', `/api/messages/mark-read/batch`, { messageIds, chatId });
+            } catch (err) {
+                console.warn('[MessageService] markAsRead server call failed:', err.message);
             }
         }
 
-        /**
-         * Upload file attachment
-         * @param {File} file - File to upload
-         * @param {Function} onProgress - Progress callback
-         * @returns {Promise} Resolves with file metadata
-         */
+        async sendTyping(chatId, isTyping) {
+            if (!navigator.onLine) return;
+            try {
+                await this._makeRequest('POST', `/api/chats/${chatId}/typing`, { typing: isTyping });
+            } catch {}
+        }
+
         async uploadFile(file, onProgress = null) {
             const formData = new FormData();
             formData.append('file', file);
-
-            const options = {
-                method: 'POST',
-                body: formData,
-                headers: {} // Let browser set content-type with boundary
-            };
-
-            if (onProgress) {
-                options.onUploadProgress = onProgress;
-            }
-
-            const response = await this._makeRequest('POST', '/api/files/upload', null, options);
-            return response.data;
+            const options = { method: 'POST', body: formData, headers: {} };
+            if (onProgress) options.onUploadProgress = onProgress;
+            return this._makeRequest('POST', '/api/files/upload', null, options);
         }
 
-        // ========== PRIVATE METHODS ==========
+        // ── Private helpers ──────────────────────────────────────────────────
+
+        _getCurrentUserId() {
+            return window.MessagesCore?.getCurrentUserId?.()
+                || window.__PARENT_SESSION__?.userId
+                || null;
+        }
+
+        _updateStoreMessages(chatId, singleMsg, allMsgs = null) {
+            if (!window.KynectaStore) return;
+            if (allMsgs) {
+                window.KynectaStore.set(`messages.byChat.${chatId}`, allMsgs);
+                return;
+            }
+            if (!singleMsg) return;
+            const existing = window.KynectaStore.get(`messages.byChat.${chatId}`) || [];
+            const idx = existing.findIndex(m => m.id === singleMsg.id);
+            if (idx >= 0) {
+                existing[idx] = { ...existing[idx], ...singleMsg };
+                window.KynectaStore.set(`messages.byChat.${chatId}`, existing);
+            } else {
+                window.KynectaStore.set(`messages.byChat.${chatId}`, [...existing, singleMsg]);
+            }
+        }
+
+        _removeFromStore(chatId, messageId) {
+            if (!window.KynectaStore || !chatId) return;
+            const existing = window.KynectaStore.get(`messages.byChat.${chatId}`) || [];
+            window.KynectaStore.set(`messages.byChat.${chatId}`, existing.filter(m => m.id !== messageId));
+        }
+
+        _patchInStore(chatId, messageId, patch) {
+            if (!window.KynectaStore || !chatId) return;
+            const existing = window.KynectaStore.get(`messages.byChat.${chatId}`) || [];
+            window.KynectaStore.set(`messages.byChat.${chatId}`, existing.map(m =>
+                m.id === messageId ? { ...m, ...patch } : m
+            ));
+        }
+
+        _emitEvent(type, data) {
+            if (window.KynectaEventBus) window.KynectaEventBus.emit(type, data);
+            try { window.dispatchEvent(new CustomEvent(`kyn:${type.toLowerCase()}`, { detail: data })); } catch {}
+        }
+
+        // ── Network ──────────────────────────────────────────────────────────
 
         async _makeRequest(method, endpoint, data = null, customOptions = {}) {
-            // Get token from various sources
-            let token = null;
-            if (window.__PARENT_SESSION__?.token) {
-                token = window.__PARENT_SESSION__.token;
-            } else if (window.AUTH_SESSION?.token) {
-                token = window.AUTH_SESSION.token;
-            } else if (window.localStorage) {
-                token = window.localStorage.getItem('kynecta_token');
-            }
+            const token = window.__PARENT_SESSION__?.token
+                || window.AUTH_SESSION?.token
+                || localStorage.getItem('token')
+                || localStorage.getItem('moodchat_token')
+                || null;
 
             const headers = {
                 'Content-Type': 'application/json',
-                ...(token && { 'Authorization': `Bearer ${token}` }),
+                ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
                 ...customOptions.headers
             };
 
-            const options = {
-                method,
-                headers,
-                credentials: 'include',
-                ...customOptions
-            };
+            const options = { method, headers, credentials: 'include', ...customOptions };
+            if (data && method !== 'GET') options.body = JSON.stringify(data);
 
-            if (data && method !== 'GET') {
-                options.body = JSON.stringify(data);
-            }
-
-            // Use api.request.js if available
-            if (window.api?.request) {
-                return window.api.request.request(endpoint, options);
-            }
-
-            // Fallback to fetch with retry logic
+            if (window.api?.request?.request) return window.api.request.request(endpoint, options);
             return this._fetchWithRetry(endpoint, options);
         }
 
         async _fetchWithRetry(endpoint, options, attempt = 1) {
             try {
                 const response = await fetch(endpoint, options);
-                
                 if (!response.ok) {
                     if (response.status === 401) {
-                        // Try to refresh token
                         const refreshed = await this._refreshToken();
                         if (refreshed) {
                             options.headers['Authorization'] = `Bearer ${refreshed}`;
                             return this._fetchWithRetry(endpoint, options, attempt);
                         }
                     }
-                    
                     if (response.status >= 500 && attempt <= this._retryConfig.maxRetries) {
-                        const delay = Math.min(
-                            this._retryConfig.baseDelay * Math.pow(2, attempt - 1),
-                            this._retryConfig.maxDelay
-                        );
+                        const delay = Math.min(this._retryConfig.baseDelay * Math.pow(2, attempt - 1), this._retryConfig.maxDelay);
                         await new Promise(r => setTimeout(r, delay));
                         return this._fetchWithRetry(endpoint, options, attempt + 1);
                     }
-                    
                     throw new Error(`HTTP ${response.status}: ${response.statusText}`);
                 }
-                
-                return await response.json();
+                return response.json();
             } catch (error) {
                 if (attempt <= this._retryConfig.maxRetries && navigator.onLine) {
-                    const delay = Math.min(
-                        this._retryConfig.baseDelay * Math.pow(2, attempt - 1),
-                        this._retryConfig.maxDelay
-                    );
+                    const delay = Math.min(this._retryConfig.baseDelay * Math.pow(2, attempt - 1), this._retryConfig.maxDelay);
                     await new Promise(r => setTimeout(r, delay));
                     return this._fetchWithRetry(endpoint, options, attempt + 1);
                 }
@@ -318,71 +331,44 @@
 
         async _refreshToken() {
             try {
-                const refreshToken = window.localStorage.getItem('kynecta_refresh_token');
+                const refreshToken = localStorage.getItem('kynecta_refresh_token');
                 if (!refreshToken) return null;
-
                 const response = await fetch('/api/auth/refresh', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ refreshToken })
                 });
-
                 if (!response.ok) return null;
-
                 const data = await response.json();
-                
-                // Update stored token
-                window.localStorage.setItem('kynecta_token', data.token);
-                if (data.refreshToken) {
-                    window.localStorage.setItem('kynecta_refresh_token', data.refreshToken);
+                if (data.token) {
+                    localStorage.setItem('kynecta_token', data.token);
+                    if (data.refreshToken) localStorage.setItem('kynecta_refresh_token', data.refreshToken);
+                    if (window.__PARENT_SESSION__) window.__PARENT_SESSION__.token = data.token;
                 }
-
-                // Update session in parent
-                if (window.__PARENT_SESSION__) {
-                    window.__PARENT_SESSION__.token = data.token;
-                }
-
-                return data.token;
-            } catch (error) {
-                return null;
-            }
+                return data.token || null;
+            } catch { return null; }
         }
 
         _queueOfflineMessage(action, data) {
             const queue = JSON.parse(localStorage.getItem('kynecta_offline_queue') || '[]');
-            
-            const queuedItem = {
-                id: `offline_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`,
-                action,
-                data,
-                timestamp: Date.now()
-            };
-            
-            queue.push(queuedItem);
+            const item  = { id: `offline_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`, action, data, timestamp: Date.now() };
+            queue.push(item);
             localStorage.setItem('kynecta_offline_queue', JSON.stringify(queue));
-
-            // Emit offline queued event
-            if (window.KynectaEventBus) {
-                window.KynectaEventBus.emit('MESSAGE_OFFLINE_QUEUED', queuedItem);
-            }
-
-            return { queued: true, id: queuedItem.id };
+            this._emitEvent('MESSAGE_OFFLINE_QUEUED', item);
+            return { queued: true, id: item.id };
         }
 
+        // Keep legacy _mergeMessages for backward compat with sync manager
         _mergeMessages(existing, incoming) {
-            const messageMap = new Map();
-            
-            existing.forEach(msg => messageMap.set(msg.id, msg));
-            incoming.forEach(msg => messageMap.set(msg.id, msg));
-            
-            return Array.from(messageMap.values())
-                .sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
+            const map = new Map();
+            existing.forEach(m => map.set(m.id, m));
+            incoming.forEach(m => map.set(m.id, m));
+            return Array.from(map.values()).sort((a, b) => (a.timestamp || a.createdAt || 0) - (b.timestamp || b.createdAt || 0));
         }
     }
 
-    // Initialize and expose globally
-    window.services = window.services || {};
+    window.services       = window.services || {};
     window.services.message = new MessageService();
 
-    console.log('[MessageService] ✅ Ready');
+    console.log('[MessageService] ✅ Ready (offline-first v2)');
 })();

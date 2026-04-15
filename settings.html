@@ -2253,10 +2253,19 @@
     <!-- Fallback color picker (hidden) -->
     <div id="fallbackColorPickerContainer" style="display: none;"></div>
 
-    <!-- Settings JS - Core and UI - Order preserved -->
-    <script type="module" src="settings-core.js"></script>
-    <script type="module" src="settings-ui.js"></script>
-    
+    <!-- Local-first layer — load BEFORE settings-core.js -->
+<script src="/js/localstore.settings.js"></script>
+<script src="/js/settingsschema.validator.js"></script>
+<script src="/js/settingsSync.engine.js"></script>
+<script src="/js/settings-core.local-first.patch.js"></script>
+
+<!-- Existing scripts — UNCHANGED -->
+<script type="module" src="settings-core.js"></script>
+<script type="module" src="settings-ui.js"></script>
+
+<!-- UI additions — load AFTER settings-ui.js -->
+<script src="/js/settings-ui.local-first.patch.js"></script>
+
     <!-- =============================================
          INLINE ERROR BOUNDARY AND INITIALIZATION - SILENT
          ============================================= -->

@@ -1,13 +1,25 @@
 /**
- * Kynecta Central Application Data Store
- * Immutable state management with reactive updates
- * @version 1.0.0
+ * app.core.store.js  (Offline-First Edition v2.2)
+ * Immutable state management with reactive updates.
+ * UI always reads from this store; writes flow through localStore first.
+ *
+ * FIXES applied v2.2:
+ *   ✅  Full group management with byId, list, myGroups, joinedGroups, adminGroups
+ *   ✅  Group members, messages, invites, pendingQueue support
+ *   ✅  loadGroupsFromLocal() — IDB + localStorage bootstrap
+ *   ✅  upsertGroup() — central write path with LocalGroupStore persistence
+ *   ✅  removeGroupFromStore() — full cleanup from all collections
+ *   ✅  upsertGroupMember() / removeGroupMember() — member management
+ *   ✅  loadGroupMessages() / upsertGroupMessage() — message handling
+ *   ✅  setGroupSyncState() — UI loading/pending/error states
+ *   ✅  Event listeners for groupSync:* and kyn:group* events
+ *
+ * @version 2.2.0
  */
 
-(function() {
+(function () {
     'use strict';
 
-    // Store configuration
     const STORE_CONFIG = {
         maxHistoryPerKey: 50,
         debug: false,
@@ -15,26 +27,15 @@
         persistDebounce: 500
     };
 
-    // Store schema definition
     const STORE_SCHEMA = {
         user: {
-            id: null,
-            username: null,
-            displayName: null,
-            email: null,
-            phone: null,
-            photoURL: null,
-            status: null,
-            lastSeen: null,
-            online: false,
-            settings: {}
+            id: null, username: null, displayName: null, email: null,
+            phone: null, photoURL: null, status: null, lastSeen: null,
+            online: false, settings: {}
         },
         session: {
-            authenticated: false,
-            token: null,
-            refreshToken: null,
-            expiresAt: null,
-            userId: null
+            authenticated: false, token: null, refreshToken: null,
+            expiresAt: null, userId: null
         },
         messages: {
             byId: {},
@@ -44,477 +45,951 @@
             drafts: {}
         },
         friends: {
-            byId: {},
-            list: [],
-            online: new Set(),
-            requests: [],
-            blocked: []
+            byId: {}, list: [], online: [],  // Set → Array for JSON-serialisability
+            requests: [], blocked: []
         },
         groups: {
             byId: {},
             list: [],
+            myGroups: [],
+            joinedGroups: [],
+            adminGroups: [],
             members: {},
-            unread: {}
+            messages: {},
+            invites: [],
+            pendingQueue: [],
+            syncState: {
+                syncing: false,
+                lastSync: 0,
+                pendingCount: 0,
+                failedIds: []
+            },
+            lastSync: 0
         },
         calls: {
-            active: null,
-            history: [],
-            missed: [],
-            ringing: null
+            active: null, history: [], missed: [], ringing: null
         },
-        status: {
-            byId: {},
-            list: [],
-            viewed: {}
-        },
+        status: { byId: {}, list: [], viewed: {} },
         settings: {
             theme: 'light',
-            fontSize: 'medium',
+            fontSize: 16,
             notifications: true,
             soundEnabled: true,
             language: 'en',
             wallpaper: null,
-            privacy: {}
+            privacy: {},
+            accentColor: '#4F46E5',
+            reduceMotion: false,
+            syncEnabled: false
         },
         ui: {
-            currentPage: 'messages',
-            modals: {},
-            loading: {},
-            notifications: []
+            currentPage: 'messages', modals: {}, loading: {}, notifications: []
         },
         sync: {
-            lastSync: 0,
-            syncing: false,
-            pending: [],
-            failed: []
+            lastSync: 0, syncing: false, pending: [], failed: []
         },
         network: {
-            online: navigator.onLine,
-            connectionType: null,
-            latency: null
+            online: navigator.onLine, connectionType: null, latency: null
         }
     };
 
-    /**
-     * Kynecta Store Implementation
-     */
+    // ─── Keys ─────────────────────────────────────────────────────────────────────
+    const LS_CANONICAL = 'knecta_settings_cache';   // LocalStoreSettings key
+    const LS_STORE_PFX = 'kynecta_store_';           // KynectaStore persist prefix
+    const LS_GROUPS_BOOTSTRAP = 'kynecta_groups_bootstrap';
+
     class KynectaStore {
         constructor() {
-            this._state = this._createInitialState();
-            this._subscribers = new Map();           // keyPath -> Set(callbacks)
-            this._wildcardSubscribers = new Set();   // callbacks for any change
-            this._history = new Map();                // keyPath -> array of past values
-            this._config = { ...STORE_CONFIG };
-            this._batchUpdates = new Map();           // pending batch updates
-            this._batchTimeout = null;
-            this._persistTimeout = null;
-            this._stats = {
-                updates: 0,
-                gets: 0,
-                subscriptions: 0,
-                rollbacks: 0
-            };
+            this._state               = this._createInitialState();
+            this._subscribers         = new Map();
+            this._wildcardSubscribers = new Set();
+            this._history             = new Map();
+            this._config              = { ...STORE_CONFIG };
+            this._batchTimeout        = null;
+            this._persistTimeout      = null;
+            this._localStoreUnsub     = null;
+            this._stats = { updates: 0, gets: 0, subscriptions: 0, rollbacks: 0 };
 
-            // Load persisted state
+            this._hydrateStoreFromLocal();   // NEW: fast boot from all kynecta_*_cache keys
             this._loadPersistedState();
+            this._setupOfflineFirstListeners();
+            this._setupStorePersistence();   // NEW: debounced write-back on every store change
+            this._subscribeToLocalStore();
 
-            // Expose globally
+            // Load groups on boot (async)
+            this.loadGroupsFromLocal();
+
             window.KynectaStore = this;
-
-            console.log('[Store] ✅ Initialized');
+            console.log('[Store] ✅ Initialized (offline-first v2.2)');
         }
 
-        // ========== PUBLIC API ==========
+        // ── PUBLIC API ───────────────────────────────────────────────────────────
 
-        /**
-         * Get value from store
-         * @param {string} keyPath - Dot notation path (e.g., 'messages.byId.123')
-         * @param {*} defaultValue - Default if path doesn't exist
-         * @returns {*} Value at path
-         */
         get(keyPath, defaultValue = null) {
             this._stats.gets++;
-            
             if (!keyPath) return this._state;
-            
             const keys = keyPath.split('.');
             let value = this._state;
-            
             for (const key of keys) {
-                if (value === null || value === undefined) {
-                    return defaultValue;
-                }
+                if (value === null || value === undefined) return defaultValue;
                 value = value[key];
             }
-            
             return value !== undefined ? value : defaultValue;
         }
 
-        /**
-         * Set value in store
-         * @param {string} keyPath - Dot notation path
-         * @param {*} value - New value
-         * @param {Object} options - Update options
-         * @param {boolean} options.silent - Skip notifications
-         * @param {boolean} options.persist - Force persistence
-         * @param {boolean} options.history - Store in history
-         * @returns {boolean} Success
-         */
         set(keyPath, value, options = {}) {
             if (!keyPath) return false;
-
             const oldValue = this.get(keyPath);
-            
-            // Skip if values are deeply equal (simple check)
-            if (JSON.stringify(oldValue) === JSON.stringify(value)) {
-                return true;
-            }
+            if (JSON.stringify(oldValue) === JSON.stringify(value)) return true;
 
-            // Record history if requested
-            if (options.history !== false) {
-                this._recordHistory(keyPath, oldValue);
-            }
+            if (options.history !== false) this._recordHistory(keyPath, oldValue);
 
-            // Perform immutable update
             const newState = this._setImmutable(this._state, keyPath.split('.'), value);
-            
             if (!newState) return false;
 
-            // Apply update
             this._state = newState;
             this._stats.updates++;
 
-            // Handle persistence
-            const shouldPersist = options.persist || 
-                this._config.persistKeys.some(key => keyPath.startsWith(key));
-            
-            if (shouldPersist) {
-                this._schedulePersistence();
-            }
+            const shouldPersist = options.persist ||
+                this._config.persistKeys.some(k => keyPath.startsWith(k));
+            if (shouldPersist) this._schedulePersistence();
 
-            // Notify subscribers
-            if (!options.silent) {
-                this._notifySubscribers(keyPath, value, oldValue);
-            }
-
+            if (!options.silent) this._notifySubscribers(keyPath, value, oldValue);
             return true;
         }
 
-        /**
-         * Update value using function
-         * @param {string} keyPath - Dot notation path
-         * @param {Function} updater - (currentValue) => newValue
-         * @param {Object} options - Update options
-         * @returns {*} New value
-         */
         update(keyPath, updater, options = {}) {
-            const currentValue = this.get(keyPath);
-            const newValue = updater(currentValue);
+            const current  = this.get(keyPath);
+            const newValue = updater(current);
             this.set(keyPath, newValue, options);
             return newValue;
         }
 
-        /**
-         * Batch multiple updates
-         * @param {Function} batchFn - Function receiving batch object
-         * @returns {Promise} Resolves when batch applied
-         */
         batch(batchFn) {
             return new Promise((resolve) => {
-                // Clear any pending batch
-                if (this._batchTimeout) {
-                    clearTimeout(this._batchTimeout);
-                }
-
-                // Create batch context
+                if (this._batchTimeout) clearTimeout(this._batchTimeout);
                 const batch = {
                     updates: [],
-                    set: (keyPath, value) => {
-                        batch.updates.push({ keyPath, value });
-                    },
-                    update: (keyPath, updater) => {
-                        const current = this.get(keyPath);
-                        batch.updates.push({ keyPath, value: updater(current) });
-                    }
+                    set:    (k, v)  => batch.updates.push({ keyPath: k, value: v }),
+                    update: (k, fn) => batch.updates.push({ keyPath: k, value: fn(this.get(k)) })
                 };
-
-                // Execute batch function
                 batchFn(batch);
-
-                // Apply batch after microtask
-                this._batchTimeout = setTimeout(() => {
-                    this._applyBatch(batch.updates);
-                    resolve();
-                }, 0);
+                this._batchTimeout = setTimeout(() => { this._applyBatch(batch.updates); resolve(); }, 0);
             });
         }
 
-        /**
-         * Subscribe to changes
-         * @param {string} keyPath - Dot notation path (or '*' for all)
-         * @param {Function} callback - (newValue, oldValue, keyPath) => {}
-         * @returns {Function} Unsubscribe function
-         */
         subscribe(keyPath, callback) {
             if (keyPath === '*') {
                 this._wildcardSubscribers.add(callback);
                 this._stats.subscriptions++;
                 return () => this._wildcardSubscribers.delete(callback);
             }
-
-            if (!this._subscribers.has(keyPath)) {
-                this._subscribers.set(keyPath, new Set());
-            }
-
+            if (!this._subscribers.has(keyPath)) this._subscribers.set(keyPath, new Set());
             this._subscribers.get(keyPath).add(callback);
             this._stats.subscriptions++;
-
             return () => {
-                const subscribers = this._subscribers.get(keyPath);
-                if (subscribers) {
-                    subscribers.delete(callback);
-                    if (subscribers.size === 0) {
-                        this._subscribers.delete(keyPath);
-                    }
-                }
+                const subs = this._subscribers.get(keyPath);
+                if (subs) { subs.delete(callback); if (!subs.size) this._subscribers.delete(keyPath); }
             };
         }
 
-        /**
-         * Subscribe with selector for derived data
-         * @param {Function} selector - (state) => derived value
-         * @param {Function} callback - (derivedValue) => {}
-         * @returns {Function} Unsubscribe
-         */
         select(selector, callback) {
             let lastValue = selector(this._state);
-            
-            const unsubscribe = this.subscribe('*', () => {
+            const unsub = this.subscribe('*', () => {
                 const newValue = selector(this._state);
                 if (JSON.stringify(lastValue) !== JSON.stringify(newValue)) {
                     callback(newValue, lastValue);
                     lastValue = newValue;
                 }
             });
-
-            // Initial callback
             callback(lastValue);
-
-            return unsubscribe;
+            return unsub;
         }
 
-        /**
-         * Get entire state snapshot
-         * @returns {Object} Frozen state snapshot
-         */
-        getState() {
-            return this._deepFreeze({ ...this._state });
-        }
+        getState() { return this._deepFreeze({ ...this._state }); }
 
-        /**
-         * Reset state to initial values
-         * @param {Array} keys - Specific keys to reset (optional)
-         */
         reset(keys = null) {
-            const initialState = this._createInitialState();
-            
+            const initial = this._createInitialState();
             if (keys) {
-                keys.forEach(key => {
-                    if (key in initialState) {
-                        this.set(key, initialState[key], { silent: false });
-                    }
-                });
+                keys.forEach(key => { if (key in initial) this.set(key, initial[key]); });
             } else {
-                this._state = initialState;
+                this._state = initial;
                 this._notifySubscribers('*', this._state, null);
             }
         }
 
-        /**
-         * Get change history for a path
-         * @param {string} keyPath - Dot notation path
-         * @param {number} limit - Max entries
-         * @returns {Array} History entries
-         */
         getHistory(keyPath, limit = 10) {
-            const history = this._history.get(keyPath) || [];
-            return history.slice(-limit);
+            return (this._history.get(keyPath) || []).slice(-limit);
         }
 
-        /**
-         * Rollback to previous value
-         * @param {string} keyPath - Dot notation path
-         * @param {number} steps - Steps to rollback
-         * @returns {boolean} Success
-         */
         rollback(keyPath, steps = 1) {
             const history = this._history.get(keyPath) || [];
             if (history.length < steps) return false;
-
             const targetIndex = history.length - steps;
-            const targetValue = history[targetIndex];
-            
-            this.set(keyPath, targetValue, { silent: false });
+            this.set(keyPath, history[targetIndex]);
             this._stats.rollbacks++;
-
-            // Truncate history
             this._history.set(keyPath, history.slice(0, targetIndex));
+            return true;
+        }
+
+        getStats() {
+            return {
+                ...this._stats,
+                subscribersByPath: Array.from(this._subscribers.entries())
+                    .map(([path, set]) => ({ path, count: set.size })),
+                wildcardSubscribers: this._wildcardSubscribers.size,
+                historySize: Array.from(this._history.values())
+                    .reduce((acc, arr) => acc + arr.length, 0)
+            };
+        }
+
+        setDebug(enabled) { this._config.debug = enabled; }
+
+        // ── Offline-first helpers ────────────────────────────────────────────────
+
+        async loadMessagesFromLocal(chatId) {
+            const localStore = window.KynectaLocalStore;
+            if (!localStore) return;
+            try {
+                await localStore.ready();
+                const msgs = await localStore.getMessagesByChat(chatId, { limit: 100 });
+                this.set(`messages.byChat.${chatId}`, Array.isArray(msgs) ? msgs : [], { silent: false });
+            } catch (err) {
+                console.warn('[Store] loadMessagesFromLocal failed:', err.message);
+            }
+        }
+
+        upsertMessage(chatId, message) {
+            if (!chatId || !message || !message.id) return;
+            const existing = this.get(`messages.byChat.${chatId}`) || [];
+            const arr = Array.isArray(existing) ? existing : [];
+            const idx = arr.findIndex(m =>
+                m.id === message.id ||
+                (message.serverId && m.serverId === message.serverId)
+            );
+            if (idx >= 0) {
+                const updated = [...arr];
+                updated[idx] = { ...arr[idx], ...message };
+                this.set(`messages.byChat.${chatId}`, updated);
+            } else {
+                this.set(`messages.byChat.${chatId}`, [...arr, message]);
+            }
+        }
+
+        // ── Offline-first friend helpers ─────────────────────────────────
+
+        async loadFriendsFromLocal() {
+            const ls = window.KynectaFriendsLocalStore;
+            if (!ls) return;
+            try {
+                await ls.ready();
+                const [friends, incoming, blocked] = await Promise.all([
+                    ls.getFriends(),
+                    ls.getPendingReceived(),
+                    ls.getBlocked(),
+                ]);
+                const toDisplay = r => ({
+                    id:          r.friendId,
+                    localId:     r.id,
+                    serverId:    r.serverId,
+                    displayName: r.displayName || r.username || r.friendId,
+                    username:    r.username  || '',
+                    avatar:      r.avatar    || '',
+                    photoURL:    r.avatar    || '',
+                    status:      r.status,
+                    addedAt:     r.createdAt,
+                    isLocalOnly: r.isLocalOnly,
+                });
+                this.batch(b => {
+                    b.set('friends.list',     friends.map(toDisplay));
+                    b.set('friends.requests', incoming.map(toDisplay));
+                    b.set('friends.blocked',  blocked.map(toDisplay));
+                });
+                console.log('[Store] Friends loaded from local: ' + friends.length + ' friends, ' + incoming.length + ' requests');
+            } catch (err) {
+                console.warn('[Store] loadFriendsFromLocal failed:', err.message);
+            }
+        }
+
+        upsertFriend(friendData) {
+            if (!friendData || !friendData.id) return;
+            const list = this.get('friends.list') || [];
+            const idx  = list.findIndex(f => String(f.id) === String(friendData.id));
+            const entry = {
+                id:          friendData.id,
+                displayName: friendData.displayName || friendData.username || String(friendData.id),
+                username:    friendData.username  || '',
+                avatar:      friendData.avatar    || friendData.photoURL || '',
+                photoURL:    friendData.avatar    || friendData.photoURL || '',
+                status:      friendData.status    || 'offline',
+                addedAt:     friendData.addedAt   || friendData.createdAt || Date.now(),
+                isLocalOnly: friendData.isLocalOnly !== false,
+            };
+            if (idx >= 0) {
+                const updated = [...list];
+                updated[idx] = { ...list[idx], ...entry };
+                this.set('friends.list', updated);
+            } else {
+                this.set('friends.list', [...list, entry]);
+            }
+        }
+
+        removeFriendFromStore(friendId) {
+            const list = this.get('friends.list') || [];
+            this.set('friends.list', list.filter(f => String(f.id) !== String(friendId)));
+        }
+
+        syncFromLocalStore() {
+            const lss = window.LocalStoreSettings;
+            if (!lss) return;
+            try {
+                const local = lss.getAll();
+                if (!local || Object.keys(local).length <= 1) return;
+                const mapped = _localSettingsToStoreSchema(local);
+                const current = this.get('settings') || {};
+                this.set('settings', Object.assign({}, current, mapped), { persist: true });
+            } catch (e) { console.warn('[Store] syncFromLocalStore failed:', e.message); }
+        }
+
+        // ═══════════════════════════════════════════════════════════════════════════
+        // ── NEW GROUP METHODS (v2.2) ──────────────────────────────────────────────
+        // ═══════════════════════════════════════════════════════════════════════════
+
+        /**
+         * Load groups from LocalGroupStore (IndexedDB) into reactive store.
+         * Called on boot and after every server sync.
+         * Uses synchronous localStorage bootstrap for instant first paint.
+         */
+        async loadGroupsFromLocal() {
+            // Step 1: Synchronous bootstrap from localStorage (instant)
+            this._applyGroupBootstrap();
+
+            // Step 2: Async load from IndexedDB (richer data)
+            const localGroupStore = window.LocalGroupStore;
+            if (!localGroupStore) return;
+
+            try {
+                await localGroupStore.ready();
+                
+                const [groups, myGroups, joinedGroups, adminGroups, invites] = await Promise.all([
+                    localGroupStore.getAllGroups(),
+                    localGroupStore.getMyGroups(),
+                    localGroupStore.getJoinedGroups(),
+                    localGroupStore.getAdminGroups(),
+                    localGroupStore.getPendingInvites()
+                ]);
+
+                this.batch(b => {
+                    // Build byId map
+                    const byId = {};
+                    groups.forEach(g => { byId[g.id] = g; });
+                    b.set('groups.byId', byId);
+                    b.set('groups.list', groups);
+                    b.set('groups.myGroups', myGroups);
+                    b.set('groups.joinedGroups', joinedGroups);
+                    b.set('groups.adminGroups', adminGroups);
+                    b.set('groups.invites', invites);
+                });
+
+                // Cache to localStorage for next boot
+                this._cacheGroupBootstrap({ groups, myGroups, joinedGroups, adminGroups, invites });
+                
+                console.log('[Store] Groups loaded from local:', groups.length, 'groups');
+            } catch (err) {
+                console.warn('[Store] loadGroupsFromLocal failed:', err.message);
+            }
+        }
+
+        /**
+         * Upsert a single group into the reactive store.
+         * Central write path — persists to LocalGroupStore first.
+         */
+        async upsertGroup(groupData) {
+            if (!groupData || !groupData.id) return false;
+
+            const localGroupStore = window.LocalGroupStore;
+            
+            // Persist to IndexedDB first
+            if (localGroupStore) {
+                try {
+                    await localGroupStore.ready();
+                    await localGroupStore.saveGroup(groupData);
+                } catch (err) {
+                    console.warn('[Store] upsertGroup: IDB save failed:', err.message);
+                }
+            }
+
+            // Update store synchronously
+            const byId = this.get('groups.byId') || {};
+            const list = this.get('groups.list') || [];
+            const myGroups = this.get('groups.myGroups') || [];
+            const joinedGroups = this.get('groups.joinedGroups') || [];
+            const adminGroups = this.get('groups.adminGroups') || [];
+
+            const idx = list.findIndex(g => g.id === groupData.id);
+            const isNew = idx === -1;
+            
+            const updatedGroup = {
+                id: groupData.id,
+                name: groupData.name,
+                description: groupData.description || '',
+                avatar: groupData.avatar || groupData.photoURL || '',
+                coverImage: groupData.coverImage || '',
+                createdBy: groupData.createdBy,
+                createdAt: groupData.createdAt || Date.now(),
+                updatedAt: groupData.updatedAt || Date.now(),
+                memberCount: groupData.memberCount || 0,
+                maxMembers: groupData.maxMembers || 500,
+                isPrivate: groupData.isPrivate !== false,
+                joinCode: groupData.joinCode || null,
+                settings: groupData.settings || {},
+                lastMessage: groupData.lastMessage || null,
+                lastActivity: groupData.lastActivity || Date.now(),
+                syncState: groupData.syncState || 'synced'
+            };
+
+            // Update byId
+            const newById = { ...byId, [groupData.id]: updatedGroup };
+            
+            // Update list
+            let newList;
+            if (idx >= 0) {
+                newList = [...list];
+                newList[idx] = updatedGroup;
+            } else {
+                newList = [...list, updatedGroup];
+            }
+
+            // Update myGroups if current user is a member
+            const userId = this.get('user.id');
+            let newMyGroups = [...myGroups];
+            let newJoinedGroups = [...joinedGroups];
+            let newAdminGroups = [...adminGroups];
+
+            if (userId) {
+                const isMember = groupData.members?.includes?.(userId) || 
+                                (groupData.memberIds?.includes?.(userId)) ||
+                                groupData.createdBy === userId;
+                
+                if (isMember && isNew) {
+                    newMyGroups.push(updatedGroup);
+                    newJoinedGroups.push(updatedGroup);
+                } else if (!isMember && !isNew) {
+                    newMyGroups = newMyGroups.filter(g => g.id !== groupData.id);
+                    newJoinedGroups = newJoinedGroups.filter(g => g.id !== groupData.id);
+                }
+
+                // Update adminGroups if user is admin
+                const isAdmin = groupData.admins?.includes?.(userId) || groupData.createdBy === userId;
+                if (isAdmin && isNew) {
+                    newAdminGroups.push(updatedGroup);
+                } else if (!isAdmin) {
+                    newAdminGroups = newAdminGroups.filter(g => g.id !== groupData.id);
+                }
+            }
+
+            this.batch(b => {
+                b.set('groups.byId', newById);
+                b.set('groups.list', newList);
+                b.set('groups.myGroups', newMyGroups);
+                b.set('groups.joinedGroups', newJoinedGroups);
+                b.set('groups.adminGroups', newAdminGroups);
+            });
+
+            // Update cache
+            this._cacheGroupBootstrap({
+                groups: newList,
+                myGroups: newMyGroups,
+                joinedGroups: newJoinedGroups,
+                adminGroups: newAdminGroups,
+                invites: this.get('groups.invites') || []
+            });
 
             return true;
         }
 
         /**
-         * Get store statistics
-         * @returns {Object} Statistics
+         * Remove a group from the reactive store and IDB.
          */
-        getStats() {
-            return {
-                ...this._stats,
-                subscribersByPath: Array.from(this._subscribers.entries()).map(([path, set]) => ({
-                    path,
-                    count: set.size
-                })),
-                wildcardSubscribers: this._wildcardSubscribers.size,
-                historySize: Array.from(this._history.values()).reduce((acc, arr) => acc + arr.length, 0),
-                batchPending: this._batchUpdates.size
-            };
+        async removeGroupFromStore(groupId) {
+            if (!groupId) return false;
+
+            const localGroupStore = window.LocalGroupStore;
+            if (localGroupStore) {
+                try {
+                    await localGroupStore.ready();
+                    await localGroupStore.deleteGroup(groupId);
+                } catch (err) {
+                    console.warn('[Store] removeGroupFromStore: IDB delete failed:', err.message);
+                }
+            }
+
+            const byId = this.get('groups.byId') || {};
+            const list = this.get('groups.list') || [];
+            const myGroups = this.get('groups.myGroups') || [];
+            const joinedGroups = this.get('groups.joinedGroups') || [];
+            const adminGroups = this.get('groups.adminGroups') || [];
+            const members = this.get('groups.members') || {};
+            const messages = this.get('groups.messages') || {};
+            const unread = this.get('groups.unread') || {};
+
+            const newById = { ...byId };
+            delete newById[groupId];
+
+            const newList = list.filter(g => g.id !== groupId);
+            const newMyGroups = myGroups.filter(g => g.id !== groupId);
+            const newJoinedGroups = joinedGroups.filter(g => g.id !== groupId);
+            const newAdminGroups = adminGroups.filter(g => g.id !== groupId);
+            
+            const newMembers = { ...members };
+            delete newMembers[groupId];
+            
+            const newMessages = { ...messages };
+            delete newMessages[groupId];
+            
+            const newUnread = { ...unread };
+            delete newUnread[groupId];
+
+            this.batch(b => {
+                b.set('groups.byId', newById);
+                b.set('groups.list', newList);
+                b.set('groups.myGroups', newMyGroups);
+                b.set('groups.joinedGroups', newJoinedGroups);
+                b.set('groups.adminGroups', newAdminGroups);
+                b.set('groups.members', newMembers);
+                b.set('groups.messages', newMessages);
+                b.set('groups.unread', newUnread);
+            });
+
+            this._cacheGroupBootstrap({
+                groups: newList,
+                myGroups: newMyGroups,
+                joinedGroups: newJoinedGroups,
+                adminGroups: newAdminGroups,
+                invites: this.get('groups.invites') || []
+            });
+
+            return true;
         }
 
         /**
-         * Enable/disable debug mode
-         * @param {boolean} enabled - Debug state
+         * Upsert a group member.
          */
-        setDebug(enabled) {
-            this._config.debug = enabled;
+        async upsertGroupMember(groupId, memberData) {
+            if (!groupId || !memberData || !memberData.userId) return false;
+
+            const localGroupStore = window.LocalGroupStore;
+            if (localGroupStore) {
+                try {
+                    await localGroupStore.ready();
+                    await localGroupStore.saveMember(groupId, memberData);
+                } catch (err) {
+                    console.warn('[Store] upsertGroupMember: IDB save failed:', err.message);
+                }
+            }
+
+            const members = this.get('groups.members') || {};
+            const groupMembers = members[groupId] || [];
+            
+            const idx = groupMembers.findIndex(m => m.userId === memberData.userId);
+            let newGroupMembers;
+            
+            if (idx >= 0) {
+                newGroupMembers = [...groupMembers];
+                newGroupMembers[idx] = { ...groupMembers[idx], ...memberData };
+            } else {
+                newGroupMembers = [...groupMembers, memberData];
+            }
+            
+            const newMembers = { ...members, [groupId]: newGroupMembers };
+            this.set('groups.members', newMembers);
+            
+            // Also update memberCount in group data
+            const group = this.get(`groups.byId.${groupId}`);
+            if (group) {
+                const updatedGroup = { ...group, memberCount: newGroupMembers.length };
+                await this.upsertGroup(updatedGroup);
+            }
+            
+            return true;
         }
 
-        // ========== PRIVATE METHODS ==========
+        /**
+         * Remove a group member.
+         */
+        async removeGroupMember(groupId, userId) {
+            if (!groupId || !userId) return false;
+
+            const localGroupStore = window.LocalGroupStore;
+            if (localGroupStore) {
+                try {
+                    await localGroupStore.ready();
+                    await localGroupStore.deleteMember(groupId, userId);
+                } catch (err) {
+                    console.warn('[Store] removeGroupMember: IDB delete failed:', err.message);
+                }
+            }
+
+            const members = this.get('groups.members') || {};
+            const groupMembers = members[groupId] || [];
+            
+            const newGroupMembers = groupMembers.filter(m => m.userId !== userId);
+            const newMembers = { ...members, [groupId]: newGroupMembers };
+            this.set('groups.members', newMembers);
+            
+            // Update memberCount in group data
+            const group = this.get(`groups.byId.${groupId}`);
+            if (group) {
+                const updatedGroup = { ...group, memberCount: newGroupMembers.length };
+                await this.upsertGroup(updatedGroup);
+            }
+            
+            return true;
+        }
+
+        /**
+         * Load group messages from IDB into store.
+         */
+        async loadGroupMessages(groupId, limit = 50) {
+            if (!groupId) return [];
+
+            const localGroupStore = window.LocalGroupStore;
+            if (!localGroupStore) return [];
+
+            try {
+                await localGroupStore.ready();
+                const messages = await localGroupStore.getMessages(groupId, { limit });
+                
+                const groupMessages = this.get('groups.messages') || {};
+                this.set('groups.messages', { ...groupMessages, [groupId]: messages });
+                
+                return messages;
+            } catch (err) {
+                console.warn('[Store] loadGroupMessages failed:', err.message);
+                return [];
+            }
+        }
+
+        /**
+         * Upsert a group message (persist to IDB + store).
+         */
+        async upsertGroupMessage(groupId, message) {
+            if (!groupId || !message || !message.id) return false;
+
+            const localGroupStore = window.LocalGroupStore;
+            if (localGroupStore) {
+                try {
+                    await localGroupStore.ready();
+                    await localGroupStore.saveMessage(groupId, message);
+                } catch (err) {
+                    console.warn('[Store] upsertGroupMessage: IDB save failed:', err.message);
+                }
+            }
+
+            const groupMessages = this.get('groups.messages') || {};
+            const existing = groupMessages[groupId] || [];
+            
+            const idx = existing.findIndex(m => m.id === message.id);
+            let newMessages;
+            
+            if (idx >= 0) {
+                newMessages = [...existing];
+                newMessages[idx] = { ...existing[idx], ...message };
+            } else {
+                newMessages = [...existing, message];
+                // Sort by timestamp
+                newMessages.sort((a, b) => (a.timestamp || a.createdAt || 0) - (b.timestamp || b.createdAt || 0));
+            }
+            
+            this.set('groups.messages', { ...groupMessages, [groupId]: newMessages });
+            
+            // Update lastMessage in group data
+            if (newMessages.length > 0) {
+                const lastMsg = newMessages[newMessages.length - 1];
+                const group = this.get(`groups.byId.${groupId}`);
+                if (group) {
+                    const updatedGroup = {
+                        ...group,
+                        lastMessage: lastMsg,
+                        lastActivity: lastMsg.timestamp || lastMsg.createdAt || Date.now()
+                    };
+                    await this.upsertGroup(updatedGroup);
+                }
+            }
+            
+            return true;
+        }
+
+        /**
+         * Set group sync state (for UI loading/pending/error indicators).
+         */
+        setGroupSyncState(groupId, state, error = null) {
+            const syncState = this.get('groups.syncState') || {
+                syncing: false,
+                lastSync: 0,
+                pendingCount: 0,
+                failedIds: []
+            };
+            
+            const newSyncState = { ...syncState };
+            
+            if (groupId === '*') {
+                newSyncState.syncing = state === 'syncing';
+                if (state === 'synced') newSyncState.lastSync = Date.now();
+                if (state === 'error') newSyncState.failedIds = error ? [error] : [];
+            } else {
+                // Per-group state can be stored in groups.byId[groupId].syncState
+                const group = this.get(`groups.byId.${groupId}`);
+                if (group) {
+                    const updatedGroup = {
+                        ...group,
+                        syncState: state,
+                        syncError: error
+                    };
+                    this.upsertGroup(updatedGroup);
+                }
+            }
+            
+            if (groupId === '*') {
+                this.set('groups.syncState', newSyncState);
+            }
+        }
+
+        // ── Private ──────────────────────────────────────────────────────────────
+
+        /**
+         * NEW (offline-first): Hydrate the reactive store at module load from every
+         * `kynecta_*_cache` key found in localStorage.  This gives a zero-latency
+         * first paint — the UI has real data before any network round-trip.
+         */
+        _hydrateStoreFromLocal() {
+            if (!window.localStorage) return;
+            try {
+                const cachePrefix = 'kynecta_';
+                const cacheSuffix = '_cache';
+                for (let i = 0; i < localStorage.length; i++) {
+                    const key = localStorage.key(i);
+                    if (!key || !key.startsWith(cachePrefix) || !key.endsWith(cacheSuffix)) continue;
+
+                    // Derive store keyPath from cache key: "kynecta_friends_cache" → "friends"
+                    const domain = key.slice(cachePrefix.length, key.length - cacheSuffix.length);
+                    if (!domain || !(domain in this._state)) continue;
+
+                    try {
+                        const raw = localStorage.getItem(key);
+                        if (!raw) continue;
+                        const parsed = JSON.parse(raw);
+                        // Cache entries may wrap payload under { data, timestamp } or be the raw value
+                        const payload = (parsed && parsed.data !== undefined) ? parsed.data : parsed;
+                        if (payload !== null && payload !== undefined) {
+                            this.set(domain, payload, { silent: true, persist: false });
+                            if (this._config.debug) console.log('[Store] Hydrated', domain, 'from', key);
+                        }
+                    } catch { /* malformed cache entry — skip */ }
+                }
+                console.log('[Store] _hydrateStoreFromLocal complete');
+            } catch (err) {
+                console.warn('[Store] _hydrateStoreFromLocal error:', err.message);
+            }
+        }
+
+        /**
+         * NEW (offline-first): Subscribe to all store updates and debounce-write the
+         * changed top-level slice back to its `kynecta_<key>_cache` localStorage key.
+         * This keeps the cache fresh so the next page load sees current data instantly.
+         */
+        _setupStorePersistence() {
+            const debounceMap = new Map();
+            const DEBOUNCE_MS = this._config.persistDebounce || 500;
+            const cachePrefix = 'kynecta_';
+            const cacheSuffix = '_cache';
+
+            this.subscribe('*', (_state, _old, _path) => {
+                // Determine the top-level key that changed
+                const topKey = typeof _path === 'string' ? _path.split('.')[0] : null;
+                // Skip ephemeral or already-handled slices
+                if (!topKey || topKey === 'network' || topKey === 'ui') return;
+
+                if (debounceMap.has(topKey)) clearTimeout(debounceMap.get(topKey));
+                debounceMap.set(topKey, setTimeout(() => {
+                    debounceMap.delete(topKey);
+                    try {
+                        const value = this.get(topKey);
+                        if (value === null || value === undefined) return;
+                        const cacheKey = `${cachePrefix}${topKey}${cacheSuffix}`;
+                        localStorage.setItem(cacheKey, JSON.stringify({
+                            data: value,
+                            timestamp: Date.now()
+                        }));
+                    } catch { /* quota exceeded or private browsing — ignore */ }
+                }, DEBOUNCE_MS));
+            });
+
+            console.log('[Store] _setupStorePersistence active');
+        }
+
+        _subscribeToLocalStore() {
+            if (!window.LocalStoreSettings) {
+                setTimeout(() => this._subscribeToLocalStore(), 300);
+                return;
+            }
+            if (this._localStoreUnsub) this._localStoreUnsub();
+
+            this._localStoreUnsub = window.LocalStoreSettings.subscribe((_path, _value, allSettings) => {
+                const mapped = _localSettingsToStoreSchema(allSettings);
+                const current = this.get('settings') || {};
+                this.set('settings', Object.assign({}, current, mapped), { persist: false, silent: false });
+            });
+            console.log('[Store] Subscribed to LocalStoreSettings');
+        }
+
+        _setupOfflineFirstListeners() {
+            window.addEventListener('kyn:chatSynced', async (e) => {
+                const { chatId } = e.detail || {};
+                if (chatId) await this.loadMessagesFromLocal(chatId);
+            });
+            window.addEventListener('online',  () => this.set('network.online', true));
+            window.addEventListener('offline', () => this.set('network.online', false));
+
+            window.addEventListener('settingsSavedLocal', () => {
+                this.syncFromLocalStore();
+            });
+
+            window.addEventListener('kyn:friendsSynced', async () => {
+                await this.loadFriendsFromLocal();
+            });
+
+            // ── NEW GROUP EVENT LISTENERS (v2.2) ──────────────────────────────────
+            
+            window.addEventListener('groupSync:started', () => {
+                this.setGroupSyncState('*', 'syncing');
+            });
+            
+            window.addEventListener('groupSync:completed', async () => {
+                this.setGroupSyncState('*', 'synced');
+                await this.loadGroupsFromLocal();  // Reload fresh from IDB
+            });
+            
+            window.addEventListener('groupSync:failed', (e) => {
+                const { error } = e.detail || {};
+                this.setGroupSyncState('*', 'error', error);
+            });
+            
+            window.addEventListener('kyn:groupCreated', async (e) => {
+                const { group } = e.detail || {};
+                if (group) await this.upsertGroup(group);
+            });
+            
+            window.addEventListener('kyn:groupUpdated', async (e) => {
+                const { group } = e.detail || {};
+                if (group) await this.upsertGroup(group);
+            });
+            
+            window.addEventListener('kyn:groupDeleted', async (e) => {
+                const { groupId } = e.detail || {};
+                if (groupId) await this.removeGroupFromStore(groupId);
+            });
+            
+            window.addEventListener('kyn:groupMemberAdded', async (e) => {
+                const { groupId, member } = e.detail || {};
+                if (groupId && member) await this.upsertGroupMember(groupId, member);
+            });
+            
+            window.addEventListener('kyn:groupMemberRemoved', async (e) => {
+                const { groupId, userId } = e.detail || {};
+                if (groupId && userId) await this.removeGroupMember(groupId, userId);
+            });
+            
+            window.addEventListener('kyn:groupMessageReceived', async (e) => {
+                const { groupId, message } = e.detail || {};
+                if (groupId && message) await this.upsertGroupMessage(groupId, message);
+            });
+            
+            window.addEventListener('kyn:groupInviteReceived', async (e) => {
+                const { invite } = e.detail || {};
+                if (invite) {
+                    const invites = this.get('groups.invites') || [];
+                    if (!invites.find(i => i.id === invite.id)) {
+                        this.set('groups.invites', [...invites, invite]);
+                    }
+                }
+            });
+        }
 
         _createInitialState() {
-            // Deep clone schema
             return JSON.parse(JSON.stringify(STORE_SCHEMA));
         }
 
         _setImmutable(obj, keys, value, index = 0) {
             const key = keys[index];
-            
-            // Handle array indices
             if (Array.isArray(obj) && !isNaN(key)) {
                 const idx = parseInt(key, 10);
                 if (index === keys.length - 1) {
-                    const newArray = [...obj];
-                    newArray[idx] = value;
-                    return newArray;
+                    const a = [...obj]; a[idx] = value; return a;
                 }
-                
-                const newArray = [...obj];
-                newArray[idx] = this._setImmutable(obj[idx], keys, value, index + 1);
-                return newArray;
+                const a = [...obj];
+                a[idx] = this._setImmutable(obj[idx], keys, value, index + 1);
+                return a;
             }
-
-            // Handle objects
-            if (index === keys.length - 1) {
-                return { ...obj, [key]: value };
-            }
-
+            if (index === keys.length - 1) return { ...obj, [key]: value };
             const nextObj = obj[key] || (isNaN(keys[index + 1]) ? {} : []);
             return { ...obj, [key]: this._setImmutable(nextObj, keys, value, index + 1) };
         }
 
         _recordHistory(keyPath, value) {
-            if (!this._history.has(keyPath)) {
-                this._history.set(keyPath, []);
-            }
-
+            if (!this._history.has(keyPath)) this._history.set(keyPath, []);
             const history = this._history.get(keyPath);
             history.push(value);
-
-            if (history.length > this._config.maxHistoryPerKey) {
-                history.shift();
-            }
+            if (history.length > this._config.maxHistoryPerKey) history.shift();
         }
 
         _notifySubscribers(keyPath, newValue, oldValue) {
-            // Notify specific subscribers
             if (this._subscribers.has(keyPath)) {
-                this._subscribers.get(keyPath).forEach(callback => {
-                    try {
-                        callback(newValue, oldValue, keyPath);
-                    } catch (error) {
-                        console.error('[Store] Subscriber error:', error);
-                    }
+                this._subscribers.get(keyPath).forEach(cb => {
+                    try { cb(newValue, oldValue, keyPath); }
+                    catch (e) { console.error('[Store] Subscriber error:', e); }
                 });
             }
-
-            // Notify parent path subscribers
-            const pathParts = keyPath.split('.');
-            while (pathParts.length > 1) {
-                pathParts.pop();
-                const parentPath = pathParts.join('.');
-                
-                if (this._subscribers.has(parentPath)) {
-                    const parentValue = this.get(parentPath);
-                    this._subscribers.get(parentPath).forEach(callback => {
-                        try {
-                            callback(parentValue, null, parentPath);
-                        } catch (error) {
-                            console.error('[Store] Subscriber error:', error);
-                        }
+            const parts = keyPath.split('.');
+            while (parts.length > 1) {
+                parts.pop();
+                const pp = parts.join('.');
+                if (this._subscribers.has(pp)) {
+                    const pv = this.get(pp);
+                    this._subscribers.get(pp).forEach(cb => {
+                        try { cb(pv, null, pp); }
+                        catch (e) { console.error('[Store] Subscriber error:', e); }
                     });
                 }
             }
-
-            // Notify wildcard subscribers
-            this._wildcardSubscribers.forEach(callback => {
-                try {
-                    callback(this._state, null, '*');
-                } catch (error) {
-                    console.error('[Store] Wildcard subscriber error:', error);
-                }
+            this._wildcardSubscribers.forEach(cb => {
+                try { cb(this._state, null, keyPath); }
+                catch (e) { console.error('[Store] Wildcard subscriber error:', e); }
             });
-
-            // Emit through EventBus if available
             if (window.KynectaEventBus) {
-                window.KynectaEventBus.emit('STORE_UPDATED', {
-                    keyPath,
-                    newValue,
-                    oldValue,
-                    timestamp: Date.now()
-                }, { async: true });
+                window.KynectaEventBus.emit('STORE_UPDATED',
+                    { keyPath, newValue, oldValue, timestamp: Date.now() }, { async: true });
             }
         }
 
         _applyBatch(updates) {
-            // Apply all updates immutably
             let newState = this._state;
-            
             updates.forEach(({ keyPath, value }) => {
-                const oldValue = this.get(keyPath);
+                const old = this.get(keyPath);
                 newState = this._setImmutable(newState, keyPath.split('.'), value);
-                
-                // Record history
-                this._recordHistory(keyPath, oldValue);
+                this._recordHistory(keyPath, old);
             });
-
-            // Apply final state
             this._state = newState;
             this._stats.updates++;
-
-            // Notify subscribers
             updates.forEach(({ keyPath }) => {
-                const newValue = this.get(keyPath);
-                this._notifySubscribers(keyPath, newValue, null);
+                const v = this.get(keyPath);
+                this._notifySubscribers(keyPath, v, null);
             });
-
-            // Schedule persistence
             this._schedulePersistence();
         }
 
         _schedulePersistence() {
-            if (this._persistTimeout) {
-                clearTimeout(this._persistTimeout);
-            }
-
+            if (this._persistTimeout) clearTimeout(this._persistTimeout);
             this._persistTimeout = setTimeout(() => {
                 this._persistState();
                 this._persistTimeout = null;
@@ -523,62 +998,171 @@
 
         _persistState() {
             if (!window.localStorage) return;
-
             try {
                 this._config.persistKeys.forEach(key => {
                     const value = this.get(key);
                     if (value !== null && value !== undefined) {
-                        localStorage.setItem(`kynecta_store_${key}`, JSON.stringify(value));
+                        localStorage.setItem(`${LS_STORE_PFX}${key}`, JSON.stringify(value));
                     }
                 });
-            } catch (error) {
-                console.warn('[Store] Failed to persist state:', error);
-            }
+
+                const settingsValue = this.get('settings');
+                const lss = window.LocalStoreSettings;
+                if (settingsValue && lss) {
+                    const flat = _storeSchemaToLocalSettings(settingsValue);
+                    lss.persist(Object.assign({}, lss.getAll(), flat));
+                }
+            } catch (err) { console.warn('[Store] Failed to persist state:', err); }
         }
 
         _loadPersistedState() {
             if (!window.localStorage) return;
-
             try {
-                this._config.persistKeys.forEach(key => {
-                    const stored = localStorage.getItem(`kynecta_store_${key}`);
+                ['user', 'session', 'theme'].forEach(key => {
+                    const stored = localStorage.getItem(`${LS_STORE_PFX}${key}`);
                     if (stored) {
-                        try {
-                            const value = JSON.parse(stored);
-                            this.set(key, value, { silent: true, persist: false });
-                        } catch (e) {
-                            // Ignore parse errors
-                        }
+                        try { this.set(key, JSON.parse(stored), { silent: true, persist: false }); } catch {}
                     }
                 });
-            } catch (error) {
-                console.warn('[Store] Failed to load persisted state:', error);
-            }
+
+                let canonicalSettings = null;
+                let canonicalTs       = 0;
+
+                try {
+                    const rawLSS = localStorage.getItem(LS_CANONICAL);
+                    if (rawLSS) {
+                        const parsedLSS = JSON.parse(rawLSS);
+                        const lssTs = parsedLSS.timestamp || 0;
+                        if (lssTs >= canonicalTs) {
+                            canonicalSettings = _localSettingsToStoreSchema(parsedLSS.data || parsedLSS);
+                            canonicalTs = lssTs;
+                        }
+                    }
+                } catch {}
+
+                try {
+                    const rawStore = localStorage.getItem(`${LS_STORE_PFX}settings`);
+                    if (rawStore) {
+                        const parsedStore = JSON.parse(rawStore);
+                        const storeTs = parsedStore._savedAt || 0;
+                        if (storeTs > canonicalTs) {
+                            canonicalSettings = parsedStore;
+                            canonicalTs = storeTs;
+                        }
+                    }
+                } catch {}
+
+                if (canonicalSettings) {
+                    const current = this.get('settings') || {};
+                    this.set('settings', Object.assign({}, current, canonicalSettings),
+                        { silent: true, persist: false });
+                }
+            } catch (err) { console.warn('[Store] Failed to load persisted state:', err); }
         }
 
         _deepFreeze(obj) {
             if (obj === null || typeof obj !== 'object') return obj;
-            
             Object.keys(obj).forEach(key => {
-                if (typeof obj[key] === 'object') {
-                    this._deepFreeze(obj[key]);
-                }
+                if (typeof obj[key] === 'object') this._deepFreeze(obj[key]);
             });
-            
             return Object.freeze(obj);
+        }
+
+        /**
+         * Apply cached group bootstrap from localStorage (instant first paint).
+         */
+        _applyGroupBootstrap() {
+            try {
+                const cached = localStorage.getItem(LS_GROUPS_BOOTSTRAP);
+                if (cached) {
+                    const data = JSON.parse(cached);
+                    if (data.groups) {
+                        const byId = {};
+                        data.groups.forEach(g => { byId[g.id] = g; });
+                        this.batch(b => {
+                            b.set('groups.byId', byId);
+                            b.set('groups.list', data.groups);
+                            b.set('groups.myGroups', data.myGroups || []);
+                            b.set('groups.joinedGroups', data.joinedGroups || []);
+                            b.set('groups.adminGroups', data.adminGroups || []);
+                            b.set('groups.invites', data.invites || []);
+                        });
+                        console.log('[Store] Group bootstrap applied from cache');
+                    }
+                }
+            } catch (err) {
+                console.warn('[Store] Failed to apply group bootstrap:', err.message);
+            }
+        }
+
+        /**
+         * Cache group data to localStorage for fast next-load.
+         */
+        _cacheGroupBootstrap(data) {
+            try {
+                const toCache = {
+                    groups: data.groups || [],
+                    myGroups: data.myGroups || [],
+                    joinedGroups: data.joinedGroups || [],
+                    adminGroups: data.adminGroups || [],
+                    invites: data.invites || [],
+                    _cachedAt: Date.now()
+                };
+                localStorage.setItem(LS_GROUPS_BOOTSTRAP, JSON.stringify(toCache));
+            } catch (err) {
+                console.warn('[Store] Failed to cache group bootstrap:', err.message);
+            }
         }
     }
 
-    // Initialize singleton
-    const store = new KynectaStore();
+    // ─── Schema translation helpers ───────────────────────────────────────────────
 
-    // Expose globally
-    window.KynectaStore = store;
-
-    // Add to authorities if exists
-    if (window.__KYNECTA_AUTHORITIES__) {
-        window.__KYNECTA_AUTHORITIES__.store = store;
+    function _localSettingsToStoreSchema(local) {
+        if (!local) return {};
+        const out = {};
+        if (local.theme)    out.theme    = local.theme;
+        if (local.language) out.language = local.language;
+        if (local.notifications) {
+            out.notifications = local.notifications.messages !== false;
+            out.soundEnabled  = local.notifications.calls   !== false;
+        }
+        if (local.privacy)  out.privacy  = Object.assign({}, local.privacy);
+        if (local.chat && local.chat.fontSize) {
+            const sizeMap = { small: 14, medium: 16, large: 18 };
+            out.fontSize = sizeMap[local.chat.fontSize] || 16;
+        }
+        if (local.syncEnabled !== undefined) out.syncEnabled = local.syncEnabled;
+        return out;
     }
 
-    console.log('[Store] ✅ Ready');
+    function _storeSchemaToLocalSettings(settings) {
+        if (!settings) return {};
+        const out = {};
+        if (settings.theme)    out.theme    = settings.theme;
+        if (settings.language) out.language = settings.language;
+        if (settings.notifications !== undefined) {
+            out.notifications = {
+                messages: settings.notifications !== false,
+                calls:    settings.soundEnabled  !== false,
+                groups:   settings.notifications !== false,
+            };
+        }
+        if (settings.privacy)  out.privacy  = Object.assign({}, settings.privacy);
+        if (settings.fontSize) {
+            const n = settings.fontSize;
+            out.chat = { fontSize: n <= 14 ? 'small' : n >= 18 ? 'large' : 'medium' };
+        }
+        if (settings.syncEnabled !== undefined) out.syncEnabled = settings.syncEnabled;
+        out._savedAt = Date.now();
+        return out;
+    }
+
+    // ─── Bootstrap ────────────────────────────────────────────────────────────────
+
+    const store = new KynectaStore();
+    window.KynectaStore = store;
+
+    if (window.__KYNECTA_AUTHORITIES__) window.__KYNECTA_AUTHORITIES__.store = store;
+
+    console.log('[Store] ✅ Ready (offline-first v2.2)');
 })();

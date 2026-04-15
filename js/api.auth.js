@@ -80,7 +80,47 @@
         }));
     } catch (e) {}
     
-    console.log(`🔐 [API-AUTH] Initializing modular authentication service v${VERSION} (CRITICAL SESSION PERSISTENCE FIX)`);
+
+    // ── PERSISTENT AUTH HELPER ──────────────────────────────────────────────
+    // Called after every successful login/register to persist session locally.
+    // This enables auto-login on next app start (WhatsApp-style).
+    function _persistAuthLocally(token, refreshToken, user, expiresAt) {
+        try {
+            const payload = {
+                token:        token,
+                refreshToken: refreshToken || null,
+                user:         user         || null,
+                expiresAt:    expiresAt    || (Date.now() + 24 * 60 * 60 * 1000),
+                issuedAt:     Date.now()
+            };
+            // Prefer AuthStorage module if available
+            if (window.AuthStorage && typeof window.AuthStorage.saveAuth === 'function') {
+                window.AuthStorage.saveAuth(payload);
+            } else {
+                localStorage.setItem('kynecta_auth', JSON.stringify(payload));
+            }
+            console.log('[API-AUTH] \u2705 Auth persisted to localStorage');
+        } catch(e) {
+            console.warn('[API-AUTH] \u26a0\ufe0f Could not persist auth locally:', e.message);
+        }
+    }
+
+    // ── CLEAR PERSISTED AUTH (called on logout) ─────────────────────────────
+    function _clearPersistedAuth() {
+        try {
+            if (window.AuthStorage && typeof window.AuthStorage.clearAuth === 'function') {
+                window.AuthStorage.clearAuth();
+            } else {
+                localStorage.removeItem('kynecta_auth');
+                localStorage.removeItem('accessToken');
+                localStorage.removeItem('refreshToken');
+            }
+            console.log('[API-AUTH] \u2705 Auth cleared from localStorage');
+        } catch(e) {}
+    }
+
+
+        console.log(`🔐 [API-AUTH] Initializing modular authentication service v${VERSION} (CRITICAL SESSION PERSISTENCE FIX)`);
     
     // ============================================================================
     // IMMEDIATE PUBLIC API SHELL - WITH MINIMAL STUBS

@@ -5550,7 +5550,8 @@ const createGroupOnline = async function(groupData) {
             return;
         }
         
-        const members = [session.user?.uid || session.user?.id, ...selectedFriends];
+        const creatorId = session.user?.uid || session.user?.id;
+        const members = [...new Set([creatorId, ...safeArray(selectedFriends), ...safeArray(groupData?.memberIds)])].filter(Boolean);
         
         const groupDataToSave = {
             name: groupData.name,
@@ -5562,7 +5563,7 @@ const createGroupOnline = async function(groupData) {
             rules: groupData.rules || [],
             moderationSettings: groupData.moderationSettings || {},
             joinQuestions: [],
-            customReactions: groupData.customReactions || ['👍', '❤️', '😂'],
+            customReactions: groupData.customReactions || ['\u{1F44D}', '\u2764\uFE0F', '\u{1F602}'],
             badges: ['star', 'fire'],
             memberIds: members,
             purpose: groupData.purpose || '',
@@ -5609,48 +5610,57 @@ const createGroupOnline = async function(groupData) {
             friendSelectionModal.style.display = 'none';
         }
 
-        // FIXED: Send real invitations to every selected friend via the invite API.
-        // Also read window.__pendingGroupInvites which is set by the UI Members tab
-        // (window._cgSelectedMembers) since that Set lives outside this module scope.
-        const allInvites = [
-            ...new Set([
-                ...(selectedFriends || []),
-                ...(window.__pendingGroupInvites || [])
-            ])
-        ];
+        const allInvites = [...new Set([
+            ...safeArray(selectedFriends),
+            ...safeArray(window.__pendingGroupInvites),
+            ...safeArray(groupData?.memberIds)
+        ])].filter(friendId => String(friendId) !== String(creatorId));
         if (allInvites.length > 0) {
             const groupId = newGroup.id || newGroup.group?.id;
             if (groupId) {
+                let addedMembers = 0;
+                let invitedMembers = 0;
                 for (const friendId of allInvites) {
                     if (!friendId) continue;
                     try {
-                        await secureApiCall(`/group-members/${groupId}/invitations`, {
+                        const inviteResponse = await secureApiCall(`/group-members/${groupId}/invitations`, {
                             method: 'POST',
                             body: JSON.stringify({ inviteeId: friendId, role: 'member' }),
                             headers: { 'Content-Type': 'application/json' }
                         });
+                        const inviteData = safeObject(inviteResponse?.data || inviteResponse);
+                        const action = inviteData.action || inviteResponse?.action || (inviteResponse?.success ? 'invite_sent' : 'failed');
+                        if (action === 'member_added' || action === 'already_member') addedMembers++;
+                        else if (action === 'invite_required' || action === 'invite_sent') invitedMembers++;
                     } catch (inviteErr) {
-                        // Silently continue — restricted users may reject; non-friends may 403
                         debugLog(`[createGroupOnline] Invite failed for ${friendId}:`, inviteErr.message);
                     }
+                }
+                if (typeof showNotification === 'function') {
+                    if (addedMembers > 0) showNotification(`${addedMembers} member${addedMembers > 1 ? 's' : ''} added immediately`, 'success');
+                    if (invitedMembers > 0) showNotification(`${invitedMembers} invitation${invitedMembers > 1 ? 's' : ''} sent`, 'info');
                 }
             }
         }
 
         selectedFriends = [];
-        // Clear the UI-level pending invites
         try { window.__pendingGroupInvites = []; } catch(_) {}
+        try { window.GroupSyncEngine?.syncAll?.({ silent: true }).catch(() => {}); } catch (_) {}
         showGroupDetails(newGroup, 'my_group');
         
-        // Use safeSend for parent communication
         safeSend('GROUP_CREATED', {
             group: newGroup,
             timestamp: Date.now()
         });
         
-    } catch (error) {}
+    } catch (error) {
+        console.error('[GROUP CREATE] Failed:', error?.message || error);
+        if (typeof showNotification === 'function') {
+            showNotification(error?.message || 'Failed to create group', 'error');
+        }
+        throw error;
+    }
 };
-
 const joinGroupOnline = async function(groupId) {
     if (!isGroupOperationReady()) {
         queueGroupAction({ type: 'joinGroup', groupId });
@@ -7552,6 +7562,7 @@ export {
     processPendingOfflineActions,
     updateCreateGroupPostingRulesUI
 };
+window.GroupCore = GroupCore;
 // =============================================
 // SETTINGS CACHE BOOTSTRAP - OFFLINE-FIRST
 // =============================================
@@ -7578,3 +7589,4 @@ export {
         } catch(e) {}
     });
 })();
+

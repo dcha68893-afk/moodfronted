@@ -37,9 +37,15 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Groups | Knecta Chat</title>
     
-    <!-- API System - LOADED FIRST (Using type="module" for ES6 imports) -->
-    <script type="module" src="group-core.js"></script>
-    <script type="module" src="group-ui.js"></script>
+    <!-- Existing scripts — keep as-is -->
+<script type="module" src="group-core.js"></script>
+<script type="module" src="group-ui.js"></script>
+
+<!-- ADD THESE — local-first layer (order matters) -->
+<script type="module" src="localStore.groups.js"></script>
+<script type="module" src="groupQueue.manager.js"></script>
+<script type="module" src="groupSync.engine.js"></script>
+<script type="module" src="group-core.patch.js"></script>
     
     <script type="module" src="/js/settingsManager.js"></script>
 

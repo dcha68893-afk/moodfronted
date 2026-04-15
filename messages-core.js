@@ -1035,8 +1035,58 @@
         STARRED_MESSAGES: 'kynecta_starred_messages_v8',
         UI_STATE: 'kynecta_ui_state_v8',
         MESSAGE_QUEUE: 'kynecta_message_queue_v8',
-        CHAT_STATE: 'kynecta_chat_state_v8'
+        CHAT_STATE: 'kynecta_chat_state_v8',
+        CURRENT_CATEGORY: 'kynecta_current_category_v8'
     };
+
+    function ensureSafeArray(data) {
+        if (typeof window.safeArray === 'function') return window.safeArray(data);
+        return Array.isArray(data) ? data : [];
+    }
+
+    function ensureSafeObject(data) {
+        if (typeof window.safeObject === 'function') return window.safeObject(data);
+        return data && typeof data === 'object' && !Array.isArray(data) ? data : {};
+    }
+
+    function getStorageBridge() {
+        if (window.AppStorage && typeof window.AppStorage.get === 'function' && typeof window.AppStorage.set === 'function') {
+            return window.AppStorage;
+        }
+
+        return {
+            get(key, fallback = null) {
+                try {
+                    const raw = localStorage.getItem(key);
+                    if (raw === null || raw === undefined) return fallback;
+                    try {
+                        return JSON.parse(raw);
+                    } catch (_error) {
+                        return raw;
+                    }
+                } catch (_error) {
+                    return fallback;
+                }
+            },
+            set(key, value) {
+                try {
+                    localStorage.setItem(key, typeof value === 'string' ? value : JSON.stringify(value));
+                    console.log('[LOCAL SAVE]', key, value);
+                    return true;
+                } catch (_error) {
+                    return false;
+                }
+            },
+            remove(key) {
+                try {
+                    localStorage.removeItem(key);
+                    return true;
+                } catch (_error) {
+                    return false;
+                }
+            }
+        };
+    }
 
     // =============================================
     // SECURITY UTILITIES
@@ -1319,9 +1369,10 @@
         
         _checkStorage: function() {
             try {
+                const storage = getStorageBridge();
                 const testKey = '_kynecta_test_';
-                localStorage.setItem(testKey, 'test');
-                localStorage.removeItem(testKey);
+                storage.set(testKey, 'test');
+                storage.remove(testKey);
                 this.storageAvailable = true;
             } catch (e) {
                 this.storageAvailable = false;
@@ -1331,8 +1382,10 @@
         get: function(key, fallback = null) {
             if (this.storageAvailable) {
                 try {
-                    const value = localStorage.getItem(key);
-                    if (value !== null) return value;
+                    const value = getStorageBridge().get(key, fallback);
+                    if (value !== null && value !== undefined) {
+                        return typeof value === 'string' ? value : JSON.stringify(value);
+                    }
                 } catch (e) {
                 }
             }
@@ -1343,7 +1396,7 @@
             this.memoryStore.set(key, value);
             if (this.storageAvailable) {
                 try {
-                    localStorage.setItem(key, String(value));
+                    getStorageBridge().set(key, value);
                 } catch (e) {
                     if (e.name === 'QuotaExceededError') {
                         this.quotaExceeded = true;
@@ -1355,7 +1408,7 @@
         
         remove: function(key) {
             if (this.storageAvailable) {
-                try { localStorage.removeItem(key); } catch (e) {}
+                try { getStorageBridge().remove(key); } catch (e) {}
             }
             this.memoryStore.delete(key);
         },
@@ -1380,7 +1433,9 @@
         
         clear: function() {
             if (this.storageAvailable) {
-                try { localStorage.clear(); } catch (e) {}
+                try {
+                    Object.values(LOCAL_STORAGE_KEYS).forEach(key => getStorageBridge().remove(key));
+                } catch (e) {}
             }
             this.memoryStore.clear();
         },
@@ -2178,11 +2233,13 @@
         _conversations: [],
         _conversationsMap: new Map(),
         _activeConversation: null,
+        _currentCategory: SafeStorage.get(LOCAL_STORAGE_KEYS.CURRENT_CATEGORY, 'all') || 'all',
         _messages: [],
         _messagesMap: new Map(),
         _subscribers: new Set(),
         _loaded: false,
         _historyCache: new Map(),
+        _lastMessagesFetchAt: new Map(),
         _loadingChats: false,
         _loadingMessages: false,
         _pendingConversations: new Map(),
@@ -2219,18 +2276,33 @@
         
         _loadFromCache: function() {
             try {
+                console.log('[LOCAL LOAD]', LOCAL_STORAGE_KEYS.CHATS_CACHE);
                 const cached = SafeStorage.getJSON(LOCAL_STORAGE_KEYS.CHATS_CACHE);
                 if (cached && Array.isArray(cached.conversations)) {
-                    this._conversations = cached.conversations;
+                    this._conversations = ensureSafeArray(cached.conversations);
                     this._rebuildMap();
                     this._loaded = true;
+                    if (!this._activeConversation && this._conversations.length > 0) {
+                        this._activeConversation = this._conversations[0];
+                    }
                 }
                 
-                const archived = SafeStorage.getJSON(LOCAL_STORAGE_KEYS.ARCHIVED_CHATS, []);
+                const archived = ensureSafeArray(SafeStorage.getJSON(LOCAL_STORAGE_KEYS.ARCHIVED_CHATS, []));
                 archived.forEach(chatId => {
                     const chat = this._conversationsMap.get(chatId);
                     if (chat) chat.archived = true;
                 });
+
+                this._currentCategory = this.getCurrentCategory();
+                if (this._activeConversation && this._activeConversation.id) {
+                    this._messages = ensureSafeArray(
+                        SafeStorage.getJSON(`${LOCAL_STORAGE_KEYS.MESSAGES_PREFIX}${this._activeConversation.id}`, [])
+                    );
+                    this._rebuildMessagesMap();
+                }
+                if (this._conversations.length > 0) {
+                    this._notifySubscribers();
+                }
             } catch (e) {}
         },
         
@@ -2408,9 +2480,29 @@
                 console.log('[ChatManager] Skipping message fetch for pending conversation');
                 return;
             }
+
+            const fetchKey = String(conversationId);
+            const now = Date.now();
+            const forceFetch = options.force === true;
+            const minFetchGap = typeof options.minFetchGap === 'number' ? options.minFetchGap : 8000;
+            const lastFetchAt = this._lastMessagesFetchAt.get(fetchKey) || 0;
+            if (!forceFetch && now - lastFetchAt < minFetchGap) {
+                return;
+            }
+            this._lastMessagesFetchAt.set(fetchKey, now);
+            
+            // OFFLINE-FIRST: Load from local store first (instant UI)
+            if (window.KynectaLocalStore) {
+                try {
+                    const localMsgs = await window.KynectaLocalStore.getMessagesByChat(conversationId, { limit: options.limit || 100 });
+                    if (localMsgs && localMsgs.length > 0) {
+                        this.setMessages(localMsgs);
+                    }
+                } catch(_lsErr) {}
+            }
             
             if (!navigator.onLine) {
-                console.log('[ChatManager] Offline mode - using cached messages');
+                console.log('[ChatManager] Offline mode - using local store data');
                 const cachedMessages = this.loadPreviousMessages(conversationId);
                 if (cachedMessages && cachedMessages.length > 0) {
                     this.setMessages(cachedMessages);
@@ -2590,7 +2682,7 @@
             const uniqueMap = new Map();
             const seenFriendIds = new Set();
             
-            (conversations || []).forEach(chat => {
+            ensureSafeArray(conversations).forEach(chat => {
                 if (!chat || !chat.id) return;
                 
                 let friendId = chat.friendId || chat.otherParticipantId;
@@ -2668,32 +2760,102 @@
         },
         
         setMessages: function(messages) {
-            const uniqueMessages = [];
-            const seenIds = new Set();
-            
-            for (const msg of (messages || [])) {
-                if (msg.id && !seenIds.has(msg.id)) {
-                    seenIds.add(msg.id);
-                    uniqueMessages.push(msg);
+            // Deduplicate: for each message, a serverId-confirmed copy wins over
+            // an optimistic copy with the same localId.
+            const byId = new Map();
+            for (const msg of ensureSafeArray(messages)) {
+                if (!msg.id) continue;
+                const existing = byId.get(msg.id);
+                if (!existing) {
+                    byId.set(msg.id, { ...msg });
+                } else {
+                    // Merge: server data wins
+                    byId.set(msg.id, { ...existing, ...msg });
+                }
+                // Remove any optimistic copy keyed by localId
+                if (msg.localId && msg.localId !== msg.id) {
+                    byId.delete(msg.localId);
                 }
             }
-            
-            uniqueMessages.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
-            
+
+            const uniqueMessages = Array.from(byId.values());
+            const ts = m => m.createdAt || m.timestamp || 0;
+            uniqueMessages.sort((a, b) => ts(a) - ts(b));
+
             this._messages = uniqueMessages;
             this._rebuildMessagesMap();
             this._saveMessagesToCache();
             this._notifySubscribers();
+
+            // ── OFFLINE-FIRST: persist ALL messages to IndexedDB ─────────────
+            if (window.KynectaLocalStore && uniqueMessages.length > 0) {
+                const chatId = uniqueMessages[0]?.chatId || uniqueMessages[0]?.conversationId;
+                if (chatId) {
+                    window.KynectaLocalStore.saveMessages(
+                        uniqueMessages.map(m => ({
+                            ...m,
+                            chatId: m.chatId || m.conversationId || chatId,
+                            createdAt: m.createdAt || m.timestamp || Date.now()
+                        }))
+                    ).catch(()=>{});
+                }
+            }
         },
         
         addMessage: function(message) {
             if (!message || !message.id) return;
-            
-            if (this._messagesMap.has(message.id)) {
-                console.log(`[ChatManager] Duplicate message ignored: ${message.id}`);
+
+            // ── OFFLINE-FIRST deduplication ──────────────────────────────────
+            // Check by id AND by localId so confirmed server messages
+            // replace their optimistic counterpart instead of duplicating.
+            const existingById = this._messagesMap.get(message.id);
+            if (existingById) {
+                // Merge server data into existing (status, id, etc.)
+                Object.assign(existingById, message);
+                this._rebuildMessagesMap();
+                this._saveMessagesToCache();
+                this._notifySubscribers();
+                if (window.KynectaLocalStore) {
+                    window.KynectaLocalStore.saveMessage({
+                        ...existingById,
+                        chatId: existingById.chatId || existingById.conversationId
+                    }).catch(()=>{});
+                }
                 return;
             }
-            
+            // Also check if we have an optimistic copy by localId
+            if (message.localId) {
+                const existingByLocalId = this._messagesMap.get(message.localId);
+                if (existingByLocalId) {
+                    // Replace the optimistic message in-place
+                    const idx = this._messages.findIndex(m => m.id === message.localId);
+                    const merged = { ...existingByLocalId, ...message, id: message.id || existingByLocalId.id };
+                    if (idx !== -1) this._messages[idx] = merged;
+                    this._messagesMap.delete(message.localId);
+                    this._messagesMap.set(merged.id, merged);
+                    this._saveMessagesToCache();
+                    this._notifySubscribers();
+                    if (window.KynectaLocalStore) {
+                        window.KynectaLocalStore.saveMessage({
+                            ...merged,
+                            chatId: merged.chatId || merged.conversationId
+                        }).catch(()=>{});
+                    }
+                    return;
+                }
+            }
+
+            // ── Persist to IndexedDB ─────────────────────────────────────────
+            const chatId = message.chatId || message.conversationId;
+            if (window.KynectaLocalStore && chatId) {
+                window.KynectaLocalStore.saveMessage({
+                    ...message,
+                    chatId,
+                    createdAt: message.createdAt || message.timestamp || Date.now(),
+                    isLocalOnly: message.isLocalOnly !== false
+                }).catch(()=>{});
+            }
+
             this._messages.push(message);
             this._messagesMap.set(message.id, message);
             
@@ -2724,7 +2886,12 @@
                 const activeChat = this._activeConversation;
                 const drafts = {};
                 window.dispatchEvent(new CustomEvent('renderChatsList', {
-                    detail: { conversations: uiConvs, currentChat: activeChat, currentCategory: 'all', messageDrafts: drafts }
+                    detail: {
+                        conversations: ensureSafeArray(uiConvs),
+                        currentChat: activeChat,
+                        currentCategory: this.getCurrentCategory(),
+                        messageDrafts: ensureSafeObject(drafts)
+                    }
                 }));
             } catch(_e) {}
         },
@@ -2769,6 +2936,33 @@
         
         getMessages: function() {
             return [...this._messages];
+        },
+
+        setCurrentCategory: function(category) {
+            const normalized = ['all', 'unread', 'archived', 'blocked', 'notes'].includes(category) ? category : 'all';
+            this._currentCategory = normalized;
+            SafeStorage.set(LOCAL_STORAGE_KEYS.CURRENT_CATEGORY, normalized);
+            return normalized;
+        },
+
+        getCurrentCategory: function() {
+            const stored = SafeStorage.get(LOCAL_STORAGE_KEYS.CURRENT_CATEGORY, this._currentCategory || 'all');
+            const normalized = ['all', 'unread', 'archived', 'blocked', 'notes'].includes(stored) ? stored : 'all';
+            this._currentCategory = normalized;
+            return normalized;
+        },
+
+        renderChatsList: function() {
+            try {
+                window.dispatchEvent(new CustomEvent('renderChatsList', {
+                    detail: {
+                        conversations: ensureSafeArray(this._conversations),
+                        currentChat: this._activeConversation,
+                        currentCategory: this.getCurrentCategory(),
+                        messageDrafts: {}
+                    }
+                }));
+            } catch (_error) {}
         },
         
         loadPreviousMessages: function(conversationId) {
@@ -2862,6 +3056,7 @@
             this._messages = [];
             this._messagesMap.clear();
             this._historyCache.clear();
+            this._lastMessagesFetchAt.clear();
             this._pendingConversations.clear();
         }
     }.init();
@@ -3446,22 +3641,42 @@
                 
                 console.log(`[MessageHandler] Message sent successfully:`, result);
                 
-                const realMessage = result.message || result;
-                if (realMessage && realMessage.id) {
-                    optimisticMessage.id = realMessage.id;
-                    optimisticMessage.status = 'sent';
-                    optimisticMessage.optimistic = false;
-                    optimisticMessage.realId = realMessage.id;
-                    
-                    const messages = ChatManager.getMessages();
-                    const index = messages.findIndex(m => m.localId === localId);
-                    if (index !== -1) {
-                        messages[index] = { ...optimisticMessage, ...realMessage };
-                        ChatManager.setMessages(messages);
+                const realMessage = result.message || result?.data || result;
+                const serverId = realMessage?.id;
+
+                // Update the optimistic message in ChatManager in-place
+                if (serverId && serverId !== localId) {
+                    // Remove optimistic, add confirmed — addMessage handles dedup
+                    const msgs = ChatManager.getMessages();
+                    const idx = msgs.findIndex(m => m.id === localId || m.localId === localId);
+                    if (idx !== -1) {
+                        msgs[idx] = {
+                            ...msgs[idx],
+                            ...realMessage,
+                            id:          String(serverId),
+                            localId:     localId,
+                            status:      'sent',
+                            optimistic:  false,
+                            isLocalOnly: false,
+                            timestamp:   realMessage.createdAt || msgs[idx].timestamp || Date.now(),
+                            createdAt:   realMessage.createdAt || msgs[idx].createdAt || Date.now()
+                        };
+                        ChatManager.setMessages(msgs);
+                    }
+                    // Confirm in local store
+                    if (window.KynectaLocalStore) {
+                        window.KynectaLocalStore.confirmMessage(localId, String(serverId), {
+                            chatId:    realMessage.chatId || conversationId,
+                            createdAt: realMessage.createdAt || Date.now()
+                        }).catch(()=>{});
                     }
                 } else {
                     optimisticMessage.status = 'sent';
                     optimisticMessage.optimistic = false;
+                    optimisticMessage.isLocalOnly = false;
+                    if (window.KynectaLocalStore) {
+                        window.KynectaLocalStore.updateMessageStatus(localId, 'sent').catch(()=>{});
+                    }
                 }
                 
                 if (result && result.chatId && typeof conversationId === 'string' && conversationId.startsWith('pending_')) {
@@ -5143,42 +5358,75 @@
             if (data && data.type === 'NEW_MESSAGE') {
                 const message = data.payload || data.data;
                 if (message && message.id) {
-                    console.log('[MessageCore] Real-time message received:', message);
-                    
+                    const normalizedMessage = {
+                        id:             String(message.id),
+                        serverId:       String(message.id),
+                        content:        message.content || message.text || '',
+                        type:           message.type || 'text',
+                        senderId:       message.senderId || message.sender?.id,
+                        sender:         message.sender || null,
+                        timestamp:      message.createdAt || message.timestamp || Date.now(),
+                        createdAt:      message.createdAt || message.timestamp || Date.now(),
+                        status:         'delivered',
+                        conversationId: message.chatId,
+                        chatId:         message.chatId,
+                        isLocalOnly:    false
+                    };
+
+                    // ── Add to ChatManager (handles dedup) ──
                     if (ChatManager && ChatManager.addMessage) {
-                        const normalizedMessage = {
-                            id: message.id,
-                            content: message.content || message.text || '',
-                            type: message.type || 'text',
-                            senderId: message.senderId || message.sender?.id,
-                            sender: message.sender,
-                            timestamp: message.createdAt || message.timestamp || Date.now(),
-                            status: 'delivered',
-                            conversationId: message.chatId
-                        };
                         ChatManager.addMessage(normalizedMessage);
                     }
-                    
+
+                    // ── Update conversation list ──
                     if (ChatManager && ChatManager._conversationsMap) {
                         const conversation = ChatManager._conversationsMap.get(message.chatId);
                         if (conversation) {
-                            conversation.lastMessage = message.content;
-                            conversation.lastMessageAt = message.createdAt || Date.now();
-                            if (message.senderId !== ChatManager.getCurrentUserId?.()) {
+                            conversation.lastMessage    = message.content;
+                            conversation.lastMessageAt  = normalizedMessage.createdAt;
+                            const myId = SessionManager?.getUserId?.();
+                            if (message.senderId !== myId) {
                                 conversation.unreadCount = (conversation.unreadCount || 0) + 1;
                             }
-                            ChatManager._notifySubscribers();
                         }
-                        // Re-sort and re-render sidebar immediately
                         if (ChatManager._conversations) {
                             ChatManager._conversations.sort((a, b) => (b.lastMessageAt || 0) - (a.lastMessageAt || 0));
-                            try {
-                                window.dispatchEvent(new CustomEvent('renderChatsList', {
-                                    detail: { conversations: ChatManager._conversations, currentChat: ChatManager._activeConversation, currentCategory: 'all', messageDrafts: {} }
-                                }));
-                            } catch(_e) {}
                         }
                     }
+
+                    // ── Force immediate UI render (works whether chat panel is open or not) ──
+                    const activeChat = ChatManager?.getActiveChat?.();
+                    const isThisChat = activeChat && (activeChat.id === message.chatId);
+
+                    // Always re-render the sidebar so unread badge / preview updates
+                    try {
+                        window.dispatchEvent(new CustomEvent('renderChatsList', {
+                            detail: {
+                                conversations: ensureSafeArray(ChatManager._conversations),
+                                currentChat:   ChatManager._activeConversation,
+                                currentCategory: ChatManager.getCurrentCategory(),
+                                messageDrafts: {}
+                            }
+                        }));
+                    } catch(_e) {}
+
+                    // Re-render message list if this chat is currently open
+                    if (isThisChat) {
+                        try {
+                            const currentUser = SessionManager?.getUser?.();
+                            window.dispatchEvent(new CustomEvent('renderMessages', {
+                                detail: {
+                                    messages:    ChatManager.getMessages(),
+                                    currentChat: activeChat,
+                                    currentUser: currentUser
+                                }
+                            }));
+                        } catch(_e) {}
+                    }
+
+                    // Notify EventBus so any subscriber (UI layer) can react
+                    EventBus.emit('message:received', normalizedMessage);
+                    try { window.dispatchEvent(new CustomEvent('newMessage', { detail: { message: normalizedMessage } })); } catch(_e) {}
                 }
             }
             
@@ -5249,7 +5497,7 @@
                 }
                 _lastPollChatId = activeChat.id;
                 _lastPollMsgCount = msgCount;
-                ChatManager.fetchMessages(activeChat.id, { limit: 20 }).catch(() => {});
+                ChatManager.fetchMessages(activeChat.id, { limit: 20, minFetchGap: 25000 }).catch(() => {});
             }, 30000);
         }
     }
@@ -5330,6 +5578,7 @@
     // INITIALIZATION
     // =============================================
     async function initialize() {
+        console.log('[INIT MODULE]', MODULE_NAME);
         console.log(`[${MODULE_NAME}] 🚀 Messages Core v${MODULE_VERSION} (Stabilized Protocol | Real Data Only | Session Validation | UI Enhanced | Demo Data Included | openChatWithUser Added | Pending Chat Handling)`);
         
         try {
@@ -5440,6 +5689,7 @@
         getConversations: () => ChatManager.getConversations(),
         getMessages: () => ChatManager.getMessages(),
         getFriends: () => FriendManager.getFriendListForChat(),
+        getCurrentCategory: () => ChatManager.getCurrentCategory(),
         
         isAuthenticated: () => SessionManager.isAuthenticated(),
         
@@ -5474,6 +5724,8 @@
         getTypingUsers: (conversationId) => TypingManager.getTypingUsersForConversation(conversationId),
         
         openChatWithUser: openChatWithUser,
+        setCurrentCategory: (category) => ChatManager.setCurrentCategory(category),
+        renderChatsList: () => ChatManager.renderChatsList(),
         
         UI: {
             saveDraft: (conversationId, text, attachment) => UIStateManager.saveDraft(conversationId, text, attachment),

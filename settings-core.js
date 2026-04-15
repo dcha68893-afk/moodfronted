@@ -807,6 +807,7 @@ function recordStateTransition(from, to, reason = '') {
     });
     if (stateHistory.length > 50) stateHistory.shift();
 }
+window.__SETTINGS_STATE_OBJ__ = SettingsState;
 
 // =============================================
 // STRICT CHILD_READY - SENT EXACTLY ONCE

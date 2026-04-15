@@ -3646,6 +3646,28 @@ sanitizeHTML: function(str) {
         },
         
         handleIncomingCall: function(callData) {
+            // ── LOCAL-FIRST: record ringing state immediately ────────────────
+            (function _saveIncomingLocally() {
+                const store = window.KynectaCallLocalStore;
+                if (!store) return;
+                const id = callData.callId || callData.id;
+                if (!id) return;
+                store.save({
+                    id: id,
+                    serverId: id,
+                    callerId: callData.callerId || null,
+                    receiverId: null, // us
+                    type: callData.callType || callData.type || 'audio',
+                    status: 'ringing',
+                    callerName: callData.callerName || null,
+                    callerAvatar: callData.callerAvatar || null,
+                    isLocalOnly: false,
+                    isGroupCall: callData.isGroupCall || false,
+                    createdAt: callData.timestamp || Date.now()
+                }).catch(() => {});
+            })();
+            // Track for later accept/decline
+            window._currentIncomingCallId = callData.callId || callData.id || null;
             if (elements.incomingCallModal) {
                 if (elements.incomingCallName) {
                     elements.incomingCallName.textContent = callData.callerName || 'Incoming Call';
@@ -3690,6 +3712,24 @@ const timer = setInterval(() => {
         },
         
         handleCallInitiated: function(callData) {
+            // ── LOCAL-FIRST: record initiated call ───────────────────────────
+            (function _saveInitiatedLocally() {
+                const store = window.KynectaCallLocalStore;
+                if (!store) return;
+                const id = callData.callId || callData.id;
+                if (!id) return;
+                store.save({
+                    id: id,
+                    serverId: id,
+                    callerId: null, // us (we're the caller)
+                    receiverId: callData.receiverId || null,
+                    type: callData.callType || callData.type || 'audio',
+                    status: 'initiated',
+                    isLocalOnly: false,
+                    isGroupCall: callData.isGroupCall || false,
+                    createdAt: callData.timestamp || Date.now()
+                }).catch(() => {});
+            })();
             UIState.activeCallId = callData.callId;
             UIState.callParticipants = callData.participants || [];
             // ⚠ DO NOT set callStartTime here — timer only starts when receiver answers.
@@ -3758,12 +3798,38 @@ const timer = setInterval(() => {
         },
         
         handleCallConnected: function(callData) {
+            // ── LOCAL-FIRST: mark as connected ───────────────────────────────
+            (function _saveConnectedLocally() {
+                const store = window.KynectaCallLocalStore;
+                if (!store) return;
+                const id = callData.callId || UIState.activeCallId;
+                if (!id) return;
+                store.updateStatus(id, 'connected').catch(() => {});
+            })();
             if (elements.callStatusText) {
                 elements.callStatusText.textContent = 'In call';
             }
         },
         
         handleCallEnded: function(callData) {
+            // ── LOCAL-FIRST: finalize call record ─────────────────────────────
+            (function _saveEndedLocally() {
+                const store = window.KynectaCallLocalStore;
+                if (!store) return;
+                const id = callData.callId || UIState.activeCallId;
+                if (!id) return;
+                // Determine final status
+                let finalStatus = 'ended';
+                if (callData.reason === 'declined' || callData.status === 'rejected') finalStatus = 'rejected';
+                else if (callData.status === 'missed') finalStatus = 'missed';
+                else if (callData.status === 'failed') finalStatus = 'failed';
+                else if (callData.status === 'cancelled') finalStatus = 'cancelled';
+                const duration = callData.duration ||
+                    (UIState.callStartTime ? Math.floor((Date.now() - UIState.callStartTime) / 1000) : 0);
+                store.updateStatus(id, finalStatus, { duration, endedAt: Date.now() }).catch(() => {});
+                // Prune old records
+                store.prune().catch(() => {});
+            })();
             // Reset state FIRST
             UIState.activeCallId = null;
             UIState.callActive = false;
@@ -4018,6 +4084,53 @@ const timer = setInterval(() => {
                         break;
                     case 'CALL_INCOMING':
                         UIEventHandlers.handleIncomingCall && UIEventHandlers.handleIncomingCall(data.payload || {});
+                        break;
+                    case 'AUTO_ACCEPT_CALL':
+                    case 'ANSWER_CALL': {
+                        // Parent banner/overlay accepted — answer the call
+                        const callId = (data.payload || {}).callId || (window.callCore && window.callCore.getActiveCallId && window.callCore.getActiveCallId());
+                        if (callId && window.callCore && window.callCore.answerCall) {
+                            window.callCore.answerCall(callId).then(result => {
+                                if (result && result.success) {
+                                    UIEventHandlers.handleCallAccepted && UIEventHandlers.handleCallAccepted({ callId });
+                                } else {
+                                    console.warn('[Calls UI] answerCall failed from overlay', result);
+                                }
+                            }).catch(e => console.error('[Calls UI] answerCall error', e));
+                        } else if (callId) {
+                            // Fallback: trigger accept buttons directly
+                            const acceptBtn = document.getElementById('acceptCallBtn') || document.querySelector('[data-action="accept-call"]');
+                            if (acceptBtn) acceptBtn.click();
+                        }
+                        break;
+                    }
+                    case 'DECLINE_CALL': {
+                        // Parent overlay declined — reject the call
+                        const callId = (data.payload || {}).callId || (window.callCore && window.callCore.getActiveCallId && window.callCore.getActiveCallId());
+                        if (callId && window.callCore && window.callCore.declineCall) {
+                            window.callCore.declineCall(callId, 'declined').catch(e => {});
+                        }
+                        UIEventHandlers.handleCallEnded && UIEventHandlers.handleCallEnded({ callId, reason: 'declined' });
+                        break;
+                    }
+                    case 'CALL_CANCELLED':
+                        // Caller cancelled before we answered
+                        if (window.__kynHideCallBanner) window.__kynHideCallBanner();
+                        UIEventHandlers.handleCallEnded && UIEventHandlers.handleCallEnded(data.payload || {});
+                        UIEventHandlers.refreshCallHistory && UIEventHandlers.refreshCallHistory();
+                        break;
+                    case 'CALL_ACCEPT_RESULT':
+                        // Backend confirmed accept
+                        if ((data.payload || {}).success) {
+                            console.log('[Calls UI] ✅ Call accept confirmed by backend');
+                        } else {
+                            console.warn('[Calls UI] ❌ Backend rejected accept:', data.payload);
+                        }
+                        break;
+                    case 'CALL_REJECT_RESULT':
+                        // Backend confirmed reject
+                        UIEventHandlers.handleCallEnded && UIEventHandlers.handleCallEnded(data.payload || {});
+                        UIEventHandlers.refreshCallHistory && UIEventHandlers.refreshCallHistory();
                         break;
                     case 'CALL_REJECTED':
                         UIEventHandlers.handleCallEnded && UIEventHandlers.handleCallEnded(data.payload || {});

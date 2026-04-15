@@ -1,594 +1,572 @@
 /**
- * Kynecta Sync Manager
- * Handles data synchronization with backend
- * @version 1.0.0
+ * app.sync.manager.js  (Offline-First Edition v2.2)
+ * Orchestrates data synchronization: delegates message sync to
+ * messageSync.engine.js; handles conversations, friends, groups, etc.
+ * 
+ * @version 2.2.0 - full group sync integration with GroupSyncEngine and GroupQueueManager
  */
 
-(function() {
+(function () {
     'use strict';
 
     const SYNC_CONFIG = {
         autoSync: false,
-        syncInterval: 30000, // 30 seconds
+        syncInterval: 30000,
         retryDelay: 5000,
         maxRetries: 3,
         syncOnReconnect: true,
         syncOnLogin: true,
         batchSize: 100,
-        conflictStrategy: 'server-wins' // or 'client-wins', 'merge'
+        conflictStrategy: 'server-wins'
     };
 
     class KynectaSyncManager {
         constructor() {
-            this._isSyncing = false;
-            this._lastSync = 0;
-            this._syncQueue = [];
-            this._retryCount = 0;
-            this._syncTimer = null;
+            this._isSyncing   = false;
+            this._lastSync    = 0;
+            this._syncQueue   = [];
+            this._retryCount  = 0;
+            this._syncTimer   = null;
             this._pendingSyncs = new Map();
-            this._conflicts = [];
+            this._conflicts   = [];
             this._stats = {
-                totalSyncs: 0,
-                successfulSyncs: 0,
-                failedSyncs: 0,
-                conflicts: 0,
-                lastSyncDuration: 0,
-                syncedItems: 0
+                totalSyncs: 0, successfulSyncs: 0, failedSyncs: 0,
+                conflicts: 0, lastSyncDuration: 0, syncedItems: 0
             };
 
-            // Initialize
             this._setupEventListeners();
-            
-            // Start auto-sync if enabled
-            if (SYNC_CONFIG.autoSync) {
-                this.startAutoSync();
-            }
+            if (SYNC_CONFIG.autoSync) this.startAutoSync();
 
-            // Expose globally
             window.KynectaSync = this;
-
-            console.log('[Sync] ✅ Manager initialized');
+            console.log('[Sync] ✅ Manager initialized (offline-first v2.2)');
         }
 
-        // ========== PUBLIC API ==========
+        // ── Public API ───────────────────────────────────────────────────────
 
-        /**
-         * Start automatic synchronization
-         * @param {number} interval - Sync interval in ms
-         */
         startAutoSync(interval = SYNC_CONFIG.syncInterval) {
-            if (this._syncTimer) {
-                clearInterval(this._syncTimer);
-            }
-
-            this._syncTimer = setInterval(() => {
-                this.syncAll();
-            }, interval);
-
-            console.log('[Sync] Auto-sync started');
+            if (this._syncTimer) clearInterval(this._syncTimer);
+            this._syncTimer = setInterval(() => this.syncAll(), interval);
         }
 
-        /**
-         * Stop automatic synchronization
-         */
         stopAutoSync() {
-            if (this._syncTimer) {
-                clearInterval(this._syncTimer);
-                this._syncTimer = null;
-            }
+            if (this._syncTimer) { clearInterval(this._syncTimer); this._syncTimer = null; }
         }
 
-        /**
-         * Synchronize all data
-         * @returns {Promise} Resolves when sync complete
-         */
         async syncAll() {
-            if (this._isSyncing) {
-                return this._waitForCurrentSync();
+            // ── SYNC LOOP GUARD (patch v1) ─────────────────────────────────
+            // Use KynSyncGuard (from kynecta_safety_layer.js) when available;
+            // fall back to the private boolean for backward compatibility.
+            const guard = (typeof KynSyncGuard !== 'undefined') ? KynSyncGuard : null;
+            if (guard) {
+                if (!guard.acquire('syncAll')) {
+                    console.log('[SYNC START] syncAll already running — skipped');
+                    return this._waitForCurrentSync();
+                }
+            } else {
+                if (this._isSyncing) return this._waitForCurrentSync();
             }
+            if (!navigator.onLine) {
+                if (guard) guard.release('syncAll');
+                return;
+            }
+            console.log('[SYNC START] syncAll beginning');
 
             this._isSyncing = true;
+            let shouldReleaseGuard = true;
             this._stats.totalSyncs++;
             const startTime = Date.now();
 
             try {
-                // Emit sync started event
                 this._emitSyncEvent('SYNC_STARTED');
 
-                // Get current user ID
                 const userId = this._getCurrentUserId();
-                if (!userId) {
-                    throw new Error('No authenticated user');
+                if (!userId) throw new Error('No authenticated user');
+
+                // Delegate message sync to KynectaSyncEngine
+                const syncEngine = window.KynectaSyncEngine;
+                if (syncEngine) {
+                    await syncEngine.syncAll();
                 }
 
-                // Get last sync timestamp
-                const since = this._lastSync || 0;
+                // Delegate friend sync to dedicated offline-first engine
+                const friendSyncEngine = window.KynectaFriendSyncEngine;
+                if (friendSyncEngine) {
+                    await friendSyncEngine.syncAll();
+                }
 
-                // Perform sync operations in parallel
-                const results = await Promise.allSettled([
-                    this._syncMessages(since),
-                    this._syncFriends(since),
-                    this._syncGroups(since),
-                    this._syncStatus(since),
-                    this._syncSettings(since)
+                // ── NEW: Group sync delegation (v2.2) ─────────────────────────────
+                const groupSyncEngine = window.GroupSyncEngine;
+                if (groupSyncEngine) {
+                    await groupSyncEngine.syncAll();
+                }
+
+                // Process group offline queue
+                const groupQueue = window.GroupQueueManager;
+                if (groupQueue && groupQueue.pendingCount && groupQueue.pendingCount() > 0) {
+                    await groupQueue.processNow();
+                }
+
+                // Process remaining non-message, non-friend, non-group items
+                await Promise.allSettled([
+                    ...(friendSyncEngine ? [] : [this._syncFriends()]),
+                    ...(groupSyncEngine ? [] : [this._syncGroups()]),
+                    this._syncStatus(),
+                    this._syncSettings()
                 ]);
 
-                // Check for failures
-                const failures = results.filter(r => r.status === 'rejected');
-                if (failures.length > 0) {
-                    this._stats.failedSyncs++;
-                    throw new Error(`${failures.length} sync operations failed`);
+                // Also process any pending offline queue items
+                const offlineQueue = window.KynectaMsgQueue;
+                if (offlineQueue) await offlineQueue.processAll();
+
+                // Flush friend action queue (offline-first)
+                const friendQueue = window.KynectaFriendQueue;
+                if (friendQueue && friendQueue.pendingCount && friendQueue.pendingCount() > 0) {
+                    await friendQueue.flush();
                 }
 
-                // Update last sync time
-                this._lastSync = Date.now();
+                // Legacy offline queue
+                await this._processOfflineQueue();
+
+                this._lastSync   = Date.now();
                 this._retryCount = 0;
                 this._stats.successfulSyncs++;
                 this._stats.lastSyncDuration = Date.now() - startTime;
 
-                // Process offline queue
-                await this._processOfflineQueue();
+                this._emitSyncEvent('SYNC_COMPLETED', { duration: this._stats.lastSyncDuration });
 
-                // Emit sync completed event
-                this._emitSyncEvent('SYNC_COMPLETED', {
-                    duration: this._stats.lastSyncDuration,
-                    syncedItems: this._stats.syncedItems
-                });
-
-                // Update store
-                if (window.KynectaStore) {
-                    window.KynectaStore.set('sync.lastSync', this._lastSync);
-                }
+                if (window.KynectaStore) window.KynectaStore.set('sync.lastSync', this._lastSync);
 
                 return { success: true, lastSync: this._lastSync };
 
             } catch (error) {
                 this._stats.failedSyncs++;
                 this._retryCount++;
+                console.error('[Sync] syncAll error:', error && error.message ? error.message : error);
 
-                // Emit sync failed event
-                this._emitSyncEvent('SYNC_FAILED', {
-                    error: error.message,
-                    retryCount: this._retryCount
-                });
+                this._emitSyncEvent('SYNC_FAILED', { error: error.message, retryCount: this._retryCount });
 
-                // Schedule retry if under limit
-                if (this._retryCount <= SYNC_CONFIG.maxRetries) {
+                // ── Bounded retry with guard release (patch v1) ─────────────
+                // Release the guard and reset the flag INSIDE the setTimeout
+                // callback so the lock stays held until the retry is ready,
+                // preventing a second syncAll from starting in the gap.
+                // Do NOT re-throw — stops cascading failures in callers.
+                if (this._retryCount <= SYNC_CONFIG.maxRetries && navigator.onLine) {
+                    const delay = SYNC_CONFIG.retryDelay * this._retryCount;
+                    console.warn(`[Sync] Retry ${this._retryCount}/${SYNC_CONFIG.maxRetries} in ${delay}ms`);
+                    shouldReleaseGuard = false;
                     setTimeout(() => {
+                        this._isSyncing = false;
+                        if (typeof KynSyncGuard !== 'undefined') KynSyncGuard.release('syncAll');
                         this.syncAll();
-                    }, SYNC_CONFIG.retryDelay * this._retryCount);
+                    }, delay);
+                    // Return without releasing — retry callback handles it
+                    return { success: false, error: error.message, retryCount: this._retryCount };
                 }
 
-                throw error;
-
+                // Max retries exhausted — fall through to finally for cleanup
+                return { success: false, error: error.message, retryCount: this._retryCount };
             } finally {
                 this._isSyncing = false;
+                if (shouldReleaseGuard && typeof KynSyncGuard !== 'undefined') KynSyncGuard.release('syncAll');
             }
         }
 
-        /**
-         * Sync specific data type
-         * @param {string} type - Data type (messages, friends, groups, status, settings)
-         * @returns {Promise}
-         */
         async syncType(type) {
             const since = this._lastSync || 0;
-            
-            switch(type) {
-                case 'messages':
-                    return this._syncMessages(since);
-                case 'friends':
-                    return this._syncFriends(since);
-                case 'groups':
-                    return this._syncGroups(since);
-                case 'status':
-                    return this._syncStatus(since);
-                case 'settings':
-                    return this._syncSettings(since);
-                default:
-                    throw new Error(`Unknown sync type: ${type}`);
+            switch (type) {
+                case 'messages': {
+                    const engine = window.KynectaSyncEngine;
+                    return engine ? engine.syncAll() : this._syncMessages(since);
+                }
+                case 'friends': {
+                    const fe = window.KynectaFriendSyncEngine;
+                    return fe ? fe.syncAll() : this._syncFriends(since);
+                }
+                case 'groups': {
+                    const ge = window.GroupSyncEngine;
+                    return ge ? ge.syncAll() : this._syncGroups(since);
+                }
+                case 'status':   return this._syncStatus(since);
+                case 'settings': return this._syncSettings(since);
+                default: throw new Error(`Unknown sync type: ${type}`);
             }
         }
 
-        /**
-         * Queue item for sync
-         * @param {string} type - Data type
-         * @param {string} action - Action (create, update, delete)
-         * @param {*} data - Item data
-         * @returns {string} Queue ID
-         */
         queueForSync(type, action, data) {
-            const id = `sync_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
-            
-            this._syncQueue.push({
-                id,
-                type,
-                action,
-                data,
-                timestamp: Date.now(),
-                retries: 0
-            });
-
-            // Limit queue size
-            if (this._syncQueue.length > 1000) {
-                this._syncQueue.shift();
-            }
-
-            // Trigger sync if not already syncing
-            if (!this._isSyncing && navigator.onLine) {
-                this.syncAll();
-            }
-
+            const id = `sync_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+            this._syncQueue.push({ id, type, action, data, timestamp: Date.now(), retries: 0 });
+            if (this._syncQueue.length > 1000) this._syncQueue.shift();
+            if (!this._isSyncing && navigator.onLine) this.syncAll();
             return id;
         }
 
-        /**
-         * Get sync status
-         * @returns {Object} Sync status
-         */
         getStatus() {
             return {
-                isSyncing: this._isSyncing,
-                lastSync: this._lastSync,
-                queueLength: this._syncQueue.length,
-                retryCount: this._retryCount,
-                stats: this._stats,
-                pendingSyncs: this._pendingSyncs.size,
+                isSyncing: this._isSyncing, lastSync: this._lastSync,
+                queueLength: this._syncQueue.length, retryCount: this._retryCount,
+                stats: this._stats, pendingSyncs: this._pendingSyncs.size,
                 conflicts: this._conflicts.length
             };
         }
 
-        /**
-         * Resolve conflict
-         * @param {string} conflictId - Conflict ID
-         * @param {string} resolution - Resolution strategy
-         * @param {*} resolvedData - Resolved data
-         */
         resolveConflict(conflictId, resolution, resolvedData = null) {
             const conflict = this._conflicts.find(c => c.id === conflictId);
             if (!conflict) return false;
-
-            if (resolution === 'accept-server') {
-                this._applyServerData(conflict);
-            } else if (resolution === 'accept-client') {
-                this._applyClientData(conflict);
-            } else if (resolution === 'custom' && resolvedData) {
-                this._applyResolvedData(conflict, resolvedData);
-            }
-
+            if (resolution === 'accept-server')     this._applyServerData(conflict);
+            else if (resolution === 'accept-client') this._applyClientData(conflict);
+            else if (resolution === 'custom' && resolvedData) this._applyResolvedData(conflict, resolvedData);
             this._conflicts = this._conflicts.filter(c => c.id !== conflictId);
             return true;
         }
 
-        // ========== PRIVATE SYNC METHODS ==========
+        // ── Private sync methods ─────────────────────────────────────────────
 
+        /** Legacy message sync — used as fallback if syncEngine unavailable */
         async _syncMessages(since) {
-            const params = new URLSearchParams({
-                since,
-                limit: SYNC_CONFIG.batchSize
-            });
-
+            const localStore = window.KynectaLocalStore;
+            const params = new URLSearchParams({ since, limit: SYNC_CONFIG.batchSize });
             const response = await this._makeRequest('GET', `/api/sync/messages?${params}`);
-            
             if (response.data && response.data.length > 0) {
                 this._stats.syncedItems += response.data.length;
-                
-                // Update store
-                if (window.KynectaStore) {
+                if (localStore) {
+                    for (const item of response.data) {
+                        if (item.type === 'message') {
+                            await localStore.mergeServerMessages(item.data.chatId, [item.data]);
+                        }
+                    }
+                } else if (window.KynectaStore) {
                     response.data.forEach(item => {
                         if (item.type === 'message') {
-                            const messages = window.KynectaStore.get(`messages.byChat.${item.data.chatId}`) || [];
-                            const updated = this._mergeMessage(messages, item.data);
-                            window.KynectaStore.set(`messages.byChat.${item.data.chatId}`, updated);
+                            const msgs = window.KynectaStore.get(`messages.byChat.${item.data.chatId}`) || [];
+                            window.KynectaStore.set(`messages.byChat.${item.data.chatId}`, this._mergeMessage(msgs, item.data));
                         }
                     });
                 }
-
-                // Emit events
                 response.data.forEach(item => {
-                    if (window.KynectaEventBus) {
-                        window.KynectaEventBus.emit(`SYNC_MESSAGE_${item.action}`, item.data);
-                    }
+                    if (window.KynectaEventBus) window.KynectaEventBus.emit(`SYNC_MESSAGE_${item.action}`, item.data);
                 });
             }
-
             return response;
         }
 
-        async _syncFriends(since) {
-            const params = new URLSearchParams({
-                since,
-                limit: SYNC_CONFIG.batchSize
-            });
-
-            const response = await this._makeRequest('GET', `/api/sync/friends?${params}`);
-            
-            if (response.data && response.data.length > 0) {
-                this._stats.syncedItems += response.data.length;
-                
-                // Update store
-                if (window.KynectaStore) {
-                    const friends = window.KynectaStore.get('friends.list') || [];
+        async _syncFriends(since = this._lastSync) {
+            try {
+                const params = new URLSearchParams({ since, limit: SYNC_CONFIG.batchSize });
+                const response = await this._makeRequest('GET', `/api/sync/friends?${params}`);
+                if (response.data && response.data.length > 0) {
+                    this._stats.syncedItems += response.data.length;
+                    if (window.KynectaStore) {
+                        const friends = window.KynectaStore.get('friends.list') || [];
+                        response.data.forEach(item => {
+                            if (item.action === 'add')    friends.push(item.data);
+                            else if (item.action === 'remove') { const i = friends.findIndex(f => f.id === item.data.id); if (i !== -1) friends.splice(i, 1); }
+                            else if (item.action === 'update') { const i = friends.findIndex(f => f.id === item.data.id); if (i !== -1) friends[i] = item.data; }
+                        });
+                        window.KynectaStore.set('friends.list', friends);
+                    }
                     response.data.forEach(item => {
-                        if (item.action === 'add') {
-                            friends.push(item.data);
-                        } else if (item.action === 'remove') {
-                            const index = friends.findIndex(f => f.id === item.data.id);
-                            if (index !== -1) friends.splice(index, 1);
-                        } else if (item.action === 'update') {
-                            const index = friends.findIndex(f => f.id === item.data.id);
-                            if (index !== -1) friends[index] = item.data;
-                        }
+                        if (window.KynectaEventBus) window.KynectaEventBus.emit(`FRIEND_${item.action.toUpperCase()}`, item.data);
                     });
-                    window.KynectaStore.set('friends.list', friends);
                 }
-
-                // Emit events
-                response.data.forEach(item => {
-                    if (window.KynectaEventBus) {
-                        window.KynectaEventBus.emit(`FRIEND_${item.action.toUpperCase()}`, item.data);
-                    }
-                });
-            }
-
-            return response;
+                return response;
+            } catch (err) { console.warn('[Sync] friends sync failed:', err.message); }
         }
 
-        async _syncGroups(since) {
-            const params = new URLSearchParams({
-                since,
-                limit: SYNC_CONFIG.batchSize
-            });
+        /**
+         * UPDATED v2.2: Sync groups — delegates to GroupSyncEngine if available.
+         * If not, falls back to legacy delta loop with store.upsertGroup().
+         */
+        async _syncGroups(since = this._lastSync) {
+            // Check if GroupSyncEngine exists — delegate to it for full offline-first sync
+            const groupSyncEngine = window.GroupSyncEngine;
+            if (groupSyncEngine && typeof groupSyncEngine.syncAll === 'function') {
+                try {
+                    await groupSyncEngine.syncAll();
+                    return { success: true, source: 'GroupSyncEngine' };
+                } catch (err) {
+                    console.warn('[Sync] GroupSyncEngine failed, falling back to legacy:', err.message);
+                    // Fall through to legacy
+                }
+            }
 
-            const response = await this._makeRequest('GET', `/api/sync/groups?${params}`);
-            
-            if (response.data && response.data.length > 0) {
-                this._stats.syncedItems += response.data.length;
+            // Legacy fallback: fetch delta from server and apply to store
+            try {
+                const params = new URLSearchParams({ since, limit: SYNC_CONFIG.batchSize });
+                const response = await this._makeRequest('GET', `/api/sync/groups?${params}`);
                 
-                // Update store
-                if (window.KynectaStore) {
-                    const groups = window.KynectaStore.get('groups.list') || [];
+                if (response.data && response.data.length > 0) {
+                    this._stats.syncedItems += response.data.length;
+                    
+                    if (window.KynectaStore) {
+                        const store = window.KynectaStore;
+                        
+                        for (const item of response.data) {
+                            if (item.action === 'add' || item.action === 'update') {
+                                // Use the new upsertGroup method
+                                await store.upsertGroup(item.data);
+                            } else if (item.action === 'remove') {
+                                await store.removeGroupFromStore(item.data.id);
+                            }
+                        }
+                    }
+                    
+                    // Emit events
                     response.data.forEach(item => {
-                        if (item.action === 'add') {
-                            groups.push(item.data);
-                        } else if (item.action === 'remove') {
-                            const index = groups.findIndex(g => g.id === item.data.id);
-                            if (index !== -1) groups.splice(index, 1);
-                        } else if (item.action === 'update') {
-                            const index = groups.findIndex(g => g.id === item.data.id);
-                            if (index !== -1) groups[index] = item.data;
+                        if (window.KynectaEventBus) {
+                            window.KynectaEventBus.emit(`GROUP_${item.action.toUpperCase()}`, item.data);
                         }
                     });
-                    window.KynectaStore.set('groups.list', groups);
                 }
-
-                // Emit events
-                response.data.forEach(item => {
-                    if (window.KynectaEventBus) {
-                        window.KynectaEventBus.emit(`GROUP_${item.action.toUpperCase()}`, item.data);
-                    }
-                });
+                return response;
+            } catch (err) {
+                console.warn('[Sync] groups sync failed:', err.message);
+                throw err;
             }
-
-            return response;
         }
 
-        async _syncStatus(since) {
-            const params = new URLSearchParams({
-                since,
-                limit: SYNC_CONFIG.batchSize
-            });
-
-            const response = await this._makeRequest('GET', `/api/sync/status?${params}`);
-            
-            if (response.data && response.data.length > 0) {
-                this._stats.syncedItems += response.data.length;
-                
-                // Update store
-                if (window.KynectaStore) {
-                    const statusList = window.KynectaStore.get('status.list') || [];
+        async _syncStatus(since = this._lastSync) {
+            try {
+                const params = new URLSearchParams({ since, limit: SYNC_CONFIG.batchSize });
+                const response = await this._makeRequest('GET', `/api/sync/status?${params}`);
+                if (response.data && response.data.length > 0) {
+                    this._stats.syncedItems += response.data.length;
+                    if (window.KynectaStore) {
+                        const statusList = window.KynectaStore.get('status.list') || [];
+                        response.data.forEach(item => {
+                            if (item.action === 'add')    statusList.push(item.data);
+                            else if (item.action === 'remove') { const i = statusList.findIndex(s => s.id === item.data.id); if (i !== -1) statusList.splice(i, 1); }
+                        });
+                        window.KynectaStore.set('status.list', statusList);
+                    }
                     response.data.forEach(item => {
-                        if (item.action === 'add') {
-                            statusList.push(item.data);
-                        } else if (item.action === 'remove') {
-                            const index = statusList.findIndex(s => s.id === item.data.id);
-                            if (index !== -1) statusList.splice(index, 1);
-                        }
+                        if (window.KynectaEventBus) window.KynectaEventBus.emit('STATUS_UPDATED', item.data);
                     });
-                    window.KynectaStore.set('status.list', statusList);
                 }
-
-                // Emit events
-                response.data.forEach(item => {
-                    if (window.KynectaEventBus) {
-                        window.KynectaEventBus.emit('STATUS_UPDATED', item.data);
-                    }
-                });
-            }
-
-            return response;
+                return response;
+            } catch (err) { console.warn('[Sync] status sync failed:', err.message); }
         }
 
-        async _syncSettings(since) {
-            const response = await this._makeRequest('GET', '/api/sync/settings');
-            
-            if (response.data) {
-                // Update store
-                if (window.KynectaStore) {
-                    window.KynectaStore.set('settings', response.data);
+        async _syncSettings() {
+            try {
+                const response = await this._makeRequest('GET', '/api/sync/settings');
+                if (response.data) {
+                    if (window.KynectaStore) window.KynectaStore.set('settings', response.data);
+                    if (window.KynectaEventBus) window.KynectaEventBus.emit('SETTINGS_UPDATED', response.data);
                 }
-
-                // Emit event
-                if (window.KynectaEventBus) {
-                    window.KynectaEventBus.emit('SETTINGS_UPDATED', response.data);
-                }
-            }
-
-            return response;
+                return response;
+            } catch (err) { console.warn('[Sync] settings sync failed:', err.message); }
         }
 
+        /** Process the legacy localStorage offline queue */
         async _processOfflineQueue() {
-            const queue = JSON.parse(localStorage.getItem('kynecta_offline_queue') || '[]');
+            const queue = window.AppStorage?.getArray?.('kynecta_offline_queue') || JSON.parse(localStorage.getItem('kynecta_offline_queue') || '[]');
             if (queue.length === 0) return;
 
             const successful = [];
-
             for (const item of queue) {
                 try {
                     await this._processOfflineItem(item);
                     successful.push(item.id);
-                } catch (error) {
-                    console.warn('[Sync] Failed to process offline item:', item.id, error);
+                } catch (err) {
+                    console.warn('[Sync] Failed to process offline item:', item.id, err.message);
                 }
             }
 
-            // Remove successful items
             const remaining = queue.filter(item => !successful.includes(item.id));
-            localStorage.setItem('kynecta_offline_queue', JSON.stringify(remaining));
+            if (window.AppStorage?.set) {
+                window.AppStorage.set('kynecta_offline_queue', remaining);
+            } else {
+                localStorage.setItem('kynecta_offline_queue', JSON.stringify(remaining));
+            }
 
-            // Emit event
             if (window.KynectaEventBus) {
-                window.KynectaEventBus.emit('OFFLINE_QUEUE_PROCESSED', {
-                    processed: successful.length,
-                    remaining: remaining.length
-                });
+                window.KynectaEventBus.emit('OFFLINE_QUEUE_PROCESSED', { processed: successful.length, remaining: remaining.length });
             }
         }
 
         async _processOfflineItem(item) {
-            switch(item.action) {
+            switch (item.action) {
+                case 'send':
                 case 'sendMessage':
-                    if (window.services?.message) {
-                        return window.services.message.sendMessage(item.data);
-                    }
+                    if (window.services?.message) return window.services.message.sendMessage(item.data);
                     break;
                 case 'friendRequest':
-                    if (window.services?.friend) {
-                        return window.services.friend.sendFriendRequest(item.data.userId, item.data.message);
+                case 'add':
+                case 'accept':
+                case 'reject':
+                case 'remove':
+                case 'block':
+                case 'unblock': {
+                    const fq = window.KynectaFriendQueue;
+                    if (fq) {
+                        fq.enqueue(
+                            item.action === 'friendRequest' ? 'add' : item.action,
+                            item.data?.userId || item.data?.friendId,
+                            item.data
+                        );
+                        return;
+                    }
+                    if (window.services?.friend) return window.services.friend.sendFriendRequest(item.data.userId, item.data.message);
+                    break;
+                }
+                // ── NEW: Group offline actions (v2.2) ─────────────────────────────
+                case 'createGroup':
+                case 'updateGroup':
+                case 'deleteGroup':
+                case 'joinGroup':
+                case 'leaveGroup':
+                case 'addGroupMember':
+                case 'removeGroupMember':
+                case 'sendGroupMessage': {
+                    const groupQueue = window.GroupQueueManager;
+                    if (groupQueue && typeof groupQueue.enqueue === 'function') {
+                        groupQueue.enqueue(item.action, item.data);
+                        return;
                     }
                     break;
+                }
                 default:
-                    // Try generic endpoint
                     return this._makeRequest('POST', '/api/sync/offline', item);
             }
         }
 
         _waitForCurrentSync() {
             return new Promise((resolve) => {
-                const checkSync = () => {
-                    if (!this._isSyncing) {
-                        resolve();
-                    } else {
-                        setTimeout(checkSync, 100);
-                    }
-                };
-                checkSync();
+                const check = () => { if (!this._isSyncing) resolve(); else setTimeout(check, 100); };
+                check();
             });
         }
 
         _getCurrentUserId() {
-            if (window.__PARENT_SESSION__?.userId) {
-                return window.__PARENT_SESSION__.userId;
-            }
-            if (window.AUTH_SESSION?.userId) {
-                return window.AUTH_SESSION.userId;
-            }
-            if (window.KynectaStore) {
-                return window.KynectaStore.get('user.id');
-            }
+            if (window.__PARENT_SESSION__?.userId)   return window.__PARENT_SESSION__.userId;
+            if (window.AUTH_SESSION?.userId)         return window.AUTH_SESSION.userId;
+            if (window.KynectaStore)                 return window.KynectaStore.get('user.id');
             return null;
         }
 
         async _makeRequest(method, endpoint, data = null) {
-            let token = null;
-            if (window.__PARENT_SESSION__?.token) {
-                token = window.__PARENT_SESSION__.token;
-            } else if (window.AUTH_SESSION?.token) {
-                token = window.AUTH_SESSION.token;
-            } else if (window.localStorage) {
-                token = window.localStorage.getItem('kynecta_token');
+            const token = window.__PARENT_SESSION__?.token
+                || window.AUTH_SESSION?.token
+                || window.AppStorage?.get?.('kynecta_token', null)
+                || localStorage.getItem('kynecta_token')
+                || null;
+            const headers = { 'Content-Type': 'application/json', ...(token ? { 'Authorization': `Bearer ${token}` } : {}) };
+            const options = { method, headers, credentials: 'include' };
+            if (data && method !== 'GET') options.body = JSON.stringify(data);
+            if (typeof window.safeApiCall === 'function') {
+                return window.safeApiCall(async () => {
+                    if (window.api?.request?.request) return window.api.request.request(endpoint, options);
+                    const response = await fetch(endpoint, options);
+                    if (!response.ok) throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                    return response.json();
+                }, { data: [] });
             }
-
-            const headers = {
-                'Content-Type': 'application/json',
-                ...(token && { 'Authorization': `Bearer ${token}` })
-            };
-
-            const options = {
-                method,
-                headers,
-                credentials: 'include'
-            };
-
-            if (data && method !== 'GET') {
-                options.body = JSON.stringify(data);
-            }
-
-            if (window.api?.request) {
-                return window.api.request.request(endpoint, options);
-            }
-
+            if (window.api?.request?.request) return window.api.request.request(endpoint, options);
             const response = await fetch(endpoint, options);
-            
-            if (!response.ok) {
-                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-            }
-            
-            return await response.json();
+            if (!response.ok) throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            return response.json();
         }
 
         _mergeMessage(existing, incoming) {
-            const messageMap = new Map();
-            existing.forEach(msg => messageMap.set(msg.id, msg));
-            messageMap.set(incoming.id, incoming);
-            return Array.from(messageMap.values())
-                .sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
+            const map = new Map();
+            existing.forEach(m => map.set(m.id, m));
+            map.set(incoming.id, incoming);
+            return Array.from(map.values()).sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
         }
 
         _emitSyncEvent(type, data = {}) {
-            if (window.KynectaEventBus) {
-                window.KynectaEventBus.emit(type, {
-                    ...data,
-                    timestamp: Date.now()
-                });
-            }
+            if (window.KynectaEventBus) window.KynectaEventBus.emit(type, { ...data, timestamp: Date.now() });
         }
 
+        _applyServerData(conflict) {
+            if (window.KynectaStore) window.KynectaStore.set(conflict.keyPath, conflict.serverData);
+        }
+        _applyClientData(conflict) {}
+        _applyResolvedData(conflict, data) {
+            if (window.KynectaStore) window.KynectaStore.set(conflict.keyPath, data);
+        }
+
+        /**
+         * UPDATED v2.2: Setup event listeners with group sync integration.
+         */
         _setupEventListeners() {
-            // Listen for network changes
+            // ── Online: resume sync and flush all queues ────────────────────────
             window.addEventListener('online', () => {
+                console.log('[Sync] Network restored — resuming sync');
+                if (window.KynectaStore) window.KynectaStore.set('network.online', true);
+
                 if (SYNC_CONFIG.syncOnReconnect) {
                     this.syncAll();
+
+                    // Also trigger group sync engine if available
+                    const groupSyncEngine = window.GroupSyncEngine;
+                    if (groupSyncEngine && typeof groupSyncEngine.startBackgroundSync === 'function') {
+                        groupSyncEngine.startBackgroundSync();
+                    }
+
+                    // Trigger group queue processing
+                    const groupQueue = window.GroupQueueManager;
+                    if (groupQueue && typeof groupQueue.processNow === 'function') {
+                        groupQueue.processNow();
+                    }
+
+                    // Flush general offline queue
+                    const offlineQueue = window.KynectaOfflineQueue;
+                    if (offlineQueue && typeof offlineQueue.process === 'function') {
+                        offlineQueue.process();
+                    }
+
+                    // Re-arm auto-sync if it was enabled before going offline
+                    if (SYNC_CONFIG.autoSync && !this._syncTimer) {
+                        this.startAutoSync();
+                    }
                 }
             });
 
-            // Listen for login events
+            // ── Offline: pause sync, update store network state ──────────────────
+            window.addEventListener('offline', () => {
+                console.log('[Sync] Network lost — pausing sync');
+                if (window.KynectaStore) window.KynectaStore.set('network.online', false);
+                // Stop auto-sync timer while offline to avoid queuing failed requests
+                this.stopAutoSync();
+                // Re-arm auto-sync when we come back online (handled by 'online' listener)
+            });
+
             if (window.KynectaEventBus) {
-                window.KynectaEventBus.on('SESSION_RESTORED', () => {
+                window.KynectaEventBus.on('SESSION_RESTORED', async () => {
                     if (SYNC_CONFIG.syncOnLogin) {
-                        this.syncAll();
+                        await this.syncAll();
+                        
+                        // Load groups from local store after session restore
+                        if (window.KynectaStore && window.KynectaStore.loadGroupsFromLocal) {
+                            await window.KynectaStore.loadGroupsFromLocal();
+                        }
+                        
+                        // Start group background sync
+                        const groupSyncEngine = window.GroupSyncEngine;
+                        if (groupSyncEngine && typeof groupSyncEngine.startBackgroundSync === 'function') {
+                            groupSyncEngine.startBackgroundSync();
+                        }
                     }
                 });
-
+                
                 window.KynectaEventBus.on('SESSION_REFRESHED', () => {
-                    if (SYNC_CONFIG.syncOnLogin) {
-                        this.syncAll();
+                    if (SYNC_CONFIG.syncOnLogin) this.syncAll();
+                });
+                
+                // Listen for group sync completion events to reload groups
+                window.KynectaEventBus.on('groupSync:sync:complete', async () => {
+                    if (window.KynectaStore && window.KynectaStore.loadGroupsFromLocal) {
+                        await window.KynectaStore.loadGroupsFromLocal();
                     }
                 });
             }
         }
     }
 
-    // Initialize singleton
     const syncManager = new KynectaSyncManager();
-
-    // Expose globally
     window.KynectaSync = syncManager;
+    if (window.__KYNECTA_AUTHORITIES__) window.__KYNECTA_AUTHORITIES__.sync = syncManager;
 
-    // Add to authorities
-    if (window.__KYNECTA_AUTHORITIES__) {
-        window.__KYNECTA_AUTHORITIES__.sync = syncManager;
-    }
-
-    console.log('[Sync] ✅ Ready');
+    console.log('[Sync] ✅ Ready (offline-first v2.2)');
 })();

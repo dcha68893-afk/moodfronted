@@ -58,7 +58,86 @@
   // GLOBAL BOOT CONTEXT - COMPLETE PRESERVATION
   // ============================================================================
 
-  window.AppBootContext = window.AppBootContext || {
+
+  // ============================================================================
+  // OFFLINE-FIRST: initializeAppFromLocal()
+  // ============================================================================
+  // Called at startup to hydrate app state from localStorage WITHOUT waiting
+  // for any API response. This is the WhatsApp-style local-first boot.
+  // ============================================================================
+
+  window.initializeAppFromLocal = function() {
+    try {
+      console.log('[Bootstrap] ⚡ initializeAppFromLocal() — hydrating from localStorage');
+
+      // 1. Restore auth session
+      if (window.Session && typeof window.Session.autoLogin === 'function') {
+        window.Session.autoLogin();
+      } else {
+        // Fallback: manually hydrate if Session module not ready
+        try {
+          const rawAuth = localStorage.getItem('kynecta_auth');
+          if (rawAuth) {
+            const auth = JSON.parse(rawAuth);
+            if (auth && auth.token) {
+              if (!window.Session) window.Session = {};
+              window.Session._localToken = auth.token;
+              window.Session._localUser  = auth.user;
+              console.log('[Bootstrap] ✅ Fallback auth hydration from localStorage');
+            }
+          }
+        } catch(e) {}
+      }
+
+      // 2. Hydrate store from localStorage keys
+      if (window.KynectaStore) {
+        const storeKeys = ['messages', 'friends', 'groups', 'settings', 'status'];
+        storeKeys.forEach(key => {
+          try {
+            const raw = localStorage.getItem('kynecta_' + key + '_cache');
+            if (raw) {
+              const parsed = JSON.parse(raw);
+              window.KynectaStore.set(key, parsed);
+              console.log('[Bootstrap] ✅ Hydrated store.' + key + ' from localStorage');
+            }
+          } catch(e) {}
+        });
+      }
+
+      // 3. Mark bootstrap ready immediately — do NOT wait for API
+      window.__APP_BOOTSTRAP_COMPLETE__ = true;
+      if (window.AppBootContext && typeof window.AppBootContext.setReady === 'function') {
+        window.AppBootContext.setReady('config');
+      }
+
+      console.log('[Bootstrap] ✅ initializeAppFromLocal() complete');
+      return true;
+    } catch(error) {
+      console.error('[Bootstrap] ❌ initializeAppFromLocal() failed:', error.message);
+      window.__APP_BOOTSTRAP_COMPLETE__ = true; // Still proceed
+      return false;
+    }
+  };
+
+  // ── Network-aware sync trigger ─────────────────────────────────────────────
+  // When we come back online, trigger full background sync
+  window.addEventListener('online', function() {
+    console.log('[Bootstrap] 🌐 Network restored — scheduling sync');
+    setTimeout(function() {
+      if (window.KynectaSync && typeof window.KynectaSync.syncAll === 'function') {
+        window.KynectaSync.syncAll().catch(function(e) {
+          console.warn('[Bootstrap] Sync on reconnect failed (non-fatal):', e.message);
+        });
+      }
+    }, 1500);
+  });
+
+  window.addEventListener('offline', function() {
+    console.log('[Bootstrap] 📴 Network lost — app running in offline mode');
+  });
+
+
+    window.AppBootContext = window.AppBootContext || {
     configReady: false,
     sessionReady: false,
     uiReady: false,

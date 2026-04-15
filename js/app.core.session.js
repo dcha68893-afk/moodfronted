@@ -4656,18 +4656,67 @@
     
     // Init and wait
     init: function() {
-      // Load from storage on init
+      // ── OFFLINE-FIRST AUTO-LOGIN ──────────────────────────────────────────
+      // Load auth from localStorage immediately. Do NOT block on backend.
+      // Backend validation happens in background only when online.
       const stored = loadSessionFromStorage();
-      if (stored) {
-        centralSession.token = stored.token;
-        centralSession.refreshToken = stored.refreshToken;
-        centralSession.user = stored.user;
-        centralSession.expiresAt = stored.expiresAt;
-        centralSession.issuedAt = stored.issuedAt;
+      if (stored && stored.token) {
+        centralSession.token        = stored.token;
+        centralSession.refreshToken = stored.refreshToken || null;
+        centralSession.user         = stored.user         || null;
+        centralSession.expiresAt    = stored.expiresAt    || null;
+        centralSession.issuedAt     = stored.issuedAt     || Date.now();
         centralSession.isAuthenticated = true;
+        console.log('[Session] ✅ Auto-login: session restored from localStorage');
+      } else {
+        console.log('[Session] ℹ️ No stored session found — login required');
       }
       centralSession.initialized = true;
       return Promise.resolve(true);
+    },
+
+    // ── isReady: synchronous check ─────────────────────────────────────────
+    isReady: function() {
+      return centralSession.initialized === true;
+    },
+
+    // ── waitForReady: async helper used by api.request.js ─────────────────
+    waitForReady: function(timeoutMs = 8000) {
+      if (centralSession.initialized) return Promise.resolve(true);
+      return new Promise((resolve) => {
+        const t = setTimeout(() => resolve(false), timeoutMs);
+        const iv = setInterval(() => {
+          if (centralSession.initialized) {
+            clearTimeout(t);
+            clearInterval(iv);
+            resolve(true);
+          }
+        }, 30);
+      });
+    },
+
+    // ── autoLogin: explicit call to attempt local restore ─────────────────
+    autoLogin: function() {
+      const stored = loadSessionFromStorage();
+      if (stored && stored.token) {
+        centralSession.token           = stored.token;
+        centralSession.refreshToken    = stored.refreshToken || null;
+        centralSession.user            = stored.user         || null;
+        centralSession.expiresAt       = stored.expiresAt    || null;
+        centralSession.isAuthenticated = true;
+        console.log('[Session] ✅ autoLogin() succeeded');
+        return true;
+      }
+      console.log('[Session] ℹ️ autoLogin() — no stored auth');
+      return false;
+    },
+
+    // ── redirectToLogin: navigate to login page ────────────────────────────
+    redirectToLogin: function() {
+      if (window.location.pathname !== '/' && !window.location.pathname.includes('index')) {
+        console.log('[Session] Redirecting to login');
+        window.location.href = '/';
+      }
     },
     
     waitForSession: function(timeoutMs = 10000) {

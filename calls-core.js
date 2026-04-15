@@ -2278,6 +2278,18 @@ function applySession(sessionData) {
                     return;
                 }
                 
+                // Bug 4: AUTO_ACCEPT_CALL sent by parent banner → accept the call
+                if (message.type === 'AUTO_ACCEPT_CALL') {
+                    const callId = (message.payload || {}).callId || callsState.activeCallId;
+                    if (callId && window.callCore && window.callCore.answerCall) {
+                        logCall(MODULE, 'AUTO_ACCEPT_CALL received from parent banner', { callId });
+                        window.callCore.answerCall(callId).catch(e => {
+                            logError(MODULE, 'AUTO_ACCEPT answerCall failed', e);
+                        });
+                    }
+                    return;
+                }
+                
                 if (message.type === MESSAGE_TYPES.CALL_INITIATED) {
                     handleCallInitiated(message.payload || message.data);
                     return;
@@ -4178,7 +4190,41 @@ initiateCall: async function(callType, participants = []) {
         
         logCall(MODULE, 'Sending CALL_INITIATE to parent', { callId, callType, participants, isGroupCall });
         
-        const result = await safeSend('CALL_INITIATE', {
+        // ── LOCAL-FIRST: create local call record immediately ──────────────
+        (function _saveLocalCallRecord() {
+            const store = window.KynectaCallLocalStore;
+            if (!store) return;
+            store.save({
+                id: callId,
+                serverId: null,
+                callerId: callsState.session?.userId || null,
+                receiverId: (!isGroupCall && participants[0]) ? (typeof participants[0] === 'object' ? participants[0].id : parseInt(participants[0])) : null,
+                type: callType,
+                status: 'initiated',
+                isLocalOnly: true,
+                isGroupCall: isGroupCall,
+                participants: participants.map(p => typeof p === 'object' ? p.id : parseInt(p)),
+                createdAt: Date.now()
+            }).catch(() => {});
+        })();
+
+        // ── SESSION MANAGER: register outgoing session ──────────────────────
+        (function _registerSession() {
+            const mgr = window.KynectaCallSession;
+            if (!mgr || mgr.isActive) return;
+            try {
+                mgr.startOutgoing({
+                    callerId: callsState.session?.userId,
+                    receiverId: (!isGroupCall && participants[0]) ? (typeof participants[0] === 'object' ? participants[0].id : parseInt(participants[0])) : null,
+                    callType: callType,
+                    localCallId: callId,
+                    participants: participants
+                });
+            } catch(e) { console.warn('[CallsCore] Session mgr start failed:', e.message); }
+        })();
+
+        // ── RETRY ENGINE: send CALL_INITIATE with auto-retry ────────────────
+        const _signalPayload = {
             callId: callId,
             callType: callType,
             participantIds: isGroupCall ? participants.map(p => typeof p === 'object' ? p.id : parseInt(p)) : null,
@@ -4187,13 +4233,40 @@ initiateCall: async function(callType, participants = []) {
             returnTo: callsState.pendingCallReturnTo || window.__pendingCallOrigin || 'calls',
             callSource: callsState.pendingCallSource || 'calls',
             timestamp: Date.now()
-        }, true);
+        };
+
+        let result;
+        const retryEngine = window.KynectaCallRetry;
+        if (retryEngine && !retryEngine.isActive) {
+            result = await new Promise((resolve) => {
+                retryEngine.execute(
+                    async (attempt) => {
+                        logCall(MODULE, `CALL_INITIATE attempt ${attempt}`, { callId });
+                        const r = await safeSend('CALL_INITIATE', { ..._signalPayload, timestamp: Date.now() }, true);
+                        if (r && r.success !== false) return { success: true, ...r };
+                        throw new Error(r?.reason || r?.error || 'signal_failed');
+                    },
+                    (successResult) => resolve(successResult),
+                    (failInfo)      => resolve({ success: false, reason: failInfo.reason || 'retries_exhausted' }),
+                    { label: 'CALL_INITIATE', maxAttempts: 3, baseDelay: 3000 }
+                );
+            });
+        } else {
+            // Fallback: direct send (no retry available or already retrying)
+            result = await safeSend('CALL_INITIATE', _signalPayload, true);
+        }
 
         if (result.success === false) {
             resetCallState();
             callsState.callActive = false;
             callsState.callState = 'idle';
             callsState.activeCallId = null;
+            // Update local history to failed
+            const store = window.KynectaCallLocalStore;
+            if (store) store.updateStatus(callId, 'failed').catch(() => {});
+            // Clear session
+            const mgr = window.KynectaCallSession;
+            if (mgr && mgr.isActive) mgr.end('failed');
             throw new Error(result.reason || result.error || 'Failed to initiate call');
         }
         
@@ -4272,15 +4345,14 @@ initiateCall: async function(callType, participants = []) {
                 WebRTCManager.setCurrentCallId(callId);
                 WebRTCManager.setConnectionTimeout(CONFIG.CALL_CONNECTION_TIMEOUT);
                 
-                // Send accept to parent
+                // ── Bug 1 fix: send CALL_ACCEPT as a direct postMessage type
+                // so chat.html's dedicated CALL_ACCEPT handler fires it to
+                // POST /calls/:id/answer on the backend. ───────────────────────
                 const result = await safeSend('CALL_ACCEPT', {
                     callId,
                     timestamp: Date.now()
-                }, true);
-                
-                if (result.success === false) {
-                    throw new Error(result.reason || 'Failed to accept call');
-                }
+                }, false);  // no ack needed — backend confirms via ws event
+                // We don't block on result here; if send failed the call will timeout
                 
                 this.transition(CALLS_STATE.IN_CALL, 'call_accepted');
                 
@@ -4301,12 +4373,14 @@ initiateCall: async function(callType, participants = []) {
             logCall(MODULE, 'Rejecting call', { callId, reason });
             
             try {
-                await IframeTransport.sendAction('CALL_REJECT', {
+                // ── Bug 1 fix: send CALL_REJECT as direct postMessage type
+                // so chat.html's CALL_REJECT handler hits POST /calls/:id/reject ──
+                safeSend('CALL_REJECT', {
                     callId,
                     reason,
                     timestamp: Date.now()
-                });
-                
+                }, false);
+
                 if (callsState.activeCallId === callId) {
                     resetCallState();
                 }
@@ -4349,13 +4423,14 @@ endCall: async function(callId, options = {}) {
             numericCallId = numericCallId; // keep as-is; chat.html translates it
         }
         
-        // Send detailed call end info
-        await IframeTransport.sendAction('CALL_ENDED', {
+        // ── Bug 5 fix: send CALL_ENDED as direct postMessage type
+        // so chat.html's CALL_ENDED handler POSTs to /calls/:id/end ──────────
+        safeSend('CALL_ENDED', {
             callId: numericCallId,
             duration: duration,
             status: status,
             timestamp: Date.now()
-        });
+        }, false);
         
         // Send API request directly
         if (window.parent && window.parent !== window && numericCallId) {
@@ -4453,11 +4528,12 @@ endCall: async function(callId, options = {}) {
             if (callsState.callActive) {
                 logWarn(MODULE, 'Incoming call rejected - already in a call');
                 
-                IframeTransport.sendAction('CALL_REJECT', {
+                // Bug 1 fix: use direct CALL_REJECT message so parent hits backend
+                safeSend('CALL_REJECT', {
                     callId: callData.callId,
                     reason: 'busy',
                     timestamp: Date.now()
-                }).catch(() => {});
+                }, false);
                 return;
             }
             
@@ -6818,11 +6894,12 @@ _escapeHtml: function(text) {
         // CRITICAL: Check for existing active call
         if (callsState.callActive) {
             logWarn(MODULE, 'Incoming call rejected - already in a call');
-            IframeTransport.sendAction('CALL_REJECT', {
+            // Bug 1 fix: use direct CALL_REJECT so parent hits backend /reject
+            safeSend('CALL_REJECT', {
                 callId: callData.callId,
                 reason: 'busy',
                 timestamp: Date.now()
-            }).catch(() => {});
+            }, false);
             return;
         }
         
@@ -6830,6 +6907,42 @@ _escapeHtml: function(text) {
         callsState.callData = callData;
         callsState.callState = 'incoming';
         callsState.activeCallId = callData.callId;  // ← CRITICAL: Set activeCallId for incoming calls
+
+        // ── SESSION MANAGER: register incoming session ──────────────────────
+        (function _registerIncomingSession() {
+            const mgr = window.KynectaCallSession;
+            if (!mgr || mgr.isActive) return;
+            try {
+                mgr.startIncoming({
+                    callId:      callData.callId,
+                    callerId:    callData.callerId,
+                    callType:    callData.callType || callData.type || 'audio',
+                    callerName:  callData.callerName,
+                    callerAvatar:callData.callerAvatar,
+                    isGroupCall: callData.isGroupCall || false
+                });
+            } catch(e) { console.warn('[CallsCore] Session mgr incoming failed:', e.message); }
+        })();
+
+        // ── LOCAL-FIRST: record ringing immediately ─────────────────────────
+        (function _saveIncomingLocally() {
+            const store = window.KynectaCallLocalStore;
+            if (!store) return;
+            const id = callData.callId || callData.id;
+            if (!id) return;
+            store.save({
+                id, serverId: id,
+                callerId: callData.callerId || null,
+                receiverId: callsState.session?.userId || null,
+                type: callData.callType || callData.type || 'audio',
+                status: 'ringing',
+                callerName: callData.callerName || null,
+                callerAvatar: callData.callerAvatar || null,
+                isLocalOnly: false,
+                createdAt: callData.timestamp || Date.now()
+            }).catch(() => {});
+        })();
+
         notifyListeners('incoming_call', callData);
     }
     
@@ -6893,6 +7006,17 @@ _escapeHtml: function(text) {
     callsState.activeCallId = serverCallId || localCallId;
     callsState.localCallId = localCallId;   // keep local id for reference
     callsState.serverCallId = serverCallId; // real DB UUID
+
+    // ── SESSION MANAGER: link server ID ──────────────────────────────────
+    (function _linkServerId() {
+        const mgr = window.KynectaCallSession;
+        if (mgr && mgr.isActive && serverCallId) mgr.setServerCallId(serverCallId);
+        // Also link in local store
+        const store = window.KynectaCallLocalStore;
+        if (store && localCallId && serverCallId && localCallId !== serverCallId) {
+            store.linkServerId(localCallId, serverCallId).catch(() => {});
+        }
+    })();
     callsState.callParticipants = callData.participants || callData.call?.participants || [];
     callsState.callStartTime = Date.now();
     callsState.callType = callData.callType || callData.call?.type;
@@ -6931,6 +7055,21 @@ _escapeHtml: function(text) {
         
         callsState.callState = 'connected';
         callsState.callActive = true;
+        callsState.callStartTime = callsState.callStartTime || Date.now();
+
+        // ── SESSION MANAGER: mark connected ──────────────────────────────────
+        const mgr = window.KynectaCallSession;
+        if (mgr && mgr.isActive) mgr.markConnected();
+
+        // ── LOCAL-FIRST: update status to connected ───────────────────────────
+        (function _markConnectedLocally() {
+            const store = window.KynectaCallLocalStore;
+            if (!store) return;
+            const id = callData.callId || callsState.activeCallId;
+            if (!id) return;
+            store.updateStatus(id, 'connected').catch(() => {});
+        })();
+
         notifyListeners('call_connected', callData);
     }
     
@@ -6943,6 +7082,27 @@ _escapeHtml: function(text) {
     
     function handleCallEnded(callData) {
         logCall(MODULE, 'handleCallEnded', callData);
+
+        // ── SESSION MANAGER: end session ─────────────────────────────────────
+        (function _endSession() {
+            const mgr = window.KynectaCallSession;
+            if (mgr && mgr.isActive) {
+                const status = callData.status || 'ended';
+                mgr.end(status);
+            }
+        })();
+
+        // ── LOCAL-FIRST: finalize local history record ──────────────────────
+        (function _finalizeLocally() {
+            const store = window.KynectaCallLocalStore;
+            if (!store) return;
+            const id = callData.callId || callsState.activeCallId;
+            if (!id) return;
+            const status = callData.status || 'ended';
+            const duration = callData.duration || 
+                (callsState.callStartTime ? Math.floor((Date.now() - callsState.callStartTime) / 1000) : 0);
+            store.updateStatus(id, status, { duration, endedAt: Date.now() }).catch(() => {});
+        })();
         
         resetCallState();
         notifyListeners('call_ended', callData);

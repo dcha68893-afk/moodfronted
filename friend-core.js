@@ -1,5 +1,12 @@
 // =============================================
-// FRIEND PAGE - STABILIZED COMMUNICATION v13.2
+// FRIEND PAGE - OFFLINE-FIRST EDITION v14.0
+// MIGRATED: Full offline-first architecture (spec v1.0)
+// ADDED: localStore.friends.js integration (IndexedDB cache)
+// ADDED: friendQueue.manager.js integration (offline action queue)
+// ADDED: friendSync.engine.js integration (server reconciliation)
+// ADDED: Spec-compliant data model (id, serverId, isLocalOnly, syncVersion)
+// ADDED: Optimistic UI updates with proper rollback
+// ADDED: Status transition validation
 // FIXED: All Users / Discovery showing 0 users
 // FIXED: Search uses client-side filtering (no API calls)
 // FIXED: Avatar field normalization (avatar/photoURL)
@@ -48,7 +55,7 @@ const DEBUG = false;
 const PRODUCTION = window.location.hostname !== 'localhost' && !window.location.hostname.includes('127.0.0.1');
 
 const MODULE_NAME = 'friends';
-const MODULE_VERSION = '13.2';
+const MODULE_VERSION = '14.0';
 const EXPECTED_PARENT_ORIGIN = window.location.origin;
 
 // =============================================
@@ -2881,6 +2888,361 @@ const FriendCacheManager = {
 FriendCacheManager.init();
 
 // =============================================
+// [OFFLINE-FIRST BOOTSTRAP]
+// Connects FriendCacheManager to localStore.friends.js,
+// friendQueue.manager.js, and friendSync.engine.js.
+// UI always reads from localStore → KynectaStore.
+// All mutations go through the queue when offline.
+// =============================================
+
+const OfflineFirstFriends = {
+    _initialized: false,
+
+    async init() {
+        if (this._initialized) return;
+        this._initialized = true;
+
+        // Wait for localStore to be ready
+        const ls = window.KynectaFriendsLocalStore;
+        if (ls) {
+            try {
+                await ls.ready();
+                // Set current user on the store
+                const userId = __session.user?.id
+                    || window.__PARENT_SESSION__?.userId
+                    || window.KynectaStore?.get('user.id');
+                if (userId) ls.setCurrentUser(String(userId));
+
+                // Hydrate FriendCacheManager from localStore immediately (zero-wait UI)
+                await this._hydrateFromLocalStore();
+            } catch (e) {
+                Logger.warn('OfflineFirstFriends', 'LocalStore hydration failed', e.message);
+            }
+        }
+
+        // Listen for sync events from the sync engine
+        window.addEventListener('kyn:friendsSynced', (e) => {
+            Logger.debug('OfflineFirstFriends', 'Friends synced', e.detail);
+            this._hydrateFromLocalStore();
+        });
+
+        // Listen for queue rollback events — restore UI to pre-optimistic state
+        window.addEventListener('kyn:friendRollback', (e) => {
+            const { item } = e.detail || {};
+            if (item) {
+                Logger.warn('OfflineFirstFriends', 'Rolling back optimistic state', item);
+                this._hydrateFromLocalStore();
+                showNotification?.('Action failed and was reverted. Please try again.', 'error');
+            }
+        });
+
+        Logger.info('OfflineFirstFriends', '✅ Offline-first bridge initialized');
+    },
+
+    /**
+     * Read from IndexedDB localStore and push into FriendCacheManager + KynectaStore.
+     * This is what makes the UI "load instantly from local cache".
+     */
+    async _hydrateFromLocalStore() {
+        const ls = window.KynectaFriendsLocalStore;
+        if (!ls) return;
+        try {
+            await ls.ready();
+            const [friends, incoming, sent] = await Promise.all([
+                ls.getFriends(),
+                ls.getPendingReceived(),
+                ls.getPendingSent(),
+            ]);
+
+            // Push accepted friends into cache
+            const friendMap = new Map(FriendCacheManager._cache.friends);
+            friends.forEach(r => {
+                const display = {
+                    id:          r.friendId,
+                    localId:     r.id,
+                    serverId:    r.serverId,
+                    displayName: r.displayName || r.username || r.friendId,
+                    username:    r.username || '',
+                    avatar:      r.avatar || '',
+                    photoURL:    r.avatar || '',
+                    status:      r.status,
+                    addedAt:     r.createdAt,
+                    isLocalOnly: r.isLocalOnly,
+                };
+                friendMap.set(r.friendId, display);
+            });
+            FriendCacheManager._cache.friends = friendMap;
+
+            // Push incoming requests
+            const reqMap = new Map(FriendCacheManager._cache.requests);
+            incoming.forEach(r => {
+                reqMap.set(r.serverId || r.id, {
+                    id:          r.serverId || r.id,
+                    localId:     r.id,
+                    senderId:    r.friendId,
+                    receiverId:  r.userId,
+                    status:      'pending',
+                    displayName: r.displayName || r.username || r.friendId,
+                    username:    r.username || '',
+                    avatar:      r.avatar || '',
+                    createdAt:   r.createdAt,
+                    isLocalOnly: r.isLocalOnly,
+                });
+            });
+            FriendCacheManager._cache.requests = reqMap;
+
+            // Push sent requests
+            const sentMap = new Map(FriendCacheManager._cache.sentRequests);
+            sent.forEach(r => {
+                sentMap.set(r.serverId || r.id, {
+                    id:          r.serverId || r.id,
+                    localId:     r.id,
+                    receiverId:  r.friendId,
+                    senderId:    r.userId,
+                    status:      'pending',
+                    displayName: r.displayName || r.username || r.friendId,
+                    username:    r.username || '',
+                    avatar:      r.avatar || '',
+                    createdAt:   r.createdAt,
+                    isLocalOnly: r.isLocalOnly,
+                    optimistic:  r.isLocalOnly,
+                });
+            });
+            FriendCacheManager._cache.sentRequests = sentMap;
+
+            FriendCacheManager.syncToGlobals();
+        } catch (e) {
+            Logger.warn('OfflineFirstFriends', 'Hydration error', e.message);
+        }
+    },
+
+    /**
+     * Enqueue a friend action offline-first.
+     * Creates a local record optimistically, then queues the server call.
+     *
+     * @param {'add'|'accept'|'reject'|'remove'|'cancel'|'block'|'unblock'} action
+     * @param {string} friendId
+     * @param {object} [opts]   Extra payload (requestId, notes, etc.)
+     * @returns {Promise<{success:boolean, localId:string}>}
+     */
+    async enqueueAction(action, friendId, opts = {}) {
+        const ls    = window.KynectaFriendsLocalStore;
+        const queue = window.KynectaFriendQueue;
+
+        const userId = __session.user?.id
+            || window.__PARENT_SESSION__?.userId
+            || window.KynectaStore?.get('user.id');
+
+        // Determine optimistic local status
+        const statusMap = {
+            add:     'pending_sent',
+            accept:  'accepted',
+            reject:  'removed',
+            remove:  'removed',
+            cancel:  'removed',
+            block:   'blocked',
+            unblock: 'none',
+        };
+        const optimisticStatus = statusMap[action] || 'none';
+
+        let localId = opts.localRecordId || null;
+
+        if (ls) {
+            try {
+                await ls.ready();
+                if (action === 'add') {
+                    // Create new local-only record
+                    const existing = await ls.getByFriendId(friendId);
+                    if (existing && !['none','removed'].includes(existing.status)) {
+                        return { success: false, error: 'Friendship already exists', existing };
+                    }
+                    const record = await ls.upsert({
+                        userId:      String(userId),
+                        friendId:    String(friendId),
+                        status:      'pending_sent',
+                        isLocalOnly: true,
+                        displayName: opts.displayName,
+                        username:    opts.username,
+                        avatar:      opts.avatar,
+                    });
+                    localId = record.id;
+                } else if (localId) {
+                    await ls.updateStatus(localId, optimisticStatus).catch(() => {});
+                } else {
+                    // Try to find by friendId
+                    const existing = await ls.getByFriendId(friendId);
+                    if (existing) {
+                        localId = existing.id;
+                        await ls.updateStatus(localId, optimisticStatus).catch(() => {});
+                    }
+                }
+            } catch (e) {
+                Logger.warn('OfflineFirstFriends', 'LocalStore pre-enqueue failed', e.message);
+            }
+        }
+
+        // Enqueue the server call
+        if (queue) {
+            queue.enqueue(action, friendId, opts, localId);
+        }
+
+        return { success: true, localId };
+    },
+};
+
+// Auto-init when auth is ready
+const _offlineInitTrigger = () => OfflineFirstFriends.init();
+window.addEventListener('kyn:authReady', _offlineInitTrigger);
+window.addEventListener('AUTH_READY', _offlineInitTrigger);
+// Also init immediately if auth is already done
+if (authReadyReceived && __session.ready) {
+    setTimeout(() => OfflineFirstFriends.init(), 0);
+}
+
+// =============================================
+// [saveFriendLocal] — UNIFIED PERSISTENCE HELPER
+// Call this after any mutation to a friend record.
+// Guarantees:
+//   ✔ localStorage has data (FriendCacheManager.persist)
+//   ✔ IndexedDB has data   (KynectaFriendsLocalStore)
+//   ✔ UI loads from local first (KynectaStore reactive update)
+//   ✔ Refresh does not delete friends
+//
+// Usage:
+//   await saveFriendLocal(friendData, 'accepted');         // add/update friend
+//   await saveFriendLocal(friendData, 'removed');          // remove friend
+//   await saveFriendLocal(friendData, 'pending_sent');     // sent request
+//   await saveFriendLocal(friendData, 'pending_received'); // incoming request
+//   await saveFriendLocal(friendData, 'blocked');          // block
+// =============================================
+
+async function saveFriendLocal(friendData, status = 'accepted', opts = {}) {
+    if (!friendData) return;
+
+    const friendId = friendData.id || friendData.friendId;
+    if (!friendId) {
+        Logger.warn('saveFriendLocal', 'No friendId provided', friendData);
+        return;
+    }
+
+    const userId = __session.user?.id
+        || window.__PARENT_SESSION__?.userId
+        || window.KynectaStore?.get('user.id');
+
+    // ── 1. Write to FriendCacheManager (in-memory + localStorage) ──────────
+    try {
+        if (status === 'accepted') {
+            FriendCacheManager.setFriend({ ...friendData, id: friendId });
+        } else if (status === 'pending_sent') {
+            FriendCacheManager.setSentRequest({
+                id:         friendData.serverId || friendData.id || `temp_${friendId}`,
+                receiverId: friendId,
+                senderId:   userId,
+                status:     'pending',
+                displayName: friendData.displayName || friendData.username,
+                avatar:      friendData.avatar || friendData.photoURL,
+                username:    friendData.username,
+                createdAt:   friendData.createdAt || new Date().toISOString(),
+                isLocalOnly: opts.isLocalOnly !== false,
+                ...friendData,
+            });
+        } else if (status === 'pending_received') {
+            FriendCacheManager.setRequest({
+                id:         friendData.serverId || friendData.id || `req_${friendId}`,
+                senderId:   friendId,
+                receiverId: userId,
+                status:     'pending',
+                displayName: friendData.displayName || friendData.username,
+                avatar:      friendData.avatar || friendData.photoURL,
+                username:    friendData.username,
+                createdAt:   friendData.createdAt || new Date().toISOString(),
+                isLocalOnly: opts.isLocalOnly !== false,
+                ...friendData,
+            });
+        } else if (status === 'removed') {
+            FriendCacheManager.removeFriend(friendId);
+            FriendCacheManager.removeRequest?.(friendData.requestId || friendData.id);
+            FriendCacheManager.removeSentRequest?.(friendData.requestId || friendData.id);
+        } else if (status === 'blocked') {
+            FriendCacheManager.removeFriend(friendId);
+        }
+
+        FriendCacheManager.syncToGlobals();
+        FriendCacheManager.persist(); // → localStorage
+    } catch (e) {
+        Logger.warn('saveFriendLocal', 'FriendCacheManager update failed', e.message);
+    }
+
+    // ── 2. Write to IndexedDB (survives refresh, offline-first source) ──────
+    const ls = window.KynectaFriendsLocalStore;
+    if (ls) {
+        try {
+            await ls.ready();
+
+            if (status === 'removed') {
+                const existing = await ls.getByFriendId(String(friendId));
+                if (existing) {
+                    await ls.updateStatus(existing.id, 'removed').catch(() => {});
+                }
+            } else {
+                await ls.upsert({
+                    serverId:    friendData.serverId || null,
+                    userId:      String(userId),
+                    friendId:    String(friendId),
+                    status:      status,
+                    createdAt:   friendData.createdAt || new Date().toISOString(),
+                    updatedAt:   new Date().toISOString(),
+                    syncVersion: friendData.syncVersion || 1,
+                    isLocalOnly: opts.isLocalOnly !== false,
+                    displayName: friendData.displayName || friendData.username || null,
+                    username:    friendData.username || null,
+                    avatar:      friendData.avatar || friendData.photoURL || null,
+                });
+            }
+        } catch (e) {
+            Logger.warn('saveFriendLocal', 'IndexedDB upsert failed', e.message);
+        }
+    }
+
+    // ── 3. Push into KynectaStore so reactive UI rerenders immediately ───────
+    const store = window.KynectaStore;
+    if (store) {
+        try {
+            if (status === 'accepted') {
+                const list = store.get('friends.list') || [];
+                const idx  = list.findIndex(f => String(f.id) === String(friendId));
+                const entry = {
+                    id:          friendId,
+                    displayName: friendData.displayName || friendData.username || String(friendId),
+                    username:    friendData.username || '',
+                    avatar:      friendData.avatar || friendData.photoURL || '',
+                    photoURL:    friendData.avatar || friendData.photoURL || '',
+                    status:      friendData.onlineStatus || friendData.status || 'offline',
+                    addedAt:     friendData.addedAt || friendData.createdAt || Date.now(),
+                    isLocalOnly: opts.isLocalOnly !== false,
+                };
+                if (idx >= 0) { const u = [...list]; u[idx] = { ...list[idx], ...entry }; store.set('friends.list', u); }
+                else           { store.set('friends.list', [...list, entry]); }
+            } else if (status === 'removed') {
+                const list = store.get('friends.list') || [];
+                store.set('friends.list', list.filter(f => String(f.id) !== String(friendId)));
+            } else if (status === 'blocked') {
+                const list = store.get('friends.list') || [];
+                store.set('friends.list', list.filter(f => String(f.id) !== String(friendId)));
+                const blocked = store.get('friends.blocked') || [];
+                if (!blocked.find(f => String(f.id) === String(friendId))) {
+                    store.set('friends.blocked', [...blocked, { id: friendId, ...friendData }]);
+                }
+            }
+        } catch (e) {
+            Logger.warn('saveFriendLocal', 'KynectaStore update failed', e.message);
+        }
+    }
+
+    Logger.debug('saveFriendLocal', `Saved ${friendId} as ${status}`, { isLocalOnly: opts.isLocalOnly });
+}
+
+// =============================================
 // [FRIEND REQUEST MANAGER]
 // =============================================
 
@@ -2888,428 +3250,517 @@ const FriendRequestManager = {
     _pendingOperations: new Map(),
     _maxOperationAge: 30000,
     _requestInProgress: new Set(),
-    
+
     async sendFriendRequest(userId, options = {}) {
         if (!assertActive('sendFriendRequest')) {
             return { success: false, error: 'Module not active' };
         }
-        
+
         if (!authReadyReceived || !__session.ready || !__session.token) {
             return new Promise((resolve, reject) => {
                 queueRequest(async () => {
                     try {
                         const result = await this.sendFriendRequest(userId, options);
                         resolve(result);
-                    } catch (error) {
-                        reject(error);
-                    }
+                    } catch (error) { reject(error); }
                 });
             });
         }
-        
-        if (!userId) {
-            return { success: false, error: 'Invalid user ID' };
-        }
-        
+
+        if (!userId) return { success: false, error: 'Invalid user ID' };
+
         const opId = `send_${userId}_${Date.now()}`;
-        
+
         if (this._pendingOperations.has(userId)) {
             return this._pendingOperations.get(userId).promise;
         }
-        
+
         if (this._requestInProgress.has(userId)) {
             return { success: false, error: 'Request already in progress' };
         }
-        
+
         const promise = this._executeSendRequest(userId, options, opId);
         this._pendingOperations.set(userId, { promise, timestamp: Date.now() });
         this._requestInProgress.add(userId);
-        
+
         promise.finally(() => {
             setTimeout(() => {
                 this._pendingOperations.delete(userId);
                 this._requestInProgress.delete(userId);
             }, 1000);
         });
-        
+
         return promise;
     },
-    
-  // In FriendRequestManager._executeSendRequest - UPDATE the response handling:
 
-async _executeSendRequest(userId, options, opId) {
-    Logger.info('FriendRequestManager', 'Sending friend request', { userId, options });
-    
-    const optimisticRequest = {
-        id: `temp_${Date.now()}`,
-        receiverId: userId,
-        senderId: __session.user?.id,
-        status: 'pending',
-        timestamp: Date.now(),
-        category: options.category || 'friend',
-        note: options.note || '',
-        isTemporary: options.isTemporary || false,
-        duration: options.duration || null,
-        isBusiness: options.isBusiness || false,
-        optimistic: true
-    };
-    
-    FriendCacheManager.setSentRequest(optimisticRequest);
-    FriendCacheManager.syncToGlobals();
-    
-    window.dispatchEvent(new CustomEvent('friendRequestSent', {
-        detail: { request: optimisticRequest, optimistic: true }
-    }));
-    
-    try {
-        const response = await authorizedRequest('/api/friends/requests/send', {
-            method: 'POST',
-            body: JSON.stringify({ 
-                receiverId: userId,
-                category: options.category || 'friend',
-                note: options.note || ''
-            })
-        });
-        
-        Logger.info('FriendRequestManager', 'Send request response', { success: response.success, data: response.data });
-        
-        // FIXED: Handle different response formats
-        if (response && response.success) {
-            let requestData = null;
-            
-            // Extract request data from various response formats
-            if (response.data) {
-                if (response.data.request) {
-                    requestData = response.data.request;
-                } else if (response.data.data?.request) {
-                    requestData = response.data.data.request;
-                } else if (response.data.id) {
-                    requestData = response.data;
-                } else {
-                    requestData = response.data;
-                }
-            }
-            
-            if (requestData) {
-                FriendCacheManager.removeSentRequest(optimisticRequest.id);
-                // Format the request for cache
-                const formattedRequest = {
-                    id: requestData.id,
-                    receiverId: requestData.receiverId,
-                    senderId: requestData.requesterId,
-                    status: requestData.status,
-                    createdAt: requestData.createdAt,
-                    timestamp: requestData.createdAt || Date.now()
-                };
-                FriendCacheManager.setSentRequest(formattedRequest);
-            }
-            
-            FriendCacheManager.syncToGlobals();
-            FriendCacheManager.persist();
-            
-            window.dispatchEvent(new CustomEvent('friendRequestSent', {
-                detail: { request: requestData || optimisticRequest, success: true }
-            }));
-            
-            // Trigger immediate polling to refresh incoming requests
-            setTimeout(() => {
-                PollingManager._fetchIncomingRequests();
-                loadSentRequestsFromBackend();
-                loadFriendRequestsFromBackend();
-            }, 500);
-            
-            showNotification?.('Friend request sent successfully!', 'success');
-            
-            return { success: true, request: requestData || optimisticRequest };
-        } else {
-            optimisticRequest.failed = true;
-            FriendCacheManager.setSentRequest(optimisticRequest);
-            FriendCacheManager.syncToGlobals();
-            
-            window.dispatchEvent(new CustomEvent('friendRequestFailed', {
-                detail: { request: optimisticRequest, error: response?.error || response?.message || 'API error' }
-            }));
-            
-            showNotification?.(response?.error || response?.message || 'Failed to send friend request', 'error');
-            
-            return { 
-                success: false, 
-                error: response?.error || response?.message || 'Failed to send request',
-                optimistic: optimisticRequest 
-            };
-        }
-    } catch (error) {
-        Logger.error('FriendRequestManager', 'Send request failed', error);
-        
-        optimisticRequest.failed = true;
-        optimisticRequest.error = error.message;
+    async _executeSendRequest(userId, options, opId) {
+        Logger.info('FriendRequestManager', 'Sending friend request (offline-first)', { userId, options });
+
+        // ── Optimistic local record ──────────────────────────────────────────
+        const tempId = `temp_${Date.now()}`;
+        const optimisticRequest = {
+            id:          tempId,
+            receiverId:  userId,
+            senderId:    __session.user?.id,
+            status:      'pending',
+            timestamp:   Date.now(),
+            category:    options.category || 'friend',
+            note:        options.note || '',
+            isTemporary: options.isTemporary || false,
+            duration:    options.duration || null,
+            isBusiness:  options.isBusiness || false,
+            optimistic:  true,
+            isLocalOnly: true,
+            displayName: options.displayName || null,
+            username:    options.username    || null,
+            avatar:      options.avatar      || null,
+        };
+
+        // Persist immediately to localStorage + IndexedDB + KynectaStore
+        await saveFriendLocal(
+            {
+                id:        userId,
+                serverId:  null,
+                createdAt: new Date().toISOString(),
+                displayName: options.displayName,
+                username:    options.username,
+                avatar:      options.avatar,
+            },
+            'pending_sent',
+            { isLocalOnly: true }
+        );
+
         FriendCacheManager.setSentRequest(optimisticRequest);
         FriendCacheManager.syncToGlobals();
-        
-        window.dispatchEvent(new CustomEvent('friendRequestFailed', {
-            detail: { request: optimisticRequest, error: error.message }
+
+        window.dispatchEvent(new CustomEvent('friendRequestSent', {
+            detail: { request: optimisticRequest, optimistic: true }
         }));
-        
-        showNotification?.(error.message || 'Failed to send friend request', 'error');
-        
-        return { success: false, error: error.message, optimistic: optimisticRequest };
-    }
-},
-    
-   // In FriendRequestManager - UPDATE the acceptFriendRequest method:
 
-// In FriendRequestManager - REPLACE the acceptFriendRequest method:
+        // ── Offline path ─────────────────────────────────────────────────────
+        if (!navigator.onLine) {
+            Logger.info('FriendRequestManager', 'Offline – request queued for later');
+            await OfflineFirstFriends.enqueueAction('add', userId, { ...options }, null);
+            showNotification?.('You\'re offline. Friend request will be sent when you reconnect.', 'info');
+            return { success: true, queued: true, request: optimisticRequest };
+        }
 
-async acceptFriendRequest(requestId, friendId) {
-    console.log('[FriendRequestManager] acceptFriendRequest called with:', { requestId, friendId });
-    
-    if (!assertActive('acceptFriendRequest')) {
-        console.error('[FriendRequestManager] Module not active');
-        return { success: false, error: 'Module not active' };
-    }
-    
-    if (!authReadyReceived || !__session.ready || !__session.token) {
-        console.log('[FriendRequestManager] Auth not ready, queueing request');
-        return new Promise((resolve, reject) => {
-            queueRequest(async () => {
-                try {
-                    const result = await this.acceptFriendRequest(requestId, friendId);
-                    resolve(result);
-                } catch (error) {
-                    reject(error);
-                }
+        // ── Online path ──────────────────────────────────────────────────────
+        try {
+            const response = await authorizedRequest('/api/friends/requests/send', {
+                method: 'POST',
+                body: JSON.stringify({
+                    receiverId: userId,
+                    category:   options.category || 'friend',
+                    note:       options.note || ''
+                })
             });
-        });
-    }
-    
-    if (!requestId || !friendId) {
-        console.error('[FriendRequestManager] Invalid request data:', { requestId, friendId });
-        return { success: false, error: 'Invalid request data' };
-    }
-    
-    console.log('[FriendRequestManager] Accepting friend request via API', { requestId, friendId });
-    
-    try {
-        const existingRequest = FriendCacheManager.getRequest(requestId);
-        console.log('[FriendRequestManager] Existing request from cache:', existingRequest);
-        
-        // Make the API call to accept the request
-        const response = await authorizedRequest(`/api/friends/requests/${requestId}/accept`, {
-            method: 'POST'
-        });
-        
-        console.log('[FriendRequestManager] Accept request response:', response);
-        
-        if (response && response.success) {
-            console.log('[FriendRequestManager] Request accepted successfully on backend');
-            
-            // Remove the incoming request from cache
-            FriendCacheManager.removeRequest(requestId);
-            
-            // Fetch the friend details to add to friends list
-            const friendDetailsResponse = await authorizedRequest(`/api/friends/user/${friendId}`);
-            console.log('[FriendRequestManager] Friend details response:', friendDetailsResponse);
-            
-            let newFriend = null;
-            if (friendDetailsResponse.success && friendDetailsResponse.data) {
-                const userData = friendDetailsResponse.data.user || friendDetailsResponse.data;
-                newFriend = {
-                    id: userData.id,
-                    displayName: userData.displayName || userData.username || 'Friend',
-                    username: userData.username || '',
-                    avatar: userData.avatar || '',
-                    photoURL: userData.avatar || '',
-                    firstName: userData.firstName || '',
-                    lastName: userData.lastName || '',
-                    status: userData.status || 'offline',
-                    lastSeen: userData.lastActive || userData.lastSeen,
-                    addedAt: Date.now(),
-                    category: existingRequest?.category || 'friend'
+
+            Logger.info('FriendRequestManager', 'Send request response', { success: response?.success });
+
+            if (response && response.success) {
+                let requestData = null;
+                if (response.data) {
+                    requestData = response.data.request
+                        || response.data.data?.request
+                        || (response.data.id ? response.data : null)
+                        || response.data;
+                }
+
+                // Replace temp optimistic with confirmed server record
+                FriendCacheManager.removeSentRequest(tempId);
+
+                const confirmedData = {
+                    id:          requestData?.id       || tempId,
+                    serverId:    requestData?.id       || null,
+                    receiverId:  requestData?.receiverId || userId,
+                    senderId:    requestData?.requesterId || __session.user?.id,
+                    status:      requestData?.status   || 'pending',
+                    createdAt:   requestData?.createdAt || new Date().toISOString(),
+                    timestamp:   requestData?.createdAt || Date.now(),
+                    displayName: options.displayName   || null,
+                    username:    options.username      || null,
+                    avatar:      options.avatar        || null,
+                    isLocalOnly: false,
                 };
+
+                // Persist confirmed state to all layers
+                await saveFriendLocal(
+                    { id: userId, ...confirmedData },
+                    'pending_sent',
+                    { isLocalOnly: false }
+                );
+
+                FriendCacheManager.setSentRequest(confirmedData);
+                FriendCacheManager.syncToGlobals();
+                FriendCacheManager.persist();
+
+                window.dispatchEvent(new CustomEvent('friendRequestSent', {
+                    detail: { request: confirmedData, success: true }
+                }));
+
+                setTimeout(() => {
+                    PollingManager._fetchIncomingRequests();
+                    loadSentRequestsFromBackend();
+                    loadFriendRequestsFromBackend();
+                }, 500);
+
+                showNotification?.('Friend request sent successfully!', 'success');
+                return { success: true, request: confirmedData };
+
             } else {
-                // Fallback if user fetch fails
-                newFriend = {
-                    id: friendId,
-                    displayName: existingRequest?.senderName || existingRequest?.user?.displayName || 'Friend',
-                    username: existingRequest?.senderUsername || existingRequest?.user?.username || '',
-                    avatar: existingRequest?.senderAvatar || existingRequest?.user?.avatar || '',
-                    photoURL: existingRequest?.senderAvatar || existingRequest?.user?.avatar || '',
-                    addedAt: Date.now(),
-                    category: existingRequest?.category || 'friend'
-                };
+                // Server rejected — rollback all layers
+                FriendCacheManager.removeSentRequest(tempId);
+                await saveFriendLocal({ id: userId }, 'removed', { isLocalOnly: false });
+                FriendCacheManager.syncToGlobals();
+
+                window.dispatchEvent(new CustomEvent('friendRequestFailed', {
+                    detail: { request: optimisticRequest, error: response?.error || response?.message || 'API error' }
+                }));
+                showNotification?.(response?.error || response?.message || 'Failed to send friend request', 'error');
+                return { success: false, error: response?.error || response?.message || 'Failed to send request' };
             }
-            
-            // Add to friends cache
-            FriendCacheManager.setFriend(newFriend);
+
+        } catch (error) {
+            Logger.error('FriendRequestManager', 'Send request failed – keeping queued', error);
+
+            // Network error: local record stays (it is already persisted), just queue for retry
+            optimisticRequest.queued = true;
+            FriendCacheManager.setSentRequest(optimisticRequest);
             FriendCacheManager.syncToGlobals();
-            FriendCacheManager.persist();
-            
-            // Trigger refresh of friends list
-            await loadFriendsFromBackend();
-            
-            // Dispatch internal UI update event
-            window.dispatchEvent(new CustomEvent('friendRequestAccepted', {
-                detail: { requestId, friendId, success: true, friend: newFriend }
+
+            await OfflineFirstFriends.enqueueAction('add', userId, { ...options }, null);
+
+            window.dispatchEvent(new CustomEvent('friendRequestQueued', {
+                detail: { request: optimisticRequest, error: error.message }
             }));
-            
-            window.dispatchEvent(new CustomEvent('friendAdded', {
-                detail: { friend: newFriend }
-            }));
-            
-            // Send event to parent: FRIEND_ACCEPTED
-            safeSend({
-                type: 'FRIEND_ACCEPTED',
-                payload: {
-                    requestId,
-                    friendId,
-                    friend: newFriend,
-                    timestamp: Date.now()
-                }
+            showNotification?.('Request queued — will retry automatically.', 'warning');
+            return { success: true, queued: true, request: optimisticRequest };
+        }
+    },
+
+    async acceptFriendRequest(requestId, friendId) {
+        console.log('[FriendRequestManager] acceptFriendRequest called with:', { requestId, friendId });
+
+        if (!assertActive('acceptFriendRequest')) {
+            console.error('[FriendRequestManager] Module not active');
+            return { success: false, error: 'Module not active' };
+        }
+
+        if (!authReadyReceived || !__session.ready || !__session.token) {
+            console.log('[FriendRequestManager] Auth not ready, queueing request');
+            return new Promise((resolve, reject) => {
+                queueRequest(async () => {
+                    try {
+                        const result = await this.acceptFriendRequest(requestId, friendId);
+                        resolve(result);
+                    } catch (error) { reject(error); }
+                });
             });
-            
-            // Trigger immediate polling to refresh incoming requests and friends
-            setTimeout(() => {
-                PollingManager._fetchIncomingRequests();
-                loadFriendsFromBackend();
-                loadSentRequestsFromBackend();
-                loadFriendRequestsFromBackend();
-            }, 500);
-            
-            if (typeof showNotification === 'function') {
-                showNotification(`You are now friends with ${newFriend.displayName}!`, 'success');
-            }
-            
-            return { success: true, friend: newFriend };
-        } else {
-            const errorMsg = response?.error || response?.message || 'Accept failed';
-            console.error('[FriendRequestManager] Accept failed:', errorMsg);
-            if (typeof showNotification === 'function') {
-                showNotification(errorMsg, 'error');
-            }
-            return { success: false, error: errorMsg };
         }
-    } catch (error) {
-        console.error('[FriendRequestManager] Accept request error:', error);
-        if (typeof showNotification === 'function') {
-            showNotification(error.message || 'Failed to accept friend request', 'error');
+
+        if (!requestId || !friendId) {
+            console.error('[FriendRequestManager] Invalid request data:', { requestId, friendId });
+            return { success: false, error: 'Invalid request data' };
         }
-        return { success: false, error: error.message };
-    }
-},
-    
+
+        const existingRequest = FriendCacheManager.getRequest(requestId);
+
+        // ── Optimistic: move pending_received → accepted in all layers ───────
+        FriendCacheManager.removeRequest(requestId);
+
+        // Find localStore record and optimistically mark accepted
+        const ls = window.KynectaFriendsLocalStore;
+        let localRecordId = null;
+        if (ls) {
+            try {
+                await ls.ready();
+                const lr = await ls.getByFriendId(String(friendId));
+                if (lr) {
+                    localRecordId = lr.id;
+                    await ls.updateStatus(lr.id, 'accepted');
+                }
+            } catch (e) {
+                Logger.warn('acceptFriendRequest', 'LocalStore optimistic update failed', e.message);
+            }
+        }
+        FriendCacheManager.syncToGlobals();
+
+        // ── Offline path ─────────────────────────────────────────────────────
+        if (!navigator.onLine) {
+            await OfflineFirstFriends.enqueueAction('accept', friendId, { requestId }, localRecordId);
+            showNotification?.('You\'re offline. Accept will sync when you reconnect.', 'info');
+            return { success: true, queued: true };
+        }
+
+        // ── Online path ──────────────────────────────────────────────────────
+        try {
+            const response = await authorizedRequest(`/api/friends/requests/${requestId}/accept`, {
+                method: 'POST'
+            });
+
+            console.log('[FriendRequestManager] Accept request response:', response);
+
+            if (response && response.success) {
+                // Fetch full friend profile
+                const friendDetailsResponse = await authorizedRequest(`/api/friends/user/${friendId}`);
+                let newFriend = null;
+
+                if (friendDetailsResponse?.success && friendDetailsResponse.data) {
+                    const u = friendDetailsResponse.data.user || friendDetailsResponse.data;
+                    newFriend = {
+                        id:          u.id,
+                        serverId:    response.data?.friendRequest?.id || null,
+                        displayName: u.displayName || u.username || 'Friend',
+                        username:    u.username    || '',
+                        avatar:      u.avatar      || '',
+                        photoURL:    u.avatar      || '',
+                        firstName:   u.firstName   || '',
+                        lastName:    u.lastName    || '',
+                        status:      u.status      || 'offline',
+                        lastSeen:    u.lastActive  || u.lastSeen || null,
+                        addedAt:     Date.now(),
+                        category:    existingRequest?.category || 'friend',
+                        isLocalOnly: false,
+                    };
+                } else {
+                    newFriend = {
+                        id:          friendId,
+                        serverId:    response.data?.friendRequest?.id || null,
+                        displayName: existingRequest?.senderName || existingRequest?.user?.displayName || 'Friend',
+                        username:    existingRequest?.senderUsername || existingRequest?.user?.username || '',
+                        avatar:      existingRequest?.senderAvatar  || existingRequest?.user?.avatar  || '',
+                        photoURL:    existingRequest?.senderAvatar  || existingRequest?.user?.avatar  || '',
+                        addedAt:     Date.now(),
+                        category:    existingRequest?.category || 'friend',
+                        isLocalOnly: false,
+                    };
+                }
+
+                // Persist accepted friend to all layers
+                await saveFriendLocal(newFriend, 'accepted', { isLocalOnly: false });
+
+                FriendCacheManager.setFriend(newFriend);
+                FriendCacheManager.syncToGlobals();
+                FriendCacheManager.persist();
+
+                // Confirm localStore record with serverId
+                if (ls && localRecordId) {
+                    await ls.confirm(localRecordId, newFriend.serverId, { status: 'accepted', ...newFriend })
+                          .catch(() => {});
+                }
+
+                await loadFriendsFromBackend();
+
+                window.dispatchEvent(new CustomEvent('friendRequestAccepted', {
+                    detail: { requestId, friendId, success: true, friend: newFriend }
+                }));
+                window.dispatchEvent(new CustomEvent('friendAdded', { detail: { friend: newFriend } }));
+
+                safeSend({
+                    type: 'FRIEND_ACCEPTED',
+                    payload: { requestId, friendId, friend: newFriend, timestamp: Date.now() }
+                });
+
+                setTimeout(() => {
+                    PollingManager._fetchIncomingRequests();
+                    loadFriendsFromBackend();
+                    loadSentRequestsFromBackend();
+                    loadFriendRequestsFromBackend();
+                }, 500);
+
+                if (typeof showNotification === 'function') {
+                    showNotification(`You are now friends with ${newFriend.displayName}!`, 'success');
+                }
+                return { success: true, friend: newFriend };
+
+            } else {
+                // Server rejected — rollback optimistic accept
+                const errorMsg = response?.error || response?.message || 'Accept failed';
+                if (existingRequest) FriendCacheManager.setRequest(existingRequest);
+                if (ls && localRecordId) {
+                    await ls.updateStatus(localRecordId, 'pending_received').catch(() => {});
+                }
+                FriendCacheManager.syncToGlobals();
+                if (typeof showNotification === 'function') showNotification(errorMsg, 'error');
+                return { success: false, error: errorMsg };
+            }
+
+        } catch (error) {
+            console.error('[FriendRequestManager] Accept request error – queuing:', error);
+
+            // Network error: queue retry, restore pending_received
+            await OfflineFirstFriends.enqueueAction('accept', friendId, { requestId }, localRecordId);
+            if (existingRequest) FriendCacheManager.setRequest(existingRequest);
+            if (ls && localRecordId) {
+                await ls.updateStatus(localRecordId, 'pending_received').catch(() => {});
+            }
+            FriendCacheManager.syncToGlobals();
+            if (typeof showNotification === 'function') {
+                showNotification('Accept queued — will retry automatically.', 'warning');
+            }
+            return { success: true, queued: true, error: error.message };
+        }
+    },
+
     async declineFriendRequest(requestId) {
         if (!assertActive('declineFriendRequest')) {
             return { success: false, error: 'Module not active' };
         }
-        
+
         if (!authReadyReceived || !__session.ready || !__session.token) {
             return new Promise((resolve, reject) => {
                 queueRequest(async () => {
-                    try {
-                        const result = await this.declineFriendRequest(requestId);
-                        resolve(result);
-                    } catch (error) {
-                        reject(error);
-                    }
+                    try { resolve(await this.declineFriendRequest(requestId)); }
+                    catch (error) { reject(error); }
                 });
             });
         }
-        
+
         if (!requestId) return { success: false, error: 'Invalid request ID' };
-        
+
         Logger.info('FriendRequestManager', 'Declining friend request', { requestId });
-        
+
+        const existingRequest = FriendCacheManager.getRequest(requestId);
+        const friendId = existingRequest?.senderId || existingRequest?.user?.id;
+
+        // Optimistic: remove from incoming requests + persist removed state
+        FriendCacheManager.removeRequest(requestId);
+        if (friendId) {
+            await saveFriendLocal({ id: friendId }, 'removed', { isLocalOnly: true }).catch(() => {});
+        }
+
+        const ls = window.KynectaFriendsLocalStore;
+        let localRecordId = null;
+        if (ls && friendId) {
+            try {
+                const lr = await ls.getByFriendId(String(friendId));
+                if (lr) { localRecordId = lr.id; }
+            } catch (e) { /* non-fatal */ }
+        }
+        FriendCacheManager.syncToGlobals();
+
+        if (!navigator.onLine) {
+            await OfflineFirstFriends.enqueueAction('reject', friendId || requestId, { requestId }, localRecordId);
+            showNotification?.('You\'re offline. Decline will sync when you reconnect.', 'info');
+            return { success: true, queued: true };
+        }
+
         try {
             const response = await authorizedRequest(`/api/friends/requests/${requestId}/reject`, {
                 method: 'POST'
             });
-            
+
             if (response && response.success) {
-                FriendCacheManager.removeRequest(requestId);
                 FriendCacheManager.syncToGlobals();
                 FriendCacheManager.persist();
-                
                 window.dispatchEvent(new CustomEvent('friendRequestDeclined', {
                     detail: { requestId, success: true }
                 }));
-                
-                safeSend({
-                    type: 'FRIEND_REJECTED',
-                    payload: {
-                        requestId,
-                        timestamp: Date.now()
-                    }
-                });
-                
-                // Trigger immediate polling to refresh incoming requests
-                setTimeout(() => {
-                    PollingManager._fetchIncomingRequests();
-                }, 500);
-                
+                safeSend({ type: 'FRIEND_REJECTED', payload: { requestId, timestamp: Date.now() } });
+                setTimeout(() => PollingManager._fetchIncomingRequests(), 500);
                 return { success: true };
             } else {
+                // Rollback
+                if (existingRequest) FriendCacheManager.setRequest(existingRequest);
+                if (ls && localRecordId) {
+                    await ls.updateStatus(localRecordId, 'pending_received').catch(() => {});
+                }
+                FriendCacheManager.syncToGlobals();
                 return { success: false, error: response?.error || 'Decline failed' };
             }
         } catch (error) {
-            Logger.error('FriendRequestManager', 'Decline failed', error);
-            return { success: false, error: error.message };
+            Logger.error('FriendRequestManager', 'Decline failed – queuing', error);
+            await OfflineFirstFriends.enqueueAction('reject', friendId || requestId, { requestId }, localRecordId);
+            // Restore while queued
+            if (existingRequest) FriendCacheManager.setRequest(existingRequest);
+            if (ls && localRecordId) {
+                await ls.updateStatus(localRecordId, 'pending_received').catch(() => {});
+            }
+            FriendCacheManager.syncToGlobals();
+            showNotification?.('Decline queued — will retry automatically.', 'warning');
+            return { success: true, queued: true };
         }
     },
-    
+
     async cancelFriendRequest(requestId) {
         if (!assertActive('cancelFriendRequest')) {
             return { success: false, error: 'Module not active' };
         }
-        
+
         if (!authReadyReceived || !__session.ready || !__session.token) {
             return new Promise((resolve, reject) => {
                 queueRequest(async () => {
-                    try {
-                        const result = await this.cancelFriendRequest(requestId);
-                        resolve(result);
-                    } catch (error) {
-                        reject(error);
-                    }
+                    try { resolve(await this.cancelFriendRequest(requestId)); }
+                    catch (error) { reject(error); }
                 });
             });
         }
-        
+
         if (!requestId) return { success: false, error: 'Invalid request ID' };
-        
+
         Logger.info('FriendRequestManager', 'Canceling friend request', { requestId });
-        
+
+        const existingSent = FriendCacheManager.getSentRequest?.(requestId);
+        const friendId = existingSent?.receiverId;
+
+        // Optimistic: remove from sent requests + persist removed state
+        FriendCacheManager.removeSentRequest(requestId);
+        if (friendId) {
+            await saveFriendLocal({ id: friendId }, 'removed', { isLocalOnly: true }).catch(() => {});
+        }
+
+        const ls = window.KynectaFriendsLocalStore;
+        let localRecordId = null;
+        if (ls && friendId) {
+            try {
+                const lr = await ls.getByFriendId(String(friendId));
+                if (lr) { localRecordId = lr.id; }
+            } catch (e) { /* non-fatal */ }
+        }
+        FriendCacheManager.syncToGlobals();
+
+        if (!navigator.onLine) {
+            await OfflineFirstFriends.enqueueAction('cancel', friendId || requestId, { requestId }, localRecordId);
+            showNotification?.('You\'re offline. Cancel will sync when you reconnect.', 'info');
+            return { success: true, queued: true };
+        }
+
         try {
             const response = await authorizedRequest(`/api/friends/requests/${requestId}`, {
                 method: 'DELETE'
             });
-            
+
             if (response && response.success) {
-                FriendCacheManager.removeSentRequest(requestId);
                 FriendCacheManager.syncToGlobals();
                 FriendCacheManager.persist();
-                
                 window.dispatchEvent(new CustomEvent('friendRequestCancelled', {
                     detail: { requestId, success: true }
                 }));
-                
-                safeSend({
-                    type: 'FRIEND_REJECTED',
-                    payload: {
-                        requestId,
-                        timestamp: Date.now()
-                    }
-                });
-                
+                safeSend({ type: 'FRIEND_REJECTED', payload: { requestId, timestamp: Date.now() } });
                 return { success: true };
             } else {
+                // Rollback
+                if (existingSent) FriendCacheManager.setSentRequest(existingSent);
+                if (ls && localRecordId) {
+                    await ls.updateStatus(localRecordId, 'pending_sent').catch(() => {});
+                }
+                FriendCacheManager.syncToGlobals();
                 return { success: false, error: response?.error || 'Cancel failed' };
             }
         } catch (error) {
-            Logger.error('FriendRequestManager', 'Cancel failed', error);
-            return { success: false, error: error.message };
+            Logger.error('FriendRequestManager', 'Cancel failed – queuing', error);
+            await OfflineFirstFriends.enqueueAction('cancel', friendId || requestId, { requestId }, localRecordId);
+            if (existingSent) FriendCacheManager.setSentRequest(existingSent);
+            if (ls && localRecordId) {
+                await ls.updateStatus(localRecordId, 'pending_sent').catch(() => {});
+            }
+            FriendCacheManager.syncToGlobals();
+            showNotification?.('Cancel queued — will retry automatically.', 'warning');
+            return { success: true, queued: true };
         }
     },
-    
+
     cleanup() {
         const now = Date.now();
         for (const [id, op] of this._pendingOperations) {
@@ -3322,6 +3773,7 @@ async acceptFriendRequest(requestId, friendId) {
 };
 
 setInterval(() => FriendRequestManager.cleanup(), 60000);
+
 
 // =============================================
 // [GLOBAL EVENT HANDLERS FOR FRIEND_ACCEPTED]
@@ -6973,69 +7425,89 @@ async function removeFriend(friendData) {
     } catch (e) {
         return { success: false, error: e.message };
     }
-    
+
     if (!validateFriendData(friendData)) {
         showNotification?.('Invalid friend data', 'error');
         return { success: false };
     }
-    
+
     const verification = await V6.verifySession();
     if (!verification.valid) {
         showNotification?.('Session verification failed', 'error');
         return { success: false };
     }
-    
+
     const friendId = friendData.id;
     const wasPinned = FriendCacheManager._cache.pinnedFriends.delete(friendId);
-    const wasMuted = FriendCacheManager._cache.mutedFriends.delete(friendId);
+    const wasMuted  = FriendCacheManager._cache.mutedFriends.delete(friendId);
     const wasFriend = FriendCacheManager.removeFriend(friendId);
-    
+
+    // Persist removed state immediately to localStorage + IndexedDB + KynectaStore
+    await saveFriendLocal(friendData, 'removed', { isLocalOnly: true });
+
     FriendCacheManager.syncToGlobals();
     FriendCacheManager.persist();
-    
+
+    // Offline path: queue for later
+    if (!navigator.onLine) {
+        await OfflineFirstFriends.enqueueAction('remove', friendId, {}, null);
+        showNotification?.('You\'re offline. Removal will sync when you reconnect.', 'info');
+        return { success: true, queued: true };
+    }
+
     try {
         const response = await authorizedRequest(`/api/friends/${friendId}`, {
             method: 'DELETE'
         });
-        
+
         Logger.info('removeFriend', 'Friend removed', { friendId, success: response?.success });
-        
+
         if (response?.success) {
+            // Confirm removal in IndexedDB (hard delete)
+            const ls = window.KynectaFriendsLocalStore;
+            if (ls) {
+                const lr = await ls.getByFriendId(String(friendId)).catch(() => null);
+                if (lr) await ls.hardDelete(lr.id).catch(() => {});
+            }
+
             updateCurrentSection?.();
             updateFriendCounts?.();
             showNotification?.('Friend removed', 'success');
-            
+
             safeSend({
                 type: 'FRIEND_REMOVED',
-                payload: {
-                    friendId,
-                    timestamp: Date.now()
-                }
+                payload: { friendId, timestamp: Date.now() }
             });
-            
+
             return { success: true };
         } else {
+            // Rollback all layers
             if (wasFriend) FriendCacheManager.setFriend(friendData);
             if (wasPinned) FriendCacheManager._cache.pinnedFriends.set(friendId, friendData);
-            if (wasMuted) FriendCacheManager._cache.mutedFriends.set(friendId, friendData);
+            if (wasMuted)  FriendCacheManager._cache.mutedFriends.set(friendId, friendData);
+            await saveFriendLocal(friendData, 'accepted', { isLocalOnly: false });
             FriendCacheManager.syncToGlobals();
             FriendCacheManager.persist();
-            
+
             showNotification?.('Failed to remove friend', 'error');
             return { success: false };
         }
     } catch (error) {
+        // Network error: queue retry, rollback UI
+        Logger.error('removeFriend', 'Network error – queuing', error);
+        await OfflineFirstFriends.enqueueAction('remove', friendId, {}, null);
+
         if (wasFriend) FriendCacheManager.setFriend(friendData);
         if (wasPinned) FriendCacheManager._cache.pinnedFriends.set(friendId, friendData);
-        if (wasMuted) FriendCacheManager._cache.mutedFriends.set(friendId, friendData);
+        if (wasMuted)  FriendCacheManager._cache.mutedFriends.set(friendId, friendData);
+        await saveFriendLocal(friendData, 'accepted', { isLocalOnly: false });
         FriendCacheManager.syncToGlobals();
         FriendCacheManager.persist();
-        
+
         if (error.message !== 'Session expired') {
-            Logger.error('removeFriend', 'Failed to remove friend', error);
-            showNotification?.('Failed to remove friend', 'error');
+            showNotification?.('Remove queued — will retry automatically.', 'warning');
         }
-        return { success: false };
+        return { success: true, queued: true };
     }
 }
 
@@ -7045,70 +7517,90 @@ async function blockUser(friendData) {
     } catch (e) {
         return { success: false, error: e.message };
     }
-    
+
     if (!validateFriendData(friendData)) {
         showNotification?.('Invalid user data', 'error');
         return { success: false };
     }
-    
+
     const verification = await V6.verifySession();
     if (!verification.valid) {
         showNotification?.('Session verification failed', 'error');
         return { success: false };
     }
-    
+
     const friendId = friendData.id;
-    
+
     const wasFriend = FriendCacheManager.removeFriend(friendId);
     const wasPinned = FriendCacheManager._cache.pinnedFriends.delete(friendId);
-    const wasMuted = FriendCacheManager._cache.mutedFriends.delete(friendId);
-    
+    const wasMuted  = FriendCacheManager._cache.mutedFriends.delete(friendId);
+
+    // Persist blocked state immediately to localStorage + IndexedDB + KynectaStore
+    await saveFriendLocal(friendData, 'blocked', { isLocalOnly: true });
+
     FriendCacheManager.syncToGlobals();
     FriendCacheManager.persist();
-    
+
+    // Offline path: queue for later
+    if (!navigator.onLine) {
+        await OfflineFirstFriends.enqueueAction('block', friendId, {}, null);
+        showNotification?.('You\'re offline. Block will sync when you reconnect.', 'info');
+        return { success: true, queued: true };
+    }
+
     try {
         const response = await authorizedRequest(`/api/friends/${friendId}/block`, {
             method: 'POST'
         });
-        
+
         Logger.info('blockUser', 'User blocked', { friendId, success: response?.success });
-        
+
         if (response?.success) {
+            // Confirm blocked in IndexedDB
+            const ls = window.KynectaFriendsLocalStore;
+            if (ls) {
+                const lr = await ls.getByFriendId(String(friendId)).catch(() => null);
+                if (lr) await ls.updateStatus(lr.id, 'blocked').catch(() => {});
+            }
+
             updateCurrentSection?.();
             updateFriendCounts?.();
             showNotification?.('User blocked', 'success');
-            
+
             safeSend({
                 type: 'FRIEND_BLOCKED',
-                payload: {
-                    userId: friendId,
-                    timestamp: Date.now()
-                }
+                payload: { userId: friendId, timestamp: Date.now() }
             });
-            
+
             return { success: true };
         } else {
+            // Rollback
             if (wasFriend) FriendCacheManager.setFriend(friendData);
             if (wasPinned) FriendCacheManager._cache.pinnedFriends.set(friendId, friendData);
-            if (wasMuted) FriendCacheManager._cache.mutedFriends.set(friendId, friendData);
+            if (wasMuted)  FriendCacheManager._cache.mutedFriends.set(friendId, friendData);
+            await saveFriendLocal(friendData, 'accepted', { isLocalOnly: false });
             FriendCacheManager.syncToGlobals();
             FriendCacheManager.persist();
-            
+
             showNotification?.('Failed to block user', 'error');
             return { success: false };
         }
     } catch (error) {
+        // Network error: queue retry, rollback UI
+        Logger.error('blockUser', 'Network error – queuing', error);
+        await OfflineFirstFriends.enqueueAction('block', friendId, {}, null);
+
         if (wasFriend) FriendCacheManager.setFriend(friendData);
         if (wasPinned) FriendCacheManager._cache.pinnedFriends.set(friendId, friendData);
-        if (wasMuted) FriendCacheManager._cache.mutedFriends.set(friendId, friendData);
+        if (wasMuted)  FriendCacheManager._cache.mutedFriends.set(friendId, friendData);
+        await saveFriendLocal(friendData, 'accepted', { isLocalOnly: false });
         FriendCacheManager.syncToGlobals();
         FriendCacheManager.persist();
-        
+
         if (error.message !== 'Session expired') {
-            Logger.error('blockUser', 'Failed to block user', error);
-            showNotification?.('Failed to block user', 'error');
+            showNotification?.('Block queued — will retry automatically.', 'warning');
         }
-        return { success: false };
+        return { success: true, queued: true };
     }
 }
 
@@ -8956,6 +9448,8 @@ export {
     FriendSearchEngine,
     QRCodeManager,
     GroupParticipationManager,
+    OfflineFirstFriends,
+    saveFriendLocal,
 
     // State and promises
     TokenPromise,

@@ -400,19 +400,20 @@
             background: rgba(255, 255, 255, 0.8);
         }
         
+        /* Loading overlay — hidden by default, only shown for explicit actions (e.g. login submit) */
         .loading-overlay {
             position: fixed;
             top: 0;
             left: 0;
             right: 0;
             bottom: 0;
-            background: rgba(0, 0, 0, 0.7);
+            background: rgba(0, 0, 0, 0.55);
             display: flex;
             align-items: center;
             justify-content: center;
             z-index: 9999;
             opacity: 0;
-            transition: opacity 0.3s ease;
+            transition: opacity 0.25s ease;
             pointer-events: none;
         }
         .loading-overlay.visible {
@@ -420,18 +421,19 @@
             pointer-events: all;
         }
         .loading-spinner {
-            width: 50px;
-            height: 50px;
-            border: 3px solid rgba(255, 255, 255, 0.3);
+            width: 44px;
+            height: 44px;
+            border: 3px solid rgba(255, 255, 255, 0.25);
             border-radius: 50%;
             border-top-color: white;
-            animation: spin 1s linear infinite;
+            animation: spin 0.85s linear infinite;
         }
         .loading-text {
             color: white;
-            margin-top: 20px;
-            font-size: 14px;
+            margin-top: 16px;
+            font-size: 13px;
             text-align: center;
+            opacity: 0.85;
         }
         
         .branding {
@@ -1778,6 +1780,11 @@
     <!-- ====================================================================== -->
     <!-- SESSION MANAGER - MUST BE LOADED BEFORE ANY AUTH LOGIC -->
     <!-- ====================================================================== -->
+    <!-- ✅ OFFLINE-FIRST: Persistent auth storage (must load first) -->
+    <script src="/js/authStorage.js"></script>
+    <!-- ✅ OFFLINE-FIRST: Offline action queue -->
+    <script src="/js/app.offline.queue.js"></script>
+
     <script src="/js/auth.session.manager.js"></script>
 
     <!-- ====================================================================== -->
@@ -2022,8 +2029,9 @@
         
         async function initializeAuthenticationSystem() {
             if (authInitialized) return;
-            window.CoreUtils.showLoading('Initializing...');
-            await waitForAPIReady();
+            // No blocking splash — UI renders immediately.
+            // API modules are awaited in the background only.
+            waitForAPIReady(); // fire-and-forget; buttons re-bind when ready
             initPasswordToggles();
             initThemeToggle();
             initBottomNav();
@@ -2075,10 +2083,10 @@
             }
             
             bindAuthButtons();
-            await checkExistingSession();
+            checkExistingSession();  // reads localStorage synchronously — instant
             
             authInitialized = true;
-            window.CoreUtils.hideLoading();
+            // No hideLoading() needed — nothing was shown
         }
         
         function bindAuthButtons() {

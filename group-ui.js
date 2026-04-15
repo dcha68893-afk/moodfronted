@@ -1510,10 +1510,15 @@ export function renderPipeline() {
  */
 export function initialRenderFromCache() {
     try {
+        // ── LOCAL-FIRST: Hydrate GroupCore arrays from KynectaStore before render ──
+        // KynectaStore was already populated from IDB/localStorage at boot time.
+        // This means tabs render INSTANTLY from cache without waiting for the server.
+        _hydrateFromStore();
+
         if (typeof loadCachedDataInstantly === 'function') {
             loadCachedDataInstantly();
         }
-        
+
         const activeSection = getActiveSection();
         
         switch(activeSection) {
@@ -1596,6 +1601,78 @@ export function setupLiveUpdates() {
     }, 30000);
     
     registerTimer(syncTimer);
+
+    // ── LOCAL-FIRST: listen to KynectaStore and GroupSyncEngine events ──────
+    // These fire when IDB/server data arrives — re-render immediately.
+
+    window.addEventListener('kyn:groupsLoaded', () => {
+        _hydrateFromStore();
+        _rerenderActiveSection();
+    });
+
+    window.addEventListener('kyn:groupUpserted', (e) => {
+        // Update GroupCore arrays in-place so render functions see it
+        if (e.detail && GroupCore) {
+            const g = e.detail;
+            const updateArr = (arr) => {
+                const i = arr.findIndex(x => x.id === g.id);
+                if (i !== -1) arr[i] = g; else arr.push(g);
+            };
+            updateArr(GroupCore.groups);
+            _UI_CACHE.groupItems.delete(`group_${g.id}_group`);
+            _UI_CACHE.groupItems.delete(`group_${g.id}_my_group`);
+            _UI_CACHE.groupItems.delete(`group_${g.id}_joined`);
+            _UI_CACHE.groupItems.delete(`group_${g.id}_admin`);
+        }
+        _rerenderActiveSection();
+    });
+
+    window.addEventListener('kyn:groupRemoved', (e) => {
+        const gid = e.detail?.groupId;
+        if (gid && GroupCore) {
+            GroupCore.groups       = GroupCore.groups.filter(g => g.id !== gid);
+            GroupCore.myGroups     = GroupCore.myGroups.filter(g => g.id !== gid);
+            GroupCore.joinedGroups = GroupCore.joinedGroups.filter(g => g.id !== gid);
+            GroupCore.adminGroups  = GroupCore.adminGroups.filter(g => g.id !== gid);
+        }
+        _rerenderActiveSection();
+    });
+
+    window.addEventListener('kyn:groupSyncState', (e) => {
+        _updateSyncStateUI(e.detail?.state || 'idle');
+    });
+
+    window.addEventListener('groupSync:sync:groups-updated', () => {
+        _hydrateFromStore();
+        _rerenderActiveSection();
+    });
+
+    window.addEventListener('groupSync:sync:complete', () => {
+        _updateSyncStateUI('synced');
+        _hydrateFromStore();
+        _rerenderActiveSection();
+    });
+
+    window.addEventListener('groupSync:sync:start', () => {
+        _updateSyncStateUI('syncing');
+    });
+
+    window.addEventListener('groupSync:sync:error', () => {
+        _updateSyncStateUI('error');
+    });
+
+    // Group chat opened → load messages from IDB
+    window.addEventListener('kyn:groupChatOpened', (e) => {
+        const gid = e.detail?.groupId;
+        if (gid && window.KynectaStore && window.KynectaStore.loadGroupMessages) {
+            window.KynectaStore.loadGroupMessages(gid).catch(() => {});
+        }
+    });
+
+    // Online / offline banner
+    window.addEventListener('offline', _showOfflineBanner);
+    window.addEventListener('online',  _hideOfflineBanner);
+    if (!navigator.onLine) _showOfflineBanner();
 }
 
 /**
@@ -2361,6 +2438,132 @@ export function clearUICache() {
 }
 
 // =============================================
+// LOCAL-FIRST HYDRATION HELPERS
+// =============================================
+
+/**
+ * _hydrateFromStore()
+ * Reads groups from KynectaStore (which was populated from IDB/localStorage
+ * at boot) and pushes them into GroupCore's in-memory arrays so the existing
+ * render functions (renderAllGroupsSecure etc.) display data immediately.
+ *
+ * This is what makes every tab show instant content from cache — no network wait.
+ */
+function _hydrateFromStore() {
+    try {
+        const store = window.KynectaStore;
+        if (!store) return;
+
+        const storeGroups = store.get('groups.list')       || [];
+        const storeMy     = store.get('groups.myGroups')    || [];
+        const storeJoined = store.get('groups.joinedGroups')|| [];
+        const storeAdmin  = store.get('groups.adminGroups') || [];
+        const storeInvites= store.get('groups.invites')     || [];
+
+        // Only overwrite GroupCore arrays if the store has data AND core is empty
+        // (avoids clobbering a fresh server response with stale cache)
+        if (GroupCore) {
+            if (storeGroups.length > 0 && GroupCore.groups.length === 0) {
+                GroupCore.groups       = storeGroups;
+                GroupCore.myGroups     = storeMy;
+                GroupCore.joinedGroups = storeJoined;
+                GroupCore.adminGroups  = storeAdmin;
+                GroupCore.groupInvites = storeInvites;
+            }
+        }
+    } catch (e) { /* silent */ }
+}
+
+/**
+ * _updateSyncStateUI(state)
+ * Shows/hides the sync state badge on each tab.
+ * state: 'idle' | 'syncing' | 'synced' | 'error'
+ */
+function _updateSyncStateUI(state) {
+    try {
+        // Sync indicator badge — injected into the header if not present
+        let badge = document.getElementById('groupsSyncBadge');
+        if (!badge) {
+            badge = document.createElement('span');
+            badge.id = 'groupsSyncBadge';
+            badge.style.cssText = 'font-size:11px;padding:2px 8px;border-radius:10px;margin-left:8px;transition:all .3s;display:inline-flex;align-items:center;gap:4px;';
+            // Try to attach to the sidebar header or first available anchor
+            const header = document.querySelector('.sidebar-header, .groups-header, #groupsTitle');
+            if (header) header.appendChild(badge);
+        }
+
+        const configs = {
+            idle    : { text: '',           bg: 'transparent',          icon: '' },
+            syncing : { text: 'Syncing…',   bg: 'rgba(99,102,241,.15)', icon: '⟳', spin: true },
+            synced  : { text: 'Up to date', bg: 'rgba(72,187,120,.15)', icon: '✓' },
+            error   : { text: 'Sync error', bg: 'rgba(245,101,101,.15)',icon: '!' },
+            pending : { text: 'Pending',    bg: 'rgba(237,137,54,.15)', icon: '⏳' },
+        };
+        const cfg = configs[state] || configs.idle;
+        badge.innerHTML  = cfg.icon ? `<span>${cfg.icon}</span> ${cfg.text}` : '';
+        badge.style.background = cfg.bg;
+        badge.style.color = state === 'synced' ? '#48bb78'
+                          : state === 'error'  ? '#f56565'
+                          : state === 'syncing' ? 'var(--primary-color, #6c63ff)'
+                          : state === 'pending' ? '#ed8936'
+                          : 'var(--text-secondary)';
+
+        // Show loading state on the active list container
+        const activeSection = getActiveSection();
+        const listId = {
+            allGroupsSection: 'allGroupsList',
+            myGroupsSection : 'myGroupsList',
+            joinedSection   : 'joinedList',
+            invitesSection  : 'invitesList',
+            adminSection    : 'adminList',
+        }[activeSection];
+        const list = listId ? document.getElementById(listId) : null;
+        if (list) {
+            if (state === 'syncing' && list.children.length === 0) {
+                list.innerHTML = `<div class="empty-state" style="opacity:.5"><i class="fas fa-spinner fa-spin"></i><p>Loading…</p></div>`;
+            }
+        }
+    } catch (e) { /* silent */ }
+}
+
+/**
+ * _showOfflineBanner() / _hideOfflineBanner()
+ * Shows a non-blocking top banner when the app is offline.
+ * Disappears automatically when connection is restored.
+ */
+function _showOfflineBanner() {
+    try {
+        if (document.getElementById('kynOfflineBanner')) return;
+        const banner = document.createElement('div');
+        banner.id = 'kynOfflineBanner';
+        banner.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:9999;background:#ed8936;color:#fff;text-align:center;padding:6px 12px;font-size:13px;font-weight:500;';
+        banner.innerHTML = '✈️ You\'re offline — showing cached groups. Actions will sync when reconnected.';
+        document.body.prepend(banner);
+    } catch (e) {}
+}
+function _hideOfflineBanner() {
+    try { document.getElementById('kynOfflineBanner')?.remove(); } catch (e) {}
+}
+
+/**
+ * Re-render the active section from current GroupCore state (called after
+ * KynectaStore pushes updated data into GroupCore arrays).
+ */
+function _rerenderActiveSection() {
+    try {
+        const section = getActiveSection();
+        switch (section) {
+            case 'allGroupsSection': renderAllGroupsSecure();   break;
+            case 'myGroupsSection':  renderMyGroupsSecure();    break;
+            case 'joinedSection':    renderJoinedGroupsSecure(); break;
+            case 'invitesSection':   renderGroupInvitesSecure(); break;
+            case 'adminSection':     renderAdminGroupsSecure();  break;
+        }
+        if (typeof updateGroupCounts === 'function') updateGroupCounts();
+    } catch (e) {}
+}
+
+// =============================================
 // COMPREHENSIVE EVENT LISTENERS SETUP
 // =============================================
 
@@ -2550,6 +2753,44 @@ export function setupPostingRulesVisibility() {
 window._cgSelectedMembers = window._cgSelectedMembers || new Set();
 window._cgFriendsAll = window._cgFriendsAll || [];
 
+function normalizeFriendRecord(friend) {
+    const safeFriend = safeObject(friend);
+    const privacy = safeObject(safeFriend.privacy || safeFriend.privacySettings || safeFriend.settings?.privacy);
+    const settings = safeObject(safeFriend.settings);
+    const invitePolicy = (
+        privacy.allowGroupAdds === false ||
+        privacy.allowGroupInvites === false ||
+        privacy.groupAddPolicy === 'invite_required' ||
+        privacy.groupInvitePolicy === 'invite_required' ||
+        settings.groupInvitePolicy === 'invite_required'
+    ) ? 'invite_required' : 'direct_add';
+
+    return {
+        id: safeFriend.id,
+        displayName: safeFriend.displayName || [safeFriend.firstName, safeFriend.lastName].filter(Boolean).join(' ') || safeFriend.username || 'Unknown',
+        username: safeFriend.username || '',
+        avatar: safeFriend.avatar || safeFriend.photoURL || null,
+        online: safeFriend.status === 'online' || safeFriend.online === true,
+        invitePolicy
+    };
+}
+
+function getCachedFriendsForMembersTab() {
+    const cachedFriends = safeArray(window.KynectaStore?.get?.('friends.list', []));
+    if (cachedFriends.length === 0) return [];
+    return cachedFriends
+        .map(normalizeFriendRecord)
+        .filter(friend => friend.id !== undefined && friend.id !== null);
+}
+
+function summarizeMemberAction(result) {
+    const payload = safeObject(result?.data || result);
+    const action = payload.action || result?.action || (result?.success ? 'invite_sent' : 'failed');
+    if (action === 'member_added' || action === 'already_member') return 'member_added';
+    if (action === 'invite_required' || action === 'invite_sent') return 'invite_sent';
+    return result?.success ? 'invite_sent' : 'failed';
+}
+
 /**
  * Setup members tab inside create group modal
  * FIXED: tab content existed but friends were never loaded and no selection logic
@@ -2569,26 +2810,23 @@ export function setupMembersTab() {
 export async function loadFriendsForMembersTab() {
     const list = safeGetElement('#friendsPickerList');
     if (!list) return;
+    const cachedFriends = getCachedFriendsForMembersTab();
+    if (cachedFriends.length > 0) {
+        window._cgFriendsAll = cachedFriends;
+        renderFriendsPickerList(window._cgFriendsAll);
+        return;
+    }
     if (window._cgFriendsAll.length > 0) { renderFriendsPickerList(window._cgFriendsAll); return; }
-    list.innerHTML = '<div style="text-align:center;padding:20px;color:var(--text-secondary)"><i class="fas fa-spinner fa-spin"></i> Loading friends…</div>';
+    list.innerHTML = '<div style="text-align:center;padding:20px;color:var(--text-secondary)"><i class="fas fa-spinner fa-spin"></i> Loading friends...</div>';
     try {
-        const token = localStorage.getItem('auth_token') || sessionStorage.getItem('auth_token') || '';
-        const res = await fetch('/api/friends', { headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' } });
-        const data = await res.json();
-        const raw = data?.data?.friends || data?.data || data?.friends || [];
-        window._cgFriendsAll = raw.map(f => ({
-            id: f.id,
-            displayName: f.displayName || [f.firstName, f.lastName].filter(Boolean).join(' ') || f.username || 'Unknown',
-            username: f.username || '',
-            avatar: f.avatar || null,
-            online: f.status === 'online',
-        }));
+        const data = await panelFetch('/api/friends');
+        const raw = safeArray(data?.data?.friends || data?.data || data?.friends);
+        window._cgFriendsAll = raw.map(normalizeFriendRecord).filter(friend => friend.id !== undefined && friend.id !== null);
         renderFriendsPickerList(window._cgFriendsAll);
     } catch (_) {
         list.innerHTML = '<div style="text-align:center;padding:20px;color:var(--text-secondary)"><i class="fas fa-exclamation-circle"></i> Could not load friends.</div>';
     }
 }
-
 export function renderFriendsPickerList(friends) {
     const list = safeGetElement('#friendsPickerList');
     if (!list) return;
@@ -2600,13 +2838,14 @@ export function renderFriendsPickerList(friends) {
     friends.forEach(f => {
         const item = document.createElement('div');
         const sel = window._cgSelectedMembers.has(f.id);
+        const inviteMode = f.invitePolicy === 'invite_required';
         item.style.cssText = 'display:flex;align-items:center;gap:10px;padding:9px 10px;border-radius:8px;cursor:pointer;transition:background .15s;' + (sel ? 'background:var(--bg-secondary);border:1px solid var(--primary-color,#6c63ff);border-radius:8px;' : 'border:1px solid transparent;');
         const initials = f.displayName.split(' ').map(w=>w[0]).join('').toUpperCase().slice(0,2)||'U';
         item.innerHTML = `
             <div style="width:36px;height:36px;border-radius:50%;background:var(--primary-color,#6c63ff);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:13px;flex-shrink:0;${f.avatar?'background-image:url('+f.avatar+');background-size:cover;':''}">${f.avatar?'':initials}</div>
             <div style="flex:1;min-width:0">
                 <div style="font-weight:600;font-size:13px;color:var(--text-primary)">${f.displayName}</div>
-                <div style="font-size:11px;color:var(--text-secondary)">${f.username?'@'+f.username:''} · <span style="color:${f.online?'#48bb78':'var(--text-secondary)'}">●</span> ${f.online?'Online':'Offline'}</div>
+                <div style="font-size:11px;color:var(--text-secondary)">${f.username?'@'+f.username:''} · <span style="color:${f.online?'#48bb78':'var(--text-secondary)'}">●</span> ${f.online?'Online':'Offline'}${inviteMode ? ' · Invite required' : ' · Add directly'}</div>
             </div>
             <div style="width:20px;height:20px;border-radius:50%;border:2px solid ${sel?'var(--primary-color,#6c63ff)':'var(--border-color)'};background:${sel?'var(--primary-color,#6c63ff)':'none'};display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:11px;color:#fff;">${sel?'✓':''}</div>
         `;
@@ -2647,20 +2886,34 @@ export function renderSelectedMembersChips() {
  */
 export function setupCategoryTabs() {
     const tabs = [
-        { btn: 'allTab', section: 'allGroupsSection' },
-        { btn: 'myGroupsTab', section: 'myGroupsSection' },
-        { btn: 'joinedTab', section: 'joinedSection' },
-        { btn: 'invitesTab', section: 'invitesSection' },
-        { btn: 'adminTab', section: 'adminSection' }
+        { btn: 'allTab',      section: 'allGroupsSection' },
+        { btn: 'myGroupsTab', section: 'myGroupsSection'  },
+        { btn: 'joinedTab',   section: 'joinedSection'    },
+        { btn: 'invitesTab',  section: 'invitesSection'   },
+        { btn: 'adminTab',    section: 'adminSection'     }
     ];
     
     tabs.forEach(({ btn, section }) => {
-        const tabElement = safeGetElement(`#${btn}`);
-        const sectionElement = safeGetElement(`#${section}`);
+        const tabElement    = safeGetElement(`#${btn}`);
+        const sectionElement= safeGetElement(`#${section}`);
         
         if (tabElement && sectionElement) {
             registerUIEventListener(tabElement, 'click', () => {
+                // ① Set active section (renders from GroupCore arrays = local cache)
                 setActiveSection(section);
+
+                // ② Hydrate from KynectaStore in case it has fresher data than GroupCore
+                _hydrateFromStore();
+                _rerenderActiveSection();
+
+                // ③ Trigger background server sync (non-blocking)
+                //    GroupSyncEngine will update store → kyn:groupsLoaded → re-render
+                if (navigator.onLine) {
+                    setTimeout(() => {
+                        const gse = window.GroupSyncEngine;
+                        if (gse) gse.syncAll({ silent: true }).catch(() => {});
+                    }, 50);
+                }
             });
         }
     });
@@ -3043,15 +3296,19 @@ export function setupFriendSelectionModal() {
             if (count === 0) return;
             // If we have an existing group open, send invites immediately
             if (selectedGroup && selectedGroup.id) {
-                let sent = 0, failed = 0;
+                let invited = 0, added = 0, failed = 0;
                 for (const friendId of (selectedFriends || [])) {
                     try {
                         const result = await GroupCore.inviteToGroup(selectedGroup.id, friendId, 'member');
-                        if (result && result.success) sent++; else failed++;
+                        const outcome = summarizeMemberAction(result);
+                        if (outcome === 'member_added') added++;
+                        else if (outcome === 'invite_sent') invited++;
+                        else failed++;
                     } catch (_) { failed++; }
                 }
                 if (typeof showNotification === 'function') {
-                    if (sent > 0) showNotification(`${sent} invitation${sent > 1 ? 's' : ''} sent`, 'success');
+                    if (added > 0) showNotification(`${added} member${added > 1 ? 's' : ''} added to the group`, 'success');
+                    if (invited > 0) showNotification(`${invited} invitation${invited > 1 ? 's' : ''} sent`, 'success');
                     if (failed > 0) showNotification(`${failed} invitation${failed > 1 ? 's' : ''} failed`, 'error');
                 }
                 selectedFriends = [];
@@ -3486,6 +3743,17 @@ export function registerUICoreEvents() {
             progressiveEnhancement();
         }
     });
+
+    if (!window.__groupRealtimeInviteBridgeInstalled && window.KynectaRealtime?.on) {
+        window.__groupRealtimeInviteBridgeInstalled = true;
+        const refreshInvites = () => {
+            try { syncGroupsFromServer?.().catch?.(() => {}); } catch (_) {}
+            try { loadReceivedInvites?.().catch?.(() => {}); } catch (_) {}
+        };
+        window.KynectaRealtime.on('group:invitation:received', refreshInvites);
+        window.KynectaRealtime.on('group:invitation:accepted', refreshInvites);
+        window.KynectaRealtime.on('group:member:joined', refreshInvites);
+    }
 }
 
 // =============================================
@@ -3524,13 +3792,27 @@ export function cleanupUISession() {
 // ═══════════════════════════════════════════════════════════════
 
 function getAuthToken() {
-    return localStorage.getItem('auth_token') || sessionStorage.getItem('auth_token') || '';
+    const storage = window.AppStorage || window.parent?.AppStorage || null;
+    return (
+        storage?.get?.('auth_token', '') ||
+        storage?.get?.('token', '') ||
+        localStorage.getItem('auth_token') ||
+        localStorage.getItem('token') ||
+        sessionStorage.getItem('auth_token') ||
+        sessionStorage.getItem('token') ||
+        ''
+    );
 }
 
 async function panelFetch(path, opts = {}) {
     const headers = { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + getAuthToken(), ...(opts.headers||{}) };
-    const res = await fetch(path, { ...opts, headers });
-    return res.json().catch(() => ({}));
+    try {
+        const res = await fetch(path, { ...opts, headers });
+        return await res.json().catch(() => ({}));
+    } catch (error) {
+        console.warn('[GROUP UI] panelFetch failed:', error?.message || error);
+        return { success: false, message: error?.message || 'Request failed' };
+    }
 }
 
 function panelCard(innerHTML) {
@@ -3807,24 +4089,22 @@ async function sendPanelInvites() {
     if (!window._invSelFriends.size) { if (typeof showNotification === 'function') showNotification('No friends selected', 'error'); return; }
     const btn = document.getElementById('invSendBtn');
     if (btn) { btn.disabled = true; btn.textContent = 'Sending…'; }
-    let sent = 0, failed = 0;
+    let invited = 0, added = 0, failed = 0;
     for (const fid of window._invSelFriends) {
         try {
             const res = await panelFetch('/api/group-members/' + gid + '/invitations', {
                 method: 'POST',
                 body: JSON.stringify({ inviteeId: fid, role: 'member' })
             });
-            // success OR "invitation sent" means the backend handled it
-            // (restricted users get an invitation; unrestricted users may be added directly)
-            if (res.success || res.message?.toLowerCase().includes('invited') || res.message?.toLowerCase().includes('sent')) {
-                sent++;
-            } else {
-                failed++;
-            }
+            const outcome = summarizeMemberAction(res);
+            if (outcome === 'member_added') added++;
+            else if (outcome === 'invite_sent') invited++;
+            else failed++;
         } catch (_) { failed++; }
     }
     if (btn) { btn.disabled = false; }
-    if (sent > 0 && typeof showNotification === 'function') showNotification(sent + ' invitation' + (sent>1?'s':'') + ' sent!', 'success');
+    if (added > 0 && typeof showNotification === 'function') showNotification(added + ' member' + (added>1?'s':'') + ' added!', 'success');
+    if (invited > 0 && typeof showNotification === 'function') showNotification(invited + ' invitation' + (invited>1?'s':'') + ' sent!', 'success');
     if (failed > 0 && typeof showNotification === 'function') showNotification(failed + ' failed', 'error');
     window._invSelFriends.clear();
     loadInviteFriendsTab();
@@ -3988,3 +4268,4 @@ if (typeof document !== 'undefined') {
         if (cached) { var parsed = JSON.parse(cached); var settings = (parsed && parsed.data) ? parsed.data : parsed; if (parsed.timestamp && (Date.now() - parsed.timestamp) < 86400000) applyAll(settings); }
     } catch(e) {}
 })();
+

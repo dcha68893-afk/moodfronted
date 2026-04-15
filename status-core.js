@@ -7054,6 +7054,12 @@ let lastPostDate = null;
 let activeFilters = new Set();
 let selectedDraft = null;
 let isBackgroundInitialized = false;
+let statusAuthBlocked = false;
+
+function isAuthorizationFailure(error) {
+    const message = String(error?.message || error || '');
+    return /401|unauthorized|forbidden/i.test(message);
+}
 
 const statusTypes = {
     'text': { name: 'Text Status', icon: 'fas fa-font', color: 'var(--primary-color)' },
@@ -7411,6 +7417,11 @@ async function safeApiOperation(operation) {
 
 
 async function loadStatusesInBackground() {
+    if (statusAuthBlocked) {
+        logStatus('WARNING', 'Status API auth blocked - serving cache only');
+        return;
+    }
+
     // Wait for token before attempting API call
     try {
         await waitForTokenReady();
@@ -7436,6 +7447,11 @@ async function loadStatusesInBackground() {
             logStatus('SUCCESS', `Loaded ${statuses.length} statuses`);
         }
     } catch (error) {
+        if (isAuthorizationFailure(error)) {
+            statusAuthBlocked = true;
+            logStatus('WARNING', 'Status API unauthorized - staying on cached statuses');
+            return;
+        }
         logStatus('FAILED', `loadStatusesInBackground: ${error.message}`);
         throw error;
     }
@@ -7459,6 +7475,11 @@ async function waitForToken(timeout = 5000) {
 }
 
 async function loadMyStatusesInBackground() {
+    if (statusAuthBlocked) {
+        logStatus('WARNING', 'My-status API auth blocked - serving cache only');
+        return;
+    }
+
     // Wait for token to be available using the existing token readiness system
     try {
         await waitForTokenReady();
@@ -7483,6 +7504,11 @@ async function loadMyStatusesInBackground() {
             logStatus('SUCCESS', `Loaded ${myStatuses.length} my statuses`);
         }
     } catch (error) {
+        if (isAuthorizationFailure(error)) {
+            statusAuthBlocked = true;
+            logStatus('WARNING', 'My-status API unauthorized - using cached data');
+            return;
+        }
         logStatus('FAILED', `loadMyStatusesInBackground: ${error.message}`);
         // Serve cache on failure so UI shows previous statuses
         try {
@@ -7510,6 +7536,11 @@ async function loadFriendsStatusesInBackground() {
 }
 
 async function loadHighlightsInBackground() {
+    if (statusAuthBlocked) {
+        logStatus('WARNING', 'Highlights API auth blocked - serving cache only');
+        return;
+    }
+
     // Wait for token before attempting API call
     try {
         await waitForTokenReady();
@@ -7534,6 +7565,11 @@ async function loadHighlightsInBackground() {
             logStatus('SUCCESS', `Loaded ${highlights.length} highlights`);
         }
     } catch (error) {
+        if (isAuthorizationFailure(error)) {
+            statusAuthBlocked = true;
+            logStatus('WARNING', 'Highlights API unauthorized - using cached data');
+            return;
+        }
         logStatus('FAILED', `loadHighlightsInBackground: ${error.message}`);
         // Serve cache on failure
         try {
@@ -7548,6 +7584,11 @@ async function loadHighlightsInBackground() {
 }
 
 async function loadUserDataInBackground() {
+    if (statusAuthBlocked) {
+        logStatus('WARNING', 'User profile API auth blocked - serving cache only');
+        return;
+    }
+
     // Wait for token before attempting API call
     try {
         await waitForTokenReady();
@@ -7573,6 +7614,10 @@ async function loadUserDataInBackground() {
             logStatus('SUCCESS', 'User data loaded');
         }
     } catch (error) {
+        if (isAuthorizationFailure(error)) {
+            statusAuthBlocked = true;
+            logStatus('WARNING', 'User profile API unauthorized - using cached user');
+        }
         logStatus('WARNING', `loadUserDataInBackground: ${error.message}`);
         // Serve cached user on failure
         const cached = loadUserFromCache();

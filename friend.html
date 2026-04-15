@@ -2763,9 +2763,78 @@
     <script src="/js/vendor/pickr.min.js"></script>
     <script src="/js/vendor/marked.min.js"></script>
 
-    <!-- 3. Core module (must load before UI) -->
+    <!-- ✅ SAFETY LAYER — Must be first (patch v1) -->
+    <script src="/js/kynecta.safety.layer.js"></script>
+    <script>
+        // Normalize earlier storage monkey-patches so coordinated logout/session cleanup still works.
+        (function() {
+            const storageProto = localStorage ? Object.getPrototypeOf(localStorage) : null;
+            if (!storageProto) return;
+
+            const nativeRemoveItem = storageProto.removeItem;
+            const nativeClear = storageProto.clear;
+            const nativeSetItem = storageProto.setItem;
+            const protectedKeys = new Set(['kynecta_auth', 'token', 'moodchat_token', 'accessToken', 'USER_TOKEN']);
+
+            localStorage.removeItem = function(key) {
+                if (window.__allowAuthStorageMutation__ === true) {
+                    return nativeRemoveItem.call(this, key);
+                }
+                if (protectedKeys.has(key)) {
+                    console.warn('Friend module blocked clearing of:', key);
+                    return;
+                }
+                return nativeRemoveItem.call(this, key);
+            };
+
+            localStorage.clear = function() {
+                if (window.__allowAuthStorageMutation__ === true) {
+                    return nativeClear.call(this);
+                }
+                console.warn('Friend module blocked localStorage.clear()');
+            };
+
+            localStorage.setItem = function(key, value) {
+                if (value === 'test.token.123' || (typeof value === 'string' && value.includes('test.token.123'))) {
+                    console.warn('Friend module blocked test token for:', key);
+                    return;
+                }
+                return nativeSetItem.call(this, key, value);
+            };
+        })();
+
+        // ── Child frame: bridge AppStorage from parent, then signal ready ──
+        (function() {
+            console.log('[friend.html] Bridging AppStorage from parent...');
+            // waitForParentReady is provided by kynecta_safety_layer.js
+            waitForParentReady(8000).then(function() {
+                try {
+                    if (window.parent && window.parent.AppStorage) {
+                        window.AppStorage = window.parent.AppStorage;
+                        console.log('[friend.html] ✅ AppStorage bridged from parent');
+                    }
+                } catch(e) {
+                    console.warn('[friend.html] Could not bridge AppStorage (cross-origin?):', e.message);
+                }
+            });
+        })();
+    </script>
+
+    <!-- ── CORRECTED LOAD ORDER (patch v1) ───────────────────────────────────
+         1. app.core.store   — KynectaStore must exist before localStore reads it
+         2. app.sync.manager — SyncManager must exist before sync engines reference it
+         3. localStore.*     — IndexedDB + localStorage caches
+         4. Queue / Sync engines
+         5. friend-core (ES module) — full friend logic
+         6. friend-ui  (ES module) — rendering (imports from friend-core)
+    -->
+    <script src="/js/app.core.store.js"></script>
+    <script src="/js/app.sync.manager.js"></script>
+    <script src="localStore.friends.js"></script>
+    <script src="friendQueue.manager.js"></script>
+    <script src="friendSync.engine.js"></script>
     <script type="module" src="friend-core.js"></script>
-    
+
     <!-- 4. UI module (depends on core) -->
     <script type="module" src="friend-ui.js"></script>
     

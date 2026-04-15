@@ -36,19 +36,31 @@
             });
 
             const response = await this._makeRequest('GET', `/api/friends?${params}`);
+            if (!response) return []; // offline or error
+
+            // ── safeArray guard (patch v1) ─────────────────────────────────
+            const friends = (typeof safeArray === 'function')
+                ? safeArray(response.data)
+                : (Array.isArray(response.data) ? response.data : []);
             
             // Cache result
             this._cache.set(cacheKey, {
-                data: response.data,
+                data: friends,
                 timestamp: Date.now()
             });
 
+            console.log('[LOCAL SAVE] friends_list', friends.length, 'items');
+
             // Update store
             if (window.KynectaStore) {
-                window.KynectaStore.set('friends.list', response.data);
+                window.KynectaStore.set('friends.list', friends);
+            }
+            // Also write to AppStorage for cross-iframe access
+            if (window.AppStorage) {
+                window.AppStorage.set('knecta_friends_cache', friends);
             }
 
-            return response.data;
+            return friends;
         }
 
         /**
@@ -58,10 +70,15 @@
          * @returns {Promise}
          */
         async sendFriendRequest(userId, message = '') {
+            if (!userId) {
+                console.warn('[FriendService] sendFriendRequest: missing userId');
+                return null;
+            }
             const response = await this._makeRequest('POST', '/api/friends/requests', {
                 userId,
                 message
             });
+            if (!response) return null; // offline / error
 
             // Emit event
             if (window.KynectaEventBus) {
@@ -77,7 +94,9 @@
          * @returns {Promise}
          */
         async acceptFriendRequest(requestId) {
+            if (!requestId) return null;
             const response = await this._makeRequest('POST', `/api/friends/requests/${requestId}/accept`);
+            if (!response) return null;
 
             // Update store
             if (window.KynectaStore) {
@@ -100,7 +119,9 @@
          * @returns {Promise}
          */
         async rejectFriendRequest(requestId) {
+            if (!requestId) return null;
             const response = await this._makeRequest('POST', `/api/friends/requests/${requestId}/reject`);
+            if (!response) return null;
 
             // Update store
             if (window.KynectaStore) {
@@ -118,7 +139,9 @@
          * @returns {Promise}
          */
         async removeFriend(friendId) {
+            if (!friendId) return null;
             const response = await this._makeRequest('DELETE', `/api/friends/${friendId}`);
+            if (!response) return null;
 
             // Update store
             if (window.KynectaStore) {
@@ -141,7 +164,9 @@
          * @returns {Promise}
          */
         async blockUser(userId) {
+            if (!userId) return null;
             const response = await this._makeRequest('POST', '/api/users/block', { userId });
+            if (!response) return null;
 
             // Update store
             if (window.KynectaStore) {
@@ -168,7 +193,9 @@
          * @returns {Promise}
          */
         async unblockUser(userId) {
+            if (!userId) return null;
             const response = await this._makeRequest('POST', '/api/users/unblock', { userId });
+            if (!response) return null;
 
             // Update store
             if (window.KynectaStore) {
@@ -191,13 +218,22 @@
          */
         async getOnlineFriends() {
             const response = await this._makeRequest('GET', '/api/friends/online');
+            if (!response) return []; // offline or error
+
+            // ── safeArray guard (patch v1) ─────────────────────────────────
+            const onlineList = (typeof safeArray === 'function')
+                ? safeArray(response.data)
+                : (Array.isArray(response.data) ? response.data : []);
             
             // Update store
             if (window.KynectaStore) {
-                window.KynectaStore.set('friends.online', new Set(response.data));
+                window.KynectaStore.set('friends.online', new Set(onlineList));
+            }
+            if (window.AppStorage) {
+                window.AppStorage.set('friends_online', onlineList);
             }
 
-            return response.data;
+            return onlineList;
         }
 
         /**
@@ -235,14 +271,37 @@
         // ========== PRIVATE METHODS ==========
 
         async _makeRequest(method, endpoint, data = null) {
-            // Get token from various sources
+            // ── Offline guard (patch v1) ───────────────────────────────────
+            if (!navigator.onLine) {
+                console.warn('[FriendService] Offline — skipping request:', endpoint);
+                return null;
+            }
+
+            // ── Token resolution — prefer parent session, fall through to
+            //    AppStorage (single source of truth), then localStorage ──────
             let token = null;
-            if (window.__PARENT_SESSION__?.token) {
-                token = window.__PARENT_SESSION__.token;
-            } else if (window.AUTH_SESSION?.token) {
-                token = window.AUTH_SESSION.token;
-            } else if (window.localStorage) {
-                token = window.localStorage.getItem('kynecta_token');
+            try {
+                // 1. Injected session from parent postMessage
+                if (window.__PARENT_SESSION__?.token) {
+                    token = window.__PARENT_SESSION__.token;
+                } else if (window.AUTH_SESSION?.token) {
+                    token = window.AUTH_SESSION.token;
+                }
+                // 2. AppStorage (single source of truth — patch v1)
+                if (!token && window.AppStorage) {
+                    token = window.AppStorage.get('token') ||
+                            window.AppStorage.get('moodchat_token') ||
+                            window.AppStorage.get('accessToken');
+                }
+                // 3. Raw localStorage fallback
+                if (!token && window.localStorage) {
+                    token = localStorage.getItem('token') ||
+                            localStorage.getItem('moodchat_token') ||
+                            localStorage.getItem('accessToken') ||
+                            localStorage.getItem('kynecta_token');
+                }
+            } catch (e) {
+                console.warn('[FriendService] Token resolution error:', e.message);
             }
 
             const headers = {

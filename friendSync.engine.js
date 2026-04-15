@@ -1,0 +1,525 @@
+/**
+ * friendSync.engine.js  (Offline-First Edition)
+ * Fetches the server-authoritative friend list, merges it with the local
+ * IndexedDB store, resolves conflicts, and keeps KynectaStore in sync.
+ *
+ * RULES (per spec):
+ *  - Server state ALWAYS wins for final relationship status
+ *  - Local-only (isLocalOnly:true) records are preserved until confirmed
+ *  - No duplicate entries allowed
+ *  - UI is always notified after reconciliation
+ *
+ * @version 1.0.0
+ */
+
+(function () {
+    'use strict';
+
+    const SYNC_INTERVAL      = 60_000;   // Full sync every 60 s
+    const SYNC_DEBOUNCE      = 400;      // Debounce rapid consecutive calls
+    const REQUEST_TIMEOUT_MS = 15_000;
+
+    // ── FriendSyncEngine ───────────────────────────────────────────────────
+
+    class FriendSyncEngine {
+        constructor() {
+            this._syncing       = false;
+            this._lastSync      = 0;
+            this._syncTimer     = null;
+            this._debounceTimer = null;
+            this._stats = {
+                totalSyncs:   0,
+                successful:   0,
+                failed:       0,
+                lastDuration: 0,
+                merged:       0,
+                conflicts:    0,
+            };
+
+            this._setupListeners();
+            window.KynectaFriendSyncEngine = this;
+            console.log('[FriendSync] ✅ Initialized');
+        }
+
+        // ── Public API ──────────────────────────────────────────────────────
+
+        /**
+         * Perform a full sync: fetch server list + reconcile with localStore.
+         * Safe to call multiple times; concurrent calls are collapsed.
+         */
+        async syncAll() {
+            if (this._debounceTimer) {
+                clearTimeout(this._debounceTimer);
+                this._debounceTimer = null;
+            }
+            return new Promise((resolve) => {
+                this._debounceTimer = setTimeout(async () => {
+                    resolve(await this._runSync());
+                }, SYNC_DEBOUNCE);
+            });
+        }
+
+        /**
+         * Sync only a specific relationship type (friends, requests, sent, blocked).
+         */
+        async syncType(type) {
+            if (!this._isReady()) return null;
+            switch (type) {
+                case 'friends':  return this._syncFriends();
+                case 'requests': return this._syncIncomingRequests();
+                case 'sent':     return this._syncSentRequests();
+                case 'blocked':  return this._syncBlocked();
+                default: console.warn(`[FriendSync] Unknown sync type: ${type}`);
+            }
+        }
+
+        startAutoSync(interval = SYNC_INTERVAL) {
+            if (this._syncTimer) clearInterval(this._syncTimer);
+            this._syncTimer = setInterval(() => this.syncAll(), interval);
+        }
+
+        stopAutoSync() {
+            if (this._syncTimer) { clearInterval(this._syncTimer); this._syncTimer = null; }
+        }
+
+        getStats() { return { ...this._stats, lastSync: this._lastSync, syncing: this._syncing }; }
+
+        // ── Core sync logic ─────────────────────────────────────────────────
+
+        async _runSync() {
+            // ── Sync loop guard (patch v1) ─────────────────────────────────
+            const guard = typeof KynSyncGuard !== 'undefined' ? KynSyncGuard : null;
+            if (guard) {
+                if (!guard.acquire('friendSync')) {
+                    return { skipped: true, reason: 'already syncing (guard)' };
+                }
+            } else {
+                if (this._syncing) return { skipped: true, reason: 'already syncing' };
+            }
+            if (!navigator.onLine) {
+                if (guard) guard.release('friendSync');
+                return { skipped: true, reason: 'offline' };
+            }
+            if (!this._isReady()) {
+                if (guard) guard.release('friendSync');
+                return { skipped: true, reason: 'auth not ready' };
+            }
+
+            this._syncing = true;
+            this._stats.totalSyncs++;
+            const start = Date.now();
+
+            this._emit('FRIEND_SYNC_STARTED');
+            console.log('[FriendSync] Starting full sync…');
+
+            try {
+                await Promise.allSettled([
+                    this._syncFriends(),
+                    this._syncIncomingRequests(),
+                    this._syncSentRequests(),
+                    this._syncBlocked(),
+                ]);
+
+                // Push reconciled data into KynectaStore so UI re-renders
+                await this._pushToStore();
+
+                // Also flush any queued offline operations now that we have fresh server data
+                const queue = window.KynectaFriendQueue;
+                if (queue && queue.pendingCount() > 0) {
+                    await queue.flush();
+                }
+
+                this._lastSync            = Date.now();
+                this._stats.successful++;
+                this._stats.lastDuration  = Date.now() - start;
+
+                this._emit('FRIEND_SYNC_COMPLETED', { duration: this._stats.lastDuration });
+                if (window.KynectaStore) window.KynectaStore.set('sync.lastSync', this._lastSync);
+
+                console.log(`[FriendSync] ✅ Sync completed in ${this._stats.lastDuration}ms`);
+                return { success: true, duration: this._stats.lastDuration };
+
+            } catch (error) {
+                this._stats.failed++;
+                console.error('[FriendSync] Sync failed:', error);
+                this._emit('FRIEND_SYNC_FAILED', { error: error.message });
+                return { success: false, error: error.message };
+            } finally {
+                this._syncing = false;
+                if (typeof KynSyncGuard !== 'undefined') KynSyncGuard.release('friendSync');
+            }
+        }
+
+        async _syncFriends() {
+            const ls = window.KynectaFriendsLocalStore;
+            if (!ls) return;
+
+            try {
+                const res = await this._request('/api/friends');
+                if (!res?.success) return;
+
+                const serverFriends = (res.data?.friends || res.data || [])
+                    .map(f => this._normalizeRecord(f, 'accepted'));
+
+                await this._reconcile(serverFriends, 'accepted');
+                console.log(`[FriendSync] Friends synced: ${serverFriends.length}`);
+            } catch (e) {
+                console.warn('[FriendSync] friends sync error:', e.message);
+            }
+        }
+
+        async _syncIncomingRequests() {
+            const ls = window.KynectaFriendsLocalStore;
+            if (!ls) return;
+
+            try {
+                const res = await this._request('/api/friends/incoming');
+                if (!res?.success) return;
+
+                const reqs = (res.data?.requests || res.data || [])
+                    .map(r => this._normalizeRecord(r, 'pending_received'));
+
+                await this._reconcile(reqs, 'pending_received');
+                console.log(`[FriendSync] Incoming requests synced: ${reqs.length}`);
+            } catch (e) {
+                console.warn('[FriendSync] incoming requests sync error:', e.message);
+            }
+        }
+
+        async _syncSentRequests() {
+            const ls = window.KynectaFriendsLocalStore;
+            if (!ls) return;
+
+            try {
+                const res = await this._request('/api/friends/sent');
+                if (!res?.success) return;
+
+                const reqs = (res.data?.requests || res.data || [])
+                    .map(r => this._normalizeRecord(r, 'pending_sent'));
+
+                await this._reconcile(reqs, 'pending_sent');
+                console.log(`[FriendSync] Sent requests synced: ${reqs.length}`);
+            } catch (e) {
+                console.warn('[FriendSync] sent requests sync error:', e.message);
+            }
+        }
+
+        async _syncBlocked() {
+            const ls = window.KynectaFriendsLocalStore;
+            if (!ls) return;
+
+            try {
+                const res = await this._request('/api/friends/blocked');
+                if (!res?.success) return;
+
+                const blocked = (res.data?.blockedUsers || res.data || [])
+                    .map(u => this._normalizeRecord(u, 'blocked'));
+
+                await this._reconcile(blocked, 'blocked');
+                console.log(`[FriendSync] Blocked users synced: ${blocked.length}`);
+            } catch (e) {
+                console.warn('[FriendSync] blocked sync error:', e.message);
+            }
+        }
+
+        /**
+         * Reconcile server records for a given status with the local store.
+         * Rules:
+         *  - Server record present + local absent  → insert locally (isLocalOnly=false)
+         *  - Server record present + local present → server wins for confirmed fields
+         *  - Server record absent  + local present (isLocalOnly=false) → remove locally (orphan)
+         *  - Server record absent  + local present (isLocalOnly=true)  → keep (unconfirmed, will retry)
+         */
+        async _reconcile(serverRecords, status) {
+            const ls = window.KynectaFriendsLocalStore;
+            if (!ls) return;
+
+            await ls.ready();
+            const localRecords = await ls.getAll(status);
+            const userId = this._getCurrentUserId();
+
+            const serverMap = new Map();
+            serverRecords.forEach(r => {
+                serverMap.set(String(r.friendId), r);
+                if (r.serverId) serverMap.set(String(r.serverId), r);
+            });
+
+            // Update or insert server records
+            for (const sr of serverRecords) {
+                const local = localRecords.find(lr =>
+                    String(lr.friendId) === String(sr.friendId) ||
+                    (sr.serverId && lr.serverId === sr.serverId)
+                );
+
+                if (local) {
+                    // Conflict: server wins
+                    if (local.status !== sr.status || local.serverId !== sr.serverId) {
+                        this._stats.conflicts++;
+                        await ls.upsert({ ...sr, id: local.id, isLocalOnly: false });
+                    }
+                } else {
+                    // New from server
+                    try {
+                        await ls.upsert({
+                            ...sr,
+                            userId,
+                            isLocalOnly: false,
+                            syncVersion: sr.syncVersion || 1,
+                        });
+                        this._stats.merged++;
+                    } catch (e) {
+                        console.warn('[FriendSync] Upsert failed:', e.message);
+                    }
+                }
+            }
+
+            // Remove orphaned (server-confirmed) local records not in server list
+            for (const lr of localRecords) {
+                if (lr.isLocalOnly) continue; // preserve pending local-only records
+                const inServer = serverRecords.some(sr =>
+                    String(sr.friendId) === String(lr.friendId) ||
+                    (lr.serverId && sr.serverId === lr.serverId)
+                );
+                if (!inServer) {
+                    await ls.hardDelete(lr.id);
+                    console.debug(`[FriendSync] Removed orphan: ${lr.friendId}`);
+                }
+            }
+        }
+
+        /**
+         * Normalize a server record to the standard local data model.
+         */
+        _normalizeRecord(raw, defaultStatus) {
+            const userId = this._getCurrentUserId();
+            // Server shape can be: { id, requesterId, receiverId, status, ... }
+            // or a flat user: { id, username, ... } (from accepted friends list)
+            const isFullRecord = raw.requesterId !== undefined || raw.receiverId !== undefined;
+
+            if (isFullRecord) {
+                // Determine friendId from the current user's perspective
+                const friendId = String(raw.requesterId) === String(userId)
+                    ? raw.receiverId
+                    : raw.requesterId;
+
+                // Map server status to local status vocabulary
+                const statusMap = {
+                    pending:  raw.requesterId === userId ? 'pending_sent' : 'pending_received',
+                    accepted: 'accepted',
+                    blocked:  'blocked',
+                    rejected: 'removed',
+                };
+
+                return {
+                    serverId:    raw.id,
+                    userId:      String(userId),
+                    friendId:    String(friendId),
+                    status:      statusMap[raw.status] || defaultStatus,
+                    createdAt:   raw.createdAt || new Date().toISOString(),
+                    updatedAt:   raw.updatedAt || new Date().toISOString(),
+                    syncVersion: 1,
+                    isLocalOnly: false,
+                    // Display data (optional, from include)
+                    displayName: raw.friendRequesterUser?.username || raw.friendReceiverUser?.username || null,
+                    username:    raw.friendRequesterUser?.username || raw.friendReceiverUser?.username || null,
+                    avatar:      raw.friendRequesterUser?.avatar   || raw.friendReceiverUser?.avatar   || null,
+                };
+            } else {
+                // Flat user object from accepted friends list
+                return {
+                    serverId:    null,
+                    userId:      String(userId),
+                    friendId:    String(raw.id),
+                    status:      defaultStatus,
+                    createdAt:   new Date().toISOString(),
+                    updatedAt:   new Date().toISOString(),
+                    syncVersion: 1,
+                    isLocalOnly: false,
+                    displayName: raw.displayName || raw.username,
+                    username:    raw.username,
+                    avatar:      raw.avatar,
+                };
+            }
+        }
+
+        /**
+         * Push reconciled local data into KynectaStore so UI re-renders immediately.
+         */
+        async _pushToStore() {
+            const ls    = window.KynectaFriendsLocalStore;
+            const store = window.KynectaStore;
+            if (!ls || !store) return;
+
+            await ls.ready();
+
+            const [rawFriends, rawIncoming, rawSent, rawBlocked] = await Promise.all([
+                ls.getFriends(),
+                ls.getPendingReceived(),
+                ls.getPendingSent(),
+                ls.getBlocked(),
+            ]);
+
+            // ── safeArray guards (patch v1) ────────────────────────────────
+            const _sa = typeof safeArray === 'function' ? safeArray : (v => Array.isArray(v) ? v : []);
+            const friends  = _sa(rawFriends);
+            const incoming = _sa(rawIncoming);
+            const sent     = _sa(rawSent);
+            const blocked  = _sa(rawBlocked);
+
+            // Notify FriendCacheManager if available
+            const fcm = window.FriendCacheManager;
+            if (fcm) {
+                friends.forEach(f => fcm.setFriend?.(this._toDisplayFormat(f)));
+                incoming.forEach(r => fcm.setRequest?.(this._toRequestFormat(r)));
+                sent.forEach(r => fcm.setSentRequest?.(this._toRequestFormat(r)));
+                fcm.syncToGlobals?.();
+            }
+
+            // Also write into KynectaStore directly
+            const friendList   = friends.map(f => this._toDisplayFormat(f));
+            const requestList  = incoming.map(r => this._toRequestFormat(r));
+            const blockedList  = blocked.map(f => this._toDisplayFormat(f));
+
+            store.batch(b => {
+                b.set('friends.list', friendList);
+                b.set('friends.requests', requestList);
+                b.set('friends.blocked', blockedList);
+            });
+
+            // ── Persist to AppStorage (single source of truth — patch v1) ──
+            if (window.AppStorage) {
+                window.AppStorage.set('knecta_friends_cache', friendList);
+                window.AppStorage.set('knecta_friend_requests_cache', requestList);
+                console.log('[LOCAL SAVE] friends pushed to AppStorage:', friendList.length);
+            }
+
+            // Dispatch event for UI listeners
+            window.dispatchEvent(new CustomEvent('kyn:friendsSynced', {
+                detail: {
+                    friends:  friends.length,
+                    incoming: incoming.length,
+                    sent:     sent.length,
+                    blocked:  blocked.length,
+                    timestamp: Date.now(),
+                }
+            }));
+        }
+
+        _toDisplayFormat(record) {
+            return {
+                id:          record.friendId,
+                serverId:    record.serverId,
+                localId:     record.id,
+                status:      record.status,
+                displayName: record.displayName || record.username || record.friendId,
+                username:    record.username    || '',
+                avatar:      record.avatar      || '',
+                photoURL:    record.avatar      || '',
+                addedAt:     record.createdAt,
+                updatedAt:   record.updatedAt,
+                isLocalOnly: record.isLocalOnly,
+            };
+        }
+
+        _toRequestFormat(record) {
+            return {
+                id:          record.serverId || record.id,
+                localId:     record.id,
+                senderId:    record.status === 'pending_sent' ? record.userId : record.friendId,
+                receiverId:  record.status === 'pending_sent' ? record.friendId : record.userId,
+                status:      record.status === 'pending_sent' ? 'pending' : 'pending',
+                friendId:    record.friendId,
+                displayName: record.displayName || record.username || record.friendId,
+                username:    record.username || '',
+                avatar:      record.avatar   || '',
+                createdAt:   record.createdAt,
+                isLocalOnly: record.isLocalOnly,
+            };
+        }
+
+        // ── HTTP helper ──────────────────────────────────────────────────────
+
+        async _request(endpoint, options = {}) {
+            const token = window.__PARENT_SESSION__?.token
+                || window.AUTH_SESSION?.token
+                || localStorage.getItem('kynecta_token');
+
+            const headers = {
+                'Content-Type': 'application/json',
+                ...(token ? { Authorization: `Bearer ${token}` } : {}),
+            };
+
+            const controller = new AbortController();
+            const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+
+            try {
+                if (window.api?.request?.request) {
+                    return window.api.request.request(endpoint, { ...options, headers });
+                }
+                const res = await fetch(endpoint, {
+                    method: 'GET',
+                    ...options,
+                    headers,
+                    credentials: 'include',
+                    signal: controller.signal,
+                });
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                return res.json();
+            } finally {
+                clearTimeout(timeout);
+            }
+        }
+
+        // ── Utilities ────────────────────────────────────────────────────────
+
+        _getCurrentUserId() {
+            return window.__PARENT_SESSION__?.userId
+                || window.AUTH_SESSION?.userId
+                || window.KynectaStore?.get('user.id')
+                || null;
+        }
+
+        _isReady() {
+            return !!this._getCurrentUserId();
+        }
+
+        _emit(event, data = {}) {
+            if (window.KynectaEventBus) {
+                window.KynectaEventBus.emit(event, { ...data, timestamp: Date.now() });
+            }
+        }
+
+        _setupListeners() {
+            // Sync when network comes back
+            window.addEventListener('online', () => {
+                console.log('[FriendSync] Network restored – triggering sync');
+                this.syncAll();
+            });
+
+            // Sync after auth is ready
+            window.addEventListener('kyn:authReady', () => this.syncAll());
+            window.addEventListener('AUTH_READY',    () => this.syncAll());
+
+            // Sync when a queue item succeeds (keeps local state fresh)
+            window.addEventListener('kyn:friendConfirmed', () => this.syncAll());
+
+            // Listen for real-time events that should trigger a reconcile
+            if (window.KynectaEventBus) {
+                window.KynectaEventBus.on?.('FRIEND_REQUEST_RECEIVED', () => this.syncType('requests'));
+                window.KynectaEventBus.on?.('FRIEND_ACCEPTED',         () => this.syncType('friends'));
+                window.KynectaEventBus.on?.('FRIEND_REMOVED',          () => this.syncType('friends'));
+            }
+            window.addEventListener('kyn:friendsSynced', () => {}); // no-op to prevent unhandled
+        }
+    }
+
+    // ── Bootstrap ────────────────────────────────────────────────────────────
+
+    const engine = new FriendSyncEngine();
+    window.KynectaFriendSyncEngine = engine;
+
+    // Start auto-sync
+    engine.startAutoSync();
+
+    console.log('[FriendSync] ✅ Ready');
+})();

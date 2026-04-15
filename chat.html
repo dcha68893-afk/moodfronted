@@ -12,7 +12,7 @@
         }
 
         body {
-            font-family: system-ui, -apple-system, sans-serif;
+            font-family: system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
             background: #f5f5f5;
             overflow: hidden;
             height: 100vh;
@@ -31,6 +31,184 @@
             align-items: center;
             justify-content: center;
             transition: opacity 0.3s;
+        }
+
+        /* GLOBAL HEADER WITH PROFILE */
+        #globalHeader {
+            position: fixed;
+            top: 0;
+            left: 60px;
+            right: 0;
+            height: 56px;
+            background:
+                linear-gradient(135deg, rgba(255,255,255,0.97), rgba(244,247,251,0.94)),
+                linear-gradient(90deg, rgba(17,24,39,0.03), rgba(14,165,233,0.04));
+            backdrop-filter: blur(8px);
+            border-bottom: 1px solid rgba(15,23,42,0.08);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 24px;
+            z-index: 95;
+            box-shadow: 0 8px 24px rgba(15,23,42,0.06);
+        }
+
+        .header-context {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            min-width: 0;
+        }
+
+        .header-module-badge {
+            width: 40px;
+            height: 40px;
+            border-radius: 14px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            background: linear-gradient(135deg, #0f172a, #2563eb);
+            color: #fff;
+            box-shadow: 0 10px 18px rgba(37, 99, 235, 0.18);
+            flex: 0 0 auto;
+        }
+
+        .header-module-copy {
+            min-width: 0;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .header-module-title {
+            font-size: 15px;
+            font-weight: 700;
+            color: #0f172a;
+            line-height: 1.1;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .header-module-subtitle {
+            font-size: 12px;
+            color: #64748b;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .profile-trigger {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            cursor: pointer;
+            padding: 6px 12px;
+            border-radius: 40px;
+            background: rgba(255,255,255,0.72);
+            border: 1px solid rgba(148, 163, 184, 0.25);
+            transition: all 0.2s;
+        }
+        .profile-trigger:hover { background: rgba(255,255,255,0.92); }
+        .profile-avatar-sm {
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            object-fit: cover;
+            border: 2px solid #7c3aed;
+        }
+        .profile-name-sm {
+            font-size: 14px;
+            font-weight: 500;
+            color: #1f2937;
+        }
+
+        /* PROFILE MODAL */
+        .profile-modal {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0,0,0,0.7);
+            backdrop-filter: blur(4px);
+            z-index: 10000;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            visibility: hidden;
+            opacity: 0;
+            transition: 0.2s;
+        }
+        .profile-modal.active {
+            visibility: visible;
+            opacity: 1;
+        }
+        .profile-card {
+            width: 90%;
+            max-width: 480px;
+            background: white;
+            border-radius: 32px;
+            overflow: hidden;
+            box-shadow: 0 20px 35px -12px rgba(0,0,0,0.3);
+        }
+        .cover-area {
+            height: 160px;
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            position: relative;
+            cursor: pointer;
+        }
+        .cover-img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+        .avatar-large {
+            width: 100px;
+            height: 100px;
+            border-radius: 50%;
+            border: 4px solid white;
+            margin: -50px auto 12px;
+            display: block;
+            cursor: pointer;
+            object-fit: cover;
+            background: #f3f4f6;
+        }
+        .profile-info {
+            text-align: center;
+            padding: 0 20px 20px;
+        }
+        .profile-username {
+            font-size: 22px;
+            font-weight: 700;
+            margin: 8px 0 4px;
+        }
+        .profile-bio {
+            color: #6b7280;
+            font-size: 14px;
+            margin: 8px 0;
+        }
+        .edit-profile-btn {
+            background: #7c3aed;
+            color: white;
+            border: none;
+            padding: 8px 20px;
+            border-radius: 40px;
+            font-weight: 500;
+            margin-top: 12px;
+            cursor: pointer;
+        }
+        .close-modal {
+            position: absolute;
+            top: 16px;
+            right: 20px;
+            background: rgba(0,0,0,0.5);
+            color: white;
+            border: none;
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            font-size: 20px;
+            cursor: pointer;
         }
 
         #permanentSidebar {
@@ -101,7 +279,42 @@
             50% { opacity: 0.5; transform: scale(1.2); }
         }
 
-        /* Incoming call notification */
+        /* INCOMING CALL BANNER - GLOBAL */
+        #kyn-call-banner {
+            position: fixed;
+            bottom: 90px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: linear-gradient(135deg, #1f2937, #111827);
+            color: white;
+            padding: 12px 24px;
+            border-radius: 60px;
+            display: none;
+            align-items: center;
+            gap: 20px;
+            z-index: 10001;
+            box-shadow: 0 10px 25px -5px rgba(0,0,0,0.3);
+            backdrop-filter: blur(8px);
+            border: 1px solid rgba(255,255,255,0.2);
+        }
+        .call-banner-actions button {
+            background: white;
+            border: none;
+            padding: 6px 18px;
+            border-radius: 30px;
+            font-weight: 600;
+            cursor: pointer;
+            margin-left: 10px;
+        }
+        .call-banner-actions .accept-call {
+            background: #10b981;
+            color: white;
+        }
+        .call-banner-actions .decline-call {
+            background: #ef4444;
+            color: white;
+        }
+
         .incoming-call-toast {
             position: fixed;
             bottom: 80px;
@@ -151,7 +364,7 @@
 
         .iframe-container {
             position: fixed;
-            top: 0;
+            top: 56px;
             left: 60px;
             right: 0;
             bottom: 0;
@@ -170,6 +383,7 @@
             display: block;
         }
 
+        /* Mobile Navigation & Icon Visibility Logic */
         .mobile-nav-bar {
             display: none;
             position: fixed;
@@ -184,12 +398,13 @@
             transition: transform 0.3s ease;
         }
 
-        body.chat-panel-active .mobile-nav-bar {
-            transform: translateY(100%);
-            display: flex !important;
-            pointer-events: none;
+        /* CRITICAL FIX: Hide mobile nav bar ONLY when in chat panel OR when call screen is active */
+        body.chat-panel-active .mobile-nav-bar,
+        body.call-screen-active .mobile-nav-bar {
+            display: none !important;
         }
 
+        /* Mobile back button - shows ONLY in chat panel or call screen */
         .mobile-back-btn {
             display: none;
             position: fixed;
@@ -214,8 +429,10 @@
             transform: scale(0.95);
         }
         
-        body.chat-panel-active .mobile-back-btn {
-            display: flex;
+        /* Mobile back button visible in chat panel OR call screen */
+        body.chat-panel-active .mobile-back-btn,
+        body.call-screen-active .mobile-back-btn {
+            display: flex !important;
         }
 
         .mobile-nav-icon {
@@ -232,15 +449,31 @@
             color: white;
         }
 
+        /* Desktop styles */
         @media (max-width: 768px) {
             #permanentSidebar {
                 display: none;
             }
             .iframe-container {
                 left: 0;
+                top: 56px;
             }
             .mobile-nav-bar {
                 display: flex;
+            }
+            #globalHeader {
+                left: 0;
+                padding: 0 14px;
+            }
+            body.call-screen-active #globalHeader {
+                opacity: 0.3;
+                pointer-events: none;
+            }
+            .header-module-subtitle {
+                display: none;
+            }
+            .profile-name-sm {
+                display: none;
             }
         }
 
@@ -286,8 +519,18 @@
                 transform: scale(0.98);
             }
         }
+
+        /* Additional utility classes */
+        .text-center { text-align: center; }
+        .w-full { width: 100%; }
+        .pointer-events-none { pointer-events: none; }
+        .pointer-events-auto { pointer-events: auto; }
+        .transition-all { transition: all 0.2s ease; }
+        .z-50 { z-index: 50; }
+        .rounded-full { border-radius: 9999px; }
+        .shadow-lg { box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1); }
     </style>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="/css/vendor/font-awesome.min.css">
 </head>
 <body>
 
@@ -299,6 +542,49 @@
             </div>
             <h2 style="color: #374151;">Kynecta</h2>
             <p style="color: #6b7280;">Loading...</p>
+        </div>
+    </div>
+
+    <!-- Global Header with Profile & Cover -->
+    <div id="globalHeader">
+        <div class="header-context">
+            <div id="headerModuleBadge" class="header-module-badge">
+                <i id="headerModuleIcon" class="fas fa-comments"></i>
+            </div>
+            <div class="header-module-copy">
+                <div id="headerModuleTitle" class="header-module-title">Messages</div>
+                <div id="headerModuleSubtitle" class="header-module-subtitle">Your recent chats load from local cache first.</div>
+            </div>
+        </div>
+        <div id="profileTrigger" class="profile-trigger">
+            <img id="headerAvatar" class="profile-avatar-sm" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%237c3aed'%3E%3Cpath d='M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z'/%3E%3C/svg%3E" alt="avatar">
+            <span id="headerUserName" class="profile-name-sm">User</span>
+            <i class="fas fa-chevron-down" style="font-size: 12px; color: #9ca3af;"></i>
+        </div>
+    </div>
+
+    <!-- Profile Modal -->
+    <div id="profileModal" class="profile-modal">
+        <div class="profile-card">
+            <div class="cover-area" id="coverClickArea">
+                <img id="modalCoverImg" class="cover-img" src="https://placehold.co/600x200/667eea/white?text=Cover+Photo">
+                <button class="close-modal" id="closeModalBtn"><i class="fas fa-times"></i></button>
+            </div>
+            <img id="modalAvatarImg" class="avatar-large" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%237c3aed'%3E%3Cpath d='M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z'/%3E%3C/svg%3E">
+            <div class="profile-info">
+                <div class="profile-username" id="modalUsername">User</div>
+                <div class="profile-bio" id="modalBio">Hey there! I'm using Kynecta.</div>
+                <button id="editProfileBtn" class="edit-profile-btn"><i class="fas fa-pen"></i> Edit Profile</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Global Incoming Call Banner -->
+    <div id="kyn-call-banner">
+        <div><i class="fas fa-phone-alt"></i> <strong id="callerName">Unknown</strong> is calling...</div>
+        <div class="call-banner-actions">
+            <button class="accept-call" id="bannerAcceptCall"><i class="fas fa-check"></i> Accept</button>
+            <button class="decline-call" id="bannerDeclineCall"><i class="fas fa-times"></i> Decline</button>
         </div>
     </div>
 
@@ -327,32 +613,32 @@
         <button class="mobile-nav-icon" data-page="tools"><i class="fas fa-tools"></i></button>
     </div>
     
-    <!-- Mobile Back Button (visible only when chat panel is active) -->
+    <!-- Mobile Back Button (visible only when chat panel OR call screen is active) -->
     <button id="mobileBackBtn" class="mobile-back-btn">
         <i class="fas fa-arrow-left"></i>
     </button>
 
     <!-- IFrame Containers for each module -->
     <div id="messagesContent" class="iframe-container">
-        <iframe id="messagesIframe" class="content-iframe" src="message.html" data-module="messages" sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-modals allow-downloads allow-popups-to-escape-sandbox"></iframe>
+        <iframe id="messagesIframe" class="content-iframe" src="message.html" data-module="messages"></iframe>
     </div>
     <div id="statusContent" class="iframe-container hidden">
-        <iframe id="statusIframe" class="content-iframe" src="status.html" data-module="status" sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-modals allow-downloads allow-popups-to-escape-sandbox"></iframe>
+        <iframe id="statusIframe" class="content-iframe" src="status.html" data-module="status"></iframe>
     </div>
     <div id="groupContent" class="iframe-container hidden">
-        <iframe id="groupIframe" class="content-iframe" src="group.html" data-module="group" sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-modals allow-downloads allow-popups-to-escape-sandbox"></iframe>
+        <iframe id="groupIframe" class="content-iframe" src="group.html" data-module="group"></iframe>
     </div>
     <div id="friendsContent" class="iframe-container hidden">
-        <iframe id="friendsIframe" class="content-iframe" src="friend.html" data-module="friends" sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-modals allow-downloads allow-popups-to-escape-sandbox" allow="camera; microphone; geolocation"></iframe>
+        <iframe id="friendsIframe" class="content-iframe" src="friend.html" data-module="friends" allow="camera; microphone; geolocation"></iframe>
     </div>
     <div id="callsContent" class="iframe-container hidden">
-        <iframe id="callsIframe" class="content-iframe" src="calls.html" data-module="calls" sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-modals allow-downloads allow-popups-to-escape-sandbox"></iframe>
+        <iframe id="callsIframe" class="content-iframe" src="calls.html" data-module="calls" allow="camera; microphone"></iframe>
     </div>
     <div id="settingsContent" class="iframe-container hidden">
-        <iframe id="settingsIframe" class="content-iframe" src="settings.html" data-module="settings" sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-modals allow-downloads allow-popups-to-escape-sandbox"></iframe>
+        <iframe id="settingsIframe" class="content-iframe" src="settings.html" data-module="settings"></iframe>
     </div>
     <div id="toolsContent" class="iframe-container hidden">
-        <iframe id="toolsIframe" class="content-iframe" src="Tools.html" data-module="tools" sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-modals allow-downloads allow-popups-to-escape-sandbox"></iframe>
+        <iframe id="toolsIframe" class="content-iframe" src="Tools.html" data-module="tools"></iframe>
     </div>
 
     <script>
@@ -370,11 +656,17 @@
         // Session protection - prevent clearing critical auth keys
         (function() {
             const originalRemove = localStorage.removeItem;
-            localStorage.removeItem = function(key) {
-                if (key === 'kynecta_auth' || key === 'token' || key === 'moodchat_token' || key === 'accessToken') {
-                    console.log('🛡️ Blocked clearing:', key);
-                    return;
+            window.__allowAuthStorageMutation__ = window.__allowAuthStorageMutation__ === true;
+            window.__withAuthStorageMutation = function(callback) {
+                const previous = window.__allowAuthStorageMutation__ === true;
+                window.__allowAuthStorageMutation__ = true;
+                try {
+                    return typeof callback === 'function' ? callback() : undefined;
+                } finally {
+                    window.__allowAuthStorageMutation__ = previous;
                 }
+            };
+            localStorage.removeItem = function(key) {
                 originalRemove.call(this, key);
             };
         })();
@@ -408,9 +700,234 @@
         };
 
         // ======================================================================
+        // PROFILE & COVER PICTURE MANAGEMENT
+        // ======================================================================
+        let currentUserProfile = { 
+            id: null, 
+            username: 'User', 
+            avatar: null, 
+            cover: null, 
+            bio: 'Hey there! I\'m using Kynecta.' 
+        };
+
+        function loadUserProfileFromStorage() {
+            try {
+                const auth = localStorage.getItem('kynecta_auth');
+                if (auth) {
+                    const parsed = JSON.parse(auth);
+                    currentUserProfile.id = parsed.userId || parsed.id;
+                    currentUserProfile.username = parsed.displayName || parsed.username || 'User';
+                    currentUserProfile.avatar = parsed.avatar || parsed.photoURL;
+                    currentUserProfile.cover = parsed.cover;
+                    currentUserProfile.bio = parsed.bio || 'Hey there! I\'m using Kynecta.';
+                }
+                const token = localStorage.getItem('token');
+                if (token && !currentUserProfile.id) {
+                    try {
+                        const payload = JSON.parse(atob(token.split('.')[1]));
+                        currentUserProfile.id = payload.userId || payload.id;
+                        currentUserProfile.username = payload.username || payload.name || 'User';
+                    } catch(e) {}
+                }
+                const savedAvatar = localStorage.getItem('user_avatar');
+                if (savedAvatar) currentUserProfile.avatar = savedAvatar;
+                const savedCover = localStorage.getItem('user_cover');
+                if (savedCover) currentUserProfile.cover = savedCover;
+                const savedBio = localStorage.getItem('user_bio');
+                if (savedBio) currentUserProfile.bio = savedBio;
+                updateProfileUI();
+            } catch(e) {}
+        }
+
+        function updateProfileUI() {
+            const avatarUrl = currentUserProfile.avatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(currentUserProfile.username)}&background=7c3aed&color=fff`;
+            document.getElementById('headerAvatar').src = avatarUrl;
+            document.getElementById('headerUserName').innerText = currentUserProfile.username;
+            document.getElementById('modalAvatarImg').src = avatarUrl;
+            document.getElementById('modalUsername').innerText = currentUserProfile.username;
+            document.getElementById('modalBio').innerText = currentUserProfile.bio;
+            document.getElementById('modalCoverImg').src = currentUserProfile.cover || 'https://placehold.co/600x200/667eea/white?text=Cover+Photo';
+        }
+
+        async function saveProfileUpdates(avatarFile, coverFile, bioText) {
+            const baseUrl = window.__getApiBase();
+            const token = localStorage.getItem('token');
+            if (!token) return;
+            
+            if (avatarFile) {
+                const formData = new FormData();
+                formData.append('avatar', avatarFile);
+                try {
+                    const res = await fetch(`${baseUrl}/users/avatar`, {
+                        method: 'POST',
+                        headers: { 'Authorization': `Bearer ${token}` },
+                        body: formData
+                    });
+                    if (res.ok) {
+                        const data = await res.json();
+                        if (data.avatarUrl) {
+                            currentUserProfile.avatar = data.avatarUrl;
+                            localStorage.setItem('user_avatar', data.avatarUrl);
+                        }
+                    }
+                } catch(e) { console.warn('Avatar upload failed:', e); }
+            }
+            
+            if (coverFile) {
+                const formData = new FormData();
+                formData.append('cover', coverFile);
+                try {
+                    const res = await fetch(`${baseUrl}/users/cover`, {
+                        method: 'POST',
+                        headers: { 'Authorization': `Bearer ${token}` },
+                        body: formData
+                    });
+                    if (res.ok) {
+                        const data = await res.json();
+                        if (data.coverUrl) {
+                            currentUserProfile.cover = data.coverUrl;
+                            localStorage.setItem('user_cover', data.coverUrl);
+                        }
+                    }
+                } catch(e) { console.warn('Cover upload failed:', e); }
+            }
+            
+            if (bioText !== undefined) {
+                try {
+                    await fetch(`${baseUrl}/users/profile`, {
+                        method: 'PATCH',
+                        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ bio: bioText })
+                    });
+                    currentUserProfile.bio = bioText;
+                    localStorage.setItem('user_bio', bioText);
+                } catch(e) { console.warn('Bio update failed:', e); }
+            }
+            updateProfileUI();
+            
+            // Broadcast to all modules
+            dispatchEventToModules({
+                type: 'UPDATE_PROFILE_DATA',
+                payload: { avatar: currentUserProfile.avatar, cover: currentUserProfile.cover, bio: currentUserProfile.bio }
+            });
+        }
+
+        function setupProfileModal() {
+            const modal = document.getElementById('profileModal');
+            const trigger = document.getElementById('profileTrigger');
+            const closeBtn = document.getElementById('closeModalBtn');
+            const editBtn = document.getElementById('editProfileBtn');
+            
+            trigger.onclick = () => modal.classList.add('active');
+            closeBtn.onclick = () => modal.classList.remove('active');
+            modal.onclick = (e) => { if (e.target === modal) modal.classList.remove('active'); };
+            
+            editBtn.onclick = () => {
+                const newBio = prompt('Edit your bio:', currentUserProfile.bio);
+                if (newBio !== null) saveProfileUpdates(null, null, newBio);
+                const avatarInput = document.createElement('input');
+                avatarInput.type = 'file';
+                avatarInput.accept = 'image/*';
+                avatarInput.onchange = async (e) => {
+                    if (e.target.files[0]) await saveProfileUpdates(e.target.files[0], null, null);
+                };
+                avatarInput.click();
+            };
+            
+            document.getElementById('coverClickArea').onclick = () => {
+                const coverInput = document.createElement('input');
+                coverInput.type = 'file';
+                coverInput.accept = 'image/*';
+                coverInput.onchange = async (e) => {
+                    if (e.target.files[0]) await saveProfileUpdates(null, e.target.files[0], null);
+                };
+                coverInput.click();
+            };
+        }
+
+        // ======================================================================
+        // GLOBAL CALL BANNER
+        // ======================================================================
+        let pendingIncomingCall = null;
+        
+        function hideGlobalBanner() {
+            const banner = document.getElementById('kyn-call-banner');
+            if (banner) banner.style.display = 'none';
+            pendingIncomingCall = null;
+            console.log('[Parent] Call banner dismissed');
+        }
+        
+        function setupGlobalCallBanner() {
+            const banner = document.getElementById('kyn-call-banner');
+            const acceptBtn = document.getElementById('bannerAcceptCall');
+            const declineBtn = document.getElementById('bannerDeclineCall');
+            
+            function hideBanner() {
+                banner.style.display = 'none';
+                pendingIncomingCall = null;
+            }
+            
+            acceptBtn.onclick = async () => {
+                if (pendingIncomingCall) {
+                    const callId = pendingIncomingCall.callId || pendingIncomingCall.id;
+                    if (callId) {
+                        const baseUrl = window.__getApiBase();
+                        const token = localStorage.getItem('token');
+                        try {
+                            await fetch(`${baseUrl}/calls/${callId}/answer`, {
+                                method: 'POST',
+                                headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+                                body: JSON.stringify({})
+                            });
+                        } catch(e) {}
+                    }
+                    navigateToPage('calls');
+                    setTimeout(() => {
+                        const callsIframe = document.getElementById('callsIframe');
+                        if (callsIframe && callsIframe.contentWindow) {
+                            callsIframe.contentWindow.postMessage({
+                                type: 'AUTO_ACCEPT_CALL',
+                                payload: pendingIncomingCall
+                            }, '*');
+                        }
+                    }, 400);
+                    hideBanner();
+                }
+            };
+            
+            declineBtn.onclick = async () => {
+                if (pendingIncomingCall) {
+                    const callId = pendingIncomingCall.callId || pendingIncomingCall.id;
+                    if (callId) {
+                        const baseUrl = window.__getApiBase();
+                        const token = localStorage.getItem('token');
+                        try {
+                            await fetch(`${baseUrl}/calls/${callId}/reject`, {
+                                method: 'POST',
+                                headers: { 'Authorization': `Bearer ${token}` }
+                            });
+                        } catch(e) {}
+                    }
+                    hideBanner();
+                } else {
+                    hideBanner();
+                }
+            };
+            
+            window.showIncomingCallBanner = (callData) => {
+                pendingIncomingCall = callData;
+                document.getElementById('callerName').innerText = callData.callerName || callData.fromUserName || 'Someone';
+                banner.style.display = 'flex';
+                // Auto-hide after 30 seconds if not answered
+                setTimeout(() => {
+                    if (pendingIncomingCall === callData) hideBanner();
+                }, 30000);
+            };
+        }
+
+        // ======================================================================
         // CENTRALIZED EVENT DISPATCHER
         // ======================================================================
-        
         function dispatchEventToModules(event) {
             const enrichedEvent = {
                 ...event,
@@ -420,27 +937,19 @@
                 broadcastId: `${event.type}_${Date.now()}_${Math.random().toString(36).substr(2, 8)}`
             };
             
-            let modulesSent = [];
-            
             Object.entries(moduleToIframeId).forEach(([moduleName, iframeId]) => {
                 if (enrichedEvent.targetModule && enrichedEvent.targetModule !== moduleName) {
                     return;
                 }
-                
                 const iframe = document.getElementById(iframeId);
                 if (iframe && iframe.contentWindow) {
                     try {
                         iframe.contentWindow.postMessage(enrichedEvent, '*');
-                        modulesSent.push(moduleName);
                     } catch (error) {
                         console.error(`Failed to dispatch event to ${moduleName}:`, error);
                     }
                 }
             });
-            
-            if (modulesSent.length === 0) {
-                console.warn(`⚠️ Event "${enrichedEvent.type}" had no targets (no iframes available)`);
-            }
         }
         
         const moduleRegistry = new Set();
@@ -466,7 +975,7 @@
         }
         
         function sendFriendsToMessagesIframe(friends) {
-            const iframe = document.getElementById('messagesIframe') || document.getElementById('messageIframe');
+            const iframe = document.getElementById('messagesIframe');
             if (iframe && iframe.contentWindow) {
                 iframe.contentWindow.postMessage({
                     type: 'FRIENDS_LIST_UPDATE',
@@ -476,7 +985,7 @@
         }
         
         function sendFriendsToGroupIframe(friends) {
-            const iframe = document.getElementById('groupIframe') || document.getElementById('groupsIframe');
+            const iframe = document.getElementById('groupIframe');
             if (iframe && iframe.contentWindow) {
                 iframe.contentWindow.postMessage({
                     type: 'FRIENDS_LIST_UPDATE',
@@ -521,6 +1030,26 @@
 
         window.__currentPage = 'messages';
         window.__lastActivePage = 'messages';
+        const headerPageMeta = {
+            messages: { icon: 'fa-comments', title: 'Messages', subtitle: 'Your recent chats load from local cache first.' },
+            status:   { icon: 'fa-bolt', title: 'Status', subtitle: 'Stories and highlights refresh quietly in the background.' },
+            group:    { icon: 'fa-users', title: 'Groups', subtitle: 'Communities stay responsive with local-first hydration.' },
+            friends:  { icon: 'fa-user', title: 'Friends', subtitle: 'Contacts, requests, and discovery live in one place.' },
+            calls:    { icon: 'fa-phone', title: 'Calls', subtitle: 'Recent calls and live call actions are coordinated here.' },
+            settings: { icon: 'fa-cog', title: 'Settings', subtitle: 'Profile, privacy, and preferences for the whole app.' },
+            tools:    { icon: 'fa-wrench', title: 'Tools', subtitle: 'Utilities and marketplace actions for power users.' }
+        };
+
+        function updateHeaderContext(page) {
+            const meta = headerPageMeta[page] || headerPageMeta.messages;
+            const iconEl = document.getElementById('headerModuleIcon');
+            const titleEl = document.getElementById('headerModuleTitle');
+            const subtitleEl = document.getElementById('headerModuleSubtitle');
+
+            if (iconEl) iconEl.className = `fas ${meta.icon}`;
+            if (titleEl) titleEl.textContent = meta.title;
+            if (subtitleEl) subtitleEl.textContent = meta.subtitle;
+        }
 
         function navigateToPage(page) {
             if (!page) return;
@@ -528,12 +1057,28 @@
                 window.__lastActivePage = window.__currentPage || 'messages';
                 window.__currentPage = page;
             }
+            updateHeaderContext(page);
             document.querySelectorAll('.iframe-container').forEach(c => c.classList.add('hidden'));
             const target = document.getElementById(`${page}Content`);
             if (target) target.classList.remove('hidden');
             document.querySelectorAll('.nav-icon, .mobile-nav-icon').forEach(b => b.classList.remove('active'));
             document.querySelectorAll(`.nav-icon[data-page="${page}"], .mobile-nav-icon[data-page="${page}"]`).forEach(b => b.classList.add('active'));
-            document.body.classList.remove('chat-panel-active');
+            
+            // Handle mobile panel states - CRITICAL FIX
+            // Remove call-screen-active when leaving calls page unless a call is active
+            if (page !== 'calls') {
+                // Only remove call-screen-active if no active call is in progress
+                // This will be managed by CALL_SCREEN_ACTIVE events
+                if (!window.__activeCallInProgress) {
+                    document.body.classList.remove('call-screen-active');
+                }
+            }
+            
+            // chat-panel-active is managed by message iframe events
+            if (page !== 'messages') {
+                // Don't auto-remove chat-panel-active - let messages iframe manage it
+            }
+            
             if (page === 'calls')    setTimeout(() => sendFriendsToCallsIframe(), 300);
             if (page === 'messages') setTimeout(() => sendFriendsToMessagesIframe(), 300);
             if (page === 'group')    setTimeout(() => sendFriendsToGroupIframe(), 300);
@@ -560,7 +1105,10 @@
         const mobileBackBtn = document.getElementById('mobileBackBtn');
         if (mobileBackBtn) {
             mobileBackBtn.addEventListener('click', () => {
-                document.body.classList.remove('chat-panel-active');
+                // Remove both panel states
+                document.body.classList.remove('chat-panel-active', 'call-screen-active');
+                window.__activeCallInProgress = false;
+                // Notify messages iframe to go back to chat list
                 const messagesIframe = document.getElementById('messagesIframe');
                 if (messagesIframe && messagesIframe.contentWindow) {
                     messagesIframe.contentWindow.postMessage({
@@ -568,6 +1116,15 @@
                         timestamp: Date.now()
                     }, '*');
                 }
+                // Notify calls iframe to close active call screen
+                const callsIframe = document.getElementById('callsIframe');
+                if (callsIframe && callsIframe.contentWindow) {
+                    callsIframe.contentWindow.postMessage({
+                        type: 'CLOSE_CALL_SCREEN',
+                        timestamp: Date.now()
+                    }, '*');
+                }
+                navigateToPage('messages');
             });
         }
 
@@ -579,15 +1136,22 @@
             }
         }, 2000);
         
-        function setupChatPanelDetection() {
+        // ======================================================================
+        // CHAT AND CALL PANEL DETECTION FOR MOBILE
+        // ======================================================================
+        function setupPanelDetection() {
             const messagesIframe = document.getElementById('messagesIframe');
             if (!messagesIframe) return;
             
             window.addEventListener('message', function(event) {
                 if (!isTrustedOrigin(event.origin)) return;
                 const data = event.data || {};
+                
+                // Handle chat panel state
                 if (data.type === 'CHAT_OPENED' || data.type === 'CONVERSATION_OPENED') {
-                    if (window.innerWidth <= 768) document.body.classList.add('chat-panel-active');
+                    if (window.innerWidth <= 768) {
+                        document.body.classList.add('chat-panel-active');
+                    }
                 }
                 if (data.type === 'CHAT_LIST_SHOWN' || data.type === 'CHAT_CLOSED' || data.type === 'GO_BACK_TO_CHAT_LIST') {
                     if (window.innerWidth <= 768) {
@@ -597,27 +1161,100 @@
                         }
                     }
                 }
+                
+                // Handle call screen active state - CRITICAL FOR ICON HIDING
+                if (data.type === 'CALL_SCREEN_ACTIVE') {
+                    if (data.payload && data.payload.active === true) {
+                        window.__activeCallInProgress = true;
+                        document.body.classList.add('call-screen-active');
+                        console.log('[Parent] Call screen active - icons hidden');
+                    } else {
+                        window.__activeCallInProgress = false;
+                        document.body.classList.remove('call-screen-active');
+                        console.log('[Parent] Call screen inactive - icons restored');
+                    }
+                }
+                
+                // Handle call termination events from child
+                if (data.type === 'CALL_ENDED' || data.type === 'CALL_FORCE_ENDED' || data.type === 'CALL_REJECTED') {
+                    hideGlobalBanner();
+                    document.body.classList.remove('call-screen-active');
+                    window.__activeCallInProgress = false;
+                }
             });
         }
         
         document.addEventListener('DOMContentLoaded', function() {
-            setupChatPanelDetection();
-            if (window.innerWidth <= 768) document.body.classList.remove('chat-panel-active');
+            setupPanelDetection();
+            if (window.innerWidth <= 768) {
+                document.body.classList.remove('chat-panel-active', 'call-screen-active');
+            }
         });
         
         window.addEventListener('resize', function() {
-            if (window.innerWidth > 768) document.body.classList.remove('chat-panel-active');
+            if (window.innerWidth > 768) {
+                document.body.classList.remove('chat-panel-active', 'call-screen-active');
+            }
         });
     </script>
     
+    <!-- ✅ SAFETY LAYER — Must be first (patch v1) -->
+    <script src="js/kynecta.safety.layer.js"></script>
+    <script>
+        // Signal to child iframes that AppStorage is ready
+        (function() {
+            window.__safeApiCall = window.__safeApiCall || function(apiCallFn, fallback) {
+                return window.safeApiCall(apiCallFn, fallback === undefined ? null : fallback);
+            };
+
+            window.__getStableSessionData = function() {
+                const token = localStorage.getItem('token') ||
+                    localStorage.getItem('moodchat_token') ||
+                    localStorage.getItem('accessToken') ||
+                    window.Session?.getToken?.() ||
+                    null;
+
+                let user = null;
+                try {
+                    user = JSON.parse(localStorage.getItem('currentUser') || localStorage.getItem('user') || 'null');
+                } catch (_) {
+                    user = null;
+                }
+
+                const auth = window.safeParse ? window.safeParse(localStorage.getItem('kynecta_auth'), null) : null;
+                if (!user && auth && auth.user) user = auth.user;
+
+                return {
+                    token,
+                    user,
+                    userId: user?.id || user?.userId || auth?.userId || auth?.id || null,
+                    authenticated: !!token
+                };
+            };
+
+            if (window.AppStorage) {
+                window.__kynParentReady = true;
+                console.log('[chat.html] ✅ AppStorage ready, __kynParentReady = true');
+            } else {
+                console.error('[chat.html] ❌ AppStorage missing after safety layer load');
+            }
+        })();
+    </script>
+
     <!-- Core Scripts -->
     <script src="js/app.core.eventbus.js"></script>
     <script src="js/app.core.store.js"></script>
     <script src="js/app.realtime.socket.js"></script>
+    <!-- OFFLINE-FIRST LAYER -->
+    <script src="js/localStore.messages.js"></script>
+    <script src="js/messageQueue.manager.js"></script>
+    <script src="js/messageSync.engine.js"></script>
     <script src="js/services.message.js"></script>
     <script src="js/services.friend.js"></script>
     <script src="js/app.sync.manager.js"></script>
     <script src="js/app.offline.queue.js"></script>
+    <script src="js/settingsManager.js"></script>
+
     <script>window.__parentHandlesApiRequests = true;</script>
     <script type="module" src="js/api.core.js"></script>
 
@@ -638,58 +1275,38 @@
                 attempts++;
                 console.log('[Chat] Validating session... attempt', attempts);
                 
-                // Check if SessionManager is loaded
                 if (!window.SessionManager) {
                     if (attempts < MAX_ATTEMPTS) {
-                        console.warn('[Chat] SessionManager not loaded yet, waiting... attempt', attempts);
+                        console.warn('[Chat] SessionManager not loaded yet, waiting...');
                         setTimeout(validateChatSession, 500);
                     } else {
-                        console.error('[Chat] SessionManager failed to load after', MAX_ATTEMPTS, 'attempts');
-                        // Fallback: check localStorage directly
+                        console.error('[Chat] SessionManager failed to load');
                         const token = localStorage.getItem('token') || localStorage.getItem('moodchat_token');
-                        if (!token) {
-                            console.log('[Chat] No token found, redirecting to index');
-                            window.location.href = 'index.html';
-                        }
+                        if (!token) window.location.href = 'index.html';
                     }
                     return;
                 }
                 
-                console.log('[Chat] SessionManager loaded, checking session...');
-                
-                // Check if session is valid
                 const isValid = window.SessionManager.isSessionValid();
                 const shouldPrompt = window.SessionManager.shouldPromptLogin();
                 
-                console.log('[Chat] Session valid:', isValid, 'Should prompt:', shouldPrompt);
-                
                 if (!isValid || shouldPrompt) {
-                    console.log('[Chat] No valid session, redirecting to index');
                     window.location.href = 'index.html';
                     return;
                 }
                 
-                // Restore session tokens
                 const session = window.SessionManager.getCurrentSession();
                 if (session && session.token) {
                     localStorage.setItem('token', session.token);
                     localStorage.setItem('accessToken', session.token);
                     localStorage.setItem('moodchat_token', session.token);
-                    localStorage.setItem('USER_TOKEN', session.token);
-                    
                     if (session.user) {
                         localStorage.setItem('currentUser', JSON.stringify(session.user));
                         window.currentUser = session.user;
                     }
-                    
-                    console.log('[Chat] Session restored');
                 }
-                
-                // Update activity on page load
                 window.SessionManager.updateActivity();
             }
-            
-            // Run validation immediately
             validateChatSession();
         })();
     </script>
@@ -746,7 +1363,6 @@
                 const lastRequest = requestThrottle.get(endpoint) || 0;
                 const throttleTime = THROTTLE_TIMES[endpoint] || THROTTLE_TIMES.default;
                 if (now - lastRequest < throttleTime) {
-                    console.log(`[Throttle] Skipping ${endpoint} - ${now - lastRequest}ms since last request`);
                     return false;
                 }
                 requestThrottle.set(endpoint, now);
@@ -921,6 +1537,12 @@
                     id: cachedUserId
                 };
 
+                // ── patch v1: expose session on window so same-origin iframes
+                // and services (services_friend.js, friendqueue_manager.js etc.)
+                // can find the token without relying solely on postMessage ──
+                window.__PARENT_SESSION__ = sessionData;
+                window.AUTH_SESSION       = sessionData;
+
                 iframe.contentWindow.postMessage({
                     type: 'SESSION_DATA',
                     id: `session_${Date.now()}_${moduleName}`,
@@ -1062,7 +1684,7 @@
                         }
                         return Array.isArray(calls) ? calls : [];
                     } else {
-                        console.warn('[Parent] Failed to load call history:', response.status, response.statusText);
+                        console.warn('[Parent] Failed to load call history:', response.status);
                         if (callsIframe && callsIframe.contentWindow) {
                             callsIframe.contentWindow.postMessage({
                                 type: 'CALL_HISTORY_UPDATE',
@@ -1129,7 +1751,7 @@
             });
 
             // ======================================================================
-            // MAIN MESSAGE HANDLER
+            // MAIN MESSAGE HANDLER - WITH WS-BRIDGE SOURCE DETECTION
             // ======================================================================
             window.addEventListener('message', async function(event) {
                 if (!isTrustedOrigin(event.origin)) return;
@@ -1137,7 +1759,191 @@
                 const data = event.data || {};
                 if (!data || typeof data !== 'object') return;
 
-                // CALL HANDLING
+                // ==================================================================
+                // CALL ENDED HANDLER - ONLY POST TO API IF SOURCE IS NOT 'ws-bridge'
+                // ==================================================================
+                if (data.type === 'CALL_ENDED' && data.source !== 'ws-bridge') {
+                    const callId = data.payload?.callId || data.callId;
+                    if (callId) {
+                        const baseUrl = window.__getApiBase();
+                        const token = localStorage.getItem('token') || cachedToken;
+                        try {
+                            await fetch(`${baseUrl}/calls/${callId}/end`, {
+                                method: 'POST',
+                                headers: { 'Authorization': `Bearer ${token}` }
+                            });
+                            console.log('[Parent] Call ended via API (non-ws source)');
+                        } catch(e) { console.warn('[Parent] Failed to POST /calls/end:', e); }
+                    }
+                    // Dismiss banner on call termination
+                    hideGlobalBanner();
+                    document.body.classList.remove('call-screen-active');
+                    window.__activeCallInProgress = false;
+                    await refreshCallHistoryForUser(cachedUserId);
+                    return;
+                }
+                
+                // Handle ws-bridge sourced events - dismiss banner but DON'T POST to /calls/:id/end
+                if (data.type === 'CALL_ENDED' && data.source === 'ws-bridge') {
+                    console.log('[Parent] CALL_ENDED from ws-bridge - banner dismissed, no API call');
+                    hideGlobalBanner();
+                    document.body.classList.remove('call-screen-active');
+                    window.__activeCallInProgress = false;
+                    await refreshCallHistoryForUser(cachedUserId);
+                    return;
+                }
+                
+                // ==================================================================
+                // CALL ANSWERED HANDLER
+                // ==================================================================
+                if (data.type === 'CALL_ANSWERED' || data.type === 'CALL_ACCEPTED') {
+                    console.log('[Parent] Call answered - dismissing banner');
+                    hideGlobalBanner();
+                    return;
+                }
+                
+                // ==================================================================
+                // CALL REJECTED HANDLER
+                // ==================================================================
+                if (data.type === 'CALL_REJECTED') {
+                    console.log('[Parent] Call rejected - dismissing banner');
+                    hideGlobalBanner();
+                    document.body.classList.remove('call-screen-active');
+                    window.__activeCallInProgress = false;
+                    return;
+                }
+                
+                // ==================================================================
+                // CALL FORCE ENDED HANDLER - unified
+                // ==================================================================
+                function handleForceEnded(callData, source) {
+                    console.log('[Parent] Force ended call - dismissing banner, source:', source);
+                    hideGlobalBanner();
+                    document.body.classList.remove('call-screen-active');
+                    window.__activeCallInProgress = false;
+                    refreshCallHistoryForUser(cachedUserId);
+                }
+                
+                if (data.type === 'CALL_FORCE_ENDED') {
+                    handleForceEnded(data.payload, data.source);
+                    return;
+                }
+                
+                if (data.type === 'call:force_end' || data.type === 'call_force_ended') {
+                    console.log('[Parent] Force end alias received:', data.type);
+                    handleForceEnded(data.payload, 'alias');
+                    return;
+                }
+                
+                // ==================================================================
+                // CALL CANCELLED HANDLER
+                // ==================================================================
+                if (data.type === 'CALL_CANCELLED' || data.type === 'call:cancelled') {
+                    console.log('[Parent] Call cancelled - dismissing banner');
+                    hideGlobalBanner();
+                    document.body.classList.remove('call-screen-active');
+                    window.__activeCallInProgress = false;
+                    return;
+                }
+
+                // ==================================================================
+                // CALL INCOMING HANDLER - Show on ALL pages (including calls page)
+                // ==================================================================
+                if (data.type === 'call:incoming' || (data.type === 'CALL_INCOMING' && data.payload)) {
+                    const callData = data.payload || data;
+                    // Show banner on ALL pages (not just non-calls pages)
+                    if (window.showIncomingCallBanner) {
+                        window.showIncomingCallBanner(callData);
+                    }
+                    // Also dispatch to calls iframe
+                    const callsIframe = document.getElementById('callsIframe');
+                    if (callsIframe && callsIframe.contentWindow) {
+                        callsIframe.contentWindow.postMessage({ type: 'CALL_INCOMING', payload: callData, source: data.source || 'parent' }, '*');
+                    }
+                    return;
+                }
+
+                // ==================================================================
+                // CALL SCREEN ACTIVE - Control icon visibility
+                // ==================================================================
+                if (data.type === 'CALL_SCREEN_ACTIVE') {
+                    if (data.payload && data.payload.active === true) {
+                        window.__activeCallInProgress = true;
+                        document.body.classList.add('call-screen-active');
+                        console.log('[Parent] Call screen active - icons hidden');
+                    } else {
+                        window.__activeCallInProgress = false;
+                        document.body.classList.remove('call-screen-active');
+                        console.log('[Parent] Call screen inactive - icons restored');
+                    }
+                    return;
+                }
+
+                // ==================================================================
+                // CALL ACCEPT HANDLER - POST /calls/:id/answer
+                // ==================================================================
+                if (data.type === 'CALL_ACCEPT') {
+                    const callId = data.payload?.callId;
+                    const baseUrl = window.__getApiBase();
+                    const token = localStorage.getItem('token') || cachedToken;
+                    let success = false;
+                    let resultData = null;
+                    if (callId) {
+                        try {
+                            const res = await fetch(`${baseUrl}/calls/${callId}/answer`, {
+                                method: 'POST',
+                                headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+                                body: JSON.stringify({})
+                            });
+                            resultData = await res.json().catch(()=>({}));
+                            success = res.ok;
+                            console.log('[Parent] Call accept result:', success);
+                        } catch(e) { console.warn('[Parent] CALL_ACCEPT error:', e); }
+                    }
+                    if (event.source) {
+                        event.source.postMessage({
+                            type: 'CALL_ACCEPT_RESULT',
+                            payload: { success, callId, data: resultData, timestamp: Date.now() }
+                        }, '*');
+                    }
+                    hideGlobalBanner();
+                    await refreshCallHistoryForUser(cachedUserId);
+                    return;
+                }
+
+                // ==================================================================
+                // CALL REJECT HANDLER - POST /calls/:id/reject
+                // ==================================================================
+                if (data.type === 'CALL_REJECT') {
+                    const callId = data.payload?.callId;
+                    const baseUrl = window.__getApiBase();
+                    const token = localStorage.getItem('token') || cachedToken;
+                    let success = false;
+                    if (callId) {
+                        try {
+                            const res = await fetch(`${baseUrl}/calls/${callId}/reject`, {
+                                method: 'POST',
+                                headers: { 'Authorization': `Bearer ${token}` }
+                            });
+                            success = res.ok;
+                            console.log('[Parent] Call reject result:', success);
+                        } catch(e) { console.warn('[Parent] CALL_REJECT error:', e); }
+                    }
+                    if (event.source) {
+                        event.source.postMessage({
+                            type: 'CALL_REJECT_RESULT',
+                            payload: { success, callId, timestamp: Date.now() }
+                        }, '*');
+                    }
+                    hideGlobalBanner();
+                    document.body.classList.remove('call-screen-active');
+                    await refreshCallHistoryForUser(cachedUserId);
+                    return;
+                }
+
+                // ==================================================================
+                // CALL DISPATCH LOGIC
+                // ==================================================================
                 if (!window.__callDispatchLock) window.__callDispatchLock = { ts: 0, userId: null };
 
                 function __isCallDuplicate(userId) {
@@ -1147,7 +1953,7 @@
 
                 function __dispatchCallToIframe(userId, userName, callType, returnTo, chatUserId, source) {
                     if (__isCallDuplicate(userId)) {
-                        console.log('[Parent] ⏭ Duplicate call dispatch suppressed for userId', userId);
+                        console.log('[Parent] ⏭ Duplicate call dispatch suppressed');
                         return;
                     }
                     window.__callDispatchLock = { ts: Date.now(), userId: String(userId) };
@@ -1160,18 +1966,14 @@
                     window.__callReturnContext = ctx;
                     try { sessionStorage.setItem('call_return_ctx', JSON.stringify(ctx)); } catch(e) {}
 
-                    console.log(`[Parent] 📞 Dispatching call → user=${userName}(${userId}) type=${callType} returnTo=${returnTo} source=${source}`);
+                    console.log(`[Parent] 📞 Dispatching call → user=${userName}(${userId}) type=${callType} returnTo=${returnTo}`);
 
                     navigateToPage('calls');
 
                     const callsIframe = document.getElementById('callsIframe');
                     if (!callsIframe) return;
 
-                    const payload = {
-                        userId, userName, callType,
-                        returnTo, chatUserId: chatUserId || userId,
-                        source, timestamp: Date.now()
-                    };
+                    const payload = { userId, userName, callType, returnTo, chatUserId: chatUserId || userId, source, timestamp: Date.now() };
 
                     try { sessionStorage.setItem('pending_call', JSON.stringify(payload)); } catch(e) {}
 
@@ -1188,19 +1990,13 @@
 
                 if (data.type === 'SWITCH_MODULE' && data.module === 'calls') {
                     const p = data.payload || {};
-                    __dispatchCallToIframe(
-                        p.userId, p.userName || 'User', p.callType || 'voice',
-                        p.returnTo || 'messages', p.chatUserId || p.userId, 'messages-module'
-                    );
+                    __dispatchCallToIframe(p.userId, p.userName || 'User', p.callType || 'voice', p.returnTo || 'messages', p.chatUserId || p.userId, 'messages-module');
                     return;
                 }
 
                 if (data.type === 'INITIATE_CALL') {
                     const p = data.payload || {};
-                    __dispatchCallToIframe(
-                        p.userId, p.userName || 'User', p.callType || 'voice',
-                        'messages', p.userId, 'messages-module'
-                    );
+                    __dispatchCallToIframe(p.userId, p.userName || 'User', p.callType || 'voice', 'messages', p.userId, 'messages-module');
                 }
 
                 if (data.type === 'CALL_ENDED_RETURN') {
@@ -1213,7 +2009,7 @@
                     try { sessionStorage.removeItem('call_return_ctx'); } catch(e) {}
 
                     const returnTo = ctx?.returnTo || 'calls';
-                    console.log(`[Parent] 📞 Call ended → returnTo=${returnTo}`, ctx);
+                    console.log(`[Parent] 📞 Call ended → returnTo=${returnTo}`);
 
                     if (returnTo === 'messages') {
                         navigateToPage('messages');
@@ -1223,12 +2019,7 @@
                                 setTimeout(() => {
                                     msgIframe.contentWindow.postMessage({
                                         type: 'OPEN_CHAT_WITH_USER',
-                                        payload: {
-                                            userId: ctx.chatUserId,
-                                            userName: ctx.userName || 'User',
-                                            returnFromCall: true,
-                                            timestamp: Date.now()
-                                        },
+                                        payload: { userId: ctx.chatUserId, userName: ctx.userName || 'User', returnFromCall: true, timestamp: Date.now() },
                                         source: 'parent-frame'
                                     }, '*');
                                     if (window.innerWidth <= 768) document.body.classList.add('chat-panel-active');
@@ -1240,11 +2031,7 @@
                         const friendsIframe = document.getElementById('friendsIframe');
                         if (friendsIframe && friendsIframe.contentWindow) {
                             setTimeout(() => {
-                                friendsIframe.contentWindow.postMessage({
-                                    type: 'RETURN_FROM_CALL',
-                                    payload: { returnFromCall: true, timestamp: Date.now() },
-                                    source: 'parent-frame'
-                                }, '*');
+                                friendsIframe.contentWindow.postMessage({ type: 'RETURN_FROM_CALL', payload: { returnFromCall: true, timestamp: Date.now() }, source: 'parent-frame' }, '*');
                             }, 300);
                         }
                     } else {
@@ -1252,11 +2039,7 @@
                         const callsIframe = document.getElementById('callsIframe');
                         if (callsIframe && callsIframe.contentWindow) {
                             setTimeout(() => {
-                                callsIframe.contentWindow.postMessage({
-                                    type: 'SHOW_CALLS_SIDEBAR',
-                                    payload: { timestamp: Date.now() },
-                                    source: 'parent-frame'
-                                }, '*');
+                                callsIframe.contentWindow.postMessage({ type: 'SHOW_CALLS_SIDEBAR', payload: { timestamp: Date.now() }, source: 'parent-frame' }, '*');
                             }, 200);
                         }
                     }
@@ -1264,20 +2047,13 @@
 
                 // VERIFY SESSION HANDLER
                 if (data.type === 'VERIFY_SESSION') {
-                    console.log('[Parent] VERIFY_SESSION received from module:', data.source);
                     const requestId = data.payload?.requestId || data.requestId;
-                    
                     if (event.source && event.source.postMessage) {
                         event.source.postMessage({
                             type: 'VERIFY_RESPONSE',
                             requestId: requestId,
-                            payload: {
-                                valid: true,
-                                timestamp: Date.now(),
-                                module: data.source
-                            }
+                            payload: { valid: true, timestamp: Date.now(), module: data.source }
                         }, '*');
-                        console.log('[Parent] ✅ VERIFY_RESPONSE sent');
                     }
                     return;
                 }
@@ -1294,9 +2070,7 @@
                                 sendSessionToModule(iframe, targetModule);
                             } else {
                                 updateSessionCache();
-                                if (cachedToken && cachedUserId) {
-                                    sendSessionToModule(iframe, targetModule);
-                                }
+                                if (cachedToken && cachedUserId) sendSessionToModule(iframe, targetModule);
                             }
                             setTimeout(() => pushSettingsToModule(iframe, targetModule), 300);
                         }
@@ -1307,13 +2081,8 @@
 
                 // FRIEND EVENTS
                 if (data.type === 'FRIEND_ACCEPTED' || data.type === 'FRIEND_REJECTED' || data.type === 'FRIEND_REMOVED') {
-                    console.log(`[Parent] Broadcasting ${data.type} event to all modules`, data.payload);
                     setTimeout(() => requestFriendsFromFriendIframe(), 500);
-                    dispatchEventToModules({
-                        type: data.type,
-                        payload: data.payload || data,
-                        originalSource: data.source || 'child-module'
-                    });
+                    dispatchEventToModules({ type: data.type, payload: data.payload || data, originalSource: data.source || 'child-module' });
                 }
 
                 // SETTINGS HANDLERS
@@ -1326,31 +2095,14 @@
                         document.body.setAttribute('data-theme', theme);
                         try { localStorage.setItem('app_theme', theme); } catch(e) {}
                     }
-                    dispatchEventToModules({
-                        type: 'SETTINGS_UPDATED',
-                        payload: { settings, timestamp: Date.now() },
-                        originalSource: 'settings'
-                    });
-                    Object.entries(settings).forEach(([section, secVal]) => {
-                        if (secVal && typeof secVal === 'object') {
-                            Object.entries(secVal).forEach(([key, value]) => {
-                                dispatchEventToModules({
-                                    type: 'SETTING_CHANGED',
-                                    payload: { section, key, value, timestamp: Date.now() },
-                                    originalSource: 'settings'
-                                });
-                            });
-                        }
-                    });
+                    dispatchEventToModules({ type: 'SETTINGS_UPDATED', payload: { settings, timestamp: Date.now() }, originalSource: 'settings' });
                 }
 
                 if (data.type === 'SETTINGS_GLOBAL_UPDATE') {
                     const { section, key, value } = data;
                     if (section === 'appearance') {
                         if (key === 'theme') {
-                            const resolvedTheme = value === 'auto'
-                                ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
-                                : value;
+                            const resolvedTheme = value === 'auto' ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light') : value;
                             document.documentElement.setAttribute('data-theme', resolvedTheme);
                             document.body.setAttribute('data-theme', resolvedTheme);
                             try { localStorage.setItem('app_theme', resolvedTheme); } catch(e) {}
@@ -1372,11 +2124,7 @@
                         existing[section][key] = value;
                         localStorage.setItem('knecta_settings_cache', JSON.stringify(existing));
                     } catch(e) {}
-                    dispatchEventToModules({
-                        type: 'SETTING_CHANGED',
-                        payload: { section, key, value, timestamp: Date.now() },
-                        originalSource: 'settings'
-                    });
+                    dispatchEventToModules({ type: 'SETTING_CHANGED', payload: { section, key, value, timestamp: Date.now() }, originalSource: 'settings' });
                 }
 
                 // STORAGE PROXY HANDLERS
@@ -1384,24 +2132,13 @@
                     let storedValue = null;
                     try { storedValue = localStorage.getItem(data.key); } catch(e) {}
                     try {
-                        event.source.postMessage({
-                            type: 'STORAGE_RESULT',
-                            requestId: data.requestId,
-                            value: storedValue,
-                            error: null
-                        }, '*');
+                        event.source.postMessage({ type: 'STORAGE_RESULT', requestId: data.requestId, value: storedValue, error: null }, '*');
                     } catch(e) {}
                     return;
                 }
 
                 if (data.type === 'STORAGE_SET') {
-                    try {
-                        if (data.key && data.value !== undefined) {
-                            localStorage.setItem(data.key, data.value);
-                        }
-                    } catch(e) {
-                        console.warn('[Parent] STORAGE_SET failed:', data.key, e.message);
-                    }
+                    try { if (data.key && data.value !== undefined) localStorage.setItem(data.key, data.value); } catch(e) {}
                     return;
                 }
 
@@ -1423,58 +2160,34 @@
                     return;
                 }
 
-                // FILE UPLOAD PROXY HANDLER
+                // FILE UPLOAD PROXY
                 if (data.type === 'FILE_UPLOAD') {
                     const { requestId, fileName, fileType, fileSize, base64Data } = data;
                     const replySource = event.source;
-
                     const sendResult = (payload) => {
-                        try {
-                            if (replySource && replySource.postMessage) {
-                                replySource.postMessage({ type: 'FILE_UPLOAD_RESULT', requestId, ...payload }, '*');
-                            }
-                        } catch(e) {}
+                        try { if (replySource && replySource.postMessage) replySource.postMessage({ type: 'FILE_UPLOAD_RESULT', requestId, ...payload }, '*'); } catch(e) {}
                     };
-
                     try {
                         const baseUrl = window.__getApiBase ? window.__getApiBase() : 'http://localhost:4000/api';
-                        let token = null;
-                        try {
-                            token = localStorage.getItem('token') ||
-                                    localStorage.getItem('moodchat_token') ||
-                                    localStorage.getItem('accessToken');
-                        } catch(e) {}
-
+                        let token = localStorage.getItem('token') || localStorage.getItem('moodchat_token') || localStorage.getItem('accessToken');
                         const [meta, b64] = base64Data.split(',');
                         const mime = (meta.match(/:(.*?);/) || [])[1] || fileType || 'application/octet-stream';
                         const binary = atob(b64);
                         const bytes = new Uint8Array(binary.length);
                         for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
                         const blob = new Blob([bytes], { type: mime });
-
                         const formData = new FormData();
                         formData.append('file', blob, fileName || 'upload');
                         formData.append('type', mime.split('/')[0]);
-
                         const headers = {};
                         if (token) headers['Authorization'] = 'Bearer ' + token;
-
-                        const uploadRes = await fetch(baseUrl + '/upload', {
-                            method: 'POST',
-                            headers,
-                            body: formData,
-                            credentials: 'include'
-                        });
-
+                        const uploadRes = await fetch(baseUrl + '/upload', { method: 'POST', headers, body: formData, credentials: 'include' });
                         if (uploadRes.ok) {
                             const json = await uploadRes.json().catch(() => ({}));
                             const url = json.url || json.data?.url || json.fileUrl || json.mediaUrl;
-                            if (url) {
-                                sendResult({ url, success: true });
-                                return;
-                            }
+                            if (url) { sendResult({ url, success: true }); return; }
                         }
-                        sendResult({ error: 'Upload endpoint unavailable', success: false });
+                        sendResult({ error: 'Upload failed', success: false });
                     } catch(uploadErr) {
                         sendResult({ error: uploadErr.message || 'Upload failed', success: false });
                     }
@@ -1484,10 +2197,7 @@
                 // API REQUEST HANDLER
                 if (data.type === 'API_REQUEST') {
                     let endpoint = data.payload?.endpoint || data.endpoint;
-                    if (!endpoint) {
-                        console.error('[Parent] API_REQUEST missing endpoint:', data);
-                        return;
-                    }
+                    if (!endpoint) return;
                     if (endpointMappings[endpoint]) endpoint = endpointMappings[endpoint];
                     if (endpoint.startsWith('/api/')) endpoint = endpoint.substring(4);
                     if (!endpoint.startsWith('/')) endpoint = '/' + endpoint;
@@ -1496,206 +2206,97 @@
                     const method = data.payload?.method || data.method || 'GET';
                     const body = data.payload?.body || data.payload?.data || data.body || data.data || null;
                     const params = data.payload?.params || data.params || null;
-                    const sourceModule = data.source || data.payload?.source || 'unknown';
                     
                     let token = data.payload?.token || cachedToken;
                     if (!token) {
                         try {
                             const freshSession = getSessionData();
                             token = freshSession?.token || null;
-                            if (token && !cachedToken) {
-                                cachedToken = token;
-                                cachedUserId = freshSession.userId;
-                                cachedUser = freshSession.user;
-                            }
+                            if (token && !cachedToken) { cachedToken = token; cachedUserId = freshSession.userId; cachedUser = freshSession.user; }
                         } catch(e) {}
                     }
                     if (!token) {
-                        try {
-                            token = localStorage.getItem('token') || 
-                                    localStorage.getItem('moodchat_token') || 
-                                    localStorage.getItem('accessToken');
-                        } catch(e) {}
+                        try { token = localStorage.getItem('token') || localStorage.getItem('moodchat_token') || localStorage.getItem('accessToken'); } catch(e) {}
                     }
 
                     try {
                         const baseUrl = window.__getApiBase ? window.__getApiBase() : 'http://localhost:4000/api';
                         let url = baseUrl + endpoint;
-                        
                         if (method === 'GET' && params && typeof params === 'object') {
                             const queryString = new URLSearchParams(params).toString();
                             if (queryString) url += '?' + queryString;
                         }
-                        
-                        const headers = {
-                            'Content-Type': 'application/json',
-                            'Accept': 'application/json'
-                        };
-                        
+                        const headers = { 'Content-Type': 'application/json', 'Accept': 'application/json' };
                         if (token) headers['Authorization'] = `Bearer ${token}`;
-                        
-                        const fetchOptions = {
-                            method: method,
-                            headers: headers,
-                            credentials: 'include'
-                        };
-                        
-                        if (body && (method === 'POST' || method === 'PUT' || method === 'PATCH')) {
-                            fetchOptions.body = JSON.stringify(body);
-                        }
-                        
+                        const fetchOptions = { method: method, headers: headers, credentials: 'include' };
+                        if (body && (method === 'POST' || method === 'PUT' || method === 'PATCH')) fetchOptions.body = JSON.stringify(body);
                         const response = await fetch(url, fetchOptions);
                         let responseData;
-                        
                         const contentType = response.headers.get('content-type');
-                        if (contentType && contentType.includes('application/json')) {
-                            responseData = await response.json();
-                        } else {
-                            responseData = { message: await response.text() || 'Request completed' };
-                        }
-                        
+                        if (contentType && contentType.includes('application/json')) responseData = await response.json();
+                        else responseData = { message: await response.text() || 'Request completed' };
                         const isSuccess = response.ok;
-                        
-                        const responsePayload = isSuccess ? {
-                            success: true,
-                            data: responseData,
-                            statusCode: response.status
-                        } : {
-                            success: false,
-                            error: responseData?.message || responseData?.error || `HTTP ${response.status}`,
-                            statusCode: response.status,
-                            data: responseData
-                        };
-                        
-                        if (event.source && event.source.postMessage) {
-                            event.source.postMessage({
-                                type: 'API_RESPONSE',
-                                requestId: requestId,
-                                payload: responsePayload,
-                                timestamp: new Date().toISOString()
-                            }, '*');
-                        }
-                        
+                        const responsePayload = isSuccess ? { success: true, data: responseData, statusCode: response.status } : { success: false, error: responseData?.message || responseData?.error || `HTTP ${response.status}`, statusCode: response.status, data: responseData };
+                        if (event.source && event.source.postMessage) event.source.postMessage({ type: 'API_RESPONSE', requestId: requestId, payload: responsePayload, timestamp: new Date().toISOString() }, '*');
                     } catch (error) {
-                        console.error(`[Parent] API error for ${sourceModule}: ${endpoint}`, error);
-                        if (event.source && event.source.postMessage) {
-                            event.source.postMessage({
-                                type: 'API_RESPONSE',
-                                requestId: requestId,
-                                payload: {
-                                    success: false,
-                                    error: error.message || 'Network request failed',
-                                    statusCode: 0,
-                                    data: null
-                                },
-                                timestamp: new Date().toISOString()
-                            }, '*');
-                        }
+                        if (event.source && event.source.postMessage) event.source.postMessage({ type: 'API_RESPONSE', requestId: requestId, payload: { success: false, error: error.message || 'Network request failed', statusCode: 0, data: null }, timestamp: new Date().toISOString() }, '*');
                     }
                 }
 
                 // MODULE SWITCHING
                 if (data.type === 'SWITCH_MODULE' && data.module !== 'calls') {
-                    const targetModule = data.module;
-                    console.log('[Parent] Switching to module:', targetModule, data.payload);
-                    navigateToPage(targetModule);
-
+                    navigateToPage(data.module);
                     if (data.payload?.returnFromCall) {
-                        if (targetModule === 'messages' && data.payload?.openChatWith) {
+                        if (data.module === 'messages' && data.payload?.openChatWith) {
                             const msgIframe = document.getElementById('messagesIframe');
                             if (msgIframe && msgIframe.contentWindow) {
                                 setTimeout(() => {
-                                    msgIframe.contentWindow.postMessage({
-                                        type: 'OPEN_CHAT_WITH_USER',
-                                        payload: {
-                                            userId: data.payload.openChatWith,
-                                            returnFromCall: true,
-                                            timestamp: Date.now()
-                                        },
-                                        source: 'parent-frame'
-                                    }, '*');
+                                    msgIframe.contentWindow.postMessage({ type: 'OPEN_CHAT_WITH_USER', payload: { userId: data.payload.openChatWith, returnFromCall: true, timestamp: Date.now() }, source: 'parent-frame' }, '*');
                                     if (window.innerWidth <= 768) document.body.classList.add('chat-panel-active');
                                 }, 300);
                             }
-                        } else if (targetModule === 'friends') {
+                        } else if (data.module === 'friends') {
                             const friendsIframe = document.getElementById('friendsIframe');
-                            if (friendsIframe && friendsIframe.contentWindow) {
-                                setTimeout(() => {
-                                    friendsIframe.contentWindow.postMessage({
-                                        type: 'RETURN_FROM_CALL',
-                                        payload: { returnFromCall: true, timestamp: Date.now() },
-                                        source: 'parent-frame'
-                                    }, '*');
-                                }, 300);
-                            }
+                            if (friendsIframe && friendsIframe.contentWindow) setTimeout(() => friendsIframe.contentWindow.postMessage({ type: 'RETURN_FROM_CALL', payload: { returnFromCall: true, timestamp: Date.now() }, source: 'parent-frame' }, '*'), 300);
                         }
                     }
                 }
 
                 if (data.type === 'DIRECT_CHAT_REQUEST') {
-                    const chatPayload = {
-                        userId: data.payload.userId,
-                        userName: data.payload.userName || data.payload.name || 'User',
-                        timestamp: Date.now()
-                    };
+                    const chatPayload = { userId: data.payload.userId, userName: data.payload.userName || data.payload.name || 'User', timestamp: Date.now() };
                     sessionStorage.setItem('pending_chat', JSON.stringify(chatPayload));
-                    window.__pendingChat = chatPayload;
                     navigateToPage('messages');
                     const messagesIframe = document.getElementById('messagesIframe');
                     if (messagesIframe && messagesIframe.contentWindow) {
-                        messagesIframe.contentWindow.postMessage({
-                            type: 'OPEN_CHAT_WITH_USER',
-                            payload: chatPayload,
-                            source: 'parent-frame',
-                            timestamp: Date.now()
-                        }, '*');
+                        messagesIframe.contentWindow.postMessage({ type: 'OPEN_CHAT_WITH_USER', payload: chatPayload, source: 'parent-frame', timestamp: Date.now() }, '*');
                         if (window.innerWidth <= 768) document.body.classList.add('chat-panel-active');
                     }
                 }
 
                 if (data.type === 'DIRECT_CALL_REQUEST') {
                     const p = data.payload || {};
-                    const returnTo = (window.__currentPage && window.__currentPage !== 'calls')
-                        ? window.__currentPage
-                        : (window.__lastActivePage || 'friends');
+                    const returnTo = (window.__currentPage && window.__currentPage !== 'calls') ? window.__currentPage : (window.__lastActivePage || 'friends');
                     sendFriendsToCallsIframe();
-                    __dispatchCallToIframe(
-                        p.userId, p.userName || p.name || 'User', p.callType || 'voice',
-                        returnTo, p.userId, 'friends-module'
-                    );
+                    __dispatchCallToIframe(p.userId, p.userName || p.name || 'User', p.callType || 'voice', returnTo, p.userId, 'friends-module');
                 }
 
                 if (data.type === 'CHILD_CLOSING') {
                     const returnPage = data.returnTo || window.__lastActivePage || 'messages';
-                    console.log(`[Parent] CHILD_CLOSING from ${data.module || data.childId || 'unknown'}, returning to: ${returnPage}`);
                     navigateToPage(returnPage);
                     if (returnPage === 'messages') {
                         const messagesIframe = document.getElementById('messagesIframe');
-                        if (messagesIframe && messagesIframe.contentWindow) {
-                            setTimeout(() => {
-                                messagesIframe.contentWindow.postMessage({ type: 'CALL_ENDED_RETURN', timestamp: Date.now() }, '*');
-                            }, 200);
-                        }
+                        if (messagesIframe && messagesIframe.contentWindow) setTimeout(() => messagesIframe.contentWindow.postMessage({ type: 'CALL_ENDED_RETURN', timestamp: Date.now() }, '*'), 200);
                     }
                 }
 
                 if (data.type === 'HIDE_SIDEBAR_ICONS') {
-                    document.querySelectorAll('.nav-icon, .mobile-nav-icon, .sidebar-nav .nav-item').forEach(function(el) {
-                        el.style.opacity = '0.3';
-                        el.style.pointerEvents = 'none';
-                    });
+                    document.querySelectorAll('.nav-icon, .mobile-nav-icon, .sidebar-nav .nav-item').forEach(el => { el.style.opacity = '0.3'; el.style.pointerEvents = 'none'; });
                 }
                 if (data.type === 'SHOW_SIDEBAR_ICONS') {
-                    document.querySelectorAll('.nav-icon, .mobile-nav-icon, .sidebar-nav .nav-item').forEach(function(el) {
-                        el.style.opacity = '';
-                        el.style.pointerEvents = '';
-                    });
+                    document.querySelectorAll('.nav-icon, .mobile-nav-icon, .sidebar-nav .nav-item').forEach(el => { el.style.opacity = ''; el.style.pointerEvents = ''; });
                 }
 
-                if (data.type === 'API_RESPONSE' && data.status === 401) {
-                    console.log('[Parent] Received 401, attempting token refresh');
-                    await refreshAuthToken();
-                }
+                if (data.type === 'API_RESPONSE' && data.status === 401) await refreshAuthToken();
 
                 if (data.type === 'REFRESH_CALL_HISTORY') {
                     const userId = data.payload?.userId || cachedUserId;
@@ -1710,120 +2311,51 @@
                     const isGroupCall = data.payload?.isGroupCall || false;
                     const callOriginPage = data.payload?.returnTo || window.__currentPage || window.__lastActivePage || 'calls';
                     window.__pendingCallOrigin = callOriginPage;
-                    const baseUrl = window.__getApiBase ? window.__getApiBase() : 'http://localhost:4000/api';
+                    const baseUrl = window.__getApiBase();
                     let token = cachedToken;
+                    try { if (!token) token = localStorage.getItem('token') || localStorage.getItem('moodchat_token') || localStorage.getItem('accessToken'); } catch(e) {}
                     try {
-                        if (!token) token = localStorage.getItem('token') || localStorage.getItem('moodchat_token') || localStorage.getItem('accessToken');
-                    } catch(e) {}
-
-                    try {
-                        const body = {
-                            callType: callType === 'voice' ? 'audio' : callType,
-                            isGroupCall: isGroupCall,
-                        };
-                        if (isGroupCall && participantIds) {
-                            body.participantIds = participantIds;
-                        } else if (calleeId) {
-                            body.participantIds = [parseInt(calleeId)];
-                        }
-
-                        const resp = await fetch(`${baseUrl}/calls`, {
-                            method: 'POST',
-                            headers: {
-                                'Content-Type': 'application/json',
-                                'Authorization': `Bearer ${token}`
-                            },
-                            body: JSON.stringify(body)
-                        });
+                        const body = { callType: callType === 'voice' ? 'audio' : callType, isGroupCall: isGroupCall };
+                        if (isGroupCall && participantIds) body.participantIds = participantIds;
+                        else if (calleeId) body.participantIds = [parseInt(calleeId)];
+                        const resp = await fetch(`${baseUrl}/calls`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }, body: JSON.stringify(body) });
                         const respData = await resp.json();
-
                         if (resp.ok && (respData.data?.call?.id || respData.data?.callId)) {
                             const serverCallId = respData.data?.call?.id || respData.data?.callId;
                             window.__callIdMap = window.__callIdMap || {};
                             window.__callIdMap[localCallId] = serverCallId;
-
                             const callsIframe = document.getElementById('callsIframe');
-                            if (callsIframe && callsIframe.contentWindow) {
-                                callsIframe.contentWindow.postMessage({
-                                    type: 'CALL_INITIATED',
-                                    payload: {
-                                        ...(respData.data?.call || respData.data),
-                                        callId: serverCallId,
-                                        localCallId: localCallId,
-                                        callType: callType,
-                                        returnTo: callOriginPage,
-                                        receiverOnline: respData.data?.receiverOnline !== false,
-                                        success: true
-                                    }
-                                }, '*');
-                            }
+                            if (callsIframe && callsIframe.contentWindow) callsIframe.contentWindow.postMessage({ type: 'CALL_INITIATED', payload: { ...(respData.data?.call || respData.data), callId: serverCallId, localCallId: localCallId, callType: callType, returnTo: callOriginPage, receiverOnline: respData.data?.receiverOnline !== false, success: true } }, '*');
                         } else {
-                            console.warn('[Parent] CALL_INITIATE failed:', respData);
                             const callsIframe = document.getElementById('callsIframe');
-                            if (callsIframe && callsIframe.contentWindow) {
-                                callsIframe.contentWindow.postMessage({
-                                    type: 'CALL_INITIATED',
-                                    payload: { success: false, error: respData?.message || 'Failed to start call', localCallId }
-                                }, '*');
-                            }
+                            if (callsIframe && callsIframe.contentWindow) callsIframe.contentWindow.postMessage({ type: 'CALL_INITIATED', payload: { success: false, error: respData?.message || 'Failed to start call', localCallId } }, '*');
                         }
                     } catch(err) {
-                        console.error('[Parent] CALL_INITIATE error:', err);
                         const callsIframe = document.getElementById('callsIframe');
-                        if (callsIframe && callsIframe.contentWindow) {
-                            callsIframe.contentWindow.postMessage({
-                                type: 'CALL_INITIATED',
-                                payload: { success: false, error: err.message, localCallId }
-                            }, '*');
-                        }
+                        if (callsIframe && callsIframe.contentWindow) callsIframe.contentWindow.postMessage({ type: 'CALL_INITIATED', payload: { success: false, error: err.message, localCallId } }, '*');
                     }
                 }
 
                 if (data.type === 'API_REQUEST' && window.__callIdMap) {
                     let ep = data.payload?.endpoint || '';
-                    Object.entries(window.__callIdMap).forEach(([local, server]) => {
-                        if (ep.includes(local)) {
-                            data.payload.endpoint = ep.replace(local, server);
-                        }
-                    });
+                    Object.entries(window.__callIdMap).forEach(([local, server]) => { if (ep.includes(local)) data.payload.endpoint = ep.replace(local, server); });
                 }
 
-                // ── WebRTC Signaling Bridge (outbound): calls iframe → wsService → remote ──
-                // calls-core.js sends SIGNAL_OFFER / SIGNAL_ANSWER / ICE_CANDIDATE to window.parent
-                // We forward them to the remote peer via wsService.send()
+                // WebRTC Signaling Bridge
                 if (data.type === 'SIGNAL_OFFER' || data.type === 'SIGNAL_ANSWER' || data.type === 'ICE_CANDIDATE') {
                     if (window.wsService && typeof window.wsService.send === 'function') {
-                        const wsEventMap = {
-                            'SIGNAL_OFFER':   'call_offer',
-                            'SIGNAL_ANSWER':  'call_answer',
-                            'ICE_CANDIDATE':  'ice_candidate'
-                        };
-                        const wsType = wsEventMap[data.type];
-                        try {
-                            window.wsService.send(wsType, data.payload || {});
-                            console.log(`[Parent] ↑ WebRTC signal forwarded to wsService: ${wsType}`);
-                        } catch(sigErr) {
-                            console.warn('[Parent] Failed to forward WebRTC signal:', sigErr.message);
-                        }
-                    } else {
-                        // Fallback: try emit() if send() not available
-                        if (window.wsService && typeof window.wsService.emit === 'function') {
-                            const wsEventMap = { 'SIGNAL_OFFER':'call_offer', 'SIGNAL_ANSWER':'call_answer', 'ICE_CANDIDATE':'ice_candidate' };
-                            window.wsService.emit(wsEventMap[data.type], data.payload || {});
-                        }
-                        console.warn('[Parent] wsService.send not available for WebRTC signal:', data.type);
+                        const wsEventMap = { 'SIGNAL_OFFER': 'call_offer', 'SIGNAL_ANSWER': 'call_answer', 'ICE_CANDIDATE': 'ice_candidate' };
+                        try { window.wsService.send(wsEventMap[data.type], data.payload || {}); } catch(sigErr) { console.warn('[Parent] WebRTC signal forward failed:', sigErr.message); }
+                    } else if (window.wsService && typeof window.wsService.emit === 'function') {
+                        const wsEventMap = { 'SIGNAL_OFFER': 'call_offer', 'SIGNAL_ANSWER': 'call_answer', 'ICE_CANDIDATE': 'ice_candidate' };
+                        window.wsService.emit(wsEventMap[data.type], data.payload || {});
                     }
                     return;
                 }
 
                 if (data.type === 'GET_FRIENDS_LIST') {
                     const src = event.source;
-                    if (src && src.postMessage) {
-                        src.postMessage({
-                            type: 'FRIENDS_LIST_RESPONSE',
-                            payload: { friends: cachedFriendsList, timestamp: Date.now() }
-                        }, '*');
-                    }
+                    if (src && src.postMessage) src.postMessage({ type: 'FRIENDS_LIST_RESPONSE', payload: { friends: cachedFriendsList, timestamp: Date.now() } }, '*');
                     requestFriendsFromFriendIframe();
                 }
 
@@ -1840,122 +2372,135 @@
                     if (!requestId) return;
                     const page = data.payload?.page || 1;
                     const limit = data.payload?.limit || 20;
-                    const baseUrl = window.__getApiBase ? window.__getApiBase() : 'http://localhost:4000/api';
+                    const baseUrl = window.__getApiBase();
                     let token = cachedToken;
-                    if (!token) {
-                        try { token = localStorage.getItem('token') || localStorage.getItem('moodchat_token') || localStorage.getItem('accessToken'); } catch(e) {}
-                    }
-                    if (!token) {
-                        if (event.source) event.source.postMessage({ type: 'FETCH_LISTINGS_RESPONSE', requestId, payload: { data: { listings: [], total: 0 } } }, '*');
-                        return;
-                    }
-                    fetch(`${baseUrl}/marketplace/listings?page=${page}&limit=${limit}`, {
-                        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-                        credentials: 'include'
-                    }).then(r => r.json()).then(responseData => {
-                        if (event.source) event.source.postMessage({
-                            type: 'FETCH_LISTINGS_RESPONSE',
-                            requestId,
-                            payload: { data: responseData.data || { listings: [], total: 0 } }
-                        }, '*');
-                    }).catch(() => {
-                        if (event.source) event.source.postMessage({ type: 'FETCH_LISTINGS_RESPONSE', requestId, payload: { data: { listings: [], total: 0 } } }, '*');
-                    });
+                    if (!token) { try { token = localStorage.getItem('token') || localStorage.getItem('moodchat_token') || localStorage.getItem('accessToken'); } catch(e) {} }
+                    if (!token) { if (event.source) event.source.postMessage({ type: 'FETCH_LISTINGS_RESPONSE', requestId, payload: { data: { listings: [], total: 0 } } }, '*'); return; }
+                    fetch(`${baseUrl}/marketplace/listings?page=${page}&limit=${limit}`, { headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' }, credentials: 'include' })
+                        .then(r => r.json())
+                        .then(responseData => { if (event.source) event.source.postMessage({ type: 'FETCH_LISTINGS_RESPONSE', requestId, payload: { data: responseData.data || { listings: [], total: 0 } } }, '*'); })
+                        .catch(() => { if (event.source) event.source.postMessage({ type: 'FETCH_LISTINGS_RESPONSE', requestId, payload: { data: { listings: [], total: 0 } } }, '*'); });
                 }
             });
 
-            // WebSocket call event listeners
+            // ======================================================================
+            // WEBSOCKET CALL EVENT LISTENERS WITH SOURCE: 'ws-bridge'
+            // ======================================================================
             if (window.wsService && typeof window.wsService.on === 'function') {
+                // call:incoming - show banner on ALL pages
                 window.wsService.on('call:incoming', function(callData) {
+                    console.log('[WS] call:incoming received - showing banner');
+                    if (window.showIncomingCallBanner) {
+                        window.showIncomingCallBanner(callData);
+                    }
                     const callsFrame = document.getElementById('callsIframe');
                     if (callsFrame && callsFrame.contentWindow) {
-                        callsFrame.contentWindow.postMessage({ type: 'CALL_INCOMING', payload: callData }, '*');
+                        callsFrame.contentWindow.postMessage({ type: 'CALL_INCOMING', payload: callData, source: 'ws-bridge' }, '*');
                     }
                 });
+                
+                // call:answered
                 window.wsService.on('call:answered', function(callData) {
+                    console.log('[WS] call:answered - dismissing banner');
+                    hideGlobalBanner();
                     const callsFrame = document.getElementById('callsIframe');
                     if (callsFrame && callsFrame.contentWindow) {
-                        callsFrame.contentWindow.postMessage({ type: 'CALL_ACCEPTED', payload: callData }, '*');
+                        callsFrame.contentWindow.postMessage({ type: 'CALL_ACCEPTED', payload: callData, source: 'ws-bridge' }, '*');
                     }
                     setTimeout(() => refreshCallHistoryForUser(cachedUserId), 1000);
                 });
+                
+                // call:rejected
                 window.wsService.on('call:rejected', function(callData) {
+                    console.log('[WS] call:rejected - dismissing banner');
+                    hideGlobalBanner();
+                    document.body.classList.remove('call-screen-active');
+                    window.__activeCallInProgress = false;
                     const callsFrame = document.getElementById('callsIframe');
                     if (callsFrame && callsFrame.contentWindow) {
-                        callsFrame.contentWindow.postMessage({ type: 'CALL_REJECTED', payload: callData }, '*');
+                        callsFrame.contentWindow.postMessage({ type: 'CALL_REJECTED', payload: callData, source: 'ws-bridge' }, '*');
                     }
                     setTimeout(() => refreshCallHistoryForUser(cachedUserId), 1000);
                 });
+                
+                // call:ended - with ws-bridge source
                 window.wsService.on('call:ended', function(callData) {
+                    console.log('[WS] call:ended - dismissing banner, no API call');
+                    hideGlobalBanner();
+                    document.body.classList.remove('call-screen-active');
+                    window.__activeCallInProgress = false;
                     const callsFrame = document.getElementById('callsIframe');
                     if (callsFrame && callsFrame.contentWindow) {
-                        callsFrame.contentWindow.postMessage({ type: 'CALL_ENDED', payload: callData }, '*');
+                        callsFrame.contentWindow.postMessage({ type: 'CALL_ENDED', payload: callData, source: 'ws-bridge' }, '*');
                     }
                     setTimeout(() => refreshCallHistoryForUser(cachedUserId), 500);
                 });
+                
+                // call_force_ended
                 window.wsService.on('call_force_ended', function(callData) {
+                    console.log('[WS] call_force_ended - dismissing banner');
+                    hideGlobalBanner();
+                    document.body.classList.remove('call-screen-active');
+                    window.__activeCallInProgress = false;
                     const callsFrame = document.getElementById('callsIframe');
                     if (callsFrame && callsFrame.contentWindow) {
-                        callsFrame.contentWindow.postMessage({ type: 'CALL_FORCE_ENDED', payload: callData }, '*');
+                        callsFrame.contentWindow.postMessage({ type: 'CALL_FORCE_ENDED', payload: callData, source: 'ws-bridge' }, '*');
+                    }
+                    setTimeout(() => refreshCallHistoryForUser(cachedUserId), 500);
+                });
+                
+                // call:force_end alias
+                window.wsService.on('call:force_end', function(callData) {
+                    console.log('[WS] call:force_end alias - dismissing banner');
+                    hideGlobalBanner();
+                    document.body.classList.remove('call-screen-active');
+                    window.__activeCallInProgress = false;
+                    const callsFrame = document.getElementById('callsIframe');
+                    if (callsFrame && callsFrame.contentWindow) {
+                        callsFrame.contentWindow.postMessage({ type: 'CALL_FORCE_ENDED', payload: callData, source: 'ws-bridge' }, '*');
+                    }
+                    setTimeout(() => refreshCallHistoryForUser(cachedUserId), 500);
+                });
+                
+                // call:cancelled
+                window.wsService.on('call:cancelled', function(callData) {
+                    console.log('[WS] call:cancelled - dismissing banner');
+                    hideGlobalBanner();
+                    document.body.classList.remove('call-screen-active');
+                    window.__activeCallInProgress = false;
+                    const callsFrame = document.getElementById('callsIframe');
+                    if (callsFrame && callsFrame.contentWindow) {
+                        callsFrame.contentWindow.postMessage({ type: 'CALL_CANCELLED', payload: callData, source: 'ws-bridge' }, '*');
                     }
                     setTimeout(() => refreshCallHistoryForUser(cachedUserId), 500);
                 });
 
-                // ── WebRTC Signaling Bridge ──────────────────────────────────────
-                // Forward SDP offer/answer and ICE candidates from wsService → calls iframe
-                // and from calls iframe → wsService (so both peers can exchange WebRTC signals)
-
+                // WebRTC Signaling Bridge inbound
                 function _fwdToCallsIframe(type, payload) {
                     const f = document.getElementById('callsIframe');
-                    if (f && f.contentWindow) f.contentWindow.postMessage({ type, payload, source: 'parent-signal' }, '*');
+                    if (f && f.contentWindow) f.contentWindow.postMessage({ type, payload, source: 'ws-bridge' }, '*');
                 }
-
-                // Inbound signals from the remote peer (via ws server → wsService → here → iframe)
-                window.wsService.on('call_offer',        d => _fwdToCallsIframe('SIGNAL_OFFER',       d));
-                window.wsService.on('call_answer',       d => _fwdToCallsIframe('SIGNAL_ANSWER',      d));
-                window.wsService.on('ice_candidate',     d => _fwdToCallsIframe('ICE_CANDIDATE',      d));
-                window.wsService.on('call:offer',        d => _fwdToCallsIframe('SIGNAL_OFFER',       d));
-                window.wsService.on('call:answer',       d => _fwdToCallsIframe('SIGNAL_ANSWER',      d));
-                window.wsService.on('call:ice_candidate',d => _fwdToCallsIframe('ICE_CANDIDATE',      d));
+                window.wsService.on('call_offer', d => _fwdToCallsIframe('SIGNAL_OFFER', d));
+                window.wsService.on('call_answer', d => _fwdToCallsIframe('SIGNAL_ANSWER', d));
+                window.wsService.on('ice_candidate', d => _fwdToCallsIframe('ICE_CANDIDATE', d));
+                window.wsService.on('call:offer', d => _fwdToCallsIframe('SIGNAL_OFFER', d));
+                window.wsService.on('call:answer', d => _fwdToCallsIframe('SIGNAL_ANSWER', d));
+                window.wsService.on('call:ice_candidate', d => _fwdToCallsIframe('ICE_CANDIDATE', d));
             }
-
-            // ── WebRTC outbound signals: calls iframe → wsService → remote peer ──
-            // Handled in the main window.addEventListener('message') listener below.
-            // Signals arrive from calls iframe as SIGNAL_OFFER / SIGNAL_ANSWER / ICE_CANDIDATE
-            // and must be forwarded via wsService.send() to the server.
 
             // Calls iframe load handler
             const callsIframe = document.getElementById('callsIframe');
             if (callsIframe) {
                 callsIframe.addEventListener('load', function() {
-                    console.log('[Parent] Calls iframe loaded, sending initial data');
-                    
                     if (cachedToken && cachedUserId) {
-                        const sessionData = {
-                            token: cachedToken,
-                            userId: cachedUserId,
-                            user: cachedUser,
-                            authenticated: true
-                        };
-                        callsIframe.contentWindow.postMessage({
-                            type: 'SESSION_DATA',
-                            payload: sessionData,
-                            timestamp: Date.now()
-                        }, '*');
+                        callsIframe.contentWindow.postMessage({ type: 'SESSION_DATA', payload: { token: cachedToken, userId: cachedUserId, user: cachedUser, authenticated: true }, timestamp: Date.now() }, '*');
                     }
-                    
                     setTimeout(() => sendFriendsToCallsIframe(), 500);
-                    
                     const pendingCall = sessionStorage.getItem('pending_call');
                     if (pendingCall) {
                         try {
                             const callData = JSON.parse(pendingCall);
-                            callsIframe.contentWindow.postMessage({
-                                type: 'OPEN_CALL_WITH_USER',
-                                payload: callData,
-                                source: 'parent-frame',
-                                timestamp: Date.now()
-                            }, '*');
+                            callsIframe.contentWindow.postMessage({ type: 'OPEN_CALL_WITH_USER', payload: callData, source: 'parent-frame', timestamp: Date.now() }, '*');
                             sessionStorage.removeItem('pending_call');
                         } catch(e) {}
                     }
@@ -1969,8 +2514,13 @@
             }, 1000);
         })();
 
-        // Pending chat and call handlers on DOMContentLoaded
+        // DOMContentLoaded handlers
         document.addEventListener('DOMContentLoaded', function() {
+            updateHeaderContext(window.__currentPage || 'messages');
+            loadUserProfileFromStorage();
+            setupProfileModal();
+            setupGlobalCallBanner();
+            
             const pendingChat = sessionStorage.getItem('pending_chat');
             if (pendingChat) {
                 try {
@@ -1978,12 +2528,7 @@
                     const messagesIframe = document.getElementById('messagesIframe');
                     if (messagesIframe && messagesIframe.contentWindow) {
                         setTimeout(() => {
-                            messagesIframe.contentWindow.postMessage({
-                                type: 'OPEN_CHAT_WITH_USER',
-                                payload: chatData,
-                                source: 'parent-frame',
-                                timestamp: Date.now()
-                            }, '*');
+                            messagesIframe.contentWindow.postMessage({ type: 'OPEN_CHAT_WITH_USER', payload: chatData, source: 'parent-frame', timestamp: Date.now() }, '*');
                             sessionStorage.removeItem('pending_chat');
                             if (window.innerWidth <= 768) document.body.classList.add('chat-panel-active');
                         }, 1000);
@@ -1997,12 +2542,7 @@
                     const callsIframe = document.getElementById('callsIframe');
                     if (callsIframe && callsIframe.contentWindow) {
                         setTimeout(() => {
-                            callsIframe.contentWindow.postMessage({
-                                type: 'OPEN_CALL_WITH_USER',
-                                payload: callData,
-                                source: 'parent-frame',
-                                timestamp: Date.now()
-                            }, '*');
+                            callsIframe.contentWindow.postMessage({ type: 'OPEN_CALL_WITH_USER', payload: callData, source: 'parent-frame', timestamp: Date.now() }, '*');
                             sessionStorage.removeItem('pending_call');
                         }, 1000);
                     }

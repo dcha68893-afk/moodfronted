@@ -147,6 +147,26 @@
         return true;
     }
 
+    function ensureSafeArray(data) {
+        if (typeof window.safeArray === 'function') return window.safeArray(data);
+        return Array.isArray(data) ? data : [];
+    }
+
+    function ensureSafeObject(data) {
+        if (typeof window.safeObject === 'function') return window.safeObject(data);
+        return data && typeof data === 'object' && !Array.isArray(data) ? data : {};
+    }
+
+    function sanitizeHTML(html) {
+        if (typeof html !== 'string') return '';
+        return html
+            .replace(/<script[\s\S]*?>[\s\S]*?<\/script>/gi, '')
+            .replace(/\son\w+\s*=\s*(['"]).*?\1/gi, '')
+            .replace(/\son\w+\s*=\s*[^\s>]+/gi, '')
+            .replace(/javascript:/gi, '')
+            .replace(/data:text\/html/gi, '');
+    }
+
     // =============================================
     // GET CORE REFERENCE (WORKS WITH BOTH CASES)
     // =============================================
@@ -184,6 +204,9 @@
         _initialized: false,
         _cachedCoreSessionValid: false,
         _lastCoreCheckTime: 0,
+        _hasTriggeredInitialDataFetch: false,
+        _pendingFetchTimer: null,
+        _lastDataFetchAt: 0,
         
         init() {
             if (this._initialized) return this;
@@ -321,7 +344,7 @@
         safeSetHTML(element, html) {
             if (!element) return;
             try {
-                element.innerHTML = html;
+                element.innerHTML = sanitizeHTML(html);
             } catch (e) {}
         },
         
@@ -784,13 +807,22 @@
         
         _triggerRealDataFetch() {
             const core = getMessagesCore();
+            const now = Date.now();
+
+            if (this._pendingFetchTimer) {
+                return;
+            }
+            if (this._hasTriggeredInitialDataFetch && (now - this._lastDataFetchAt) < 15000) {
+                return;
+            }
             
             const coreState = core?.getState?.();
             const coreIsActive = coreState?.state === 'ACTIVE';
             
             if (!coreIsActive) {
                 console.log('[messagesUI] Core not ACTIVE yet, scheduling retry for data fetch');
-                setTimeout(() => {
+                this._pendingFetchTimer = setTimeout(() => {
+                    this._pendingFetchTimer = null;
                     const coreStateRetry = getMessagesCore()?.getState?.();
                     if (coreStateRetry?.state === 'ACTIVE') {
                         this._triggerRealDataFetch();
@@ -803,6 +835,8 @@
                 console.log('[messagesUI] No valid session, skipping data fetch');
                 return;
             }
+            this._hasTriggeredInitialDataFetch = true;
+            this._lastDataFetchAt = now;
             
             if (core && core.fetchConversations) {
                 console.log('[messagesUI] Triggering real data fetch from backend');
@@ -1012,6 +1046,17 @@
                 UIFailsafe.queueAction(() => {
                     if (e.detail && e.detail.message) {
                         this._notifyListeners('newMessage', e.detail.message);
+
+                        // Force immediate re-render of the messages container
+                        // if the incoming message belongs to the active chat
+                        const core = getMessagesCore();
+                        const activeChat = core?.getCurrentConversation?.() || core?.ChatManager?.getActiveChat?.();
+                        const incomingChatId = e.detail.message.chatId || e.detail.message.conversationId;
+                        if (activeChat && String(activeChat.id) === String(incomingChatId)) {
+                            const messages    = core?.getMessages?.() || [];
+                            const currentUser = core?.getCurrentUser?.();
+                            UIRenderer.renderMessages(messages, activeChat, currentUser);
+                        }
                     }
                 });
             });
@@ -1382,7 +1427,8 @@
 
             window.addEventListener('renderChatsList', (e) => {
                 UIFailsafe.queueAction(() => {
-                    this.renderChatsList(e.detail.chats, e.detail.currentChat, e.detail.currentCategory, e.detail.messageDrafts);
+                    const chats = e.detail?.conversations || e.detail?.chats || [];
+                    this.renderChatsList(chats, e.detail?.currentChat, e.detail?.currentCategory, e.detail?.messageDrafts);
                 });
             });
 
@@ -1517,26 +1563,46 @@
         renderMessages(messages, currentChat, currentUser) {
             const container = UIFailsafe.safeGetElement('messagesContainer');
             if (!container) return;
-
-            container.innerHTML = '';
+            const normalizedMessages = ensureSafeArray(messages);
+            const currentChatId = currentChat?.id ? String(currentChat.id) : '';
+            const renderSignature = `${currentChatId}|${normalizedMessages.length}|${normalizedMessages.map(m => `${m.id}:${m.status || ''}:${m.timestamp || m.createdAt || ''}`).join(',')}`;
 
             if (!this._canRender()) {
+                if (currentChat && normalizedMessages.length > 0) {
+                    const groupedMessages = this._groupMessagesByDate(normalizedMessages);
+                    if (this._lastRenderedMessagesSignature !== renderSignature) {
+                        container.innerHTML = '';
+                        this._renderMessageBatches(container, groupedMessages, currentUser);
+                        this._lastRenderedMessagesSignature = renderSignature;
+                    }
+                    return;
+                }
                 UIFailsafe.safeSetHTML(container, this._getPassiveLoadingState());
                 return;
             }
 
             if (!currentChat) {
+                container.innerHTML = '';
+                this._lastRenderedMessagesSignature = null;
                 UIFailsafe.safeSetHTML(container, this._getEmptyChatHTML());
                 return;
             }
 
-            if (!messages || messages.length === 0) {
+            if (normalizedMessages.length === 0) {
+                container.innerHTML = '';
+                this._lastRenderedMessagesSignature = `${currentChatId}|empty`;
                 UIFailsafe.safeSetHTML(container, this._getEmptyMessagesHTML(currentChat));
                 return;
             }
 
-            const groupedMessages = this._groupMessagesByDate(messages);
+            if (this._lastRenderedMessagesSignature === renderSignature) {
+                return;
+            }
+
+            container.innerHTML = '';
+            const groupedMessages = this._groupMessagesByDate(normalizedMessages);
             this._renderMessageBatches(container, groupedMessages, currentUser);
+            this._lastRenderedMessagesSignature = renderSignature;
             this.scrollToBottom(container);
         },
 
@@ -1605,9 +1671,11 @@
             const content = core?.formatMessageText ? 
                 core.formatMessageText(message.content) : 
                 message.content;
+            // Use createdAt first (set at send time for sender, server time for receiver)
+            const msgTs = message.createdAt || message.timestamp || Date.now();
             const time = core?.formatTime ? 
-                core.formatTime(message.timestamp) : 
-                new Date(message.timestamp).toLocaleTimeString();
+                core.formatTime(msgTs) : 
+                new Date(msgTs).toLocaleTimeString([], {hour:'numeric',minute:'2-digit',hour12:true});
             
             const safeMessage = JSON.stringify(message).replace(/"/g, '&quot;');
             
@@ -1952,13 +2020,25 @@
         renderChatsList(chats, currentChat, category, messageDrafts) {
             const container = UIFailsafe.safeGetElement('chatsList');
             if (!container) return;
+            const normalizedChats = ensureSafeArray(chats);
+            const normalizedCategory = ['all', 'unread', 'archived', 'blocked', 'notes'].includes(category) ? category : 'all';
+            const normalizedDrafts = ensureSafeObject(messageDrafts);
 
             if (!this._canRender()) {
+                if (normalizedChats.length > 0) {
+                    // Allow cached sidebar data to remain visible before ACTIVE to avoid flash-to-empty.
+                } else {
+                    UIFailsafe.safeSetHTML(container, this._getPassiveLoadingState());
+                    return;
+                }
+            }
+
+            if (!this._canRender() && normalizedChats.length === 0) {
                 UIFailsafe.safeSetHTML(container, this._getPassiveLoadingState());
                 return;
             }
 
-            if (!chats || chats.length === 0) {
+            if (normalizedChats.length === 0) {
                 UIFailsafe.safeSetHTML(container, `
                     <div class="empty-state">
                         <i class="fas fa-comments empty-icon"></i>
@@ -1969,17 +2049,17 @@
                 return;
             }
 
-            let filteredChats = chats;
-            if (category === 'unread') {
-                filteredChats = chats.filter(c => c.unreadCount > 0);
-            } else if (category === 'archived') {
-                filteredChats = chats.filter(c => c.archived);
-            } else if (category === 'blocked') {
-                filteredChats = chats.filter(c => c.blocked);
-            } else if (category === 'notes') {
-                filteredChats = chats.filter(c => c.type === 'note');
+            let filteredChats = normalizedChats;
+            if (normalizedCategory === 'unread') {
+                filteredChats = normalizedChats.filter(c => (Number(c?.unreadCount) || 0) > 0);
+            } else if (normalizedCategory === 'archived') {
+                filteredChats = normalizedChats.filter(c => !!c?.archived);
+            } else if (normalizedCategory === 'blocked') {
+                filteredChats = normalizedChats.filter(c => !!c?.blocked);
+            } else if (normalizedCategory === 'notes') {
+                filteredChats = normalizedChats.filter(c => c?.type === 'note');
             } else {
-                filteredChats = chats.filter(c => !c.archived && !c.blocked);
+                filteredChats = normalizedChats.filter(c => !c?.archived && !c?.blocked);
             }
 
             filteredChats.sort((a, b) => {
@@ -1988,9 +2068,10 @@
 
             let html = '';
             filteredChats.forEach(chat => {
-                const hasDraft = messageDrafts && messageDrafts[chat.id];
+                const hasDraft = normalizedDrafts && normalizedDrafts[chat.id];
                 const isSelected = currentChat?.id === chat.id;
-                const unreadBadge = chat.unreadCount > 0 ? `<span class="unread-badge">${chat.unreadCount}</span>` : '';
+                const unreadCount = Number(chat?.unreadCount) || 0;
+                const unreadBadge = unreadCount > 0 ? `<span class="unread-badge">${unreadCount}</span>` : '';
                 const draftBadge = hasDraft ? '<span class="draft-badge">Draft</span>' : '';
                 const status = chat.online ? 'online' : 'offline';
                 const core = getMessagesCore();
@@ -2041,21 +2122,22 @@
             });
 
             UIFailsafe.safeSetHTML(container, html);
-            this._updateCategoryBadges(chats);
+            this._updateCategoryBadges(normalizedChats);
         },
 
         _updateCategoryBadges(chats) {
+            const normalizedChats = ensureSafeArray(chats);
             const allBadge = UIFailsafe.safeGetElement('allBadge');
             const unreadBadge = UIFailsafe.safeGetElement('unreadBadge');
             const archivedBadge = UIFailsafe.safeGetElement('archivedBadge');
             const blockedBadge = UIFailsafe.safeGetElement('blockedBadge');
             const notesBadge = UIFailsafe.safeGetElement('notesBadge');
 
-            if (allBadge) UIFailsafe.safeSetText(allBadge, chats.filter(c => !c.archived && !c.blocked).length);
-            if (unreadBadge) UIFailsafe.safeSetText(unreadBadge, chats.filter(c => c.unreadCount > 0).length);
-            if (archivedBadge) UIFailsafe.safeSetText(archivedBadge, chats.filter(c => c.archived).length);
-            if (blockedBadge) UIFailsafe.safeSetText(blockedBadge, chats.filter(c => c.blocked).length);
-            if (notesBadge) UIFailsafe.safeSetText(notesBadge, chats.filter(c => c.type === 'note').length);
+            if (allBadge) UIFailsafe.safeSetText(allBadge, normalizedChats.filter(c => !c?.archived && !c?.blocked).length);
+            if (unreadBadge) UIFailsafe.safeSetText(unreadBadge, normalizedChats.filter(c => (Number(c?.unreadCount) || 0) > 0).length);
+            if (archivedBadge) UIFailsafe.safeSetText(archivedBadge, normalizedChats.filter(c => !!c?.archived).length);
+            if (blockedBadge) UIFailsafe.safeSetText(blockedBadge, normalizedChats.filter(c => !!c?.blocked).length);
+            if (notesBadge) UIFailsafe.safeSetText(notesBadge, normalizedChats.filter(c => c?.type === 'note').length);
         },
 
         renderContactsList(contacts) {
@@ -4961,7 +5043,8 @@ Type: ${message.type || 'text'}`;
                 if (UIRenderer._canRender()) {
                     const currentChat = core.getCurrentConversation?.();
                     const drafts = core.UI?.getDraft ? {} : {};
-                    UIRenderer.renderChatsList(conversations, currentChat, 'all', drafts);
+                    const currentCategory = core.getCurrentCategory?.() || 'all';
+                    UIRenderer.renderChatsList(conversations, currentChat, currentCategory, drafts);
                 }
             });
             
@@ -4973,7 +5056,8 @@ Type: ${message.type || 'text'}`;
             if (core.ChatManager && core.ChatManager.subscribe) {
                 core.ChatManager.subscribe((conversations, activeChat, messages) => {
                     if (UIRenderer._canRender()) {
-                        UIRenderer.renderChatsList(conversations || [], activeChat, 'all', {});
+                        const currentCategory = core.getCurrentCategory?.() || 'all';
+                        UIRenderer.renderChatsList(conversations || [], activeChat, currentCategory, {});
                         if (activeChat && messages) {
                             const user = core.getCurrentUser?.();
                             UIRenderer.renderMessages(messages, activeChat, user);
@@ -5027,7 +5111,8 @@ Type: ${message.type || 'text'}`;
                             const conversations = core.getConversations?.() || [];
                             const friends = core.getFriends?.() || [];
                             if (conversations.length > 0 && UIRenderer._canRender()) {
-                                UIRenderer.renderChatsList(conversations, core.getCurrentConversation?.(), 'all', {});
+                                const currentCategory = core.getCurrentCategory?.() || 'all';
+                                UIRenderer.renderChatsList(conversations, core.getCurrentConversation?.(), currentCategory, {});
                             }
                             if (friends.length > 0 && UIRenderer._canRender()) {
                                 UIRenderer.renderContactsList(friends);

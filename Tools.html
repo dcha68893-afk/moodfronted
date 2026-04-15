@@ -1102,11 +1102,7 @@
                 </div>
                 
                 <div class="marketplace-list-content" id="marketplaceListContent">
-                    <!-- Listing items will be loaded here -->
-                    <div class="loading-placeholder">
-                        <div class="loading-spinner" style="margin: 0 auto 15px;"></div>
-                        <p>Loading marketplace listings...</p>
-                    </div>
+                    <!-- Listings load in background; skeleton shown by JS until data arrives -->
                 </div>
             </div>
         </div>
@@ -1140,10 +1136,10 @@
                             <i class="fas fa-gift"></i>
                         </button>
                         <div class="tip-amounts" id="tipAmounts">
-                            <div class="tip-option" data-amount="1">$1 <i class="fas fa-coffee"></i></div>
-                            <div class="tip-option" data-amount="5">$5 <i class="fas fa-pizza-slice"></i></div>
-                            <div class="tip-option" data-amount="10">$10 <i class="fas fa-hamburger"></i></div>
-                            <div class="tip-option" data-amount="20">$20 <i class="fas fa-wine-bottle"></i></div>
+                            <div class="tip-option" data-amount="130">KES 130 <i class="fas fa-coffee"></i></div>
+                            <div class="tip-option" data-amount="650">KES 650 <i class="fas fa-pizza-slice"></i></div>
+                            <div class="tip-option" data-amount="1300">KES 1,300 <i class="fas fa-hamburger"></i></div>
+                            <div class="tip-option" data-amount="2600">KES 2,600 <i class="fas fa-wine-bottle"></i></div>
                             <div class="tip-option" data-amount="custom">Custom Amount</div>
                         </div>
                     </div>
@@ -1208,7 +1204,7 @@
                         
                         <div class="input-group">
                             <label for="servicePrice">Price (Optional)</label>
-                            <input type="text" class="text-input" id="servicePrice" placeholder="e.g., $20, Free, Negotiable">
+                            <input type="text" class="text-input" id="servicePrice" placeholder="e.g., KES 500, Free, Negotiable">
                         </div>
                         
                         <div class="input-group">
@@ -1249,7 +1245,7 @@
                         
                         <div class="input-group">
                             <label for="digitalPrice">Price (Optional)</label>
-                            <input type="text" class="text-input" id="digitalPrice" placeholder="e.g., $5, Free download, Pay what you want">
+                            <input type="text" class="text-input" id="digitalPrice" placeholder="e.g., KES 200, Free download, Pay what you want">
                         </div>
                         
                         <div class="file-upload-area" id="digitalUploadArea">
@@ -1295,7 +1291,7 @@
                             <div style="margin-top: 10px;">
                                 <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
                                     <input type="checkbox" id="featuredListingCheckbox">
-                                    <span style="font-size: 12px;">Enable ($5/day)</span>
+                                    <span style="font-size: 12px;">Enable (KES 650/day)</span>
                                 </label>
                             </div>
                         </div>
@@ -1309,7 +1305,7 @@
                             <div style="margin-top: 10px;">
                                 <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
                                     <input type="checkbox" id="boostListingCheckbox">
-                                    <span style="font-size: 12px;">Enable ($3/day)</span>
+                                    <span style="font-size: 12px;">Enable (KES 390/day)</span>
                                 </label>
                             </div>
                         </div>
@@ -1336,7 +1332,7 @@
                             <div style="margin-top: 10px;">
                                 <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
                                     <input type="checkbox" id="priorityMessagingCheckbox">
-                                    <span style="font-size: 12px;">Enable ($2/day)</span>
+                                    <span style="font-size: 12px;">Enable (KES 260/day)</span>
                                 </label>
                             </div>
                         </div>
@@ -1350,7 +1346,7 @@
                             <div style="margin-top: 10px;">
                                 <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
                                     <input type="checkbox" id="autoRenewCheckbox">
-                                    <span style="font-size: 12px;">Enable ($1/day)</span>
+                                    <span style="font-size: 12px;">Enable (KES 130/day)</span>
                                 </label>
                             </div>
                         </div>
@@ -1364,7 +1360,7 @@
                             <div style="margin-top: 10px;">
                                 <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
                                     <input type="checkbox" id="verifiedBadgeCheckbox">
-                                    <span style="font-size: 12px;">Enable ($10/month)</span>
+                                    <span style="font-size: 12px;">Enable (KES 1,300/month)</span>
                                 </label>
                             </div>
                         </div>
@@ -1806,7 +1802,7 @@
             <div class="premium-plans">
                 <div class="premium-plan" data-plan="monthly">
                     <div class="plan-name">Monthly</div>
-                    <div class="plan-price">$9.99<span style="font-size: 14px; color: var(--text-secondary);">/month</span></div>
+                    <div class="plan-price">KES 1,299<span style="font-size: 14px; color: var(--text-secondary);">/month</span></div>
                     <div class="plan-features">
                         <div class="plan-feature">
                             <i class="fas fa-check" style="color: var(--success-color);"></i>
@@ -1832,7 +1828,7 @@
                 
                 <div class="premium-plan popular" data-plan="quarterly">
                     <div class="plan-name">Quarterly</div>
-                    <div class="plan-price">$24.99<span style="font-size: 14px; color: var(--text-secondary);">/3 months</span></div>
+                    <div class="plan-price">KES 3,249<span style="font-size: 14px; color: var(--text-secondary);">/3 months</span></div>
                     <div class="plan-features">
                         <div class="plan-feature">
                             <i class="fas fa-check" style="color: var(--success-color);"></i>
@@ -1858,7 +1854,7 @@
                 
                 <div class="premium-plan" data-plan="yearly">
                     <div class="plan-name">Yearly</div>
-                    <div class="plan-price">$79.99<span style="font-size: 14px; color: var(--text-secondary);">/year</span></div>
+                    <div class="plan-price">KES 10,399<span style="font-size: 14px; color: var(--text-secondary);">/year</span></div>
                     <div class="plan-features">
                         <div class="plan-feature">
                             <i class="fas fa-check" style="color: var(--success-color);"></i>
@@ -1884,7 +1880,7 @@
                 
                 <div class="premium-plan" data-plan="business">
                     <div class="plan-name">Business</div>
-                    <div class="plan-price">$199.99<span style="font-size: 14px; color: var(--text-secondary);">/year</span></div>
+                    <div class="plan-price">KES 25,999<span style="font-size: 14px; color: var(--text-secondary);">/year</span></div>
                     <div class="plan-features">
                         <div class="plan-feature">
                             <i class="fas fa-check" style="color: var(--success-color);"></i>
@@ -1923,6 +1919,22 @@
                     <div class="payment-method" data-method="crypto">
                         <i class="fas fa-coins" style="font-size: 24px; margin-bottom: 10px;"></i>
                         <div>Crypto</div>
+                    </div>
+                    <div class="payment-method" data-method="mpesa" style="border-color: #4CAF50;">
+                        <i class="fas fa-mobile-alt" style="font-size:24px;margin-bottom:10px;color:#4CAF50;"></i>
+                        <div style="font-weight:600;color:#4CAF50;">M-Pesa</div>
+                    </div>
+                </div>
+                <!-- M-Pesa STK Push Form -->
+                <div class="payment-form" id="mpesaPaymentForm" style="display:none;">
+                    <div style="background:linear-gradient(135deg,#4CAF50,#2E7D32);color:white;border-radius:12px;padding:16px;margin-bottom:16px;text-align:center;">
+                        <i class="fas fa-mobile-alt" style="font-size:32px;margin-bottom:8px;"></i>
+                        <p style="font-weight:600;margin:0;">Lipa na M-Pesa</p>
+                        <p style="font-size:12px;opacity:0.9;margin:4px 0 0;">STK Push to your phone</p>
+                    </div>
+                    <input type="tel" class="text-input" placeholder="M-Pesa Phone (e.g. 0712345678)" id="mpesaPhone" style="margin-bottom:10px;">
+                    <div style="font-size:12px;color:var(--text-secondary);padding:8px;background:var(--secondary-color);border-radius:8px;">
+                        <i class="fas fa-info-circle"></i> You will receive an STK push on your phone. Enter your M-Pesa PIN to complete payment.
                     </div>
                 </div>
                 
@@ -2211,5 +2223,229 @@
 
         <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
     <script src="/js/vendor/spectrum.min.js"></script>
+    <!-- ============================================= -->
+<!-- TOOL MODULE SCRIPTS - MUST BE LOADED IN ORDER -->
+<!-- ============================================= -->
+
+<!-- Core module dependencies -->
+<script type="module" src="localstore.tools.js"></script>
+<script type="module" src="toolregistry.manage.js"></script>
+<script type="module" src="toolpermission.guard.js"></script>
+<script type="module" src="toolexecution.sandbox.js"></script>
+<script type="module" src="toolsync.engine.js"></script>
+
+<!-- Main Core (must be loaded as module due to exports) -->
+<script type="module" src="Tool-core.js"></script>
+
+<!-- UI Controller (depends on Tool-core exports) -->
+<script type="module" src="Tool-ui.js"></script>
+
+    <!-- Purchase / Checkout Modal -->
+    <div class="create-listing-modal" id="purchaseModal" style="z-index:10002;">
+        <div class="create-listing-container" style="max-width:480px;">
+            <div class="create-listing-header">
+                <h3 id="purchaseModalTitle">Complete Purchase</h3>
+                <button class="add-listing-btn" id="closePurchaseModal"><i class="fas fa-times"></i></button>
+            </div>
+            <div style="padding:20px;">
+                <div id="purchaseSummary" style="background:var(--secondary-color);border-radius:12px;padding:16px;margin-bottom:16px;">
+                    <div style="font-weight:600;font-size:16px;" id="purchaseItemTitle">Item</div>
+                    <div style="font-size:24px;font-weight:bold;color:var(--primary-color);margin-top:8px;" id="purchaseItemPrice">KES 0</div>
+                    <div style="font-size:12px;color:var(--text-secondary);margin-top:4px;" id="purchaseItemType">Service</div>
+                </div>
+                <div style="margin-bottom:16px;">
+                    <div style="font-weight:600;margin-bottom:10px;">Select Payment Method</div>
+                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+                        <div class="payment-method" data-checkout-method="mpesa" style="border-color:#4CAF50;background:rgba(76,175,80,0.05);" onclick="selectCheckoutMethod('mpesa',this)">
+                            <i class="fas fa-mobile-alt" style="font-size:22px;margin-bottom:6px;color:#4CAF50;"></i>
+                            <div style="font-weight:600;color:#4CAF50;">M-Pesa</div>
+                            <div style="font-size:10px;color:var(--text-secondary);">STK Push</div>
+                        </div>
+                        <div class="payment-method" data-checkout-method="card" onclick="selectCheckoutMethod('card',this)">
+                            <i class="fas fa-credit-card" style="font-size:22px;margin-bottom:6px;"></i>
+                            <div style="font-weight:600;">Card</div>
+                            <div style="font-size:10px;color:var(--text-secondary);">Visa / Mastercard</div>
+                        </div>
+                    </div>
+                </div>
+                <div id="checkoutMpesaForm" style="display:none;margin-bottom:16px;">
+                    <div style="background:linear-gradient(135deg,#4CAF50,#2E7D32);color:white;border-radius:10px;padding:14px;margin-bottom:12px;display:flex;align-items:center;gap:12px;">
+                        <i class="fas fa-mobile-alt" style="font-size:28px;"></i>
+                        <div><div style="font-weight:600;">Lipa na M-Pesa</div><div style="font-size:12px;opacity:.9;">Enter phone to receive STK Push</div></div>
+                    </div>
+                    <input type="tel" class="text-input" id="checkoutMpesaPhone" placeholder="Phone: 0712345678 or +254712345678" style="margin-bottom:8px;">
+                    <div style="font-size:11px;color:var(--text-secondary);padding:8px;background:var(--secondary-color);border-radius:6px;"><i class="fas fa-info-circle"></i> A push notification will be sent to your phone. Enter your M-Pesa PIN when prompted.</div>
+                </div>
+                <div id="checkoutCardForm" style="display:none;margin-bottom:16px;">
+                    <input type="text" class="text-input" placeholder="Card Number" id="checkoutCardNumber" style="margin-bottom:8px;">
+                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">
+                        <input type="text" class="text-input" placeholder="MM/YY" id="checkoutCardExpiry">
+                        <input type="text" class="text-input" placeholder="CVC" id="checkoutCardCvc">
+                    </div>
+                    <input type="text" class="text-input" placeholder="Cardholder Name" id="checkoutCardName">
+                </div>
+                <div id="purchaseProcessing" style="display:none;text-align:center;padding:20px;">
+                    <div class="loading-spinner" style="margin:0 auto 12px;"></div>
+                    <p id="processingText">Processing payment...</p>
+                </div>
+            </div>
+            <div class="action-buttons">
+                <button class="action-btn secondary" id="cancelPurchaseBtn"><i class="fas fa-times"></i> Cancel</button>
+                <button class="action-btn primary" id="confirmPurchaseBtn" style="background:linear-gradient(135deg,#4CAF50,#2E7D32);">
+                    <i class="fas fa-check"></i> <span id="confirmPurchaseBtnText">Pay Now</span>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+    // ── Purchase / Checkout UI Logic ──────────────────────────────────────────
+    window._pendingPurchaseListing = null;
+
+    window.openPurchaseModal = function(listing) {
+        window._pendingPurchaseListing = listing;
+        var modal = document.getElementById('purchaseModal');
+        if (!modal) return;
+        // Populate summary
+        document.getElementById('purchaseItemTitle').textContent = listing.title || 'Item';
+        var rawPrice = listing.price;
+        var priceDisplay = 'Free';
+        if (rawPrice && rawPrice !== '0' && rawPrice !== 0) {
+            // If price looks like a number, display as KES
+            var num = parseFloat(String(rawPrice).replace(/[^0-9.]/g, ''));
+            if (!isNaN(num) && num > 0) {
+                priceDisplay = 'KES ' + num.toLocaleString('en-KE');
+            } else {
+                priceDisplay = String(rawPrice);
+            }
+        }
+        document.getElementById('purchaseItemPrice').textContent = priceDisplay;
+        document.getElementById('purchaseItemType').textContent = (listing.type || 'item').charAt(0).toUpperCase() + (listing.type || 'item').slice(1);
+        document.getElementById('checkoutMpesaForm').style.display = 'none';
+        document.getElementById('checkoutCardForm').style.display = 'none';
+        document.getElementById('purchaseProcessing').style.display = 'none';
+        document.getElementById('confirmPurchaseBtnText').textContent = 'Pay Now';
+        // Pre-select M-Pesa
+        setTimeout(function(){ selectCheckoutMethod('mpesa', document.querySelector('[data-checkout-method="mpesa"]')); }, 50);
+        modal.classList.add('active');
+        modal.style.display = 'flex';
+    };
+
+    window.selectCheckoutMethod = function(method, el) {
+        document.querySelectorAll('[data-checkout-method]').forEach(function(m){ m.classList.remove('selected'); });
+        if (el) el.classList.add('selected');
+        document.getElementById('checkoutMpesaForm').style.display = method === 'mpesa' ? 'block' : 'none';
+        document.getElementById('checkoutCardForm').style.display = method === 'card' ? 'block' : 'none';
+        window._checkoutMethod = method;
+    };
+
+    document.addEventListener('DOMContentLoaded', function() {
+        var closeBtn = document.getElementById('closePurchaseModal');
+        var cancelBtn = document.getElementById('cancelPurchaseBtn');
+        var confirmBtn = document.getElementById('confirmPurchaseBtn');
+
+        function closePurchaseModal() {
+            var modal = document.getElementById('purchaseModal');
+            if (modal) { modal.classList.remove('active'); modal.style.display = 'none'; }
+            window._pendingPurchaseListing = null;
+        }
+
+        if (closeBtn) closeBtn.onclick = closePurchaseModal;
+        if (cancelBtn) cancelBtn.onclick = closePurchaseModal;
+
+        if (confirmBtn) {
+            confirmBtn.onclick = async function() {
+                var listing = window._pendingPurchaseListing;
+                if (!listing) return;
+                var method = window._checkoutMethod || 'mpesa';
+                var processing = document.getElementById('purchaseProcessing');
+                var forms = document.querySelectorAll('#checkoutMpesaForm,#checkoutCardForm');
+
+                if (method === 'mpesa') {
+                    var phone = (document.getElementById('checkoutMpesaPhone').value || '').trim();
+                    if (!phone) { alert('Please enter your M-Pesa phone number'); return; }
+                }
+
+                // Show processing state
+                forms.forEach(function(f){ f.style.display='none'; });
+                processing.style.display = 'block';
+                document.getElementById('processingText').textContent = method === 'mpesa' ? 'Sending STK Push to your phone...' : 'Processing card payment...';
+                confirmBtn.disabled = true;
+
+                try {
+                    var rawPrice = listing.price;
+                    var amountKes = 0;
+                    if (rawPrice) {
+                        var num = parseFloat(String(rawPrice).replace(/[^0-9.]/g,''));
+                        amountKes = isNaN(num) ? 0 : num;
+                    }
+
+                    var payload = {
+                        listingId: listing.id,
+                        amount: amountKes,
+                        currency: 'KES',
+                        paymentMethod: method
+                    };
+                    if (method === 'mpesa') {
+                        var phone = document.getElementById('checkoutMpesaPhone').value.trim();
+                        // Normalize phone to 254XXXXXXXXX
+                        phone = phone.replace(/^0/, '254').replace(/^\+/, '').replace(/\s/g,'');
+                        payload.phone = phone;
+                        payload.mpesaPhone = phone;
+                    }
+
+                    // Call purchase endpoint via safeApiCall or direct fetch
+                    var token = (window.marketplaceCore && window.marketplaceCore.getCentralToken && window.marketplaceCore.getCentralToken()) || '';
+                    var headers = {'Content-Type':'application/json'};
+                    if (token) headers['Authorization'] = 'Bearer ' + token;
+
+                    // Step 1: Record purchase
+                    var purchaseResp = await fetch('/api/marketplace/listings/' + listing.id + '/purchase', {
+                        method: 'POST', headers: headers, credentials: 'include',
+                        body: JSON.stringify({ buyerId: window.currentUser?.id })
+                    }).then(function(r){ return r.json(); }).catch(function(){ return {success:false}; });
+
+                    // Step 2: Process payment
+                    var payResp = await fetch('/api/payments/process', {
+                        method: 'POST', headers: headers, credentials: 'include',
+                        body: JSON.stringify(payload)
+                    }).then(function(r){ return r.json(); }).catch(function(){ return {success:false}; });
+
+                    processing.style.display = 'none';
+                    confirmBtn.disabled = false;
+
+                    if (method === 'mpesa') {
+                        document.getElementById('processingText').textContent = 'Check your phone for the M-Pesa prompt!';
+                        processing.style.display = 'block';
+                        setTimeout(function(){
+                            closePurchaseModal();
+                            if (window.showNotification) window.showNotification('M-Pesa STK Push sent! Check your phone.', 'success');
+                        }, 3000);
+                    } else {
+                        closePurchaseModal();
+                        if (window.showNotification) window.showNotification('Payment successful! Thank you.', 'success');
+                    }
+                } catch(err) {
+                    processing.style.display = 'none';
+                    confirmBtn.disabled = false;
+                    forms.forEach(function(f){ if(f.id.includes(method)) f.style.display='block'; });
+                    if (window.showNotification) window.showNotification('Payment failed. Please try again.', 'error');
+                }
+            };
+        }
+
+        // Also wire M-Pesa in the premium payment container
+        document.addEventListener('click', function(e) {
+            var method = e.target.closest('[data-method]');
+            if (!method) return;
+            var m = method.dataset.method;
+            var mpesaForm = document.getElementById('mpesaPaymentForm');
+            var cardForm = document.getElementById('cardPaymentForm');
+            if (mpesaForm) mpesaForm.style.display = m === 'mpesa' ? 'block' : 'none';
+            if (cardForm) cardForm.style.display = m === 'card' ? 'block' : 'none';
+        });
+    });
+    </script>
+
 </body>
 </html>

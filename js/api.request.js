@@ -197,7 +197,7 @@
      */
     function getAuthToken() {
         try {
-            // ONLY use window.Session.getToken() - NO localStorage fallback
+            // 1. Primary: centralized Session module
             if (window.Session && typeof window.Session.getToken === 'function') {
                 const token = window.Session.getToken();
                 if (token && typeof token === 'string' && token.trim()) {
@@ -205,16 +205,28 @@
                 }
             }
             
-            // Fallback to memory via _getUserToken for backward compatibility
+            // 2. Fallback: memory token from api.core
             if (_getUserToken && typeof _getUserToken === 'function') {
                 const memoryToken = _getUserToken();
                 if (memoryToken && typeof memoryToken === 'string' && memoryToken.trim()) {
-                    console.warn("[API] ⏳ Using memory token fallback - Session module should be used");
                     return memoryToken;
                 }
             }
             
-            // Session module not available or no token
+            // 3. Last resort: read directly from localStorage (auto-login compatibility)
+            try {
+                const rawAuth = localStorage.getItem('kynecta_auth');
+                if (rawAuth) {
+                    const auth = JSON.parse(rawAuth);
+                    if (auth && auth.token && typeof auth.token === 'string') {
+                        return auth.token;
+                    }
+                }
+                // Also try legacy keys
+                const legacyToken = localStorage.getItem('accessToken') || localStorage.getItem('token');
+                if (legacyToken) return legacyToken;
+            } catch(e) {}
+            
             return null;
         } catch (error) {
             console.warn('[API] ⏳ Failed to retrieve auth token:', error.message);
@@ -462,7 +474,21 @@
             
             // 🔥 CRITICAL: Wait for session before making any request
             await waitForSessionReady();
-            
+
+            // ── OFFLINE GUARD ────────────────────────────────────────────────
+            if (!navigator.onLine) {
+                console.log('[API] \u23f8\ufe0f Offline — returning cached/offline response for:', url);
+                // Return cached data if available, otherwise soft offline response
+                const cacheKey = 'get_' + normalizeEndpoint(url);
+                const cachedData = _apiCache ? _apiCache.get(cacheKey) : null;
+                if (cachedData) {
+                    return { ok: true, success: true, status: 200, statusText: 'OK (offline/cached)',
+                             data: cachedData, headers: {}, cached: true, offline: true };
+                }
+                return { ok: false, success: false, status: 0, statusText: 'Offline',
+                         offline: true, data: { message: 'Device is offline' }, headers: {} };
+            }
+
             const normalizedUrl = normalizeEndpoint(url);
             const isPublic = isPublicEndpointCheck(normalizedUrl);
             
