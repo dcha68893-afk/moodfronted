@@ -1785,6 +1785,7 @@
     <script src="/js/app.offline.queue.js"></script>
 
     <script src="/js/auth.session.manager.js"></script>
+    <script src="/js/app.runtime.authority.js"></script>
 
     <!-- ====================================================================== -->
     <!-- ACCOUNT LIMIT ENFORCEMENT -->
@@ -2123,7 +2124,7 @@
                             const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), 30000));
                             response = await Promise.race([loginPromise, timeout]);
                         } else {
-                            const baseUrl = location.hostname === 'localhost' ? 'http://localhost:4000' : 'https://moodchat-fy56.onrender.com';
+                            const baseUrl = window.__getApiOrigin ? window.__getApiOrigin() : (location.hostname === 'localhost' ? 'http://localhost:4000' : 'https://moodchat-fy56.onrender.com');
                             const res = await fetch(`${baseUrl}/api/auth/login`, {
                                 method: 'POST', headers: { 'Content-Type': 'application/json' },
                                 body: JSON.stringify({ identifier, password })
@@ -2135,6 +2136,12 @@
                             const token = response.token || response.data?.token || response.accessToken;
                             const user = response.user || response.data?.user;
                             if (token) {
+                                window.AppRuntimeAuthority?.persistSession?.({
+                                    token,
+                                    refreshToken: response.refreshToken || response.data?.refreshToken || null,
+                                    user: user || null,
+                                    expiresAt: response.expiresAt || response.data?.expiresAt || null
+                                });
                                 window.SessionState.setToken(token);
                                 if (user) window.SessionState.setUser(user);
                                 if (window.SessionManager && rememberMe && user) {
@@ -2186,7 +2193,7 @@
                             const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), 30000));
                             response = await Promise.race([regPromise, timeout]);
                         } else {
-                            const baseUrl = location.hostname === 'localhost' ? 'http://localhost:4000' : 'https://moodchat-fy56.onrender.com';
+                            const baseUrl = window.__getApiOrigin ? window.__getApiOrigin() : (location.hostname === 'localhost' ? 'http://localhost:4000' : 'https://moodchat-fy56.onrender.com');
                             const res = await fetch(`${baseUrl}/api/auth/register`, {
                                 method: 'POST', headers: { 'Content-Type': 'application/json' },
                                 body: JSON.stringify({ email, username, password, displayName: displayName || username })
@@ -2198,6 +2205,12 @@
                             const token = response.token || response.data?.token;
                             const user = response.user || response.data?.user;
                             if (token) {
+                                window.AppRuntimeAuthority?.persistSession?.({
+                                    token,
+                                    refreshToken: response.refreshToken || response.data?.refreshToken || null,
+                                    user: user || null,
+                                    expiresAt: response.expiresAt || response.data?.expiresAt || null
+                                });
                                 window.SessionState.setToken(token);
                                 if (user) window.SessionState.setUser(user);
                                 if (window.SessionManager && user) window.SessionManager.createSession(user, token, true);
@@ -2239,7 +2252,7 @@
                         if (window.api?.auth?.forgotPassword) {
                             response = await window.api.auth.forgotPassword({ email });
                         } else {
-                            const baseUrl = location.hostname === 'localhost' ? 'http://localhost:4000' : 'https://moodchat-fy56.onrender.com';
+                            const baseUrl = window.__getApiOrigin ? window.__getApiOrigin() : (location.hostname === 'localhost' ? 'http://localhost:4000' : 'https://moodchat-fy56.onrender.com');
                             const res = await fetch(`${baseUrl}/api/auth/forgot-password`, {
                                 method: 'POST', headers: { 'Content-Type': 'application/json' },
                                 body: JSON.stringify({ email })
@@ -2268,6 +2281,12 @@
         }
         
         async function checkExistingSession() {
+            const runtimeSession = window.AppRuntimeAuthority?.getSessionSnapshot?.();
+            if (runtimeSession?.authenticated) {
+                window.location.replace('chat.html');
+                return true;
+            }
+
             const token = window.SessionState.getToken();
             const user = window.SessionState.getUser();
             const isLoggedIn = localStorage.getItem('isLoggedIn') === 'true';
@@ -2307,6 +2326,7 @@
                     const token = window.SessionState.getToken();
                     const user = window.SessionState.getUser();
                     if (token && user) {
+                        window.AppRuntimeAuthority?.persistSession?.({ token, user });
                         window.currentUser = user;
                         window.CoreUtils.showNotification('Success', 'Quick login successful! Redirecting...', 'success');
                         setTimeout(() => { window.location.href = 'chat.html'; }, 1000);
@@ -2319,6 +2339,7 @@
             }
             if (removeBtn) {
                 removeBtn.addEventListener('click', () => {
+                    window.AppRuntimeAuthority?.clearSession?.({ emit: true, reason: 'quick-login-removed' });
                     window.SessionState.clearUser();
                     window.SessionState.clearToken();
                     card.classList.remove('visible');
@@ -2337,6 +2358,7 @@
             const logout = document.getElementById('logoutBtn');
             if (logout) {
                 logout.addEventListener('click', () => {
+                    window.AppRuntimeAuthority?.clearSession?.({ emit: true, reason: 'logout' });
                     window.SessionState.clearToken();
                     window.SessionState.clearUser();
                     if (window.SessionManager) window.SessionManager.logout(false);

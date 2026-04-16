@@ -2396,3 +2396,8 @@ input:checked + .toggle-slider:before {
         max-height: 95vh;
     }
 }
+
+/* Parent header consolidation: hide module main headers */
+#sidebar > .sidebar-header {
+    display: none !important;
+}

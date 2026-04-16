@@ -17,6 +17,22 @@
 (function (global) {
     'use strict';
 
+    // Log suppression: noisy safety-layer messages printed only once (across iframes).
+    function _logOnce(key, level, message) {
+        try {
+            var storageKey = '__kynecta_safety_logOnce__' + String(key || '').replace(/[^a-z0-9_\-]/ig, '_');
+            if (localStorage.getItem(storageKey)) return;
+            localStorage.setItem(storageKey, '1');
+        } catch (_) {}
+        try {
+            var fn = (level === 'warn') ? console.warn
+                : (level === 'error') ? console.error
+                : (level === 'info') ? console.info
+                : console.log;
+            fn.call(console, message);
+        } catch (_) {}
+    }
+
     function announceAppStorageReady(source) {
         try {
             global.__kynParentReady = true;
@@ -184,7 +200,7 @@
             }
         };
 
-        console.log('[SafetyLayer] ✅ AppStorage initialized (top frame)');
+        _logOnce('topAppStorageInitialized', 'log', '[SafetyLayer] ✅ AppStorage initialized (top frame)');
         announceAppStorageReady('top-frame');
     }
 
@@ -198,7 +214,7 @@
             var _parent = global.parent;
             if (_parent && _parent.AppStorage) {
                 global.AppStorage = _parent.AppStorage;
-                console.log('[SafetyLayer] ✅ AppStorage bridged from parent');
+                _logOnce('appStorageBridgedFromParent', 'log', '[SafetyLayer] ✅ AppStorage bridged from parent');
                 announceAppStorageReady('parent-bridge');
             } else {
                 // Parent not ready yet — create a local fallback and swap later
@@ -223,13 +239,13 @@
                     try {
                         if (global.parent && global.parent.AppStorage) {
                             global.AppStorage = global.parent.AppStorage;
-                            console.log('[SafetyLayer] ✅ AppStorage upgraded to parent (deferred)');
+                            _logOnce('appStorageUpgradedDeferred', 'log', '[SafetyLayer] ✅ AppStorage upgraded to parent (deferred)');
                             announceAppStorageReady('parent-upgrade');
                         }
                     } catch (_) {}
                 }, 500);
 
-                console.warn('[SafetyLayer] ⚠️ Parent AppStorage unavailable — using local fallback');
+                _logOnce('parentAppStorageNotReady', 'info', '[SafetyLayer] Parent AppStorage not ready yet; using local fallback until parent storage is available');
             }
         } catch (e) {
             console.warn('[SafetyLayer] ⚠️ Cross-origin parent access blocked — local storage only', e);
@@ -370,6 +386,6 @@
         }
     };
 
-    console.log('[SafetyLayer] ✅ Global safety layer loaded');
+    _logOnce('globalSafetyLayerLoaded', 'log', '[SafetyLayer] ✅ Global safety layer loaded');
 
 }(typeof window !== 'undefined' ? window : this));

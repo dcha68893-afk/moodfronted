@@ -1,15 +1,28 @@
 ﻿﻿// js/config.js - SIMPLE VERSION
-console.log('🔧 Loading configuration...');
+console.log('Loading configuration...');
 
-// REMOVED hardcoded localhost URL - using api.js BACKEND_URL instead
-// Backend URL should be set in api.js or by main application
+window.__isLocalEnvironment = window.__isLocalEnvironment || function(hostname) {
+    const host = String(hostname || window.location.hostname || '').toLowerCase();
+    if (!host) return true;
+    if (host === 'localhost' || host === '127.0.0.1' || host === '0.0.0.0') return true;
+    if (host.endsWith('.local')) return true;
+    if (host.startsWith('192.168.') || host.startsWith('10.')) return true;
+    return /^172\.(1[6-9]|2\d|3[0-1])\./.test(host);
+};
+
+window.__getApiOrigin = window.__getApiOrigin || function() {
+    return window.__isLocalEnvironment() ? 'http://localhost:4000' : 'https://moodchat-fy56.onrender.com';
+};
+
+window.__getApiBase = window.__getApiBase || function() {
+    return `${window.__getApiOrigin()}/api`;
+};
 
 // Helper function
 window.apiCall = async function(endpoint, options = {}) {
-    // Use BACKEND_URL from api.js or fallback to Render URL if not set
-    const baseUrl = window.BACKEND_URL || 'https://moodchat-fy56.onrender.com/api';
+    const baseUrl = window.BACKEND_URL || (typeof window.__getApiBase === 'function' ? window.__getApiBase() : 'https://moodchat-fy56.onrender.com/api');
     const url = `${baseUrl}${endpoint}`;
-    console.log('📡 Calling:', url);
+    console.log('Calling:', url);
     
     const defaultOptions = {
         headers: {
@@ -42,4 +55,4 @@ window.apiCall = async function(endpoint, options = {}) {
     }
 };
 
-console.log('✅ Config loaded.');
+console.log('Config loaded.');

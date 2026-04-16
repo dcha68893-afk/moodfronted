@@ -3086,3 +3086,8 @@ body {
 /* ── Multi-send cancel btn dark theme ── */
 [data-theme="dark"] .multi-send-cancel-btn { background: #b02020; }
 [data-theme="dark"] .multi-send-cancel-btn:hover { background: #8c1919; }
+
+/* Parent header consolidation: hide module main headers */
+#sidebar > .sidebar-header {
+    display: none !important;
+}

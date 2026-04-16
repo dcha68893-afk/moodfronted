@@ -5315,7 +5315,7 @@ export function setupConnectivityListeners() {
             }
         });
         window.addEventListener('offline', () => {
-            showNotification('Working offline - changes will sync when back online', 'info');
+            syncOfflineMarketplaceData();
         });
     } catch {}
 }

@@ -2123,3 +2123,8 @@
             text-align: center;
             color: var(--text-secondary);
         }
+
+/* Parent header consolidation: hide module main headers */
+#sidebar > .sidebar-header {
+    display: none !important;
+}

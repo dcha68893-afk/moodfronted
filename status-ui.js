@@ -1021,8 +1021,6 @@ const UIFailsafe = {
                 });
                 if (!this.processingAction && navigator.onLine) {
                     this._processQueue();
-                } else if (!navigator.onLine) {
-                    showNotification('You are offline. Action queued.', 'info');
                 }
             });
         };
@@ -1876,7 +1874,6 @@ class UIEventSystem {
 
     handleOffline = () => {
         this.emit('offline', { timestamp: Date.now() });
-        showNotification('You are offline. Some features may be limited.', 'warning');
     };
 
     handleResize = () => {

@@ -2703,4 +2703,9 @@
             margin-top: 2px;
             font-weight: normal;
         }
+
+/* Parent header consolidation: hide module main headers */
+#sidebar > .sidebar-header {
+    display: none !important;
+}
         

@@ -2227,3 +2227,8 @@
             font-size: 12px;
             color: var(--text-secondary);
         }
+
+/* Parent header consolidation: hide module main headers */
+#sidebar > .sidebar-header {
+    display: none !important;
+}

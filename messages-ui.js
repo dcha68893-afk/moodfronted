@@ -1311,19 +1311,11 @@
         },
 
         _showOfflineUI() {
-            const offlineOverlay = UIFailsafe.safeGetElement('offlineOverlay');
-            if (offlineOverlay) UIFailsafe.safeAddClass(offlineOverlay, 'active');
-            
-            const offlineIndicator = UIFailsafe.safeGetElement('offlineIndicator');
-            if (offlineIndicator) UIFailsafe.safeSetStyle(offlineIndicator, 'display', 'flex');
+            return;
         },
 
         _hideOfflineUI() {
-            const offlineOverlay = UIFailsafe.safeGetElement('offlineOverlay');
-            if (offlineOverlay) UIFailsafe.safeRemoveClass(offlineOverlay, 'active');
-            
-            const offlineIndicator = UIFailsafe.safeGetElement('offlineIndicator');
-            if (offlineIndicator) UIFailsafe.safeSetStyle(offlineIndicator, 'display', 'none');
+            return;
         },
 
         getFullState() {
@@ -4204,9 +4196,7 @@ Type: ${message.type || 'text'}`;
 
             window.addEventListener('offline', () => {
                 UIFailsafe.queueAction(() => {
-                    const offlineOverlay = UIFailsafe.safeGetElement('offlineOverlay');
-                    if (offlineOverlay) UIFailsafe.safeAddClass(offlineOverlay, 'active');
-                    UIRenderer.showNotification('You are offline', 'warning');
+                    MessageUIState.setState({ networkState: 'offline' });
                 });
             });
         },

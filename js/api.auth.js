@@ -793,8 +793,23 @@
             }
             
             // Priority 4: Environment detection
-            const hostname = window.location.hostname;
-            if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '') {
+            if (typeof window.__getApiOrigin === 'function') {
+                const url = window.__getApiOrigin();
+                console.log('[AUTH] Base URL from shared environment helper:', url);
+                return url;
+            }
+
+            const hostname = String(window.location.hostname || '').toLowerCase();
+            if (
+                hostname === '' ||
+                hostname === 'localhost' ||
+                hostname === '127.0.0.1' ||
+                hostname === '0.0.0.0' ||
+                hostname.endsWith('.local') ||
+                hostname.startsWith('192.168.') ||
+                hostname.startsWith('10.') ||
+                /^172\.(1[6-9]|2\d|3[0-1])\./.test(hostname)
+            ) {
                 console.log('[AUTH] Base URL from localhost detection: http://localhost:4000');
                 return 'http://localhost:4000';
             }
@@ -804,7 +819,7 @@
             return 'https://moodchat-fy56.onrender.com';
         } catch (error) {
             console.error('[AUTH] Error getting base URL:', error);
-            return 'http://localhost:4000';
+            return typeof window.__getApiOrigin === 'function' ? window.__getApiOrigin() : 'http://localhost:4000';
         }
     }
     

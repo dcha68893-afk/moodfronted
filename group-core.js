@@ -209,8 +209,9 @@ function __isValidSession(sessionObj) {
 
     if (!sessionObj.token || typeof sessionObj.token !== 'string') return false;
 
-    const userId = sessionObj.user?.id ?? sessionObj.user?.uid ?? sessionObj.userId;
-    if (userId === undefined || userId === null || userId === 'user' || typeof userId !== 'number') return false;
+    const rawUserId = sessionObj.user?.id ?? sessionObj.user?.uid ?? sessionObj.userId;
+    const userId = typeof rawUserId === 'string' ? Number(rawUserId) : rawUserId;
+    if (!Number.isFinite(userId) || userId === 0) return false;
 
     return true;
 }
@@ -985,6 +986,22 @@ case 'SETTING_CHANGED':
         /* lifecycle log suppressed */
         
         if (updateData && LifecycleState.isActive()) {
+            const normalizedUpdateUserId = typeof updateData.user?.id === 'string'
+                ? Number(updateData.user.id)
+                : (typeof updateData.userId === 'string' ? Number(updateData.userId) : updateData.user?.id);
+
+            if (Number.isFinite(normalizedUpdateUserId)) {
+                updateData = {
+                    ...updateData,
+                    userId: normalizedUpdateUserId,
+                    user: updateData.user ? {
+                        ...updateData.user,
+                        id: normalizedUpdateUserId,
+                        userId: normalizedUpdateUserId
+                    } : updateData.user
+                };
+            }
+
             // Validate partial update (only fields we care about)
             if (updateData.token && typeof updateData.token !== 'string') {
                 console.warn('[MODULE] Invalid token in SESSION_UPDATE, ignoring');
@@ -1581,6 +1598,26 @@ let _lastAppliedSessionHash = null;
 
 function applySession(sessionData) {
     if (!sessionData) return;
+
+    const normalizedUserId = typeof sessionData.user?.id === 'string'
+        ? Number(sessionData.user.id)
+        : (typeof sessionData.userId === 'string' ? Number(sessionData.userId) : (sessionData.user?.id ?? sessionData.userId));
+
+    if (Number.isFinite(normalizedUserId)) {
+        sessionData = {
+            ...sessionData,
+            id: normalizedUserId,
+            userId: normalizedUserId,
+            user: sessionData.user ? {
+                ...sessionData.user,
+                id: normalizedUserId,
+                userId: normalizedUserId
+            } : {
+                id: normalizedUserId,
+                userId: normalizedUserId
+            }
+        };
+    }
     
     // Validate session data before applying
     if (!__isValidSession(sessionData)) {

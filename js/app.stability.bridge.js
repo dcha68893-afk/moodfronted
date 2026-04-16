@@ -24,6 +24,7 @@
         normalizedUrl = normalizedUrl.replace(/^\/api\/statuses\b/, '/api/status');
         normalizedUrl = normalizedUrl.replace(/^\/api\/friends\/user\/([^/?#]+)(.*)$/i, '/api/friends/$1$2');
         normalizedUrl = normalizedUrl.replace(/^\/api\/groups\/invites\/pending\b/i, '/api/groups/invitations?status=pending');
+        normalizedUrl = normalizedUrl.replace(/^\/api\/events\b/i, '/api/groups/events');
 
         if (/^\/api\/groups\/[^/]+\/members$/i.test(normalizedUrl) && String(method || 'GET').toUpperCase() === 'POST') {
             let body = data;

@@ -1137,3 +1137,8 @@
             flex: 1;
             font-size: 14px;
         }
+
+/* Parent header consolidation: hide module main headers */
+#settingsSidebar > .settings-header {
+    display: none !important;
+}

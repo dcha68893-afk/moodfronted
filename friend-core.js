@@ -3341,7 +3341,6 @@ const FriendRequestManager = {
         if (!navigator.onLine) {
             Logger.info('FriendRequestManager', 'Offline – request queued for later');
             await OfflineFirstFriends.enqueueAction('add', userId, { ...options }, null);
-            showNotification?.('You\'re offline. Friend request will be sent when you reconnect.', 'info');
             return { success: true, queued: true, request: optimisticRequest };
         }
 
@@ -3434,7 +3433,6 @@ const FriendRequestManager = {
             window.dispatchEvent(new CustomEvent('friendRequestQueued', {
                 detail: { request: optimisticRequest, error: error.message }
             }));
-            showNotification?.('Request queued — will retry automatically.', 'warning');
             return { success: true, queued: true, request: optimisticRequest };
         }
     },
@@ -3489,7 +3487,6 @@ const FriendRequestManager = {
         // ── Offline path ─────────────────────────────────────────────────────
         if (!navigator.onLine) {
             await OfflineFirstFriends.enqueueAction('accept', friendId, { requestId }, localRecordId);
-            showNotification?.('You\'re offline. Accept will sync when you reconnect.', 'info');
             return { success: true, queued: true };
         }
 
@@ -3597,7 +3594,6 @@ const FriendRequestManager = {
             }
             FriendCacheManager.syncToGlobals();
             if (typeof showNotification === 'function') {
-                showNotification('Accept queued — will retry automatically.', 'warning');
             }
             return { success: true, queued: true, error: error.message };
         }
@@ -3642,7 +3638,6 @@ const FriendRequestManager = {
 
         if (!navigator.onLine) {
             await OfflineFirstFriends.enqueueAction('reject', friendId || requestId, { requestId }, localRecordId);
-            showNotification?.('You\'re offline. Decline will sync when you reconnect.', 'info');
             return { success: true, queued: true };
         }
 
@@ -3678,7 +3673,6 @@ const FriendRequestManager = {
                 await ls.updateStatus(localRecordId, 'pending_received').catch(() => {});
             }
             FriendCacheManager.syncToGlobals();
-            showNotification?.('Decline queued — will retry automatically.', 'warning');
             return { success: true, queued: true };
         }
     },
@@ -3722,7 +3716,6 @@ const FriendRequestManager = {
 
         if (!navigator.onLine) {
             await OfflineFirstFriends.enqueueAction('cancel', friendId || requestId, { requestId }, localRecordId);
-            showNotification?.('You\'re offline. Cancel will sync when you reconnect.', 'info');
             return { success: true, queued: true };
         }
 
@@ -3756,7 +3749,6 @@ const FriendRequestManager = {
                 await ls.updateStatus(localRecordId, 'pending_sent').catch(() => {});
             }
             FriendCacheManager.syncToGlobals();
-            showNotification?.('Cancel queued — will retry automatically.', 'warning');
             return { success: true, queued: true };
         }
     },
@@ -7484,7 +7476,6 @@ async function removeFriend(friendData) {
     // Offline path: queue for later
     if (!navigator.onLine) {
         await OfflineFirstFriends.enqueueAction('remove', friendId, {}, null);
-        showNotification?.('You\'re offline. Removal will sync when you reconnect.', 'info');
         return { success: true, queued: true };
     }
 
@@ -7538,7 +7529,6 @@ async function removeFriend(friendData) {
         FriendCacheManager.persist();
 
         if (error.message !== 'Session expired') {
-            showNotification?.('Remove queued — will retry automatically.', 'warning');
         }
         return { success: true, queued: true };
     }
@@ -7577,7 +7567,6 @@ async function blockUser(friendData) {
     // Offline path: queue for later
     if (!navigator.onLine) {
         await OfflineFirstFriends.enqueueAction('block', friendId, {}, null);
-        showNotification?.('You\'re offline. Block will sync when you reconnect.', 'info');
         return { success: true, queued: true };
     }
 
@@ -7631,7 +7620,6 @@ async function blockUser(friendData) {
         FriendCacheManager.persist();
 
         if (error.message !== 'Session expired') {
-            showNotification?.('Block queued — will retry automatically.', 'warning');
         }
         return { success: true, queued: true };
     }
@@ -9727,3 +9715,4 @@ function applySettingToFriendModule(section, key, value) {
         } catch(e) {}
     });
 })();
+

@@ -47,6 +47,7 @@
         // ════════════════════════════════════════════════════════════════════
         async sendMessage(messageData) {
             const localStore = this._localStore;
+            const normalizedPayload = this._normalizeOutgoingMessage(messageData);
 
             // 1. Generate local UUID
             const localId = _uuid();
@@ -54,10 +55,11 @@
             // 2. Save locally as pending
             const localMsg = localStore ? await localStore.saveMessage({
                 id:          localId,
-                chatId:      messageData.chatId,
-                senderId:    messageData.senderId || this._getCurrentUserId(),
-                content:     messageData.content,
-                type:        messageData.type || 'text',
+                chatId:      normalizedPayload.chatId,
+                senderId:    normalizedPayload.senderId || this._getCurrentUserId(),
+                content:     normalizedPayload.content,
+                type:        normalizedPayload.type || 'text',
+                replyToId:   normalizedPayload.replyToId || null,
                 status:      'pending',
                 isLocalOnly: true,
                 createdAt:   Date.now()
@@ -65,31 +67,42 @@
 
             // 3. Immediately reflect in UI via store/eventbus
             if (localMsg) {
-                this._updateStoreMessages(messageData.chatId, localMsg);
+                this._updateStoreMessages(normalizedPayload.chatId, localMsg);
                 this._emitEvent('MESSAGE_PENDING', localMsg);
             }
 
             // 4. Try to send to backend
             try {
                 const response = await this._makeRequest('POST', '/api/messages', {
-                    ...messageData,
+                    ...normalizedPayload,
                     localId
                 });
 
-                const serverMsg = response?.data || response;
+                const serverMsg = this._normalizeIncomingMessage(response?.data || response, {
+                    fallbackChatId: normalizedPayload.chatId,
+                    fallbackSenderId: normalizedPayload.senderId || this._getCurrentUserId()
+                });
                 const serverId  = serverMsg?.id;
 
                 // 5a. On success: confirm local message
                 if (localStore && serverId) {
                     await localStore.confirmMessage(localId, String(serverId), {
-                        chatId:    serverMsg.chatId || messageData.chatId,
+                        chatId:    serverMsg.chatId || normalizedPayload.chatId,
                         createdAt: serverMsg.createdAt || Date.now()
                     });
                 }
 
-                const finalMsg = { ...(localMsg || {}), serverId: serverId ? String(serverId) : null, status: 'sent', isLocalOnly: false };
+                const finalMsg = {
+                    ...(localMsg || {}),
+                    ...serverMsg,
+                    id: serverId ? String(serverId) : (localMsg?.id || localId),
+                    localId,
+                    serverId: serverId ? String(serverId) : null,
+                    status: 'sent',
+                    isLocalOnly: false
+                };
 
-                this._updateStoreMessages(messageData.chatId, finalMsg);
+                this._updateStoreMessages(normalizedPayload.chatId, finalMsg);
                 this._emitEvent('MESSAGE_SENT', finalMsg);
 
                 return finalMsg;
@@ -101,16 +114,16 @@
                 }
 
                 if (this._msgQueue) {
-                    this._msgQueue.enqueue({ ...messageData, localId, id: localId });
+                    this._msgQueue.enqueue({ ...normalizedPayload, localId, id: localId });
                 } else {
                     // Fallback to legacy offline queue
-                    this._queueOfflineMessage('send', { ...messageData, localId });
+                    this._queueOfflineMessage('send', { ...normalizedPayload, localId });
                 }
 
                 this._emitEvent('MESSAGE_FAILED', { localId, error: error.message });
 
                 // Return local message so UI still shows it
-                return localMsg || { id: localId, status: 'failed', ...messageData };
+                return localMsg || { id: localId, status: 'failed', ...normalizedPayload };
             }
         }
 
@@ -146,7 +159,10 @@
             const requestPromise = this._makeRequest('GET', `/api/messages?chatId=${chatId}&${params}`)
                 .then(async response => {
                     this._pendingRequests.delete(cacheKey);
-                    const messages = response?.data?.messages || response?.messages || response?.data || [];
+                    const rawMessages = response?.data?.messages || response?.messages || response?.data || [];
+                    const messages = Array.isArray(rawMessages)
+                        ? rawMessages.map((message) => this._normalizeIncomingMessage(message, { fallbackChatId: chatId }))
+                        : [];
                     if (localStore && messages.length) {
                         await localStore.mergeServerMessages(chatId, messages);
                         const local = await localStore.getMessagesByChat(chatId, options);
@@ -213,7 +229,9 @@
             if (!navigator.onLine) return { queued: true };
 
             try {
-                return await this._makeRequest('POST', `/api/messages/mark-read/batch`, { messageIds, chatId });
+                const result = await this._makeRequest('POST', `/api/messages/mark-read/batch`, { messageIds, chatId });
+                this._emitEvent('MESSAGE_READ', { chatId, messageIds, result });
+                return result;
             } catch (err) {
                 console.warn('[MessageService] markAsRead server call failed:', err.message);
             }
@@ -296,8 +314,45 @@
             const options = { method, headers, credentials: 'include', ...customOptions };
             if (data && method !== 'GET') options.body = JSON.stringify(data);
 
-            if (window.api?.request?.request) return window.api.request.request(endpoint, options);
+            if (window.api?.request?.request) {
+                const requestOptions = { ...customOptions, headers };
+                // api.request.request expects `options.body` (not `options.data`)
+                if (data !== null && data !== undefined && method !== 'GET') {
+                    requestOptions.body = data;
+                }
+                return window.api.request.request(method, endpoint, requestOptions);
+            }
             return this._fetchWithRetry(endpoint, options);
+        }
+
+        _normalizeOutgoingMessage(messageData = {}) {
+            return {
+                ...messageData,
+                chatId: messageData.chatId || messageData.conversationId || null,
+                senderId: messageData.senderId || this._getCurrentUserId(),
+                type: messageData.type || messageData.messageType || 'text',
+                replyToId: messageData.replyToId || messageData.replyTo || null
+            };
+        }
+
+        _normalizeIncomingMessage(message = {}, context = {}) {
+            if (!message || typeof message !== 'object') {
+                return message;
+            }
+
+            const createdAt = message.createdAt || message.timestamp || Date.now();
+            return {
+                ...message,
+                id: message.id != null ? String(message.id) : message.localId || _uuid(),
+                chatId: message.chatId || message.conversationId || context.fallbackChatId || null,
+                conversationId: message.conversationId || message.chatId || context.fallbackChatId || null,
+                senderId: message.senderId || message.sender?.id || context.fallbackSenderId || null,
+                type: message.type || message.messageType || 'text',
+                replyToId: message.replyToId || message.replyTo || null,
+                timestamp: createdAt,
+                createdAt,
+                status: message.status || (message.readAt ? 'read' : message.deliveredAt ? 'delivered' : message.sentAt ? 'sent' : 'sent')
+            };
         }
 
         async _fetchWithRetry(endpoint, options, attempt = 1) {

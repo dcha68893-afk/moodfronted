@@ -64,11 +64,29 @@
   
   const SESSION_SCHEMA = {
     token: "string",
-    refreshToken: "string",
-    userId: "string",
     expiresAt: "number",
     issuedAt: "number"
   };
+
+  function normalizeSessionUserId(value) {
+    if (value === null || value === undefined || value === '') {
+      return null;
+    }
+    return String(value);
+  }
+
+  function normalizeSessionTimestamp(value) {
+    if (value === null || value === undefined || value === '') {
+      return null;
+    }
+
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      return value;
+    }
+
+    const parsed = new Date(value).getTime();
+    return Number.isFinite(parsed) ? parsed : null;
+  }
 
   // ============================================================================
   // SESSION HARDENING: PHASE 4 - ATOMIC STATE MACHINE (PRESERVED)
@@ -117,6 +135,16 @@
       }
     }
 
+    if (session.refreshToken !== null &&
+        session.refreshToken !== undefined &&
+        typeof session.refreshToken !== 'string') {
+      return { isValid: false, reason: `Field refreshToken must be string|null, got ${typeof session.refreshToken}` };
+    }
+
+    if (session.userId === null || session.userId === undefined || session.userId === '') {
+      return { isValid: false, reason: 'Missing required field: userId' };
+    }
+
     if (session.expiresAt <= Date.now()) {
       return { isValid: false, reason: 'Session expired', expired: true };
     }
@@ -159,9 +187,9 @@
       const sessionToValidate = {
         token: parsed.token,
         refreshToken: parsed.refreshToken || null,
-        userId: parsed.user?.id || parsed.user?.uid,
-        expiresAt: parsed.expiresAt ? new Date(parsed.expiresAt).getTime() : null,
-        issuedAt: parsed.issuedAt || null
+        userId: normalizeSessionUserId(parsed.userId || parsed.id || parsed.user?.id || parsed.user?.uid),
+        expiresAt: normalizeSessionTimestamp(parsed.expiresAt),
+        issuedAt: normalizeSessionTimestamp(parsed.issuedAt) || Date.now()
       };
       
       const validation = validateSession(sessionToValidate);
@@ -172,10 +200,11 @@
       
       return {
         token: parsed.token,
-        refreshToken: parsed.refreshToken,
+        refreshToken: parsed.refreshToken || null,
         user: parsed.user,
-        expiresAt: parsed.expiresAt,
-        issuedAt: parsed.issuedAt
+        userId: sessionToValidate.userId,
+        expiresAt: sessionToValidate.expiresAt,
+        issuedAt: sessionToValidate.issuedAt
       };
     } catch (error) {
       return null;
@@ -237,16 +266,16 @@
         return false;
       }
       
-      let expiryDate = expiresAt;
+      let expiryDate = normalizeSessionTimestamp(expiresAt);
       if (!expiryDate && expiresIn) {
-        expiryDate = new Date(Date.now() + (expiresIn * 1000)).toISOString();
+        expiryDate = Date.now() + (Number(expiresIn) * 1000);
       }
       
       const sessionToValidate = {
         token: token,
         refreshToken: refreshToken || null,
-        userId: user.id || user.uid,
-        expiresAt: expiryDate ? new Date(expiryDate).getTime() : null,
+        userId: normalizeSessionUserId(user.id || user.uid || sessionData.userId),
+        expiresAt: expiryDate,
         issuedAt: Date.now()
       };
       

@@ -2559,7 +2559,7 @@
                     const normalizedMessages = messagesArray.map(msg => ({
                         id: msg.id,
                         content: msg.content || msg.text || '',
-                        type: msg.type || 'text',
+                        type: msg.type || msg.messageType || 'text',
                         senderId: msg.senderId || msg.sender?.id,
                         sender: msg.sender,
                         timestamp: msg.createdAt || msg.timestamp || Date.now(),
@@ -2628,7 +2628,7 @@
                     content: content,
                     type: options.type || 'text',
                     attachment: options.attachment,
-                    replyTo: options.replyTo,
+                    replyToId: options.replyToId || options.replyTo,
                     mentions: options.mentions
                 };
             } else {
@@ -2638,7 +2638,7 @@
                     content: content,
                     type: options.type || 'text',
                     attachment: options.attachment,
-                    replyTo: options.replyTo,
+                    replyToId: options.replyToId || options.replyTo,
                     mentions: options.mentions
                 };
             }
@@ -5597,49 +5597,11 @@
             
             console.log(`[${MODULE_NAME}] ✅ Initialized - waiting for parent activation and valid session`);
             
+            // Production requirement: never activate mock/demo data.
             setTimeout(() => {
                 if (!_demoBootstrapFired && currentState !== LIFECYCLE_STATES.ACTIVE && !parentReadyReceived) {
                     _demoBootstrapFired = true;
-                    console.log(`[${MODULE_NAME}] Demo bootstrap: no parent detected after 3s, activating demo mode`);
-                    _demoModeEnabled = true;
-                    
-                    try {
-                        if (currentState === LIFECYCLE_STATES.BOOT) setState(LIFECYCLE_STATES.INITIALIZING, 'demo_bootstrap');
-                        if (currentState === LIFECYCLE_STATES.INITIALIZING) setState(LIFECYCLE_STATES.READY, 'demo_bootstrap');
-                        if (currentState === LIFECYCLE_STATES.READY) setState(LIFECYCLE_STATES.WAIT_PARENT, 'demo_bootstrap');
-                        
-                        SessionManager.setSession({
-                            token: 'demo_token_12345',
-                            userId: 1001,
-                            user: { id: 1001, displayName: 'Me', username: 'me' }
-                        });
-                        
-                        if (currentState === LIFECYCLE_STATES.WAIT_PARENT) {
-                            setState(LIFECYCLE_STATES.ACTIVE, 'demo_self_activate');
-                        }
-                        if (currentState !== LIFECYCLE_STATES.ACTIVE) {
-                            currentState = LIFECYCLE_STATES.ACTIVE;
-                            notifyStateListeners(LIFECYCLE_STATES.ACTIVE, 'BOOT', 'demo_force');
-                        }
-                        
-                        initializeUISafe();
-                        ChatManager._loadDemoDataIfNeeded();
-                        FriendManager._loadDemoFriendsIfNeeded();
-                        
-                        setTimeout(() => {
-                            try {
-                                window.dispatchEvent(new CustomEvent('conversationsUpdated', {
-                                    detail: { conversations: ChatManager.getConversations() }
-                                }));
-                                window.dispatchEvent(new CustomEvent('friendsUpdated', {
-                                    detail: { friends: FriendManager.getFriends() }
-                                }));
-                            } catch(e) {}
-                        }, 200);
-                        
-                    } catch(e) {
-                        console.warn(`[${MODULE_NAME}] Demo bootstrap error:`, e);
-                    }
+                    console.warn(`[${MODULE_NAME}] Demo bootstrap suppressed: waiting for parent/session for real data`);
                 }
             }, 3000);
             

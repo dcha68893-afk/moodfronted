@@ -217,7 +217,10 @@
 
         async _fetchServerMessages(chatId, since = 0, limit = 100) {
             const token   = this._getToken();
-            const baseUrl = window.api?.env?.getBaseUrl?.() || 'http://localhost:4000/api';
+            const baseUrl =
+                window.api?.env?.getBaseUrl?.() ||
+                window.__getApiBase?.() ||
+                'http://localhost:4000/api';
 
             let url = `${baseUrl}/messages?chatId=${chatId}&limit=${limit}`;
             if (since) url += `&after=${new Date(since).toISOString()}`;

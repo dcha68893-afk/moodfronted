@@ -253,7 +253,10 @@
 
             // Fallback: direct API call via api gateway
             const token = this._getToken();
-            const baseUrl = window.api?.env?.getBaseUrl?.() || 'http://localhost:4000/api';
+            const baseUrl =
+                window.api?.env?.getBaseUrl?.() ||
+                window.__getApiBase?.() ||
+                'http://localhost:4000/api';
 
             const body = {
                 chatId:   payload.chatId,

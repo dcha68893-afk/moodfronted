@@ -1922,3 +1922,8 @@ body.camera-active .top-bar {
     opacity: 1;
     visibility: visible;
 }
+
+/* Parent header consolidation: hide module main headers */
+#sidebar > .sidebar-header {
+    display: none !important;
+}

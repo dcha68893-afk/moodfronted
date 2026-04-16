@@ -1,4 +1,4 @@
-﻿﻿<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -109,6 +109,44 @@
             transition: all 0.2s;
         }
         .profile-trigger:hover { background: rgba(255,255,255,0.92); }
+        
+        /* Header module icons/actions (single source of truth in parent) */
+        .header-actions {
+            display: flex;
+            align-items: center;
+            justify-content: flex-end;
+            gap: 10px;
+            flex: 1 1 auto;
+            min-width: 0;
+        }
+
+        .header-actions.hidden {
+            display: none !important;
+        }
+
+        .header-action-btn {
+            width: 36px;
+            height: 36px;
+            border-radius: 12px;
+            border: 1px solid rgba(148, 163, 184, 0.25);
+            background: rgba(255,255,255,0.70);
+            color: #0f172a;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: transform 0.15s ease, background 0.15s ease;
+        }
+
+        .header-action-btn:hover {
+            transform: translateY(-1px);
+            background: rgba(255,255,255,0.95);
+        }
+
+        .header-action-btn i {
+            font-size: 16px;
+        }
+
         .profile-avatar-sm {
             width: 36px;
             height: 36px;
@@ -556,6 +594,7 @@
                 <div id="headerModuleSubtitle" class="header-module-subtitle">Your recent chats load from local cache first.</div>
             </div>
         </div>
+        <div id="headerActions" class="header-actions hidden" aria-label="Module actions"></div>
         <div id="profileTrigger" class="profile-trigger">
             <img id="headerAvatar" class="profile-avatar-sm" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%237c3aed'%3E%3Cpath d='M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z'/%3E%3C/svg%3E" alt="avatar">
             <span id="headerUserName" class="profile-name-sm">User</span>
@@ -645,12 +684,19 @@
         // ======================================================================
         // ENVIRONMENT DETECTION & SESSION PROTECTION
         // ======================================================================
-        window.__getApiBase = function() {
-            const host = window.location.hostname;
-            if (host === 'localhost' || host === '127.0.0.1' || host.startsWith('192.168.') || host.startsWith('10.')) {
-                return 'http://localhost:4000/api';
-            }
-            return 'https://moodchat-fy56.onrender.com/api';
+        window.__isLocalEnvironment = window.__isLocalEnvironment || function(hostname) {
+            const host = String(hostname || window.location.hostname || '').toLowerCase();
+            if (!host) return true;
+            if (host === 'localhost' || host === '127.0.0.1' || host === '0.0.0.0') return true;
+            if (host.endsWith('.local')) return true;
+            if (host.startsWith('192.168.') || host.startsWith('10.')) return true;
+            return /^172\.(1[6-9]|2\d|3[0-1])\./.test(host);
+        };
+        window.__getApiOrigin = window.__getApiOrigin || function() {
+            return window.__isLocalEnvironment() ? 'http://localhost:4000' : 'https://moodchat-fy56.onrender.com';
+        };
+        window.__getApiBase = window.__getApiBase || function() {
+            return `${window.__getApiOrigin()}/api`;
         };
 
         // Session protection - prevent clearing critical auth keys
@@ -1076,12 +1122,13 @@
         window.__lastActivePage = 'messages';
         const headerPageMeta = {
             messages: { icon: 'fa-comments', title: 'Messages', subtitle: 'Your recent chats load from local cache first.' },
-            status:   { icon: 'fa-bolt', title: 'Status', subtitle: 'Stories and highlights refresh quietly in the background.' },
+            status:   { icon: 'fa-circle', title: 'Status', subtitle: 'Stories and highlights refresh quietly in the background.' },
             group:    { icon: 'fa-users', title: 'Groups', subtitle: 'Communities stay responsive with local-first hydration.' },
-            friends:  { icon: 'fa-user', title: 'Friends', subtitle: 'Contacts, requests, and discovery live in one place.' },
+            groups:   { icon: 'fa-users', title: 'Groups', subtitle: 'Communities stay responsive with local-first hydration.' },
+            friends:  { icon: 'fa-user-friends', title: 'Friends', subtitle: 'Contacts, requests, and discovery live in one place.' },
             calls:    { icon: 'fa-phone', title: 'Calls', subtitle: 'Recent calls and live call actions are coordinated here.' },
             settings: { icon: 'fa-cog', title: 'Settings', subtitle: 'Profile, privacy, and preferences for the whole app.' },
-            tools:    { icon: 'fa-wrench', title: 'Tools', subtitle: 'Utilities and marketplace actions for power users.' }
+            tools:    { icon: 'fa-tools', title: 'Tools', subtitle: 'Utilities and marketplace actions for power users.' }
         };
 
         function updateHeaderContext(page) {
@@ -1095,6 +1142,85 @@
             if (subtitleEl) subtitleEl.textContent = meta.subtitle;
         }
 
+        // ======================================================================
+        // HEADER ACTIONS (single source of truth in parent)
+        // ======================================================================
+        const headerActionConfigByPage = {
+            messages: [
+                { btnId: 'multiSendToggleBtn', icon: 'fa-broadcast-tower', title: 'Multi-send' },
+                { btnId: 'newChatBtn', icon: 'fa-edit', title: 'New chat' }
+            ],
+            friends: [
+                { btnId: 'startNewChatBtn', icon: 'fa-comments', title: 'New chat' },
+                { btnId: 'addFriendBtn', icon: 'fa-user-plus', title: 'Add friend' }
+            ],
+            calls: [
+                { btnId: 'newCallBtn', icon: 'fa-phone-plus', title: 'New call' }
+            ],
+            group: [
+                { btnId: 'createGroupBtn', icon: 'fa-users', title: 'Create group' }
+            ],
+            groups: [
+                { btnId: 'createGroupBtn', icon: 'fa-users', title: 'Create group' }
+            ],
+            status: [
+                { btnId: 'viewHighlightsBtn', icon: 'fa-star', title: 'Highlights' },
+                { btnId: 'viewDraftsBtn', icon: 'fa-file-alt', title: 'Drafts' },
+                { btnId: 'createStatusBtn', icon: 'fa-plus', title: 'Create status' }
+            ],
+            settings: [
+                { btnId: 'backToAppBtn', icon: 'fa-arrow-left', title: 'Back to app' }
+            ],
+            tools: [
+                { btnId: 'viewAnalyticsBtn', icon: 'fa-chart-bar', title: 'Analytics' },
+                { btnId: 'viewSavedBtn', icon: 'fa-bookmark', title: 'Saved' },
+                { btnId: 'viewNotesBtn', icon: 'fa-sticky-note', title: 'Notes' },
+                { btnId: 'viewTrustStatsBtn', icon: 'fa-shield-alt', title: 'Trust Stats' },
+                { btnId: 'createListingBtn', icon: 'fa-plus', title: 'Create listing' }
+            ]
+        };
+
+        function triggerIframeHeaderAction(page, btnId) {
+            try {
+                const normalizedPage = (page === 'groups') ? 'group' : page;
+                const iframeId = moduleToIframeId[normalizedPage] || moduleToIframeId[page];
+                const iframe = iframeId ? document.getElementById(iframeId) : null;
+                if (!iframe || !iframe.contentWindow) return;
+                const doc = iframe.contentWindow.document;
+                const btn = doc && doc.getElementById ? doc.getElementById(btnId) : null;
+                if (btn && typeof btn.click === 'function') btn.click();
+            } catch (e) {
+                console.warn('[Parent headerActions] Unable to trigger iframe button:', e && e.message ? e.message : e);
+            }
+        }
+
+        function updateHeaderActions(page) {
+            const headerActionsEl = document.getElementById('headerActions');
+            if (!headerActionsEl) return;
+
+            const normalizedPage = (page === 'groups') ? 'group' : page;
+            const actions = headerActionConfigByPage[normalizedPage] || headerActionConfigByPage[page] || [];
+
+            headerActionsEl.innerHTML = '';
+            if (!actions || actions.length === 0) {
+                headerActionsEl.classList.add('hidden');
+                return;
+            }
+
+            headerActionsEl.classList.remove('hidden');
+            actions.forEach(action => {
+                if (!action || !action.btnId) return;
+                const b = document.createElement('button');
+                b.type = 'button';
+                b.className = 'header-action-btn';
+                b.title = action.title || '';
+                b.setAttribute('aria-label', action.title || action.btnId);
+                b.innerHTML = `<i class="fas ${action.icon || ''}"></i>`;
+                b.addEventListener('click', () => triggerIframeHeaderAction(page, action.btnId));
+                headerActionsEl.appendChild(b);
+            });
+        }
+
         function navigateToPage(page) {
             if (!page) return;
             if (window.__currentPage !== page) {
@@ -1102,6 +1228,7 @@
                 window.__currentPage = page;
             }
             updateHeaderContext(page);
+            updateHeaderActions(page);
             document.querySelectorAll('.iframe-container').forEach(c => c.classList.add('hidden'));
             const target = document.getElementById(`${page}Content`);
             if (target) target.classList.remove('hidden');
@@ -1270,7 +1397,7 @@
                     window.Session?.getToken?.() ||
                     null;
 
-                let user = auth?.user || null;
+                let user = auth?.user || window.Session?.getUser?.() || null;
                 if (!user) {
                     try {
                         user = JSON.parse(localStorage.getItem('currentUser') || localStorage.getItem('user') || 'null');
@@ -1318,6 +1445,7 @@
     <!-- SESSION MANAGER - MUST BE LOADED BEFORE VALIDATION -->
     <!-- ====================================================================== -->
     <script src="js/auth.session.manager.js"></script>
+    <script src="js/app.runtime.authority.js"></script>
 
     <!-- ====================================================================== -->
     <!-- SESSION VALIDATION FOR CHAT PAGE - FIXED VERSION -->
@@ -1325,13 +1453,10 @@
     <script>
         (function() {
             function validateChatSession() {
-                const auth = window.AuthStorage?.getAuth?.() || null;
-                const token = auth?.token ||
-                    localStorage.getItem('authToken') ||
-                    localStorage.getItem('token') ||
-                    localStorage.getItem('moodchat_token') ||
-                    localStorage.getItem('accessToken');
-                const user = auth?.user || (() => {
+                const runtimeSession = window.AppRuntimeAuthority?.getSessionSnapshot?.();
+                const stableSession = runtimeSession || (window.__getStableSessionData ? window.__getStableSessionData() : null);
+                const token = stableSession?.token || null;
+                const user = stableSession?.user || (() => {
                     try {
                         return JSON.parse(localStorage.getItem('currentUser') || localStorage.getItem('user') || 'null');
                     } catch (_) {
@@ -1342,21 +1467,25 @@
                 console.log('[AUTH TOKEN]', token);
 
                 if (!token || !user) {
-                    window.location.href = 'index.html';
+                    window.location.replace('index.html');
                     return;
                 }
 
-                localStorage.setItem('authToken', token);
-                localStorage.setItem('token', token);
-                localStorage.setItem('accessToken', token);
-                localStorage.setItem('moodchat_token', token);
-                localStorage.setItem('isLoggedIn', 'true');
-                localStorage.setItem('currentUser', JSON.stringify(user));
-                localStorage.setItem('user', JSON.stringify(user));
+                window.AppRuntimeAuthority?.persistSession?.({
+                    token,
+                    refreshToken: stableSession?.refreshToken || null,
+                    user,
+                    expiresAt: stableSession?.expiresAt || null
+                }, { emit: false });
                 window.currentUser = user;
 
                 if (window.Session?.setSession) {
-                    window.Session.setSession({ token, user, refreshToken: auth?.refreshToken, expiresAt: auth?.expiresAt });
+                    window.Session.setSession({
+                        token,
+                        user,
+                        refreshToken: stableSession?.refreshToken || null,
+                        expiresAt: stableSession?.expiresAt || null
+                    });
                 }
 
                 if (window.SessionManager?.updateActivity) {
@@ -1487,57 +1616,58 @@
             };
 
             function getSessionData() {
-                const token = localStorage.getItem('authToken') || 
-                              localStorage.getItem('token') || 
-                              localStorage.getItem('moodchat_token') || 
+                const auth = window.AuthStorage?.getAuth?.() || null;
+                const session = window.Session?.getSession?.() || null;
+                const token = session?.token ||
+                              auth?.token ||
+                              window.Session?.getToken?.() ||
+                              localStorage.getItem('authToken') ||
+                              localStorage.getItem('token') ||
+                              localStorage.getItem('moodchat_token') ||
                               localStorage.getItem('accessToken');
                 if (!token) return null;
 
-                let userId = null;
-                let user = null;
-
-                try {
-                    const parts = token.split('.');
-                    if (parts.length === 3) {
-                        const payload = JSON.parse(atob(parts[1]));
-                        userId = payload.userId || payload.id || payload.sub || payload.user_id || payload.uid;
-                        if (userId) {
-                            user = {
-                                id: userId,
-                                userId: userId,
-                                username: payload.username || payload.name || payload.email?.split('@')[0] || 'User',
-                                email: payload.email || '',
-                                displayName: payload.displayName || payload.username || payload.name || 'User',
-                                firstName: payload.firstName || '',
-                                lastName: payload.lastName || ''
-                            };
-                        }
-                    }
-                } catch (e) {
-                    console.warn('[Parent] Failed to decode token:', e);
-                }
+                let user = session?.user || auth?.user || window.Session?.getUser?.() || null;
+                let userId = user?.id || user?.userId || session?.userId || auth?.userId || auth?.id || null;
 
                 if (!userId) {
-                    const authData = localStorage.getItem('kynecta_auth');
-                    if (authData) {
-                        try {
-                            const parsed = JSON.parse(authData);
-                            userId = parsed.userId || parsed.id || parsed.user?.id;
-                            if (userId) user = parsed.user || parsed;
-                        } catch(e) {}
+                    try {
+                        const parts = token.split('.');
+                        if (parts.length === 3) {
+                            const payload = JSON.parse(atob(parts[1]));
+                            userId = payload.userId || payload.id || payload.sub || payload.user_id || payload.uid || null;
+                            if (!user && userId) {
+                                user = {
+                                    id: userId,
+                                    userId: userId,
+                                    username: payload.username || payload.name || payload.email?.split('@')[0] || 'User',
+                                    email: payload.email || '',
+                                    displayName: payload.displayName || payload.username || payload.name || 'User',
+                                    firstName: payload.firstName || '',
+                                    lastName: payload.lastName || ''
+                                };
+                            }
+                        }
+                    } catch (e) {
+                        console.warn('[Parent] Failed to decode token:', e);
                     }
                 }
 
                 if (!userId) return null;
-                return { token, userId, user };
+                return { token, userId: String(userId), user };
             }
 
             function updateSessionCache() {
                 const session = getSessionData();
                 if (session && session.userId) {
                     cachedToken = session.token;
-                    cachedUserId = session.userId;
-                    cachedUser = session.user || { id: session.userId, userId: session.userId, username: 'User' };
+                    const normalizedUserId = Number(session.userId);
+                    cachedUserId = Number.isFinite(normalizedUserId) ? normalizedUserId : session.userId;
+                    cachedUser = session.user || { id: cachedUserId, userId: cachedUserId, username: 'User' };
+                    if (cachedUser && (cachedUser.id == null || cachedUser.userId == null)) {
+                        cachedUser.id = cachedUser.id ?? cachedUserId;
+                        cachedUser.userId = cachedUser.userId ?? cachedUserId;
+                    }
                     requestFriendsFromFriendIframe();
                 } else {
                     cachedToken = null;
@@ -1593,9 +1723,11 @@
                     timestamp: now
                 };
 
+                const numericUserId = Number(cachedUserId);
+                const normalizedUserId = Number.isFinite(numericUserId) ? numericUserId : cachedUserId;
                 const userData = {
-                    id: cachedUserId,
-                    userId: cachedUserId,
+                    id: normalizedUserId,
+                    userId: normalizedUserId,
                     username: cachedUser?.username || 'User',
                     displayName: cachedUser?.displayName || cachedUser?.username || 'User',
                     email: cachedUser?.email || '',
@@ -1609,8 +1741,8 @@
                     authenticated: true,
                     expiresAt: Date.now() + 3600000,
                     ready: true,
-                    userId: cachedUserId,
-                    id: cachedUserId
+                    userId: normalizedUserId,
+                    id: normalizedUserId
                 };
 
                 // ── patch v1: expose session on window so same-origin iframes
@@ -1625,7 +1757,7 @@
                     source: 'parent',
                     target: moduleName,
                     payload: sessionData,
-                    userId: cachedUserId,
+                    userId: normalizedUserId,
                     timestamp: now
                 }, '*');
 
@@ -1638,10 +1770,10 @@
                         authenticated: true,
                         session: sessionData,
                         user: userData,
-                        userId: cachedUserId,
+                        userId: normalizedUserId,
                         timestamp: now
                     },
-                    userId: cachedUserId,
+                    userId: normalizedUserId,
                     timestamp: now
                 }, '*');
 
@@ -1655,9 +1787,9 @@
                         state: 'READY',
                         message: 'Parent is ready',
                         session: sessionData,
-                        userId: cachedUserId
+                        userId: normalizedUserId
                     },
-                    userId: cachedUserId,
+                    userId: normalizedUserId,
                     timestamp: now
                 }, '*');
                 
@@ -1693,8 +1825,31 @@
             function getCachedSettings() {
                 try {
                     const raw = localStorage.getItem('knecta_settings_cache');
-                    return raw ? JSON.parse(raw) : null;
+                    if (!raw) return null;
+                    const parsed = JSON.parse(raw);
+                    return parsed?.data || parsed;
                 } catch(e) { return null; }
+            }
+
+            function persistCachedSettings(settings) {
+                try {
+                    localStorage.setItem('knecta_settings_cache', JSON.stringify({
+                        data: settings || {},
+                        timestamp: Date.now(),
+                        version: '1.0.0'
+                    }));
+                    return true;
+                } catch (e) {
+                    return false;
+                }
+            }
+
+            function updateCachedSettingsPath(section, key, value) {
+                const existing = getCachedSettings() || {};
+                if (!existing[section] || typeof existing[section] !== 'object') existing[section] = {};
+                existing[section][key] = value;
+                persistCachedSettings(existing);
+                return existing;
             }
 
             function pushSettingsToModule(iframe, moduleName) {
@@ -2177,8 +2332,13 @@
 
                 // SETTINGS HANDLERS
                 if (data.type === 'SETTINGS_UPDATED') {
-                    const settings = data.settings || data.payload?.settings || {};
-                    try { localStorage.setItem('knecta_settings_cache', JSON.stringify(settings)); } catch(e) {}
+                    const settings = data.settings || data.payload?.settings || null;
+                    // Ignore "section-only" updates coming from settings UI.
+                    // Those messages don't carry the full settings object and would wipe/apply defaults.
+                    if (!settings || typeof settings !== 'object' || Array.isArray(settings) || Object.keys(settings).length === 0) {
+                        return;
+                    }
+                    persistCachedSettings(settings);
                     try {
                         if (window.SettingsStore) {
                             Object.entries(settings || {}).forEach(([section, values]) => {
@@ -2219,12 +2379,7 @@
                         if (key === 'performanceMode') document.documentElement.setAttribute('data-performance-mode', value ? 'true' : 'false');
                     }
                     if (section === 'mood' && key === 'currentMood') document.documentElement.setAttribute('data-mood', value);
-                    try {
-                        const existing = JSON.parse(localStorage.getItem('knecta_settings_cache') || '{}');
-                        if (!existing[section]) existing[section] = {};
-                        existing[section][key] = value;
-                        localStorage.setItem('knecta_settings_cache', JSON.stringify(existing));
-                    } catch(e) {}
+                    updateCachedSettingsPath(section, key, value);
                     dispatchEventToModules({ type: 'SETTING_CHANGED', payload: { section, key, value, timestamp: Date.now() }, originalSource: 'settings' });
                 }
 
@@ -2321,8 +2476,6 @@
                     }
 
                     try {
-                        const baseUrl = window.__getApiBase ? window.__getApiBase() : 'http://localhost:4000/api';
-                        let url = baseUrl + endpoint;
                         const cachedApiFallback = getCachedApiFallback(endpoint);
                         if (cachedApiFallback) {
                             if (event.source && event.source.postMessage) {
@@ -2348,29 +2501,44 @@
                             }
                             return;
                         }
-                        if (method === 'GET' && params && typeof params === 'object') {
-                            const queryString = new URLSearchParams(params).toString();
-                            if (queryString) url += '?' + queryString;
-                        }
-                        const headers = { 'Content-Type': 'application/json', 'Accept': 'application/json' };
-                        if (token) headers['Authorization'] = `Bearer ${token}`;
-                        const fetchOptions = { method: method, headers: headers, credentials: 'include' };
-                        if (body && (method === 'POST' || method === 'PUT' || method === 'PATCH')) fetchOptions.body = JSON.stringify(body);
-                        const response = await fetch(url, fetchOptions);
-                        let responseData;
-                        const contentType = response.headers.get('content-type');
-                        if (contentType && contentType.includes('application/json')) responseData = await response.json();
-                        else responseData = { message: await response.text() || 'Request completed' };
-                        const isStatusEndpoint = endpoint === '/status/my' || endpoint === '/status/highlights' || endpoint === '/auth/me';
-                        const isSuccess = response.ok || (isStatusEndpoint && response.status === 401);
-                        const responsePayload = isSuccess
-                            ? {
-                                success: true,
-                                data: response.ok ? responseData : (endpoint === '/status/highlights' ? { highlights: [] } : endpoint === '/status/my' ? { statuses: [] } : { user: cachedUser, data: cachedUser }),
-                                statusCode: response.status,
-                                fallback: !response.ok
+                        let responsePayload;
+                        if (window.api?.request?.request) {
+                            const apiResult = await window.api.request.request(method, endpoint, {
+                                data: body,
+                                params,
+                                token,
+                                headers: token ? { Authorization: `Bearer ${token}` } : {}
+                            });
+
+                            responsePayload = {
+                                success: apiResult?.ok !== false && apiResult?.success !== false,
+                                data: apiResult?.data ?? null,
+                                error: apiResult?.error || null,
+                                statusCode: apiResult?.status || apiResult?.statusCode || 200,
+                                offline: !!apiResult?.offline,
+                                fallback: !!apiResult?.fallback,
+                                cached: !!apiResult?.cached
+                            };
+                        } else {
+                            const baseUrl = window.__getApiBase ? window.__getApiBase() : 'http://localhost:4000/api';
+                            let url = baseUrl + endpoint;
+                            if (method === 'GET' && params && typeof params === 'object') {
+                                const queryString = new URLSearchParams(params).toString();
+                                if (queryString) url += '?' + queryString;
                             }
-                            : { success: false, error: responseData?.message || responseData?.error || `HTTP ${response.status}`, statusCode: response.status, data: responseData };
+                            const headers = { 'Content-Type': 'application/json', 'Accept': 'application/json' };
+                            if (token) headers['Authorization'] = `Bearer ${token}`;
+                            const fetchOptions = { method: method, headers: headers, credentials: 'include' };
+                            if (body && (method === 'POST' || method === 'PUT' || method === 'PATCH')) fetchOptions.body = JSON.stringify(body);
+                            const response = await fetch(url, fetchOptions);
+                            let responseData;
+                            const contentType = response.headers.get('content-type');
+                            if (contentType && contentType.includes('application/json')) responseData = await response.json();
+                            else responseData = { message: await response.text() || 'Request completed' };
+                            responsePayload = response.ok
+                                ? { success: true, data: responseData, statusCode: response.status }
+                                : { success: false, error: responseData?.message || responseData?.error || `HTTP ${response.status}`, statusCode: response.status, data: responseData };
+                        }
                         if (event.source && event.source.postMessage) event.source.postMessage({ type: 'API_RESPONSE', requestId: requestId, payload: responsePayload, timestamp: new Date().toISOString() }, '*');
                     } catch (error) {
                         if (event.source && event.source.postMessage) event.source.postMessage({ type: 'API_RESPONSE', requestId: requestId, payload: { success: false, error: error.message || 'Network request failed', statusCode: 0, data: null }, timestamp: new Date().toISOString() }, '*');
@@ -2460,26 +2628,6 @@
                             window.__callIdMap[localCallId] = serverCallId;
                             const callsIframe = document.getElementById('callsIframe');
                             if (callsIframe && callsIframe.contentWindow) callsIframe.contentWindow.postMessage({ type: 'CALL_INITIATED', payload: { ...(respData.data?.call || respData.data), callId: serverCallId, localCallId: localCallId, callType: callType, returnTo: callOriginPage, receiverOnline: respData.data?.receiverOnline !== false, success: true } }, '*');
-                        } else if ((respData?.error || respData?.message || '').includes('wsService.isUserOnline is not a function')) {
-                            const fallbackCallId = localCallId || `call_fallback_${Date.now()}`;
-                            window.__callIdMap = window.__callIdMap || {};
-                            window.__callIdMap[localCallId] = fallbackCallId;
-                            const callsIframe = document.getElementById('callsIframe');
-                            if (callsIframe && callsIframe.contentWindow) {
-                                callsIframe.contentWindow.postMessage({
-                                    type: 'CALL_INITIATED',
-                                    payload: {
-                                        success: true,
-                                        fallback: true,
-                                        callId: fallbackCallId,
-                                        localCallId,
-                                        callType,
-                                        returnTo: callOriginPage,
-                                        receiverOnline: true,
-                                        participants: body.participantIds || []
-                                    }
-                                }, '*');
-                            }
                         } else {
                             const callsIframe = document.getElementById('callsIframe');
                             if (callsIframe && callsIframe.contentWindow) callsIframe.contentWindow.postMessage({ type: 'CALL_INITIATED', payload: { success: false, error: respData?.message || 'Failed to start call', localCallId } }, '*');
@@ -2671,6 +2819,7 @@
         // DOMContentLoaded handlers
         document.addEventListener('DOMContentLoaded', function() {
             updateHeaderContext(window.__currentPage || 'messages');
+            updateHeaderActions(window.__currentPage || 'messages');
             loadUserProfileFromStorage();
             setupProfileModal();
             setupGlobalCallBanner();
