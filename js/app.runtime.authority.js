@@ -43,6 +43,17 @@
         }
     }
 
+    function decodeTokenPayload(token) {
+        try {
+            const parts = String(token || '').split('.');
+            if (parts.length !== 3) return null;
+            const payload = JSON.parse(atob(parts[1]));
+            return payload && typeof payload === 'object' ? payload : null;
+        } catch (_error) {
+            return null;
+        }
+    }
+
     function detectLocalEnvironment(hostname) {
         const host = String(hostname || window.location.hostname || '').toLowerCase();
         if (!host) return true;
@@ -79,7 +90,15 @@
         const token = auth.token || auth.accessToken || auth.access_token || null;
         if (!token) return null;
 
-        const user = auth.user || auth.data?.user || null;
+        const tokenPayload = decodeTokenPayload(token);
+        const fallbackUser = tokenPayload ? {
+            id: tokenPayload.userId || tokenPayload.id || tokenPayload.sub || null,
+            userId: tokenPayload.userId || tokenPayload.id || tokenPayload.sub || null,
+            username: tokenPayload.username || tokenPayload.name || tokenPayload.email?.split('@')[0] || '',
+            displayName: tokenPayload.displayName || tokenPayload.username || tokenPayload.name || tokenPayload.email?.split('@')[0] || '',
+            email: tokenPayload.email || ''
+        } : null;
+        const user = auth.user || auth.data?.user || fallbackUser || null;
         const expiresAt = auth.expiresAt || auth.expires_at || null;
         const refreshToken = auth.refreshToken || auth.refresh_token || null;
         const userId = user?.id || user?.userId || auth.userId || auth.id || null;
@@ -514,6 +533,15 @@
         if (type.indexOf('message') !== -1) {
             if (window.KynectaSyncEngine && typeof window.KynectaSyncEngine.ingestIncomingMessage === 'function') {
                 window.KynectaSyncEngine.ingestIncomingMessage(body, body.chatId || body.conversationId).catch(function () {});
+            }
+            if (type === 'message:new') {
+                try {
+                    window.dispatchEvent(new CustomEvent('newMessage', {
+                        detail: {
+                            message: body
+                        }
+                    }));
+                } catch (_error) {}
             }
             emit('MESSAGE_RECEIVED', body);
         }

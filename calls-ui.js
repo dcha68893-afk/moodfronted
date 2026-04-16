@@ -334,7 +334,7 @@ async function loadCallHistory() {
     
     if (!token) {
         console.warn('[Calls UI] No token for call history');
-        displayCallHistory([]);
+        loadCachedCallHistory();
         return [];
     }
     
@@ -356,7 +356,7 @@ async function loadCallHistory() {
         }
     } catch (error) {
         console.error('[Calls UI] Error loading call history:', error);
-        displayCallHistory([]);
+        loadCachedCallHistory();
         return [];
     }
 }
@@ -364,6 +364,22 @@ async function loadCallHistory() {
 // Call this in initializeUISystem after cacheElements()
 // Add this line inside initializeUISystem:
 loadCachedCallHistory();
+
+function formatCallClockTime(timestamp) {
+    const date = new Date(timestamp || Date.now());
+    if (isNaN(date.getTime())) return '';
+    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
+function formatCallChatTimestamp(timestamp) {
+    const date = new Date(timestamp || Date.now());
+    if (isNaN(date.getTime())) return formatCallClockTime(Date.now());
+    const now = new Date();
+    if (date.toDateString() === now.toDateString()) {
+        return formatCallClockTime(date);
+    }
+    return `${date.toLocaleDateString([], { month: 'short', day: 'numeric' })} ${formatCallClockTime(date)}`;
+}
 
 function displayCallHistory(calls) {
     const allCallsList = document.getElementById('allCallsList');
@@ -442,7 +458,7 @@ function displayCallHistory(calls) {
                 dateStr = date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
             }
             
-            const timeStr = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            const timeStr = formatCallClockTime(date);
             return { dateStr, timeStr };
         } catch(e) {
             return { dateStr: 'Unknown', timeStr: '' };
@@ -485,8 +501,13 @@ function displayCallHistory(calls) {
             || (contactMatch && (contactMatch.displayName || contactMatch.username || contactMatch.name))
             || (call.callerInfo?.username) || (call.calleeInfo?.username)
             || ('User #' + (otherId || '?'));
-        
+
         const initials = name.split(' ').map(function(n){ return n[0]; }).join('').toUpperCase().substring(0, 2);
+        const avatarUrl = otherParticipant?.avatar || otherParticipant?.photoURL || contactMatch?.avatar || contactMatch?.photoURL || '';
+        const contactStatus = String(contactMatch?.status || (contactMatch?.isOnline ? 'online' : (call.status === 'missed' ? 'missed' : 'offline'))).toLowerCase();
+        const contactStatusLabel = contactStatus === 'online'
+            ? 'Online'
+            : (contactStatus === 'away' ? 'Away' : (contactStatus === 'missed' ? 'Missed call' : 'Offline'));
         const directionInfo = getCallDirectionInfo(call);
         // FIXED: use createdAt as fallback when startedAt is null (e.g. missed/cancelled calls)
         const { dateStr, timeStr } = formatCallDateTime(call.startedAt || call.createdAt);
@@ -505,8 +526,8 @@ function displayCallHistory(calls) {
         
         // REMOVED fake carrier/network info - only real data shown
         item.innerHTML = `
-            <div class="call-avatar" style="width: 40px; height: 40px; background-color: #6c5ce7; flex-shrink: 0;">
-                <span style="font-size: 14px;">${escapeHtml(initials)}</span>
+            <div class="call-avatar" style="width: 44px; height: 44px; background-color: #6c5ce7; flex-shrink: 0;">
+                ${avatarUrl ? `<img src="${escapeHtml(avatarUrl)}" alt="${escapeHtml(name)}">` : `<span style="font-size: 14px;">${escapeHtml(initials)}</span>`}
             </div>
             <div class="call-info" style="flex: 1; min-width: 0;">
                 <div class="call-name" style="font-size: 14px; margin-bottom: 2px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
@@ -515,6 +536,10 @@ function displayCallHistory(calls) {
                         ${directionInfo.directionIcon} ${directionInfo.directionText}
                     </span>
                     ${call.type === 'video' ? '<span style="font-size: 10px; padding: 2px 6px; border-radius: 10px; background: #8b5cf620; color: #8b5cf6;"><i class="fas fa-video"></i> Video</span>' : '<span style="font-size: 10px; padding: 2px 6px; border-radius: 10px; background: #10b98120; color: #10b981;"><i class="fas fa-phone"></i> Voice</span>'}
+                </div>
+                <div class="contact-status ${escapeHtml(contactStatus)}" style="margin-bottom: 4px;">
+                    <span class="status-dot"></span>
+                    ${escapeHtml(contactStatusLabel)}
                 </div>
                 <div class="call-details" style="font-size: 11px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
                     <span style="display: flex; align-items: center; gap: 3px;">
@@ -2818,6 +2843,30 @@ sanitizeHTML: function(str) {
                 // If we have AppState with contacts, use that
                 if (window.AppState && window.AppState.contacts && Array.isArray(window.AppState.contacts)) {
                     this.renderContactsList(window.AppState.contacts);
+                    return;
+                }
+
+                if (Array.isArray(window.__cachedCallContacts) && window.__cachedCallContacts.length > 0) {
+                    this.renderContactsList(window.__cachedCallContacts);
+                    return;
+                }
+
+                const localFriends = JSON.parse(localStorage.getItem('friends') || '[]');
+                if (Array.isArray(localFriends) && localFriends.length > 0) {
+                    const contacts = localFriends.map((friend) => ({
+                        id: friend.id || friend.userId,
+                        userId: friend.id || friend.userId,
+                        name: friend.displayName || friend.username || friend.name || ('User #' + (friend.id || friend.userId)),
+                        displayName: friend.displayName || friend.username || friend.name || ('User #' + (friend.id || friend.userId)),
+                        username: friend.username || friend.name || '',
+                        status: friend.status || (friend.online ? 'online' : 'offline'),
+                        isOnline: friend.online || friend.isOnline || friend.status === 'online',
+                        avatar: friend.avatar || friend.photoURL || '',
+                        isPremium: !!friend.isPremium
+                    }));
+                    UIState.contacts = contacts;
+                    window.__cachedCallContacts = contacts;
+                    this.renderContactsList(contacts);
                 }
             } catch (error) {
                 if (DEBUG) {
@@ -3127,10 +3176,16 @@ sanitizeHTML: function(str) {
                     if (state.currentFocusMode !== undefined) UIState.currentFocusMode = state.currentFocusMode;
                     
                     // Update call state from core
+                    UIState.callActive = !!state.callActive;
                     UIState.activeCallId = state.activeCallId;
                     UIState.callType = state.callType;
                     UIState.callParticipants = state.callParticipants || [];
                     UIState.callStartTime = state.callStartTime;
+                    if (!state.callActive && (!state.callState || state.callState === 'idle')) {
+                        UIState.activeCallId = null;
+                        UIState.callParticipants = [];
+                        UIState.callStartTime = null;
+                    }
                     
                     if (RenderingPipeline && RenderingPipeline.updateSyncIndicator) {
                         RenderingPipeline.updateSyncIndicator();
@@ -3366,7 +3421,14 @@ sanitizeHTML: function(str) {
                     break;
                 case 'call_blocked':
                     if (data && data.reason === 'call_active') {
-                        showNotification('You are already in a call', 'warning');
+                        const liveCall = (coreInstance && coreInstance.isInCall && coreInstance.isInCall()) ||
+                            UIState.callActive === true ||
+                            ['connected', 'connecting', 'ongoing', 'active', 'in_call', 'initiating', 'ringing'].includes(UIState.callState);
+                        if (liveCall) {
+                            showNotification('You are already in a call', 'warning');
+                        } else {
+                            console.warn('[Calls UI] Suppressed stale call_active warning');
+                        }
                     }
                     break;
                 case 'contacts_update':
@@ -3649,7 +3711,7 @@ sanitizeHTML: function(str) {
             msgEl.innerHTML = `
                 <div class="message-sender">${SecuritySanitizer.sanitizeString(sender || 'Participant')}</div>
                 <div class="message-content">${SecuritySanitizer.sanitizeString(message)}</div>
-                <div class="message-time">${timestamp ? new Date(timestamp).toLocaleTimeString() : 'now'}</div>
+                <div class="message-time">${formatCallChatTimestamp(timestamp)}</div>
             `;
             
             chatPanel.appendChild(msgEl);
@@ -6445,7 +6507,7 @@ declineIncomingCall: async function() {
 
             const panel = document.createElement('div');
             panel.className = 'feature-panel chat-panel';
-            const now = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            const now = formatCallClockTime(Date.now());
             const currentUsername = window.__CHILD_SESSION__?.username || 'You';
 
             // Load chat history from state
@@ -6455,7 +6517,7 @@ declineIncomingCall: async function() {
                 return `<div class="chat-message ${isSelf ? 'self' : 'other'}">
                     <div class="message-sender">${isSelf ? 'You' : (m.senderName || 'Participant')}</div>
                     <div class="message-content">${m.text}</div>
-                    <div class="message-time">${new Date(m.timestamp).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}</div>
+                    <div class="message-time">${formatCallChatTimestamp(m.timestamp)}</div>
                 </div>`;
             }).join('');
 
@@ -6496,7 +6558,7 @@ declineIncomingCall: async function() {
                 // Append locally
                 const msgEl = document.createElement('div');
                 msgEl.className = 'chat-message self';
-                msgEl.innerHTML = `<div class="message-sender">You</div><div class="message-content">${message}</div><div class="message-time">${new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}</div>`;
+                msgEl.innerHTML = `<div class="message-sender">You</div><div class="message-content">${message}</div><div class="message-time">${formatCallChatTimestamp(Date.now())}</div>`;
                 messagesContainer.appendChild(msgEl);
                 messagesContainer.scrollTop = messagesContainer.scrollHeight;
                 // Store in state
@@ -7665,7 +7727,8 @@ function escapeHtmlForCall(str) {
             if (coreInstance && coreInstance.isInCall) {
                 return coreInstance.isInCall();
             }
-            return UIState.activeCallId !== null;
+            const activeStates = ['connected', 'ongoing', 'active', 'call_ready', 'in_call', 'incoming', 'ringing', 'initiating'];
+            return UIState.callActive === true || activeStates.includes(UIState.callState);
         },
         // Refresh session sync indicator
         refreshSyncIndicator: () => {

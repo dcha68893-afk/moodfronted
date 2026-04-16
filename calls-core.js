@@ -8311,7 +8311,10 @@ clearActiveCall: function() {
                 // auto-reset instead of blocking. This prevents the "already in call" loop
                 // caused by backend cleanup not propagating to frontend state.
                 const callAge = callsState.callStartTime ? Date.now() - callsState.callStartTime : Infinity;
-                if (callAge > 90000) {
+                const hasLiveMedia = !!callsState.localStream || !!callsState.remoteStream;
+                const looksDisconnected = !['connected', 'connecting'].includes(callsState.connectionState) &&
+                    !['connected', 'ongoing', 'active', 'in_call', 'initiating', 'ringing', 'incoming'].includes(callsState.callState);
+                if (callAge > 90000 || (!hasLiveMedia && looksDisconnected)) {
                     logWarn(MODULE, 'Stale callActive detected (>90s), auto-resetting before new call', { callAge, callId: callsState.activeCallId });
                     if (window.callCore && window.callCore.forceResetCallState) {
                         window.callCore.forceResetCallState();

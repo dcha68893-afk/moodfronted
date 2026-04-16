@@ -5,6 +5,19 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Kynecta - Advanced Mood-Based Chat</title>
     <style>
+        :root {
+            --app-primary-gradient: linear-gradient(135deg, #2563eb 0%, #1d4ed8 62%, #06b6d4 100%);
+            --app-primary-color: #2563eb;
+            --app-primary-dark: #1d4ed8;
+            --app-primary-light: #dbeafe;
+            --app-secondary-surface: #f8fafc;
+            --app-secondary-muted: #e5e7eb;
+            --app-accent-color: #8b5cf6;
+            --app-accent-soft: #cffafe;
+            --app-text-color: #0f172a;
+            --app-text-secondary: #64748b;
+        }
+
         * {
             margin: 0;
             padding: 0;
@@ -13,7 +26,7 @@
 
         body {
             font-family: system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-            background: #f5f5f5;
+            background: var(--app-secondary-surface);
             overflow: hidden;
             height: 100vh;
         }
@@ -67,7 +80,7 @@
             display: inline-flex;
             align-items: center;
             justify-content: center;
-            background: linear-gradient(135deg, #0f172a, #2563eb);
+            background: var(--app-primary-gradient);
             color: #fff;
             box-shadow: 0 10px 18px rgba(37, 99, 235, 0.18);
             flex: 0 0 auto;
@@ -503,6 +516,7 @@
                 left: 0;
                 padding: 0 14px;
             }
+            body.chat-panel-active #globalHeader,
             body.call-screen-active #globalHeader {
                 opacity: 0.3;
                 pointer-events: none;
@@ -756,7 +770,7 @@
             bio: 'Hey there! I\'m using Kynecta.' 
         };
 
-        function createInlineAvatar(name, bgColor = '#7c3aed', fgColor = '#ffffff') {
+        function createInlineAvatar(name, bgColor = '#2563eb', fgColor = '#ffffff') {
             const safeName = String(name || 'User').trim() || 'User';
             const initials = safeName
                 .split(/\s+/)
@@ -768,7 +782,7 @@
             return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
         }
 
-        function normalizeAvatarUrl(url, name, bgColor = '#7c3aed') {
+        function normalizeAvatarUrl(url, name, bgColor = '#2563eb') {
             const fallback = createInlineAvatar(name, bgColor);
             if (!url) return fallback;
             const value = String(url);
@@ -800,23 +814,55 @@
             return null;
         }
 
+        function loadCachedFriendsListFromStorage() {
+            const candidates = [
+                'friends',
+                'kynecta_friends_cache',
+                'knecta_friends_cache',
+                'knecta_contacts_cache'
+            ];
+            for (const key of candidates) {
+                try {
+                    const parsed = JSON.parse(localStorage.getItem(key) || 'null');
+                    if (Array.isArray(parsed) && parsed.length > 0) {
+                        return parsed;
+                    }
+                    if (parsed && Array.isArray(parsed.friends) && parsed.friends.length > 0) {
+                        return parsed.friends;
+                    }
+                } catch (_) {}
+            }
+            return [];
+        }
+
+        function loadCachedCallHistoryFromStorage() {
+            try {
+                const parsed = JSON.parse(localStorage.getItem('cached_call_history') || 'null');
+                if (parsed && Array.isArray(parsed.calls)) {
+                    return parsed.calls;
+                }
+            } catch (_) {}
+            return [];
+        }
+
         function loadUserProfileFromStorage() {
             try {
                 const auth = localStorage.getItem('kynecta_auth');
                 if (auth) {
                     const parsed = JSON.parse(auth);
-                    currentUserProfile.id = parsed.userId || parsed.id;
-                    currentUserProfile.username = parsed.displayName || parsed.username || 'User';
-                    currentUserProfile.avatar = parsed.avatar || parsed.photoURL;
-                    currentUserProfile.cover = parsed.cover;
-                    currentUserProfile.bio = parsed.bio || 'Hey there! I\'m using Kynecta.';
+                    const user = parsed.user || parsed;
+                    currentUserProfile.id = user.id || user.userId || parsed.userId || parsed.id;
+                    currentUserProfile.username = user.displayName || user.username || user.name || parsed.displayName || parsed.username || 'User';
+                    currentUserProfile.avatar = user.avatar || user.photoURL || parsed.avatar || parsed.photoURL;
+                    currentUserProfile.cover = user.cover || parsed.cover;
+                    currentUserProfile.bio = user.bio || parsed.bio || 'Hey there! I\'m using Kynecta.';
                 }
                 const token = localStorage.getItem('authToken') || localStorage.getItem('token');
                 if (token && !currentUserProfile.id) {
                     try {
                         const payload = JSON.parse(atob(token.split('.')[1]));
                         currentUserProfile.id = payload.userId || payload.id;
-                        currentUserProfile.username = payload.username || payload.name || 'User';
+                        currentUserProfile.username = payload.displayName || payload.username || payload.name || 'User';
                     } catch(e) {}
                 }
                 const savedAvatar = localStorage.getItem('user_avatar');
@@ -830,7 +876,7 @@
         }
 
         function updateProfileUI() {
-            const avatarUrl = normalizeAvatarUrl(currentUserProfile.avatar, currentUserProfile.username, '#7c3aed');
+            const avatarUrl = normalizeAvatarUrl(currentUserProfile.avatar, currentUserProfile.username, '#2563eb');
             document.getElementById('headerAvatar').src = avatarUrl;
             document.getElementById('headerUserName').innerText = currentUserProfile.username;
             document.getElementById('modalAvatarImg').src = avatarUrl;
@@ -1093,7 +1139,7 @@
                     name: friend.displayName || friend.username || friend.name || 'User',
                     displayName: friend.displayName || friend.username || friend.name,
                     username: friend.username,
-                    avatar: normalizeAvatarUrl(friend.avatar || friend.photoURL, friend.displayName || friend.username || friend.name || 'User', '#6c5ce7'),
+                    avatar: normalizeAvatarUrl(friend.avatar || friend.photoURL, friend.displayName || friend.username || friend.name || 'User', '#2563eb'),
                     online: friend.online || false,
                     status: friend.status || (friend.online ? 'online' : 'offline')
                 }));
@@ -1221,6 +1267,39 @@
             });
         }
 
+        function applyParentShellToIframe(iframe, page) {
+            try {
+                if (!iframe || !iframe.contentWindow) return;
+                const doc = iframe.contentDocument || iframe.contentWindow.document;
+                if (!doc || !doc.body) return;
+                const shellVars = {
+                    '--primary-color': '#2563eb',
+                    '--primary-dark': '#1d4ed8',
+                    '--primary-light': '#dbeafe',
+                    '--secondary-color': '#f8fafc',
+                    '--background-color': '#f1f5f9',
+                    '--surface-color': '#ffffff',
+                    '--card-background': '#ffffff',
+                    '--border-color': '#e5e7eb',
+                    '--text-primary': '#0f172a',
+                    '--text-secondary': '#64748b',
+                    '--accent-color': '#8b5cf6',
+                    '--accent-soft': '#cffafe',
+                    '--header-gradient': 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 62%, #06b6d4 100%)'
+                };
+                doc.body.setAttribute('data-parent-shell', 'true');
+                doc.body.setAttribute('data-parent-module', page || iframe.dataset.module || '');
+                if (doc.documentElement) {
+                    doc.documentElement.setAttribute('data-parent-shell', 'true');
+                    doc.documentElement.setAttribute('data-parent-module', page || iframe.dataset.module || '');
+                }
+                Object.entries(shellVars).forEach(([key, value]) => {
+                    doc.documentElement?.style?.setProperty(key, value);
+                    doc.body?.style?.setProperty(key, value);
+                });
+            } catch (_error) {}
+        }
+
         function navigateToPage(page) {
             if (!page) return;
             if (window.__currentPage !== page) {
@@ -1259,6 +1338,7 @@
             const iframeId = moduleToIframeId[page];
             if (iframeId) {
                 const iframe = document.getElementById(iframeId);
+                applyParentShellToIframe(iframe, page);
                 if (iframe && iframe.contentWindow && window.__cachedToken && window.__cachedUserId) {
                     window.__sendSessionToModule(iframe, page);
                     setTimeout(() => window.__pushSettingsToModule(iframe, page), 150);
@@ -1271,6 +1351,11 @@
                 e.preventDefault();
                 if (btn.dataset.page) navigateToPage(btn.dataset.page);
             });
+        });
+
+        document.querySelectorAll('.content-iframe').forEach((iframe) => {
+            iframe.addEventListener('load', () => applyParentShellToIframe(iframe, iframe.dataset.module || 'messages'));
+            applyParentShellToIframe(iframe, iframe.dataset.module || 'messages');
         });
 
         const mobileBackBtn = document.getElementById('mobileBackBtn');
@@ -1452,6 +1537,21 @@
     <!-- ====================================================================== -->
     <script>
         (function() {
+            function hasOfflineBootCache() {
+                try {
+                    const chatCache = JSON.parse(localStorage.getItem('kynecta_chats_cache_v8') || localStorage.getItem('knecta_chats_cache_v8') || 'null');
+                    const callCache = JSON.parse(localStorage.getItem('cached_call_history') || 'null');
+                    const friends = JSON.parse(localStorage.getItem('friends') || '[]');
+                    return !!(
+                        (chatCache && Array.isArray(chatCache.conversations) && chatCache.conversations.length > 0) ||
+                        (callCache && Array.isArray(callCache.calls) && callCache.calls.length > 0) ||
+                        (Array.isArray(friends) && friends.length > 0)
+                    );
+                } catch (_) {
+                    return false;
+                }
+            }
+
             function validateChatSession() {
                 const runtimeSession = window.AppRuntimeAuthority?.getSessionSnapshot?.();
                 const stableSession = runtimeSession || (window.__getStableSessionData ? window.__getStableSessionData() : null);
@@ -1462,11 +1562,32 @@
                     } catch (_) {
                         return null;
                     }
+                })() || (() => {
+                    if (!token) return null;
+                    try {
+                        const payload = JSON.parse(atob(token.split('.')[1]));
+                        const derivedId = payload.userId || payload.id || payload.sub || null;
+                        if (!derivedId) return null;
+                        return {
+                            id: derivedId,
+                            userId: derivedId,
+                            username: payload.username || payload.name || payload.email?.split('@')[0] || 'User',
+                            displayName: payload.displayName || payload.username || payload.name || payload.email?.split('@')[0] || 'User',
+                            email: payload.email || ''
+                        };
+                    } catch (_) {
+                        return null;
+                    }
                 })();
 
                 console.log('[AUTH TOKEN]', token);
 
                 if (!token || !user) {
+                    if (hasOfflineBootCache()) {
+                        console.warn('[chat.html] Using offline cache while session validation is pending');
+                        dismissLoadingScreen(0);
+                        return;
+                    }
                     window.location.replace('index.html');
                     return;
                 }
@@ -1659,6 +1780,11 @@
 
             function updateSessionCache() {
                 const session = getSessionData();
+                const localFriends = loadCachedFriendsListFromStorage();
+                if (localFriends.length > 0) {
+                    cachedFriendsList = localFriends;
+                    broadcastFriendsToAllModules(cachedFriendsList);
+                }
                 if (session && session.userId) {
                     cachedToken = session.token;
                     const normalizedUserId = Number(session.userId);
@@ -1882,17 +2008,30 @@
             }
 
             async function refreshCallHistoryForUser(userId) {
-                if (!cachedToken) return [];
+                const cachedCalls = loadCachedCallHistoryFromStorage();
                 const callsIframe = document.getElementById('callsIframe');
+                if (callsIframe && callsIframe.contentWindow && cachedCalls.length > 0) {
+                    callsIframe.contentWindow.postMessage({
+                        type: 'CALL_HISTORY_UPDATE',
+                        payload: { calls: cachedCalls, loading: false, cached: true, timestamp: Date.now() }
+                    }, '*');
+                }
+                if (!cachedToken) {
+                    return cachedCalls;
+                }
                 try {
                     console.log('[Parent] Refreshing call history for user:', userId);
                     const baseUrl = window.__getApiBase ? window.__getApiBase() : 'http://localhost:4000/api';
 
-                    if (callsIframe && callsIframe.contentWindow) {
+                    if (callsIframe && callsIframe.contentWindow && navigator.onLine) {
                         callsIframe.contentWindow.postMessage({
                             type: 'CALL_HISTORY_UPDATE',
-                            payload: { calls: [], loading: true, timestamp: Date.now() }
+                            payload: { calls: cachedCalls, loading: true, cached: cachedCalls.length > 0, timestamp: Date.now() }
                         }, '*');
+                    }
+
+                    if (!navigator.onLine) {
+                        return cachedCalls;
                     }
 
                     let response = await fetch(`${baseUrl}/calls/history?limit=50`, {
@@ -1920,7 +2059,7 @@
                         if (callsIframe && callsIframe.contentWindow) {
                             callsIframe.contentWindow.postMessage({
                                 type: 'CALL_HISTORY_UPDATE',
-                                payload: { calls: [], loading: false, error: true, timestamp: Date.now() }
+                                payload: { calls: cachedCalls, loading: false, error: true, cached: cachedCalls.length > 0, timestamp: Date.now() }
                             }, '*');
                         }
                     }
@@ -1929,11 +2068,11 @@
                     if (callsIframe && callsIframe.contentWindow) {
                         callsIframe.contentWindow.postMessage({
                             type: 'CALL_HISTORY_UPDATE',
-                            payload: { calls: [], loading: false, error: true, timestamp: Date.now() }
+                            payload: { calls: cachedCalls, loading: false, error: true, cached: cachedCalls.length > 0, timestamp: Date.now() }
                         }, '*');
                     }
                 }
-                return [];
+                return cachedCalls;
             }
 
             async function refreshAuthToken() {

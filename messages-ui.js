@@ -2089,8 +2089,8 @@
                 const avatarSrc = chat.friendAvatar || chat.avatar || chat.photoURL || '';
                 const avatarInitial = (chat.friendName || 'U').charAt(0).toUpperCase();
                 const avatarHtml = avatarSrc
-                    ? `<img class="avatar-photo" src="${avatarSrc}" alt="${chat.friendName || 'User'}" loading="lazy" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"><span style="display:none;width:100%;height:100%;background:linear-gradient(135deg,#667eea,#764ba2);color:#fff;align-items:center;justify-content:center;font-weight:700;font-size:17px;border-radius:50%;">${avatarInitial}</span>`
-                    : `<span style="width:100%;height:100%;background:linear-gradient(135deg,#667eea,#764ba2);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:17px;border-radius:50%;">${avatarInitial}</span>`;
+                    ? `<img class="avatar-photo" src="${avatarSrc}" alt="${chat.friendName || 'User'}" loading="lazy" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"><span style="display:none;width:100%;height:100%;background:linear-gradient(135deg,#2563eb 0%,#1d4ed8 68%,#06b6d4 100%);color:#fff;align-items:center;justify-content:center;font-weight:700;font-size:17px;border-radius:50%;">${avatarInitial}</span>`
+                    : `<span style="width:100%;height:100%;background:linear-gradient(135deg,#2563eb 0%,#1d4ed8 68%,#06b6d4 100%);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:17px;border-radius:50%;">${avatarInitial}</span>`;
                 html += `
                     <div class="chat-item ${isSelected ? 'selected' : ''}" data-chat-id="${chat.id}" onclick="window.messagesUI?.openChat(${safeChat})">
                         <div class="chat-avatar" style="overflow:hidden;">
@@ -2142,6 +2142,20 @@
                 if (coreFriends.length > 0) {
                     contacts = coreFriends;
                 } else {
+                    try {
+                        const cachedFriends = JSON.parse(localStorage.getItem('friends') || '[]');
+                        if (Array.isArray(cachedFriends) && cachedFriends.length > 0) {
+                            contacts = cachedFriends.map(friend => ({
+                                ...friend,
+                                id: friend.id || friend.userId,
+                                name: friend.displayName || friend.username || friend.name || 'User',
+                                displayName: friend.displayName || friend.username || friend.name || 'User',
+                                online: friend.online === true || friend.status === 'online'
+                            }));
+                        }
+                    } catch (_) {}
+                }
+                if (!contacts || contacts.length === 0) {
                     UIFailsafe.safeSetHTML(container, `
                         <div class="empty-state" style="padding:32px 16px;text-align:center;">
                             <i class="fas fa-user-friends" style="font-size:40px;color:#d1d5db;margin-bottom:12px;display:block;"></i>
@@ -4835,16 +4849,9 @@ Type: ${message.type || 'text'}`;
         if (chatPanel) {
             chatPanel.classList.remove('hidden');
             UIStateManager.setState('chatVisible', true);
-            
-            const messagesContainer = document.getElementById('messagesContainer');
-            if (messagesContainer) {
-                messagesContainer.innerHTML = `
-                    <div class="loading-chat">
-                        <div class="loading-spinner"></div>
-                        <p>Opening conversation with ${userName}...</p>
-                    </div>
-                `;
-            }
+            try {
+                window.parent?.postMessage({ type: 'CHAT_OPENED', timestamp: Date.now() }, '*');
+            } catch (_error) {}
         }
         
         window.currentFriendName = userName;
@@ -5405,9 +5412,10 @@ Type: ${message.type || 'text'}`;
                         UIRenderer.renderMessages(cachedMessages);
                     } else {
                         messagesContainer.innerHTML = `
-                            <div class="loading-chat">
-                                <div class="loading-spinner"></div>
-                                <p>Opening conversation with ${displayName}...</p>
+                            <div class="empty-chat">
+                                <i class="fas fa-comment-dots empty-chat-icon"></i>
+                                <div class="empty-chat-title">Conversation ready</div>
+                                <div class="empty-chat-message">Type your first message below to start the conversation with ${displayName}</div>
                             </div>
                         `;
                     }
@@ -5420,6 +5428,9 @@ Type: ${message.type || 'text'}`;
                 if (chatPanel) {
                     chatPanel.classList.remove('hidden');
                     UIStateManager.setState('chatVisible', true);
+                    try {
+                        window.parent?.postMessage({ type: 'CHAT_OPENED', timestamp: Date.now() }, '*');
+                    } catch (_error) {}
                 }
                 
                 const nameEl = document.getElementById('chatFriendName');
@@ -5456,21 +5467,6 @@ Type: ${message.type || 'text'}`;
                             if (indicatorEl) avatarEl.appendChild(indicatorEl);
                         }
                     }
-                }
-                
-                const messagesContainer = document.getElementById('messagesContainer');
-                if (messagesContainer && messagesContainer.innerHTML.includes('loading-chat')) {
-                    setTimeout(() => {
-                        if (messagesContainer.innerHTML.includes('loading-chat')) {
-                            messagesContainer.innerHTML = `
-                                <div class="empty-chat">
-                                    <i class="fas fa-comment-dots empty-chat-icon"></i>
-                                    <div class="empty-chat-title">No messages yet</div>
-                                    <div class="empty-chat-message">Type your first message below to start the conversation with ${displayName}</div>
-                                </div>
-                            `;
-                        }
-                    }, 1000);
                 }
                 
             };

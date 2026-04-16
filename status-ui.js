@@ -297,6 +297,15 @@ let parentReady = false;
 
 function syncDataFromCore() {
     const core = getCore();
+
+    function readLocalJson(key, fallback) {
+        try {
+            const parsed = JSON.parse(localStorage.getItem(key) || 'null');
+            return parsed == null ? fallback : parsed;
+        } catch (_error) {
+            return fallback;
+        }
+    }
     
     // Sync statuses
     if (core && core.getStatuses) {
@@ -304,6 +313,8 @@ function syncDataFromCore() {
         if (newStatuses !== statuses) {
             statuses = newStatuses;
         }
+    } else if (!Array.isArray(statuses) || statuses.length === 0) {
+        statuses = readLocalJson(LOCAL_STORAGE_KEYS.STATUSES, []);
     }
     
     // Sync my statuses
@@ -312,6 +323,8 @@ function syncDataFromCore() {
         if (newMyStatuses !== myStatuses) {
             myStatuses = newMyStatuses;
         }
+    } else if (!Array.isArray(myStatuses) || myStatuses.length === 0) {
+        myStatuses = readLocalJson(LOCAL_STORAGE_KEYS.MY_STATUSES, []);
     }
     
     // Sync friends statuses
@@ -328,6 +341,8 @@ function syncDataFromCore() {
         if (newFriendsList !== friendsList) {
             friendsList = newFriendsList;
         }
+    } else if (!Array.isArray(friendsList) || friendsList.length === 0) {
+        friendsList = readLocalJson('friends', []);
     }
     
     // Sync session
@@ -345,6 +360,14 @@ function syncDataFromCore() {
                 isTokenReady = authenticated;
             }
         }
+    } else if (!currentUser) {
+        currentUser =
+            readLocalJson('currentUser', null) ||
+            readLocalJson('user', null) ||
+            readLocalJson('kynecta_auth', null)?.user ||
+            null;
+        userData = currentUser;
+        isTokenReady = !!(localStorage.getItem('authToken') || localStorage.getItem('token') || localStorage.getItem('moodchat_token'));
     }
     
     // Sync parent ready
@@ -382,6 +405,15 @@ function syncDataFromCore() {
 function populateFriendsInCreateModal() {
     const friendsContainer = document.getElementById('friendsListContainer');
     if (!friendsContainer) return;
+
+    if (!friendsList || friendsList.length === 0) {
+        try {
+            const cachedFriends = JSON.parse(localStorage.getItem('friends') || '[]');
+            if (Array.isArray(cachedFriends) && cachedFriends.length > 0) {
+                friendsList = cachedFriends;
+            }
+        } catch (_error) {}
+    }
     
     if (!friendsList || friendsList.length === 0) {
         friendsContainer.innerHTML = `
@@ -4601,18 +4633,33 @@ async function handlePostStatus() {
         }
         const core = getCore();
         const response = await core.postStatus(statusData);
-        if (response && response.success) {
-            showNotification('Status posted successfully', 'success');
+        if (response && (response.success || response.queued)) {
+            const optimisticStatus = response.status || {
+                id: response.id || `local_status_${Date.now()}`,
+                type: statusData.type,
+                text: statusData.text || '',
+                caption: statusData.caption || '',
+                question: statusData.question || '',
+                options: statusData.options || [],
+                createdAt: new Date().toISOString(),
+                userId: currentUser?.id || statusData.userId || null,
+                user: currentUser || statusData.user || null,
+                queued: !!response.queued,
+                visibility: 'friends'
+            };
+            showNotification(response.queued ? 'Status saved offline and will sync automatically' : 'Status posted successfully', 'success');
             const modal = UIElements.createStatusModal;
             if (modal) modal.classList.remove('active');
-            if (response.status) {
-                statuses.unshift(response.status);
-                myStatuses.unshift(response.status);
-                renderStatusListInstantlyUI();
-                updateMyStatusPreviewUI();
-                updateCurrentSectionUI();
-                updateMoodChartUI();
-            }
+            statuses = [optimisticStatus].concat(Array.isArray(statuses) ? statuses : []);
+            myStatuses = [optimisticStatus].concat(Array.isArray(myStatuses) ? myStatuses : []);
+            try {
+                localStorage.setItem(LOCAL_STORAGE_KEYS.STATUSES, JSON.stringify(statuses));
+                localStorage.setItem(LOCAL_STORAGE_KEYS.MY_STATUSES, JSON.stringify(myStatuses));
+            } catch (_error) {}
+            renderStatusListInstantlyUI();
+            updateMyStatusPreviewUI();
+            updateCurrentSectionUI();
+            updateMoodChartUI();
             const textInput = UIElements.getElement('textStatusInput');
             if (textInput) textInput.value = '';
             const mediaPreview = UIElements.getElement('mediaPreview');

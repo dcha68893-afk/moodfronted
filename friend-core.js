@@ -2910,7 +2910,16 @@ const OfflineFirstFriends = {
                 // Set current user on the store
                 const userId = __session.user?.id
                     || window.__PARENT_SESSION__?.userId
-                    || window.KynectaStore?.get('user.id');
+                    || window.KynectaStore?.get('user.id')
+                    || localStorage.getItem('currentUserId')
+                    || (() => {
+                        try {
+                            const stored = JSON.parse(localStorage.getItem('currentUser') || localStorage.getItem('user') || 'null');
+                            return stored?.id || stored?.userId || null;
+                        } catch (_error) {
+                            return null;
+                        }
+                    })();
                 if (userId) ls.setCurrentUser(String(userId));
 
                 // Hydrate FriendCacheManager from localStore immediately (zero-wait UI)
@@ -3011,6 +3020,18 @@ const OfflineFirstFriends = {
             FriendCacheManager._cache.sentRequests = sentMap;
 
             FriendCacheManager.syncToGlobals();
+            try {
+                const localFriends = Array.from(friendMap.values());
+                localStorage.setItem('friends', JSON.stringify(localFriends));
+                window.dispatchEvent(new CustomEvent('friendsUpdated', {
+                    detail: {
+                        friends: localFriends,
+                        count: localFriends.length,
+                        cached: true,
+                        offline: !navigator.onLine
+                    }
+                }));
+            } catch (_error) {}
         } catch (e) {
             Logger.warn('OfflineFirstFriends', 'Hydration error', e.message);
         }
@@ -3098,6 +3119,7 @@ window.addEventListener('AUTH_READY', _offlineInitTrigger);
 if (authReadyReceived && __session.ready) {
     setTimeout(() => OfflineFirstFriends.init(), 0);
 }
+setTimeout(() => OfflineFirstFriends.init(), 0);
 
 // =============================================
 // [saveFriendLocal] — UNIFIED PERSISTENCE HELPER

@@ -154,6 +154,19 @@
             color: var(--text-secondary);
             opacity: 0.7;
         }
+        body[data-parent-shell="true"] #settingsSidebar > .settings-header,
+        body[data-parent-shell="true"] #settingsContent > .content-header {
+            display: none !important;
+        }
+
+        body[data-parent-shell="true"] #userAvatarPreview {
+            display: none !important;
+        }
+
+        body[data-parent-shell="true"] #settingsSidebar,
+        body[data-parent-shell="true"] #settingsContent {
+            padding-top: 0 !important;
+        }
     </style>
     
     <link rel="stylesheet" href="settings.css">

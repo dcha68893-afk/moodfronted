@@ -2755,6 +2755,15 @@
             this._loaded = true;
             this._saveToCache();
             this._notifySubscribers();
+
+            if (window.KynectaLocalStore && this._conversations.length > 0) {
+                this._conversations.forEach(conversation => {
+                    window.KynectaLocalStore.saveConversation({
+                        ...conversation,
+                        updatedAt: conversation.updatedAt || conversation.lastMessageAt || Date.now()
+                    }).catch(() => {});
+                });
+            }
             
             console.log(`[ChatManager] Set ${this._conversations.length} unique conversations`);
         },
@@ -3944,11 +3953,14 @@
     const ConversationManager = {
         async openConversation(conversationId, options = {}) {
             if (!conversationId) return false;
-            if (!SessionManager.isAuthenticated() && !_demoModeEnabled) return false;
             
             const actualId = typeof conversationId === 'object' ? conversationId.id : conversationId;
             
             const conversation = ChatManager.getConversation(actualId);
+            const canUseCachedConversation = !!conversation;
+            if (!SessionManager.isAuthenticated() && !_demoModeEnabled && !canUseCachedConversation) {
+                return false;
+            }
             if (conversation) {
                 ChatManager.setActiveConversation(conversation);
                 this._showChatPanel(conversation);
@@ -5501,7 +5513,7 @@
             }, 30000);
         }
     }
-    
+
     async function loadCachedData() {
         try {
             const cachedUser = SafeStorage.getJSON(LOCAL_STORAGE_KEYS.USER_CACHE);
@@ -5512,6 +5524,16 @@
             const cachedChats = SafeStorage.getJSON(LOCAL_STORAGE_KEYS.CHATS_CACHE);
             if (cachedChats?.conversations) {
                 ChatManager.setConversations(cachedChats.conversations);
+            }
+
+            if (window.KynectaLocalStore?.getAllConversations) {
+                try {
+                    const idbConversations = await window.KynectaLocalStore.getAllConversations();
+                    if (Array.isArray(idbConversations) && idbConversations.length > 0) {
+                        const mergedConversations = [...ChatManager.getConversations(), ...idbConversations];
+                        ChatManager.setConversations(mergedConversations);
+                    }
+                } catch (_) {}
             }
             
             const cachedFriends = SafeStorage.getJSON(LOCAL_STORAGE_KEYS.FRIENDS_CACHE);
@@ -5528,9 +5550,6 @@
     }
     
     function restoreLastChat() {
-        if (currentState !== LIFECYCLE_STATES.ACTIVE) return;
-        if (!SessionManager.isAuthenticated()) return;
-        
         const lastChatId = SafeStorage.get('lastChatId');
         if (lastChatId) {
             const conversation = ChatManager.getConversation(lastChatId);
