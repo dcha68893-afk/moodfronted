@@ -1761,8 +1761,17 @@ export const updateCurrentSection = function() {
 
 export const renderAllFriendsList = function() {
     // Use window globals (always fresh from syncToGlobals)
+    const _localFriends = (() => {
+        try {
+            const parsed = JSON.parse(localStorage.getItem('friends') || '[]');
+            console.log('[LOCAL LOAD]', parsed);
+            return window.safeArray(parsed);
+        } catch (_) {
+            return [];
+        }
+    })();
     const _pinnedArray = Array.isArray(window.pinnedFriends) ? window.pinnedFriends : (Array.isArray(pinnedFriends) ? pinnedFriends : []);
-    const _friendArray = Array.isArray(window.friends) ? window.friends : (Array.isArray(friends) ? friends : []);
+    const _friendArray = Array.isArray(window.friends) ? window.friends : (Array.isArray(friends) ? friends : _localFriends);
     const _contactArray = Array.isArray(window.contacts) ? window.contacts : (Array.isArray(contacts) ? contacts : []);
     const _temporaryArray = Array.isArray(window.temporaryFriends) ? window.temporaryFriends : (Array.isArray(temporaryFriends) ? temporaryFriends : []);
     const _hasData = _friendArray.length + _pinnedArray.length + _contactArray.length + _temporaryArray.length > 0;
@@ -2594,6 +2603,9 @@ export const renderMutedFriends = function() {
 
 // Cache for all users data
 let _allUsersCache = [];
+window.safeArray = window.safeArray || function safeArray(data) {
+    return Array.isArray(data) ? data : [];
+};
 
 // Update the cache from various sources
 function updateAllUsersCache() {
@@ -2606,13 +2618,20 @@ function updateAllUsersCache() {
     } else if (allUsers && Array.isArray(allUsers) && allUsers.length > 0) {
         _allUsersCache = allUsers;
         console.log(`[All Users] Cache updated from imported allUsers: ${_allUsersCache.length} users`);
+    } else {
+        try {
+            _allUsersCache = window.safeArray(JSON.parse(localStorage.getItem('discover_users') || '[]'));
+            console.log('[LOCAL LOAD]', _allUsersCache);
+        } catch (_) {
+            _allUsersCache = [];
+        }
     }
     return _allUsersCache;
 }
 
 // Get filtered users based on search term
 function getFilteredUsers(searchTerm) {
-    const users = _allUsersCache.length > 0 ? _allUsersCache : updateAllUsersCache();
+    const users = window.safeArray(_allUsersCache.length > 0 ? _allUsersCache : updateAllUsersCache());
     const currentUserId = currentUser?.id;
     
     let filtered = users.filter(user => {

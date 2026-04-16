@@ -61,6 +61,15 @@
         try { return JSON.parse(str); } catch (_) { return fallback; }
     };
 
+    var __localSaveLogState = global.__kynLocalSaveLogState || (global.__kynLocalSaveLogState = Object.create(null));
+    function shouldLogLocalSave(key) {
+        var now = Date.now();
+        var last = __localSaveLogState[key] || 0;
+        if (now - last < 15000) return false;
+        __localSaveLogState[key] = now;
+        return true;
+    }
+
     // ─────────────────────────────────────────────────────────────────────────
     // 2. APP STORAGE — SINGLE SOURCE OF TRUTH
     //    Parent (chat.html) creates window.AppStorage.
@@ -103,7 +112,7 @@
                 try {
                     var serialized = (typeof value === 'string') ? value : JSON.stringify(value);
                     localStorage.setItem(key, serialized);
-                    console.log('[LOCAL SAVE]', key, value);
+                    if (shouldLogLocalSave(key)) console.log('[LOCAL SAVE]', key, value);
                     return true;
                 } catch (e) {
                     console.error('[AppStorage.set] Failed to write "' + key + '":', e);
@@ -116,7 +125,7 @@
              */
             remove: function (key) {
                 var PROTECTED = ['kynecta_auth', 'token', 'moodchat_token', 'accessToken', 'USER_TOKEN'];
-                if (PROTECTED.indexOf(key) !== -1) {
+                if (PROTECTED.indexOf(key) !== -1 && global.__allowAuthStorageMutation__ !== true) {
                     console.warn('[AppStorage.remove] Blocked removal of protected key:', key);
                     return false;
                 }
@@ -140,6 +149,38 @@
              */
             getObject: function (key) {
                 return safeObject(this.get(key, {}));
+            },
+
+            clear: function (options) {
+                var preserveAuth = !options || options.preserveAuth !== false;
+                try {
+                    if (!preserveAuth || global.__allowAuthStorageMutation__ === true) {
+                        localStorage.clear();
+                        return true;
+                    }
+
+                    var authSnapshot = {
+                        kynecta_auth: localStorage.getItem('kynecta_auth'),
+                        token: localStorage.getItem('token'),
+                        accessToken: localStorage.getItem('accessToken'),
+                        USER_TOKEN: localStorage.getItem('USER_TOKEN'),
+                        currentUser: localStorage.getItem('currentUser'),
+                        user: localStorage.getItem('user')
+                    };
+
+                    localStorage.clear();
+
+                    Object.keys(authSnapshot).forEach(function (key) {
+                        if (authSnapshot[key] !== null && authSnapshot[key] !== undefined) {
+                            localStorage.setItem(key, authSnapshot[key]);
+                        }
+                    });
+
+                    return true;
+                } catch (e) {
+                    console.warn('[AppStorage.clear] Failed:', e);
+                    return false;
+                }
             }
         };
 
@@ -169,7 +210,7 @@
                     set: function (key, value) {
                         try {
                             localStorage.setItem(key, typeof value === 'string' ? value : JSON.stringify(value));
-                            console.log('[LOCAL SAVE (child fallback)]', key, value);
+                            if (shouldLogLocalSave(key)) console.log('[LOCAL SAVE (child fallback)]', key, value);
                             return true;
                         } catch (_) { return false; }
                     },

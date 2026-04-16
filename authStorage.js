@@ -1,210 +1,143 @@
-// Add this import at the top of your existing app.js
-import authStorage from './authStorage.js';
+// authStorage.js - Persistent Authentication Storage
+// VERSION: 1.1.0 - WhatsApp-style persistent auth layer
+// PURPOSE: Single source of truth for auth persistence in localStorage
 
-// Add these methods to your existing App class in app.js:
-class App {
-  constructor() {
-    // ... your existing constructor ...
-    
-    // ADD these properties if not already there
-    this.user = null;
-    this.isOffline = false;
-  }
+(function () {
+    'use strict';
 
-  // MODIFY your existing init method or add if not exists:
-  async init() {
-    // ADD this check for authentication state
-    const authState = authStorage.getAuthState();
-    this.isOffline = authState.isOfflineMode;
-    
-    if (authState.isAuthenticated) {
-      this.user = authState.offlineUser || await this.fetchUserProfile();
-      this.renderUI();
-      this.updateOfflineIndicator();
-      
-      // Check for queued messages
-      if (authState.queuedMessages > 0) {
-        this.showQueuedMessagesNotification(authState.queuedMessages);
-      }
+    const AUTH_STORAGE_KEY = 'kynecta_auth';
+    const LOGIN_STATE_KEY = 'isLoggedIn';
+    const LEGACY_TOKEN_KEYS = ['authToken', 'accessToken', 'token', 'moodchat_token', 'USER_TOKEN', 'kynecta_token'];
+    const LEGACY_USER_KEYS = ['currentUser', 'user', 'moodchat_user'];
+
+    function withAuthMutation(fn) {
+        const previous = window.__allowAuthStorageMutation__;
+        window.__allowAuthStorageMutation__ = true;
+        try {
+            return fn();
+        } finally {
+            window.__allowAuthStorageMutation__ = previous === true;
+        }
     }
-    
-    // ADD these event listeners
-    window.addEventListener('online', this.handleOnlineStatusChange.bind(this));
-    window.addEventListener('offline', this.handleOnlineStatusChange.bind(this));
-    
-    // ... your existing init logic ...
-  }
 
-  // ADD this method to handle online/offline status changes:
-  handleOnlineStatusChange() {
-    const wasOffline = this.isOffline;
-    this.isOffline = !navigator.onLine;
-    
-    if (wasOffline && !this.isOffline) {
-      // Came back online - attempt sync
-      this.syncOfflineData();
+    function safeParse(raw, fallback = null) {
+        try {
+            return raw ? JSON.parse(raw) : fallback;
+        } catch (_) {
+            return fallback;
+        }
     }
-    
-    this.updateOfflineIndicator();
-    
-    if (this.isOffline && this.user) {
-      this.showOfflineNotification();
+
+    function saveAuth(data) {
+        try {
+            if (!data || !data.token) {
+                console.warn('[AuthStorage] saveAuth() called with missing token');
+                return false;
+            }
+
+            const payload = {
+                token: data.token,
+                refreshToken: data.refreshToken || null,
+                user: data.user || null,
+                expiresAt: data.expiresAt || (Date.now() + 24 * 60 * 60 * 1000),
+                issuedAt: data.issuedAt || Date.now(),
+                savedAt: new Date().toISOString()
+            };
+
+            withAuthMutation(() => {
+                localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(payload));
+                LEGACY_TOKEN_KEYS.forEach((key) => localStorage.setItem(key, payload.token));
+                LEGACY_USER_KEYS.forEach((key) => localStorage.setItem(key, JSON.stringify(payload.user || null)));
+                localStorage.setItem(LOGIN_STATE_KEY, 'true');
+            });
+
+            console.log('[AUTH TOKEN]', payload.token);
+            return true;
+        } catch (error) {
+            console.error('[AuthStorage] saveAuth failed:', error.message);
+            return false;
+        }
     }
-  }
 
-  // ADD this method to update UI offline indicator:
-  updateOfflineIndicator() {
-    const indicator = document.getElementById('offline-indicator');
-    if (!indicator) return;
-    
-    indicator.style.display = this.isOffline ? 'block' : 'none';
-    indicator.textContent = this.isOffline ? 
-      `⚫ Offline Mode - Using local data` : 
-      '🟢 Online';
-    
-    // Update UI elements based on offline status
-    const sendButton = document.getElementById('send-button');
-    if (sendButton) {
-      sendButton.disabled = this.isOffline;
-      sendButton.title = this.isOffline ? 
-        'Message queued for sending when back online' : 
-        'Send message';
+    function getAuth() {
+        try {
+            const raw = localStorage.getItem(AUTH_STORAGE_KEY);
+            if (raw) {
+                const parsed = safeParse(raw);
+                if (parsed && typeof parsed === 'object' && parsed.token) {
+                    return parsed;
+                }
+            }
+
+            const fallbackToken = LEGACY_TOKEN_KEYS.map((key) => localStorage.getItem(key)).find(Boolean);
+            if (!fallbackToken) return null;
+
+            const fallbackUserRaw = LEGACY_USER_KEYS.map((key) => localStorage.getItem(key)).find(Boolean);
+            return {
+                token: fallbackToken,
+                refreshToken: null,
+                user: safeParse(fallbackUserRaw),
+                expiresAt: null,
+                issuedAt: null
+            };
+        } catch (error) {
+            console.warn('[AuthStorage] getAuth() parse error:', error.message);
+            return null;
+        }
     }
-  }
 
-  // ADD this method for offline notifications:
-  showOfflineNotification() {
-    const notification = document.createElement('div');
-    notification.className = 'offline-notification';
-    notification.innerHTML = `
-      <p>You're currently offline. Working with local data.</p>
-      <p>Messages will be queued and sent when you're back online.</p>
-      <button onclick="this.parentElement.remove()">OK</button>
-    `;
-    document.body.appendChild(notification);
-    
-    setTimeout(() => {
-      if (notification.parentElement) {
-        notification.remove();
-      }
-    }, 5000);
-  }
-
-  // ADD this method for queued messages notification:
-  showQueuedMessagesNotification(count) {
-    const notification = document.createElement('div');
-    notification.className = 'queued-notification';
-    notification.innerHTML = `
-      <p>You have ${count} message(s) queued for sending.</p>
-      <button onclick="app.syncOfflineData()">Send Now</button>
-      <button onclick="this.parentElement.remove()">Dismiss</button>
-    `;
-    document.body.appendChild(notification);
-  }
-
-  // ADD this method to sync offline data:
-  async syncOfflineData() {
-    if (!this.apiClient) return;
-    
-    const result = await this.apiClient.syncOfflineData();
-    
-    if (result.synced && result.syncedCount > 0) {
-      this.showSyncNotification(result.syncedCount);
+    function clearAuth() {
+        try {
+            withAuthMutation(() => {
+                localStorage.removeItem(AUTH_STORAGE_KEY);
+                LEGACY_TOKEN_KEYS.forEach((key) => localStorage.removeItem(key));
+                LEGACY_USER_KEYS.forEach((key) => localStorage.removeItem(key));
+                localStorage.removeItem(LOGIN_STATE_KEY);
+            });
+            return true;
+        } catch (error) {
+            console.error('[AuthStorage] clearAuth failed:', error.message);
+            return false;
+        }
     }
-  }
 
-  // ADD this method for sync notifications:
-  showSyncNotification(count) {
-    const notification = document.createElement('div');
-    notification.className = 'sync-notification';
-    notification.innerHTML = `
-      <p>Successfully sent ${count} queued message(s).</p>
-      <button onclick="this.parentElement.remove()">OK</button>
-    `;
-    document.body.appendChild(notification);
-    
-    setTimeout(() => {
-      if (notification.parentElement) {
-        notification.remove();
-      }
-    }, 3000);
-  }
-
-  // MODIFY your existing sendMessage method (or add if not exists) to handle offline:
-  async sendMessage(content) {
-    const message = {
-      type: 'chat',
-      data: {
-        content: content,
-        senderId: this.user.id,
-        timestamp: Date.now()
-      },
-      recipientId: this.currentChatId
-    };
-    
-    if (this.isOffline) {
-      // Queue message locally
-      const localId = authStorage.addToMessageQueue(message);
-      
-      // Show local message in UI immediately
-      this.renderLocalMessage(content, localId);
-      
-      // Show queued status
-      this.showMessageQueuedNotification();
-      
-      return { localId, queued: true };
-    } else {
-      // Send normally via API (your existing logic)
-      return await this.apiClient.sendMessage(message);
+    function hasValidAuth() {
+        const auth = getAuth();
+        if (!auth || !auth.token) return false;
+        if (auth.expiresAt && Date.now() > auth.expiresAt) return false;
+        return true;
     }
-  }
 
-  // ADD this method to render local messages:
-  renderLocalMessage(content, localId) {
-    const messageElement = document.createElement('div');
-    messageElement.className = 'message local-message';
-    messageElement.id = `msg_${localId}`;
-    messageElement.innerHTML = `
-      <div class="message-content">${content}</div>
-      <div class="message-status">⏳ Queued</div>
-    `;
-    
-    const chatContainer = document.getElementById('chat-messages');
-    if (chatContainer) {
-      chatContainer.appendChild(messageElement);
+    function updateAuthTokens({ token, refreshToken, expiresAt }) {
+        try {
+            const existing = getAuth() || {};
+            return saveAuth({
+                ...existing,
+                token: token || existing.token,
+                refreshToken: refreshToken || existing.refreshToken,
+                expiresAt: expiresAt || existing.expiresAt,
+                issuedAt: Date.now()
+            });
+        } catch (error) {
+            console.error('[AuthStorage] updateAuthTokens failed:', error.message);
+            return false;
+        }
     }
-  }
 
-  // ADD this method for message queued notification:
-  showMessageQueuedNotification() {
-    const notification = document.createElement('div');
-    notification.className = 'message-queued-notification';
-    notification.innerHTML = `
-      <p>Message queued for sending when back online.</p>
-      <button onclick="this.parentElement.remove()">OK</button>
-    `;
-    document.body.appendChild(notification);
-    
-    setTimeout(() => {
-      if (notification.parentElement) {
-        notification.remove();
-      }
-    }, 3000);
-  }
+    function getToken() {
+        const auth = getAuth();
+        const token = auth?.token || null;
+        console.log('[AUTH TOKEN]', token);
+        return token;
+    }
 
-  // MODIFY your existing logout method (or add if not exists):
-  logout() {
-    // Clear both online and offline auth
-    authStorage.clearAuth();
-    
-    // Update UI
-    this.user = null;
-    this.isOffline = false;
-    this.renderUI(); // Your existing renderUI method
-  }
+    function getUser() {
+        return getAuth()?.user || null;
+    }
 
-  // ... rest of your existing methods ...
-}
+    const AuthStorage = { saveAuth, getAuth, clearAuth, hasValidAuth, updateAuthTokens, getToken, getUser };
 
-// ADD this if you want to make app available globally
-window.app = window.app || new App();
+    window.AuthStorage = AuthStorage;
+    window.api = window.api || {};
+    window.api.storage = AuthStorage;
+})();

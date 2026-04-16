@@ -6623,6 +6623,8 @@ async function loadFriendsFromBackend() {
 
             if (validFriends.length > 0) {
                 FriendCacheManager.setFriends(validFriends);
+                localStorage.setItem('friends', JSON.stringify(validFriends));
+                console.log('[LOCAL SAVE]', 'friends');
                 console.log(`✅ loadFriendsFromBackend: Loaded ${validFriends.length} friends`);
             } else {
                 console.log('ℹ️ loadFriendsFromBackend: No friends yet (normal for new users)');
@@ -6666,6 +6668,17 @@ async function loadFriendsFromBackend() {
             FriendCacheManager.syncToGlobals();
             updateFriendCounts?.();
             window.dispatchEvent(new CustomEvent('friendsUpdated', { detail: { friends: cached, cached: true } }));
+        } else {
+            try {
+                const localFriends = JSON.parse(localStorage.getItem('friends') || '[]');
+                console.log('[LOCAL LOAD]', localFriends);
+                if (Array.isArray(localFriends) && localFriends.length > 0) {
+                    FriendCacheManager.setFriends(localFriends);
+                    FriendCacheManager.syncToGlobals();
+                    updateFriendCounts?.();
+                    window.dispatchEvent(new CustomEvent('friendsUpdated', { detail: { friends: localFriends, cached: true, offline: !navigator.onLine } }));
+                }
+            } catch (_) {}
         }
     } finally {
         clearFriendsLoading();
@@ -7118,6 +7131,10 @@ async function fetchAllUsersFromBackend() {
         
         // ✅ Store in FriendCacheManager for persistence
         FriendCacheManager.setUsers(filteredUsers);
+        if (Array.isArray(filteredUsers) && filteredUsers.length > 0) {
+            localStorage.setItem('discover_users', JSON.stringify(filteredUsers));
+            console.log('[LOCAL SAVE]', 'discover_users');
+        }
         
         // ✅ Make available on FriendCore for UI
         if (window.FriendCore) {
@@ -7161,6 +7178,22 @@ async function fetchAllUsersFromBackend() {
             }));
             return { success: true, count: cached.length, cached: true, users: cached };
         }
+        try {
+            const localUsers = JSON.parse(localStorage.getItem('discover_users') || '[]');
+            console.log('[LOCAL LOAD]', localUsers);
+            if (Array.isArray(localUsers) && localUsers.length > 0) {
+                allUsers = localUsers;
+                if (window.FriendCore) {
+                    window.FriendCore._allUsers = localUsers;
+                    window.FriendCore.discoverableUsers = localUsers;
+                }
+                window._allUsersCache = localUsers;
+                window.dispatchEvent(new CustomEvent('allUsersLoaded', {
+                    detail: { users: localUsers, count: localUsers.length, cached: true, offline: !navigator.onLine }
+                }));
+                return { success: true, count: localUsers.length, cached: true, users: localUsers };
+            }
+        } catch (_) {}
     }
     
     return { success: false, users: [] };

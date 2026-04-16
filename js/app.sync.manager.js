@@ -80,7 +80,9 @@
                 this._emitSyncEvent('SYNC_STARTED');
 
                 const userId = this._getCurrentUserId();
-                if (!userId) throw new Error('No authenticated user');
+                if (!userId) {
+                    return { success: false, skipped: true, reason: 'no_authenticated_user' };
+                }
 
                 // Delegate message sync to KynectaSyncEngine
                 const syncEngine = window.KynectaSyncEngine;
@@ -223,52 +225,26 @@
 
         /** Legacy message sync — used as fallback if syncEngine unavailable */
         async _syncMessages(since) {
-            const localStore = window.KynectaLocalStore;
-            const params = new URLSearchParams({ since, limit: SYNC_CONFIG.batchSize });
-            const response = await this._makeRequest('GET', `/api/sync/messages?${params}`);
-            if (response.data && response.data.length > 0) {
-                this._stats.syncedItems += response.data.length;
-                if (localStore) {
-                    for (const item of response.data) {
-                        if (item.type === 'message') {
-                            await localStore.mergeServerMessages(item.data.chatId, [item.data]);
-                        }
-                    }
-                } else if (window.KynectaStore) {
-                    response.data.forEach(item => {
-                        if (item.type === 'message') {
-                            const msgs = window.KynectaStore.get(`messages.byChat.${item.data.chatId}`) || [];
-                            window.KynectaStore.set(`messages.byChat.${item.data.chatId}`, this._mergeMessage(msgs, item.data));
-                        }
-                    });
-                }
-                response.data.forEach(item => {
-                    if (window.KynectaEventBus) window.KynectaEventBus.emit(`SYNC_MESSAGE_${item.action}`, item.data);
-                });
-            }
-            return response;
+            // This app uses `messageSync.engine.js` (chat-scoped) and `messageQueue.manager.js`.
+            // Backend `/api/messages` requires a `chatId` query param, so a global delta pull
+            // here would cause 400s and noisy retries. Keep this legacy path as a safe no-op.
+            return { success: true, data: [], skipped: true, reason: 'use-messageSyncEngine' };
         }
 
         async _syncFriends(since = this._lastSync) {
             try {
                 const params = new URLSearchParams({ since, limit: SYNC_CONFIG.batchSize });
-                const response = await this._makeRequest('GET', `/api/sync/friends?${params}`);
-                if (response.data && response.data.length > 0) {
-                    this._stats.syncedItems += response.data.length;
-                    if (window.KynectaStore) {
-                        const friends = window.KynectaStore.get('friends.list') || [];
-                        response.data.forEach(item => {
-                            if (item.action === 'add')    friends.push(item.data);
-                            else if (item.action === 'remove') { const i = friends.findIndex(f => f.id === item.data.id); if (i !== -1) friends.splice(i, 1); }
-                            else if (item.action === 'update') { const i = friends.findIndex(f => f.id === item.data.id); if (i !== -1) friends[i] = item.data; }
-                        });
-                        window.KynectaStore.set('friends.list', friends);
-                    }
-                    response.data.forEach(item => {
-                        if (window.KynectaEventBus) window.KynectaEventBus.emit(`FRIEND_${item.action.toUpperCase()}`, item.data);
-                    });
+                // Backend provides friends list via /api/friends (not /api/sync/friends).
+                const response = await this._makeRequest('GET', `/api/friends?${params}`);
+                const friends = response?.data?.friends || response?.data || response?.friends || [];
+                if (Array.isArray(friends) && friends.length > 0) {
+                    this._stats.syncedItems += friends.length;
+                    if (window.KynectaStore) window.KynectaStore.set('friends.list', friends);
+                    if (window.KynectaEventBus) window.KynectaEventBus.emit('FRIENDS_SYNCED', friends);
+                } else {
+                    if (window.KynectaStore && Array.isArray(friends)) window.KynectaStore.set('friends.list', friends);
                 }
-                return response;
+                return { success: true, data: friends };
             } catch (err) { console.warn('[Sync] friends sync failed:', err.message); }
         }
 
@@ -292,32 +268,29 @@
             // Legacy fallback: fetch delta from server and apply to store
             try {
                 const params = new URLSearchParams({ since, limit: SYNC_CONFIG.batchSize });
-                const response = await this._makeRequest('GET', `/api/sync/groups?${params}`);
+                // Backend provides groups via /api/groups (not /api/sync/groups).
+                const response = await this._makeRequest('GET', `/api/groups?${params}`);
                 
-                if (response.data && response.data.length > 0) {
-                    this._stats.syncedItems += response.data.length;
+                const groups = response?.data?.groups || response?.data || response?.groups || [];
+                if (Array.isArray(groups) && groups.length > 0) {
+                    this._stats.syncedItems += groups.length;
                     
                     if (window.KynectaStore) {
                         const store = window.KynectaStore;
                         
-                        for (const item of response.data) {
-                            if (item.action === 'add' || item.action === 'update') {
-                                // Use the new upsertGroup method
-                                await store.upsertGroup(item.data);
-                            } else if (item.action === 'remove') {
-                                await store.removeGroupFromStore(item.data.id);
+                        if (typeof store.upsertGroup === 'function') {
+                            for (const g of groups) {
+                                await store.upsertGroup(g);
                             }
+                        } else {
+                            store.set('groups.list', groups);
                         }
                     }
                     
                     // Emit events
-                    response.data.forEach(item => {
-                        if (window.KynectaEventBus) {
-                            window.KynectaEventBus.emit(`GROUP_${item.action.toUpperCase()}`, item.data);
-                        }
-                    });
+                    if (window.KynectaEventBus) window.KynectaEventBus.emit('GROUPS_SYNCED', groups);
                 }
-                return response;
+                return { success: true, data: groups };
             } catch (err) {
                 console.warn('[Sync] groups sync failed:', err.message);
                 throw err;
@@ -327,33 +300,32 @@
         async _syncStatus(since = this._lastSync) {
             try {
                 const params = new URLSearchParams({ since, limit: SYNC_CONFIG.batchSize });
-                const response = await this._makeRequest('GET', `/api/sync/status?${params}`);
-                if (response.data && response.data.length > 0) {
-                    this._stats.syncedItems += response.data.length;
-                    if (window.KynectaStore) {
-                        const statusList = window.KynectaStore.get('status.list') || [];
-                        response.data.forEach(item => {
-                            if (item.action === 'add')    statusList.push(item.data);
-                            else if (item.action === 'remove') { const i = statusList.findIndex(s => s.id === item.data.id); if (i !== -1) statusList.splice(i, 1); }
-                        });
-                        window.KynectaStore.set('status.list', statusList);
-                    }
-                    response.data.forEach(item => {
-                        if (window.KynectaEventBus) window.KynectaEventBus.emit('STATUS_UPDATED', item.data);
-                    });
-                }
-                return response;
+                // Backend provides status feed via /api/status (public endpoints included).
+                const response = await this._makeRequest('GET', `/api/status?${params}`);
+                const statuses =
+                    response?.data?.statuses ||
+                    response?.data?.data?.statuses ||
+                    response?.data ||
+                    response?.statuses ||
+                    [];
+                const list = (typeof safeArray === 'function') ? safeArray(statuses) : (Array.isArray(statuses) ? statuses : []);
+                this._stats.syncedItems += list.length;
+                if (window.KynectaStore) window.KynectaStore.set('status.list', list);
+                if (window.KynectaEventBus) window.KynectaEventBus.emit('STATUS_SYNCED', list);
+                return { success: true, data: list };
             } catch (err) { console.warn('[Sync] status sync failed:', err.message); }
         }
 
         async _syncSettings() {
             try {
-                const response = await this._makeRequest('GET', '/api/sync/settings');
-                if (response.data) {
-                    if (window.KynectaStore) window.KynectaStore.set('settings', response.data);
-                    if (window.KynectaEventBus) window.KynectaEventBus.emit('SETTINGS_UPDATED', response.data);
+                // Backend provides settings via /api/settings (not /api/sync/settings).
+                const response = await this._makeRequest('GET', '/api/settings');
+                const settings = response?.data?.settings || response?.data || response?.settings || null;
+                if (settings) {
+                    if (window.KynectaStore) window.KynectaStore.set('settings', settings);
+                    if (window.KynectaEventBus) window.KynectaEventBus.emit('SETTINGS_UPDATED', settings);
                 }
-                return response;
+                return { success: true, data: settings };
             } catch (err) { console.warn('[Sync] settings sync failed:', err.message); }
         }
 
@@ -426,7 +398,18 @@
                     break;
                 }
                 default:
-                    return this._makeRequest('POST', '/api/sync/offline', item);
+                    // Backend does not expose a generic /api/sync/offline endpoint here.
+                    // Keep the action safely queued for replay by OfflineQueue / module queues.
+                    try {
+                        const oq = window.KynectaOfflineQueue;
+                        if (oq && typeof oq.queue === 'function') {
+                            await oq.queue({ type: item.type || 'generic', action: item.action, data: item.data, priority: item.priority || 5 });
+                            return { success: true, queued: true };
+                        }
+                    } catch (e) {
+                        console.warn('[Sync] Failed to re-queue offline item:', e && e.message ? e.message : e);
+                    }
+                    return { success: false, queued: false, reason: 'no-offline-endpoint' };
             }
         }
 
@@ -440,30 +423,67 @@
         _getCurrentUserId() {
             if (window.__PARENT_SESSION__?.userId)   return window.__PARENT_SESSION__.userId;
             if (window.AUTH_SESSION?.userId)         return window.AUTH_SESSION.userId;
-            if (window.KynectaStore)                 return window.KynectaStore.get('user.id');
+            if (window.KynectaStore) {
+                const storeUserId = window.KynectaStore.get('user.id');
+                if (storeUserId) return storeUserId;
+            }
+            try {
+                const auth = window.AppStorage?.getObject?.('kynecta_auth') || JSON.parse(localStorage.getItem('kynecta_auth') || 'null');
+                if (auth?.userId || auth?.user?.id || auth?.user?.userId) return auth.userId || auth.user?.id || auth.user?.userId;
+            } catch (_) {}
+            try {
+                const user = JSON.parse(localStorage.getItem('currentUser') || localStorage.getItem('user') || 'null');
+                if (user?.id || user?.userId) return user.id || user.userId;
+            } catch (_) {}
             return null;
         }
 
         async _makeRequest(method, endpoint, data = null) {
-            const token = window.__PARENT_SESSION__?.token
-                || window.AUTH_SESSION?.token
-                || window.AppStorage?.get?.('kynecta_token', null)
-                || localStorage.getItem('kynecta_token')
-                || null;
+            const baseUrl = (window.__getApiBase && window.__getApiBase()) ||
+                window.API_BASE_URL ||
+                (window.location.origin + '/api');
+            const token = (
+                (window.Session && typeof window.Session.getToken === 'function' && window.Session.getToken()) ||
+                window.__PARENT_SESSION__?.token ||
+                window.AUTH_SESSION?.token ||
+                window.AppStorage?.get?.('authToken', null) ||
+                window.AppStorage?.get?.('token', null) ||
+                window.AppStorage?.get?.('accessToken', null) ||
+                window.AppStorage?.get?.('moodchat_token', null) ||
+                localStorage.getItem('authToken') ||
+                localStorage.getItem('token') ||
+                localStorage.getItem('accessToken') ||
+                localStorage.getItem('moodchat_token') ||
+                localStorage.getItem('USER_TOKEN') ||
+                (function () {
+                    try {
+                        const raw = localStorage.getItem('kynecta_auth');
+                        const parsed = raw ? JSON.parse(raw) : null;
+                        return parsed && parsed.token ? parsed.token : null;
+                    } catch (_) { return null; }
+                })()
+            ) || null;
             const headers = { 'Content-Type': 'application/json', ...(token ? { 'Authorization': `Bearer ${token}` } : {}) };
             const options = { method, headers, credentials: 'include' };
             if (data && method !== 'GET') options.body = JSON.stringify(data);
             if (typeof window.safeApiCall === 'function') {
                 return window.safeApiCall(async () => {
                     if (window.api?.request?.request) return window.api.request.request(endpoint, options);
-                    const response = await fetch(endpoint, options);
-                    if (!response.ok) throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                    const response = await fetch(`${baseUrl}${endpoint}`, options);
+                    if (!response.ok) {
+                        // Treat missing optional endpoints as soft-failures (prevents sync retry loops)
+                        if (response.status === 404) return { success: false, data: null, notFound: true, status: 404 };
+                        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                    }
                     return response.json();
-                }, { data: [] });
+                }, { success: false, data: null });
             }
             if (window.api?.request?.request) return window.api.request.request(endpoint, options);
-            const response = await fetch(endpoint, options);
-            if (!response.ok) throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            const response = await fetch(`${baseUrl}${endpoint}`, options);
+            if (!response.ok) {
+                if (response.status === 404) return { success: false, data: null, notFound: true, status: 404 };
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
             return response.json();
         }
 

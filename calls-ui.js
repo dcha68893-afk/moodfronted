@@ -43,6 +43,11 @@ const UIState = {
 
 (function setupEarlyCallListener() {
     'use strict';
+
+    if (window.registerModuleInit && !window.registerModuleInit('calls-ui')) {
+        console.warn('[Calls UI] Duplicate initialization skipped');
+        return;
+    }
     
     // Store pending call for later processing
     let pendingOpenCall = null;
@@ -324,7 +329,8 @@ async function requestMediaPermissions(callType) {
 async function loadCallHistory() {
     console.log('[Calls UI] Loading call history...');
     
-    const token = window.__CHILD_SESSION__?.token || localStorage.getItem('token');
+    const token = window.__CHILD_SESSION__?.token || localStorage.getItem('authToken') || localStorage.getItem('token');
+    console.log('[AUTH TOKEN]', token);
     
     if (!token) {
         console.warn('[Calls UI] No token for call history');
@@ -336,21 +342,15 @@ async function loadCallHistory() {
         // Use numeric userId
         const userId = window.__CHILD_SESSION__?.userId || 8;
         
-        const response = await fetch(`${(window.__getApiBase && window.__getApiBase()) || 'http://localhost:4000/api'}/calls/history?limit=50`, {
-            headers: {
-                'Authorization': `Bearer ${token}`,
-                'Content-Type': 'application/json'
-            }
-        });
+        const data = await window.apiRequest('GET', '/api/calls/history?limit=50', null, token);
         
-        if (response.ok) {
-            const data = await response.json();
+        if (data && data.success !== false) {
             const calls = data?.data?.calls || data?.calls || [];
             console.log('[Calls UI] Loaded call history:', calls.length, 'calls');
             displayCallHistory(calls);
             return calls;
         } else {
-            console.error('[Calls UI] Failed to load call history:', response.status);
+            console.error('[Calls UI] Failed to load call history:', data?.status);
             displayCallHistory([]);
             return [];
         }
@@ -2830,6 +2830,13 @@ sanitizeHTML: function(str) {
             if (!elements.contactsList) return;
             
             try {
+                const getAvatarFallback = (name, bgColor = '#6c5ce7') => {
+                    const safeName = String(name || 'User').trim() || 'User';
+                    const initials = safeName.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part.charAt(0).toUpperCase()).join('') || 'U';
+                    const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 80"><rect width="80" height="80" rx="40" fill="${bgColor}"/><text x="50%" y="54%" dominant-baseline="middle" text-anchor="middle" font-family="Arial, sans-serif" font-size="30" font-weight="700" fill="#ffffff">${initials}</text></svg>`;
+                    return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
+                };
+
                 if (!contacts || contacts.length === 0) {
                     elements.contactsList.innerHTML = '<div class="offline-state"><i class="fas fa-users-slash"></i><p>No contacts available</p></div>';
                     return;
@@ -2840,6 +2847,10 @@ sanitizeHTML: function(str) {
                     const name = contact.displayName || contact.username || contact.name || ('User #' + contact.id);
                     const initials = name.split(' ').map(n => n[0]).join('').toUpperCase().substring(0, 2);
                     const bgColor = '#6c5ce7'; // Default color
+                    const avatarUrl = (!navigator.onLine && /ui-avatars\.com/i.test(String(contact.avatar || '')))
+                        ? ''
+                        : (contact.avatar || '');
+                    const fallbackAvatar = getAvatarFallback(name, bgColor);
                     
                     html += `
                         <div class="contact-item" data-id="${SecuritySanitizer.sanitizeString(contact.id)}" data-name="${SecuritySanitizer.sanitizeString(name)}">
@@ -2847,7 +2858,7 @@ sanitizeHTML: function(str) {
                                 <input type="checkbox" class="contact-checkbox" id="contact-${SecuritySanitizer.sanitizeString(contact.id)}">
                             </div>
                             <div class="call-avatar" style="background-color: ${bgColor}">
-                                ${contact.avatar ? `<img src="${SecuritySanitizer.sanitizeURL(contact.avatar)}" alt="${SecuritySanitizer.sanitizeString(name)}">` : 
+                                ${avatarUrl ? `<img src="${SecuritySanitizer.sanitizeURL(avatarUrl)}" alt="${SecuritySanitizer.sanitizeString(name)}" onerror="this.onerror=null;this.src='${fallbackAvatar}'">` : 
                                   `<span>${SecuritySanitizer.sanitizeString(initials)}</span>`}
                             </div>
                             <div class="call-info">
@@ -5427,15 +5438,16 @@ const timer = setInterval(() => {
                 });
             }
             
-            const token = window.__CHILD_SESSION__?.token || localStorage.getItem('token');
+            const token = window.__CHILD_SESSION__?.token || localStorage.getItem('authToken') || localStorage.getItem('token');
+            console.log('[AUTH TOKEN]', token);
             if (token && callId) {
                 try {
-                    const response = await fetch(`${(window.__getApiBase && window.__getApiBase()) || 'http://localhost:4000/api'}/calls/${callId}/end`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-                        body: JSON.stringify({ duration: duration, status: callStatus, endedBy: window.__CHILD_SESSION__?.userId || 8 })
-                    });
-                    if (response.ok) console.log('[Calls UI] Call saved successfully');
+                    const result = await window.apiRequest('POST', `/api/calls/${callId}/end`, {
+                        duration: duration,
+                        status: callStatus,
+                        endedBy: window.__CHILD_SESSION__?.userId || 8
+                    }, token);
+                    if (result && result.success !== false) console.log('[Calls UI] Call saved successfully');
                 } catch (fetchError) { console.error('[Calls UI] Save error:', fetchError); }
             }
             

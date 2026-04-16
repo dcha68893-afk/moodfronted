@@ -79,7 +79,10 @@
             if (window.KynSyncGuard && !window.KynSyncGuard.acquire('messageSyncAll')) return;
 
             this._syncing = true;
-            console.log('[SYNC START]', 'messageSyncAll');
+            if (!this._lastSyncLogAt || Date.now() - this._lastSyncLogAt > 15000) {
+                console.log('[SYNC START]', 'messageSyncAll');
+                this._lastSyncLogAt = Date.now();
+            }
             this._stats.totalSyncs++;
 
             try {

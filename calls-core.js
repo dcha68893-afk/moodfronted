@@ -7,6 +7,10 @@
     'use strict';
 
     const MODULE_NAME = 'calls';  // EXACT module name per contract
+    if (window.registerModuleInit && !window.registerModuleInit('calls-core')) {
+        console.warn('[calls] calls-core already initialized, skipping duplicate boot');
+        return;
+    }
     
     // ==================== SESSION VALIDATION GUARD (CRITICAL PATCH) ====================
 function __isValidSession(session) {

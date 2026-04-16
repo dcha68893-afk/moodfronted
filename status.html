@@ -9,6 +9,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Status | Knecta Chat</title>
+
+    <!-- CRITICAL: Safety layer must load before module scripts -->
+    <script src="/js/kynecta.safety.layer.js"></script>
     
     <!-- Font Awesome -->
     <link rel="stylesheet" href="/css/vendor/font-awesome.min.css">
@@ -1732,6 +1735,7 @@
     
     <!-- API.js must load BEFORE status.js -->
     
+    <script src="/js/app.stability.bridge.js"></script>
     <script type="module" src="status-core.js"></script>
     <script type="module" src="status-ui.js"></script>
     <script>
@@ -1814,8 +1818,8 @@
             if (statusEl) {
                 statusEl.className = 'connection-status offline';
                 const statusText = statusEl.querySelector('.status-text');
-                if (statusText) statusText.textContent = 'Offline';
-                statusEl.style.display = 'flex';
+                if (statusText) statusText.textContent = '';
+                statusEl.style.display = 'none';
             }
         });
         

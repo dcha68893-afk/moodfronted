@@ -12,8 +12,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>MoodChat - Global Chat Platform</title>
     
-    <!-- Font Awesome 6 CDN -->
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    <link rel="stylesheet" href="/css/vendor/font-awesome.min.css">
     
     <!-- CSS Frameworks and Styles -->
     <style>
@@ -1860,28 +1859,40 @@
         
         window.SessionState = {
             getToken: function() {
+                if (window.AuthStorage?.getToken) return window.AuthStorage.getToken();
                 if (window.api?.auth?.getToken) return window.api.auth.getToken();
-                return localStorage.getItem('moodchat_token') || localStorage.getItem('token') || localStorage.getItem('accessToken');
+                const token = localStorage.getItem('authToken') || localStorage.getItem('moodchat_token') || localStorage.getItem('token') || localStorage.getItem('accessToken');
+                console.log('[AUTH TOKEN]', token);
+                return token;
             },
             setToken: function(token) {
                 if (token) {
                     if (window.api?.auth?.setToken) window.api.auth.setToken(token);
+                    localStorage.setItem('authToken', token);
                     localStorage.setItem('token', token);
                     localStorage.setItem('accessToken', token);
                     localStorage.setItem('USER_TOKEN', token);
                     localStorage.setItem('moodchat_token', token);
+                    localStorage.setItem('isLoggedIn', 'true');
+                    console.log('[AUTH TOKEN]', token);
                 }
             },
             clearToken: function() {
                 if (window.api?.auth?.clearToken) window.api.auth.clearToken();
+                localStorage.removeItem('authToken');
                 localStorage.removeItem('token');
                 localStorage.removeItem('accessToken');
                 localStorage.removeItem('USER_TOKEN');
                 localStorage.removeItem('moodchat_token');
                 localStorage.removeItem('kynecta_auth');
+                localStorage.removeItem('isLoggedIn');
             },
             getUser: function() {
                 if (window.currentUser) return window.currentUser;
+                if (window.AuthStorage?.getUser) {
+                    const storedUser = window.AuthStorage.getUser();
+                    if (storedUser) return storedUser;
+                }
                 const userStr = localStorage.getItem('currentUser') || localStorage.getItem('user') || localStorage.getItem('moodchat_user');
                 return userStr ? JSON.parse(userStr) : null;
             },
@@ -1891,6 +1902,7 @@
                     localStorage.setItem('currentUser', JSON.stringify(user));
                     localStorage.setItem('user', JSON.stringify(user));
                     localStorage.setItem('moodchat_user', JSON.stringify(user));
+                    localStorage.setItem('isLoggedIn', 'true');
                 }
             },
             clearUser: function() {
@@ -1901,7 +1913,7 @@
             },
             isLoggedIn: function() {
                 if (window.api?.auth?.isAuthenticated) return window.api.auth.isAuthenticated();
-                return !!this.getToken();
+                return localStorage.getItem('isLoggedIn') === 'true' && !!this.getToken();
             }
         };
         
@@ -2258,6 +2270,12 @@
         async function checkExistingSession() {
             const token = window.SessionState.getToken();
             const user = window.SessionState.getUser();
+            const isLoggedIn = localStorage.getItem('isLoggedIn') === 'true';
+            if (isLoggedIn && token && token.length > 20 && user) {
+                window.currentUser = user;
+                window.location.href = 'chat.html';
+                return true;
+            }
             if (token && token.length > 20) {
                 if (user) {
                     window.currentUser = user;

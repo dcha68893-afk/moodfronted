@@ -55,6 +55,8 @@
   
   // Lock to prevent concurrent modifications
   let sessionModificationLock = false;
+  let sessionInitialized = false;
+  let sessionInitializationSignature = null;
   
   // ============================================================================
   // SESSION HARDENING: PHASE 2 - SESSION SCHEMA DEFINITION (PRESERVED)
@@ -218,6 +220,13 @@
     if (sessionModificationLock) {
       return false;
     }
+
+    const sessionUserId = sessionData?.user?.id || sessionData?.user?.uid || null;
+    const sessionSignature = `${sessionUserId || 'anonymous'}:${sessionData?.token || ''}`;
+    if (sessionInitialized && sessionInitializationSignature === sessionSignature) {
+      console.log('[Session] Duplicate setSession ignored');
+      return true;
+    }
     
     sessionModificationLock = true;
     
@@ -253,6 +262,8 @@
       centralSession.issuedAt = Date.now();
       centralSession.isAuthenticated = true;
       centralSession.lastUpdated = new Date().toISOString();
+      sessionInitialized = true;
+      sessionInitializationSignature = sessionSignature;
       
       saveSessionToStorage();
       
@@ -277,6 +288,8 @@
       centralSession.issuedAt = null;
       centralSession.isAuthenticated = false;
       centralSession.lastUpdated = new Date().toISOString();
+      sessionInitialized = false;
+      sessionInitializationSignature = null;
       
       clearSessionStorage();
       

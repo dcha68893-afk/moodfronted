@@ -54,8 +54,8 @@ class PWAManager {
   async checkAuthState() {
     try {
       // Check for stored token
-      const token = localStorage.getItem('auth_token');
-      const userData = localStorage.getItem('user_data');
+      const token = localStorage.getItem('authToken') || localStorage.getItem('auth_token');
+      const userData = localStorage.getItem('user') || localStorage.getItem('user_data');
       
       if (token && userData) {
         // Verify token with backend
@@ -118,7 +118,7 @@ class PWAManager {
   setupAuthListeners() {
     // Listen for localStorage changes (cross-tab communication)
     window.addEventListener('storage', (event) => {
-      if (event.key === 'auth_token' || event.key === 'user_data') {
+      if (event.key === 'authToken' || event.key === 'auth_token' || event.key === 'user' || event.key === 'user_data') {
         console.log('kynecta: Auth storage changed, checking state');
         this.checkAuthState();
       }
@@ -185,8 +185,11 @@ class PWAManager {
     };
     
     // Store auth data
+    localStorage.setItem('authToken', userData.token);
     localStorage.setItem('auth_token', userData.token);
+    localStorage.setItem('user', JSON.stringify(userData.user));
     localStorage.setItem('user_data', JSON.stringify(userData.user));
+    localStorage.setItem('isLoggedIn', 'true');
     
     // Update UI
     this.updateUIForAuthState();
@@ -226,8 +229,11 @@ class PWAManager {
       token: null
     };
     
+    localStorage.removeItem('authToken');
     localStorage.removeItem('auth_token');
+    localStorage.removeItem('user');
     localStorage.removeItem('user_data');
+    localStorage.removeItem('isLoggedIn');
     
     this.updateUIForAuthState();
   }
@@ -564,6 +570,7 @@ class PWAManager {
         // Update local user data
         if (data.user) {
           this.authState.user = { ...this.authState.user, ...data.user };
+          localStorage.setItem('user', JSON.stringify(this.authState.user));
           localStorage.setItem('user_data', JSON.stringify(this.authState.user));
           this.updateUserProfile();
         }

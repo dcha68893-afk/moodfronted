@@ -63,6 +63,9 @@
             this._authenticated = false;
             this._sessionToken = null;
             this._listeners = new Map();
+            this._onlineUsers = new Set();
+            this._lastSignalPayload = null;
+            this._manualDisconnect = false;
             this._stats = {
                 messagesSent: 0,
                 messagesReceived: 0,
@@ -114,6 +117,7 @@
          * Disconnect from WebSocket server
          */
         disconnect() {
+            this._manualDisconnect = true;
             this._clearReconnectTimer();
             this._clearHeartbeatTimer();
             
@@ -208,6 +212,52 @@
             return this._state === CONNECTION_STATE.AUTHENTICATED;
         }
 
+        isUserOnline(userId) {
+            return this._onlineUsers.has(String(userId));
+        }
+
+        sendSignal(signalType, payload = {}, options = {}) {
+            this._lastSignalPayload = {
+                signalType,
+                payload,
+                options,
+                timestamp: Date.now()
+            };
+
+            const signalEventType = payload.eventType ||
+                payload.type ||
+                signalType ||
+                'call:signal';
+
+            return this.send(signalEventType, {
+                ...payload,
+                signalType
+            }, options);
+        }
+
+        handleReconnect(meta = {}) {
+            if (this._manualDisconnect) {
+                this._manualDisconnect = false;
+            }
+
+            if (meta && meta.token) {
+                this._sessionToken = meta.token;
+            }
+
+            this._clearReconnectTimer();
+            this._reconnectAttempts = 0;
+
+            if (this._state === CONNECTION_STATE.AUTHENTICATED) {
+                return Promise.resolve(this);
+            }
+
+            return this.connect(this._sessionToken);
+        }
+
+        emit(type, payload = {}, options = {}) {
+            return this.send(type, payload, options);
+        }
+
         /**
          * Get connection statistics
          * @returns {Object} Statistics
@@ -273,18 +323,16 @@
             
             this._state = CONNECTION_STATE.CONNECTED;
             this._reconnectAttempts = 0;
+            this._manualDisconnect = false;
             this._emitStateChange();
 
-            // Authenticate if we have a token
-            if (this._sessionToken) {
-                this._authenticate();
-            } else {
-                this._authenticated = true;
-                this._state = CONNECTION_STATE.AUTHENTICATED;
-                this._emitStateChange();
-                this._resolveConnectPromise();
-                this._processQueue();
-            }
+            // The backend WS server authenticates via connection context/querystring
+            // and does not ACK a dedicated AUTHENTICATE frame.
+            this._authenticated = true;
+            this._state = CONNECTION_STATE.AUTHENTICATED;
+            this._emitStateChange();
+            this._resolveConnectPromise();
+            this._processQueue();
 
             // Start heartbeat
             this._startHeartbeat();
@@ -316,8 +364,18 @@
 
         _onMessage(event) {
             try {
-                const message = JSON.parse(event.data);
+                if (typeof event.data !== 'string') return;
+                const rawMessage = event.data.trim();
+                if (!rawMessage) return;
+                if (rawMessage === 'connected' || rawMessage === 'ping' || rawMessage === 'pong' || rawMessage === 'PONG') {
+                    if (rawMessage === 'pong' || rawMessage === 'PONG') this._clearHeartbeatTimeout();
+                    return;
+                }
+
+                const message = JSON.parse(rawMessage);
                 this._stats.messagesReceived++;
+
+                const normalizedType = typeof message.type === 'string' ? message.type.toLowerCase() : '';
 
                 // Handle acknowledgments
                 if (message.type === 'ACK' && message.messageId) {
@@ -326,16 +384,18 @@
                 }
 
                 // Handle heartbeat responses
-                if (message.type === 'PONG') {
+                if (message.type === 'PONG' || normalizedType === 'pong') {
                     this._clearHeartbeatTimeout();
                     return;
                 }
 
                 // Handle authentication response
-                if (message.type === 'AUTHENTICATED') {
+                if (message.type === 'AUTHENTICATED' || normalizedType === 'authenticated' || normalizedType === 'welcome') {
                     this._authenticated = true;
                     this._state = CONNECTION_STATE.AUTHENTICATED;
                     this._emitStateChange();
+                    this._resolveConnectPromise();
+                    this._processQueue();
                     return;
                 }
 
@@ -350,7 +410,10 @@
                 }
 
             } catch (error) {
-                console.error('[Realtime] Message parse error:', error);
+                if (!this._lastParseErrorAt || Date.now() - this._lastParseErrorAt > 10000) {
+                    console.error('[Realtime] Message parse error:', error);
+                    this._lastParseErrorAt = Date.now();
+                }
                 this._stats.errors++;
             }
         }
@@ -362,7 +425,7 @@
             this._authenticated = false;
 
             // Handle intentional close
-            if (event.code === 1000) {
+            if (event.code === 1000 && this._manualDisconnect) {
                 this._state = CONNECTION_STATE.DISCONNECTED;
                 this._emitStateChange();
                 return;
@@ -479,6 +542,28 @@
         }
 
         _routeMessage(message) {
+            if (message && message.type === 'message' && message.message && typeof message.message === 'object') {
+                const wrappedMessage = {
+                    ...message.message,
+                    transportMeta: {
+                        from: message.from,
+                        timestamp: message.timestamp
+                    }
+                };
+                this._routeMessage(wrappedMessage);
+            }
+
+            if (message && (message.type === 'PRESENCE_UPDATE' || message.type === 'presence:update')) {
+                const presenceUserId = message.payload?.userId || message.payload?.id;
+                if (presenceUserId !== undefined && presenceUserId !== null) {
+                    if (message.payload?.online) {
+                        this._onlineUsers.add(String(presenceUserId));
+                    } else {
+                        this._onlineUsers.delete(String(presenceUserId));
+                    }
+                }
+            }
+
             // Route to type-specific listeners
             if (this._listeners.has(message.type)) {
                 this._listeners.get(message.type).forEach(({ handler, options }) => {
@@ -530,7 +615,7 @@
                 if (this._state === CONNECTION_STATE.AUTHENTICATED && this._socket) {
                     this._stats.heartbeats++;
                     
-                    this._sendMessage({ type: 'PING', timestamp: Date.now() })
+                    this._sendMessage({ type: 'ping', timestamp: Date.now() })
                         .then(() => {
                             this._heartbeatTimeoutTimer = setTimeout(() => {
                                 this._onError(new Error('Heartbeat timeout'));
@@ -574,7 +659,7 @@
             window.addEventListener('online', () => {
                 if (this._state !== CONNECTION_STATE.AUTHENTICATED) {
                     this._reconnectAttempts = 0;
-                    this._connect();
+                    this.handleReconnect({ reason: 'network-online' });
                 }
                 
                 if (window.KynectaEventBus) {
@@ -613,6 +698,18 @@
 
     // Expose globally
     window.KynectaRealtime = realtimeManager;
+    window.wsService = window.wsService || {
+        connect: realtimeManager.connect.bind(realtimeManager),
+        disconnect: realtimeManager.disconnect.bind(realtimeManager),
+        send: realtimeManager.send.bind(realtimeManager),
+        sendSignal: realtimeManager.sendSignal.bind(realtimeManager),
+        emit: realtimeManager.emit.bind(realtimeManager),
+        on: realtimeManager.on.bind(realtimeManager),
+        getState: realtimeManager.getState.bind(realtimeManager),
+        isConnected: realtimeManager.isConnected.bind(realtimeManager),
+        isUserOnline: realtimeManager.isUserOnline.bind(realtimeManager),
+        handleReconnect: realtimeManager.handleReconnect.bind(realtimeManager)
+    };
 
     // Add to authorities if exists
     if (window.__KYNECTA_AUTHORITIES__) {

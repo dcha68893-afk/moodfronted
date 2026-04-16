@@ -567,7 +567,7 @@
     <div id="profileModal" class="profile-modal">
         <div class="profile-card">
             <div class="cover-area" id="coverClickArea">
-                <img id="modalCoverImg" class="cover-img" src="https://placehold.co/600x200/667eea/white?text=Cover+Photo">
+            <img id="modalCoverImg" class="cover-img" src="data:image/svg+xml;charset=UTF-8,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 600 200%22%3E%3Cdefs%3E%3ClinearGradient id=%22g%22 x1=%220%22 x2=%221%22 y1=%220%22 y2=%221%22%3E%3Cstop stop-color=%22%23667eea%22/%3E%3Cstop offset=%221%22 stop-color=%22%23764ba2%22/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width=%22600%22 height=%22200%22 fill=%22url(%23g)%22/%3E%3Ctext x=%2250%25%22 y=%2252%25%22 dominant-baseline=%22middle%22 text-anchor=%22middle%22 font-family=%22Arial,sans-serif%22 font-size=%2230%22 font-weight=%22700%22 fill=%22white%22%3ECover Photo%3C/text%3E%3C/svg%3E">
                 <button class="close-modal" id="closeModalBtn"><i class="fas fa-times"></i></button>
             </div>
             <img id="modalAvatarImg" class="avatar-large" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%237c3aed'%3E%3Cpath d='M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z'/%3E%3C/svg%3E">
@@ -710,6 +710,50 @@
             bio: 'Hey there! I\'m using Kynecta.' 
         };
 
+        function createInlineAvatar(name, bgColor = '#7c3aed', fgColor = '#ffffff') {
+            const safeName = String(name || 'User').trim() || 'User';
+            const initials = safeName
+                .split(/\s+/)
+                .filter(Boolean)
+                .slice(0, 2)
+                .map(part => part.charAt(0).toUpperCase())
+                .join('') || 'U';
+            const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 80"><rect width="80" height="80" rx="40" fill="${bgColor}"/><text x="50%" y="54%" dominant-baseline="middle" text-anchor="middle" font-family="Arial, sans-serif" font-size="30" font-weight="700" fill="${fgColor}">${initials}</text></svg>`;
+            return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
+        }
+
+        function normalizeAvatarUrl(url, name, bgColor = '#7c3aed') {
+            const fallback = createInlineAvatar(name, bgColor);
+            if (!url) return fallback;
+            const value = String(url);
+            if (!navigator.onLine && /ui-avatars\.com|placehold\.co/i.test(value)) {
+                return fallback;
+            }
+            return value;
+        }
+
+        function readCachedStatusArray(key) {
+            try {
+                const parsed = JSON.parse(localStorage.getItem(key) || '[]');
+                return Array.isArray(parsed) ? parsed : [];
+            } catch (_) {
+                return [];
+            }
+        }
+
+        function getCachedApiFallback(endpoint) {
+            if (endpoint === '/auth/me') {
+                return { user: cachedUser, data: cachedUser };
+            }
+            if (endpoint === '/status/my') {
+                return { statuses: readCachedStatusArray('knecta_my_statuses_cache') };
+            }
+            if (endpoint === '/status/highlights') {
+                return { statuses: readCachedStatusArray('knecta_status_highlights'), highlights: readCachedStatusArray('knecta_status_highlights') };
+            }
+            return null;
+        }
+
         function loadUserProfileFromStorage() {
             try {
                 const auth = localStorage.getItem('kynecta_auth');
@@ -721,7 +765,7 @@
                     currentUserProfile.cover = parsed.cover;
                     currentUserProfile.bio = parsed.bio || 'Hey there! I\'m using Kynecta.';
                 }
-                const token = localStorage.getItem('token');
+                const token = localStorage.getItem('authToken') || localStorage.getItem('token');
                 if (token && !currentUserProfile.id) {
                     try {
                         const payload = JSON.parse(atob(token.split('.')[1]));
@@ -740,18 +784,18 @@
         }
 
         function updateProfileUI() {
-            const avatarUrl = currentUserProfile.avatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(currentUserProfile.username)}&background=7c3aed&color=fff`;
+            const avatarUrl = normalizeAvatarUrl(currentUserProfile.avatar, currentUserProfile.username, '#7c3aed');
             document.getElementById('headerAvatar').src = avatarUrl;
             document.getElementById('headerUserName').innerText = currentUserProfile.username;
             document.getElementById('modalAvatarImg').src = avatarUrl;
             document.getElementById('modalUsername').innerText = currentUserProfile.username;
             document.getElementById('modalBio').innerText = currentUserProfile.bio;
-            document.getElementById('modalCoverImg').src = currentUserProfile.cover || 'https://placehold.co/600x200/667eea/white?text=Cover+Photo';
+            document.getElementById('modalCoverImg').src = currentUserProfile.cover || 'data:image/svg+xml;charset=UTF-8,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 600 200%22%3E%3Cdefs%3E%3ClinearGradient id=%22g%22 x1=%220%22 x2=%221%22 y1=%220%22 y2=%221%22%3E%3Cstop stop-color=%22%23667eea%22/%3E%3Cstop offset=%221%22 stop-color=%22%23764ba2%22/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width=%22600%22 height=%22200%22 fill=%22url(%23g)%22/%3E%3Ctext x=%2250%25%22 y=%2252%25%22 dominant-baseline=%22middle%22 text-anchor=%22middle%22 font-family=%22Arial,sans-serif%22 font-size=%2230%22 font-weight=%22700%22 fill=%22white%22%3ECover Photo%3C/text%3E%3C/svg%3E';
         }
 
         async function saveProfileUpdates(avatarFile, coverFile, bioText) {
             const baseUrl = window.__getApiBase();
-            const token = localStorage.getItem('token');
+            const token = localStorage.getItem('authToken') || localStorage.getItem('token');
             if (!token) return;
             
             if (avatarFile) {
@@ -872,7 +916,7 @@
                     const callId = pendingIncomingCall.callId || pendingIncomingCall.id;
                     if (callId) {
                         const baseUrl = window.__getApiBase();
-                        const token = localStorage.getItem('token');
+                        const token = localStorage.getItem('authToken') || localStorage.getItem('token');
                         try {
                             await fetch(`${baseUrl}/calls/${callId}/answer`, {
                                 method: 'POST',
@@ -900,7 +944,7 @@
                     const callId = pendingIncomingCall.callId || pendingIncomingCall.id;
                     if (callId) {
                         const baseUrl = window.__getApiBase();
-                        const token = localStorage.getItem('token');
+                        const token = localStorage.getItem('authToken') || localStorage.getItem('token');
                         try {
                             await fetch(`${baseUrl}/calls/${callId}/reject`, {
                                 method: 'POST',
@@ -1003,7 +1047,7 @@
                     name: friend.displayName || friend.username || friend.name || 'User',
                     displayName: friend.displayName || friend.username || friend.name,
                     username: friend.username,
-                    avatar: friend.avatar || friend.photoURL,
+                    avatar: normalizeAvatarUrl(friend.avatar || friend.photoURL, friend.displayName || friend.username || friend.name || 'User', '#6c5ce7'),
                     online: friend.online || false,
                     status: friend.status || (friend.online ? 'online' : 'offline')
                 }));
@@ -1128,13 +1172,20 @@
             });
         }
 
-        setTimeout(() => {
-            const loading = document.getElementById('loadingScreen');
-            if (loading) {
-                loading.style.opacity = '0';
-                setTimeout(() => loading.classList.add('hidden'), 300);
-            }
-        }, 2000);
+        let loadingDismissed = false;
+        function dismissLoadingScreen(delay = 250) {
+            if (loadingDismissed) return;
+            loadingDismissed = true;
+            setTimeout(() => {
+                const loading = document.getElementById('loadingScreen');
+                if (loading) {
+                    loading.style.opacity = '0';
+                    setTimeout(() => loading.classList.add('hidden'), 180);
+                }
+            }, delay);
+        }
+
+        dismissLoadingScreen(350);
         
         // ======================================================================
         // CHAT AND CALL PANEL DETECTION FOR MOBILE
@@ -1186,6 +1237,7 @@
         
         document.addEventListener('DOMContentLoaded', function() {
             setupPanelDetection();
+            dismissLoadingScreen(0);
             if (window.innerWidth <= 768) {
                 document.body.classList.remove('chat-panel-active', 'call-screen-active');
             }
@@ -1208,21 +1260,24 @@
             };
 
             window.__getStableSessionData = function() {
-                const token = localStorage.getItem('token') ||
+                const auth = window.AuthStorage?.getAuth?.() ||
+                    (window.safeParse ? window.safeParse(localStorage.getItem('kynecta_auth'), null) : null);
+                const token = auth?.token ||
+                    localStorage.getItem('authToken') ||
+                    localStorage.getItem('token') ||
                     localStorage.getItem('moodchat_token') ||
                     localStorage.getItem('accessToken') ||
                     window.Session?.getToken?.() ||
                     null;
 
-                let user = null;
-                try {
-                    user = JSON.parse(localStorage.getItem('currentUser') || localStorage.getItem('user') || 'null');
-                } catch (_) {
-                    user = null;
+                let user = auth?.user || null;
+                if (!user) {
+                    try {
+                        user = JSON.parse(localStorage.getItem('currentUser') || localStorage.getItem('user') || 'null');
+                    } catch (_) {
+                        user = null;
+                    }
                 }
-
-                const auth = window.safeParse ? window.safeParse(localStorage.getItem('kynecta_auth'), null) : null;
-                if (!user && auth && auth.user) user = auth.user;
 
                 return {
                     token,
@@ -1254,6 +1309,7 @@
     <script src="js/app.sync.manager.js"></script>
     <script src="js/app.offline.queue.js"></script>
     <script src="js/settingsManager.js"></script>
+    <script src="js/app.stability.bridge.js"></script>
 
     <script>window.__parentHandlesApiRequests = true;</script>
     <script type="module" src="js/api.core.js"></script>
@@ -1268,44 +1324,49 @@
     <!-- ====================================================================== -->
     <script>
         (function() {
-            let attempts = 0;
-            const MAX_ATTEMPTS = 20;
-            
             function validateChatSession() {
-                attempts++;
-                console.log('[Chat] Validating session... attempt', attempts);
-                
-                if (!window.SessionManager) {
-                    if (attempts < MAX_ATTEMPTS) {
-                        console.warn('[Chat] SessionManager not loaded yet, waiting...');
-                        setTimeout(validateChatSession, 500);
-                    } else {
-                        console.error('[Chat] SessionManager failed to load');
-                        const token = localStorage.getItem('token') || localStorage.getItem('moodchat_token');
-                        if (!token) window.location.href = 'index.html';
+                const auth = window.AuthStorage?.getAuth?.() || null;
+                const token = auth?.token ||
+                    localStorage.getItem('authToken') ||
+                    localStorage.getItem('token') ||
+                    localStorage.getItem('moodchat_token') ||
+                    localStorage.getItem('accessToken');
+                const user = auth?.user || (() => {
+                    try {
+                        return JSON.parse(localStorage.getItem('currentUser') || localStorage.getItem('user') || 'null');
+                    } catch (_) {
+                        return null;
                     }
-                    return;
-                }
-                
-                const isValid = window.SessionManager.isSessionValid();
-                const shouldPrompt = window.SessionManager.shouldPromptLogin();
-                
-                if (!isValid || shouldPrompt) {
+                })();
+
+                console.log('[AUTH TOKEN]', token);
+
+                if (!token || !user) {
                     window.location.href = 'index.html';
                     return;
                 }
-                
-                const session = window.SessionManager.getCurrentSession();
-                if (session && session.token) {
-                    localStorage.setItem('token', session.token);
-                    localStorage.setItem('accessToken', session.token);
-                    localStorage.setItem('moodchat_token', session.token);
-                    if (session.user) {
-                        localStorage.setItem('currentUser', JSON.stringify(session.user));
-                        window.currentUser = session.user;
-                    }
+
+                localStorage.setItem('authToken', token);
+                localStorage.setItem('token', token);
+                localStorage.setItem('accessToken', token);
+                localStorage.setItem('moodchat_token', token);
+                localStorage.setItem('isLoggedIn', 'true');
+                localStorage.setItem('currentUser', JSON.stringify(user));
+                localStorage.setItem('user', JSON.stringify(user));
+                window.currentUser = user;
+
+                if (window.Session?.setSession) {
+                    window.Session.setSession({ token, user, refreshToken: auth?.refreshToken, expiresAt: auth?.expiresAt });
                 }
-                window.SessionManager.updateActivity();
+
+                if (window.SessionManager?.updateActivity) {
+                    window.SessionManager.updateActivity();
+                }
+
+                if (!navigator.onLine) {
+                    console.warn('Offline mode');
+                    return;
+                }
             }
             validateChatSession();
         })();
@@ -1426,7 +1487,8 @@
             };
 
             function getSessionData() {
-                const token = localStorage.getItem('token') || 
+                const token = localStorage.getItem('authToken') || 
+                              localStorage.getItem('token') || 
                               localStorage.getItem('moodchat_token') || 
                               localStorage.getItem('accessToken');
                 if (!token) return null;
@@ -1500,6 +1562,7 @@
             }
 
             function sendSessionToModule(iframe, moduleName) {
+                window.__moduleSessionDispatchCache = window.__moduleSessionDispatchCache || {};
                 const isSettings = moduleName === 'settings';
                 if (!cachedToken || !cachedUserId) {
                     if (isSettings) {
@@ -1516,6 +1579,19 @@
                     return;
                 }
                 if (!iframe || !iframe.contentWindow) return;
+
+                const now = Date.now();
+                const sessionFingerprint = `${cachedUserId}:${String(cachedToken).slice(-24)}`;
+                const lastDispatch = window.__moduleSessionDispatchCache[moduleName];
+                if (lastDispatch &&
+                    lastDispatch.fingerprint === sessionFingerprint &&
+                    now - lastDispatch.timestamp < 1500) {
+                    return;
+                }
+                window.__moduleSessionDispatchCache[moduleName] = {
+                    fingerprint: sessionFingerprint,
+                    timestamp: now
+                };
 
                 const userData = {
                     id: cachedUserId,
@@ -1545,17 +1621,17 @@
 
                 iframe.contentWindow.postMessage({
                     type: 'SESSION_DATA',
-                    id: `session_${Date.now()}_${moduleName}`,
+                    id: `session_${now}_${moduleName}`,
                     source: 'parent',
                     target: moduleName,
                     payload: sessionData,
                     userId: cachedUserId,
-                    timestamp: Date.now()
+                    timestamp: now
                 }, '*');
 
                 iframe.contentWindow.postMessage({
                     type: 'AUTH_READY',
-                    id: `auth_ready_${Date.now()}_${moduleName}`,
+                    id: `auth_ready_${now}_${moduleName}`,
                     source: 'parent',
                     target: moduleName,
                     payload: {
@@ -1563,15 +1639,15 @@
                         session: sessionData,
                         user: userData,
                         userId: cachedUserId,
-                        timestamp: Date.now()
+                        timestamp: now
                     },
                     userId: cachedUserId,
-                    timestamp: Date.now()
+                    timestamp: now
                 }, '*');
 
                 iframe.contentWindow.postMessage({
                     type: 'PARENT_READY',
-                    id: `parent_ready_${Date.now()}_${moduleName}`,
+                    id: `parent_ready_${now}_${moduleName}`,
                     source: 'parent',
                     target: moduleName,
                     payload: {
@@ -1582,7 +1658,7 @@
                         userId: cachedUserId
                     },
                     userId: cachedUserId,
-                    timestamp: Date.now()
+                    timestamp: now
                 }, '*');
                 
                 setTimeout(() => {
@@ -1599,7 +1675,8 @@
 
             (function earlyTokenInit() {
                 try {
-                    const t = localStorage.getItem('token') ||
+                    const t = localStorage.getItem('authToken') ||
+                              localStorage.getItem('token') ||
                               localStorage.getItem('moodchat_token') ||
                               localStorage.getItem('accessToken');
                     if (t && !cachedToken) {
@@ -1718,6 +1795,7 @@
                         const data = await response.json();
                         const newToken = data.token || data.accessToken;
                         if (newToken) {
+                            localStorage.setItem('authToken', newToken);
                             localStorage.setItem('token', newToken);
                             localStorage.setItem('moodchat_token', newToken);
                             localStorage.setItem('accessToken', newToken);
@@ -1740,13 +1818,25 @@
                 }
             }
 
+            function scheduleSessionCacheUpdate() {
+                if (window.safeTimeout) {
+                    window.safeTimeout(updateSessionCache, 150);
+                } else {
+                    setTimeout(updateSessionCache, 150);
+                }
+            }
+
             updateSessionCache();
-            setInterval(updateSessionCache, 10000);
+            setInterval(scheduleSessionCacheUpdate, 30000);
 
             window.addEventListener('storage', function(e) {
-                if (e.key === 'token' || e.key === 'moodchat_token' || e.key === 'kynecta_auth' || e.key === 'accessToken') {
-                    updateSessionCache();
-                    setTimeout(() => sendToAllModulesIfNeeded(true), 100);
+                if (e.key === 'authToken' || e.key === 'token' || e.key === 'moodchat_token' || e.key === 'kynecta_auth' || e.key === 'accessToken') {
+                    scheduleSessionCacheUpdate();
+                    if (window.safeTimeout) {
+                        window.safeTimeout(() => sendToAllModulesIfNeeded(true), 100);
+                    } else {
+                        setTimeout(() => sendToAllModulesIfNeeded(true), 100);
+                    }
                 }
             });
 
@@ -1766,7 +1856,7 @@
                     const callId = data.payload?.callId || data.callId;
                     if (callId) {
                         const baseUrl = window.__getApiBase();
-                        const token = localStorage.getItem('token') || cachedToken;
+                        const token = localStorage.getItem('authToken') || localStorage.getItem('token') || cachedToken;
                         try {
                             await fetch(`${baseUrl}/calls/${callId}/end`, {
                                 method: 'POST',
@@ -1885,7 +1975,7 @@
                 if (data.type === 'CALL_ACCEPT') {
                     const callId = data.payload?.callId;
                     const baseUrl = window.__getApiBase();
-                    const token = localStorage.getItem('token') || cachedToken;
+                    const token = localStorage.getItem('authToken') || localStorage.getItem('token') || cachedToken;
                     let success = false;
                     let resultData = null;
                     if (callId) {
@@ -1917,7 +2007,7 @@
                 if (data.type === 'CALL_REJECT') {
                     const callId = data.payload?.callId;
                     const baseUrl = window.__getApiBase();
-                    const token = localStorage.getItem('token') || cachedToken;
+                    const token = localStorage.getItem('authToken') || localStorage.getItem('token') || cachedToken;
                     let success = false;
                     if (callId) {
                         try {
@@ -2089,6 +2179,14 @@
                 if (data.type === 'SETTINGS_UPDATED') {
                     const settings = data.settings || data.payload?.settings || {};
                     try { localStorage.setItem('knecta_settings_cache', JSON.stringify(settings)); } catch(e) {}
+                    try {
+                        if (window.SettingsStore) {
+                            Object.entries(settings || {}).forEach(([section, values]) => {
+                                if (!values || typeof values !== 'object') return;
+                                Object.entries(values).forEach(([key, value]) => window.SettingsStore.set(`${section}.${key}`, value));
+                            });
+                        }
+                    } catch(e) {}
                     if (settings.appearance?.theme || settings.theme) {
                         const theme = settings.appearance?.theme || settings.theme;
                         document.documentElement.setAttribute('data-theme', theme);
@@ -2100,6 +2198,9 @@
 
                 if (data.type === 'SETTINGS_GLOBAL_UPDATE') {
                     const { section, key, value } = data;
+                    if (window.SettingsStore) {
+                        window.SettingsStore.set(`${section}.${key}`, value);
+                    }
                     if (section === 'appearance') {
                         if (key === 'theme') {
                             const resolvedTheme = value === 'auto' ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light') : value;
@@ -2169,7 +2270,7 @@
                     };
                     try {
                         const baseUrl = window.__getApiBase ? window.__getApiBase() : 'http://localhost:4000/api';
-                        let token = localStorage.getItem('token') || localStorage.getItem('moodchat_token') || localStorage.getItem('accessToken');
+                        let token = localStorage.getItem('authToken') || localStorage.getItem('token') || localStorage.getItem('moodchat_token') || localStorage.getItem('accessToken');
                         const [meta, b64] = base64Data.split(',');
                         const mime = (meta.match(/:(.*?);/) || [])[1] || fileType || 'application/octet-stream';
                         const binary = atob(b64);
@@ -2216,12 +2317,37 @@
                         } catch(e) {}
                     }
                     if (!token) {
-                        try { token = localStorage.getItem('token') || localStorage.getItem('moodchat_token') || localStorage.getItem('accessToken'); } catch(e) {}
+                        try { token = localStorage.getItem('authToken') || localStorage.getItem('token') || localStorage.getItem('moodchat_token') || localStorage.getItem('accessToken'); } catch(e) {}
                     }
 
                     try {
                         const baseUrl = window.__getApiBase ? window.__getApiBase() : 'http://localhost:4000/api';
                         let url = baseUrl + endpoint;
+                        const cachedApiFallback = getCachedApiFallback(endpoint);
+                        if (cachedApiFallback) {
+                            if (event.source && event.source.postMessage) {
+                                event.source.postMessage({
+                                    type: 'API_RESPONSE',
+                                    requestId: requestId,
+                                    payload: { success: true, data: cachedApiFallback, statusCode: 200, fallback: true, local: true },
+                                    timestamp: new Date().toISOString()
+                                }, '*');
+                            }
+                            return;
+                        }
+                        if (!navigator.onLine) {
+                            const offlinePayload = {
+                                success: false,
+                                error: 'Offline - skipping API',
+                                statusCode: 0,
+                                offline: true,
+                                data: endpoint.startsWith('/status') ? { statuses: [], highlights: [] } : null
+                            };
+                            if (event.source && event.source.postMessage) {
+                                event.source.postMessage({ type: 'API_RESPONSE', requestId: requestId, payload: offlinePayload, timestamp: new Date().toISOString() }, '*');
+                            }
+                            return;
+                        }
                         if (method === 'GET' && params && typeof params === 'object') {
                             const queryString = new URLSearchParams(params).toString();
                             if (queryString) url += '?' + queryString;
@@ -2235,8 +2361,16 @@
                         const contentType = response.headers.get('content-type');
                         if (contentType && contentType.includes('application/json')) responseData = await response.json();
                         else responseData = { message: await response.text() || 'Request completed' };
-                        const isSuccess = response.ok;
-                        const responsePayload = isSuccess ? { success: true, data: responseData, statusCode: response.status } : { success: false, error: responseData?.message || responseData?.error || `HTTP ${response.status}`, statusCode: response.status, data: responseData };
+                        const isStatusEndpoint = endpoint === '/status/my' || endpoint === '/status/highlights' || endpoint === '/auth/me';
+                        const isSuccess = response.ok || (isStatusEndpoint && response.status === 401);
+                        const responsePayload = isSuccess
+                            ? {
+                                success: true,
+                                data: response.ok ? responseData : (endpoint === '/status/highlights' ? { highlights: [] } : endpoint === '/status/my' ? { statuses: [] } : { user: cachedUser, data: cachedUser }),
+                                statusCode: response.status,
+                                fallback: !response.ok
+                            }
+                            : { success: false, error: responseData?.message || responseData?.error || `HTTP ${response.status}`, statusCode: response.status, data: responseData };
                         if (event.source && event.source.postMessage) event.source.postMessage({ type: 'API_RESPONSE', requestId: requestId, payload: responsePayload, timestamp: new Date().toISOString() }, '*');
                     } catch (error) {
                         if (event.source && event.source.postMessage) event.source.postMessage({ type: 'API_RESPONSE', requestId: requestId, payload: { success: false, error: error.message || 'Network request failed', statusCode: 0, data: null }, timestamp: new Date().toISOString() }, '*');
@@ -2313,7 +2447,7 @@
                     window.__pendingCallOrigin = callOriginPage;
                     const baseUrl = window.__getApiBase();
                     let token = cachedToken;
-                    try { if (!token) token = localStorage.getItem('token') || localStorage.getItem('moodchat_token') || localStorage.getItem('accessToken'); } catch(e) {}
+                    try { if (!token) token = localStorage.getItem('authToken') || localStorage.getItem('token') || localStorage.getItem('moodchat_token') || localStorage.getItem('accessToken'); } catch(e) {}
                     try {
                         const body = { callType: callType === 'voice' ? 'audio' : callType, isGroupCall: isGroupCall };
                         if (isGroupCall && participantIds) body.participantIds = participantIds;
@@ -2326,6 +2460,26 @@
                             window.__callIdMap[localCallId] = serverCallId;
                             const callsIframe = document.getElementById('callsIframe');
                             if (callsIframe && callsIframe.contentWindow) callsIframe.contentWindow.postMessage({ type: 'CALL_INITIATED', payload: { ...(respData.data?.call || respData.data), callId: serverCallId, localCallId: localCallId, callType: callType, returnTo: callOriginPage, receiverOnline: respData.data?.receiverOnline !== false, success: true } }, '*');
+                        } else if ((respData?.error || respData?.message || '').includes('wsService.isUserOnline is not a function')) {
+                            const fallbackCallId = localCallId || `call_fallback_${Date.now()}`;
+                            window.__callIdMap = window.__callIdMap || {};
+                            window.__callIdMap[localCallId] = fallbackCallId;
+                            const callsIframe = document.getElementById('callsIframe');
+                            if (callsIframe && callsIframe.contentWindow) {
+                                callsIframe.contentWindow.postMessage({
+                                    type: 'CALL_INITIATED',
+                                    payload: {
+                                        success: true,
+                                        fallback: true,
+                                        callId: fallbackCallId,
+                                        localCallId,
+                                        callType,
+                                        returnTo: callOriginPage,
+                                        receiverOnline: true,
+                                        participants: body.participantIds || []
+                                    }
+                                }, '*');
+                            }
                         } else {
                             const callsIframe = document.getElementById('callsIframe');
                             if (callsIframe && callsIframe.contentWindow) callsIframe.contentWindow.postMessage({ type: 'CALL_INITIATED', payload: { success: false, error: respData?.message || 'Failed to start call', localCallId } }, '*');
@@ -2374,7 +2528,7 @@
                     const limit = data.payload?.limit || 20;
                     const baseUrl = window.__getApiBase();
                     let token = cachedToken;
-                    if (!token) { try { token = localStorage.getItem('token') || localStorage.getItem('moodchat_token') || localStorage.getItem('accessToken'); } catch(e) {} }
+                    if (!token) { try { token = localStorage.getItem('authToken') || localStorage.getItem('token') || localStorage.getItem('moodchat_token') || localStorage.getItem('accessToken'); } catch(e) {} }
                     if (!token) { if (event.source) event.source.postMessage({ type: 'FETCH_LISTINGS_RESPONSE', requestId, payload: { data: { listings: [], total: 0 } } }, '*'); return; }
                     fetch(`${baseUrl}/marketplace/listings?page=${page}&limit=${limit}`, { headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' }, credentials: 'include' })
                         .then(r => r.json())

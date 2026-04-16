@@ -2662,15 +2662,6 @@
                         };
                     }
                 }
-                
-                const response = await fetch(`/api/users/${userId}`);
-                if (response.ok) {
-                    const user = await response.json();
-                    return {
-                        name: user.displayName || user.username,
-                        avatar: user.avatar
-                    };
-                }
             } catch (e) {
                 console.warn('[CallHandler] Could not fetch user details:', e);
             }
@@ -4802,9 +4793,7 @@ Type: ${message.type || 'text'}`;
                 return;
             }
             
-            setTimeout(() => {
-                openChatWithUserInUI(targetUserId, targetUserName);
-            }, 500);
+            openChatWithUserInUI(targetUserId, targetUserName);
         });
 
         window.addEventListener('message', function(event) {
@@ -4822,9 +4811,7 @@ Type: ${message.type || 'text'}`;
                 return;
             }
 
-            setTimeout(() => {
-                openChatWithUserInUI(targetUserId, targetUserName);
-            }, 300);
+            openChatWithUserInUI(targetUserId, targetUserName);
         });
         
         const pendingChatRaw = sessionStorage.getItem('open_chat_on_load') || sessionStorage.getItem('pending_chat');
@@ -4836,9 +4823,7 @@ Type: ${message.type || 'text'}`;
                 sessionStorage.removeItem('open_chat_on_load');
                 sessionStorage.removeItem('pending_chat');
                 
-                setTimeout(() => {
-                    openChatWithUserInUI(chatData.userId, chatData.userName || 'User');
-                }, 800);
+                openChatWithUserInUI(chatData.userId, chatData.userName || 'User');
             } catch (e) {
                 console.error('[MessageUI] Failed to parse pending chat:', e);
             }
@@ -5033,6 +5018,36 @@ Type: ${message.type || 'text'}`;
         _removeLoadingOverlays();
         
         setupAutoOpenChat();
+
+        const primeCachedUi = () => {
+            const core = getMessagesCore();
+            if (!core) return false;
+
+            const conversations = core.getConversations?.() || [];
+            const currentChat = core.getCurrentConversation?.();
+            const currentCategory = core.getCurrentCategory?.() || 'all';
+            const friends = core.getFriends?.() || [];
+            const messages = core.getMessages?.() || [];
+            const user = core.getCurrentUser?.();
+
+            if (conversations.length > 0) {
+                UIRenderer.renderChatsList(conversations, currentChat, currentCategory, {});
+            }
+            if (friends.length > 0) {
+                UIRenderer.renderContactsList(friends);
+            }
+            if (currentChat && messages.length > 0) {
+                UIRenderer.renderMessages(messages, currentChat, user);
+            }
+
+            return conversations.length > 0 || friends.length > 0;
+        };
+
+        setTimeout(() => {
+            UIFailsafe.queueAction(() => {
+                primeCachedUi();
+            });
+        }, 0);
         
         const setupCoreSubscriptions = () => {
             const core = getMessagesCore();
@@ -5154,7 +5169,7 @@ Type: ${message.type || 'text'}`;
                 }
                 clearInterval(checkCore);
             }
-        }, 500);
+        }, 120);
 
         setTimeout(() => {
             if (UIFailsafe.hasValidSession() && UIStateManager.getState('sessionValid') !== true) {
@@ -5361,6 +5376,20 @@ Type: ${message.type || 'text'}`;
             
             console.log('[messagesUI] loadChatByFriendId called with:', { friendId, friendName: displayName });
 
+            const id = parseInt(friendId, 10);
+            if (!id) {
+                console.error('[messagesUI] Invalid friend ID:', friendId);
+                return;
+            }
+
+            const existingConversation = core.getConversations?.()?.find?.((conversation) =>
+                String(conversation?.friendId) === String(id) ||
+                String(conversation?.otherParticipant?.id) === String(id) ||
+                String(conversation?.otherUserId) === String(id) ||
+                String(conversation?.userId) === String(id) ||
+                (Array.isArray(conversation?.participants) && conversation.participants.some((participant) => String(participant?.id || participant) === String(id)))
+            );
+
             const contactsSidebar = document.getElementById('contactsSidebar');
             const sidebar = document.getElementById('sidebar');
             const chatPanel = document.getElementById('chatPanel');
@@ -5379,19 +5408,20 @@ Type: ${message.type || 'text'}`;
                 
                 const messagesContainer = document.getElementById('messagesContainer');
                 if (messagesContainer) {
-                    messagesContainer.innerHTML = `
-                        <div class="loading-chat">
-                            <div class="loading-spinner"></div>
-                            <p>Opening conversation with ${displayName}...</p>
-                        </div>
-                    `;
+                    const cachedMessages = existingConversation?.id && core.getCachedMessages
+                        ? core.getCachedMessages(existingConversation.id)
+                        : [];
+                    if (Array.isArray(cachedMessages) && cachedMessages.length > 0) {
+                        UIRenderer.renderMessages(cachedMessages);
+                    } else {
+                        messagesContainer.innerHTML = `
+                            <div class="loading-chat">
+                                <div class="loading-spinner"></div>
+                                <p>Opening conversation with ${displayName}...</p>
+                            </div>
+                        `;
+                    }
                 }
-            }
-
-            const id = parseInt(friendId, 10);
-            if (!id) {
-                console.error('[messagesUI] Invalid friend ID:', friendId);
-                return;
             }
 
             const ensureChatPanelOpen = (conversationId) => {
@@ -5453,15 +5483,14 @@ Type: ${message.type || 'text'}`;
                     }, 1000);
                 }
                 
-                if (conversationId && conversationId !== false && conversationId !== null) {
-                    setTimeout(() => {
-                        const coreFetch = getMessagesCore();
-                        if (coreFetch && conversationId) {
-                            coreFetch.fetchMessages?.(conversationId);
-                        }
-                    }, 100);
-                }
             };
+
+            if (existingConversation?.id && core.openConversation) {
+                console.log('[messagesUI] Opening existing conversation instantly:', existingConversation.id);
+                core.openConversation(existingConversation.id, { minFetchGap: 25000 }).catch?.(() => {});
+                ensureChatPanelOpen(existingConversation.id);
+                return;
+            }
 
             if (core.ConversationManager?.createConversation) {
                 console.log('[messagesUI] Using ConversationManager.createConversation');

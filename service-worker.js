@@ -3,7 +3,7 @@
 // Cache Strategy: Cache-First ONLY for static assets
 // Design: Zero API interference, future-proof, authentication-safe
 
-const CACHE_NAME = 'moodchat-static-v10';
+const CACHE_NAME = 'moodchat-static-v11';
 const CACHE_MAX_AGE = 7 * 24 * 60 * 60 * 1000;
 
 const CORE_STATIC_ASSETS = [
@@ -23,18 +23,12 @@ const CORE_STATIC_ASSETS = [
 
   // ── Font Awesome: CSS + ALL webfont binaries (icons break offline without these)
   '/css/vendor/font-awesome.min.css',
-  '/webfonts/fa-solid-900.woff2',
-  '/webfonts/fa-solid-900.woff',
-  '/webfonts/fa-regular-400.woff2',
-  '/webfonts/fa-regular-400.woff',
-  '/webfonts/fa-brands-400.woff2',
-  '/webfonts/fa-brands-400.woff',
-  '/webfonts/fa-light-300.woff2',
-  '/webfonts/fa-light-300.woff',
-  '/webfonts/fa-thin-100.woff2',
-  '/webfonts/fa-thin-100.woff',
-  '/webfonts/fa-duotone-900.woff2',
-  '/webfonts/fa-duotone-900.woff',
+  '/fonts/fa-solid-900.woff2',
+  '/fonts/fa-solid-900.ttf',
+  '/fonts/fa-regular-400.woff2',
+  '/fonts/fa-regular-400.ttf',
+  '/fonts/fa-brands-400.woff2',
+  '/fonts/fa-brands-400.ttf',
 
   // ── Offline icon fallback (Unicode symbols when FA font unavailable) ──────
   '/css/offline-icon-fallback.css',
@@ -55,7 +49,8 @@ const STATIC_ASSET_PATTERNS = [
   /\/images\//i,
   /\/fonts\//i,
   /\/static\//i,
-  /\/webfonts\//i,          // Font Awesome glyph binaries
+  /\/webfonts\//i,          // Compatibility path
+  /\/fonts\//i,             // Project font binaries
   /\/css\/vendor\//i,       // Vendor CSS (font-awesome.min.css etc.)
   /\/js\/vendor\//i,        // Vendor JS
   /offline-icon-fallback/i,  // Offline icon CSS
@@ -212,7 +207,7 @@ async function handleApiRequest(request) {
 }
 
 function isFontOrIconAsset(url) {
-  return /\/webfonts\/|font-awesome|\.woff2?$|\.ttf$|\.eot$/i.test(url)
+  return /\/webfonts\/|\/fonts\/|font-awesome|\.woff2?$|\.ttf$|\.eot$/i.test(url)
       || /offline-icon-fallback|offline-icon-bootstrap/i.test(url);
 }
 

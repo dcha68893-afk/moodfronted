@@ -245,6 +245,9 @@
 
             // 3. Persist to legacy key for backwards compat
             this._saveToLegacyKey();
+            if (window.SettingsStore) {
+                window.SettingsStore.set(key, value);
+            }
 
             // 4. Broadcast to other tabs
             this.broadcastChange({ key, value });
@@ -817,9 +820,42 @@
     const instance = new SettingsManager();
     window.MoodChatSettingsManager      = instance;
     window.MoodChatSettingsManagerClass = SettingsManager;
+    window.SettingsStore = window.SettingsStore || {
+        data: {},
+        listeners: {},
+        load() {
+            this.data = JSON.parse(localStorage.getItem('app_settings') || '{}');
+            return this.data;
+        },
+        save() {
+            localStorage.setItem('app_settings', JSON.stringify(this.data));
+        },
+        set(key, value) {
+            this.data[key] = value;
+            this.save();
+            console.log('[SETTINGS UPDATED]', key, value);
+            this.notify(key, value);
+        },
+        get(key) {
+            return this.data[key];
+        },
+        subscribe(key, callback) {
+            if (!this.listeners[key]) this.listeners[key] = [];
+            this.listeners[key].push(callback);
+            return () => {
+                this.listeners[key] = (this.listeners[key] || []).filter((cb) => cb !== callback);
+            };
+        },
+        notify(key, value) {
+            (this.listeners[key] || []).forEach((cb) => cb(value, key));
+            (this.listeners['*'] || []).forEach((cb) => cb(value, key));
+        }
+    };
 
     function autoInitialize() {
         const userId = _tryReadUserId();
+        window.SettingsStore.load();
+        window.dispatchEvent(new CustomEvent('settings-store-ready'));
         instance.initialize(userId).catch(err => {
             console.error('[SettingsManager] Auto-init failed:', err);
         });
