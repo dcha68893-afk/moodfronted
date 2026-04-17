@@ -787,6 +787,19 @@
                         }
                     } catch { /* malformed cache entry — skip */ }
                 }
+                // Prefer unified IndexedDB snapshots when available.
+                if (window.KynectaCache && typeof window.KynectaCache.getModuleSnapshot === 'function') {
+                    Object.keys(this._state).forEach((domain) => {
+                        if (domain === 'network') return;
+                        Promise.resolve(window.KynectaCache.getModuleSnapshot(domain))
+                            .then((snapshot) => {
+                                if (snapshot !== null && snapshot !== undefined) {
+                                    this.set(domain, snapshot, { silent: true, persist: false });
+                                }
+                            })
+                            .catch(() => {});
+                    });
+                }
                 console.log('[Store] _hydrateStoreFromLocal complete');
             } catch (err) {
                 console.warn('[Store] _hydrateStoreFromLocal error:', err.message);
@@ -821,6 +834,9 @@
                             data: value,
                             timestamp: Date.now()
                         }));
+                        if (window.KynectaCache && typeof window.KynectaCache.setModuleSnapshot === 'function') {
+                            window.KynectaCache.setModuleSnapshot(topKey, value, { source: 'KynectaStore' }).catch(() => {});
+                        }
                     } catch { /* quota exceeded or private browsing — ignore */ }
                 }, DEBOUNCE_MS));
             });

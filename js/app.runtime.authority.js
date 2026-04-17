@@ -19,7 +19,8 @@
         validatingPromise: null,
         refreshingPromise: null,
         lastRealtimeToken: null,
-        bootstrapped: false
+        bootstrapped: false,
+        postRenderTasksScheduled: false
     };
 
     function currentPath() {
@@ -350,6 +351,55 @@
         window.location.replace('index.html' + query);
     }
 
+    function hasOfflineBootData() {
+        try {
+            const candidates = [
+                'kynecta_messages_cache',
+                'kynecta_friends_cache',
+                'kynecta_groups_cache',
+                'kynecta_status_cache',
+                'knecta_settings_cache'
+            ];
+            return candidates.some(function (key) {
+                return !!localStorage.getItem(key);
+            });
+        } catch (_error) {
+            return false;
+        }
+    }
+
+    function schedulePostRenderLogout(reason) {
+        const performLogout = function () {
+            clearSession({ emit: true, reason: reason || 'session-invalid' });
+            redirectToLogin(reason || 'session-invalid');
+        };
+
+        if (document.documentElement.classList.contains('kynecta-booted')) {
+            setTimeout(performLogout, 0);
+            return;
+        }
+
+        const onRendered = function () {
+            window.removeEventListener('KYNECTA_UI_RENDERED', onRendered);
+            setTimeout(performLogout, 0);
+        };
+        window.addEventListener('KYNECTA_UI_RENDERED', onRendered);
+    }
+
+    function afterShellRender(callback) {
+        if (document.documentElement.classList.contains('kynecta-booted')) {
+            setTimeout(callback, 0);
+            return;
+        }
+
+        const onRendered = function () {
+            window.removeEventListener('KYNECTA_UI_RENDERED', onRendered);
+            setTimeout(callback, 0);
+        };
+
+        window.addEventListener('KYNECTA_UI_RENDERED', onRendered);
+    }
+
     async function fetchJson(url, options = {}) {
         const response = await fetch(url, {
             credentials: 'include',
@@ -429,8 +479,7 @@
                         return validateSessionInBackground(refreshed);
                     }
 
-                    clearSession({ reason: 'refresh_failed' });
-                    redirectToLogin('session-expired');
+                    schedulePostRenderLogout('session-expired');
                     return null;
                 }
 
@@ -616,8 +665,19 @@
         }
 
         runtimeState.lastRealtimeToken = auth.token;
-        window.KynectaRealtime.connect(auth.token).catch(function (error) {
+        Promise.resolve(window.KynectaRealtime.connect(auth.token)).catch(function (error) {
+            emit('SOCKET_DISCONNECTED', {
+                reason: error?.message || 'connect-failed',
+                timestamp: Date.now()
+            });
             console.warn('[RuntimeAuthority] realtime connect failed:', error?.message || error);
+        }).then(function () {
+            if (window.KynectaRealtime && typeof window.KynectaRealtime.isConnected === 'function' && window.KynectaRealtime.isConnected()) {
+                emit('SOCKET_CONNECTED', {
+                    userId: auth.userId || auth.user?.id || null,
+                    timestamp: Date.now()
+                });
+            }
         });
     }
 
@@ -666,16 +726,28 @@
 
         if (auth) {
             hydrateStoreFromSession(auth);
-            connectRealtime(auth);
-            validateSessionInBackground(auth).catch(function () {});
             if (isLoginPage()) {
                 redirectToChat();
             }
+            afterShellRender(function () {
+                if (runtimeState.postRenderTasksScheduled) return;
+                runtimeState.postRenderTasksScheduled = true;
+                connectRealtime(auth);
+                validateSessionInBackground(auth).catch(function () {});
+                if (navigator.onLine && window.KynectaSync && typeof window.KynectaSync.syncAll === 'function') {
+                    window.KynectaSync.syncAll().catch(function () {});
+                }
+            });
             return;
         }
 
         if (isApplicationPage()) {
-            redirectToLogin('missing-session');
+            emit(SESSION_EVENTS.expired, { reason: 'missing-session', deferred: true });
+            if (!hasOfflineBootData()) {
+                afterShellRender(function () {
+                    schedulePostRenderLogout('missing-session');
+                });
+            }
         }
     }
 

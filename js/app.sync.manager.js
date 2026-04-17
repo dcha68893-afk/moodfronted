@@ -535,6 +535,10 @@
             });
 
             if (window.KynectaEventBus) {
+                window.KynectaEventBus.on('KYNECTA_BOOT_SYNC_READY', () => {
+                    if (navigator.onLine) this.syncAll();
+                });
+
                 window.KynectaEventBus.on('SESSION_RESTORED', async () => {
                     if (SYNC_CONFIG.syncOnLogin) {
                         await this.syncAll();

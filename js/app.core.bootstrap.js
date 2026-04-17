@@ -6429,16 +6429,12 @@ window.initializeEnhancedApp = function () {
         }
         
         if (!isLoggedIn && !isPublicPage && !hasValidStorage) {
-            console.log("[BOOT] 🔐 Authentication required, redirecting to login before initializing app");
-            APP_BOOTSTRAP.redirectToAuth("Authentication required");
-            return Promise.reject(new Error("Authentication required"));
+            console.log("[BOOT] No cached auth found - continuing with shell-first boot");
         }
         
         // If we're on chat.html but not logged in, redirect to login
         if (window.location.pathname.includes('chat.html') && !isLoggedIn && !hasValidStorage) {
-            console.log("[BOOT] On chat.html but not authenticated, redirecting to login");
-            window.location.href = 'index.html';
-            return Promise.reject(new Error("Not authenticated"));
+            console.log("[BOOT] On chat.html without cached auth - rendering shell and deferring auth resolution");
         }
         
         ensureBackwardCompatibility();

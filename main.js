@@ -58,23 +58,24 @@ class PWAManager {
       const userData = localStorage.getItem('user') || localStorage.getItem('user_data');
       
       if (token && userData) {
-        // Verify token with backend
-        const isValid = await this.validateToken(token);
-        
-        if (isValid) {
-          this.authState = {
-            isAuthenticated: true,
-            user: JSON.parse(userData),
-            token: token
-          };
-          this.updateUIForAuthState();
-          console.log('kynecta: User authenticated from stored token');
-          
-          // CRITICAL FIX: Initialize status-related functions after auth
-          this.initializeStatusFunctions();
-        } else {
-          this.clearAuthData();
-        }
+        // Offline-first: restore UI session immediately, validate in background.
+        this.authState = {
+          isAuthenticated: true,
+          user: JSON.parse(userData),
+          token: token
+        };
+        this.updateUIForAuthState();
+        console.log('kynecta: User authenticated from local cache');
+
+        // Initialize local-first status flows immediately.
+        this.initializeStatusFunctions();
+
+        // Background verification should never block startup.
+        this.validateToken(token).then((isValid) => {
+          if (!isValid) {
+            setTimeout(() => this.clearAuthData(), 0);
+          }
+        }).catch(() => {});
       } else {
         this.clearAuthData();
       }

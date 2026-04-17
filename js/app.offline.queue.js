@@ -318,45 +318,43 @@
         }
 
         async _persistToIndexedDB() {
-            if (!this._db) { await this._openIndexedDB(); }
-            if (!this._db) return;
-            try {
-                const tx    = this._db.transaction(['queue'], 'readwrite');
-                const store = tx.objectStore('queue');
-                store.clear();
-                for (const item of this._queue) store.add(item);
-            } catch { this._persistToLocalStorage(); }
+            if (window.AppCache && typeof window.AppCache.initDB === 'function') {
+                await window.AppCache.initDB();
+                const existing = await window.AppCache.getAll('syncQueue');
+                await Promise.all(existing.map((item) => window.AppCache.remove('syncQueue', item.id)));
+                await window.AppCache.save('syncQueue', this._queue.map((item) => ({
+                    ...item,
+                    id: item.id,
+                    queueId: item.id,
+                    type: item.type || 'unknown',
+                    action: item.action || 'unknown',
+                    status: item.status || 'pending',
+                    userId: item.data?.userId || item.userId || null
+                })));
+                return;
+            }
+            this._persistToLocalStorage();
         }
 
         async _loadFromIndexedDB() {
-            if (!this._db) { await this._openIndexedDB(); }
-            if (!this._db) { this._loadFromLocalStorage(); return; }
-            try {
-                const tx    = this._db.transaction(['queue'], 'readonly');
-                const store = tx.objectStore('queue');
-                const req   = store.getAll();
-                return new Promise((resolve) => {
-                    req.onsuccess = () => {
-                        const now = Date.now();
-                        this._queue = req.result.filter(item => now - item.timestamp < QUEUE_CONFIG.maxAge);
-                        this._stats.currentSize = this._queue.length;
-                        resolve();
-                    };
-                    req.onerror = () => { this._loadFromLocalStorage(); resolve(); };
-                });
-            } catch { this._loadFromLocalStorage(); }
+            if (window.AppCache && typeof window.AppCache.initDB === 'function') {
+                await window.AppCache.initDB();
+                const all = await window.AppCache.getAll('syncQueue');
+                const now = Date.now();
+                this._queue = all.filter(item => now - item.timestamp < QUEUE_CONFIG.maxAge);
+                this._stats.currentSize = this._queue.length;
+                return;
+            }
+            this._loadFromLocalStorage();
         }
 
         async _openIndexedDB() {
-            return new Promise((resolve) => {
-                const request = indexedDB.open('KynectaOfflineQueue', 1);
-                request.onupgradeneeded = (e) => {
-                    const db = e.target.result;
-                    if (!db.objectStoreNames.contains('queue')) db.createObjectStore('queue', { keyPath: 'id' });
-                };
-                request.onsuccess = (e) => { this._db = e.target.result; resolve(); };
-                request.onerror   = () => { this._useIndexedDB = false; resolve(); };
-            });
+            if (window.AppCache && typeof window.AppCache.initDB === 'function') {
+                await window.AppCache.initDB();
+                this._db = window.AppCache;
+                return;
+            }
+            this._useIndexedDB = false;
         }
 
         _checkIndexedDBSupport() { return !!window.indexedDB; }

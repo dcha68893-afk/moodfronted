@@ -26,7 +26,9 @@
         SESSION: 'session',
         SYNC: 'sync',
         UI: 'ui',
-        SYSTEM: 'system'
+        SYSTEM: 'system',
+        SETTINGS: 'settings',
+        SOCKET: 'socket'
     };
 
     // Event definitions with metadata
@@ -101,6 +103,12 @@
         UI_MODAL_OPENED: { category: EVENT_CATEGORIES.UI, priority: PRIORITY.LOW, persist: false },
         UI_MODAL_CLOSED: { category: EVENT_CATEGORIES.UI, priority: PRIORITY.LOW, persist: false },
         UI_NOTIFICATION: { category: EVENT_CATEGORIES.UI, priority: PRIORITY.NORMAL, persist: false },
+        UI_SHELL_RENDERED: { category: EVENT_CATEGORIES.UI, priority: PRIORITY.HIGH, persist: true },
+        SETTINGS_UPDATED: { category: EVENT_CATEGORIES.SETTINGS, priority: PRIORITY.NORMAL, persist: true },
+        SETTING_CHANGED: { category: EVENT_CATEGORIES.SETTINGS, priority: PRIORITY.NORMAL, persist: true },
+        SOCKET_CONNECTED: { category: EVENT_CATEGORIES.SOCKET, priority: PRIORITY.HIGH, persist: false },
+        SOCKET_DISCONNECTED: { category: EVENT_CATEGORIES.SOCKET, priority: PRIORITY.HIGH, persist: false },
+        SOCKET_EVENT: { category: EVENT_CATEGORIES.SOCKET, priority: PRIORITY.NORMAL, persist: false },
 
         // System events
         SYSTEM_NETWORK_ONLINE: { category: EVENT_CATEGORIES.SYSTEM, priority: PRIORITY.HIGH, persist: false },
@@ -139,6 +147,8 @@
             
             // Expose globally
             window.KynectaEventBus = this;
+            window.appEvents = this;
+            window.EventBus = this;
             
             console.log('[EventBus] ✅ Initialized');
         }
@@ -373,6 +383,43 @@
             ));
         }
 
+        off(_eventType, unsubscribe) {
+            if (typeof unsubscribe === 'function') {
+                unsubscribe();
+                return true;
+            }
+            return false;
+        }
+
+        bridgeWindowEvent(windowEventName, busEventName, mapDetail = null) {
+            const handler = (event) => {
+                const payload = typeof mapDetail === 'function'
+                    ? mapDetail(event)
+                    : (event && Object.prototype.hasOwnProperty.call(event, 'detail') ? event.detail : event);
+                this.emit(busEventName || windowEventName, payload || {}, { async: true });
+            };
+
+            window.addEventListener(windowEventName, handler);
+            return () => window.removeEventListener(windowEventName, handler);
+        }
+
+        bridgePostMessage(mapper) {
+            const handler = (event) => {
+                try {
+                    const mapped = typeof mapper === 'function'
+                        ? mapper(event)
+                        : { type: 'SOCKET_EVENT', payload: event.data || null, options: { async: true } };
+                    if (!mapped || !mapped.type) return;
+                    this.emit(mapped.type, mapped.payload, mapped.options || { async: true });
+                } catch (error) {
+                    console.error('[EventBus] bridgePostMessage error:', error);
+                }
+            };
+
+            window.addEventListener('message', handler);
+            return () => window.removeEventListener('message', handler);
+        }
+
         // ========== PRIVATE METHODS ==========
 
         _generateHandlerId() {
@@ -518,6 +565,26 @@
 
     // Expose globally
     window.KynectaEventBus = eventBus;
+    window.appEvents = eventBus;
+    window.EventBus = eventBus;
+
+    if (!window.__KYNECTA_EVENT_BRIDGES_BOUND__) {
+        window.__KYNECTA_EVENT_BRIDGES_BOUND__ = true;
+
+        eventBus.bridgeWindowEvent('online', 'SYSTEM_NETWORK_ONLINE', () => ({
+            online: true,
+            timestamp: Date.now(),
+            source: 'window'
+        }));
+        eventBus.bridgeWindowEvent('offline', 'SYSTEM_NETWORK_OFFLINE', () => ({
+            online: false,
+            timestamp: Date.now(),
+            source: 'window'
+        }));
+        eventBus.bridgeWindowEvent('sessionUpdated', 'SESSION_UPDATED');
+        eventBus.bridgeWindowEvent('moodchat-session-change', 'SESSION_UPDATED');
+        eventBus.bridgeWindowEvent('KYNECTA_UI_RENDERED', 'UI_SHELL_RENDERED');
+    }
 
     // Add to authorities if exists
     if (window.__KYNECTA_AUTHORITIES__) {

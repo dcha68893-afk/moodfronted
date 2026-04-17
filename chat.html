@@ -113,15 +113,20 @@
         .profile-trigger {
             display: flex;
             align-items: center;
-            gap: 12px;
+            justify-content: center;
             cursor: pointer;
-            padding: 6px 12px;
-            border-radius: 40px;
+            padding: 3px;
+            border-radius: 50%;
             background: rgba(255,255,255,0.72);
-            border: 1px solid rgba(148, 163, 184, 0.25);
+            border: 2px solid rgba(124, 58, 237, 0.35);
             transition: all 0.2s;
+            flex-shrink: 0;
         }
-        .profile-trigger:hover { background: rgba(255,255,255,0.92); }
+        .profile-trigger:hover {
+            background: rgba(255,255,255,0.95);
+            border-color: rgba(124, 58, 237, 0.65);
+            box-shadow: 0 0 0 3px rgba(124, 58, 237, 0.12);
+        }
         
         /* Header module icons/actions (single source of truth in parent) */
         .header-actions {
@@ -247,6 +252,26 @@
             font-weight: 500;
             margin-top: 12px;
             cursor: pointer;
+        }
+        .profile-action-row {
+            margin-top: 12px;
+            display: flex;
+            justify-content: center;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+        .settings-link-btn {
+            background: #1f2937;
+            color: white;
+            border: none;
+            padding: 8px 20px;
+            border-radius: 40px;
+            font-weight: 500;
+            cursor: pointer;
+        }
+        .profile-action-row .edit-profile-btn,
+        .profile-action-row .settings-link-btn {
+            margin-top: 0;
         }
         .close-modal {
             position: absolute;
@@ -435,31 +460,251 @@
         }
 
         /* ============================================================
-           MODERN BOTTOM NAVIGATION BAR - WhatsApp + Super App Style
+           CENTER ACTION POPUP MENU
            ============================================================ */
+        #centerActionMenu {
+            position: fixed;
+            bottom: 90px;
+            left: 50%;
+            transform: translateX(-50%) translateY(12px);
+            background: linear-gradient(160deg, #1e2535, #141926);
+            border: 1px solid rgba(255,255,255,0.10);
+            border-radius: 20px;
+            padding: 10px;
+            display: flex;
+            gap: 10px;
+            z-index: 1100;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.22s ease, transform 0.25s cubic-bezier(0.34,1.56,0.64,1);
+            box-shadow: 0 16px 48px rgba(0,0,0,0.55), 0 0 0 1px rgba(255,255,255,0.05);
+        }
+        #centerActionMenu.open {
+            opacity: 1;
+            pointer-events: auto;
+            transform: translateX(-50%) translateY(0);
+        }
+        .center-menu-item {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 6px;
+            padding: 14px 20px;
+            border-radius: 14px;
+            cursor: pointer;
+            background: rgba(255,255,255,0.05);
+            border: 1px solid rgba(255,255,255,0.08);
+            color: #fff;
+            transition: background 0.18s, transform 0.15s;
+            min-width: 90px;
+        }
+        .center-menu-item:active { transform: scale(0.94); }
+        .center-menu-item:hover { background: rgba(255,255,255,0.12); }
+        .center-menu-item i {
+            font-size: 22px;
+        }
+        .center-menu-item span {
+            font-size: 11px;
+            font-weight: 600;
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+            opacity: 0.8;
+        }
+        .center-menu-calls i { color: #34d399; }
+        .center-menu-group i { color: #60a5fa; }
+        #centerMenuOverlay {
+            display: none;
+            position: fixed;
+            inset: 0;
+            z-index: 1099;
+        }
+        #centerMenuOverlay.open { display: block; }
+
+        /* ============================================================
+           PROFILE EDIT PANEL (full-screen, slides up from bottom)
+           ============================================================ */
+        #profileEditPanel {
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,0.7);
+            backdrop-filter: blur(4px);
+            z-index: 10001;
+            display: flex;
+            align-items: flex-end;
+            visibility: hidden;
+            opacity: 0;
+            transition: opacity 0.25s, visibility 0.25s;
+        }
+        #profileEditPanel.active {
+            visibility: visible;
+            opacity: 1;
+        }
+        .profile-edit-sheet {
+            width: 100%;
+            max-height: 90vh;
+            background: #fff;
+            border-radius: 28px 28px 0 0;
+            overflow-y: auto;
+            transform: translateY(40px);
+            transition: transform 0.28s cubic-bezier(0.34,1.2,0.64,1);
+        }
+        #profileEditPanel.active .profile-edit-sheet {
+            transform: translateY(0);
+        }
+        .profile-edit-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 20px 20px 12px;
+            border-bottom: 1px solid #f1f5f9;
+            position: sticky;
+            top: 0;
+            background: #fff;
+            z-index: 2;
+        }
+        .profile-edit-header h3 {
+            font-size: 17px;
+            font-weight: 700;
+            color: #0f172a;
+        }
+        .profile-edit-close {
+            width: 32px; height: 32px;
+            border-radius: 50%;
+            border: none;
+            background: #f1f5f9;
+            color: #64748b;
+            font-size: 16px;
+            cursor: pointer;
+            display: flex; align-items: center; justify-content: center;
+        }
+        .profile-edit-body {
+            padding: 20px;
+        }
+        .profile-edit-cover {
+            width: 100%; height: 130px;
+            border-radius: 16px;
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            position: relative;
+            overflow: hidden;
+            cursor: pointer;
+            margin-bottom: 16px;
+        }
+        .profile-edit-cover img {
+            width: 100%; height: 100%; object-fit: cover;
+        }
+        .profile-edit-cover-overlay {
+            position: absolute; inset: 0;
+            background: rgba(0,0,0,0.35);
+            display: flex; align-items: center; justify-content: center;
+            color: #fff; font-size: 13px; font-weight: 600; gap: 6px;
+            opacity: 0; transition: opacity 0.2s;
+        }
+        .profile-edit-cover:hover .profile-edit-cover-overlay { opacity: 1; }
+        .profile-edit-avatar-row {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            margin-bottom: 20px;
+        }
+        .profile-edit-avatar {
+            width: 72px; height: 72px;
+            border-radius: 50%;
+            border: 3px solid #7c3aed;
+            object-fit: cover;
+            cursor: pointer;
+            flex-shrink: 0;
+        }
+        .profile-edit-avatar-hint {
+            font-size: 13px; color: #64748b; line-height: 1.5;
+        }
+        .profile-edit-avatar-hint strong { color: #7c3aed; display: block; font-size: 14px; margin-bottom: 2px; }
+        .profile-edit-field {
+            margin-bottom: 16px;
+        }
+        .profile-edit-field label {
+            display: block;
+            font-size: 12px;
+            font-weight: 600;
+            color: #64748b;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            margin-bottom: 6px;
+        }
+        .profile-edit-field input,
+        .profile-edit-field textarea {
+            width: 100%;
+            padding: 12px 14px;
+            border: 1.5px solid #e2e8f0;
+            border-radius: 12px;
+            font-size: 15px;
+            color: #0f172a;
+            background: #f8fafc;
+            outline: none;
+            transition: border-color 0.18s;
+            font-family: inherit;
+            resize: none;
+        }
+        .profile-edit-field input:focus,
+        .profile-edit-field textarea:focus {
+            border-color: #7c3aed;
+            background: #fff;
+        }
+        .profile-edit-save {
+            width: 100%;
+            background: linear-gradient(135deg, #7c3aed, #6d28d9);
+            color: #fff;
+            border: none;
+            padding: 14px;
+            border-radius: 14px;
+            font-size: 15px;
+            font-weight: 700;
+            cursor: pointer;
+            margin-top: 8px;
+            transition: opacity 0.2s;
+        }
+        .profile-edit-save:active { opacity: 0.85; }
+
+        /* ============================================================
+           ============================================================ */
+
+        /* ---- Notch / pill shape cut-out behind center button ---- */
+        .mobile-nav-bar::before {
+            content: '';
+            position: absolute;
+            top: -20px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 80px;
+            height: 40px;
+            background: transparent;
+            border-radius: 0 0 40px 40px;
+            box-shadow: 0 20px 0 0 rgba(13,17,26,0.97);
+            pointer-events: none;
+        }
+
         .mobile-nav-bar {
             display: none;
             position: fixed;
             bottom: 0;
             left: 0;
             right: 0;
-            height: 72px;
-            background: rgba(13, 17, 26, 0.97);
-            backdrop-filter: blur(20px) saturate(180%);
-            -webkit-backdrop-filter: blur(20px) saturate(180%);
-            border-top: 1px solid rgba(255,255,255,0.07);
+            height: 76px;
+            background: linear-gradient(180deg, rgba(10,13,22,0.98) 0%, rgba(13,17,28,0.99) 100%);
+            backdrop-filter: blur(24px) saturate(200%);
+            -webkit-backdrop-filter: blur(24px) saturate(200%);
+            border-top: 1px solid rgba(255,255,255,0.06);
             z-index: 1000;
             justify-content: space-around;
             align-items: center;
-            padding: 0 4px;
+            padding: 0 6px;
             padding-bottom: env(safe-area-inset-bottom, 0px);
             box-shadow:
-                0 -8px 32px rgba(0,0,0,0.45),
-                0 -1px 0 rgba(255,255,255,0.04);
-            /* Slide-up / slide-down transition */
+                0 -12px 40px rgba(0,0,0,0.55),
+                0 -1px 0 rgba(255,255,255,0.05),
+                inset 0 1px 0 rgba(255,255,255,0.04);
             transform: translateY(0);
-            transition: transform 0.35s cubic-bezier(0.4, 0, 0.2, 1),
-                        opacity 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+            transition: transform 0.38s cubic-bezier(0.4, 0, 0.2, 1),
+                        opacity 0.38s cubic-bezier(0.4, 0, 0.2, 1);
             opacity: 1;
         }
 
@@ -491,49 +736,74 @@
             flex-direction: column;
             align-items: center;
             justify-content: center;
-            gap: 3px;
-            padding: 8px 4px 6px;
-            color: rgba(148, 163, 184, 0.7);
+            gap: 4px;
+            padding: 10px 4px 8px;
+            color: rgba(148, 163, 184, 0.55);
             cursor: pointer;
-            font-size: 20px;
+            font-size: 21px;
             position: relative;
             border: none;
             background: transparent;
             transition:
-                color 0.22s ease,
-                transform 0.18s ease;
-            border-radius: 14px;
+                color 0.25s ease,
+                transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
+            border-radius: 16px;
             -webkit-tap-highlight-color: transparent;
             outline: none;
+            min-height: 56px;
         }
 
         .mobile-nav-icon:active {
-            transform: scale(0.88);
+            transform: scale(0.84);
         }
 
         /* Icon label text */
         .mobile-nav-icon .nav-label {
-            font-size: 9.5px;
-            font-weight: 600;
-            letter-spacing: 0.01em;
+            font-size: 9px;
+            font-weight: 700;
+            letter-spacing: 0.04em;
             line-height: 1;
-            transition: color 0.22s ease;
+            transition: color 0.25s ease, opacity 0.25s ease;
             color: inherit;
             white-space: nowrap;
+            text-transform: uppercase;
+            opacity: 0.75;
         }
 
-        /* Active glow dot indicator above label */
+        .mobile-nav-icon.active .nav-label {
+            opacity: 1;
+        }
+
+        /* Active pill indicator above icon */
+        .mobile-nav-icon::before {
+            content: '';
+            position: absolute;
+            top: 6px;
+            left: 50%;
+            transform: translateX(-50%) scaleX(0);
+            width: 28px;
+            height: 3px;
+            border-radius: 3px;
+            background: #3b82f6;
+            transition: transform 0.28s cubic-bezier(0.34, 1.56, 0.64, 1);
+        }
+
+        .mobile-nav-icon.active::before {
+            transform: translateX(-50%) scaleX(1);
+        }
+
+        /* Active glow dot indicator */
         .mobile-nav-icon::after {
             content: '';
             position: absolute;
-            bottom: 5px;
+            bottom: 8px;
             left: 50%;
             transform: translateX(-50%) scale(0);
             width: 4px;
             height: 4px;
             border-radius: 50%;
             background: #3b82f6;
-            transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
+            transition: transform 0.22s cubic-bezier(0.34, 1.56, 0.64, 1);
         }
 
         .mobile-nav-icon.active::after {
@@ -546,49 +816,85 @@
         }
 
         .mobile-nav-icon.active i {
-            filter: drop-shadow(0 0 8px rgba(96,165,250,0.75));
+            filter: drop-shadow(0 0 10px rgba(96,165,250,0.85));
         }
 
         /* Green tint for messaging/communication tabs */
         .mobile-nav-icon[data-page="messages"].active,
-        .mobile-nav-icon[data-page="calls"].active,
         .mobile-nav-icon[data-page="status"].active {
             color: #34d399;
         }
 
         .mobile-nav-icon[data-page="messages"].active i,
-        .mobile-nav-icon[data-page="calls"].active i,
         .mobile-nav-icon[data-page="status"].active i {
-            filter: drop-shadow(0 0 9px rgba(52,211,153,0.8));
+            filter: drop-shadow(0 0 10px rgba(52,211,153,0.9));
+        }
+
+        .mobile-nav-icon[data-page="messages"].active::before,
+        .mobile-nav-icon[data-page="status"].active::before {
+            background: #34d399;
         }
 
         .mobile-nav-icon[data-page="messages"].active::after,
-        .mobile-nav-icon[data-page="calls"].active::after,
         .mobile-nav-icon[data-page="status"].active::after {
             background: #34d399;
         }
 
-        /* ---- CENTER ACTION BUTTON (floating circle) ---- */
-        .mobile-nav-icon.nav-center-action {
-            flex: 0 0 60px;
-            margin-top: -22px;
-            padding: 0;
-            width: 60px;
-            height: 60px;
-            background: linear-gradient(135deg, #22c55e 0%, #16a34a 55%, #15803d 100%);
-            border-radius: 50%;
-            box-shadow:
-                0 0 0 4px rgba(13,17,26,0.97),
-                0 4px 20px rgba(34,197,94,0.55),
-                0 8px 32px rgba(0,0,0,0.4);
-            color: #fff !important;
-            font-size: 22px;
-            border: none;
-            transition:
-                transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1),
-                box-shadow 0.2s ease;
+        /* ---- Marketplace/Tools icon gets accent color ---- */
+        .mobile-nav-icon[data-page="tools"].active {
+            color: #a78bfa;
+        }
+        .mobile-nav-icon[data-page="tools"].active i {
+            filter: drop-shadow(0 0 10px rgba(167,139,250,0.9));
+        }
+        .mobile-nav-icon[data-page="tools"].active::before {
+            background: #a78bfa;
+        }
+        .mobile-nav-icon[data-page="tools"].active::after {
+            background: #a78bfa;
         }
 
+        /* ---- CENTER ACTION BUTTON (floating circle) — Calls ---- */
+        .mobile-nav-icon.nav-center-action {
+            flex: 0 0 64px;
+            margin-top: -28px;
+            padding: 0;
+            width: 64px;
+            height: 64px;
+            background: linear-gradient(145deg, #f97316 0%, #ea580c 50%, #c2410c 100%);
+            border-radius: 50%;
+            box-shadow:
+                0 0 0 4px rgba(10,13,22,0.98),
+                0 0 0 5px rgba(249,115,22,0.25),
+                0 6px 24px rgba(249,115,22,0.65),
+                0 12px 40px rgba(0,0,0,0.5);
+            color: #fff !important;
+            font-size: 24px;
+            border: none;
+            transition:
+                transform 0.22s cubic-bezier(0.34, 1.56, 0.64, 1),
+                box-shadow 0.22s ease;
+            animation: centerBtnIdle 3s ease-in-out infinite;
+        }
+
+        @keyframes centerBtnIdle {
+            0%, 100% {
+                box-shadow:
+                    0 0 0 4px rgba(10,13,22,0.98),
+                    0 0 0 5px rgba(249,115,22,0.20),
+                    0 6px 24px rgba(249,115,22,0.55),
+                    0 12px 40px rgba(0,0,0,0.5);
+            }
+            50% {
+                box-shadow:
+                    0 0 0 4px rgba(10,13,22,0.98),
+                    0 0 0 8px rgba(249,115,22,0.12),
+                    0 6px 32px rgba(249,115,22,0.75),
+                    0 12px 40px rgba(0,0,0,0.5);
+            }
+        }
+
+        .mobile-nav-icon.nav-center-action::before,
         .mobile-nav-icon.nav-center-action::after {
             display: none !important;
         }
@@ -604,47 +910,63 @@
 
         .mobile-nav-icon.nav-center-action:hover,
         .mobile-nav-icon.nav-center-action:active {
-            transform: scale(0.93) translateY(-2px);
+            transform: scale(0.91) translateY(-2px);
+            animation: none;
             box-shadow:
-                0 0 0 4px rgba(13,17,26,0.97),
-                0 6px 28px rgba(34,197,94,0.7),
-                0 12px 40px rgba(0,0,0,0.5);
+                0 0 0 4px rgba(10,13,22,0.98),
+                0 0 0 8px rgba(249,115,22,0.15),
+                0 8px 36px rgba(249,115,22,0.8),
+                0 16px 48px rgba(0,0,0,0.55);
         }
 
         .mobile-nav-icon.nav-center-action.active {
-            background: linear-gradient(135deg, #22c55e 0%, #15803d 100%);
-            box-shadow:
-                0 0 0 4px rgba(13,17,26,0.97),
-                0 0 24px rgba(34,197,94,0.9),
-                0 4px 20px rgba(34,197,94,0.6),
-                0 8px 32px rgba(0,0,0,0.5);
-            animation: centerBtnPulse 2.2s ease-in-out infinite;
+            background: linear-gradient(145deg, #f97316 0%, #c2410c 100%);
+            animation: centerBtnPulse 2s ease-in-out infinite;
         }
 
         @keyframes centerBtnPulse {
-            0%, 100% { box-shadow: 0 0 0 4px rgba(13,17,26,0.97), 0 0 24px rgba(34,197,94,0.9), 0 4px 20px rgba(34,197,94,0.6), 0 8px 32px rgba(0,0,0,0.5); }
-            50%       { box-shadow: 0 0 0 4px rgba(13,17,26,0.97), 0 0 40px rgba(34,197,94,1.0), 0 4px 28px rgba(34,197,94,0.8), 0 8px 32px rgba(0,0,0,0.5); }
+            0%, 100% {
+                box-shadow:
+                    0 0 0 4px rgba(10,13,22,0.98),
+                    0 0 0 6px rgba(249,115,22,0.22),
+                    0 6px 28px rgba(249,115,22,0.75),
+                    0 12px 40px rgba(0,0,0,0.5);
+            }
+            50% {
+                box-shadow:
+                    0 0 0 4px rgba(10,13,22,0.98),
+                    0 0 0 10px rgba(249,115,22,0.12),
+                    0 6px 40px rgba(249,115,22,1.0),
+                    0 12px 40px rgba(0,0,0,0.5);
+            }
         }
 
         /* Notification badge on nav icons */
         .mobile-nav-icon .nav-badge {
             position: absolute;
-            top: 6px;
-            right: calc(50% - 16px);
-            min-width: 17px;
-            height: 17px;
+            top: 7px;
+            right: calc(50% - 18px);
+            min-width: 18px;
+            height: 18px;
             padding: 0 4px;
-            background: #ef4444;
+            background: linear-gradient(135deg, #f87171, #ef4444);
             color: #fff;
             font-size: 9px;
-            font-weight: 700;
-            border-radius: 9px;
+            font-weight: 800;
+            border-radius: 10px;
             display: flex;
             align-items: center;
             justify-content: center;
-            border: 2px solid rgba(13,17,26,0.97);
+            border: 2px solid rgba(10,13,22,0.98);
             line-height: 1;
             pointer-events: none;
+            box-shadow: 0 2px 8px rgba(239,68,68,0.5);
+            animation: badgePop 0.3s cubic-bezier(0.34,1.56,0.64,1) forwards;
+        }
+
+        @keyframes badgePop {
+            0% { transform: scale(0); }
+            100% { transform: scale(1); }
         }
 
         /* ---- Mobile back button ---- */
@@ -685,8 +1007,8 @@
             .iframe-container {
                 left: 0;
                 top: 56px;
-                /* Leave room for the 72px bottom nav + safe area */
-                bottom: 72px;
+                /* Leave room for the 76px bottom nav + safe area */
+                bottom: 76px;
             }
             body.chat-panel-active .iframe-container,
             body.call-screen-active .iframe-container {
@@ -789,12 +1111,13 @@
             </div>
         </div>
         <div id="headerActions" class="header-actions hidden" aria-label="Module actions"></div>
-        <div id="profileTrigger" class="profile-trigger">
+        <div id="profileTrigger" class="profile-trigger" title="Profile & Settings" aria-label="Profile">
             <img id="headerAvatar" class="profile-avatar-sm" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%237c3aed'%3E%3Cpath d='M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z'/%3E%3C/svg%3E" alt="avatar">
-            <span id="headerUserName" class="profile-name-sm">User</span>
-            <i class="fas fa-chevron-down" style="font-size: 12px; color: #9ca3af;"></i>
         </div>
     </div>
+
+    <!-- Hidden username element for JS compatibility -->
+    <span id="headerUserName" style="display:none;">User</span>
 
     <!-- Profile Modal -->
     <div id="profileModal" class="profile-modal">
@@ -807,7 +1130,10 @@
             <div class="profile-info">
                 <div class="profile-username" id="modalUsername">User</div>
                 <div class="profile-bio" id="modalBio">Hey there! I'm using Kynecta.</div>
-                <button id="editProfileBtn" class="edit-profile-btn"><i class="fas fa-pen"></i> Edit Profile</button>
+                <div class="profile-action-row">
+                    <button id="editProfileBtn" class="edit-profile-btn"><i class="fas fa-pen"></i> Edit Profile</button>
+                    <button id="openSettingsBtn" class="settings-link-btn"><i class="fas fa-cog"></i> Settings</button>
+                </div>
             </div>
         </div>
     </div>
@@ -836,37 +1162,87 @@
     </div>
 
     <!-- Modern Bottom Navigation Bar (5-icon, mobile) -->
-    <div id="mobileNavBar" class="mobile-nav-bar">
-        <!-- 1. Home / Messages -->
-        <button class="mobile-nav-icon active" data-page="messages" aria-label="Messages">
+    <div id="mobileNavBar" class="mobile-nav-bar" role="navigation" aria-label="Main navigation">
+        <!-- 1. Chat / Messages -->
+        <button class="mobile-nav-icon active" data-page="messages" aria-label="Chat">
             <i class="fas fa-comment-dots"></i>
-            <span class="nav-label">Chats</span>
+            <span class="nav-label">Chat</span>
         </button>
 
-        <!-- 2. Search / Discover -->
-        <button class="mobile-nav-icon" data-page="friends" aria-label="Friends">
-            <i class="fas fa-search"></i>
+        <!-- 2. Explore / Discover -->
+        <button class="mobile-nav-icon" data-page="friends" aria-label="Explore">
+            <i class="fas fa-compass"></i>
             <span class="nav-label">Explore</span>
         </button>
 
-        <!-- 3. CENTER — Main Action (floating) -->
-        <button class="mobile-nav-icon nav-center-action" data-page="group" aria-label="Groups">
+        <!-- 3. CENTER — Quick Action (+) with popup menu -->
+        <button class="mobile-nav-icon nav-center-action" id="centerActionBtn" aria-label="New Action" onclick="toggleCenterMenu(event)">
             <i class="fas fa-plus"></i>
         </button>
 
-        <!-- 4. Notifications / Status -->
-        <button class="mobile-nav-icon" data-page="status" aria-label="Status">
+        <!-- 4. Updates / Status -->
+        <button class="mobile-nav-icon" data-page="status" aria-label="Updates">
             <i class="fas fa-bell"></i>
-            <span class="nav-label">Status</span>
+            <span class="nav-label">Updates</span>
         </button>
 
-        <!-- 5. Profile / Settings -->
-        <button class="mobile-nav-icon" data-page="settings" aria-label="Profile">
-            <i class="fas fa-user-circle"></i>
-            <span class="nav-label">Profile</span>
+        <!-- 5. Marketplace / Tools -->
+        <button class="mobile-nav-icon" data-page="tools" aria-label="Marketplace">
+            <i class="fas fa-store"></i>
+            <span class="nav-label">Market</span>
         </button>
     </div>
     
+    <!-- Center Action Popup Menu -->
+    <div id="centerMenuOverlay" onclick="closeCenterMenu()"></div>
+    <div id="centerActionMenu">
+        <div class="center-menu-item center-menu-calls" onclick="closeCenterMenu(); navigateToPage('calls');">
+            <i class="fas fa-phone-alt"></i>
+            <span>Calls</span>
+        </div>
+        <div class="center-menu-item center-menu-group" onclick="closeCenterMenu(); navigateToPage('group');">
+            <i class="fas fa-users"></i>
+            <span>Groups</span>
+        </div>
+    </div>
+
+    <!-- Profile Edit Panel (full-screen sheet) -->
+    <div id="profileEditPanel">
+        <div class="profile-edit-sheet">
+            <div class="profile-edit-header">
+                <h3>Edit Profile</h3>
+                <button class="profile-edit-close" id="profileEditCloseBtn"><i class="fas fa-times"></i></button>
+            </div>
+            <div class="profile-edit-body">
+                <!-- Cover photo -->
+                <div class="profile-edit-cover" id="editCoverArea">
+                    <img id="editCoverImg" src="data:image/svg+xml;charset=UTF-8,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 600 200%22%3E%3Cdefs%3E%3ClinearGradient id=%22g%22 x1=%220%22 x2=%221%22 y1=%220%22 y2=%221%22%3E%3Cstop stop-color=%22%23667eea%22/%3E%3Cstop offset=%221%22 stop-color=%22%23764ba2%22/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width=%22600%22 height=%22200%22 fill=%22url(%23g)%22/%3E%3C/svg%3E" alt="cover">
+                    <div class="profile-edit-cover-overlay"><i class="fas fa-camera"></i> Change Cover</div>
+                </div>
+                <!-- Avatar row -->
+                <div class="profile-edit-avatar-row">
+                    <img id="editAvatarImg" class="profile-edit-avatar" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%237c3aed'%3E%3Cpath d='M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z'/%3E%3C/svg%3E" alt="avatar">
+                    <div class="profile-edit-avatar-hint">
+                        <strong>Profile Photo</strong>
+                        Tap your photo to update it
+                    </div>
+                </div>
+                <!-- Fields -->
+                <div class="profile-edit-field">
+                    <label>Display Name</label>
+                    <input type="text" id="editDisplayName" placeholder="Your name">
+                </div>
+                <div class="profile-edit-field">
+                    <label>Bio</label>
+                    <textarea id="editBio" rows="3" placeholder="Tell people about yourself..."></textarea>
+                </div>
+                <button class="profile-edit-save" id="profileEditSaveBtn">
+                    <i class="fas fa-check"></i> Save Changes
+                </button>
+            </div>
+        </div>
+    </div>
+
     <!-- Mobile Back Button (visible only when chat panel OR call screen is active) -->
     <button id="mobileBackBtn" class="mobile-back-btn">
         <i class="fas fa-arrow-left"></i>
@@ -1154,32 +1530,117 @@
             const trigger = document.getElementById('profileTrigger');
             const closeBtn = document.getElementById('closeModalBtn');
             const editBtn = document.getElementById('editProfileBtn');
+            const settingsBtn = document.getElementById('openSettingsBtn');
             
             trigger.onclick = () => modal.classList.add('active');
             closeBtn.onclick = () => modal.classList.remove('active');
             modal.onclick = (e) => { if (e.target === modal) modal.classList.remove('active'); };
             
+            // Edit Profile opens the full edit panel
             editBtn.onclick = () => {
-                const newBio = prompt('Edit your bio:', currentUserProfile.bio);
-                if (newBio !== null) saveProfileUpdates(null, null, newBio);
-                const avatarInput = document.createElement('input');
-                avatarInput.type = 'file';
-                avatarInput.accept = 'image/*';
-                avatarInput.onchange = async (e) => {
-                    if (e.target.files[0]) await saveProfileUpdates(e.target.files[0], null, null);
-                };
-                avatarInput.click();
+                modal.classList.remove('active');
+                openProfileEditPanel();
+                if (typeof logProcessStatus === 'function') {
+                    logProcessStatus('profile-action', true, 'open-edit-profile');
+                }
             };
-            
-            document.getElementById('coverClickArea').onclick = () => {
-                const coverInput = document.createElement('input');
-                coverInput.type = 'file';
-                coverInput.accept = 'image/*';
-                coverInput.onchange = async (e) => {
-                    if (e.target.files[0]) await saveProfileUpdates(null, e.target.files[0], null);
+
+            if (settingsBtn) {
+                settingsBtn.onclick = () => {
+                    modal.classList.remove('active');
+                    navigateToPage('settings');
+                    if (typeof logProcessStatus === 'function') {
+                        logProcessStatus('profile-action', true, 'open-settings');
+                    }
                 };
-                coverInput.click();
+            }
+        }
+
+        // ======================================================================
+        // CENTER ACTION POPUP MENU
+        // ======================================================================
+        function toggleCenterMenu(e) {
+            e.stopPropagation();
+            const menu = document.getElementById('centerActionMenu');
+            const overlay = document.getElementById('centerMenuOverlay');
+            const isOpen = menu.classList.contains('open');
+            if (isOpen) {
+                menu.classList.remove('open');
+                overlay.classList.remove('open');
+            } else {
+                menu.classList.add('open');
+                overlay.classList.add('open');
+            }
+        }
+        function closeCenterMenu() {
+            document.getElementById('centerActionMenu').classList.remove('open');
+            document.getElementById('centerMenuOverlay').classList.remove('open');
+        }
+
+        // ======================================================================
+        // PROFILE EDIT PANEL
+        // ======================================================================
+        function openProfileEditPanel() {
+            const panel = document.getElementById('profileEditPanel');
+            // Pre-fill fields with current data
+            document.getElementById('editDisplayName').value = currentUserProfile.username || '';
+            document.getElementById('editBio').value = currentUserProfile.bio || '';
+            const avatarUrl = normalizeAvatarUrl(currentUserProfile.avatar, currentUserProfile.username, '#2563eb');
+            document.getElementById('editAvatarImg').src = avatarUrl;
+            document.getElementById('editCoverImg').src = currentUserProfile.cover || document.getElementById('editCoverImg').src;
+            panel.classList.add('active');
+
+            // Avatar tap
+            document.getElementById('editAvatarImg').onclick = () => {
+                const input = document.createElement('input');
+                input.type = 'file'; input.accept = 'image/*';
+                input.onchange = async (e) => {
+                    if (!e.target.files[0]) return;
+                    const reader = new FileReader();
+                    reader.onload = ev => {
+                        document.getElementById('editAvatarImg').src = ev.target.result;
+                        document.getElementById('headerAvatar').src = ev.target.result;
+                        document.getElementById('modalAvatarImg').src = ev.target.result;
+                    };
+                    reader.readAsDataURL(e.target.files[0]);
+                    await saveProfileUpdates(e.target.files[0], null, null);
+                };
+                input.click();
             };
+
+            // Cover tap
+            document.getElementById('editCoverArea').onclick = () => {
+                const input = document.createElement('input');
+                input.type = 'file'; input.accept = 'image/*';
+                input.onchange = async (e) => {
+                    if (!e.target.files[0]) return;
+                    const reader = new FileReader();
+                    reader.onload = ev => {
+                        document.getElementById('editCoverImg').src = ev.target.result;
+                        document.getElementById('modalCoverImg').src = ev.target.result;
+                    };
+                    reader.readAsDataURL(e.target.files[0]);
+                    await saveProfileUpdates(null, e.target.files[0], null);
+                };
+                input.click();
+            };
+
+            // Save button
+            document.getElementById('profileEditSaveBtn').onclick = async () => {
+                const newBio = document.getElementById('editBio').value.trim();
+                const newName = document.getElementById('editDisplayName').value.trim();
+                if (newBio) await saveProfileUpdates(null, null, newBio);
+                if (newName && newName !== currentUserProfile.username) {
+                    currentUserProfile.username = newName;
+                    localStorage.setItem('user_displayName', newName);
+                    updateProfileUI();
+                }
+                panel.classList.remove('active');
+            };
+
+            // Close button
+            document.getElementById('profileEditCloseBtn').onclick = () => panel.classList.remove('active');
+            panel.onclick = (e) => { if (e.target === panel) panel.classList.remove('active'); };
         }
 
         // ======================================================================
@@ -1191,7 +1652,7 @@
             const banner = document.getElementById('kyn-call-banner');
             if (banner) banner.style.display = 'none';
             pendingIncomingCall = null;
-            console.log('[Parent] Call banner dismissed');
+            logProcessStatus('call-banner', true, 'dismissed');
         }
         
         function setupGlobalCallBanner() {
@@ -1501,8 +1962,100 @@
             } catch (_error) {}
         }
 
-        function navigateToPage(page) {
+        function logProcessStatus(processKey, isSuccess, detail) {
+            try {
+                window.__processLogCache = window.__processLogCache || new Map();
+                const status = isSuccess ? 'success' : 'failed';
+                const networkState = navigator.onLine ? 'online' : 'offline';
+                const cacheKey = `${status}:${networkState}:${detail || ''}`;
+                if (window.__processLogCache.get(processKey) === cacheKey) return;
+                window.__processLogCache.set(processKey, cacheKey);
+                const writer = isSuccess ? console.info : console.warn;
+                writer(`[${processKey}] ${status}${detail ? `: ${detail}` : ''}`);
+            } catch (_) {}
+        }
+
+        function notifyMessagesBackToList() {
+            const messagesIframe = document.getElementById('messagesIframe');
+            if (messagesIframe && messagesIframe.contentWindow) {
+                messagesIframe.contentWindow.postMessage({
+                    type: 'GO_BACK_TO_CHAT_LIST',
+                    timestamp: Date.now()
+                }, '*');
+            }
+        }
+
+        function notifyCallsCloseScreen() {
+            const callsIframe = document.getElementById('callsIframe');
+            if (callsIframe && callsIframe.contentWindow) {
+                callsIframe.contentWindow.postMessage({
+                    type: 'CLOSE_CALL_SCREEN',
+                    timestamp: Date.now()
+                }, '*');
+            }
+        }
+
+        function getReturnPage() {
+            if (window.__lastActivePage && window.__lastActivePage !== window.__currentPage) return window.__lastActivePage;
+            if (window.__currentPage && window.__currentPage !== 'messages') return 'messages';
+            return 'messages';
+        }
+
+        function handleAppBackNavigation() {
+            const profileModal = document.getElementById('profileModal');
+            if (profileModal && profileModal.classList.contains('active')) {
+                profileModal.classList.remove('active');
+                logProcessStatus('back-navigation', true, 'closed-profile-modal');
+                return true;
+            }
+
+            const profilePanel = document.getElementById('profileEditPanel');
+            if (profilePanel && profilePanel.classList.contains('active')) {
+                profilePanel.classList.remove('active');
+                logProcessStatus('back-navigation', true, 'closed-profile-editor');
+                return true;
+            }
+
+            if (document.body.classList.contains('chat-panel-active')) {
+                notifyMessagesBackToList();
+                document.body.classList.remove('chat-panel-active');
+                logProcessStatus('back-navigation', true, 'returned-chat-list');
+                return true;
+            }
+
+            if (document.body.classList.contains('call-screen-active') || window.__activeCallInProgress) {
+                notifyCallsCloseScreen();
+                document.body.classList.remove('call-screen-active');
+                window.__activeCallInProgress = false;
+                const returnPage = getReturnPage();
+                if (window.__currentPage !== returnPage) {
+                    navigateToPage(returnPage);
+                }
+                logProcessStatus('back-navigation', true, 'closed-call-screen');
+                return true;
+            }
+
+            if (window.__currentPage !== 'messages') {
+                navigateToPage(getReturnPage());
+                logProcessStatus('back-navigation', true, 'returned-previous-page');
+                return true;
+            }
+
+            logProcessStatus('back-navigation', false, 'no-previous-page');
+            return false;
+        }
+
+        function syncBrowserHistoryState(page, replaceOnly) {
+            const state = { appNav: true, page: page || window.__currentPage || 'messages', ts: Date.now() };
+            try {
+                if (replaceOnly) history.replaceState(state, '', window.location.href);
+                else history.pushState(state, '', window.location.href);
+            } catch (_) {}
+        }
+
+        function navigateToPage(page, options = {}) {
             if (!page) return;
+            const fromHistory = !!options.fromHistory;
             if (window.__currentPage !== page) {
                 window.__lastActivePage = window.__currentPage || 'messages';
                 window.__currentPage = page;
@@ -1545,6 +2098,10 @@
                     setTimeout(() => window.__pushSettingsToModule(iframe, page), 150);
                 }
             }
+
+            if (!fromHistory) {
+                syncBrowserHistoryState(page, false);
+            }
         }
 
         document.querySelectorAll('.nav-icon, .mobile-nav-icon').forEach(btn => {
@@ -1562,28 +2119,26 @@
         const mobileBackBtn = document.getElementById('mobileBackBtn');
         if (mobileBackBtn) {
             mobileBackBtn.addEventListener('click', () => {
-                // Remove both panel states
-                document.body.classList.remove('chat-panel-active', 'call-screen-active');
-                window.__activeCallInProgress = false;
-                // Notify messages iframe to go back to chat list
-                const messagesIframe = document.getElementById('messagesIframe');
-                if (messagesIframe && messagesIframe.contentWindow) {
-                    messagesIframe.contentWindow.postMessage({
-                        type: 'GO_BACK_TO_CHAT_LIST',
-                        timestamp: Date.now()
-                    }, '*');
-                }
-                // Notify calls iframe to close active call screen
-                const callsIframe = document.getElementById('callsIframe');
-                if (callsIframe && callsIframe.contentWindow) {
-                    callsIframe.contentWindow.postMessage({
-                        type: 'CLOSE_CALL_SCREEN',
-                        timestamp: Date.now()
-                    }, '*');
-                }
-                navigateToPage('messages');
+                handleAppBackNavigation();
             });
         }
+
+        syncBrowserHistoryState(window.__currentPage || 'messages', true);
+        window.addEventListener('popstate', (event) => {
+            const statePage = event && event.state && event.state.appNav ? event.state.page : null;
+            if (statePage && statePage !== window.__currentPage) {
+                navigateToPage(statePage, { fromHistory: true });
+                return;
+            }
+
+            const handled = handleAppBackNavigation();
+            if (!handled) syncBrowserHistoryState(window.__currentPage || 'messages', true);
+        });
+
+        document.addEventListener('backbutton', function(event) {
+            event.preventDefault();
+            handleAppBackNavigation();
+        }, false);
 
         let loadingDismissed = false;
         function dismissLoadingScreen(delay = 250) {
@@ -1631,11 +2186,11 @@
                     if (data.payload && data.payload.active === true) {
                         window.__activeCallInProgress = true;
                         document.body.classList.add('call-screen-active');
-                        console.log('[Parent] Call screen active - icons hidden');
+                        logProcessStatus('call-screen', true, 'active');
                     } else {
                         window.__activeCallInProgress = false;
                         document.body.classList.remove('call-screen-active');
-                        console.log('[Parent] Call screen inactive - icons restored');
+                        logProcessStatus('call-screen', true, 'inactive');
                     }
                 }
                 
@@ -1710,6 +2265,9 @@
     </script>
 
     <!-- Core Scripts -->
+    <script src="js/app.cache.js"></script>
+    <script src="js/app.cache.unified.js"></script>
+    <script src="js/app.offline.bootstrap.js"></script>
     <script src="js/app.core.eventbus.js"></script>
     <script src="js/app.core.store.js"></script>
     <script src="js/app.realtime.socket.js"></script>
@@ -1738,6 +2296,17 @@
     <!-- ====================================================================== -->
     <script>
         (function() {
+            function afterShellRender(callback) {
+                if (document.documentElement.classList.contains('kynecta-booted')) {
+                    setTimeout(callback, 0);
+                    return;
+                }
+                window.addEventListener('KYNECTA_UI_RENDERED', function onRendered() {
+                    window.removeEventListener('KYNECTA_UI_RENDERED', onRendered);
+                    setTimeout(callback, 0);
+                });
+            }
+
             function hasOfflineBootCache() {
                 try {
                     const chatCache = JSON.parse(localStorage.getItem('kynecta_chats_cache_v8') || localStorage.getItem('knecta_chats_cache_v8') || 'null');
@@ -1781,15 +2350,14 @@
                     }
                 })();
 
-                console.log('[AUTH TOKEN]', token);
-
                 if (!token || !user) {
                     if (hasOfflineBootCache()) {
                         console.warn('[chat.html] Using offline cache while session validation is pending');
                         dismissLoadingScreen(0);
                         return;
                     }
-                    window.location.replace('index.html');
+                    // Offline-first shell: do not block render. Runtime authority can redirect later.
+                    dismissLoadingScreen(0);
                     return;
                 }
 
@@ -1817,6 +2385,13 @@
                 if (!navigator.onLine) {
                     console.warn('Offline mode');
                     return;
+                }
+
+                // Non-blocking validation. UI remains rendered even if token fails.
+                if (window.AppRuntimeAuthority?.validateSessionInBackground) {
+                    afterShellRender(() => {
+                        window.AppRuntimeAuthority.validateSessionInBackground({ token, user }).catch(() => {});
+                    });
                 }
             }
             validateChatSession();
@@ -2192,6 +2767,16 @@
                 }, '*');
             }
 
+            function emitGlobalAppEvent(type, payload, options = {}) {
+                if (window.appEvents && typeof window.appEvents.emit === 'function') {
+                    window.appEvents.emit(type, payload, options);
+                    return;
+                }
+                if (window.KynectaEventBus && typeof window.KynectaEventBus.emit === 'function') {
+                    window.KynectaEventBus.emit(type, payload, options);
+                }
+            }
+
             function sendToAllModulesIfNeeded(force = false) {
                 const now = Date.now();
                 if (!force && now - lastSessionSend < SESSION_SEND_INTERVAL) return;
@@ -2343,6 +2928,14 @@
 
                 const data = event.data || {};
                 if (!data || typeof data !== 'object') return;
+                if (data.type) {
+                    emitGlobalAppEvent('MODULE_MESSAGE', {
+                        type: data.type,
+                        source: data.source || 'child-module',
+                        module: data.module || data.source || null,
+                        timestamp: Date.now()
+                    }, { async: true });
+                }
 
                 // ==================================================================
                 // CALL ENDED HANDLER - ONLY POST TO API IF SOURCE IS NOT 'ws-bridge'
@@ -2455,11 +3048,15 @@
                     if (data.payload && data.payload.active === true) {
                         window.__activeCallInProgress = true;
                         document.body.classList.add('call-screen-active');
-                        console.log('[Parent] Call screen active - icons hidden');
+                        if (typeof logProcessStatus === 'function') {
+                            logProcessStatus('call-screen', true, 'active');
+                        }
                     } else {
                         window.__activeCallInProgress = false;
                         document.body.classList.remove('call-screen-active');
-                        console.log('[Parent] Call screen inactive - icons restored');
+                        if (typeof logProcessStatus === 'function') {
+                            logProcessStatus('call-screen', true, 'inactive');
+                        }
                     }
                     return;
                 }
@@ -2693,6 +3290,11 @@
                         document.body.setAttribute('data-theme', theme);
                         try { localStorage.setItem('app_theme', theme); } catch(e) {}
                     }
+                    emitGlobalAppEvent('SETTINGS_UPDATED', {
+                        settings,
+                        source: data.source || 'settings',
+                        timestamp: Date.now()
+                    }, { async: true });
                     dispatchEventToModules({ type: 'SETTINGS_UPDATED', payload: { settings, timestamp: Date.now() }, originalSource: 'settings' });
                 }
 
@@ -2720,6 +3322,13 @@
                     }
                     if (section === 'mood' && key === 'currentMood') document.documentElement.setAttribute('data-mood', value);
                     updateCachedSettingsPath(section, key, value);
+                    emitGlobalAppEvent('SETTING_CHANGED', {
+                        section,
+                        key,
+                        value,
+                        source: data.source || 'settings',
+                        timestamp: Date.now()
+                    }, { async: true });
                     dispatchEventToModules({ type: 'SETTING_CHANGED', payload: { section, key, value, timestamp: Date.now() }, originalSource: 'settings' });
                 }
 

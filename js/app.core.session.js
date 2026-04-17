@@ -171,6 +171,29 @@
     };
   }
 
+  function decodeTokenPayload(token) {
+    try {
+      const parts = String(token || '').split('.');
+      if (parts.length !== 3) return null;
+      return JSON.parse(atob(parts[1]));
+    } catch (_error) {
+      return null;
+    }
+  }
+
+  function resolveSessionExpiry(rawExpiresAt, token) {
+    const normalized = normalizeSessionTimestamp(rawExpiresAt);
+    if (normalized) return normalized;
+
+    const tokenPayload = decodeTokenPayload(token);
+    if (tokenPayload?.exp) {
+      const expMs = Number(tokenPayload.exp) * 1000;
+      if (Number.isFinite(expMs)) return expMs;
+    }
+
+    return Date.now() + (7 * 24 * 60 * 60 * 1000);
+  }
+
   // ============================================================================
   // CENTRAL SESSION MANAGEMENT FUNCTIONS
   // ============================================================================
@@ -188,7 +211,7 @@
         token: parsed.token,
         refreshToken: parsed.refreshToken || null,
         userId: normalizeSessionUserId(parsed.userId || parsed.id || parsed.user?.id || parsed.user?.uid),
-        expiresAt: normalizeSessionTimestamp(parsed.expiresAt),
+        expiresAt: resolveSessionExpiry(parsed.expiresAt, parsed.token),
         issuedAt: normalizeSessionTimestamp(parsed.issuedAt) || Date.now()
       };
       
@@ -224,6 +247,8 @@
         token: centralSession.token,
         user: centralSession.user,
         refreshToken: centralSession.refreshToken,
+        userId: centralSession.user?.id || centralSession.user?.uid || null,
+        authenticated: true,
         expiresAt: centralSession.expiresAt,
         issuedAt: centralSession.issuedAt || Date.now(),
         lastUpdated: new Date().toISOString()
@@ -266,7 +291,7 @@
         return false;
       }
       
-      let expiryDate = normalizeSessionTimestamp(expiresAt);
+      let expiryDate = resolveSessionExpiry(expiresAt, token);
       if (!expiryDate && expiresIn) {
         expiryDate = Date.now() + (Number(expiresIn) * 1000);
       }
@@ -359,6 +384,23 @@
       expiresAt: centralSession.expiresAt,
       issuedAt: centralSession.issuedAt,
       isAuthenticated: isCentralAuthenticated(),
+      initialized: centralSession.initialized
+    };
+  }
+
+  function getCentralSession() {
+    if (!centralSession.token || !centralSession.user) {
+      return null;
+    }
+
+    return {
+      token: centralSession.token,
+      refreshToken: centralSession.refreshToken,
+      user: centralSession.user,
+      userId: centralSession.user?.id || centralSession.user?.uid || null,
+      expiresAt: centralSession.expiresAt,
+      issuedAt: centralSession.issuedAt,
+      authenticated: isCentralAuthenticated(),
       initialized: centralSession.initialized
     };
   }
@@ -4692,7 +4734,8 @@
     getToken: getCentralToken,
     getRefreshToken: getCentralRefreshToken,
     getUser: getCentralUser,
-    getSession: getSafeCentralSession,
+    getSession: getCentralSession,
+    getSafeSession: getSafeCentralSession,
     getState: getCentralSessionState,
     isAuthenticated: isCentralAuthenticated,
     
@@ -4709,6 +4752,7 @@
         centralSession.expiresAt    = stored.expiresAt    || null;
         centralSession.issuedAt     = stored.issuedAt     || Date.now();
         centralSession.isAuthenticated = true;
+        centralSession.lastUpdated = new Date().toISOString();
         console.log('[Session] ✅ Auto-login: session restored from localStorage');
       } else {
         console.log('[Session] ℹ️ No stored session found — login required');
@@ -4745,7 +4789,9 @@
         centralSession.refreshToken    = stored.refreshToken || null;
         centralSession.user            = stored.user         || null;
         centralSession.expiresAt       = stored.expiresAt    || null;
+        centralSession.issuedAt        = stored.issuedAt     || Date.now();
         centralSession.isAuthenticated = true;
+        centralSession.lastUpdated     = new Date().toISOString();
         console.log('[Session] ✅ autoLogin() succeeded');
         return true;
       }
@@ -4767,7 +4813,7 @@
           resolve({
             ready: true,
             isAuthenticated: centralSession.isAuthenticated,
-            session: getSafeCentralSession()
+            session: getCentralSession()
           });
           return;
         }
@@ -4788,7 +4834,7 @@
             resolve({
               ready: true,
               isAuthenticated: centralSession.isAuthenticated,
-              session: getSafeCentralSession()
+              session: getCentralSession()
             });
           }
         }, 50);
