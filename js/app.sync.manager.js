@@ -80,9 +80,7 @@
                 this._emitSyncEvent('SYNC_STARTED');
 
                 const userId = this._getCurrentUserId();
-                if (!userId) {
-                    return { success: false, skipped: true, reason: 'no_authenticated_user' };
-                }
+                if (!userId) throw new Error('No authenticated user');
 
                 // Delegate message sync to KynectaSyncEngine
                 const syncEngine = window.KynectaSyncEngine;
@@ -423,34 +421,18 @@
         _getCurrentUserId() {
             if (window.__PARENT_SESSION__?.userId)   return window.__PARENT_SESSION__.userId;
             if (window.AUTH_SESSION?.userId)         return window.AUTH_SESSION.userId;
-            if (window.KynectaStore) {
-                const storeUserId = window.KynectaStore.get('user.id');
-                if (storeUserId) return storeUserId;
-            }
-            try {
-                const auth = window.AppStorage?.getObject?.('kynecta_auth') || JSON.parse(localStorage.getItem('kynecta_auth') || 'null');
-                if (auth?.userId || auth?.user?.id || auth?.user?.userId) return auth.userId || auth.user?.id || auth.user?.userId;
-            } catch (_) {}
-            try {
-                const user = JSON.parse(localStorage.getItem('currentUser') || localStorage.getItem('user') || 'null');
-                if (user?.id || user?.userId) return user.id || user.userId;
-            } catch (_) {}
+            if (window.KynectaStore)                 return window.KynectaStore.get('user.id');
             return null;
         }
 
         async _makeRequest(method, endpoint, data = null) {
-            const baseUrl = (window.__getApiBase && window.__getApiBase()) ||
-                window.API_BASE_URL ||
-                (window.location.origin + '/api');
             const token = (
                 (window.Session && typeof window.Session.getToken === 'function' && window.Session.getToken()) ||
                 window.__PARENT_SESSION__?.token ||
                 window.AUTH_SESSION?.token ||
-                window.AppStorage?.get?.('authToken', null) ||
                 window.AppStorage?.get?.('token', null) ||
                 window.AppStorage?.get?.('accessToken', null) ||
                 window.AppStorage?.get?.('moodchat_token', null) ||
-                localStorage.getItem('authToken') ||
                 localStorage.getItem('token') ||
                 localStorage.getItem('accessToken') ||
                 localStorage.getItem('moodchat_token') ||
@@ -469,7 +451,7 @@
             if (typeof window.safeApiCall === 'function') {
                 return window.safeApiCall(async () => {
                     if (window.api?.request?.request) return window.api.request.request(endpoint, options);
-                    const response = await fetch(`${baseUrl}${endpoint}`, options);
+                    const response = await fetch(endpoint, options);
                     if (!response.ok) {
                         // Treat missing optional endpoints as soft-failures (prevents sync retry loops)
                         if (response.status === 404) return { success: false, data: null, notFound: true, status: 404 };
@@ -479,7 +461,7 @@
                 }, { success: false, data: null });
             }
             if (window.api?.request?.request) return window.api.request.request(endpoint, options);
-            const response = await fetch(`${baseUrl}${endpoint}`, options);
+            const response = await fetch(endpoint, options);
             if (!response.ok) {
                 if (response.status === 404) return { success: false, data: null, notFound: true, status: 404 };
                 throw new Error(`HTTP ${response.status}: ${response.statusText}`);

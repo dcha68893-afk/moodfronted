@@ -55,6 +55,9 @@
             if (window.KynectaStore) {
                 window.KynectaStore.set('friends.list', friends);
             }
+            // FIX Bug#5: Write to the canonical localStorage key that FriendCacheManager
+            // reads on startup ('knecta_friends_cache'), not just AppStorage.
+            try { localStorage.setItem('knecta_friends_cache', JSON.stringify(friends)); } catch (_) {}
             // Also write to AppStorage for cross-iframe access
             if (window.AppStorage) {
                 window.AppStorage.set('knecta_friends_cache', friends);
@@ -229,6 +232,8 @@
             if (window.KynectaStore) {
                 window.KynectaStore.set('friends.online', new Set(onlineList));
             }
+            // FIX: persist to canonical key
+            try { localStorage.setItem('friends_online', JSON.stringify(onlineList)); } catch (_) {}
             if (window.AppStorage) {
                 window.AppStorage.set('friends_online', onlineList);
             }

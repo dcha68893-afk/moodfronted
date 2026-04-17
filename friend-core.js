@@ -2547,7 +2547,11 @@ const FriendCacheManager = {
     
     _loadFromStorage() {
         try {
-            const friendsData = SafeStorage.getObject(LOCAL_STORAGE_KEYS.FRIENDS);
+            // FIX Bug#1: read both the canonical key AND the legacy raw 'friends' key
+            let friendsData = SafeStorage.getObject(LOCAL_STORAGE_KEYS.FRIENDS);
+            if (!friendsData || !Array.isArray(friendsData) || friendsData.length === 0) {
+                try { friendsData = JSON.parse(localStorage.getItem('friends') || 'null'); } catch (_) {}
+            }
             if (friendsData && Array.isArray(friendsData)) {
                 friendsData.forEach(f => {
                     if (f && f.id) this._cache.friends.set(f.id, f);
@@ -2963,7 +2967,8 @@ const OfflineFirstFriends = {
                 ls.getPendingSent(),
             ]);
 
-            // Push accepted friends into cache
+            // FIX Bug#2: Start from the CURRENT cache so we don't wipe localStorage-
+            // loaded data when this runs concurrently with FriendCacheManager.init().
             const friendMap = new Map(FriendCacheManager._cache.friends);
             friends.forEach(r => {
                 const display = {
@@ -3022,7 +3027,7 @@ const OfflineFirstFriends = {
             FriendCacheManager.syncToGlobals();
             try {
                 const localFriends = Array.from(friendMap.values());
-                localStorage.setItem('friends', JSON.stringify(localFriends));
+                SafeStorage.setObject(LOCAL_STORAGE_KEYS.FRIENDS, localFriends); // FIX: unified key
                 window.dispatchEvent(new CustomEvent('friendsUpdated', {
                     detail: {
                         friends: localFriends,
@@ -6278,9 +6283,9 @@ const SafetyGuards = {
             return { valid: false, reason: 'Connection not ready' };
         }
         
-        if (!navigator.onLine) {
-            return { valid: false, reason: 'No internet connection' };
-        }
+        // FIX Bug#3: Do NOT block when offline — offline mutations need to
+        // reach the optimistic / queue path inside each action handler.
+        // API calls made while offline will be caught there and queued.
         
         return {
             valid: true,
@@ -6531,6 +6536,20 @@ function loadCachedDataInstantly() {
             userData = currentUser;
         }
         
+        // FIX Bug#5: If FriendCacheManager is empty (e.g. on first load after
+        // offline), pull from legacy raw 'friends' key so the UI isn't blank.
+        if (FriendCacheManager._cache.friends.size === 0) {
+            try {
+                const legacyRaw = JSON.parse(
+                    localStorage.getItem(LOCAL_STORAGE_KEYS.FRIENDS) ||
+                    localStorage.getItem('friends') || 'null'
+                );
+                if (Array.isArray(legacyRaw) && legacyRaw.length > 0) {
+                    legacyRaw.forEach(f => { if (f && f.id) FriendCacheManager._cache.friends.set(f.id, f); });
+                }
+            } catch (_) {}
+        }
+        
         const cachedFriends = FriendCacheManager.getAllFriends();
         FriendCacheManager.syncToGlobals();
         
@@ -6588,6 +6607,40 @@ async function loadFriendsFromBackend() {
         return { success: false, error: 'Module not active' };
     }
     
+    // FIX Bug#4: When offline, immediately hydrate from local stores and return.
+    // Don't wait for a network error — we know it will fail.
+    if (!navigator.onLine) {
+        Logger.info('loadFriendsFromBackend', 'Offline — loading from local cache');
+        const cached = FriendCacheManager.getAllFriends();
+        if (cached.length > 0) {
+            FriendCacheManager.syncToGlobals();
+            updateFriendCounts?.();
+            window.dispatchEvent(new CustomEvent('friendsUpdated', {
+                detail: { friends: cached, count: cached.length, cached: true, offline: true }
+            }));
+            return { success: true, count: cached.length, cached: true, offline: true };
+        }
+        // Try IndexedDB via OfflineFirstFriends
+        try { await OfflineFirstFriends._hydrateFromLocalStore(); } catch (_) {}
+        // Try raw localStorage fallback
+        try {
+            const raw = JSON.parse(
+                localStorage.getItem(LOCAL_STORAGE_KEYS.FRIENDS) ||
+                localStorage.getItem('friends') || '[]'
+            );
+            if (Array.isArray(raw) && raw.length > 0) {
+                FriendCacheManager.setFriends(raw);
+                FriendCacheManager.syncToGlobals();
+                updateFriendCounts?.();
+                window.dispatchEvent(new CustomEvent('friendsUpdated', {
+                    detail: { friends: raw, count: raw.length, cached: true, offline: true }
+                }));
+                return { success: true, count: raw.length, cached: true, offline: true };
+            }
+        } catch (_) {}
+        return { success: false, offline: true };
+    }
+    
     if (!authReadyReceived || !__session.ready || !__session.token) {
         return new Promise((resolve) => {
             queueRequest(async () => {
@@ -6637,7 +6690,7 @@ async function loadFriendsFromBackend() {
 
             if (validFriends.length > 0) {
                 FriendCacheManager.setFriends(validFriends);
-                localStorage.setItem('friends', JSON.stringify(validFriends));
+                SafeStorage.setObject(LOCAL_STORAGE_KEYS.FRIENDS, validFriends); // FIX: unified key
                 console.log('[LOCAL SAVE]', 'friends');
                 console.log(`✅ loadFriendsFromBackend: Loaded ${validFriends.length} friends`);
             } else {
@@ -8504,6 +8557,11 @@ function saveFriendsToLocalStorage() {
     try {
         FriendCacheManager.persist();
         SafeStorage.setItem(LOCAL_STORAGE_KEYS.LAST_SYNC, Date.now().toString());
+        // FIX: Keep legacy 'friends' key in sync so no code ever reads stale data
+        try {
+            const allFriends = FriendCacheManager.getAllFriends();
+            if (allFriends.length > 0) localStorage.setItem('friends', JSON.stringify(allFriends));
+        } catch (_) {}
         return true;
     } catch (error) {
         Logger.error('Persistence', 'Failed to save to localStorage', error);
@@ -8521,6 +8579,15 @@ function startParallelDataLoading() {
     
     if (!authReadyReceived || !__session.ready || !__session.token) {
         Logger.debug('Data', 'Blocked data loading - auth not ready');
+        return;
+    }
+    
+    // FIX Bug#6b: If offline, skip all API loaders and just hydrate from local cache.
+    if (!navigator.onLine) {
+        Logger.info('Data', 'Offline — skipping API loaders, hydrating from local cache');
+        backgroundTasksStarted = true;
+        loadCachedDataInstantly();
+        OfflineFirstFriends._hydrateFromLocalStore().catch(() => {});
         return;
     }
     
@@ -8756,6 +8823,15 @@ async function initialize() {
         loadCachedDataInstantly();
         
         window.addEventListener('loadInitialData', () => {
+            // FIX Bug#6: Explicit offline branch — show cached data immediately
+            // and skip any API loaders (they will fail and leave the list blank).
+            if (!navigator.onLine) {
+                Logger.info('Init', 'loadInitialData fired while offline — using local cache');
+                loadCachedDataInstantly();
+                OfflineFirstFriends._hydrateFromLocalStore().catch(() => {});
+                return;
+            }
+            
             if (authReadyReceived && __session.ready) {
                 startParallelDataLoading();
                 
@@ -9102,10 +9178,37 @@ window.addEventListener('selectFriendForAction', (event) => {
 
 window.addEventListener('offline', () => {
     Logger.debug('V6', 'Network offline');
+    // FIX Bug#6: When we go offline, immediately re-hydrate the UI from
+    // local caches so the list stays visible instead of going blank.
+    try {
+        const cached = FriendCacheManager.getAllFriends();
+        if (cached.length > 0) {
+            FriendCacheManager.syncToGlobals();
+            updateFriendCounts?.();
+            window.dispatchEvent(new CustomEvent('friendsUpdated', {
+                detail: { friends: cached, count: cached.length, cached: true, offline: true }
+            }));
+        } else {
+            // Try IndexedDB hydration as deeper fallback
+            OfflineFirstFriends._hydrateFromLocalStore().catch(() => {});
+        }
+    } catch (_) {}
 });
 
 window.addEventListener('online', () => {
     Logger.debug('V6', 'Network online');
+    // FIX: When connection restores, re-run parallel data loading so friends
+    // list refreshes from the server and queued mutations get flushed.
+    try {
+        backgroundTasksStarted = false; // allow re-run
+        if (currentState === LIFECYCLE_STATES.ACTIVE && authReadyReceived && __session.ready) {
+            Logger.info('V6', 'Reconnected — resuming data loading');
+            startParallelDataLoading();
+        }
+        // Flush any queued offline mutations
+        if (window.AppOfflineQueue?.flush) window.AppOfflineQueue.flush().catch(() => {});
+        if (window.FriendQueueManager?.flush) window.FriendQueueManager.flush().catch(() => {});
+    } catch (_) {}
 });
 
 window.addEventListener('beforeunload', () => {
@@ -9737,4 +9840,3 @@ function applySettingToFriendModule(section, key, value) {
         } catch(e) {}
     });
 })();
-

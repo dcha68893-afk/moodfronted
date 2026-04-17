@@ -303,7 +303,28 @@
 
         _openDB() {
             return new Promise((resolve, reject) => {
-                const request = indexedDB.open(DB_NAME, DB_VERSION);
+                // FIX: Guard against environments where IndexedDB is unavailable
+                // (private browsing in Safari, some iframe sandboxes, etc.)
+                if (!window.indexedDB) {
+                    console.warn('[FriendsLocalStore] IndexedDB unavailable — using in-memory fallback');
+                    this._useMemoryFallback = true;
+                    this._memStore = new Map();
+                    this._ready = true;
+                    resolve(null);
+                    return;
+                }
+
+                let request;
+                try {
+                    request = indexedDB.open(DB_NAME, DB_VERSION);
+                } catch (e) {
+                    console.warn('[FriendsLocalStore] indexedDB.open threw — using in-memory fallback:', e);
+                    this._useMemoryFallback = true;
+                    this._memStore = new Map();
+                    this._ready = true;
+                    resolve(null);
+                    return;
+                }
 
                 request.onupgradeneeded = (event) => {
                     const db = event.target.result;
@@ -325,8 +346,17 @@
                 };
 
                 request.onerror = (event) => {
-                    console.error('[FriendsLocalStore] DB open error:', event.target.error);
-                    reject(event.target.error);
+                    // FIX: Resolve (not reject) with in-memory store so callers
+                    // can still read/write without crashing the whole offline flow.
+                    console.warn('[FriendsLocalStore] DB open error — using in-memory fallback:', event.target.error);
+                    this._useMemoryFallback = true;
+                    this._memStore = new Map();
+                    this._ready = true;
+                    resolve(null);
+                };
+
+                request.onblocked = () => {
+                    console.warn('[FriendsLocalStore] DB blocked — another tab may be holding the lock');
                 };
             });
         }
@@ -336,6 +366,8 @@
         }
 
         _get(id) {
+            // FIX: memory fallback
+            if (this._useMemoryFallback) return Promise.resolve(this._memStore.get(id) || null);
             return new Promise((resolve, reject) => {
                 const req = this._tx().get(id);
                 req.onsuccess = () => resolve(req.result || null);
@@ -344,6 +376,8 @@
         }
 
         _getAll() {
+            // FIX: memory fallback
+            if (this._useMemoryFallback) return Promise.resolve(Array.from(this._memStore.values()));
             return new Promise((resolve, reject) => {
                 const req = this._tx().getAll();
                 req.onsuccess = () => resolve(req.result || []);
@@ -352,6 +386,8 @@
         }
 
         _put(record) {
+            // FIX: memory fallback
+            if (this._useMemoryFallback) { this._memStore.set(record.id, record); return Promise.resolve(record); }
             return new Promise((resolve, reject) => {
                 const req = this._tx('readwrite').put(record);
                 req.onsuccess = () => resolve(record);
@@ -360,6 +396,8 @@
         }
 
         _delete(id) {
+            // FIX: memory fallback
+            if (this._useMemoryFallback) { this._memStore.delete(id); return Promise.resolve(); }
             return new Promise((resolve, reject) => {
                 const req = this._tx('readwrite').delete(id);
                 req.onsuccess = () => resolve();

@@ -1,0 +1,639 @@
+/* ================================================================
+   GLOBAL COLOR THEME SYSTEM — ALL MODULES
+   ================================================================
+   COLOR ROLES:
+   • Primary   = Communication (GREEN)  — chat bubbles, online, call buttons, group
+   • Secondary = Structure/Navigation (BLUE) — headers, active tabs, nav
+   • Accent    = Marketplace (PURPLE/ORANGE) — buy buttons, tags, marketplace
+   • Status    = Stories/Updates (gradient) — story rings, profile rings
+   • Friend    = Social/Contact (WHITE/GRAY) — friend cards, contacts UI
+   ================================================================ */
+
+:root {
+  /* ── PRIMARY: Communication — Green ── */
+  --color-primary: #22c55e;
+  --color-primary-dark: #16a34a;
+  --color-primary-light: rgba(34, 197, 94, 0.12);
+  --color-primary-mid: rgba(34, 197, 94, 0.25);
+
+  /* ── SECONDARY: Structure & Navigation — Blue ── */
+  --color-secondary: #3b82f6;
+  --color-secondary-dark: #1d4ed8;
+  --color-secondary-light: rgba(59, 130, 246, 0.12);
+  --color-secondary-mid: rgba(59, 130, 246, 0.25);
+
+  /* ── ACCENT: Marketplace — Purple & Orange ── */
+  --color-accent-purple: #8b5cf6;
+  --color-accent-purple-dark: #6d28d9;
+  --color-accent-orange: #f97316;
+  --color-accent-orange-dark: #c2410c;
+  --color-accent-light: rgba(139, 92, 246, 0.12);
+  --marketplace-gradient: linear-gradient(135deg, #8b5cf6 0%, #f97316 100%);
+  --marketplace-gradient-soft: linear-gradient(135deg, rgba(139,92,246,0.15) 0%, rgba(249,115,22,0.15) 100%);
+
+  /* ── STATUS: Stories — Yellow → Pink → Purple ── */
+  --story-ring: linear-gradient(45deg, #facc15, #ec4899, #8b5cf6);
+  --story-ring-alt: linear-gradient(135deg, #fbbf24 0%, #f472b6 50%, #a78bfa 100%);
+  --viewed-story-ring: #d1d5db;
+
+  /* ── FRIEND: Social — White/Gray ── */
+  --color-friend-bg: #f9fafb;
+  --color-friend-card: #ffffff;
+  --color-friend-border: #e5e7eb;
+  --color-friend-muted: #9ca3af;
+
+  /* ── HEADER GRADIENTS per module ── */
+  --header-chat:    linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
+  --header-calls:   linear-gradient(135deg, #22c55e 0%, #16a34a 100%);
+  --header-groups:  linear-gradient(135deg, #22c55e 0%, #059669 100%);
+  --header-friends: linear-gradient(135deg, #f9fafb 0%, #e5e7eb 100%);
+  --header-status:  linear-gradient(135deg, #facc15 0%, #ec4899 60%, #8b5cf6 100%);
+  --header-marketplace: linear-gradient(135deg, #8b5cf6 0%, #f97316 100%);
+  --header-settings: linear-gradient(135deg, #3b82f6 0%, #6366f1 100%);
+
+  /* ── CALL BUTTONS (green, per spec) ── */
+  --call-accept-bg: #22c55e;
+  --call-accept-hover: #16a34a;
+  --call-end-bg: #ef4444;
+  --call-video-bg: #22c55e;
+
+  /* ── ONLINE INDICATOR (green) ── */
+  --online-color: #22c55e;
+  --away-color: #f59e0b;
+  --offline-color: #9ca3af;
+
+  /* ── CHAT BUBBLES (green sent, gray received) ── */
+  --bubble-sent-bg: #22c55e;
+  --bubble-sent-text: #ffffff;
+  --bubble-received-bg: #f3f4f6;
+  --bubble-received-text: #111827;
+
+  /* ── ACTIVE TABS & NAV (blue) ── */
+  --tab-active-color: #3b82f6;
+  --tab-active-border: #3b82f6;
+  --nav-active-bg: rgba(59, 130, 246, 0.1);
+
+  /* ── GLOBAL SHADOWS & RADIUS ── */
+  --shadow-sm: 0 1px 4px rgba(0,0,0,0.08);
+  --shadow-md: 0 4px 12px rgba(0,0,0,0.12);
+  --shadow-lg: 0 10px 30px rgba(0,0,0,0.16);
+}
+
+/* ================================================================
+   MODULE HEADER BARS — BLUE for navigation, GREEN for communication
+   ================================================================ */
+
+/* Chat / Messages header → BLUE (navigation) */
+.sidebar-header,
+.chat-header,
+.new-chat-header,
+.new-call-header {
+  background: var(--header-chat) !important;
+}
+
+/* Calls sidebar header → GREEN (communication) */
+.sidebar-header.calls-header,
+body[data-module="calls"] .sidebar-header {
+  background: var(--header-calls) !important;
+}
+
+/* Groups sidebar header → GREEN (communication) */
+body[data-module="groups"] .sidebar-header,
+.create-group-header {
+  background: var(--header-groups) !important;
+}
+
+/* Status sidebar header → story gradient */
+body[data-module="status"] .sidebar-header,
+.create-status-header {
+  background: var(--header-status) !important;
+}
+
+/* Marketplace / Tools header → purple-orange accent */
+body[data-module="marketplace"] .sidebar-header,
+.create-listing-header,
+body[data-module="marketplace"] .sidebar-header {
+  background: var(--header-marketplace) !important;
+}
+
+/* Settings header → blue (structure) */
+.settings-header,
+body[data-module="settings"] .sidebar-header {
+  background: var(--header-settings) !important;
+}
+
+/* Friends header → white/gray (friend role) */
+body[data-module="friends"] .sidebar-header {
+  background: var(--header-friends) !important;
+  color: #374151 !important;
+}
+
+body[data-module="friends"] .sidebar-header h2 {
+  color: #374151 !important;
+}
+
+body[data-module="friends"] .add-friend-btn {
+  background-color: rgba(0, 0, 0, 0.08) !important;
+  color: #374151 !important;
+  border-color: rgba(0,0,0,0.15) !important;
+}
+
+/* ================================================================
+   ACTIVE TABS — BLUE (secondary/navigation role)
+   ================================================================ */
+
+.category-btn.active,
+.category-tab.active,
+.panel-tab.active,
+.new-call-tab.active,
+.create-group-tab.active,
+.create-listing-tab.active,
+.create-status-tab.active,
+.add-friend-tab.active,
+.admin-management-tab.active {
+  color: var(--color-secondary) !important;
+  border-bottom-color: var(--color-secondary) !important;
+}
+
+.category-btn .badge,
+.category-tab .badge {
+  background-color: var(--color-secondary) !important;
+}
+
+/* Settings active menu item → blue */
+.menu-item.active {
+  border-left-color: var(--color-secondary) !important;
+}
+
+.menu-item.active .menu-icon {
+  color: var(--color-secondary) !important;
+}
+
+.menu-item.active .menu-badge {
+  background-color: var(--color-secondary) !important;
+}
+
+/* ================================================================
+   CHAT BUBBLES — GREEN (primary/communication)
+   ================================================================ */
+
+.message-bubble.sent,
+.message.sent .message-bubble,
+.chat-message.sent {
+  background-color: var(--bubble-sent-bg) !important;
+  color: var(--bubble-sent-text) !important;
+}
+
+.message-bubble.received,
+.message.received .message-bubble,
+.chat-message.received {
+  background-color: var(--bubble-received-bg) !important;
+  color: var(--bubble-received-text) !important;
+}
+
+/* Group chat inline messages */
+.message.sent {
+  background-color: var(--bubble-sent-bg) !important;
+  color: var(--bubble-sent-text) !important;
+}
+
+/* ================================================================
+   ONLINE / OFFLINE INDICATORS — GREEN
+   ================================================================ */
+
+.friend-status.online,
+.chat-status.online,
+.status-indicator.online,
+.participant-status.active,
+.user-status .status-indicator,
+.my-status-indicator:not(.viewed) {
+  background-color: var(--online-color) !important;
+}
+
+.friend-status.away {
+  background-color: var(--away-color) !important;
+}
+
+/* ================================================================
+   CALL BUTTONS — GREEN (primary/communication)
+   ================================================================ */
+
+/* Accept / audio call / video call buttons */
+.control-btn:not(.danger),
+.incoming-call-actions .call-action-btn:not(.danger),
+.call-control-btn.primary,
+.quick-action-icon {
+  color: var(--color-primary) !important;
+}
+
+/* The green accept button */
+.control-btn.active,
+.call-accept-btn {
+  background-color: var(--call-accept-bg) !important;
+}
+
+/* ================================================================
+   GROUP INDICATORS / AVATARS — GREEN tint
+   ================================================================ */
+
+.group-action-btn.chat,
+.friend-action-btn.chat {
+  color: var(--color-primary) !important;
+}
+
+.group-action-btn.chat:hover:not(:disabled),
+.friend-action-btn.chat:hover:not(:disabled) {
+  background-color: var(--color-primary-light) !important;
+}
+
+/* Group type badge - public groups get green */
+.group-type-badge.public {
+  background-color: var(--color-primary) !important;
+}
+
+/* ================================================================
+   PRIMARY COLOR OVERRIDES → GREEN
+   (replaces all legacy --primary-color: #0084ff uses)
+   ================================================================ */
+
+/* Inputs focus ring */
+.search-input:focus,
+.text-input:focus,
+.notes-textarea:focus,
+.message-input:focus,
+.chat-input:focus,
+.setting-input:focus,
+.setting-textarea:focus,
+.textarea-input:focus,
+.private-notes-textarea:focus {
+  border-color: var(--color-primary) !important;
+}
+
+/* Toggle switches → green */
+input:checked + .toggle-slider {
+  background-color: var(--color-primary) !important;
+}
+
+/* Unread badge in messages list */
+.chat-item-unread {
+  background-color: var(--color-primary) !important;
+}
+
+/* Send button → green */
+.send-button,
+.send-reply-btn,
+.chat-input-btn.send {
+  background-color: var(--color-primary) !important;
+}
+
+.send-button:hover:not(:disabled),
+.send-reply-btn:hover {
+  background-color: var(--color-primary-dark) !important;
+}
+
+/* Loading spinners → green */
+.loading-spinner {
+  border-top-color: var(--color-primary) !important;
+  border-color: var(--color-primary-light) !important;
+  border-top-color: var(--color-primary) !important;
+}
+
+/* Jump to latest button */
+.jump-to-latest {
+  background-color: var(--color-primary) !important;
+}
+
+/* Audio progress */
+.audio-progress,
+.audio-play-btn {
+  background-color: var(--color-primary) !important;
+}
+
+/* Poll selected */
+.poll-option.selected {
+  border-color: var(--color-primary) !important;
+  background-color: var(--color-primary-light) !important;
+}
+
+.poll-bar {
+  background-color: var(--color-primary) !important;
+}
+
+/* Thread count badge */
+.thread-count {
+  background-color: var(--color-primary) !important;
+}
+
+/* Reply border */
+.reply-wrapper {
+  border-left-color: var(--color-primary) !important;
+}
+
+/* Note item border */
+.note-item {
+  border-left-color: var(--color-primary) !important;
+}
+
+/* Selected contact */
+.contact-item.selected {
+  border-color: var(--color-primary) !important;
+}
+
+/* Leaderboard rank */
+.leaderboard-rank {
+  color: var(--color-primary) !important;
+}
+
+/* Analytics card value */
+.analytics-card-value {
+  color: var(--color-primary) !important;
+}
+
+/* ================================================================
+   SECONDARY (BLUE) — Structural & Navigation elements
+   ================================================================ */
+
+/* Primary action buttons (non-call, structural actions) */
+.action-btn.primary,
+.my-listing-action-btn.primary,
+.admin-action-btn.primary,
+.friend-request-btn.accept ~ .action-btn,
+.offline-dismiss-btn,
+.camera-btn:not(.secondary):not(.danger) {
+  background-color: var(--color-secondary) !important;
+  color: #ffffff !important;
+}
+
+.action-btn.primary:hover,
+.admin-action-btn.primary:hover {
+  background-color: var(--color-secondary-dark) !important;
+}
+
+/* Settings save/primary button */
+.setting-button.primary,
+.content-actions .action-btn.primary {
+  background-color: var(--color-secondary) !important;
+  border-color: var(--color-secondary) !important;
+}
+
+.setting-button.primary:hover {
+  background-color: var(--color-secondary-dark) !important;
+}
+
+/* File icon, attachment icon */
+.file-icon,
+.file-download,
+.attachment-icon {
+  color: var(--color-secondary) !important;
+}
+
+/* Chat action buttons (phone icon, video icon in header) */
+.chat-action-btn,
+.call-action-btn,
+.friend-action-btn.call {
+  color: var(--color-secondary) !important;
+}
+
+.friend-action-btn.call:hover:not(:disabled) {
+  background-color: var(--color-secondary-light) !important;
+}
+
+/* ================================================================
+   MARKETPLACE / ACCENT — Purple & Orange
+   ================================================================ */
+
+/* Buy buttons */
+.action-btn.primary[data-action="buy"],
+.listing-price,
+.saved-item-price,
+.listing-detail-price {
+  background-color: var(--color-accent-purple) !important;
+  color: #ffffff !important;
+}
+
+.listing-price,
+.saved-item-price,
+.listing-detail-price {
+  background-color: var(--color-accent-purple) !important;
+}
+
+/* Marketplace category active tab */
+.marketplace-category-btn.active {
+  color: var(--color-accent-purple) !important;
+  border-bottom-color: var(--color-accent-purple) !important;
+}
+
+/* Spotlight section accent */
+.spotlight-header {
+  color: var(--color-accent-orange) !important;
+}
+
+/* Service tags */
+.availability-free {
+  background: linear-gradient(45deg, var(--color-primary), #10b981) !important;
+}
+
+.availability-busy {
+  background: linear-gradient(45deg, var(--color-accent-orange), #ef4444) !important;
+}
+
+/* Trust indicators in marketplace */
+.trust-responsive {
+  background-color: var(--color-secondary-light) !important;
+  color: var(--color-secondary) !important;
+  border-color: rgba(59, 130, 246, 0.2) !important;
+}
+
+/* ================================================================
+   STATUS / STORIES — Yellow → Pink → Purple gradient rings
+   ================================================================ */
+
+/* Story ring on all avatars */
+.my-status-avatar-ring:not(.viewed),
+.status-ring:not(.viewed) {
+  background: var(--story-ring) !important;
+}
+
+.my-status-avatar-ring.viewed,
+.status-ring.viewed {
+  background: var(--viewed-story-ring) !important;
+}
+
+/* Status tags */
+.status-tag.mood {
+  background-color: rgba(250, 204, 21, 0.12) !important;
+  color: #ca8a04 !important;
+}
+
+.status-tag.intent {
+  background-color: rgba(139, 92, 246, 0.12) !important;
+  color: var(--color-accent-purple) !important;
+}
+
+/* Create status header */
+.create-status-header {
+  background: var(--story-ring-alt) !important;
+}
+
+/* ================================================================
+   FRIEND MODULE — White/Gray palette
+   ================================================================ */
+
+/* Friend list background */
+body[data-module="friends"] .friend-item {
+  background-color: var(--color-friend-card) !important;
+  border-color: var(--color-friend-border);
+}
+
+body[data-module="friends"] .friend-item:hover {
+  background-color: #f3f4f6 !important;
+}
+
+/* Mutual friends count badge */
+.mutual-friends,
+.mutual-friends-count {
+  background-color: #f3f4f6 !important;
+  color: #374151 !important;
+}
+
+.mutual-friends:hover,
+.mutual-friends-count:hover {
+  background-color: #e5e7eb !important;
+}
+
+/* Friend category badges keep their original colors */
+.friend-category-badge.acquaintance { background-color: #8e8e93 !important; }
+.friend-category-badge.friend       { background-color: var(--color-primary) !important; }
+.friend-category-badge.close-friend { background-color: var(--color-secondary) !important; }
+.friend-category-badge.family       { background-color: #f43f5e !important; }
+.friend-category-badge.business     { background-color: var(--color-accent-orange) !important; }
+
+/* Friend action buttons */
+.friend-action-btn {
+  color: var(--color-secondary) !important;
+}
+
+.friend-action-btn.success,
+.friend-action-btn.chat {
+  color: var(--color-primary) !important;
+}
+
+/* ================================================================
+   DARK MODE OVERRIDES
+   ================================================================ */
+
+[data-theme="dark"] {
+  --bubble-sent-bg: #16a34a;
+  --bubble-received-bg: #374151;
+  --bubble-received-text: #f9fafb;
+  --color-friend-bg: #1f2937;
+  --color-friend-card: #111827;
+  --color-friend-border: #374151;
+}
+
+[data-theme="dark"] .message-bubble.sent,
+[data-theme="dark"] .message.sent .message-bubble {
+  background-color: #16a34a !important;
+}
+
+[data-theme="dark"] .message-bubble.received,
+[data-theme="dark"] .message.received .message-bubble {
+  background-color: #374151 !important;
+  color: #f9fafb !important;
+}
+
+/* ================================================================
+   MOBILE VIEW — ensure consistent colors on small screens
+   ================================================================ */
+
+@media (max-width: 768px) {
+  /* Mobile header keeps module-specific gradient */
+  .sidebar-header {
+    /* inherits gradient from above */
+    flex-shrink: 0;
+  }
+
+  /* Active tab indicator stays blue on mobile */
+  .category-btn.active,
+  .category-tab.active {
+    color: var(--color-secondary) !important;
+    border-bottom-color: var(--color-secondary) !important;
+  }
+
+  /* Chat bubbles stay green on mobile */
+  .message-bubble.sent,
+  .message.sent .message-bubble {
+    background-color: var(--bubble-sent-bg) !important;
+    color: var(--bubble-sent-text) !important;
+  }
+
+  /* Story rings stay gradient on mobile */
+  .my-status-avatar-ring:not(.viewed),
+  .status-ring:not(.viewed) {
+    background: var(--story-ring) !important;
+  }
+
+  /* Online dots stay green */
+  .friend-status.online,
+  .chat-status.online {
+    background-color: var(--online-color) !important;
+  }
+
+  /* Call buttons stay green */
+  .quick-action-icon {
+    color: var(--color-primary) !important;
+  }
+}
+
+@media (max-width: 480px) {
+  /* Even on very small screens, color roles are preserved */
+  .send-button {
+    background-color: var(--color-primary) !important;
+  }
+}
+
+/* ================================================================
+   OVERRIDES FOR LEGACY --primary-color VARIABLE REFERENCES
+   These ensure any inline or JS-set styles using old blue primary
+   are overridden for communication elements
+   ================================================================ */
+
+/* Legacy variable bridge — module will still reference --primary-color
+   but for communication elements we inject our green */
+.message-bubble.sent { background-color: var(--bubble-sent-bg) !important; }
+.chat-input-btn.send  { background-color: var(--color-primary) !important; }
+.quick-action-icon    { color: var(--color-primary) !important; }
+.friend-status.online { background-color: var(--online-color) !important; }
+.chat-status.online   { background-color: var(--online-color) !important; }
+
+/* Group member count badge → green */
+.member-count {
+  color: var(--color-primary) !important;
+  background-color: var(--color-primary-light) !important;
+}
+
+/* Reaction active state */
+.reaction.active {
+  background-color: var(--color-primary) !important;
+}
+
+/* Format btn active */
+.format-btn.active {
+  background-color: var(--color-secondary) !important;
+}
+
+/* Status action buttons */
+.status-action-btn {
+  color: var(--color-primary) !important;
+}
+
+/* Group action buttons */
+.group-action-btn {
+  color: var(--color-primary) !important;
+}
+
+/* Input focus consistent */
+input:focus + .toggle-slider,
+.search-input:focus {
+  border-color: var(--color-primary) !important;
+}

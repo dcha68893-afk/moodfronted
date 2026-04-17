@@ -434,28 +434,220 @@
             display: block;
         }
 
-        /* Mobile Navigation & Icon Visibility Logic */
+        /* ============================================================
+           MODERN BOTTOM NAVIGATION BAR - WhatsApp + Super App Style
+           ============================================================ */
         .mobile-nav-bar {
             display: none;
             position: fixed;
             bottom: 0;
             left: 0;
             right: 0;
-            height: 60px;
-            background: linear-gradient(135deg, #667eea, #764ba2);
+            height: 72px;
+            background: rgba(13, 17, 26, 0.97);
+            backdrop-filter: blur(20px) saturate(180%);
+            -webkit-backdrop-filter: blur(20px) saturate(180%);
+            border-top: 1px solid rgba(255,255,255,0.07);
             z-index: 1000;
             justify-content: space-around;
             align-items: center;
-            transition: transform 0.3s ease;
+            padding: 0 4px;
+            padding-bottom: env(safe-area-inset-bottom, 0px);
+            box-shadow:
+                0 -8px 32px rgba(0,0,0,0.45),
+                0 -1px 0 rgba(255,255,255,0.04);
+            /* Slide-up / slide-down transition */
+            transform: translateY(0);
+            transition: transform 0.35s cubic-bezier(0.4, 0, 0.2, 1),
+                        opacity 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+            opacity: 1;
         }
 
-        /* CRITICAL FIX: Hide mobile nav bar ONLY when in chat panel OR when call screen is active */
+        /* Hide with smooth slide animation on chat/call screens */
         body.chat-panel-active .mobile-nav-bar,
         body.call-screen-active .mobile-nav-bar {
+            transform: translateY(100%) !important;
+            opacity: 0 !important;
+            pointer-events: none !important;
+        }
+
+        /* Ensure flex display persists on mobile */
+        @media (max-width: 768px) {
+            .mobile-nav-bar {
+                display: flex !important;
+            }
+            body.chat-panel-active .mobile-nav-bar,
+            body.call-screen-active .mobile-nav-bar {
+                display: flex !important;
+                transform: translateY(100%) !important;
+                opacity: 0 !important;
+            }
+        }
+
+        /* ---- Nav item wrapper ---- */
+        .mobile-nav-icon {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 3px;
+            padding: 8px 4px 6px;
+            color: rgba(148, 163, 184, 0.7);
+            cursor: pointer;
+            font-size: 20px;
+            position: relative;
+            border: none;
+            background: transparent;
+            transition:
+                color 0.22s ease,
+                transform 0.18s ease;
+            border-radius: 14px;
+            -webkit-tap-highlight-color: transparent;
+            outline: none;
+        }
+
+        .mobile-nav-icon:active {
+            transform: scale(0.88);
+        }
+
+        /* Icon label text */
+        .mobile-nav-icon .nav-label {
+            font-size: 9.5px;
+            font-weight: 600;
+            letter-spacing: 0.01em;
+            line-height: 1;
+            transition: color 0.22s ease;
+            color: inherit;
+            white-space: nowrap;
+        }
+
+        /* Active glow dot indicator above label */
+        .mobile-nav-icon::after {
+            content: '';
+            position: absolute;
+            bottom: 5px;
+            left: 50%;
+            transform: translateX(-50%) scale(0);
+            width: 4px;
+            height: 4px;
+            border-radius: 50%;
+            background: #3b82f6;
+            transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
+        }
+
+        .mobile-nav-icon.active::after {
+            transform: translateX(-50%) scale(1);
+        }
+
+        /* Active state — blue glow for navigation icons */
+        .mobile-nav-icon.active {
+            color: #60a5fa;
+        }
+
+        .mobile-nav-icon.active i {
+            filter: drop-shadow(0 0 8px rgba(96,165,250,0.75));
+        }
+
+        /* Green tint for messaging/communication tabs */
+        .mobile-nav-icon[data-page="messages"].active,
+        .mobile-nav-icon[data-page="calls"].active,
+        .mobile-nav-icon[data-page="status"].active {
+            color: #34d399;
+        }
+
+        .mobile-nav-icon[data-page="messages"].active i,
+        .mobile-nav-icon[data-page="calls"].active i,
+        .mobile-nav-icon[data-page="status"].active i {
+            filter: drop-shadow(0 0 9px rgba(52,211,153,0.8));
+        }
+
+        .mobile-nav-icon[data-page="messages"].active::after,
+        .mobile-nav-icon[data-page="calls"].active::after,
+        .mobile-nav-icon[data-page="status"].active::after {
+            background: #34d399;
+        }
+
+        /* ---- CENTER ACTION BUTTON (floating circle) ---- */
+        .mobile-nav-icon.nav-center-action {
+            flex: 0 0 60px;
+            margin-top: -22px;
+            padding: 0;
+            width: 60px;
+            height: 60px;
+            background: linear-gradient(135deg, #22c55e 0%, #16a34a 55%, #15803d 100%);
+            border-radius: 50%;
+            box-shadow:
+                0 0 0 4px rgba(13,17,26,0.97),
+                0 4px 20px rgba(34,197,94,0.55),
+                0 8px 32px rgba(0,0,0,0.4);
+            color: #fff !important;
+            font-size: 22px;
+            border: none;
+            transition:
+                transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1),
+                box-shadow 0.2s ease;
+        }
+
+        .mobile-nav-icon.nav-center-action::after {
             display: none !important;
         }
 
-        /* Mobile back button - shows ONLY in chat panel or call screen */
+        .mobile-nav-icon.nav-center-action .nav-label {
+            display: none;
+        }
+
+        .mobile-nav-icon.nav-center-action i {
+            font-size: 22px;
+            filter: none !important;
+        }
+
+        .mobile-nav-icon.nav-center-action:hover,
+        .mobile-nav-icon.nav-center-action:active {
+            transform: scale(0.93) translateY(-2px);
+            box-shadow:
+                0 0 0 4px rgba(13,17,26,0.97),
+                0 6px 28px rgba(34,197,94,0.7),
+                0 12px 40px rgba(0,0,0,0.5);
+        }
+
+        .mobile-nav-icon.nav-center-action.active {
+            background: linear-gradient(135deg, #22c55e 0%, #15803d 100%);
+            box-shadow:
+                0 0 0 4px rgba(13,17,26,0.97),
+                0 0 24px rgba(34,197,94,0.9),
+                0 4px 20px rgba(34,197,94,0.6),
+                0 8px 32px rgba(0,0,0,0.5);
+            animation: centerBtnPulse 2.2s ease-in-out infinite;
+        }
+
+        @keyframes centerBtnPulse {
+            0%, 100% { box-shadow: 0 0 0 4px rgba(13,17,26,0.97), 0 0 24px rgba(34,197,94,0.9), 0 4px 20px rgba(34,197,94,0.6), 0 8px 32px rgba(0,0,0,0.5); }
+            50%       { box-shadow: 0 0 0 4px rgba(13,17,26,0.97), 0 0 40px rgba(34,197,94,1.0), 0 4px 28px rgba(34,197,94,0.8), 0 8px 32px rgba(0,0,0,0.5); }
+        }
+
+        /* Notification badge on nav icons */
+        .mobile-nav-icon .nav-badge {
+            position: absolute;
+            top: 6px;
+            right: calc(50% - 16px);
+            min-width: 17px;
+            height: 17px;
+            padding: 0 4px;
+            background: #ef4444;
+            color: #fff;
+            font-size: 9px;
+            font-weight: 700;
+            border-radius: 9px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border: 2px solid rgba(13,17,26,0.97);
+            line-height: 1;
+            pointer-events: none;
+        }
+
+        /* ---- Mobile back button ---- */
         .mobile-back-btn {
             display: none;
             position: fixed;
@@ -463,41 +655,26 @@
             left: 20px;
             width: 48px;
             height: 48px;
-            background: linear-gradient(135deg, #667eea, #764ba2);
+            background: linear-gradient(135deg, #1e40af, #2563eb);
             border-radius: 50%;
             align-items: center;
             justify-content: center;
             color: white;
-            font-size: 24px;
+            font-size: 20px;
             z-index: 1001;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+            box-shadow: 0 4px 16px rgba(37,99,235,0.45), 0 2px 8px rgba(0,0,0,0.3);
             cursor: pointer;
             border: none;
             transition: all 0.2s;
         }
-        
+
         .mobile-back-btn:active {
-            transform: scale(0.95);
+            transform: scale(0.93);
         }
-        
-        /* Mobile back button visible in chat panel OR call screen */
+
         body.chat-panel-active .mobile-back-btn,
         body.call-screen-active .mobile-back-btn {
             display: flex !important;
-        }
-
-        .mobile-nav-icon {
-            flex: 1;
-            text-align: center;
-            padding: 12px;
-            color: rgba(255,255,255,0.8);
-            cursor: pointer;
-            font-size: 20px;
-        }
-
-        .mobile-nav-icon.active {
-            background: rgba(255,255,255,0.2);
-            color: white;
         }
 
         /* Desktop styles */
@@ -508,9 +685,12 @@
             .iframe-container {
                 left: 0;
                 top: 56px;
+                /* Leave room for the 72px bottom nav + safe area */
+                bottom: 72px;
             }
-            .mobile-nav-bar {
-                display: flex;
+            body.chat-panel-active .iframe-container,
+            body.call-screen-active .iframe-container {
+                bottom: 0;
             }
             #globalHeader {
                 left: 0;
@@ -531,7 +711,7 @@
 
         @media (min-width: 769px) {
             .mobile-nav-bar {
-                display: none;
+                display: none !important;
             }
             .mobile-back-btn {
                 display: none !important;
@@ -655,15 +835,36 @@
         </div>
     </div>
 
-    <!-- Mobile Navigation Bar -->
+    <!-- Modern Bottom Navigation Bar (5-icon, mobile) -->
     <div id="mobileNavBar" class="mobile-nav-bar">
-        <button class="mobile-nav-icon active" data-page="messages"><i class="fas fa-comments"></i></button>
-        <button class="mobile-nav-icon" data-page="calls"><i class="fas fa-phone"></i></button>
-        <button class="mobile-nav-icon" data-page="group"><i class="fas fa-users"></i></button>
-        <button class="mobile-nav-icon" data-page="status"><i class="fas fa-circle"></i></button>
-        <button class="mobile-nav-icon" data-page="friends"><i class="fas fa-user-friends"></i></button>
-        <button class="mobile-nav-icon" data-page="settings"><i class="fas fa-cog"></i></button>
-        <button class="mobile-nav-icon" data-page="tools"><i class="fas fa-tools"></i></button>
+        <!-- 1. Home / Messages -->
+        <button class="mobile-nav-icon active" data-page="messages" aria-label="Messages">
+            <i class="fas fa-comment-dots"></i>
+            <span class="nav-label">Chats</span>
+        </button>
+
+        <!-- 2. Search / Discover -->
+        <button class="mobile-nav-icon" data-page="friends" aria-label="Friends">
+            <i class="fas fa-search"></i>
+            <span class="nav-label">Explore</span>
+        </button>
+
+        <!-- 3. CENTER — Main Action (floating) -->
+        <button class="mobile-nav-icon nav-center-action" data-page="group" aria-label="Groups">
+            <i class="fas fa-plus"></i>
+        </button>
+
+        <!-- 4. Notifications / Status -->
+        <button class="mobile-nav-icon" data-page="status" aria-label="Status">
+            <i class="fas fa-bell"></i>
+            <span class="nav-label">Status</span>
+        </button>
+
+        <!-- 5. Profile / Settings -->
+        <button class="mobile-nav-icon" data-page="settings" aria-label="Profile">
+            <i class="fas fa-user-circle"></i>
+            <span class="nav-label">Profile</span>
+        </button>
     </div>
     
     <!-- Mobile Back Button (visible only when chat panel OR call screen is active) -->

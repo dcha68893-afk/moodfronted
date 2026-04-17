@@ -154,19 +154,6 @@
             color: var(--text-secondary);
             opacity: 0.7;
         }
-        body[data-parent-shell="true"] #settingsSidebar > .settings-header,
-        body[data-parent-shell="true"] #settingsContent > .content-header {
-            display: none !important;
-        }
-
-        body[data-parent-shell="true"] #userAvatarPreview {
-            display: none !important;
-        }
-
-        body[data-parent-shell="true"] #settingsSidebar,
-        body[data-parent-shell="true"] #settingsContent {
-            padding-top: 0 !important;
-        }
     </style>
     
     <link rel="stylesheet" href="settings.css">
@@ -1799,7 +1786,7 @@
 </head>
 <body>
     <!-- Offline Mode Badge - Only shown when offline -->
-    <div class="offline-badge" id="offlineBadge" style="display: none !important;">
+    <div class="offline-badge" id="offlineBadge">
         <i class="fas fa-wifi-slash"></i> Offline
     </div>
 
@@ -1864,7 +1851,7 @@
                     <i class="fas fa-times"></i>
                 </button>
             </div>
-            <form class="modal-body" id="changePasswordForm">
+            <div class="modal-body">
                 <div style="margin-bottom: 20px;">
                     <div style="margin-bottom: 15px;">
                         <label style="display: block; margin-bottom: 8px; font-size: 14px; font-weight: 500;">
@@ -1911,10 +1898,10 @@
                         </div>
                     </div>
                 </div>
-            </form>
+            </div>
             <div class="modal-footer">
-                <button class="action-btn secondary" id="cancelPasswordBtn" type="button">Cancel</button>
-                <button class="action-btn primary" id="savePasswordBtn" type="submit" form="changePasswordForm">Change Password</button>
+                <button class="action-btn secondary" id="cancelPasswordBtn">Cancel</button>
+                <button class="action-btn primary" id="savePasswordBtn">Change Password</button>
             </div>
         </div>
     </div>
@@ -2504,13 +2491,13 @@
                 
                 window.addEventListener('offline', function() {
                     document.body.classList.add('offline');
-                    if (offlineBadge) offlineBadge.style.display = 'none';
+                    if (offlineBadge) offlineBadge.style.display = 'block';
                 });
                 
                 // Initial online check
                 if (!navigator.onLine) {
                     document.body.classList.add('offline');
-                    if (offlineBadge) offlineBadge.style.display = 'none';
+                    if (offlineBadge) offlineBadge.style.display = 'block';
                 }
                 
                 // =============================================

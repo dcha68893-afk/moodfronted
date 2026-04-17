@@ -30,43 +30,6 @@
     
     // Trusted request marker to prevent fetch blocking loops
     const TRUSTED_REQUEST_MARKER = Symbol.for('api-trusted-request');
-    let safeTimeoutTimer = null;
-
-    function safeTimeout(fn, delay) {
-        clearTimeout(safeTimeoutTimer);
-        safeTimeoutTimer = setTimeout(fn, delay);
-        return safeTimeoutTimer;
-    }
-
-    if (typeof window.safeTimeout !== 'function') {
-        window.safeTimeout = safeTimeout;
-    }
-
-    if (typeof window.pauseSync !== 'function') {
-        window.pauseSync = function pauseSync() {
-            window.__SYNC_HALTED__ = true;
-            console.warn('[API] pauseSync()');
-        };
-    }
-
-    if (typeof window.resumeSync !== 'function') {
-        window.resumeSync = function resumeSync() {
-            window.__SYNC_HALTED__ = false;
-            console.warn('[API] resumeSync()');
-        };
-    }
-
-    if (!window.__API_NETWORK_LISTENERS_BOUND__) {
-        window.__API_NETWORK_LISTENERS_BOUND__ = true;
-        window.addEventListener('online', () => {
-            console.log('[OFFLINE MODE]', false);
-            safeTimeout(() => window.resumeSync(), 150);
-        });
-        window.addEventListener('offline', () => {
-            console.log('[OFFLINE MODE]', true);
-            safeTimeout(() => window.pauseSync(), 0);
-        });
-    }
     
     // 🔥 GATEWAY STATE - HARDENED CENTRALIZED CONTROL
     const _gatewayState = {
@@ -234,13 +197,6 @@
      */
     function getAuthToken() {
         try {
-            if (window.AuthStorage && typeof window.AuthStorage.getToken === 'function') {
-                const storedToken = window.AuthStorage.getToken();
-                if (storedToken && typeof storedToken === 'string' && storedToken.trim()) {
-                    return storedToken;
-                }
-            }
-
             // 1. Primary: centralized Session module
             if (window.Session && typeof window.Session.getToken === 'function') {
                 const token = window.Session.getToken();
@@ -267,7 +223,7 @@
                     }
                 }
                 // Also try legacy keys
-                const legacyToken = localStorage.getItem('authToken') || localStorage.getItem('accessToken') || localStorage.getItem('token');
+                const legacyToken = localStorage.getItem('accessToken') || localStorage.getItem('token');
                 if (legacyToken) return legacyToken;
             } catch(e) {}
             
@@ -543,9 +499,8 @@
                     return { ok: true, success: true, status: 200, statusText: 'OK (offline/cached)',
                              data: cachedData, headers: {}, cached: true, offline: true };
                 }
-                console.warn('Offline - skipping API');
-                console.log('[OFFLINE MODE]', true);
-                return null;
+                return { ok: false, success: false, status: 0, statusText: 'Offline',
+                         offline: true, data: { message: 'Device is offline' }, headers: {} };
             }
 
             const normalizedUrl = normalizeEndpoint(url);
@@ -553,7 +508,6 @@
             
             // 🔥 CRITICAL: Get token from centralized session module (ONLY source)
             const token = getAuthToken();
-            console.log('[AUTH TOKEN]', token);
             
             // 🔥 CRITICAL: For protected endpoints, token MUST exist
             if (!isPublic && !token) {
@@ -6893,12 +6847,6 @@ fetchOptions.signal = controller.signal;
         const functionName = 'request';
         
         try {
-            if (!navigator.onLine) {
-                console.warn('Offline - skipping API');
-                console.log('[OFFLINE MODE]', true);
-                return null;
-            }
-
             const normalizedEndpoint = normalizeEndpoint(endpoint);
             const isPublic = isPublicEndpointCheck(normalizedEndpoint);
             
@@ -6941,7 +6889,6 @@ fetchOptions.signal = controller.signal;
             
             const requiresAuth = options.auth !== false;
             const token = getAuthToken();
-            console.log('[AUTH TOKEN]', token);
             
             if (requiresAuth && !token && _apiRequestQueue && !_apiRequestQueue.isLoginComplete()) {
                 console.log("[API] ⏳ Delaying protected endpoint until login complete: ${normalizedEndpoint}");

@@ -1731,18 +1731,10 @@
         .stats-modal .modal-footer {
             margin-top: 0;
         }
-        body[data-parent-shell="true"] #sidebar > .sidebar-header {
-            display: none !important;
-        }
-
-        body[data-parent-shell="true"] #sidebar {
-            padding-top: 0 !important;
-        }
     </style>
     
     <!-- API.js must load BEFORE status.js -->
     
-    <script src="/js/app.stability.bridge.js"></script>
     <script type="module" src="status-core.js"></script>
     <script type="module" src="status-ui.js"></script>
     <script>
@@ -1825,8 +1817,8 @@
             if (statusEl) {
                 statusEl.className = 'connection-status offline';
                 const statusText = statusEl.querySelector('.status-text');
-                if (statusText) statusText.textContent = '';
-                statusEl.style.display = 'none';
+                if (statusText) statusText.textContent = 'Offline';
+                statusEl.style.display = 'flex';
             }
         });
         
