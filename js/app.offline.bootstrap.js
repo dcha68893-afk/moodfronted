@@ -40,18 +40,33 @@
   }
 
   function getFastSessionSnapshot() {
+    // ── OFFLINE-FIRST: Check kynecta_auth first (canonical storage) ──────────
+    // authStorage.js writes here on every login. This is the single source of
+    // truth — checked before any module loads, so we have a session immediately.
+    try {
+      const raw = localStorage.getItem("kynecta_auth");
+      if (raw) {
+        const auth = JSON.parse(raw);
+        if (auth && auth.token) {
+          return { token: auth.token, user: auth.user || null, authenticated: true, refreshToken: auth.refreshToken || null };
+        }
+      }
+    } catch (_e) {}
+
+    // KynectaCache (in-memory) fallback
     const fromCache = window.KynectaCache && typeof window.KynectaCache.getSession === "function"
       ? window.KynectaCache.getSession()
       : null;
-
     if (fromCache && fromCache.token) return fromCache;
 
+    // Legacy key fallback
     try {
       const token =
         localStorage.getItem("authToken") ||
         localStorage.getItem("token") ||
         localStorage.getItem("accessToken") ||
-        localStorage.getItem("moodchat_token");
+        localStorage.getItem("moodchat_token") ||
+        localStorage.getItem("kynecta_token");
       const user = JSON.parse(localStorage.getItem("currentUser") || localStorage.getItem("user") || "null");
       if (!token) return null;
       return { token, user, authenticated: true };

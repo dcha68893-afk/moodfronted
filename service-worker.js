@@ -1,11 +1,18 @@
-// Service Worker for PWA Chat Application
-// Version: 10.0.0 - OFFLINE ICONS + FULL ASSET CACHING
-// Cache Strategy: Cache-First ONLY for static assets
-// Design: Zero API interference, future-proof, authentication-safe
+// service-worker.js
+// Version: 12.0.0 - OFFLINE-FIRST + NAVIGATION CACHE FIX
+// Strategy:
+//   Navigation (HTML pages) -> Network-first, cache fallback, inline shell
+//   Static assets (JS/CSS/fonts/images) -> Cache-first, network fallback
+//   API / auth requests -> Always bypass to network (never cached)
 
-const CACHE_NAME = 'moodchat-static-v11';
-const CACHE_MAX_AGE = 7 * 24 * 60 * 60 * 1000;
+'use strict';
 
+const CACHE_NAME = 'moodchat-static-v12-offline';
+const CACHE_MAX_AGE = 7 * 24 * 60 * 60 * 1000; // 7 days in ms
+
+// ---------------------------------------------------------------------------
+// APP SHELL - core files to pre-cache on install
+// ---------------------------------------------------------------------------
 const CORE_STATIC_ASSETS = [
   '/',
   '/index.html',
@@ -17,11 +24,11 @@ const CORE_STATIC_ASSETS = [
   '/Tool.js',
   '/group.js',
 
-  // ── Pages ────────────────────────────────────────────────────────────────
+  // Pages
   '/friend.html',
   '/chat.html',
 
-  // ── Font Awesome: CSS + ALL webfont binaries (icons break offline without these)
+  // Font Awesome (local copies)
   '/css/vendor/font-awesome.min.css',
   '/fonts/fa-solid-900.woff2',
   '/fonts/fa-solid-900.ttf',
@@ -30,33 +37,24 @@ const CORE_STATIC_ASSETS = [
   '/fonts/fa-brands-400.woff2',
   '/fonts/fa-brands-400.ttf',
 
-  // ── Offline icon fallback (Unicode symbols when FA font unavailable) ──────
+  // Offline icon fallback
   '/css/offline-icon-fallback.css',
   '/js/vendor/offline-icon-bootstrap.js',
 
-  // ── App icons ────────────────────────────────────────────────────────────
+  // App icons
   '/icons/moodchat-192.png',
   '/icons/moodchat-512.png',
 
-  // ── Core app CSS ─────────────────────────────────────────────────────────
+  // Core CSS
   '/friend.css',
-  '/css/suppress-webgl.css',
+  '/css/suppress-webgl.css'
 ];
 
-const STATIC_ASSET_PATTERNS = [
-  /\.(css|js|json|png|jpg|jpeg|svg|ico|woff2|woff|ttf|webp|gif|map)$/i,
-  /\/icons\//i,
-  /\/images\//i,
-  /\/fonts\//i,
-  /\/static\//i,
-  /\/webfonts\//i,          // Compatibility path
-  /\/fonts\//i,             // Project font binaries
-  /\/css\/vendor\//i,       // Vendor CSS (font-awesome.min.css etc.)
-  /\/js\/vendor\//i,        // Vendor JS
-  /offline-icon-fallback/i,  // Offline icon CSS
-  /offline-icon-bootstrap/i  // Offline icon JS
-];
+// ---------------------------------------------------------------------------
+// PATTERNS
+// ---------------------------------------------------------------------------
 
+// These requests always go straight to network - never cached
 const BYPASS_PATTERNS = [
   /\/api\//i,
   /\/auth\//i,
@@ -73,479 +71,444 @@ const BYPASS_PATTERNS = [
   /^https?:\/\/api\./i
 ];
 
-const HTML_NAVIGATION_PATTERNS = [
-  /\.html$/i,
-  /^\/[^\.]*$/i,
-  /\/login$/i,
-  /\/register$/i,
-  /\/logout$/i
+// Static assets get cache-first treatment
+const STATIC_ASSET_PATTERNS = [
+  /\.(css|js|json|png|jpg|jpeg|svg|ico|woff2|woff|ttf|webp|gif|map)$/i,
+  /\/icons\//i,
+  /\/images\//i,
+  /\/fonts\//i,
+  /\/static\//i,
+  /\/webfonts\//i,
+  /\/css\/vendor\//i,
+  /\/js\/vendor\//i,
+  /offline-icon-fallback/i,
+  /offline-icon-bootstrap/i
 ];
 
-// NOTE: Font Awesome is loaded from /css/vendor/ (local) NOT from a CDN.
-// cdnjs.cloudflare.com links in HTML files have been replaced with local paths.
-// This means FA woff2 files are intercepted as static assets (above) and cached.
-
-// Track logged bypass requests to avoid repeated logs
+// ---------------------------------------------------------------------------
+// LOG DEDUP - prevents console spam on repeated requests
+// ---------------------------------------------------------------------------
 const loggedBypasses = new Set();
 const loggedCacheHits = new Set();
 
-// ========== CRITICAL SAFETY GUARDS ==========
+// ---------------------------------------------------------------------------
+// HELPERS
+// ---------------------------------------------------------------------------
 
-function mustBypassCompletely(request) {
-  const url = request.url;
-  const requestKey = `${request.method}:${url}`;
-  
-  // 🚫 NEVER intercept navigation requests
-  if (request.mode === 'navigate') {
-    if (!loggedBypasses.has(requestKey)) {
-      console.log('[Service Worker] Bypassing (navigation request):', url);
-      loggedBypasses.add(requestKey);
-    }
-    return true;
-  }
-  
-  // 🚫 NEVER intercept HTML documents
-  if (request.destination === 'document') {
-    if (!loggedBypasses.has(requestKey)) {
-      console.log('[Service Worker] Bypassing (document request):', url);
-      loggedBypasses.add(requestKey);
-    }
-    return true;
-  }
-  
-  // 🚫 NEVER intercept HTML files or iframe pages
-  if (HTML_NAVIGATION_PATTERNS.some(pattern => pattern.test(url))) {
-    if (!loggedBypasses.has(requestKey)) {
-      console.log('[Service Worker] Bypassing (HTML/route):', url);
-      loggedBypasses.add(requestKey);
-    }
-    return true;
-  }
-  
-  // 🚫 NEVER cache non-GET requests
-  if (request.method !== 'GET') {
-    if (!loggedBypasses.has(requestKey)) {
-      console.log('[Service Worker] Bypassing (non-GET):', url);
-      loggedBypasses.add(requestKey);
-    }
-    return true;
-  }
-  
-  // 🚫 NEVER cache API/auth requests
-  if (BYPASS_PATTERNS.some(pattern => pattern.test(url))) {
-    if (!loggedBypasses.has(requestKey)) {
-      console.log('[Service Worker] Bypassing (API/auth):', url);
-      loggedBypasses.add(requestKey);
-    }
-    return true;
-  }
-  
-  return false;
+function isApiRequest(url) {
+  return BYPASS_PATTERNS.some(function(pattern) {
+    return pattern.test(url);
+  });
 }
 
 function isStaticAsset(url) {
   if (!url || typeof url !== 'string') return false;
-  
-  return STATIC_ASSET_PATTERNS.some(pattern => pattern.test(url));
+  return STATIC_ASSET_PATTERNS.some(function(pattern) {
+    return pattern.test(url);
+  });
 }
 
-function isLocalAsset(url) {
+function isLocalRequest(url) {
   try {
-    const parsed = new URL(url, self.location.origin);
+    var parsed = new URL(url, self.location.origin);
     return parsed.origin === self.location.origin;
   } catch (e) {
     return false;
   }
 }
 
-// Check if response is already cached
-function isAlreadyCached(request, cache) {
-  return cache.match(request).then(response => !!response);
+function isFontOrIcon(url) {
+  return (
+    /\/webfonts\/|\/fonts\/|font-awesome|\.woff2?$|\.ttf$|\.eot$/i.test(url) ||
+    /offline-icon-fallback|offline-icon-bootstrap/i.test(url)
+  );
 }
 
-// ========== SAFE REQUEST HANDLER ==========
-
-async function handleApiRequest(request) {
-  // 🛡️ Clone request body ONLY ONCE
-  let requestToFetch = request;
-  if (request.body) {
-    requestToFetch = request.clone();
-  }
-  
+function isCacheStale(response) {
   try {
-    const response = await fetch(requestToFetch);
-    
-    // 🛡️ NEVER treat auth errors as offline
-    if (response.status === 401 || response.status === 403) {
-      return response;
+    var dateHeader = response.headers.get('date');
+    if (!dateHeader) return false;
+    return (Date.now() - new Date(dateHeader).getTime()) > CACHE_MAX_AGE;
+  } catch (e) {
+    return false;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// OFFLINE SHELL HTML
+// Shown as a last resort when no cache exists at all.
+// Prevents the browser built-in "You are offline" page from ever appearing.
+// ---------------------------------------------------------------------------
+var OFFLINE_SHELL = [
+  '<!DOCTYPE html>',
+  '<html lang="en">',
+  '<head>',
+  '<meta charset="UTF-8">',
+  '<meta name="viewport" content="width=device-width,initial-scale=1.0">',
+  '<title>MoodChat - Offline</title>',
+  '<style>',
+  'body { margin: 0; font-family: Segoe UI, sans-serif;',
+  '  background: linear-gradient(135deg, #667eea, #764ba2);',
+  '  min-height: 100vh; display: flex; align-items: center;',
+  '  justify-content: center; color: #fff; text-align: center; }',
+  '.card { background: rgba(255,255,255,0.15); backdrop-filter: blur(20px);',
+  '  border-radius: 20px; padding: 40px; max-width: 340px;',
+  '  border: 1px solid rgba(255,255,255,0.3); }',
+  'h1 { font-size: 2rem; margin-bottom: 10px; }',
+  'p { opacity: 0.85; margin-bottom: 24px; line-height: 1.5; }',
+  'button { background: #fff; color: #667eea; border: none;',
+  '  padding: 14px 28px; border-radius: 30px;',
+  '  font-size: 1rem; font-weight: 700; cursor: pointer; }',
+  '</style>',
+  '</head>',
+  '<body>',
+  '<div class="card">',
+  '<div style="font-size: 3rem; margin-bottom: 16px">&#x1F4AC;</div>',
+  '<h1>MoodChat</h1>',
+  '<p>You are offline. Connect to the internet, or tap below if you have visited before.</p>',
+  '<button onclick="location.reload()">Try Again</button>',
+  '</div>',
+  '</body>',
+  '</html>'
+].join('\n');
+
+// ---------------------------------------------------------------------------
+// NAVIGATION HANDLER  <-- THE ROOT CAUSE FIX
+//
+// Previously the SW was bypassing ALL navigate requests, so offline page loads
+// always went to the network and failed, showing the browser error screen.
+//
+// Now: every HTML page load uses Network-first with cache fallback.
+//   1. Try network -> cache the response -> return it
+//   2. Offline -> serve the cached version of the page
+//   3. No cached page -> serve /index.html (SPA fallback)
+//   4. No index.html cached -> return inline offline shell
+// ---------------------------------------------------------------------------
+async function handleNavigation(request) {
+  var cache = await caches.open(CACHE_NAME);
+  var pathname = new URL(request.url).pathname;
+  var htmlKey = (pathname === '/' || pathname === '') ? '/index.html' : pathname;
+
+  // Step 1: try network
+  try {
+    var networkRes = await fetch(request);
+    if (networkRes.ok) {
+      cache.put(htmlKey, networkRes.clone()).catch(function() {});
+      return networkRes;
     }
-    
-    // 🛡️ Preserve authorization headers
-    if (request.headers.has('Authorization')) {
-      const newHeaders = new Headers(response.headers);
-      newHeaders.set('Authorization', request.headers.get('Authorization'));
-      return new Response(response.body, {
-        status: response.status,
-        statusText: response.statusText,
-        headers: newHeaders
+  } catch (networkError) {
+    console.log('[SW] Offline - serving cached page for: ' + htmlKey);
+  }
+
+  // Step 2: cached page
+  var cachedPage = await cache.match(htmlKey);
+  if (cachedPage) return cachedPage;
+
+  // Step 3: SPA fallback to index.html
+  var cachedIndex = await cache.match('/index.html');
+  if (!cachedIndex) {
+    cachedIndex = await cache.match('/');
+  }
+  if (cachedIndex) {
+    console.log('[SW] Navigation fallback to /index.html');
+    return cachedIndex;
+  }
+
+  // Step 4: inline offline shell - browser error screen never shown
+  console.warn('[SW] No cached page found - returning offline shell');
+  return new Response(OFFLINE_SHELL, {
+    status: 200,
+    headers: { 'Content-Type': 'text/html; charset=utf-8' }
+  });
+}
+
+// ---------------------------------------------------------------------------
+// STATIC ASSET HANDLER
+// Cache-first for fonts (permanent). Cache-first with staleness check for rest.
+// ---------------------------------------------------------------------------
+async function handleStaticAsset(request) {
+  var cache = await caches.open(CACHE_NAME);
+  var cacheKey = request.url;
+
+  // Fonts and icons: permanent cache-first (these never change)
+  if (isFontOrIcon(request.url)) {
+    var cachedFont = await cache.match(request);
+    if (cachedFont) return cachedFont;
+    try {
+      var fontRes = await fetch(request);
+      if (fontRes.ok) {
+        cache.put(request, fontRes.clone()).catch(function() {});
+      }
+      return fontRes;
+    } catch (e) {
+      // Return empty 200 so CSS does not throw a network error
+      return new Response('', {
+        status: 200,
+        headers: { 'Content-Type': 'font/woff2' }
       });
     }
-    
-    return response;
-  } catch (error) {
-    // 🛡️ Return clean error for API failures
-    return new Response(JSON.stringify({
-      error: 'Network request failed',
-      online: navigator.onLine
-    }), {
-      status: 503,
-      headers: {
-        'Content-Type': 'application/json'
-      }
-    });
-  }
-}
-
-function isFontOrIconAsset(url) {
-  return /\/webfonts\/|\/fonts\/|font-awesome|\.woff2?$|\.ttf$|\.eot$/i.test(url)
-      || /offline-icon-fallback|offline-icon-bootstrap/i.test(url);
-}
-
-async function handleStaticAsset(request) {
-  const cache = await caches.open(CACHE_NAME);
-  const requestKey = request.url;
-
-  // 🔤 FONT / ICON ASSETS: cache-first, never stale — these never change.
-  //    Without this, going offline with an empty cache shows blank icon boxes.
-  if (isFontOrIconAsset(request.url)) {
-    const cachedFont = await cache.match(request);
-    if (cachedFont) {
-      if (!loggedCacheHits.has(requestKey)) {
-        console.log('[Service Worker] Font/icon from cache:', request.url);
-        loggedCacheHits.add(requestKey);
-      }
-      return cachedFont;
-    }
-    // Not cached yet — fetch, store, return
-    try {
-      const fontResponse = await fetch(request);
-      if (fontResponse.ok) {
-        await cache.put(request, fontResponse.clone());
-        console.log('[Service Worker] Font/icon cached:', request.url);
-      }
-      return fontResponse;
-    } catch (err) {
-      console.warn('[Service Worker] Font fetch failed (offline?):', request.url);
-      // Return empty 200 so CSS doesn't throw — browser will use system font
-      return new Response('', { status: 200, headers: { 'Content-Type': 'font/woff2' } });
-    }
   }
 
-  // 📦 ALL OTHER STATIC ASSETS: original cache-first logic
-  const alreadyCached = await isAlreadyCached(request, cache);
-  
-  if (alreadyCached) {
-    const cachedResponse = await cache.match(request);
-    if (cachedResponse) {
-      const isStale = isCacheStale(cachedResponse);
-      if (!isStale) {
-        if (!loggedCacheHits.has(requestKey)) {
-          console.log('[Service Worker] Static asset from cache:', request.url);
-          loggedCacheHits.add(requestKey);
-        }
-        return cachedResponse;
-      }
+  // All other static assets: cache-first, refresh when stale
+  var cachedRes = await cache.match(request);
+  if (cachedRes && !isCacheStale(cachedRes)) {
+    if (!loggedCacheHits.has(cacheKey)) {
+      console.log('[SW] Cache hit: ' + cacheKey);
+      loggedCacheHits.add(cacheKey);
     }
+    return cachedRes;
   }
-  
+
   try {
-    const networkResponse = await fetch(request);
-    
-    if (networkResponse.ok) {
-      if (!alreadyCached) {
-        await cache.put(request, networkResponse.clone());
-        console.log('[Service Worker] Static asset cached:', request.url);
-      }
-      return networkResponse;
+    var networkRes = await fetch(request);
+    if (networkRes.ok) {
+      cache.put(request, networkRes.clone()).catch(function() {});
+      return networkRes;
     }
-    
-    if (alreadyCached) {
-      const cachedResponse = await cache.match(request);
-      if (cachedResponse) {
-        console.log('[Service Worker] Using stale cache (network failed):', request.url);
-        return cachedResponse;
-      }
-    }
-    
-    throw new Error('Network failed and no cache available');
-    
-  } catch (error) {
-    // Last resort: try stale cache even if marked stale
-    const staleCache = await cache.match(request);
-    if (staleCache) {
-      console.log('[Service Worker] Serving stale (last resort):', request.url);
-      return staleCache;
-    }
-    return new Response('Resource not available', {
-      status: 404,
+    if (cachedRes) return cachedRes; // return stale on non-ok
+    return networkRes;
+  } catch (e) {
+    if (cachedRes) return cachedRes; // return stale when offline
+    return new Response('Resource unavailable offline', {
+      status: 503,
       headers: { 'Content-Type': 'text/plain' }
     });
   }
 }
 
-function isCacheStale(cachedResponse) {
+// ---------------------------------------------------------------------------
+// API REQUEST HANDLER
+// Always hits the network. Returns a clean JSON 503 when offline.
+// ---------------------------------------------------------------------------
+async function handleApiRequest(request) {
   try {
-    const dateHeader = cachedResponse.headers.get('date');
-    if (!dateHeader) return false;
-    
-    const cacheTime = new Date(dateHeader).getTime();
-    const age = Date.now() - cacheTime;
-    
-    return age > CACHE_MAX_AGE;
-  } catch (error) {
-    return false;
+    return await fetch(request);
+  } catch (e) {
+    return new Response(
+      JSON.stringify({ error: 'Network request failed', offline: true }),
+      {
+        status: 503,
+        headers: { 'Content-Type': 'application/json' }
+      }
+    );
   }
 }
 
-// ========== SERVICE WORKER EVENTS ==========
+// ---------------------------------------------------------------------------
+// INSTALL - pre-cache the app shell
+// ---------------------------------------------------------------------------
+self.addEventListener('install', function(event) {
+  console.log('[SW] Installing v12.0.0');
 
-self.addEventListener('install', event => {
-  console.log('[Service Worker] Installing v10.0.0 - OFFLINE ICONS + FULL ASSET CACHING');
-  
   event.waitUntil(
-    (async () => {
-      try {
-        const cache = await caches.open(CACHE_NAME);
-        console.log('[Service Worker] Caching core static assets...');
-        
-        const cachePromises = CORE_STATIC_ASSETS.map(async (asset) => {
-          try {
-            const assetUrl = asset === '/' ? '/index.html' : asset;
-            
-            if (isLocalAsset(assetUrl)) {
-              // 🛡️ Skip caching if it's HTML navigation or iframe page
-              if (HTML_NAVIGATION_PATTERNS.some(pattern => pattern.test(assetUrl))) {
-                return { asset: assetUrl, status: 'skipped', reason: 'html-navigation' };
-              }
-              
-              // Check if already cached to avoid double caching
-              const alreadyCached = await isAlreadyCached(assetUrl, cache);
-              if (alreadyCached) {
-                return { asset: assetUrl, status: 'already-cached' };
-              }
-              
-              const response = await fetch(assetUrl, {
-                credentials: 'same-origin',
-                cache: 'no-store'
-              }).catch(() => null);
-              
-              if (response && response.ok) {
-                await cache.put(assetUrl, response.clone());
-                return { asset: assetUrl, status: 'cached' };
-              }
+    caches.open(CACHE_NAME).then(function(cache) {
+      var promises = CORE_STATIC_ASSETS.map(function(asset) {
+        var url = asset === '/' ? '/index.html' : asset;
+        return fetch(url, { credentials: 'same-origin', cache: 'no-store' })
+          .then(function(response) {
+            if (response.ok) {
+              return cache.put(url, response);
             }
-            return { asset: assetUrl, status: 'failed', reason: 'fetch-failed' };
-          } catch (error) {
-            return { asset, status: 'error', reason: error.message };
-          }
-        });
-        
-        const results = await Promise.allSettled(cachePromises);
-        const successCount = results.filter(r => 
-          r.status === 'fulfilled' && r.value && 
-          (r.value.status === 'cached' || r.value.status === 'already-cached')
-        ).length;
-        
-        console.log(`[Service Worker] Installation complete. ${successCount}/${CORE_STATIC_ASSETS.length} core assets available in cache`);
-        
+          })
+          .catch(function(err) {
+            // Non-fatal: log and continue. Missing assets are handled at runtime.
+            console.warn('[SW] Could not pre-cache: ' + url + ' (' + err.message + ')');
+          });
+      });
+
+      return Promise.allSettled(promises).then(function(results) {
+        var succeeded = results.filter(function(r) {
+          return r.status === 'fulfilled';
+        }).length;
+        console.log('[SW] Pre-cached ' + succeeded + '/' + CORE_STATIC_ASSETS.length + ' assets');
         return self.skipWaiting();
-      } catch (error) {
-        console.warn('[Service Worker] Install error (non-blocking):', error.message);
-        return self.skipWaiting();
-      }
-    })()
+      });
+    })
   );
 });
 
-self.addEventListener('activate', event => {
-  console.log('[Service Worker] Activating v10.0.0 - OFFLINE ICONS + FULL ASSET CACHING');
-  
+// ---------------------------------------------------------------------------
+// ACTIVATE - remove old caches and claim all open tabs
+// ---------------------------------------------------------------------------
+self.addEventListener('activate', function(event) {
+  console.log('[SW] Activating v12.0.0');
+
   event.waitUntil(
-    (async () => {
-      try {
-        const cacheNames = await caches.keys();
-        await Promise.all(
-          cacheNames.map(cacheName => {
-            if (cacheName !== CACHE_NAME) {
-              console.log('[Service Worker] Deleting old cache:', cacheName);
-              return caches.delete(cacheName);
+    caches.keys()
+      .then(function(cacheNames) {
+        return Promise.all(
+          cacheNames.map(function(name) {
+            if (name !== CACHE_NAME) {
+              console.log('[SW] Deleting old cache: ' + name);
+              return caches.delete(name);
             }
           })
         );
-        
-        await self.clients.claim();
-        console.log('[Service Worker] Clients claimed');
-        
-        const clients = await self.clients.matchAll();
-        clients.forEach(client => {
+      })
+      .then(function() {
+        return self.clients.claim();
+      })
+      .then(function() {
+        console.log('[SW] All clients claimed');
+        return self.clients.matchAll();
+      })
+      .then(function(clients) {
+        clients.forEach(function(client) {
           client.postMessage({
             type: 'SW_ACTIVATED',
-            version: '10.0.0',
-            safeMode: true,
+            version: '12.0.0',
             timestamp: Date.now()
           });
         });
-        
-      } catch (error) {
-        console.error('[Service Worker] Activation failed:', error);
-      }
-    })()
+      })
   );
 });
 
-self.addEventListener('fetch', event => {
-  const request = event.request;
-  const url = request.url;
-  
-  // Clear old logs periodically to prevent memory buildup
-  if (loggedBypasses.size > 1000) loggedBypasses.clear();
-  if (loggedCacheHits.size > 1000) loggedCacheHits.clear();
-  
-  // 🛡️ CRITICAL: Apply all bypass guards first
-  if (mustBypassCompletely(request)) {
-    // For API endpoints with authorization, preserve headers
-    if (BYPASS_PATTERNS.some(pattern => pattern.test(url))) {
-      event.respondWith(handleApiRequest(request));
-    } else {
-      event.respondWith(fetch(request));
-    }
+// ---------------------------------------------------------------------------
+// FETCH - route every request to the correct handler
+// ---------------------------------------------------------------------------
+self.addEventListener('fetch', function(event) {
+  var request = event.request;
+  var url = request.url;
+
+  // Keep log sets from growing indefinitely
+  if (loggedBypasses.size > 500) loggedBypasses.clear();
+  if (loggedCacheHits.size > 500) loggedCacheHits.clear();
+
+  // Only intercept GET requests
+  if (request.method !== 'GET') return;
+
+  // Route 1: Navigation requests (HTML page loads)
+  // These must be handled here - this was the bug that broke offline.
+  // The previous SW bypassed ALL navigate requests, so offline = blank error page.
+  if (request.mode === 'navigate' || request.destination === 'document') {
+    event.respondWith(handleNavigation(request));
     return;
   }
-  
-  // 🛡️ ONLY handle local static assets
-  if (!isLocalAsset(url) || !isStaticAsset(url)) {
-    event.respondWith(fetch(request));
+
+  // Route 2: API / auth endpoints - always go to network
+  if (isApiRequest(url)) {
+    event.respondWith(handleApiRequest(request));
     return;
   }
-  
-  // 🛡️ Handle static assets only
-  event.respondWith(handleStaticAsset(request));
+
+  // Route 3: Local static assets (JS, CSS, fonts, images, icons)
+  if (isLocalRequest(url) && isStaticAsset(url)) {
+    event.respondWith(handleStaticAsset(request));
+    return;
+  }
+
+  // Route 4: Everything else (cross-origin, unknown types) - pass through
+  event.respondWith(
+    fetch(request).catch(function() {
+      return new Response('Offline', { status: 503 });
+    })
+  );
 });
 
-// ========== MESSAGE HANDLING ==========
+// ---------------------------------------------------------------------------
+// MESSAGE - handle commands from the page
+// ---------------------------------------------------------------------------
+self.addEventListener('message', function(event) {
+  var data = event.data;
+  if (!data || !data.type) return;
 
-self.addEventListener('message', event => {
-  const data = event.data;
-  
-  if (!data?.type) return;
-  
   switch (data.type) {
+
     case 'SKIP_WAITING':
       self.skipWaiting();
       break;
-      
+
     case 'CLEAR_CACHE':
       event.waitUntil(
-        (async () => {
-          try {
-            await caches.delete(CACHE_NAME);
-            const clients = await self.clients.matchAll();
-            clients.forEach(client => {
-              client.postMessage({
-                type: 'CACHE_CLEARED',
-                timestamp: Date.now()
-              });
-            });
-            console.log('[Service Worker] Cache cleared');
-          } catch (error) {
-            console.error('[Service Worker] Failed to clear cache:', error);
-          }
-        })()
+        caches.delete(CACHE_NAME).then(function() {
+          return self.clients.matchAll();
+        }).then(function(clients) {
+          clients.forEach(function(client) {
+            client.postMessage({ type: 'CACHE_CLEARED', timestamp: Date.now() });
+          });
+          console.log('[SW] Cache cleared');
+        })
       );
       break;
-      
+
     case 'GET_CACHE_INFO':
       event.waitUntil(
-        (async () => {
-          try {
-            const cache = await caches.open(CACHE_NAME);
-            const keys = await cache.keys();
-            
-            event.ports?.[0]?.postMessage({
+        caches.open(CACHE_NAME).then(function(cache) {
+          return cache.keys();
+        }).then(function(keys) {
+          if (event.ports && event.ports[0]) {
+            event.ports[0].postMessage({
               type: 'CACHE_INFO',
               count: keys.length,
-              version: '10.0.0',
-              timestamp: Date.now(),
-              safeMode: true
-            });
-          } catch (error) {
-            event.ports?.[0]?.postMessage({
-              type: 'CACHE_INFO',
-              error: error.message
+              version: '12.0.0',
+              timestamp: Date.now()
             });
           }
-        })()
+        })
       );
       break;
-      
+
     case 'CHECK_HEALTH':
-      event.ports?.[0]?.postMessage({
-        type: 'HEALTH_RESPONSE',
-        status: 'healthy',
-        version: '10.0.0',
-        safeMode: true,
-        timestamp: Date.now()
-      });
+      if (event.ports && event.ports[0]) {
+        event.ports[0].postMessage({
+          type: 'HEALTH_RESPONSE',
+          status: 'healthy',
+          version: '12.0.0',
+          timestamp: Date.now()
+        });
+      }
       break;
-      
+
     case 'CLEAR_LOGS':
       loggedBypasses.clear();
       loggedCacheHits.clear();
-      console.log('[Service Worker] Logs cleared');
+      console.log('[SW] Logs cleared');
       break;
   }
 });
 
-// ========== MAINTENANCE ==========
-
-async function cleanupOldCacheEntries() {
+// ---------------------------------------------------------------------------
+// PERIODIC CACHE CLEANUP - evict entries older than CACHE_MAX_AGE
+// ---------------------------------------------------------------------------
+async function cleanupOldEntries() {
   try {
-    const cache = await caches.open(CACHE_NAME);
-    const keys = await cache.keys();
-    const oneWeekAgo = Date.now() - CACHE_MAX_AGE;
-    let cleanedCount = 0;
-    
-    for (const request of keys) {
-      const response = await cache.match(request);
+    var cache = await caches.open(CACHE_NAME);
+    var keys = await cache.keys();
+    var cleaned = 0;
+    var cutoff = Date.now() - CACHE_MAX_AGE;
+
+    for (var i = 0; i < keys.length; i++) {
+      var response = await cache.match(keys[i]);
       if (response) {
-        const dateHeader = response.headers.get('date');
-        if (dateHeader) {
-          const cachedDate = new Date(dateHeader).getTime();
-          if (cachedDate < oneWeekAgo) {
-            await cache.delete(request);
-            cleanedCount++;
-          }
+        var dateHeader = response.headers.get('date');
+        if (dateHeader && new Date(dateHeader).getTime() < cutoff) {
+          await cache.delete(keys[i]);
+          cleaned++;
         }
       }
     }
-    
-    if (cleanedCount > 0) {
-      console.log(`[Service Worker] Cleaned ${cleanedCount} old cache entries`);
+
+    if (cleaned > 0) {
+      console.log('[SW] Cleaned ' + cleaned + ' stale cache entries');
     }
-  } catch (error) {
-    console.log('[Service Worker] Cleanup error:', error);
+  } catch (e) {
+    console.warn('[SW] Cleanup error:', e);
   }
 }
 
-setInterval(cleanupOldCacheEntries, CACHE_MAX_AGE);
+setInterval(cleanupOldEntries, CACHE_MAX_AGE);
 
-self.addEventListener('error', event => {
-  console.warn('[Service Worker] Error:', event.error);
+// ---------------------------------------------------------------------------
+// GLOBAL ERROR HANDLERS
+// ---------------------------------------------------------------------------
+self.addEventListener('error', function(event) {
+  console.warn('[SW] Error:', event.error);
 });
 
-self.addEventListener('unhandledrejection', event => {
-  console.warn('[Service Worker] Unhandled rejection:', event.reason);
+self.addEventListener('unhandledrejection', function(event) {
+  console.warn('[SW] Unhandled rejection:', event.reason);
   event.preventDefault();
 });
 
-console.log('[Service Worker] v10.0.0 loaded - OFFLINE ICONS ACTIVE');
+console.log('[SW] v12.0.0 loaded - offline-first navigation active');

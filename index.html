@@ -1756,6 +1756,51 @@
         </div>
     </main>
     
+
+    <!-- ====================================================================== -->
+    <!-- SERVICE WORKER REGISTRATION (OFFLINE-FIRST PWA) -->
+    <!-- MUST be the FIRST script tag — registers before any other code runs -->
+    <!-- ====================================================================== -->
+    <script>
+      (function() {
+        'use strict';
+        if (!('serviceWorker' in navigator)) return;
+
+        // Register immediately — don't wait for DOMContentLoaded
+        navigator.serviceWorker.register('/service-worker.js', { scope: '/' })
+          .then(function(registration) {
+            console.log('[SW] Registered, scope:', registration.scope);
+
+            // If a new SW is waiting, activate it immediately
+            if (registration.waiting) {
+              registration.waiting.postMessage({ type: 'SKIP_WAITING' });
+            }
+
+            registration.addEventListener('updatefound', function() {
+              const newWorker = registration.installing;
+              if (!newWorker) return;
+              newWorker.addEventListener('statechange', function() {
+                if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+                  console.log('[SW] New version available');
+                  newWorker.postMessage({ type: 'SKIP_WAITING' });
+                }
+              });
+            });
+          })
+          .catch(function(err) {
+            console.warn('[SW] Registration failed (non-blocking):', err);
+          });
+
+        // When a new SW takes control, reload to get fresh assets
+        navigator.serviceWorker.addEventListener('controllerchange', function() {
+          console.log('[SW] Controller changed — reloading for fresh assets');
+          // Only reload if we had a previous controller (i.e. an update happened)
+          if (navigator.serviceWorker.controller) {
+            window.location.reload();
+          }
+        });
+      })();
+    </script>
     <!-- ====================================================================== -->
     <!-- API LAYER - MUST LOAD FIRST -->
     <!-- ====================================================================== -->
