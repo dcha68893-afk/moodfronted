@@ -118,6 +118,7 @@
                     this._syncIncomingRequests(),
                     this._syncSentRequests(),
                     this._syncBlocked(),
+                    this._syncAllUsers(),          // ← FIX: keep discovery cache fresh
                 ]);
 
                 // Push reconciled data into KynectaStore so UI re-renders
@@ -223,6 +224,73 @@
         }
 
         /**
+         * Sync the full user directory into the IndexedDB 'users' store so
+         * discovery works offline after the first online visit.
+         * Falls back to rehydrating the UI from the stored IndexedDB data when
+         * the network request fails (offline path).
+         */
+        async _syncAllUsers() {
+            try {
+                const res = await this._request('/api/friends/users/all?limit=500');
+                if (!res?.success) throw new Error('API returned failure');
+
+                const rawUsers = res.data?.users || (Array.isArray(res.data) ? res.data : []);
+                const currentUserId = this._getCurrentUserId();
+                const users = rawUsers
+                    .filter(u => u?.id && String(u.id) !== String(currentUserId))
+                    .map(u => ({
+                        ...u,
+                        id:          String(u.id),
+                        photoURL:    u.photoURL || u.avatar || '',
+                        displayName: u.displayName || u.name || u.username || 'User',
+                    }));
+
+                if (!users.length) return;
+
+                // 1. Persist to IndexedDB (primary offline source)
+                const ls = window.KynectaFriendsLocalStore;
+                if (ls) await ls.saveUsers(users).catch(() => {});
+
+                // 2. Persist to localStorage (secondary, quick-access)
+                try { localStorage.setItem('discover_users', JSON.stringify(users)); } catch (_) {}
+
+                // 3. Update in-memory caches
+                window._allUsersCache = users;
+                if (window.FriendCore) {
+                    window.FriendCore._allUsers          = users;
+                    window.FriendCore.discoverableUsers  = users;
+                    window.FriendCore._allUsersCache     = users;
+                }
+                if (window.FriendCacheManager?.setUsers) {
+                    window.FriendCacheManager.setUsers(users);
+                }
+
+                // 4. Notify UI
+                window.dispatchEvent(new CustomEvent('allUsersLoaded', {
+                    detail: { users, count: users.length }
+                }));
+
+                console.log(`[FriendSync] Users synced: ${users.length}`);
+
+            } catch (e) {
+                // Network/API failure — rehydrate UI from IndexedDB so offline
+                // discovery still works.
+                console.warn('[FriendSync] users sync error (will serve cache):', e.message);
+                try {
+                    const ls = window.KynectaFriendsLocalStore;
+                    if (!ls) return;
+                    const idbUsers = await ls.getAllUsers();
+                    if (!idbUsers.length) return;
+                    window._allUsersCache = idbUsers;
+                    if (window.FriendCore) window.FriendCore._allUsers = idbUsers;
+                    window.dispatchEvent(new CustomEvent('allUsersLoaded', {
+                        detail: { users: idbUsers, count: idbUsers.length, cached: true, offline: !navigator.onLine }
+                    }));
+                } catch (_) {}
+            }
+        }
+
+        /**
          * Reconcile server records for a given status with the local store.
          * Rules:
          *  - Server record present + local absent  → insert locally (isLocalOnly=false)
@@ -244,29 +312,62 @@
                 if (r.serverId) serverMap.set(String(r.serverId), r);
             });
 
+            // FIX: Deduplicate local records by friendId first — keep the most
+            // recently updated record, hard-delete the extras. This prevents
+            // duplicates that arise when optimistic writes race with sync.
+            const localByFriendId = new Map();
+            for (const lr of localRecords) {
+                const key = String(lr.friendId);
+                const existing = localByFriendId.get(key);
+                if (!existing) {
+                    localByFriendId.set(key, lr);
+                } else {
+                    // Keep the server-confirmed record or the most recent one
+                    const keepExisting = !existing.isLocalOnly ||
+                        (existing.updatedAt || '') >= (lr.updatedAt || '');
+                    if (keepExisting) {
+                        await ls.hardDelete(lr.id).catch(() => {});
+                    } else {
+                        await ls.hardDelete(existing.id).catch(() => {});
+                        localByFriendId.set(key, lr);
+                    }
+                }
+            }
+            const dedupedLocal = Array.from(localByFriendId.values());
+
             // Update or insert server records
             for (const sr of serverRecords) {
-                const local = localRecords.find(lr =>
+                // FIX: Match by friendId first (authoritative), then serverId
+                const local = dedupedLocal.find(lr =>
                     String(lr.friendId) === String(sr.friendId) ||
-                    (sr.serverId && lr.serverId === sr.serverId)
+                    (sr.serverId && lr.serverId && String(lr.serverId) === String(sr.serverId))
                 );
 
                 if (local) {
-                    // Conflict: server wins
+                    // Conflict: server wins for confirmed fields
                     if (local.status !== sr.status || local.serverId !== sr.serverId) {
                         this._stats.conflicts++;
                         await ls.upsert({ ...sr, id: local.id, isLocalOnly: false });
                     }
                 } else {
-                    // New from server
+                    // New from server — ensure no ghost optimistic record already exists
+                    // by checking all statuses, not just this status bucket
                     try {
-                        await ls.upsert({
-                            ...sr,
-                            userId,
-                            isLocalOnly: false,
-                            syncVersion: sr.syncVersion || 1,
-                        });
-                        this._stats.merged++;
+                        const ghost = await ls.getByFriendId(String(sr.friendId));
+                        if (ghost && ghost.isLocalOnly && ghost.status === status) {
+                            // Confirm the optimistic record instead of duplicating
+                            await ls.confirm(ghost.id, sr.serverId || ghost.serverId, {
+                                ...sr, isLocalOnly: false
+                            });
+                        } else {
+                            await ls.upsert({
+                                ...sr,
+                                userId,
+                                isLocalOnly: false,
+                                syncVersion: sr.syncVersion || 1,
+                            });
+                            this._stats.merged++;
+                        }
                     } catch (e) {
                         console.warn('[FriendSync] Upsert failed:', e.message);
                     }
@@ -274,11 +375,11 @@
             }
 
             // Remove orphaned (server-confirmed) local records not in server list
-            for (const lr of localRecords) {
+            for (const lr of dedupedLocal) {
                 if (lr.isLocalOnly) continue; // preserve pending local-only records
                 const inServer = serverRecords.some(sr =>
                     String(sr.friendId) === String(lr.friendId) ||
-                    (lr.serverId && sr.serverId === lr.serverId)
+                    (lr.serverId && sr.serverId && String(sr.serverId) === String(lr.serverId))
                 );
                 if (!inServer) {
                     await ls.hardDelete(lr.id);
@@ -505,11 +606,56 @@
 
             // Listen for real-time events that should trigger a reconcile
             if (window.KynectaEventBus) {
-                window.KynectaEventBus.on?.('FRIEND_REQUEST_RECEIVED', () => this.syncType('requests'));
-                window.KynectaEventBus.on?.('FRIEND_ACCEPTED',         () => this.syncType('friends'));
-                window.KynectaEventBus.on?.('FRIEND_REMOVED',          () => this.syncType('friends'));
+                // FIX: immediately write incoming request to IndexedDB so it
+                // survives offline / page reload, then do a light API reconcile.
+                window.KynectaEventBus.on?.('FRIEND_REQUEST_RECEIVED', async (data) => {
+                    if (data?.request) {
+                        try {
+                            const ls = window.KynectaFriendsLocalStore;
+                            if (ls) {
+                                const record = this._normalizeRecord(data.request, 'pending_received');
+                                await ls.upsert({ ...record, isLocalOnly: false });
+                                // Push to UI immediately without waiting for API
+                                const reqFormatted = this._toRequestFormat(record);
+                                if (window.FriendCacheManager?.setRequest) {
+                                    window.FriendCacheManager.setRequest(reqFormatted);
+                                    window.FriendCacheManager.syncToGlobals?.();
+                                }
+                                window.dispatchEvent(new CustomEvent('requestsUpdated', {
+                                    detail: {
+                                        requests: window.friendRequests || [],
+                                        count:    (window.friendRequests || []).length,
+                                        source:   'websocket'
+                                    }
+                                }));
+                            }
+                        } catch (e) {
+                            console.warn('[FriendSync] WS request persist error:', e.message);
+                        }
+                    }
+                    // Background API reconcile to confirm server state
+                    this.syncType('requests');
+                });
+
+                window.KynectaEventBus.on?.('FRIEND_ACCEPTED', async (data) => {
+                    // Immediately update both sides in IndexedDB
+                    if (data?.friendId) {
+                        try {
+                            const ls = window.KynectaFriendsLocalStore;
+                            if (ls) {
+                                const existing = await ls.getByFriendId(String(data.friendId));
+                                if (existing) {
+                                    await ls.updateStatus(existing.id, 'accepted', { isLocalOnly: false });
+                                }
+                            }
+                        } catch (_) {}
+                    }
+                    this.syncType('friends');
+                });
+
+                window.KynectaEventBus.on?.('FRIEND_REMOVED', () => this.syncType('friends'));
             }
-            window.addEventListener('kyn:friendsSynced', () => {}); // no-op to prevent unhandled
+            window.addEventListener('kyn:friendsSynced', () => {}); // no-op sentinel
         }
     }
 

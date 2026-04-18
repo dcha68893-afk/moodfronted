@@ -3267,6 +3267,17 @@ sanitizeHTML: function(str) {
                 case 'call_initiated':
                     this.handleCallInitiated(data);
                     break;
+                case 'call_initiation_failed':
+                    // Offline fix: call_initiation_failed fires for both generic failures
+                    // AND when the receiver is offline (data.offline === true).
+                    // Reset any "calling..." UI and show the appropriate message.
+                    this.handleCallEnded(data);
+                    if (data && data.offline) {
+                        showNotification('User is currently offline.', 'warning');
+                    } else {
+                        showNotification(data && data.error ? data.error : 'Failed to start call', 'error');
+                    }
+                    break;
                 case 'call_accepted':
                     // Receiver answered — now start the timer
                     this.handleCallAccepted(data);

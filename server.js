@@ -3,6 +3,7 @@
  */
 
 import express from "express";
+import http from "http";
 import path from "path";
 import compression from "compression";
 import helmet from "helmet";
@@ -11,6 +12,11 @@ import rateLimit from "express-rate-limit";
 import { fileURLToPath } from "url";
 import crypto from "crypto";
 import multer from "multer";
+import { createAuthMiddleware, extractBearerToken, verifyJwtToken } from "./middleware/auth.js";
+import { WebSocketService } from "./services/webSocketService.js";
+import { createCallService } from "./services/callService.js";
+import { createCallController } from "./controllers/callController.js";
+import { createCallRouter } from "./routes/calls.js";
 
 // 🔥 FIXED: Use the correct import pattern for Cloudinary v1
 import cloudinary from "cloudinary";
@@ -19,14 +25,31 @@ import cloudinary from "cloudinary";
 import "dotenv/config";
 
 const app = express();
+const server = http.createServer(app);
 const PORT = process.env.PORT || 4000;
 
-function sendSuccess(res, data, status = 200) {
-  return res.status(status).json({ success: true, data });
+function sendSuccess(res, data, status = 200, message = "OK") {
+  return res.status(status).json({ success: true, data, message });
 }
 
-function sendError(res, error, status = 500, extra = {}) {
-  return res.status(status).json({ success: false, error, ...extra });
+function sendError(res, message, status = 500, extra = {}) {
+  return res.status(status).json({ success: false, data: null, message, ...extra });
+}
+
+function normalizeApiBody(body, fallbackMessage = "OK") {
+  const normalized = body && typeof body === "object" ? { ...body } : {};
+  const success = normalized.success !== false;
+  const message = normalized.message || normalized.error || (success ? fallbackMessage : "Request failed");
+  const data = Object.prototype.hasOwnProperty.call(normalized, "data")
+    ? normalized.data
+    : null;
+
+  return {
+    ...normalized,
+    success,
+    data,
+    message,
+  };
 }
 
 // Fix __dirname in ESM
@@ -76,6 +99,10 @@ app.use(cors());
 app.use(compression());
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ extended: true, limit: "50mb" }));
+app.use("/api", (req, _res, next) => {
+  console.log("[API] Request:", req.url);
+  next();
+});
 
 // Serve static files
 app.use(express.static(__dirname));
@@ -246,28 +273,27 @@ app.get("/health", (req, res) => {
     status: "OK",
     timestamp: new Date().toISOString(),
     cloudinary: isCloudinaryConfigured ? "Configured" : "Not Configured",
-  });
+  }, 200, "Service healthy");
 });
 
-const DEV_AUTH_SECRET = process.env.DEV_AUTH_SECRET || "knecta-dev-secret";
+const DEV_AUTH_SECRET = process.env.JWT_SECRET || process.env.DEV_AUTH_SECRET || "knecta-dev-secret";
 const devState = {
   users: new Map(),
   settings: new Map(),
   friends: new Map(),
+  friendRequestsIncoming: new Map(),
+  friendRequestsSent: new Map(),
   groups: new Map(),
+  groupInvites: new Map(),
   statuses: new Map(),
   chats: new Map(),
   calls: new Map(),
+  callRecords: new Map(),
+  idempotencyKeys: new Map(),
   marketplace: [],
   purchases: [],
   payments: [],
 };
-
-const connectedUsers = new Set();
-
-function isUserOnline(userId) {
-  return connectedUsers.has(String(userId));
-}
 
 function base64url(input) {
   return Buffer.from(input).toString("base64url");
@@ -298,23 +324,73 @@ function verifyDevToken(token) {
   }
 }
 
-function getBearerToken(req) {
-  const header = req.headers.authorization || "";
-  return header.startsWith("Bearer ") ? header.slice(7) : null;
-}
-
-function getDevUser(req) {
-  const token = getBearerToken(req);
-  const payload = verifyDevToken(token);
-  if (!payload?.userId) return null;
-  const user = devState.users.get(payload.userId) || null;
-  if (user?.id) connectedUsers.add(String(user.id));
-  return user;
-}
-
 function ensureUserBucket(map, userId, factory) {
   if (!map.has(userId)) map.set(userId, factory());
   return map.get(userId);
+}
+
+function normalizeEntityId(value) {
+  return value === undefined || value === null || value === "" ? null : String(value);
+}
+
+function buildDirectChatId(userA, userB) {
+  return [String(userA), String(userB)].sort().join("__");
+}
+
+function ensureChatRecord(userId, chatId, participantIds = []) {
+  const chats = ensureUserBucket(devState.chats, String(userId), () => []);
+  let chat = chats.find((item) => String(item.id) === String(chatId));
+  if (!chat) {
+    chat = {
+      id: String(chatId),
+      participantIds: participantIds.map((id) => String(id)),
+      messages: [],
+      unreadCount: 0,
+      updatedAt: new Date().toISOString(),
+    };
+    chats.push(chat);
+  }
+  if (participantIds.length > 0) {
+    chat.participantIds = Array.from(new Set([...(chat.participantIds || []).map(String), ...participantIds.map(String)]));
+  }
+  return chat;
+}
+
+function resolveChatContext(userId, body = {}) {
+  const senderId = String(userId);
+  const receiverId = normalizeEntityId(body.receiverId || body.userId || body.toUserId);
+  const requestedChatId = normalizeEntityId(body.chatId);
+  const chatId = receiverId
+    ? buildDirectChatId(senderId, receiverId)
+    : (requestedChatId || buildDirectChatId(senderId, senderId));
+  const participantIds = Array.from(new Set([senderId, ...(receiverId ? [receiverId] : [])]));
+  return { chatId, senderId, receiverId, participantIds };
+}
+
+function inferReceiverIdFromChat(userId, chat) {
+  const me = String(userId);
+  const others = Array.isArray(chat?.participantIds) ? chat.participantIds.map(String).filter((id) => id !== me) : [];
+  return others[0] || null;
+}
+
+function cloneMessage(message) {
+  return JSON.parse(JSON.stringify(message));
+}
+
+function getUserById(userId) {
+  return userId ? devState.users.get(String(userId)) || null : null;
+}
+
+function resolveRequestUser(req) {
+  const token = extractBearerToken(req);
+  if (!token) return null;
+
+  const verification = verifyJwtToken(token, DEV_AUTH_SECRET);
+  if (!verification.valid) return null;
+
+  const payload = verification.payload || {};
+  const userId = payload.userId || payload.id || payload.sub || null;
+  return getUserById(userId);
 }
 
 function defaultSettings(userId) {
@@ -348,6 +424,120 @@ function ensureMarketplaceSeed() {
   ];
   return devState.marketplace;
 }
+
+function ensureSeedUser(userId, overrides = {}) {
+  const normalizedUserId = String(userId);
+  const existingUser = devState.users.get(normalizedUserId) || {
+    id: normalizedUserId,
+    username: normalizedUserId,
+    displayName: overrides.displayName || `User ${normalizedUserId}`,
+    email: overrides.email || `${normalizedUserId}@local.dev`,
+  };
+
+  const userRecord = { ...existingUser, ...overrides, id: normalizedUserId };
+  devState.users.set(normalizedUserId, userRecord);
+  ensureUserBucket(devState.settings, normalizedUserId, () => defaultSettings(normalizedUserId));
+  ensureUserBucket(devState.friends, normalizedUserId, () => []);
+  ensureUserBucket(devState.friendRequestsIncoming, normalizedUserId, () => []);
+  ensureUserBucket(devState.friendRequestsSent, normalizedUserId, () => []);
+  ensureUserBucket(devState.groups, normalizedUserId, () => []);
+  ensureUserBucket(devState.groupInvites, normalizedUserId, () => []);
+  ensureUserBucket(devState.statuses, normalizedUserId, () => []);
+  ensureUserBucket(devState.chats, normalizedUserId, () => []);
+  ensureUserBucket(devState.calls, normalizedUserId, () => []);
+  return userRecord;
+}
+
+[
+  { id: "101", username: "alex", displayName: "Alex Morgan", email: "alex@local.dev" },
+  { id: "102", username: "sam", displayName: "Sam Taylor", email: "sam@local.dev" },
+  { id: "103", username: "jamie", displayName: "Jamie Lee", email: "jamie@local.dev" },
+].forEach((user) => ensureSeedUser(user.id, user));
+
+const authMiddleware = createAuthMiddleware({
+  secret: DEV_AUTH_SECRET,
+  getUserById,
+});
+
+const webSocketService = new WebSocketService({
+  authenticateRequest(req) {
+    const token = extractBearerToken({
+      headers: req.headers,
+      query: Object.fromEntries(new URL(req.url, "http://localhost").searchParams.entries()),
+    });
+
+    if (!token) return { user: null };
+
+    const verification = verifyJwtToken(token, DEV_AUTH_SECRET);
+    if (!verification.valid) return { user: null };
+
+    const payload = verification.payload || {};
+    const userId = payload.userId || payload.id || payload.sub || null;
+    const user = getUserById(userId);
+
+    return { token, payload, user };
+  },
+});
+
+const callService = createCallService({
+  state: devState,
+  webSocketService,
+});
+
+const callController = createCallController(callService);
+
+webSocketService.setMessageHandler(({ user, type, payload }) => {
+  const normalizedType = String(type || "").toLowerCase();
+  if (!user?.id) return;
+
+  if (normalizedType === "message:new" || normalizedType === "message:send" || normalizedType === "message") {
+    const receiverId = payload.receiverId || payload.userId || payload.toUserId || null;
+    if (receiverId) {
+      webSocketService.sendToUser(receiverId, "message:new", {
+        ...payload,
+        senderId: user.id,
+        createdAt: new Date().toISOString(),
+      });
+    }
+    return;
+  }
+
+  if (normalizedType === "message:delivered" || normalizedType === "message:read") {
+    const targetUserId = payload.senderId || payload.receiverId || payload.userId || null;
+    if (targetUserId) {
+      webSocketService.sendToUser(targetUserId, normalizedType, {
+        ...payload,
+        userId: user.id,
+      });
+    }
+    return;
+  }
+
+  if (normalizedType === "webrtc:signal") {
+    const targetUserId = payload.targetUserId || payload.receiverId || payload.userId || null;
+    if (targetUserId) {
+      webSocketService.sendToUser(targetUserId, "webrtc:signal", {
+        ...payload,
+        fromUserId: user.id,
+      });
+    }
+    return;
+  }
+
+  if (normalizedType === "call:accept" || normalizedType === "call_accept" || type === "CALL_ACCEPT") {
+    if (payload.callId) callService.answerCall(payload.callId, user);
+    return;
+  }
+
+  if (normalizedType === "call:reject" || normalizedType === "call_reject" || type === "CALL_REJECT") {
+    if (payload.callId) callService.rejectCall(payload.callId, user, payload.reason || "rejected");
+    return;
+  }
+
+  if (normalizedType === "call:cancelled" || normalizedType === "call_cancelled" || type === "CALL_CANCELLED") {
+    if (payload.callId) callService.cancelCall(payload.callId, user);
+  }
+});
 
 function apiDataForPath(req, user) {
   const { path: routePath, method } = req;
@@ -555,7 +745,7 @@ function apiDataForPath(req, user) {
         initiatorId: user.id,
         participantIds,
         createdAt: new Date().toISOString(),
-        receiverOnline: participantIds.some((id) => isUserOnline(id)),
+        receiverOnline: participantIds.some((id) => webSocketService.isUserOnline(id)),
       };
       calls.unshift(createdCall);
       return {
@@ -749,6 +939,374 @@ function safeObjectForApi(value) {
   return value && typeof value === "object" ? value : {};
 }
 
+app.post(["/api/auth", "/api/auth/login"], apiLimiter, (req, res) => {
+  const identifier = req.body?.email || req.body?.username || req.body?.identifier;
+  const password = req.body?.password;
+
+  if (!identifier || !password) {
+    return sendError(res, "Missing credentials", 400);
+  }
+
+  const safeId = String(identifier).trim().toLowerCase().replace(/[^a-z0-9._-]/g, "_") || `user_${Date.now()}`;
+  const userRecord = ensureSeedUser(safeId, {
+    username: safeId,
+    displayName: req.body?.displayName || safeId,
+    email: req.body?.email || `${safeId}@local.dev`,
+  });
+
+  const token = signDevToken({
+    userId: safeId,
+    exp: Math.floor(Date.now() / 1000) + 60 * 60 * 24 * 7,
+  });
+
+  return res.status(200).json({
+    success: true,
+    data: {
+      token,
+      refreshToken: null,
+      user: userRecord,
+      userId: userRecord.id,
+      authenticated: true,
+    },
+    message: "Login successful",
+  });
+});
+
+app.get("/api/auth/me", apiLimiter, authMiddleware, (req, res) => {
+  return res.status(200).json({
+    success: true,
+    data: {
+      user: req.user,
+      userId: req.user.id,
+      authenticated: true,
+    },
+    message: "Authenticated user loaded",
+  });
+});
+
+app.get("/api/auth/verify", apiLimiter, authMiddleware, (req, res) => {
+  return res.status(200).json({
+    success: true,
+    data: {
+      valid: true,
+      authenticated: true,
+      user: req.user,
+    },
+    message: "Token valid",
+  });
+});
+
+app.post("/api/auth/refresh", apiLimiter, authMiddleware, (req, res) => {
+  const token = signDevToken({
+    userId: req.user.id,
+    exp: Math.floor(Date.now() / 1000) + 60 * 60 * 24 * 7,
+  });
+
+  return res.status(200).json({
+    success: true,
+    data: {
+      token,
+      user: req.user,
+      authenticated: true,
+    },
+    message: "Token refreshed",
+  });
+});
+
+app.post("/api/auth/logout", apiLimiter, authMiddleware, (_req, res) => {
+  return res.status(200).json({
+    success: true,
+    data: { loggedOut: true },
+    message: "Logged out",
+  });
+});
+
+app.get("/api/status/my", apiLimiter, authMiddleware, (req, res) => {
+  const statuses = ensureUserBucket(devState.statuses, req.user.id, () => []);
+  return res.status(200).json({
+    success: true,
+    data: {
+      statuses,
+      my: statuses,
+    },
+    message: "My statuses loaded",
+  });
+});
+
+app.get("/api/status/highlights", apiLimiter, authMiddleware, (req, res) => {
+  const highlights = Array.from(devState.statuses.values())
+    .flat()
+    .filter((status) => String(status.userId) !== String(req.user.id))
+    .sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime())
+    .slice(0, 20);
+
+  return res.status(200).json({
+    success: true,
+    data: { highlights },
+    message: "Status highlights loaded",
+  });
+});
+
+app.post("/api/status", apiLimiter, authMiddleware, (req, res) => {
+  const statuses = ensureUserBucket(devState.statuses, req.user.id, () => []);
+  const clientRequestId = req.body?.clientRequestId || req.body?.requestId || null;
+  const dedupeKey = clientRequestId ? `status:${req.user.id}:${clientRequestId}` : null;
+
+  if (dedupeKey && devState.idempotencyKeys.has(dedupeKey)) {
+    const existingStatusId = devState.idempotencyKeys.get(dedupeKey);
+    const existingStatus = statuses.find((status) => String(status.id) === String(existingStatusId)) || null;
+    if (existingStatus) {
+      return res.status(200).json({
+        success: true,
+        data: { status: existingStatus, reused: true },
+        message: "Status request reused",
+      });
+    }
+  }
+
+  const createdStatus = {
+    id: req.body?.id || `status_${Date.now()}`,
+    userId: req.user.id,
+    text: req.body?.text || req.body?.content || "",
+    mediaUrl: req.body?.mediaUrl || null,
+    visibility: req.body?.visibility || "friends",
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
+
+  statuses.unshift(createdStatus);
+  if (dedupeKey) devState.idempotencyKeys.set(dedupeKey, createdStatus.id);
+
+  return res.status(201).json({
+    success: true,
+    data: {
+      status: createdStatus,
+      statuses,
+    },
+    message: "Status created",
+  });
+});
+
+app.get("/api/friends/users/all", apiLimiter, authMiddleware, (req, res) => {
+  const currentFriends = ensureUserBucket(devState.friends, req.user.id, () => []);
+  const limit = Math.max(1, Number(req.query.limit || 200));
+
+  const users = Array.from(devState.users.values())
+    .filter((user) => String(user.id) !== String(req.user.id))
+    .slice(0, limit)
+    .map((user) => ({
+      ...user,
+      online: webSocketService.isUserOnline(user.id),
+      isFriend: currentFriends.some((friend) => String(friend.id || friend.userId || friend) === String(user.id)),
+    }));
+
+  return res.status(200).json({
+    success: true,
+    data: {
+      users,
+      total: users.length,
+    },
+    message: "Users loaded",
+  });
+});
+
+app.get("/api/friends/incoming", apiLimiter, authMiddleware, (req, res) => {
+  const incoming = ensureUserBucket(devState.friendRequestsIncoming, req.user.id, () => []);
+  return res.status(200).json({
+    success: true,
+    data: {
+      incoming,
+      total: incoming.length,
+    },
+    message: "Incoming friend requests loaded",
+  });
+});
+
+app.get("/api/groups/invites/user", apiLimiter, authMiddleware, (req, res) => {
+  const invites = ensureUserBucket(devState.groupInvites, req.user.id, () => []);
+  return res.status(200).json({
+    success: true,
+    data: {
+      invites,
+      total: invites.length,
+    },
+    message: "Group invites loaded",
+  });
+});
+
+app.use("/api/calls", apiLimiter, createCallRouter({
+  authMiddleware,
+  controller: callController,
+}));
+
+app.get("/api/messages", apiLimiter, authMiddleware, (req, res) => {
+  const userId = String(req.user.id);
+  const chatId = normalizeEntityId(req.query.chatId);
+  if (!chatId) {
+    return sendError(res, "chatId is required", 400);
+  }
+
+  const chats = ensureUserBucket(devState.chats, userId, () => []);
+  const chat = chats.find((item) => String(item.id) === chatId) || ensureChatRecord(userId, chatId, [userId]);
+  const before = req.query.before ? Date.parse(req.query.before) : null;
+  const after = req.query.after ? Date.parse(req.query.after) : null;
+  const limit = Math.max(1, Number(req.query.limit || 100));
+
+  let messages = Array.isArray(chat.messages) ? [...chat.messages] : [];
+  if (Number.isFinite(before)) {
+    messages = messages.filter((message) => Date.parse(message.createdAt) < before);
+  }
+  if (Number.isFinite(after)) {
+    messages = messages.filter((message) => Date.parse(message.createdAt) > after);
+  }
+  messages.sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt));
+  messages = messages.slice(-limit);
+
+  return sendSuccess(res, {
+    chatId,
+    messages,
+    unread: chat.unreadCount || 0,
+  }, 200, "Messages loaded");
+});
+
+app.post("/api/messages", apiLimiter, authMiddleware, (req, res) => {
+  const { chatId, senderId, receiverId, participantIds } = resolveChatContext(req.user.id, req.body || {});
+  const content = String(req.body?.content || "").trim();
+  const type = req.body?.type || "text";
+  const localId = normalizeEntityId(req.body?.localId);
+
+  if (!content && !req.body?.attachment) {
+    return sendError(res, "Message content is required", 400);
+  }
+
+  const createdAt = new Date().toISOString();
+  const messageId = `msg_${Date.now()}_${crypto.randomBytes(4).toString("hex")}`;
+  const delivered = receiverId ? webSocketService.isUserOnline(receiverId) : false;
+  const message = {
+    id: messageId,
+    localId,
+    chatId,
+    conversationId: chatId,
+    senderId,
+    receiverId,
+    content,
+    type,
+    attachment: req.body?.attachment || null,
+    replyToId: req.body?.replyToId || null,
+    mentions: Array.isArray(req.body?.mentions) ? req.body.mentions : [],
+    createdAt,
+    updatedAt: createdAt,
+    status: delivered ? "delivered" : "sent",
+  };
+
+  participantIds.forEach((participantId) => {
+    const chat = ensureChatRecord(participantId, chatId, participantIds);
+    chat.messages = Array.isArray(chat.messages) ? chat.messages : [];
+    chat.messages.push(cloneMessage(message));
+    chat.lastMessage = content;
+    chat.lastMessageAt = createdAt;
+    chat.updatedAt = createdAt;
+    if (String(participantId) !== senderId) {
+      chat.unreadCount = (chat.unreadCount || 0) + 1;
+    }
+  });
+
+  if (receiverId) {
+    webSocketService.sendToUser(receiverId, "new_message", message);
+  }
+
+  webSocketService.sendToUser(senderId, "message_sent", {
+    messageId,
+    localId,
+    serverId: messageId,
+    chatId,
+    createdAt,
+  });
+
+  if (delivered) {
+    webSocketService.sendToUser(senderId, "message_delivered", {
+      messageId,
+      localId,
+      serverId: messageId,
+      chatId,
+      deliveredAt: createdAt,
+    });
+  }
+
+  return sendSuccess(res, {
+    message,
+    chatId,
+    delivered,
+  }, 201, "Message created");
+});
+
+app.post("/api/messages/mark-read/batch", apiLimiter, authMiddleware, (req, res) => {
+  const userId = String(req.user.id);
+  const chatId = normalizeEntityId(req.body?.chatId);
+  const incomingIds = Array.isArray(req.body?.messageIds) ? req.body.messageIds.map(String) : [];
+  if (!chatId || incomingIds.length === 0) {
+    return sendError(res, "chatId and messageIds are required", 400);
+  }
+
+  const chats = ensureUserBucket(devState.chats, userId, () => []);
+  const chat = chats.find((item) => String(item.id) === chatId);
+  if (!chat) {
+    return sendSuccess(res, { chatId, messageIds: [], updated: 0 }, 200, "Nothing to mark as read");
+  }
+
+  const readAt = new Date().toISOString();
+  const updatedMessages = [];
+  chat.messages = (chat.messages || []).map((message) => {
+    if (!incomingIds.includes(String(message.id))) return message;
+    const next = { ...message, status: "read", readAt, updatedAt: readAt };
+    updatedMessages.push(next);
+    return next;
+  });
+  chat.unreadCount = 0;
+  chat.updatedAt = readAt;
+
+  const participantIds = Array.isArray(chat.participantIds) ? chat.participantIds.map(String) : [userId];
+  participantIds
+    .filter((participantId) => participantId !== userId)
+    .forEach((participantId) => {
+      const participantChat = ensureChatRecord(participantId, chatId, participantIds);
+      participantChat.messages = (participantChat.messages || []).map((message) => {
+        if (!incomingIds.includes(String(message.id))) return message;
+        return { ...message, status: "read", readAt, updatedAt: readAt };
+      });
+      participantChat.updatedAt = readAt;
+    });
+
+  const senderIds = new Set();
+  updatedMessages.forEach((message) => {
+    if (message.senderId && String(message.senderId) !== userId) {
+      senderIds.add(String(message.senderId));
+    }
+  });
+
+  senderIds.forEach((senderId) => {
+    updatedMessages.forEach((message) => {
+      if (String(message.senderId) === senderId) {
+        webSocketService.sendToUser(senderId, "message_read", {
+          messageId: message.id,
+          localId: message.localId || null,
+          serverId: message.id,
+          chatId,
+          readAt,
+          readerId: userId,
+        });
+      }
+    });
+  });
+
+  return sendSuccess(res, {
+    chatId,
+    messageIds: updatedMessages.map((message) => message.id),
+    updated: updatedMessages.length,
+    readAt,
+  }, 200, "Messages marked as read");
+});
+
 app.use("/api", apiLimiter, (req, res, next) => {
   if (
     req.path.startsWith("/cloudinary") ||
@@ -757,9 +1315,9 @@ app.use("/api", apiLimiter, (req, res, next) => {
     return next();
   }
 
-  const user = getDevUser(req);
+  const user = resolveRequestUser(req);
   const { status = 200, body } = apiDataForPath(req, user);
-  return res.status(status).json(body);
+  return res.status(status).json(normalizeApiBody(body));
 });
 
 // DEFAULT 404 HANDLERS
@@ -773,6 +1331,16 @@ app.use((req, res) => {
 });
 
 // START SERVER
-app.listen(PORT, "0.0.0.0", () => {
+server.on("upgrade", (req, socket, head) => {
+  if (String(req.url || "").startsWith("/ws")) {
+    webSocketService.handleUpgrade(req, socket, head);
+    return;
+  }
+
+  socket.write("HTTP/1.1 404 Not Found\r\n\r\n");
+  socket.destroy();
+});
+
+server.listen(PORT, "0.0.0.0", () => {
   console.log(`🚀 Server running on port ${PORT}`);
 });

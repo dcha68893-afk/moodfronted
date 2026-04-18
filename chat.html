@@ -3571,14 +3571,26 @@
                         else if (calleeId) body.participantIds = [parseInt(calleeId)];
                         const resp = await fetch(`${baseUrl}/calls`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }, body: JSON.stringify(body) });
                         const respData = await resp.json();
-                        if (resp.ok && (respData.data?.call?.id || respData.data?.callId)) {
+                        const callsIframe = document.getElementById('callsIframe');
+
+                        // Offline fix: backend returns HTTP 200 with success:false + offline:true
+                        // when the callee has no active socket. Must be caught BEFORE the success
+                        // branch (which only checks resp.ok + call.id — both true in the offline case).
+                        if (respData.offline === true || respData.data?.offline === true || respData.data?.receiverOnline === false) {
+                            const offlineMsg = respData.message || respData.data?.message || 'User is currently offline.';
+                            console.warn('[Parent] CALL_INITIATE — receiver offline:', offlineMsg);
+                            if (callsIframe && callsIframe.contentWindow) {
+                                callsIframe.contentWindow.postMessage({
+                                    type: 'CALL_INITIATED',
+                                    payload: { success: false, offline: true, error: offlineMsg, localCallId }
+                                }, '*');
+                            }
+                        } else if (resp.ok && (respData.data?.call?.id || respData.data?.callId)) {
                             const serverCallId = respData.data?.call?.id || respData.data?.callId;
                             window.__callIdMap = window.__callIdMap || {};
                             window.__callIdMap[localCallId] = serverCallId;
-                            const callsIframe = document.getElementById('callsIframe');
-                            if (callsIframe && callsIframe.contentWindow) callsIframe.contentWindow.postMessage({ type: 'CALL_INITIATED', payload: { ...(respData.data?.call || respData.data), callId: serverCallId, localCallId: localCallId, callType: callType, returnTo: callOriginPage, receiverOnline: respData.data?.receiverOnline !== false, success: true } }, '*');
+                            if (callsIframe && callsIframe.contentWindow) callsIframe.contentWindow.postMessage({ type: 'CALL_INITIATED', payload: { ...(respData.data?.call || respData.data), callId: serverCallId, localCallId: localCallId, callType: callType, returnTo: callOriginPage, receiverOnline: true, success: true } }, '*');
                         } else {
-                            const callsIframe = document.getElementById('callsIframe');
                             if (callsIframe && callsIframe.contentWindow) callsIframe.contentWindow.postMessage({ type: 'CALL_INITIATED', payload: { success: false, error: respData?.message || 'Failed to start call', localCallId } }, '*');
                         }
                     } catch(err) {
@@ -3649,7 +3661,32 @@
                         callsFrame.contentWindow.postMessage({ type: 'CALL_INCOMING', payload: callData, source: 'ws-bridge' }, '*');
                     }
                 });
-                
+
+                // Gap 5 fix: backend may emit 'incoming_call' (underscore) instead of 'call:incoming'.
+                // Register both naming conventions so the incoming banner always fires.
+                window.wsService.on('incoming_call', function(callData) {
+                    console.log('[WS] incoming_call (underscore) received - showing banner');
+                    if (window.showIncomingCallBanner) {
+                        window.showIncomingCallBanner(callData);
+                    }
+                    const callsFrame = document.getElementById('callsIframe');
+                    if (callsFrame && callsFrame.contentWindow) {
+                        callsFrame.contentWindow.postMessage({ type: 'CALL_INCOMING', payload: callData, source: 'ws-bridge' }, '*');
+                    }
+                });
+
+                // call_incoming — emitted by routes/calls.js POST / and /start via notifyUser()
+                window.wsService.on('call_incoming', function(callData) {
+                    console.log('[WS] call_incoming received - showing banner');
+                    if (window.showIncomingCallBanner) {
+                        window.showIncomingCallBanner(callData);
+                    }
+                    const callsFrame = document.getElementById('callsIframe');
+                    if (callsFrame && callsFrame.contentWindow) {
+                        callsFrame.contentWindow.postMessage({ type: 'CALL_INCOMING', payload: callData, source: 'ws-bridge' }, '*');
+                    }
+                });
+
                 // call:answered
                 window.wsService.on('call:answered', function(callData) {
                     console.log('[WS] call:answered - dismissing banner');

@@ -55,12 +55,25 @@
             if (window.KynectaStore) {
                 window.KynectaStore.set('friends.list', friends);
             }
-            // FIX Bug#5: Write to the canonical localStorage key that FriendCacheManager
+            // Write to the canonical localStorage key that FriendCacheManager
             // reads on startup ('knecta_friends_cache'), not just AppStorage.
             try { localStorage.setItem('knecta_friends_cache', JSON.stringify(friends)); } catch (_) {}
             // Also write to AppStorage for cross-iframe access
             if (window.AppStorage) {
                 window.AppStorage.set('knecta_friends_cache', friends);
+            }
+            // FIX: Write to IndexedDB 'friends' store so friends are available
+            // offline even after localStorage is cleared or quota-exceeded.
+            if (friends.length > 0 && window.AppCache) {
+                const idbFriends = friends.map(f => ({
+                    ...f,
+                    id:          String(f.id || f.friendId),
+                    friendId:    String(f.id || f.friendId),
+                    userId:      String(f.userId || f.id),
+                    status:      f.status || 'accepted',
+                    isLocalOnly: false,
+                }));
+                window.AppCache.save('friends', idbFriends).catch(() => {});
             }
 
             return friends;

@@ -65,6 +65,34 @@
         } catch {}
     }
 
+    async function _saveQueueRecord(item, status = 'pending', extra = {}) {
+        if (!window.AppCache?.save || !item?.queueId) return;
+        try {
+            await window.AppCache.save('syncQueue', {
+                id: item.queueId,
+                queueId: item.queueId,
+                type: 'message',
+                action: 'send_message',
+                status,
+                userId: item.payload?.senderId || window.__PARENT_SESSION__?.userId || null,
+                messageId: item.messageId,
+                chatId: item.chatId,
+                payload: item.payload,
+                retryCount: item.retryCount || 0,
+                lastAttempt: item.lastAttempt || null,
+                enqueuedAt: item.enqueuedAt || Date.now(),
+                ...extra
+            });
+        } catch {}
+    }
+
+    async function _removeQueueRecord(queueId) {
+        if (!window.AppCache?.remove || !queueId) return;
+        try {
+            await window.AppCache.remove('syncQueue', queueId);
+        } catch {}
+    }
+
     // ════════════════════════════════════════════════════════════════════════
     // MessageQueueManager
     // ════════════════════════════════════════════════════════════════════════
@@ -120,6 +148,7 @@
 
             this._queue.push(item);
             _saveQueue(this._queue);
+            _saveQueueRecord(item, 'pending');
             this._emit('queue:added', item);
 
             // Immediately try if online
@@ -134,9 +163,11 @@
          */
         remove(messageId) {
             const before = this._queue.length;
+            const removedItem = this._queue.find(q => q.messageId === messageId) || null;
             this._queue = this._queue.filter(q => q.messageId !== messageId);
             if (this._queue.length !== before) {
                 _saveQueue(this._queue);
+                if (removedItem?.queueId) _removeQueueRecord(removedItem.queueId);
                 this._emit('queue:removed', { messageId });
             }
         }
@@ -181,12 +212,14 @@
             if (!navigator.onLine) { this._scheduleRetry(item); return; }
 
             item.lastAttempt = Date.now();
+            _saveQueueRecord(item, 'processing', { lastAttempt: item.lastAttempt });
 
             try {
                 await this._sendToServer(item);
 
                 // Success — remove from queue
                 this.remove(item.messageId);
+                _removeQueueRecord(item.queueId);
 
                 // Update local store
                 this._emit('queue:sent', { queueId: item.queueId, messageId: item.messageId });
@@ -200,6 +233,7 @@
             } catch (err) {
                 item.retryCount++;
                 _saveQueue(this._queue);
+                _saveQueueRecord(item, 'retry', { retryCount: item.retryCount, lastError: err.message });
 
                 if (item.retryCount >= MAX_RETRIES) {
                     // Move to failed
@@ -209,6 +243,7 @@
                     const failed = _loadFailed();
                     failed.push({ ...item, failedAt: Date.now(), lastError: err.message });
                     _saveFailed(failed);
+                    _saveQueueRecord(item, 'failed', { failedAt: Date.now(), lastError: err.message });
 
                     // Mark message failed in local store
                     const localStore = window.KynectaLocalStore;
@@ -293,12 +328,14 @@
                 throw new Error('Message send failed');
             }
 
-            // Update local store with server id
-            const serverId = data?.data?.id || data?.id;
+            // FIX: Extract server message from data.message (new format) or fallbacks
+            const serverMessage = data?.data?.message || data?.message || data?.data || data;
+            const serverId = serverMessage?.id || data?.data?.id || data?.id;
             if (serverId && window.KynectaLocalStore) {
                 await window.KynectaLocalStore.confirmMessage(item.messageId, String(serverId), {
-                    chatId:    data?.data?.chatId || payload.chatId,
-                    createdAt: data?.data?.createdAt || Date.now()
+                    chatId:    serverMessage?.chatId || data?.data?.chatId || payload.chatId,
+                    createdAt: serverMessage?.createdAt || data?.data?.createdAt || Date.now(),
+                    status: serverMessage?.status || (data?.data?.delivered ? 'delivered' : 'sent')
                 });
             }
 
@@ -306,14 +343,18 @@
         }
 
         _getToken() {
-            const storage = window.AppStorage;
+            // FIX: Single source of truth — reads from AppCache session first,
+            // then falls back to known localStorage keys. Matches messageSync_engine.js.
+            if (window.AppCache && typeof window.AppCache.getSession === 'function') {
+                const session = window.AppCache.getSession();
+                if (session && session.token) return session.token;
+            }
             return window.__PARENT_SESSION__?.token
                 || window.AUTH_SESSION?.token
-                || storage?.get?.('token', null)
-                || storage?.get?.('moodchat_token', null)
-                || storage?.get?.('accessToken', null)
+                || localStorage.getItem('kynecta_auth') && (() => {
+                    try { return JSON.parse(localStorage.getItem('kynecta_auth'))?.token; } catch { return null; }
+                })()
                 || localStorage.getItem('token')
-                || localStorage.getItem('moodchat_token')
                 || localStorage.getItem('accessToken')
                 || null;
         }

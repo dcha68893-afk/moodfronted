@@ -460,6 +460,12 @@ const SettingsState = {
         this._applySettingGlobally(section, key, value);
         this._notify('optimistic-update', { section, key, value });
 
+        // STEP 1b: Push into AppSettings (single source of truth).
+        // Uses equality check internally so no infinite loop.
+        if (window.AppSettings) {
+            window.AppSettings.set(section + '.' + key, value);
+        }
+
         // STEP 2: Persist to backend when possible
         if (!isAuthenticated || currentState !== LifecycleState.ACTIVE) {
             if (!OfflineQueue.isOnline()) {
@@ -532,6 +538,12 @@ const SettingsState = {
     },
     
     _applySettingGlobally(section, key, value) {
+        // 1. Push into AppSettings (single source of truth)
+        if (window.AppSettings) {
+            window.AppSettings.set(section + '.' + key, value);
+        }
+
+        // 2. Notify parent frame
         if (window.parent && window.parent !== window) {
             window.parent.postMessage({
                 type: 'SETTINGS_GLOBAL_UPDATE',
@@ -542,7 +554,22 @@ const SettingsState = {
                 timestamp: Date.now()
             }, '*');
         }
-        
+
+        // 3. Broadcast to sibling iframes
+        try {
+            const frames = document.querySelectorAll('iframe');
+            frames.forEach(f => {
+                try {
+                    f.contentWindow.postMessage({
+                        type: 'SETTINGS_GLOBAL_UPDATE',
+                        source: MODULE_NAME,
+                        section, key, value,
+                        timestamp: Date.now()
+                    }, '*');
+                } catch (_) {}
+            });
+        } catch (_) {}
+
         this._applyLocalEffects(section, key, value);
     },
     
@@ -613,6 +640,8 @@ const SettingsState = {
             this.data = cached;
             this.loaded = true;
             this._notify('loaded', this.data);
+            // Sync cached settings into AppSettings immediately (offline-safe)
+            if (window.AppSettings) window.AppSettings.merge(this.data);
             
             // If not authenticated, don't try to fetch from backend
             if (!isAuthenticated) {
@@ -651,6 +680,8 @@ const SettingsState = {
                 this.lastSynced = Date.now();
                 this._saveToCache();
                 this._notify('loaded', this.data);
+                // Sync backend settings into AppSettings
+                if (window.AppSettings) window.AppSettings.merge(this.data);
                 return this.data;
             } else if (cached) {
                 return cached;
@@ -5983,6 +6014,11 @@ async function saveSettings() {
         SafeStorage.setJSON('user_settings', userSettings);
         coreData.settings = userSettings;
         SettingsState._saveToCache();
+
+        // Push full settings into AppSettings (single source of truth)
+        if (window.AppSettings) {
+            window.AppSettings.merge(userSettings);
+        }
         
         if (userSettings.appearance) {
             applyTheme(userSettings.appearance.theme || 'auto');

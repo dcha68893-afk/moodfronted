@@ -462,8 +462,11 @@ function handleApiResponse(data) {
     
     if (isFailed) {
         const errMsg = response.error || response.message || 'API request failed';
-        console.error(`[${MODULE_NAME}] API request failed: ${errMsg}`);
-        pending.reject(new Error(errMsg));
+        const err = new Error(errMsg);
+        // Attach the HTTP status code so isAuthorizationFailure() can match numerically
+        err.statusCode = response.statusCode || 0;
+        console.error(`[${MODULE_NAME}] API request failed (${err.statusCode}): ${errMsg}`);
+        pending.reject(err);
     } else {
         // Extract data from response
         let result = response;
@@ -871,9 +874,12 @@ function setSession(token, user, expiresAt = null) {
     _sessionUser = user;
     _sessionExpiresAt = expiresAt ? new Date(expiresAt) : null;
     _sessionReady = true;
-    
+
     __storeValidSessionId(sessionToValidate);
-    
+
+    // Clear any previous auth block so background loaders can retry
+    if (typeof resetStatusAuthBlock === 'function') resetStatusAuthBlock();
+
     logStatus('SUCCESS', 'Session stored in memory');
     
     // Load statuses after session is established — debounced to prevent multiple
@@ -1416,15 +1422,33 @@ async function postStatus(statusData) {
     if (statusData.latitude != null) payload.latitude = statusData.latitude;
     if (statusData.longitude != null) payload.longitude = statusData.longitude;
 
-    // If offline — queue immediately without attempting a doomed request
+    // If offline — queue immediately + show optimistically in UI
     if (!isOnlineGlobal || !navigator.onLine) {
         try {
+            const tempId = 'offline_' + Date.now();
+            const optimistic = {
+                ...payload,
+                id: tempId,
+                createdAt: new Date().toISOString(),
+                expiresAt: new Date(Date.now() + 86400000).toISOString(),
+                offline: true,
+                pending: true,
+                user: currentUser || null
+            };
+            // Show in UI immediately
+            statuses.unshift(optimistic);
+            myStatuses.unshift(optimistic);
+            SafeStorage.setJSON(LOCAL_STORAGE_KEYS.STATUSES, statuses);
+            SafeStorage.setJSON(LOCAL_STORAGE_KEYS.MY_STATUSES, myStatuses);
+            StatusDB.put(optimistic).catch(() => {});
+            // Queue for background sync
             const queue = await SafeStorage.getJSON(LOCAL_STORAGE_KEYS.OFFLINE_QUEUE) || [];
-            queue.push({ ...payload, _queuedAt: new Date().toISOString() });
+            queue.push({ ...payload, _tempId: tempId, _queuedAt: new Date().toISOString() });
             SafeStorage.setJSON(LOCAL_STORAGE_KEYS.OFFLINE_QUEUE, queue);
+            if (typeof notifyStatusObservers === 'function') notifyStatusObservers();
             updateStatusState({ loading: false });
-            logStatus('INFO', 'Status queued offline — will post when connection returns');
-            return { success: true, queued: true, message: 'Queued for posting when online' };
+            logStatus('INFO', 'Status shown locally + queued offline — will sync when online');
+            return { success: true, queued: true, status: optimistic, message: 'Queued for posting when online' };
         } catch (qErr) {
             updateStatusState({ loading: false, error: 'Failed to queue status offline' });
             return { success: false, error: 'Offline and queue failed' };
@@ -1439,6 +1463,8 @@ async function postStatus(statusData) {
         const newStatus = response?.status || response?.data?.status || null;
         if (newStatus) {
             addStatus(newStatus);
+            // Persist to IndexedDB immediately
+            StatusDB.put(newStatus).catch(() => {});
             // Invalidate TTL so next background refresh picks up the new post
             SafeStorage.memoryStore.delete(LOCAL_STORAGE_KEYS.LAST_SYNC);
             updateStatusState({ loading: false });
@@ -1515,6 +1541,8 @@ async function deleteStatus(statusId) {
         
         if (response && response.success !== false) {
             removeStatus(statusId);
+            // Remove from IndexedDB immediately
+            StatusDB.remove(statusId).catch(() => {});
             logStatus('SUCCESS', `Status deleted: ${statusId}`);
             return { success: true };
         } else {
@@ -1524,6 +1552,88 @@ async function deleteStatus(statusId) {
         console.error(`[${MODULE_NAME}] Failed to delete status:`, error);
         logStatus('FAILED', `Delete status: ${error.message}`);
         return { success: false, error: error.message };
+    }
+}
+
+// =============================================
+// REAL-TIME STATUS EVENTS  (socket → IndexedDB → UI)
+// =============================================
+function handleRealtimeStatusEvent(eventName, data) {
+    try {
+        logStatus('SUCCESS', `Realtime event: ${eventName}`);
+
+        switch (eventName) {
+            case 'new_status':
+            case 'status:created':
+            case 'status_created': {
+                const status = data?.status || data;
+                if (!status || !status.id) break;
+                // Ensure expiry
+                if (!status.expiresAt) {
+                    status.expiresAt = new Date(Date.now() + 86400000).toISOString();
+                }
+                // Skip if already in local list
+                if (!statuses.find(s => s.id === status.id)) {
+                    statuses.unshift(status);
+                    SafeStorage.setJSON(LOCAL_STORAGE_KEYS.STATUSES, statuses);
+                    StatusDB.put(status).catch(() => {});
+                    // Notify UI layer
+                    if (typeof notifyStatusObservers === 'function') notifyStatusObservers();
+                    if (typeof renderStatusListInstantlyUI === 'function') {
+                        renderStatusListInstantlyUI();
+                    }
+                    logStatus('SUCCESS', `Realtime: new status ${status.id} added`);
+                }
+                break;
+            }
+
+            case 'status_deleted':
+            case 'status:deleted': {
+                const statusId = data?.statusId || data?.id || data;
+                if (!statusId) break;
+                removeStatus(statusId);
+                StatusDB.remove(statusId).catch(() => {});
+                SafeStorage.setJSON(LOCAL_STORAGE_KEYS.STATUSES, statuses);
+                SafeStorage.setJSON(LOCAL_STORAGE_KEYS.MY_STATUSES, myStatuses);
+                if (typeof notifyStatusObservers === 'function') notifyStatusObservers();
+                if (typeof renderStatusListInstantlyUI === 'function') {
+                    renderStatusListInstantlyUI();
+                }
+                logStatus('SUCCESS', `Realtime: status ${statusId} deleted`);
+                break;
+            }
+
+            case 'status_updated':
+            case 'status:updated': {
+                const statusId = data?.statusId || data?.id;
+                const updates  = data?.updates  || data;
+                if (!statusId) break;
+                updateStatus(statusId, updates);
+                // Refresh from IDB if we have the item
+                StatusDB.getAll().then(all => {
+                    const existing = all.find(s => String(s.id) === String(statusId));
+                    if (existing) {
+                        Object.assign(existing, updates);
+                        StatusDB.put(existing).catch(() => {});
+                    }
+                }).catch(() => {});
+                if (typeof notifyStatusObservers === 'function') notifyStatusObservers();
+                break;
+            }
+
+            case 'status:liked':
+            case 'status_liked': {
+                const statusId = data?.statusId || data?.id;
+                if (!statusId) break;
+                updateStatus(statusId, { likeCount: (statuses.find(s => s.id === statusId)?.likeCount || 0) + 1 });
+                break;
+            }
+
+            default:
+                break;
+        }
+    } catch (err) {
+        logStatus('FAILED', `handleRealtimeStatusEvent (${eventName}): ${err.message}`);
     }
 }
 
@@ -3304,7 +3414,9 @@ function handleParentMessage(event) {
                 return;
             }
 
-            if (!MessageValidator.validate(msg).valid) {
+            const _validResult = MessageValidator.validate(msg);
+            const _msgValid = typeof _validResult === 'object' && _validResult !== null ? _validResult.valid : _validResult;
+            if (!_msgValid) {
                 debugWarn(`Invalid message schema: ${msg.type}`);
                 return;
             }
@@ -3415,6 +3527,45 @@ if (msg.type === 'AUTH_READY') {
                         addStatus(status);
                     }
                 }
+                return;
+            }
+
+            // ── REAL-TIME: WebSocket events forwarded from parent socket bridge ──
+            // Handles both snake_case (socket.io) and colon-namespaced (backend emit) forms
+            if (
+                msg.type === 'REALTIME_EVENT' ||
+                msg.type === 'SOCKET_EVENT'   ||
+                msg.type === 'WS_EVENT'
+            ) {
+                const evtName = msg.event || msg.payload?.event || msg.payload?.type || '';
+                const evtData = msg.payload?.data || msg.data || msg.payload || {};
+                handleRealtimeStatusEvent(evtName, evtData);
+                return;
+            }
+
+            // Direct event types (parent broadcasts the event type directly)
+            if (
+                msg.type === 'new_status'      ||
+                msg.type === 'status:created'  ||
+                msg.type === 'status_created'
+            ) {
+                handleRealtimeStatusEvent('new_status', msg.payload || msg.data || msg);
+                return;
+            }
+
+            if (
+                msg.type === 'status_deleted'  ||
+                msg.type === 'status:deleted'
+            ) {
+                handleRealtimeStatusEvent('status_deleted', msg.payload || msg.data || msg);
+                return;
+            }
+
+            if (
+                msg.type === 'status:updated'  ||
+                msg.type === 'status_updated'
+            ) {
+                handleRealtimeStatusEvent('status_updated', msg.payload || msg.data || msg);
                 return;
             }
 
@@ -6160,11 +6311,15 @@ function handleEnhancedParentMessage(event) {
         
         const message = event.data;
         
-        if (!MessageValidator.validate(message).valid) {
+        const _vr2 = MessageValidator.validate(message);
+        const _mv2 = typeof _vr2 === 'object' && _vr2 !== null ? _vr2.valid : _vr2;
+        if (!_mv2) {
             return;
         }
         
-        const sanitizedMessage = MessageFirewall.sanitize(message);
+        // Skip HTML-encoding for trusted internal message types — sanitize corrupts API payloads/tokens
+        const _skipSanitize = ['API_RESPONSE', 'AUTH_READY', 'SESSION_DATA', 'PARENT_READY', 'SESSION', 'SESSION_ACTIVE', 'SESSION_UPDATE'].includes(message.type);
+        const sanitizedMessage = _skipSanitize ? message : MessageFirewall.sanitize(message);
         
         const messageKey = `${sanitizedMessage.type}:${sanitizedMessage.id || 'no-id'}:${sanitizedMessage.timestamp || Date.now()}`;
         if (state.messageCache.has(messageKey)) return;
@@ -7056,9 +7211,19 @@ let selectedDraft = null;
 let isBackgroundInitialized = false;
 let statusAuthBlocked = false;
 
+// Reset auth block when a new valid session arrives so retries work after login
+function resetStatusAuthBlock() {
+    if (statusAuthBlocked) {
+        statusAuthBlocked = false;
+        logStatus('SUCCESS', 'Auth block cleared — new session available');
+    }
+}
+
 function isAuthorizationFailure(error) {
     const message = String(error?.message || error || '');
-    return /401|unauthorized|forbidden/i.test(message);
+    // Also catch numeric status codes attached to error objects
+    const code = error?.statusCode || error?.status || 0;
+    return /401|unauthorized|forbidden/i.test(message) || code === 401 || code === 403;
 }
 
 const statusTypes = {
@@ -7213,6 +7378,102 @@ const LOCAL_STORAGE_KEYS = {
 };
 
 // =============================================
+// INDEXED-DB STATUS CACHE  (cache-first, offline-capable)
+// Store: "status"  — key = status id
+// =============================================
+const StatusDB = (() => {
+    const DB_NAME = 'knecta_status_db';
+    const DB_VERSION = 2;
+    const STORE = 'status';
+    let _db = null;
+
+    function open() {
+        if (_db) return Promise.resolve(_db);
+        return new Promise((resolve, reject) => {
+            if (!window.indexedDB) { reject(new Error('IndexedDB not supported')); return; }
+            const req = window.indexedDB.open(DB_NAME, DB_VERSION);
+            req.onupgradeneeded = (e) => {
+                const db = e.target.result;
+                if (!db.objectStoreNames.contains(STORE)) {
+                    const store = db.createObjectStore(STORE, { keyPath: 'id' });
+                    store.createIndex('userId', 'userId', { unique: false });
+                    store.createIndex('expiresAt', 'expiresAt', { unique: false });
+                    store.createIndex('createdAt', 'createdAt', { unique: false });
+                }
+            };
+            req.onsuccess = (e) => { _db = e.target.result; resolve(_db); };
+            req.onerror = (e) => reject(e.target.error);
+        });
+    }
+
+    function tx(mode) {
+        return open().then(db => db.transaction(STORE, mode).objectStore(STORE));
+    }
+
+    function promReq(req) {
+        return new Promise((res, rej) => {
+            req.onsuccess = () => res(req.result);
+            req.onerror  = () => rej(req.error);
+        });
+    }
+
+    async function putMany(items) {
+        if (!Array.isArray(items) || !items.length) return;
+        const store = await tx('readwrite');
+        for (const item of items) {
+            if (item && item.id) {
+                // Ensure expiresAt is set (24 h default)
+                if (!item.expiresAt) item.expiresAt = new Date(Date.now() + 86400000).toISOString();
+                store.put(item);
+            }
+        }
+    }
+
+    async function getAll() {
+        const store = await tx('readonly');
+        const all = await promReq(store.getAll());
+        // Filter out expired on read
+        const now = Date.now();
+        return (all || []).filter(s => !s.expiresAt || new Date(s.expiresAt).getTime() > now);
+    }
+
+    async function getAllMine(userId) {
+        if (!userId) return [];
+        const all = await getAll();
+        return all.filter(s => String(s.userId) === String(userId));
+    }
+
+    async function remove(id) {
+        const store = await tx('readwrite');
+        store.delete(id);
+    }
+
+    async function purgeExpired() {
+        const store = await tx('readwrite');
+        const all = await promReq(store.getAll());
+        const now = Date.now();
+        (all || []).forEach(s => {
+            if (s.expiresAt && new Date(s.expiresAt).getTime() <= now) store.delete(s.id);
+        });
+    }
+
+    async function put(item) {
+        if (!item || !item.id) return;
+        if (!item.expiresAt) item.expiresAt = new Date(Date.now() + 86400000).toISOString();
+        const store = await tx('readwrite');
+        store.put(item);
+    }
+
+    return { open, putMany, getAll, getAllMine, remove, put, purgeExpired };
+})();
+
+// Initialise DB early and purge stale entries
+StatusDB.open().then(() => StatusDB.purgeExpired()).catch(() => {});
+
+// Periodic expiry cleanup (every 5 min)
+setInterval(() => StatusDB.purgeExpired().catch(() => {}), 5 * 60 * 1000);
+
+// =============================================
 // INSTANT UI RENDERING WITH CACHED DATA (CACHE ONLY, NOT PRIMARY)
 // =============================================
 function initializeUIWithCachedData() {
@@ -7256,19 +7517,35 @@ function loadUserFromCache() {
 
 async function loadCachedDataInstantly() {
     try {
+        // ── CACHE-FIRST: load from IndexedDB (persistent, offline-capable) ──
+        try {
+            const idbAll = await StatusDB.getAll();
+            if (idbAll && idbAll.length > 0) {
+                statuses = idbAll.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+                const uid = getSessionUserId();
+                if (uid) myStatuses = idbAll.filter(s => String(s.userId) === String(uid));
+                logStatus('SUCCESS', `IndexedDB cache: ${statuses.length} statuses loaded instantly`);
+                // Notify UI immediately so the list renders before any API call
+                if (typeof notifyStatusObservers === 'function') notifyStatusObservers();
+            }
+        } catch (_idbErr) {
+            // IndexedDB unavailable — fall through to SafeStorage below
+        }
+
+        // ── FALLBACK: SafeStorage (memory / localStorage) ──
         const statusesData = await SafeStorage.getJSON(LOCAL_STORAGE_KEYS.STATUSES);
-        if (statusesData) {
+        if (statusesData && (!statuses || statuses.length === 0)) {
             try { statuses = statusesData || []; } catch { statuses = []; }
             
             const statusKey = 'statuses_cached';
             if (!_loggedMessages.has(statusKey)) {
                 _loggedMessages.add(statusKey);
-                logStatus('INFO', `Loaded ${statuses.length} statuses from cache`);
+                logStatus('INFO', `Loaded ${statuses.length} statuses from SafeStorage cache`);
             }
         }
         
         const myStatusesData = await SafeStorage.getJSON(LOCAL_STORAGE_KEYS.MY_STATUSES);
-        if (myStatusesData) {
+        if (myStatusesData && (!myStatuses || myStatuses.length === 0)) {
             try { myStatuses = myStatusesData || []; } catch { myStatuses = []; }
         }
         
@@ -7444,6 +7721,8 @@ async function loadStatusesInBackground() {
             if (typeof filterStatusesByPrivacy !== 'undefined') statuses = filterStatusesByPrivacy(statuses);
             statuses.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
             SafeStorage.setJSON(LOCAL_STORAGE_KEYS.STATUSES, statuses);
+            // Persist to IndexedDB for offline-first on next load
+            StatusDB.putMany(statuses).catch(() => {});
             logStatus('SUCCESS', `Loaded ${statuses.length} statuses`);
         }
     } catch (error) {
@@ -7501,6 +7780,8 @@ async function loadMyStatusesInBackground() {
         if (Array.isArray(list)) {
             myStatuses = list;
             SafeStorage.setJSON(LOCAL_STORAGE_KEYS.MY_STATUSES, myStatuses);
+            // Persist to IndexedDB so my statuses survive offline
+            StatusDB.putMany(myStatuses).catch(() => {});
             logStatus('SUCCESS', `Loaded ${myStatuses.length} my statuses`);
         }
     } catch (error) {
@@ -7510,12 +7791,19 @@ async function loadMyStatusesInBackground() {
             return;
         }
         logStatus('FAILED', `loadMyStatusesInBackground: ${error.message}`);
-        // Serve cache on failure so UI shows previous statuses
+        // Serve IndexedDB cache first, fall back to SafeStorage
         try {
-            const cached = await SafeStorage.getJSON(LOCAL_STORAGE_KEYS.MY_STATUSES);
-            if (cached && Array.isArray(cached) && cached.length > 0) {
-                myStatuses = cached;
-                logStatus('INFO', `Serving ${cached.length} cached my-statuses after fetch failure`);
+            const uid = getSessionUserId();
+            const idbMine = uid ? await StatusDB.getAllMine(uid) : [];
+            if (idbMine.length > 0) {
+                myStatuses = idbMine;
+                logStatus('INFO', `Serving ${idbMine.length} IndexedDB my-statuses after fetch failure`);
+            } else {
+                const cached = await SafeStorage.getJSON(LOCAL_STORAGE_KEYS.MY_STATUSES);
+                if (cached && Array.isArray(cached) && cached.length > 0) {
+                    myStatuses = cached;
+                    logStatus('INFO', `Serving ${cached.length} cached my-statuses after fetch failure`);
+                }
             }
         } catch (_) {}
         throw error;
@@ -8634,9 +8922,11 @@ async function syncPendingData() {
         const stillQueued = [];
         for (const statusData of offlineQueue) {
             let posted = false;
+            let serverStatus = null;
             for (let attempt = 1; attempt <= 3 && !posted; attempt++) {
                 try {
-                    await makeApiRequest('/api/status', 'POST', statusData);
+                    const res = await makeApiRequest('/api/status', 'POST', statusData);
+                    serverStatus = res?.status || res?.data?.status || null;
                     posted = true;
                 } catch (err) {
                     if (attempt < 3) {
@@ -8644,13 +8934,35 @@ async function syncPendingData() {
                     }
                 }
             }
-            if (!posted) stillQueued.push(statusData);
+            if (posted) {
+                // Remove the offline-prefixed temp entry from IndexedDB
+                if (statusData._tempId) {
+                    StatusDB.remove(statusData._tempId).catch(() => {});
+                    // Also evict from in-memory arrays
+                    statuses    = statuses.filter(s => s.id !== statusData._tempId);
+                    myStatuses  = myStatuses.filter(s => s.id !== statusData._tempId);
+                }
+                // Save the real server status to IDB
+                if (serverStatus) {
+                    StatusDB.put(serverStatus).catch(() => {});
+                    if (!statuses.find(s => s.id === serverStatus.id)) statuses.unshift(serverStatus);
+                    if (!myStatuses.find(s => s.id === serverStatus.id)) myStatuses.unshift(serverStatus);
+                }
+            } else {
+                stillQueued.push(statusData);
+            }
         }
         if (stillQueued.length > 0) {
             SafeStorage.setJSON(LOCAL_STORAGE_KEYS.OFFLINE_QUEUE, stillQueued);
             logStatus('WARNING', `syncPendingData: ${stillQueued.length} status(es) still queued after retries`);
         } else {
             SafeStorage.remove(LOCAL_STORAGE_KEYS.OFFLINE_QUEUE);
+        }
+        // Refresh UI with synced data
+        if (offlineQueue.length > stillQueued.length) {
+            SafeStorage.setJSON(LOCAL_STORAGE_KEYS.STATUSES, statuses);
+            SafeStorage.setJSON(LOCAL_STORAGE_KEYS.MY_STATUSES, myStatuses);
+            if (typeof notifyStatusObservers === 'function') notifyStatusObservers();
         }
 
         // ── 3. Force a fresh data pull (bypassing TTL) ────────────────────────

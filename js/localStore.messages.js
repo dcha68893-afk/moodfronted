@@ -12,21 +12,26 @@
         return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
     }
 
-    function normalizeMessage(partial) {
-        const message = { ...(partial || {}) };
-        const id = String(message.id || message.localId || message.serverId || uuid('msg'));
-        const chatId = String(message.chatId || message.conversationId || message.groupId || 'unknown');
+    function normalizeMessage(partial, existing = null) {
+        const message = { ...(existing || {}), ...(partial || {}) };
+        const stableId = existing?.id || message.localId || message.id || message.serverId || uuid('msg');
+        const id = String(stableId);
+        const chatId = String(message.chatId || message.conversationId || message.groupId || existing?.chatId || 'unknown');
+        const createdAt = message.createdAt || message.timestamp || existing?.createdAt || now();
         return {
             ...message,
             id,
-            localId: id,
-            serverId: message.serverId ? String(message.serverId) : null,
+            localId: String(message.localId || existing?.localId || id),
+            serverId: message.serverId != null
+                ? String(message.serverId)
+                : (message.id && String(message.id) !== id ? String(message.id) : (existing?.serverId || null)),
             chatId,
             conversationId: chatId,
-            createdAt: message.createdAt || message.timestamp || now(),
+            createdAt,
+            timestamp: message.timestamp || createdAt,
             updatedAt: now(),
-            status: message.status || 'pending',
-            isLocalOnly: message.isLocalOnly !== false
+            status: message.status || existing?.status || 'pending',
+            isLocalOnly: message.isLocalOnly !== false && !message.serverId
         };
     }
 
@@ -60,9 +65,32 @@
             return this._readyPromise;
         }
 
+        async _findExistingMessage(partial) {
+            const candidate = partial || {};
+            const idsToTry = [
+                candidate.localId,
+                candidate.id,
+                candidate.serverId
+            ].filter(Boolean).map(String);
+
+            for (const id of idsToTry) {
+                const direct = await window.AppCache.get('messages', id);
+                if (direct) return direct;
+            }
+
+            if (candidate.serverId || candidate.id) {
+                const serverId = String(candidate.serverId || candidate.id);
+                const byServerId = await this.getMessageByServerId(serverId);
+                if (byServerId) return byServerId;
+            }
+
+            return null;
+        }
+
         async saveMessage(partial) {
             await this.ready();
-            const record = normalizeMessage(partial);
+            const existing = await this._findExistingMessage(partial);
+            const record = normalizeMessage(partial, existing);
             const saved = await window.AppCache.save('messages', record);
             console.log('[CACHE] Saved:', 'messages');
             return saved;
@@ -97,7 +125,14 @@
 
         async updateMessage(id, patch) {
             await this.ready();
-            return window.AppCache.update('messages', String(id), { ...(patch || {}), updatedAt: now() });
+            const existing = await this._findExistingMessage({ id });
+            if (!existing) return null;
+            return this.saveMessage({
+                ...existing,
+                ...(patch || {}),
+                id: existing.id,
+                localId: existing.localId || existing.id
+            });
         }
 
         async updateMessageStatus(id, status, extra = {}) {
@@ -105,10 +140,17 @@
         }
 
         async confirmMessage(localId, serverId, serverData = {}) {
-            const existing = await this.getMessageById(localId);
+            const existing = await this._findExistingMessage({
+                id: localId,
+                localId,
+                serverId
+            });
             if (!existing) return null;
-            return this.updateMessage(localId, {
+            return this.saveMessage({
+                ...existing,
                 ...serverData,
+                id: existing.id,
+                localId: existing.localId || String(localId),
                 serverId: String(serverId),
                 status: serverData.status || 'sent',
                 isLocalOnly: false,
@@ -119,23 +161,13 @@
         async mergeServerMessages(chatId, serverMessages) {
             const normalized = [];
             for (const item of (serverMessages || [])) {
-                const existing = item.id ? await this.getMessageByServerId(item.id) : null;
-                if (existing) {
-                    normalized.push(await this.updateMessage(existing.id, {
-                        ...item,
-                        serverId: String(item.id),
-                        chatId: String(chatId),
-                        isLocalOnly: false
-                    }));
-                } else {
-                    normalized.push(await this.saveMessage({
-                        ...item,
-                        serverId: item.id ? String(item.id) : null,
-                        chatId: String(chatId),
-                        isLocalOnly: false,
-                        status: item.status || 'delivered'
-                    }));
-                }
+                normalized.push(await this.saveMessage({
+                    ...item,
+                    serverId: item.id ? String(item.id) : (item.serverId ? String(item.serverId) : null),
+                    chatId: String(chatId),
+                    isLocalOnly: false,
+                    status: item.status || 'delivered'
+                }));
             }
             return normalized;
         }

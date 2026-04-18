@@ -207,6 +207,8 @@
         _hasTriggeredInitialDataFetch: false,
         _pendingFetchTimer: null,
         _lastDataFetchAt: 0,
+        _lastLoggedLifecycleState: null,
+        _fetchRetryScheduled: false,
         
         init() {
             if (this._initialized) return this;
@@ -702,6 +704,10 @@
             const coreUserId = getMessagesCore()?.getCurrentUserId?.();
             
             if (coreHasSession && coreUserId && typeof coreUserId === 'number' && coreUserId !== 0) {
+                // Already correct — skip entirely to avoid log/fetch cascade
+                if (this.state.sessionValid && this.state.lifecycleState === LIFECYCLE_STATES.ACTIVE) {
+                    return false;
+                }
                 if (!this.state.sessionValid || this.state.lifecycleState !== LIFECYCLE_STATES.ACTIVE) {
                     console.log('[UIStateManager] Force syncing session state - core has valid session');
                     this.state.sessionValid = true;
@@ -779,7 +785,10 @@
                 `);
             }
             
-            console.log(`[messagesUI] Lifecycle: ${lifecycleState}`);
+            if (lifecycleState !== this._lastLoggedLifecycleState) {
+                console.log(`[messagesUI] Lifecycle: ${lifecycleState}`);
+                this._lastLoggedLifecycleState = lifecycleState;
+            }
             
             const hasSession = UIFailsafe.hasValidSession();
             this._updateUIInteractionState(info.action && hasSession);
@@ -820,14 +829,21 @@
             const coreIsActive = coreState?.state === 'ACTIVE';
             
             if (!coreIsActive) {
-                console.log('[messagesUI] Core not ACTIVE yet, scheduling retry for data fetch');
-                this._pendingFetchTimer = setTimeout(() => {
-                    this._pendingFetchTimer = null;
-                    const coreStateRetry = getMessagesCore()?.getState?.();
-                    if (coreStateRetry?.state === 'ACTIVE') {
-                        this._triggerRealDataFetch();
-                    }
-                }, 500);
+                // Schedule exactly ONE retry — do not log on every attempt.
+                // The messagesLifecycleChange event listener will fire _triggerRealDataFetch
+                // again once the core actually reaches ACTIVE.
+                if (!this._fetchRetryScheduled) {
+                    this._fetchRetryScheduled = true;
+                    this._pendingFetchTimer = setTimeout(() => {
+                        this._pendingFetchTimer = null;
+                        this._fetchRetryScheduled = false;
+                        const retryState = getMessagesCore()?.getState?.();
+                        if (retryState?.state === 'ACTIVE') {
+                            this._triggerRealDataFetch();
+                        }
+                        // If still not ACTIVE, stop — the lifecycle event will retry later.
+                    }, 1000);
+                }
                 return;
             }
             
@@ -1311,11 +1327,38 @@
         },
 
         _showOfflineUI() {
-            return;
+            // FIX: Show a non-blocking amber banner — never hide or block the chat UI.
+            // The message list stays interactive using IndexedDB cached data.
+            let banner = document.getElementById('kyn-offline-banner');
+            if (!banner) {
+                banner = document.createElement('div');
+                banner.id = 'kyn-offline-banner';
+                banner.setAttribute('role', 'status');
+                banner.setAttribute('aria-live', 'polite');
+                banner.style.cssText = [
+                    'position:fixed',
+                    'top:0',
+                    'left:0',
+                    'right:0',
+                    'z-index:99999',
+                    'background:#d97706',
+                    'color:#fff',
+                    'text-align:center',
+                    'padding:6px 16px',
+                    'font-size:13px',
+                    'font-weight:500',
+                    'letter-spacing:0.01em',
+                    'pointer-events:none'
+                ].join(';');
+                document.body.appendChild(banner);
+            }
+            banner.textContent = 'Offline — showing cached data';
+            banner.style.display = 'block';
         },
 
         _hideOfflineUI() {
-            return;
+            const banner = document.getElementById('kyn-offline-banner');
+            if (banner) banner.style.display = 'none';
         },
 
         getFullState() {
@@ -4290,7 +4333,7 @@ Type: ${message.type || 'text'}`;
                                 core.setReplyToMessage?.(null);
                             }
                         }
-                        UIRenderer.showNotification('Message sent');
+                        UIRenderer.showNotification(response.queued ? 'Message queued for sync' : 'Message sent');
                     } else {
                         UIRenderer.showNotification('Failed to send', 'error');
                     }

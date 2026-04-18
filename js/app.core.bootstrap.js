@@ -699,6 +699,26 @@
 
   function userLoggedIn() {
     try {
+      // ── OFFLINE-FIRST: Check persisted auth FIRST, before any module ──────
+      // This ensures the app opens immediately even if auth modules haven't
+      // loaded yet or the device is offline.
+      try {
+        const rawAuth = localStorage.getItem("kynecta_auth");
+        if (rawAuth) {
+          const auth = JSON.parse(rawAuth);
+          if (auth && auth.token) {
+            return true; // local session exists → consider logged in
+          }
+        }
+      } catch (_) {}
+
+      // Legacy token keys fallback
+      const legacyKeys = ["authToken", "accessToken", "token", "moodchat_token", "USER_TOKEN", "kynecta_token", "moodchat_jwt_token"];
+      for (const key of legacyKeys) {
+        if (localStorage.getItem(key)) return true;
+      }
+
+      // In-memory checks (modules may not be ready on first load)
       if (window.currentUser) return true;
 
       if (
@@ -714,8 +734,7 @@
         if (user) return true;
       }
 
-      const token = localStorage.getItem("accessToken") || localStorage.getItem("moodchat_jwt_token");
-      return !!token;
+      return false;
     } catch (error) {
       console.warn("⚠️ userLoggedIn check failed:", error);
       return false;
@@ -751,25 +770,12 @@
     console.log(`🔐 Auth check: loggedIn=${isLoggedIn}, publicPage=${isPublicPage}`);
 
     if (!isLoggedIn && !isPublicPage) {
-      console.log("🔐 User not logged in, redirecting to login");
-
-      const returnPath = window.location.pathname + window.location.search;
-      try {
-        sessionStorage.setItem("moodchat_return_path", returnPath);
-      } catch (error) {
-        console.warn("⚠️ Failed to store return path:", error);
-      }
-
-      if (
-        !window.location.pathname.includes("index.html") &&
-        !window.location.pathname.includes("index.html") &&
-        !window.location.pathname.includes("/")
-      ) {
-        setTimeout(() => {
-          window.location.href = "/index.html";
-        }, 100);
-      }
-
+      // ── OFFLINE-FIRST: Never hard-redirect during initialization ──────────
+      // If we have no local session at all, the UI layer (showAuthUI / showLogin)
+      // will handle presenting the login form. We do NOT redirect here because:
+      //   1. We may be offline and modules haven't hydrated yet
+      //   2. A hard redirect breaks the back-stack and creates redirect loops
+      console.log("🔐 No local session found — auth UI will be shown by UI flow");
       return false;
     }
 
@@ -3504,56 +3510,63 @@
       }
 
       if (!authState.hasToken) {
-        console.log("🔐 No token found: Redirecting to auth");
+        // ── OFFLINE-FIRST: No local session at all — show login form ──────────
+        // Do NOT redirect; show the auth UI inline so the user can log in.
+        console.log("🔐 No local session — showing auth UI");
 
         if (window.app && window.app._dependencyGraph) {
           window.app._dependencyGraph.uiFlow.decision = "no_token";
-          window.app._dependencyGraph.uiFlow.action = "redirect_to_auth";
+          window.app._dependencyGraph.uiFlow.action = "show_auth_ui";
         }
 
-        this.redirectToAuth("No authentication token found");
+        this.showAuthUI();
         return;
       }
 
-      if (!authState.tokenValid) {
-        console.log("🔐 Token needs validation");
+      // ── OFFLINE-FIRST: Token exists locally → OPEN APP IMMEDIATELY ────────
+      // We trust the local session. Background validation will silently
+      // verify with the server (if online) and only log out on hard 401.
+      console.log("✅ Local session found — opening app immediately (offline-first)");
 
-        if (window.app && window.app._dependencyGraph) {
-          window.app._dependencyGraph.uiFlow.decision = "token_needs_validation";
-          window.app._dependencyGraph.uiFlow.action = "validate_token";
-        }
+      if (window.app && window.app._dependencyGraph) {
+        window.app._dependencyGraph.uiFlow.decision = "local_session_present";
+        window.app._dependencyGraph.uiFlow.action = "show_dashboard_ui_immediately";
+      }
 
-        const validationResult = await this.validateToken();
+      this.showDashboardUI();
 
-        if (validationResult.valid) {
-          console.log("✅ Token validated successfully");
+      // ── BACKGROUND VALIDATION — non-blocking ─────────────────────────────
+      // Only runs when online. A 401 triggers logout; network errors are ignored.
+      if (navigator.onLine) {
+        console.log("🔄 [BOOT] Starting background token validation...");
+        this.validateToken()
+          .then((validationResult) => {
+            if (validationResult && validationResult.valid === false) {
+              console.warn("⚠️ [BOOT] Background validation: token rejected by server — logging out");
 
-          if (window.app && window.app._dependencyGraph) {
-            window.app._dependencyGraph.uiFlow.tokenValidation = "success";
-            window.app._dependencyGraph.uiFlow.action = "show_dashboard_ui";
-          }
+              if (window.app && window.app._dependencyGraph) {
+                window.app._dependencyGraph.uiFlow.backgroundValidation = "failed";
+                window.app._dependencyGraph.uiFlow.backgroundValidationReason = validationResult.reason;
+              }
 
-          this.showDashboardUI();
-        } else {
-          console.log("❌ Token validation failed:", validationResult.reason);
+              // Give the user a moment to see the app before forcing logout
+              setTimeout(() => {
+                this.redirectToAuth("Session expired — please log in again");
+              }, 500);
+            } else {
+              console.log("✅ [BOOT] Background validation: token is valid");
 
-          if (window.app && window.app._dependencyGraph) {
-            window.app._dependencyGraph.uiFlow.tokenValidation = "failed";
-            window.app._dependencyGraph.uiFlow.tokenValidationReason = validationResult.reason;
-            window.app._dependencyGraph.uiFlow.action = "redirect_to_auth";
-          }
-
-          this.redirectToAuth(`Token validation failed: ${validationResult.reason}`);
-        }
+              if (window.app && window.app._dependencyGraph) {
+                window.app._dependencyGraph.uiFlow.backgroundValidation = "success";
+              }
+            }
+          })
+          .catch((err) => {
+            // Network error / offline — silently ignore, app stays open
+            console.log("📴 [BOOT] Background validation skipped (network error):", err && err.message);
+          });
       } else {
-        console.log("✅ Token already valid: Showing dashboard");
-
-        if (window.app && window.app._dependencyGraph) {
-          window.app._dependencyGraph.uiFlow.decision = "token_already_valid";
-          window.app._dependencyGraph.uiFlow.action = "show_dashboard_ui";
-        }
-
-        this.showDashboardUI();
+        console.log("📴 [BOOT] Device is offline — skipping background validation, app stays open");
       }
 
       if (window.app && window.app._dependencyGraph) {
@@ -4665,8 +4678,11 @@
       console.log("📦 Loading app content with session-aware sequencing...");
 
       if (!userLoggedIn()) {
-        console.log("🔐 User not logged in, redirecting to login instead of loading content");
-        this.redirectToAuth("User not logged in");
+        // ── OFFLINE-FIRST: Never hard-redirect from content loading ──────────
+        // If local session is missing, show auth UI. A redirect here would break
+        // offline scenarios and cause redirect loops on slow connections.
+        console.log("🔐 No local session in loadAppContent — showing auth UI");
+        this.showAuthUI();
         return;
       }
 

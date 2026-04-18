@@ -1785,6 +1785,80 @@
     <link rel="stylesheet" href="/css/suppress-webgl.css">
 </head>
 <body>
+    <!--
+        ─────────────────────────────────────────────────────────────────
+        THEME FLASH PREVENTION — inline, runs before any CSS loads
+        Reads app_settings_global (AppSettings key) or knecta_settings_cache
+        and applies data-theme + CSS variables immediately.
+        ─────────────────────────────────────────────────────────────────
+    -->
+    <script>
+    (function() {
+        function _readTheme() {
+            try {
+                var raw = localStorage.getItem('app_settings_global');
+                if (raw) {
+                    var p = JSON.parse(raw);
+                    if (p && p.data && p.data.appearance && p.data.appearance.theme) return p.data.appearance.theme;
+                }
+            } catch (_) {}
+            try {
+                var raw2 = localStorage.getItem('knecta_settings_cache');
+                if (raw2) {
+                    var p2 = JSON.parse(raw2);
+                    var d = p2.data || p2;
+                    if (d && d.appearance && d.appearance.theme) return d.appearance.theme;
+                    if (d && d.theme) return d.theme;
+                }
+            } catch (_) {}
+            try {
+                var raw3 = localStorage.getItem('moodchat_settings_default');
+                if (raw3) {
+                    var p3 = JSON.parse(raw3);
+                    if (p3 && p3.appearance && p3.appearance.theme) return p3.appearance.theme;
+                }
+            } catch (_) {}
+            return null;
+        }
+        var theme = _readTheme();
+        if (theme) {
+            var root = document.documentElement;
+            root.setAttribute('data-theme', theme);
+            root.classList.add('theme-' + theme);
+            if (theme === 'dark') {
+                root.style.setProperty('--bg-color', '#1a1a1a');
+                root.style.setProperty('--text-color', '#ffffff');
+                root.style.setProperty('--text-primary', '#ffffff');
+                root.style.setProperty('--sidebar-bg', '#252525');
+                root.style.setProperty('--card-bg', '#2d2d2d');
+                root.style.setProperty('--border-color', '#404040');
+                root.style.setProperty('--hover-color', '#363636');
+            }
+        }
+        // Also read accent color
+        try {
+            var accentRaw = localStorage.getItem('app_settings_global');
+            if (accentRaw) {
+                var accentP = JSON.parse(accentRaw);
+                var accent = accentP && accentP.data && accentP.data.appearance && accentP.data.appearance.accentColor;
+                if (accent) document.documentElement.style.setProperty('--primary-color', accent);
+            }
+        } catch (_) {}
+        // Font size
+        try {
+            var fsRaw = localStorage.getItem('app_settings_global');
+            if (fsRaw) {
+                var fsP = JSON.parse(fsRaw);
+                var fs = fsP && fsP.data && fsP.data.appearance && fsP.data.appearance.fontSize;
+                if (fs) {
+                    document.documentElement.style.setProperty('--base-font-size', fs + 'px');
+                    document.documentElement.style.fontSize = fs + 'px';
+                }
+            }
+        } catch (_) {}
+    })();
+    </script>
+
     <!-- Offline Mode Badge - Only shown when offline -->
     <div class="offline-badge" id="offlineBadge">
         <i class="fas fa-wifi-slash"></i> Offline
@@ -2255,18 +2329,46 @@
     <!-- Fallback color picker (hidden) -->
     <div id="fallbackColorPickerContainer" style="display: none;"></div>
 
-    <!-- Local-first layer — load BEFORE settings-core.js -->
-<script src="/js/localstore.settings.js"></script>
-<script src="/js/settingsschema.validator.js"></script>
-<script src="/js/settingsSync.engine.js"></script>
-<script src="/js/settings-core.local-first.patch.js"></script>
+    <!--
+        ═══════════════════════════════════════════════════════════════════
+        SCRIPT LOAD ORDER — DO NOT CHANGE
+        ═══════════════════════════════════════════════════════════════════
+        1. AppSettings       — single source of truth, boots from localStorage
+        2. Propagation       — subscribes to AppSettings, applies DOM effects
+        3. Module subs       — per-module apply functions + auto-subscriptions
+        4. Local store layer — localstore.settings + schema validator + sync
+        5. Core patch        — ties localstore into the pipeline
+        6. settings-core     — SettingsState, lifecycle, backend sync
+        7. settings-ui       — UI rendering, section loading
+        8. UI patch          — offline indicator, sync badge
+        ═══════════════════════════════════════════════════════════════════
+    -->
 
-<!-- Existing scripts — UNCHANGED -->
-<script type="module" src="settings-core.js"></script>
-<script type="module" src="settings-ui.js"></script>
+    <!-- ① Single source of truth — must come first -->
+    <script src="/js/AppSettings.js"></script>
 
-<!-- UI additions — load AFTER settings-ui.js -->
-<script src="/js/settings-ui.local-first.patch.js"></script>
+    <!-- ② Global propagation — all modules react to changes -->
+    <script src="/js/settings-global-propagation.js"></script>
+
+    <!-- ③ Per-module apply functions + auto-subscription bootstrapper -->
+    <script src="/js/settings-module-subscriptions.js"></script>
+
+    <!-- ④ Local-first storage layer -->
+    <script src="/js/localstore.settings.js"></script>
+    <script src="/js/settingsschema.validator.js"></script>
+    <script src="/js/settingsSync.engine.js"></script>
+
+    <!-- ⑤ Patch: ties LocalStoreSettings into SettingsState + AppSettings -->
+    <script src="/js/settings-core.local-first.patch.js"></script>
+
+    <!-- ⑥ Core module (SettingsState, lifecycle, backend sync, UI sections) -->
+    <script type="module" src="settings-core.js"></script>
+
+    <!-- ⑦ UI rendering layer -->
+    <script type="module" src="settings-ui.js"></script>
+
+    <!-- ⑧ UI additions — offline indicator, sync badge, sync toggle row -->
+    <script src="/js/settings-ui.local-first.patch.js"></script>
 
     <!-- =============================================
          INLINE ERROR BOUNDARY AND INITIALIZATION - SILENT
@@ -2516,6 +2618,93 @@
                 };
             });
             
+            // ═══════════════════════════════════════════════════════════════
+            // APPSETTINGS LIVE BINDINGS
+            // Connect the static HTML inputs (profile section placeholder) to
+            // AppSettings so they update the store without waiting for JS modules.
+            // ═══════════════════════════════════════════════════════════════════
+
+            function _bindInputToAppSettings(id, settingPath, eventType) {
+                eventType = eventType || 'change';
+                var el = document.getElementById(id);
+                if (!el) return;
+                el.addEventListener(eventType, function() {
+                    var val = el.type === 'checkbox' ? el.checked : el.value;
+                    if (window.AppSettings) window.AppSettings.set(settingPath, val);
+                    // Also fire __updateSetting for backwards compat with settings-core
+                    if (window.__updateSetting) {
+                        var parts = settingPath.split('.');
+                        var section = parts[0];
+                        var key = parts.slice(1).join('.');
+                        window.__updateSetting(section, key, val);
+                    }
+                });
+            }
+
+            // Profile section inputs
+            _bindInputToAppSettings('displayNameInput',        'account.displayName',        'input');
+            _bindInputToAppSettings('usernameInput',           'account.username',           'input');
+            _bindInputToAppSettings('bioInput',                'account.bio',                'input');
+            _bindInputToAppSettings('emailInput',              'account.email',              'input');
+            _bindInputToAppSettings('profileVisibilitySelect', 'privacy.profileVisibility',  'change');
+            _bindInputToAppSettings('lastSeenToggle',          'privacy.lastSeen',           'change');
+
+            // Sync badge — listen to AppSettings state changes
+            window.addEventListener('appSettingsChanged', function(e) {
+                var d = e.detail;
+                if (!d || !d.path) return;
+                // Visual "saved" pulse on the save button
+                var saveBtn = document.getElementById('saveSectionBtn');
+                if (saveBtn) {
+                    saveBtn.classList.add('saved-animation');
+                    setTimeout(function() { saveBtn.classList.remove('saved-animation'); }, 600);
+                }
+            });
+
+            // Pre-populate the static profile inputs from AppSettings once it's ready
+            function _populateFromAppSettings() {
+                if (!window.AppSettings) return;
+                var s = window.AppSettings.getAll();
+                var el;
+
+                el = document.getElementById('displayNameInput');
+                if (el && s.account && s.account.displayName) el.value = s.account.displayName;
+
+                el = document.getElementById('usernameInput');
+                if (el && s.account && s.account.username) el.value = s.account.username;
+
+                el = document.getElementById('bioInput');
+                if (el && s.account && s.account.bio) {
+                    el.value = s.account.bio;
+                    // Update counter
+                    var counter = document.getElementById('bioCounter');
+                    if (counter) counter.textContent = s.account.bio.length;
+                }
+
+                el = document.getElementById('emailInput');
+                if (el && s.account && s.account.email) el.value = s.account.email;
+
+                el = document.getElementById('profileVisibilitySelect');
+                if (el && s.privacy && s.privacy.profileVisibility) el.value = s.privacy.profileVisibility;
+
+                el = document.getElementById('lastSeenToggle');
+                if (el && s.privacy) el.checked = s.privacy.lastSeen !== false;
+
+                el = document.getElementById('userNamePreview');
+                if (el && s.account && s.account.displayName) el.textContent = s.account.displayName;
+            }
+
+            if (window.AppSettings) {
+                _populateFromAppSettings();
+                window.AppSettings.subscribe(function() { _populateFromAppSettings(); });
+            } else {
+                window.addEventListener('appSettingsReady', _populateFromAppSettings);
+            }
+
+            // ═══════════════════════════════════════════════════════════════
+            // END APPSETTINGS LIVE BINDINGS
+            // ═══════════════════════════════════════════════════════════════
+
             // =============================================
             // PERFORMANCE MARKERS - SILENT
             // =============================================

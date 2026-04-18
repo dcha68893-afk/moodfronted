@@ -217,9 +217,12 @@
 
         async _fetchServerMessages(chatId, since = 0, limit = 100) {
             const token   = this._getToken();
+            // FIX: Canonical base URL resolution — avoids undefined from deep optional chains
             const baseUrl =
                 window.api?.env?.getBaseUrl?.() ||
                 window.__getApiBase?.() ||
+                window.AppConfig?.apiBase ||
+                window.Environment?.apiBaseUrl ||
                 'http://localhost:4000/api';
 
             let url = `${baseUrl}/messages?chatId=${chatId}&limit=${limit}`;
@@ -248,14 +251,18 @@
         }
 
         _getToken() {
-            const storage = window.AppStorage;
+            // FIX: Single source of truth — reads from AppCache session first,
+            // then falls back to known localStorage keys. Matches messageQueue_manager.js.
+            if (window.AppCache && typeof window.AppCache.getSession === 'function') {
+                const session = window.AppCache.getSession();
+                if (session && session.token) return session.token;
+            }
             return window.__PARENT_SESSION__?.token
                 || window.AUTH_SESSION?.token
-                || storage?.get?.('token', null)
-                || storage?.get?.('moodchat_token', null)
-                || storage?.get?.('accessToken', null)
+                || localStorage.getItem('kynecta_auth') && (() => {
+                    try { return JSON.parse(localStorage.getItem('kynecta_auth'))?.token; } catch { return null; }
+                })()
                 || localStorage.getItem('token')
-                || localStorage.getItem('moodchat_token')
                 || localStorage.getItem('accessToken')
                 || null;
         }
@@ -288,7 +295,7 @@
                 setTimeout(() => this.syncAll(), 500);
             });
 
-            // After app is notified of incoming WS message
+            // After app is notified of incoming WS message (postMessage bridge)
             window.addEventListener('message', (event) => {
                 const data = event.data || {};
                 if (data.type === 'MESSAGE_RECEIVE' || data.type === 'NEW_MESSAGE') {
@@ -296,6 +303,72 @@
                     const chatId = msg.chatId || msg.conversationId;
                     if (chatId) this.ingestIncomingMessage(msg, chatId);
                 }
+            });
+
+            // FIX: Also handle real-time events from KynectaRealtime socket
+            if (window.KynectaRealtime) {
+                this._attachRealtimeListeners(window.KynectaRealtime);
+            } else {
+                // Attach when realtime manager becomes available
+                window.addEventListener('kyn:realtimeReady', () => {
+                    if (window.KynectaRealtime) this._attachRealtimeListeners(window.KynectaRealtime);
+                });
+            }
+        }
+
+        _attachRealtimeListeners(rt) {
+            // New inbound message from WebSocket
+            rt.on('message:new', (payload) => {
+                const chatId = payload?.chatId || payload?.conversationId;
+                if (chatId) this.ingestIncomingMessage(payload, chatId);
+            });
+
+            // Message edited — update local store
+            rt.on('message:edited', async (payload) => {
+                const localStore = window.KynectaLocalStore;
+                if (!localStore || !payload?.messageId) return;
+                const existing = await localStore.getMessageByServerId(String(payload.messageId));
+                if (existing) {
+                    await localStore.updateMessage(existing.id, {
+                        content: payload.content,
+                        isEdited: true,
+                        editedAt: payload.editedAt || Date.now()
+                    });
+                    this._emitChatUpdated(existing.chatId);
+                }
+            });
+
+            // Message deleted — mark locally
+            rt.on('message:deleted', async (payload) => {
+                const localStore = window.KynectaLocalStore;
+                if (!localStore || !payload?.messageId) return;
+                const existing = await localStore.getMessageByServerId(String(payload.messageId));
+                if (existing) {
+                    await localStore.deleteMessage(existing.id);
+                    this._emitChatUpdated(existing.chatId);
+                }
+            });
+
+            // Read receipts — update status
+            rt.on('message:read', async (payload) => {
+                const { chatId, messageIds, readBy } = payload || {};
+                if (!chatId || !Array.isArray(messageIds)) return;
+                const localStore = window.KynectaLocalStore;
+                if (!localStore) return;
+                for (const serverId of messageIds) {
+                    const existing = await localStore.getMessageByServerId(String(serverId));
+                    if (existing) await localStore.updateMessageStatus(existing.id, 'read', { readAt: Date.now() });
+                }
+                this._emitChatUpdated(chatId);
+            });
+
+            // Delivery confirmation
+            rt.on('message:delivered', async (payload) => {
+                if (!payload?.messageId) return;
+                const localStore = window.KynectaLocalStore;
+                if (!localStore) return;
+                const existing = await localStore.getMessageByServerId(String(payload.messageId));
+                if (existing) await localStore.updateMessageStatus(existing.id, 'delivered');
             });
         }
     }

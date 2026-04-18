@@ -598,14 +598,9 @@
     // =============================================
     function makeApiRequest(endpoint, method, data = null, params = null) {
         return new Promise((resolve, reject) => {
-            if (_demoModeEnabled) {
-                console.log(`[${MODULE_NAME}] Demo mode: returning mock data for ${endpoint}`);
-                const demoData = getDemoData(endpoint, method);
-                if (demoData) {
-                    resolve(demoData);
-                    return;
-                }
-            }
+            // FIX: Demo mode API intercept removed — all requests go to real backend.
+            // If unauthenticated, let the request fail naturally so callers can use
+            // IndexedDB cache as the offline fallback.
             
             const isReadOnly = (method === 'GET');
             if (!isReadOnly && !ensureActive(`API_REQUEST: ${endpoint}`)) {
@@ -1764,6 +1759,18 @@
         this._handleSessionData(data);
     }
     
+    // AUTH_READY carries the session before PARENT_READY arrives.
+    // Extract the session immediately so the state machine can progress.
+    if (data.type === 'AUTH_READY') {
+        const sessionData = (data.payload && (data.payload.session || data.payload)) || data;
+        const session = sessionData.session || sessionData;
+        if (session && session.token && session.userId) {
+            this._handleSessionData({ payload: session, type: 'SESSION_DATA' });
+        }
+        // If we are still in INITIALIZING we cannot transition yet, but the
+        // session is now stored so PARENT_READY (which comes next) will find it.
+    }
+    
     if (data.type === INCOMING_TYPES.PARENT_READY || data.type === INCOMING_TYPES.coreReady) {
         this._handleParentReady(data);
     }
@@ -1825,38 +1832,68 @@
                 console.log(`[${MODULE_NAME}] Session provided in PARENT_READY, userId: ${providedSession.userId}`);
                 SessionManager.setSession(providedSession);
             } else {
-                console.log(`[${MODULE_NAME}] No session in PARENT_READY payload, will wait for SESSION_DATA`);
-                if (_demoModeEnabled) {
-                    console.log(`[${MODULE_NAME}] Demo mode: creating mock session`);
-                    SessionManager.setSession({
-                        token: 'demo_token_12345',
-                        userId: 1001,
-                        user: { id: 1001, displayName: 'Me', username: 'me' }
-                    });
+                // No session in this payload — load offline cache for immediate display.
+                if (window.KynectaLocalStore) {
+                    window.KynectaLocalStore.getAllConversations().then(convs => {
+                        if (convs && convs.length > 0) {
+                            window.dispatchEvent(new CustomEvent('kyn:offlineCacheLoaded', { detail: { convs } }));
+                        }
+                    }).catch(() => {});
                 }
             }
             
-            if (currentState === LIFECYCLE_STATES.WAIT_PARENT) {
+            // Accept PARENT_READY from WAIT_PARENT, INITIALIZING or READY —
+            // AUTH_READY+SESSION_DATA can arrive before CHILD_READY completes
+            // the transition to WAIT_PARENT, so we must not silently drop this.
+            const canActivate = (
+                currentState === LIFECYCLE_STATES.WAIT_PARENT ||
+                currentState === LIFECYCLE_STATES.INITIALIZING ||
+                currentState === LIFECYCLE_STATES.READY
+            );
+            
+            if (canActivate) {
+                // Force the state machine to WAIT_PARENT if it hasn't got there yet,
+                // then immediately evaluate the session.
+                if (currentState === LIFECYCLE_STATES.INITIALIZING) {
+                    // INITIALIZING → READY → WAIT_PARENT chain (may already be done async)
+                    if (!childReadySent) {
+                        // Let the normal boot sequence finish; we stored the session above.
+                        // The boot sequence will call notifyChildReady → WAIT_PARENT → active.
+                        return;
+                    }
+                }
+                if (currentState === LIFECYCLE_STATES.READY && !childReadySent) {
+                    ParentConnectionManager.notifyChildReady();
+                }
+                
                 if (SessionManager.isAuthenticated()) {
-                    setState(LIFECYCLE_STATES.ACTIVE, 'parent_ready_with_valid_session');
+                    if (currentState !== LIFECYCLE_STATES.ACTIVE) {
+                        // Ensure we're at WAIT_PARENT before jumping to ACTIVE
+                        if (currentState === LIFECYCLE_STATES.READY) {
+                            setState(LIFECYCLE_STATES.WAIT_PARENT, 'parent_ready_bridge');
+                        }
+                        setState(LIFECYCLE_STATES.ACTIVE, 'parent_ready_with_valid_session');
+                    }
                     console.log(`[${MODULE_NAME}] ACTIVE (valid session)`);
-                    
                     initializeUISafe();
                     flushMessageQueue();
                     startDataFlow();
                 } else {
                     console.log(`[${MODULE_NAME}] WAITING_AUTH (no valid session yet)`);
-                    setState(LIFECYCLE_STATES.WAITING_AUTH, 'parent_ready_waiting_for_session');
-                    
+                    if (currentState === LIFECYCLE_STATES.READY) {
+                        setState(LIFECYCLE_STATES.WAIT_PARENT, 'parent_ready_bridge');
+                    }
+                    if (currentState === LIFECYCLE_STATES.WAIT_PARENT) {
+                        setState(LIFECYCLE_STATES.WAITING_AUTH, 'parent_ready_waiting_for_session');
+                    }
                     safeSend(OUTGOING_ACTIONS.REQUEST_SESSION, {
                         module: MODULE_NAME,
                         timestamp: Date.now()
                     }, { requireAck: false });
-                    
                     initializeUISafe();
                 }
             } else {
-                console.log(`[${MODULE_NAME}] PARENT_READY received in state: ${currentState} - ignoring (expected WAIT_PARENT)`);
+                console.log(`[${MODULE_NAME}] PARENT_READY received in state: ${currentState} - ignoring`);
             }
         },
 
@@ -1885,13 +1922,13 @@
                     userId: sessionData?.userId,
                     userIdType: typeof sessionData?.userId
                 });
-                if (_demoModeEnabled && !SessionManager.isAuthenticated()) {
-                    console.log('[ParentConnectionManager] Demo mode: creating mock session');
-                    SessionManager.setSession({
-                        token: 'demo_token_12345',
-                        userId: 1001,
-                        user: { id: 1001, displayName: 'Me', username: 'me' }
-                    });
+                // FIX: Never inject fake demo tokens. Show cached data only.
+                if (!SessionManager.isAuthenticated() && window.KynectaLocalStore) {
+                    window.KynectaLocalStore.getAllConversations().then(convs => {
+                        if (convs && convs.length > 0) {
+                            window.dispatchEvent(new CustomEvent('kyn:offlineCacheLoaded', { detail: { convs } }));
+                        }
+                    }).catch(() => {});
                 }
             }
         },
@@ -2251,26 +2288,20 @@
         },
         
         _loadDemoDataIfNeeded: function() {
-            if (_demoModeEnabled && (!this._conversations || this._conversations.length === 0)) {
-                console.log('[ChatManager] Loading demo chat data');
-                this._conversations = [...DEMO_CHATS.conversations];
-                this._rebuildMap();
-                this._saveToCache();
-                
-                if (!this._activeConversation && this._conversations.length > 0) {
-                    this._activeConversation = this._conversations[0];
+            // FIX: Never load fake demo data. Load from IndexedDB cache instead.
+            if (!this._conversations || this._conversations.length === 0) {
+                if (window.KynectaLocalStore) {
+                    window.KynectaLocalStore.getAllConversations().then(convs => {
+                        if (convs && convs.length > 0) {
+                            console.log('[ChatManager] Offline-first: loaded', convs.length, 'cached conversations');
+                            this._conversations = convs;
+                            this._rebuildMap();
+                            if (!this._activeConversation && this._conversations.length > 0) {
+                                this._activeConversation = this._conversations[0];
+                            }
+                        }
+                    }).catch(() => {});
                 }
-                
-                for (const [convId, messages] of Object.entries(DEMO_CHATS.messages)) {
-                    const key = `${LOCAL_STORAGE_KEYS.MESSAGES_PREFIX}${convId}`;
-                    SafeStorage.setJSON(key, messages);
-                    if (parseInt(convId) === this._activeConversation?.id) {
-                        this._messages = messages;
-                        this._rebuildMessagesMap();
-                    }
-                }
-                
-                this._notifySubscribers();
             }
         },
         
@@ -2423,10 +2454,9 @@
         
         async fetchConversations() {
             if (!SessionManager.isAuthenticated()) {
-                console.log('[ChatManager] Not authenticated, cannot fetch conversations');
-                if (_demoModeEnabled && (!this._conversations || this._conversations.length === 0)) {
-                    this._loadDemoDataIfNeeded();
-                }
+                console.log('[ChatManager] Not authenticated — loading conversations from cache');
+                // FIX: Always load cache, never demo data
+                this._loadDemoDataIfNeeded();
                 return;
             }
             
@@ -2455,20 +2485,21 @@
                 
                 if (chatsArray.length > 0) {
                     this.setConversations(chatsArray);
+                    // FIX: Also sync to local store for next offline boot
+                    if (window.KynectaSyncEngine) {
+                        window.KynectaSyncEngine.syncConversations(chatsArray);
+                    }
                     this._notifySuccess('Conversations loaded');
-                } else if (_demoModeEnabled) {
-                    this._loadDemoDataIfNeeded();
                 } else {
-                    this.setConversations([]);
-                    console.warn('[ChatManager] No conversations received');
+                    // FIX: Fall back to cache, not demo data
+                    this._loadDemoDataIfNeeded();
+                    this.setConversations(this._conversations || []);
+                    console.warn('[ChatManager] No conversations received from server');
                 }
             } catch (error) {
                 console.error('[ChatManager] Failed to fetch conversations:', error);
-                if (_demoModeEnabled) {
-                    this._loadDemoDataIfNeeded();
-                } else {
-                    this._notifyError(error.message);
-                }
+                // FIX: Load from cache on failure, not demo data
+                this._loadDemoDataIfNeeded();
             } finally {
                 this._loadingChats = false;
                 this._notifyLoading('chats', false);
@@ -2490,17 +2521,16 @@
                 return;
             }
             this._lastMessagesFetchAt.set(fetchKey, now);
-            
-            // OFFLINE-FIRST: Load from local store first (instant UI)
+
             if (window.KynectaLocalStore) {
                 try {
                     const localMsgs = await window.KynectaLocalStore.getMessagesByChat(conversationId, { limit: options.limit || 100 });
                     if (localMsgs && localMsgs.length > 0) {
                         this.setMessages(localMsgs);
                     }
-                } catch(_lsErr) {}
+                } catch (_lsErr) {}
             }
-            
+
             if (!navigator.onLine) {
                 console.log('[ChatManager] Offline mode - using local store data');
                 const cachedMessages = this.loadPreviousMessages(conversationId);
@@ -2510,38 +2540,56 @@
                 }
                 return;
             }
-            
+
             if (!SessionManager.isAuthenticated()) {
-                console.log('[ChatManager] Not authenticated, cannot fetch messages');
-                if (_demoModeEnabled && conversationId) {
-                    const demoMessages = DEMO_CHATS.messages[conversationId];
-                    if (demoMessages) {
-                        this.setMessages(demoMessages);
-                    }
+                console.log('[ChatManager] Not authenticated — loading messages from local cache');
+                // FIX: Load from IndexedDB, not fake demo messages
+                if (conversationId && window.KynectaLocalStore) {
+                    window.KynectaLocalStore.getMessagesByChat(conversationId).then(cached => {
+                        if (cached && cached.length > 0) {
+                            this.setMessages(cached);
+                            this._notifySubscribers();
+                        }
+                    }).catch(() => {});
                 }
                 return;
             }
-            
+
             if (!conversationId) {
                 console.warn('[ChatManager] Cannot fetch messages - no conversation ID');
                 return;
             }
-            
+
             if (this._loadingMessages) return;
             this._loadingMessages = true;
             this._notifyLoading('messages', true);
-            
+
             try {
-                console.log(`[ChatManager] 📤 Fetching messages for conversation: ${conversationId}`);
-                const params = { 
+                console.log(`[ChatManager] Fetching messages for conversation: ${conversationId}`);
+
+                if (window.KynectaLocalStore && window.KynectaSyncEngine) {
+                    await window.KynectaSyncEngine.syncChat(conversationId, {
+                        since: options.after || 0,
+                        limit: options.limit || 100
+                    });
+
+                    const hydratedMessages = await window.KynectaLocalStore.getMessagesByChat(conversationId, {
+                        limit: options.limit || 100,
+                        before: options.before || null
+                    });
+
+                    this.setMessages(hydratedMessages);
+                    this._notifySuccess('Messages loaded');
+                    return;
+                }
+
+                const params = {
                     chatId: conversationId,
                     before: options.before,
                     limit: options.limit || 50
                 };
                 const response = await makeApiRequest('/messages', 'GET', null, params);
-                
-                console.log(`[ChatManager] 📥 Received messages response:`, response);
-                
+
                 let messagesArray = [];
                 if (response && Array.isArray(response)) {
                     messagesArray = response;
@@ -2552,41 +2600,37 @@
                 } else if (response && response.data && Array.isArray(response.data)) {
                     messagesArray = response.data;
                 }
-                
-                console.log(`[ChatManager] 📥 Extracted ${messagesArray.length} messages from response`);
-                
+
                 if (messagesArray.length > 0) {
                     const normalizedMessages = messagesArray.map(msg => ({
                         id: msg.id,
+                        localId: msg.localId || msg.id,
+                        serverId: msg.serverId || msg.id,
                         content: msg.content || msg.text || '',
                         type: msg.type || msg.messageType || 'text',
                         senderId: msg.senderId || msg.sender?.id,
                         sender: msg.sender,
                         timestamp: msg.createdAt || msg.timestamp || Date.now(),
-                        status: 'delivered',
-                        conversationId: conversationId
+                        createdAt: msg.createdAt || msg.timestamp || Date.now(),
+                        status: msg.status || 'delivered',
+                        conversationId: conversationId,
+                        chatId: conversationId,
+                        isLocalOnly: false
                     }));
                     this.setMessages(normalizedMessages);
                     this._notifySuccess('Messages loaded');
-                } else if (_demoModeEnabled) {
-                    const demoMessages = DEMO_CHATS.messages[conversationId];
-                    if (demoMessages) {
-                        this.setMessages(demoMessages);
-                    } else {
-                        this.setMessages([]);
-                    }
                 } else {
                     this.setMessages([]);
                 }
             } catch (error) {
                 console.error('[ChatManager] Failed to fetch messages:', error);
-                if (_demoModeEnabled) {
-                    const demoMessages = DEMO_CHATS.messages[conversationId];
-                    if (demoMessages) {
-                        this.setMessages(demoMessages);
-                    } else {
-                        this.setMessages([]);
-                    }
+                // FIX: Always fall back to IndexedDB cache — never fake demo messages
+                if (window.KynectaLocalStore) {
+                    const fallbackMessages = await window.KynectaLocalStore.getMessagesByChat(conversationId, {
+                        limit: options.limit || 100,
+                        before: options.before || null
+                    }).catch(() => []);
+                    this.setMessages(fallbackMessages || []);
                 } else {
                     this._notifyError(error.message);
                     this.setMessages([]);
@@ -2625,6 +2669,7 @@
                 console.log(`[ChatManager] 📤 Sending message to pending conversation - using receiverId: ${pendingConv.pendingReceiverId}`);
                 requestBody = {
                     receiverId: pendingConv.pendingReceiverId,
+                    localId: options.localId || options.id || null,
                     content: content,
                     type: options.type || 'text',
                     attachment: options.attachment,
@@ -2635,6 +2680,7 @@
                 console.log(`[ChatManager] 📤 Sending message to real conversation - using chatId: ${conversationId}`);
                 requestBody = {
                     chatId: conversationId,
+                    localId: options.localId || options.id || null,
                     content: content,
                     type: options.type || 'text',
                     attachment: options.attachment,
@@ -2649,28 +2695,24 @@
             
             if (isPending && result && (result.chatId || (result.data && result.data.chatId))) {
                 const realChatId = result.chatId || result.data.chatId;
-                if (realChatId && typeof realChatId === 'number') {
-                    console.log(`[ChatManager] Received real chatId ${realChatId} for pending conversation, replacing...`);
-                    try {
-                        const realConversation = await makeApiRequest(`/chats/${realChatId}`, 'GET');
-                        if (realConversation) {
-                            const normalizedConv = {
-                                id: realConversation.id || realChatId,
-                                friendId: realConversation.friendId || realConversation.otherParticipant?.id,
-                                friendName: realConversation.friendName || realConversation.otherParticipant?.displayName || 'Chat',
-                                friendAvatar: realConversation.friendAvatar || realConversation.otherParticipant?.avatar,
-                                lastMessage: realConversation.lastMessage || content,
-                                lastMessageAt: realConversation.lastMessageAt || Date.now(),
-                                unreadCount: 0,
-                                online: realConversation.online || false,
-                                type: 'direct'
-                            };
-                            this.replacePendingConversation(conversationId, normalizedConv);
-                            result.chatId = realChatId;
-                        }
-                    } catch (e) {
-                        console.warn('[ChatManager] Could not fetch real conversation details:', e);
-                    }
+                if (realChatId) {
+                    const pendingConv = this._conversationsMap.get(conversationId) || {};
+                    const normalizedConv = {
+                        ...pendingConv,
+                        ...(result.conversation || result.data?.conversation || {}),
+                        id: realChatId,
+                        chatId: realChatId,
+                        friendId: pendingConv.pendingReceiverId || pendingConv.friendId || result.receiverId || result.data?.receiverId,
+                        friendName: pendingConv.friendName || pendingConv.userName || 'Chat',
+                        friendAvatar: pendingConv.friendAvatar || pendingConv.userAvatar || '',
+                        lastMessage: content,
+                        lastMessageAt: Date.now(),
+                        unreadCount: 0,
+                        type: 'direct',
+                        isPending: false
+                    };
+                    this.replacePendingConversation(conversationId, normalizedConv);
+                    result.chatId = realChatId;
                 }
             }
             
@@ -2906,12 +2948,26 @@
         },
         
         updateMessageStatus: function(messageId, status, details = {}) {
-            const message = this._messagesMap.get(messageId);
+            const normalizedId = String(messageId);
+            const message = this._messagesMap.get(normalizedId)
+                || this._messages.find(m =>
+                    String(m.id) === normalizedId
+                    || String(m.localId || '') === normalizedId
+                    || String(m.serverId || '') === normalizedId
+                );
             if (!message) return false;
             
             message.status = status;
             if (details.deliveredAt) message.deliveredAt = details.deliveredAt;
             if (details.readAt) message.readAt = details.readAt;
+            if (details.serverId && !message.serverId) message.serverId = String(details.serverId);
+            if (details.localId && !message.localId) message.localId = String(details.localId);
+            this._messagesMap.set(String(message.id), message);
+            if (message.localId) this._messagesMap.set(String(message.localId), message);
+            if (message.serverId) this._messagesMap.set(String(message.serverId), message);
+            if (window.KynectaLocalStore) {
+                window.KynectaLocalStore.updateMessageStatus(message.localId || message.id, status, details).catch(() => {});
+            }
             
             EventBus.emit('message:status', { messageId, status, message });
             return true;
@@ -3090,21 +3146,22 @@
         },
         
         _loadDemoFriendsIfNeeded: function() {
-            if (_demoModeEnabled && (!this._friends || this._friends.length === 0)) {
-                console.log('[FriendManager] Loading demo friends');
-                this._friends = [
-                    { id: 2001, displayName: 'moodchat1', username: 'moodchat1', online: true, status: 'online', avatar: 'https://ui-avatars.com/api/?name=moodchat1&background=4caf50&color=fff' },
-                    { id: 2002, displayName: 'moodchat2', username: 'moodchat2', online: true, status: 'online', avatar: 'https://ui-avatars.com/api/?name=moodchat2&background=2196f3&color=fff' }
-                ];
-                this._rebuildMap();
-                this._friends.forEach(friend => {
-                    if (friend.online) {
-                        this._activeFriends.add(friend.id);
-                    }
-                });
-                this._loaded = true;
-                this._saveToCache();
-                this._notifySubscribers();
+            // FIX: Never load fake demo friends. Load from IndexedDB cache instead.
+            if (!this._friends || this._friends.length === 0) {
+                if (window.AppCache) {
+                    window.AppCache.getAll('friends').then(cached => {
+                        if (cached && cached.length > 0) {
+                            console.log('[FriendManager] Offline-first: loaded', cached.length, 'cached friends');
+                            this._friends = cached;
+                            this._rebuildMap();
+                            this._friends.forEach(friend => {
+                                if (friend.online) this._activeFriends.add(friend.id);
+                            });
+                            this._loaded = true;
+                            this._notifySubscribers();
+                        }
+                    }).catch(() => {});
+                }
             }
         },
         
@@ -3144,10 +3201,9 @@
         
         async fetchFriends() {
             if (!SessionManager.isAuthenticated()) {
-                console.log('[FriendManager] Not authenticated, cannot fetch friends');
-                if (_demoModeEnabled) {
-                    this._loadDemoFriendsIfNeeded();
-                }
+                console.log('[FriendManager] Not authenticated — loading friends from cache');
+                // FIX: Load from IndexedDB, not fake demo friends
+                this._loadDemoFriendsIfNeeded();
                 return;
             }
             
@@ -3173,19 +3229,15 @@
                 
                 if (friends && Array.isArray(friends) && friends.length > 0) {
                     this.setFriends(friends);
-                } else if (friends && Array.isArray(friends) && friends.length === 0) {
+                } else {
                     this.setFriends([]);
                     await this._fetchAllUsersAsFallback();
-                } else if (_demoModeEnabled) {
-                    this._loadDemoFriendsIfNeeded();
                 }
             } catch (error) {
                 console.error('[FriendManager] Failed to fetch friends:', error);
-                if (_demoModeEnabled) {
-                    this._loadDemoFriendsIfNeeded();
-                } else {
-                    this._notifyError(error.message);
-                }
+                // FIX: Fall back to cache, not demo friends
+                this._loadDemoFriendsIfNeeded();
+                this._notifyError(error.message);
             } finally {
                 this._loading = false;
             }
@@ -3624,6 +3676,7 @@
             const optimisticMessage = {
                 id: localId,
                 localId: localId,
+                chatId: conversationId,
                 requestId: requestId,
                 conversationId: conversationId,
                 senderId: SessionManager.getUserId() || null,
@@ -3636,7 +3689,8 @@
                 optimistic: true,
                 attachment: options.attachment ? { ...options.attachment } : null,
                 replyTo: options.replyTo,
-                mentions: options.mentions
+                mentions: options.mentions,
+                isLocalOnly: true
             };
             
             this._optimisticMessages.set(localId, optimisticMessage);
@@ -3646,15 +3700,18 @@
             EventBus.emit('message:sending', { message: optimisticMessage, optimistic: true });
             
             try {
-                const result = await ChatManager.sendMessageToBackend(content, conversationId, options);
+                const result = await ChatManager.sendMessageToBackend(content, conversationId, {
+                    ...options,
+                    localId
+                });
                 
                 console.log(`[MessageHandler] Message sent successfully:`, result);
                 
-                const realMessage = result.message || result?.data || result;
+                const realMessage = result?.message || result?.data?.message || result?.data || result;
                 const serverId = realMessage?.id;
 
                 // Update the optimistic message in ChatManager in-place
-                if (serverId && serverId !== localId) {
+                if (serverId) {
                     // Remove optimistic, add confirmed — addMessage handles dedup
                     const msgs = ChatManager.getMessages();
                     const idx = msgs.findIndex(m => m.id === localId || m.localId === localId);
@@ -3662,11 +3719,14 @@
                         msgs[idx] = {
                             ...msgs[idx],
                             ...realMessage,
-                            id:          String(serverId),
+                            id:          localId,
                             localId:     localId,
-                            status:      'sent',
+                            serverId:    String(serverId),
+                            status:      realMessage.status || 'sent',
                             optimistic:  false,
                             isLocalOnly: false,
+                            conversationId: realMessage.chatId || realMessage.conversationId || conversationId,
+                            chatId:      realMessage.chatId || realMessage.conversationId || conversationId,
                             timestamp:   realMessage.createdAt || msgs[idx].timestamp || Date.now(),
                             createdAt:   realMessage.createdAt || msgs[idx].createdAt || Date.now()
                         };
@@ -3676,7 +3736,8 @@
                     if (window.KynectaLocalStore) {
                         window.KynectaLocalStore.confirmMessage(localId, String(serverId), {
                             chatId:    realMessage.chatId || conversationId,
-                            createdAt: realMessage.createdAt || Date.now()
+                            createdAt: realMessage.createdAt || Date.now(),
+                            status: realMessage.status || 'sent'
                         }).catch(()=>{});
                     }
                 } else {
@@ -3705,6 +3766,31 @@
                 
             } catch (error) {
                 console.error(`[MessageHandler] Failed to send message:`, error);
+
+                const shouldQueue = !navigator.onLine || /network|fetch|timeout|offline/i.test(String(error.message || ''));
+                if (shouldQueue && window.KynectaMsgQueue) {
+                    optimisticMessage.status = 'pending';
+                    optimisticMessage.optimistic = false;
+                    optimisticMessage.queued = true;
+                    ChatManager.updateMessageStatus(localId, 'pending', { queued: true, reason: error.message });
+                    window.KynectaMsgQueue.enqueue({
+                        id: localId,
+                        localId,
+                        chatId: conversationId,
+                        content: optimisticMessage.content,
+                        type: optimisticMessage.type,
+                        attachment: optimisticMessage.attachment,
+                        replyToId: options.replyToId || options.replyTo || null,
+                        mentions: options.mentions,
+                        senderId: optimisticMessage.senderId
+                    });
+                    EventBus.emit('message:queued', { messageId: localId, error: error.message });
+
+                    this._optimisticMessages.delete(localId);
+                    this._pendingRequests.delete(requestId);
+
+                    return { success: true, queued: true, offline: !navigator.onLine, localId };
+                }
                 
                 optimisticMessage.status = 'failed';
                 optimisticMessage.error = error.message;
@@ -3958,7 +4044,7 @@
             
             const conversation = ChatManager.getConversation(actualId);
             const canUseCachedConversation = !!conversation;
-            if (!SessionManager.isAuthenticated() && !_demoModeEnabled && !canUseCachedConversation) {
+            if (!SessionManager.isAuthenticated() && !canUseCachedConversation) {
                 return false;
             }
             if (conversation) {
@@ -4056,7 +4142,7 @@
                 return;
             }
             if (!ensureActive('fetchMessages')) return;
-            if (!SessionManager.isAuthenticated() && !_demoModeEnabled) return;
+            if (!SessionManager.isAuthenticated()) return;
             
             await ChatManager.fetchMessages(conversationId, options);
         },
@@ -4817,7 +4903,7 @@
             document.addEventListener('click', async (e) => {
                 const conversationItem = e.target.closest('.chat-item');
                 if (conversationItem) {
-                    const canAct = (canSendUserMessages() && SessionManager.isAuthenticated()) || _demoModeEnabled;
+                    const canAct = canSendUserMessages() || !!ChatManager.getConversation(conversationItem.dataset.chatId);
                     if (canAct) {
                         const conversationId = conversationItem.dataset.chatId;
                         if (conversationId) {
@@ -5253,12 +5339,8 @@
         Logger.info('DataFlow', 'Starting data flow');
         
         if (ChatManager._conversations && ChatManager._conversations.length > 0) {
-            const hasOnlyDemo = ChatManager._conversations.every(c => c.id === 1001 || c.id === 1002);
-            if (hasOnlyDemo) {
-                console.log('[DataFlow] Clearing demo conversations to load real data');
-                ChatManager._conversations = [];
-                ChatManager._conversationsMap.clear();
-            }
+            // FIX: No longer need to check for fake demo IDs — cache data is always real
+            console.log('[DataFlow] Conversations already loaded from cache — syncing with server');
         }
         if (FriendManager._friends && FriendManager._friends.length > 0) {
             const hasOnlyDemo = FriendManager._friends.every(f => f.id === 2001 || f.id === 2002);
@@ -5364,106 +5446,137 @@
     // REAL-TIME MESSAGE HANDLER
     // =============================================
     function setupRealtimeMessageListener() {
+        let hasRealtimeBinding = false;
+
+        const renderRealtimeUpdate = function(chatId, normalizedMessage = null) {
+            if (normalizedMessage && ChatManager && ChatManager.addMessage) {
+                ChatManager.addMessage(normalizedMessage);
+            }
+
+            if (ChatManager && ChatManager._conversationsMap && chatId) {
+                const conversation = ChatManager._conversationsMap.get(chatId);
+                if (conversation && normalizedMessage) {
+                    conversation.lastMessage = normalizedMessage.content;
+                    conversation.lastMessageAt = normalizedMessage.createdAt || normalizedMessage.timestamp || Date.now();
+                    const myId = SessionManager?.getUserId?.();
+                    if (normalizedMessage.senderId && String(normalizedMessage.senderId) !== String(myId)) {
+                        conversation.unreadCount = (conversation.unreadCount || 0) + 1;
+                    }
+                }
+                if (ChatManager._conversations) {
+                    ChatManager._conversations.sort((a, b) => (b.lastMessageAt || 0) - (a.lastMessageAt || 0));
+                }
+            }
+
+            const activeChat = ChatManager?.getActiveChat?.();
+            const isThisChat = activeChat && chatId && String(activeChat.id) === String(chatId);
+
+            try {
+                window.dispatchEvent(new CustomEvent('renderChatsList', {
+                    detail: {
+                        conversations: ensureSafeArray(ChatManager._conversations),
+                        currentChat: ChatManager._activeConversation,
+                        currentCategory: ChatManager.getCurrentCategory(),
+                        messageDrafts: {}
+                    }
+                }));
+            } catch (_e) {}
+
+            if (isThisChat) {
+                try {
+                    const currentUser = SessionManager?.getUser?.();
+                    window.dispatchEvent(new CustomEvent('renderMessages', {
+                        detail: {
+                            messages: ChatManager.getMessages(),
+                            currentChat: activeChat,
+                            currentUser: currentUser
+                        }
+                    }));
+                } catch (_e) {}
+            }
+        };
+
+        const handleRealtimePayload = async function(type, payload) {
+            const normalizedType = String(type || '').toLowerCase();
+            const data = payload || {};
+
+            if (normalizedType === 'new_message' || normalizedType === 'message:new' || normalizedType === 'newmessage') {
+                const message = data.payload || data.data || data;
+                const chatId = message.chatId || message.conversationId;
+                if (!message || !message.id || !chatId) return;
+
+                let normalizedMessage = {
+                    id: String(message.id),
+                    serverId: String(message.id),
+                    content: message.content || message.text || '',
+                    type: message.type || 'text',
+                    senderId: message.senderId || message.sender?.id,
+                    sender: message.sender || null,
+                    timestamp: message.createdAt || message.timestamp || Date.now(),
+                    createdAt: message.createdAt || message.timestamp || Date.now(),
+                    status: message.status || 'delivered',
+                    conversationId: chatId,
+                    chatId: chatId,
+                    isLocalOnly: false
+                };
+
+                if (window.KynectaSyncEngine?.ingestIncomingMessage) {
+                    const saved = await window.KynectaSyncEngine.ingestIncomingMessage(message, chatId).catch(() => null);
+                    if (saved) {
+                        normalizedMessage = {
+                            ...saved,
+                            conversationId: saved.chatId || saved.conversationId || chatId,
+                            chatId: saved.chatId || chatId
+                        };
+                    }
+                }
+
+                renderRealtimeUpdate(chatId, normalizedMessage);
+                EventBus.emit('message:received', normalizedMessage);
+                try { window.dispatchEvent(new CustomEvent('newMessage', { detail: { message: normalizedMessage } })); } catch (_e) {}
+                return;
+            }
+
+            if (normalizedType === 'message_sent' || normalizedType === 'message:sent') {
+                const messageId = data.localId || data.messageId || data.serverId || data.id;
+                if (messageId && ChatManager.updateMessageStatus) {
+                    ChatManager.updateMessageStatus(messageId, 'sent', {
+                        localId: data.localId || null,
+                        serverId: data.serverId || data.messageId || data.id || null
+                    });
+                }
+                return;
+            }
+
+            if (normalizedType === 'message_delivered' || normalizedType === 'message:delivered') {
+                const messageId = data.localId || data.messageId || data.serverId || data.id;
+                if (messageId && ChatManager.updateMessageStatus) {
+                    ChatManager.updateMessageStatus(messageId, 'delivered', {
+                        deliveredAt: data.deliveredAt || data.timestamp || Date.now(),
+                        localId: data.localId || null,
+                        serverId: data.serverId || data.messageId || data.id || null
+                    });
+                }
+                return;
+            }
+
+            if (normalizedType === 'message_read' || normalizedType === 'message:read') {
+                const messageId = data.localId || data.messageId || data.serverId || data.id;
+                if (messageId && ChatManager.updateMessageStatus) {
+                    ChatManager.updateMessageStatus(messageId, 'read', {
+                        readAt: data.readAt || data.timestamp || Date.now(),
+                        localId: data.localId || null,
+                        serverId: data.serverId || data.messageId || data.id || null
+                    });
+                }
+                return;
+            }
+        };
+
         window.addEventListener('message', function(event) {
             const data = event.data;
-            
-            if (data && data.type === 'NEW_MESSAGE') {
-                const message = data.payload || data.data;
-                if (message && message.id) {
-                    const normalizedMessage = {
-                        id:             String(message.id),
-                        serverId:       String(message.id),
-                        content:        message.content || message.text || '',
-                        type:           message.type || 'text',
-                        senderId:       message.senderId || message.sender?.id,
-                        sender:         message.sender || null,
-                        timestamp:      message.createdAt || message.timestamp || Date.now(),
-                        createdAt:      message.createdAt || message.timestamp || Date.now(),
-                        status:         'delivered',
-                        conversationId: message.chatId,
-                        chatId:         message.chatId,
-                        isLocalOnly:    false
-                    };
+            handleRealtimePayload(data?.type, data);
 
-                    // ── Add to ChatManager (handles dedup) ──
-                    if (ChatManager && ChatManager.addMessage) {
-                        ChatManager.addMessage(normalizedMessage);
-                    }
-
-                    // ── Update conversation list ──
-                    if (ChatManager && ChatManager._conversationsMap) {
-                        const conversation = ChatManager._conversationsMap.get(message.chatId);
-                        if (conversation) {
-                            conversation.lastMessage    = message.content;
-                            conversation.lastMessageAt  = normalizedMessage.createdAt;
-                            const myId = SessionManager?.getUserId?.();
-                            if (message.senderId !== myId) {
-                                conversation.unreadCount = (conversation.unreadCount || 0) + 1;
-                            }
-                        }
-                        if (ChatManager._conversations) {
-                            ChatManager._conversations.sort((a, b) => (b.lastMessageAt || 0) - (a.lastMessageAt || 0));
-                        }
-                    }
-
-                    // ── Force immediate UI render (works whether chat panel is open or not) ──
-                    const activeChat = ChatManager?.getActiveChat?.();
-                    const isThisChat = activeChat && (activeChat.id === message.chatId);
-
-                    // Always re-render the sidebar so unread badge / preview updates
-                    try {
-                        window.dispatchEvent(new CustomEvent('renderChatsList', {
-                            detail: {
-                                conversations: ensureSafeArray(ChatManager._conversations),
-                                currentChat:   ChatManager._activeConversation,
-                                currentCategory: ChatManager.getCurrentCategory(),
-                                messageDrafts: {}
-                            }
-                        }));
-                    } catch(_e) {}
-
-                    // Re-render message list if this chat is currently open
-                    if (isThisChat) {
-                        try {
-                            const currentUser = SessionManager?.getUser?.();
-                            window.dispatchEvent(new CustomEvent('renderMessages', {
-                                detail: {
-                                    messages:    ChatManager.getMessages(),
-                                    currentChat: activeChat,
-                                    currentUser: currentUser
-                                }
-                            }));
-                        } catch(_e) {}
-                    }
-
-                    // Notify EventBus so any subscriber (UI layer) can react
-                    EventBus.emit('message:received', normalizedMessage);
-                    try { window.dispatchEvent(new CustomEvent('newMessage', { detail: { message: normalizedMessage } })); } catch(_e) {}
-                }
-            }
-            
-            if (data && data.type === 'MESSAGE_SENT') {
-                const messageId = data.payload?.messageId || data.messageId;
-                if (messageId && ChatManager.updateMessageStatus) {
-                    ChatManager.updateMessageStatus(messageId, 'sent');
-                }
-            }
-            
-            if (data && data.type === 'MESSAGE_DELIVERED') {
-                const messageId = data.payload?.messageId || data.messageId;
-                if (messageId && ChatManager.updateMessageStatus) {
-                    ChatManager.updateMessageStatus(messageId, 'delivered');
-                }
-            }
-            
-            if (data && data.type === 'MESSAGE_READ') {
-                const messageId = data.payload?.messageId || data.messageId;
-                if (messageId && ChatManager.updateMessageStatus) {
-                    ChatManager.updateMessageStatus(messageId, 'read');
-                }
-            }
-
-            // ── FRIEND ONLINE / OFFLINE ── update FriendManager + active chat header
             if (data && (data.type === 'FRIEND_ONLINE' || data.type === 'FRIEND_OFFLINE' || data.type === 'STATUS_UPDATE')) {
                 const p = data.payload || data;
                 const uid = p.userId || p.id || p.friendId;
@@ -5471,7 +5584,6 @@
                 if (uid && FriendManager) {
                     FriendManager.updateFriendStatus({ userId: uid, id: uid, online: isOnline, status: isOnline ? 'online' : 'offline', lastSeen: p.lastSeen || null });
                 }
-                // If this user is the currently open chat, update the header live
                 const activeChat = ChatManager?.getActiveChat?.();
                 if (activeChat) {
                     const chatFriendId = activeChat.friendId || activeChat.otherUserId || activeChat.userId;
@@ -5484,10 +5596,23 @@
                 }
             }
         });
-    }
 
+        if (!hasRealtimeBinding && window.wsService?.on) {
+            hasRealtimeBinding = true;
+            ['new_message', 'message:new', 'message_delivered', 'message:delivered', 'message_read', 'message:read'].forEach((eventName) => {
+                window.wsService.on(eventName, (payload) => {
+                    handleRealtimePayload(eventName, payload);
+                });
+            });
+        }
+    }
     function startRealtimeSync() {
         setupRealtimeMessageListener();
+
+        const realtimeToken = window.__PARENT_SESSION__?.token || SessionManager.getToken?.() || null;
+        if (window.KynectaRealtime?.connect && realtimeToken) {
+            window.KynectaRealtime.connect(realtimeToken).catch(() => {});
+        }
         
         if (ChatManager && ChatManager.getActiveChat) {
             // FIX: was 3000ms (3s) causing massive console spam and duplicate fetches.

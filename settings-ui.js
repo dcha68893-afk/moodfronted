@@ -159,6 +159,10 @@ let unsavedChanges = false;          // Mutable local variable - FIXED
 // =============================================
 window.__updateSetting = async (section, key, value) => {
     try {
+        // Push into AppSettings FIRST — instant, offline-safe, propagates to all modules
+        if (window.AppSettings) {
+            window.AppSettings.set(section + '.' + key, value);
+        }
         await SettingsState.update(section, key, value);
         unsavedChanges = true;
         window.updateSaveButton();
@@ -426,6 +430,20 @@ export async function initializeUI() {
         uiInitialized = true;
         uiReady = true;
         
+        // Subscribe to AppSettings so UI re-applies whenever any setting changes
+        // (covers cross-tab, offline→online, and other-module-triggered changes)
+        if (window.AppSettings && !window.__SETTINGS_UI_APP_SUB__) {
+            window.__SETTINGS_UI_APP_SUB__ = window.AppSettings.subscribe((settings, path) => {
+                try {
+                    if (settings) {
+                        applySettingsToUI(settings);
+                    }
+                } catch (e) {
+                    // non-blocking
+                }
+            });
+        }
+
         dispatchUIReady();
         
         debugLog('UI initialization complete');

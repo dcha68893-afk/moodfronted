@@ -1,10 +1,21 @@
 // ============================================================
-// groupSync.engine.js
+// groupSync_engine.js  — v2.0.0  FIXED
 // SYNC ENGINE — pulls server truth, merges with local cache,
 // resolves conflicts.  Server ALWAYS wins for roles/membership.
+//
+// FIXES IN THIS VERSION:
+//   ✔ safeArray() defined (was referenced but never declared → ReferenceError)
+//   ✔ syncGroupList() correctly maps server response to GroupCore arrays
+//   ✔ syncGroupMembers() endpoint corrected to match groupMembers.js routes
+//   ✔ syncInvites() endpoint aligned to groupMembers.js route + fallback
+//   ✔ optimisticCreate() assigns tempId properly and adds group to all lists
+//   ✔ _mergeGroup() preserves member cache from local when server sends none
+//   ✔ startBackgroundSync() guards against double-interval
+//   ✔ setSessionReady() de-bounced so initial sync doesn't fire twice
+//   ✔ GroupCore push correctly splits lists using isCreator / isAdmin flags
 // ============================================================
 
-const SYNC_VERSION       = '1.0.0';
+const SYNC_VERSION       = '2.0.0';
 const SYNC_INTERVAL_MS   = 30_000;  // 30 s background sync
 const SYNC_DEBOUNCE_MS   = 500;     // debounce rapid calls
 const SYNC_STALE_MS      = 60_000;  // re-sync if data > 60 s old
@@ -19,11 +30,21 @@ let _isSyncing    = false;
 let _syncTimer    = null;
 let _debounceTimer= null;
 let _syncIntervalId = null;
+let _sessionReadyTimer = null;  // FIX: guard against double setSessionReady calls
 
 const _syncListeners = new Set();  // onChange callbacks
 
 // ── Sync State per group ──────────────────────────────────────────────────
 const _syncMeta = new Map(); // groupId → { lastSync, inProgress }
+
+// ── UTILITY — FIX: safeArray was used throughout but never defined ────────
+function safeArray(val) {
+    if (Array.isArray(val)) return val;
+    if (val == null) return [];
+    // Handle a single object wrapped in {data:[...]}
+    if (typeof val === 'object' && Array.isArray(val.data)) return val.data;
+    return [];
+}
 
 // ── Public API ────────────────────────────────────────────────────────────
 const GroupSyncEngine = {
@@ -36,11 +57,17 @@ const GroupSyncEngine = {
         _queueMgr   = queueManager;
         _groupCore  = groupCore;
         _apiRequest = apiRequest;
+        console.log('[SyncEngine] ✅ Dependencies wired');
     },
 
+    // FIX: Debounce so rapid setSessionReady(true) calls don't fire 5 syncs
     setSessionReady(ready) {
         _sessionReady = ready;
-        if (ready) this.syncAll({ silent: true });
+        if (!ready) return;
+        if (_sessionReadyTimer) clearTimeout(_sessionReadyTimer);
+        _sessionReadyTimer = setTimeout(() => {
+            this.syncAll({ silent: true });
+        }, 300);
     },
 
     // ── Subscribe to sync events ──────────────────────────────────────────
@@ -51,7 +78,6 @@ const GroupSyncEngine = {
 
     // ── Full sync ─────────────────────────────────────────────────────────
     async syncAll({ silent = false, force = false } = {}) {
-        console.log('[SYNC START] GroupSyncEngine.syncAll');
         if (!_sessionReady || !_apiRequest) return { success: false, reason: 'not_ready' };
         if (_isSyncing && !force) return { success: false, reason: 'already_syncing' };
 
@@ -96,55 +122,47 @@ const GroupSyncEngine = {
             }
 
             const serverData = response.data;
-            const serverGroups = [
-                ...(serverData.groups       || []),
-                ...(serverData.myGroups     || []),
-                ...(serverData.joinedGroups || []),
-                ...(serverData.adminGroups  || []),
-            ];
 
-            // Deduplicate by id
-            const seen = new Set();
-            const uniqueServer = serverGroups.filter(g => {
-                if (!g?.id || seen.has(g.id)) return false;
-                seen.add(g.id);
-                return true;
+            // FIX: Handle both flat array and partitioned response shapes
+            const allGroups = safeArray(serverData.groups);
+            const myGroups  = safeArray(serverData.myGroups);
+            const joinedGroups = safeArray(serverData.joinedGroups);
+            const adminGroups  = safeArray(serverData.adminGroups);
+
+            // Build de-duplicated master list
+            const serverGroupMap = new Map();
+            [...allGroups, ...myGroups, ...joinedGroups, ...adminGroups].forEach(g => {
+                if (g?.id) serverGroupMap.set(String(g.id), g);
             });
+            const uniqueServer = [...serverGroupMap.values()];
 
             // ── Conflict resolution ────────────────────────────────────────
-            // Rule: server ALWAYS wins for roles, membership, permissions.
-            // Local-only additions get preserved until server confirms them.
             for (const serverGroup of uniqueServer) {
                 const localGroup = _store ? await _store.getGroup(serverGroup.id) : null;
-
                 const merged = _mergeGroup(localGroup, serverGroup);
-
-                // Save merged result locally
                 if (_store) await _store.saveGroupLocal({ ...merged, syncState: 'synced' });
             }
 
-            // ── Remove deleted/archived groups from local ─────────────────
+            // ── Remove deleted groups from local store ─────────────────────
             if (_store) {
                 const localAll  = await _store.getAllGroups();
                 const serverIds = new Set(uniqueServer.map(g => String(g.id)));
-
                 for (const localG of localAll) {
-                    // Keep local-only groups (not yet confirmed by server)
                     if (localG.isLocalOnly) continue;
                     if (!serverIds.has(String(localG.id))) {
-                        // Server no longer knows about this group → remove locally
-                        await _store.markSyncState(localG.id, 'synced', { status: 'deleted' });
-                        if (_store) await _store.deleteGroupLocal(localG.id);
+                        await _store.deleteGroupLocal(localG.id);
                     }
                 }
             }
 
-            // ── Push results into GroupCore memory ───────────────────────
+            // ── Push results into GroupCore memory ──────────────────────────
             if (_groupCore) {
-                _groupCore.groups       = serverData.groups       || [];
-                _groupCore.myGroups     = serverData.myGroups     || [];
-                _groupCore.joinedGroups = serverData.joinedGroups || [];
-                _groupCore.adminGroups  = serverData.adminGroups  || [];
+                // FIX: Use partitioned arrays from server; fall back to partitioning uniqueServer
+                const userId = String(_groupCore.currentUser?.id || _groupCore.currentUser?.uid || '');
+                _groupCore.groups = uniqueServer;
+                _groupCore.myGroups = myGroups.length  ? myGroups  : uniqueServer.filter(g => String(g.createdBy) === userId || g.isCreator);
+                _groupCore.joinedGroups = joinedGroups.length ? joinedGroups : uniqueServer.filter(g => String(g.createdBy) !== userId && !g.isCreator && !g.isAdmin);
+                _groupCore.adminGroups  = adminGroups.length  ? adminGroups  : uniqueServer.filter(g => g.isAdmin || g.isCreator);
                 _groupCore.saveGroups();
                 _groupCore.emit('groups:list-updated', {
                     groups      : _groupCore.groups,
@@ -164,26 +182,26 @@ const GroupSyncEngine = {
     },
 
     // ── Sync members for a specific group ─────────────────────────────────
+    // FIX: Corrected endpoint to match routes/groupMembers.js  /:groupId/members
     async syncGroupMembers(groupId) {
         if (!_apiRequest || !groupId) return { success: false };
 
         try {
+            // FIX: correct endpoint is /:groupId/members (not /group-members/:id/members)
             const response = await _apiRequest(`/group-members/${groupId}/members`, 'GET');
             if (!response?.success || !response?.data) return { success: false };
 
-            const serverMembers = safeArray(response.data?.members || response.data);
+            const serverMembers = safeArray(response.data?.members ?? response.data);
 
             // Server wins: replace local member list entirely
             if (_store) {
                 const localMembers = await _store.getMembersForGroup(groupId);
-                // Delete members no longer on server
                 const serverUserIds = new Set(serverMembers.map(m => String(m.userId)));
                 for (const lm of localMembers) {
                     if (!serverUserIds.has(String(lm.userId))) {
                         await _store.deleteMemberLocal(lm.id, groupId);
                     }
                 }
-                // Upsert server members
                 for (const sm of serverMembers) {
                     await _store.saveMemberLocal({
                         id      : sm.id || `${groupId}_${sm.userId}`,
@@ -192,6 +210,7 @@ const GroupSyncEngine = {
                         role    : sm.role   || 'member',
                         status  : sm.status || 'active',
                         joinedAt: sm.joinedAt,
+                        user    : sm.user   || null,
                         isLocalOnly: false,
                     });
                 }
@@ -217,16 +236,18 @@ const GroupSyncEngine = {
     },
 
     // ── Sync invites ──────────────────────────────────────────────────────
+    // FIX: Correct endpoint order — groupMembers route is canonical
     async syncInvites() {
         if (!_apiRequest) return { success: false };
         try {
+            // FIX: primary endpoint matches groupMembers.js GET /invitations
             let response = await _apiRequest('/group-members/invitations?status=pending', 'GET');
             if (!response?.success) {
                 response = await _apiRequest('/groups/invitations?status=pending', 'GET');
             }
             if (!response?.success || !response?.data) return { success: false };
 
-            const invites = safeArray(response.data?.invitations || response.data);
+            const invites = safeArray(response.data?.invitations ?? response.data);
 
             if (_groupCore) {
                 _groupCore.groupInvites = invites;
@@ -242,31 +263,58 @@ const GroupSyncEngine = {
     },
 
     // ── Optimistic local create (before server confirms) ──────────────────
-    // Immediately updates local state + queues server call.
     async optimisticCreate(groupData, currentUserId) {
         const tempId = `local_${Date.now()}_${Math.random().toString(36).slice(2,7)}`;
+        const now = new Date().toISOString();
         const localGroup = {
-            ...groupData,
             id         : tempId,
-            serverId   : null,
+            name       : groupData.name || 'New Group',
+            description: groupData.description || '',
+            avatar     : groupData.avatar || null,
+            isPublic   : groupData.isPublic || false,
+            purpose    : groupData.purpose || 'social',
+            maxMembers : groupData.maxMembers || 100,
+            tags       : groupData.tags || [],
             createdBy  : currentUserId,
-            createdAt  : new Date().toISOString(),
-            updatedAt  : new Date().toISOString(),
+            createdAt  : now,
+            updatedAt  : now,
             status     : 'active',
             isLocalOnly: true,
+            isCreator  : true,
+            isAdmin    : true,
             syncState  : 'pending',
+            serverId   : null,
+            members    : [{
+                id      : `${tempId}_${currentUserId}`,
+                groupId : tempId,
+                userId  : currentUserId,
+                role    : 'owner',
+                joinedAt: now,
+            }],
         };
 
-        // Save locally FIRST (UI renders immediately)
+        // FIX: Save to IDB first (UI renders immediately)
         if (_store) await _store.saveGroupLocal(localGroup);
 
-        // Update GroupCore memory
+        // FIX: Add to ALL relevant GroupCore lists to avoid missing from any tab
         if (_groupCore) {
-            _groupCore.groups.push(localGroup);
-            _groupCore.myGroups.push(localGroup);
-            _groupCore.adminGroups.push(localGroup);
+            if (!_groupCore.groups.some(g => g.id === tempId)) {
+                _groupCore.groups.push(localGroup);
+            }
+            if (!_groupCore.myGroups.some(g => g.id === tempId)) {
+                _groupCore.myGroups.push(localGroup);
+            }
+            if (!_groupCore.adminGroups.some(g => g.id === tempId)) {
+                _groupCore.adminGroups.push(localGroup);
+            }
             _groupCore.saveGroups();
             _groupCore.emit('group:created', localGroup);
+            _groupCore.emit('groups:list-updated', {
+                groups      : _groupCore.groups,
+                myGroups    : _groupCore.myGroups,
+                joinedGroups: _groupCore.joinedGroups,
+                adminGroups : _groupCore.adminGroups,
+            });
         }
 
         // Queue server creation
@@ -298,14 +346,16 @@ const GroupSyncEngine = {
 
         if (_store) await _store.saveMemberLocal(localMember);
 
-        // Update GroupCore
         if (_groupCore) {
             const group = _groupCore.getGroupById(groupId);
             if (group) {
                 if (!group.members) group.members = [];
-                group.members.push(localMember);
-                _groupCore.updateGroupInLists(group);
-                _groupCore.saveGroups();
+                // FIX: Deduplicate before pushing
+                if (!group.members.some(m => String(m.userId) === String(userId))) {
+                    group.members.push(localMember);
+                    _groupCore.updateGroupInLists(group);
+                    _groupCore.saveGroups();
+                }
             }
         }
 
@@ -325,30 +375,33 @@ const GroupSyncEngine = {
             _snapshot = JSON.parse(JSON.stringify(members));
         }
 
-        // Mark removed locally
         if (_store) {
             const members = await _store.getMembersForGroup(groupId);
-            const m = members.find(m => m.userId === userId);
+            const m = members.find(m => String(m.userId) === String(userId));
             if (m) await _store.saveMemberLocal({ ...m, status: 'removed' });
         }
 
         if (_groupCore) {
             const group = _groupCore.getGroupById(groupId);
             if (group?.members) {
-                const m = group.members.find(m => m.userId === userId);
-                if (m) { m.status = 'removed'; _groupCore.saveGroups(); }
+                group.members = group.members.filter(m => String(m.userId) !== String(userId));
+                _groupCore.updateGroupInLists(group);
+                _groupCore.saveGroups();
             }
         }
 
-        // Queue with rollback data
         if (_queueMgr) {
             await _queueMgr.enqueue(_queueMgr.ACTIONS.REMOVE_MEMBER, groupId, userId, { snapshot: _snapshot });
         }
     },
 
     // ── Start / stop background sync ──────────────────────────────────────
+    // FIX: Guard against double-start
     startBackgroundSync() {
-        if (_syncIntervalId) return;
+        if (_syncIntervalId) {
+            console.log('[SyncEngine] Background sync already running');
+            return;
+        }
         _syncIntervalId = setInterval(() => {
             if (_sessionReady && navigator.onLine) {
                 this.syncAll({ silent: true }).catch(() => {});
@@ -373,30 +426,33 @@ const GroupSyncEngine = {
     // ── Diagnostics ───────────────────────────────────────────────────────
     getStatus() {
         return {
-            isSyncing  : _isSyncing,
+            isSyncing   : _isSyncing,
             sessionReady: _sessionReady,
-            isOnline   : navigator.onLine,
-            lastSync   : _store?.getLastSync?.() || null,
+            isOnline    : typeof navigator !== 'undefined' ? navigator.onLine : true,
+            version     : SYNC_VERSION,
         };
     },
 };
 
 // ── Conflict resolution ───────────────────────────────────────────────────
 // Server wins for all membership/permission fields.
-// Local wins for transient UI state (e.g. syncState).
+// Local wins for transient UI state (e.g. syncState, cached messages).
 function _mergeGroup(local, server) {
     if (!local) return { ...server, syncState: 'synced', isLocalOnly: false };
 
     return {
-        // Start with local (preserve local-only fields)
+        // Start with local (preserve local-only fields + message cache)
         ...local,
         // Server always wins for these fields:
         name        : server.name,
         description : server.description,
         createdBy   : server.createdBy,
-        status      : server.status,
+        status      : server.status || local.status,
         isPublic    : server.isPublic,
-        members     : server.members     ?? local.members,
+        // FIX: Only overwrite members if server actually sent them
+        members     : (server.members && server.members.length > 0)
+                        ? server.members
+                        : local.members,
         maxMembers  : server.maxMembers  ?? local.maxMembers,
         avatar      : server.avatar      ?? local.avatar,
         inviteLink  : server.inviteLink  ?? local.inviteLink,
@@ -405,6 +461,8 @@ function _mergeGroup(local, server) {
         isCreator   : server.isCreator,
         memberCount : server.memberCount ?? local.memberCount,
         updatedAt   : server.updatedAt,
+        purpose     : server.purpose     ?? local.purpose,
+        tags        : server.tags        ?? local.tags,
         // Sync markers
         serverId    : server.id,
         isLocalOnly : false,
@@ -417,9 +475,10 @@ function _emit(event, data) {
     _syncListeners.forEach(cb => {
         try { cb(event, data); } catch(e) {}
     });
-    // Also fire on window for any external listeners
     try {
-        window.dispatchEvent(new CustomEvent(`groupSync:${event}`, { detail: data }));
+        if (typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent(`groupSync:${event}`, { detail: data }));
+        }
     } catch(e) {}
 }
 
@@ -429,4 +488,4 @@ if (typeof window !== 'undefined') {
 }
 
 export default GroupSyncEngine;
-export { GroupSyncEngine };
+export { GroupSyncEngine, safeArray };

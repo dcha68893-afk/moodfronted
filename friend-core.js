@@ -7154,6 +7154,40 @@ async function loadGroupsFromBackend() {
 // =============================================
 
 async function fetchAllUsersFromBackend() {
+    // ── OFFLINE-FIRST: serve IndexedDB cache immediately, before any auth/active
+    // check, so discovery never shows a blank screen offline. ─────────────────
+    if (!navigator.onLine) {
+        try {
+            const ls = window.KynectaFriendsLocalStore;
+            const idbUsers = ls ? (await ls.getAllUsers().catch(() => [])) : [];
+            if (idbUsers.length > 0) {
+                window._allUsersCache = idbUsers;
+                if (window.FriendCore) {
+                    window.FriendCore._allUsers         = idbUsers;
+                    window.FriendCore.discoverableUsers = idbUsers;
+                    window.FriendCore._allUsersCache    = idbUsers;
+                }
+                if (window.FriendCacheManager?.setUsers) window.FriendCacheManager.setUsers(idbUsers);
+                window.dispatchEvent(new CustomEvent('allUsersLoaded', {
+                    detail: { users: idbUsers, count: idbUsers.length, cached: true, offline: true }
+                }));
+                return { success: true, users: idbUsers, count: idbUsers.length, cached: true, offline: true };
+            }
+        } catch (_) {}
+        // IndexedDB empty — try localStorage before giving up
+        try {
+            const raw = JSON.parse(localStorage.getItem('discover_users') || '[]');
+            if (Array.isArray(raw) && raw.length > 0) {
+                window._allUsersCache = raw;
+                window.dispatchEvent(new CustomEvent('allUsersLoaded', {
+                    detail: { users: raw, count: raw.length, cached: true, offline: true }
+                }));
+                return { success: true, users: raw, count: raw.length, cached: true, offline: true };
+            }
+        } catch (_) {}
+        return { success: false, users: [], offline: true };
+    }
+
     if (!assertActive('fetchAllUsersFromBackend')) {
         return { success: false, error: 'Module not active' };
     }
@@ -7202,11 +7236,27 @@ async function fetchAllUsersFromBackend() {
             localStorage.setItem('discover_users', JSON.stringify(filteredUsers));
             console.log('[LOCAL SAVE]', 'discover_users');
         }
+
+        // ✅ FIX: Persist to IndexedDB 'users' store — primary offline source for discovery
+        if (filteredUsers.length > 0) {
+            const ls = window.KynectaFriendsLocalStore;
+            if (ls && typeof ls.saveUsers === 'function') {
+                ls.saveUsers(filteredUsers).catch(e =>
+                    console.warn('[fetchAllUsers] IndexedDB users save failed:', e.message)
+                );
+            } else {
+                // Fallback: write directly to AppCache if localStore not ready
+                window.AppCache?.save?.('users', filteredUsers.map(u => ({
+                    ...u, id: String(u.id), userId: String(u.id)
+                }))).catch?.(() => {});
+            }
+        }
         
         // ✅ Make available on FriendCore for UI
         if (window.FriendCore) {
-            window.FriendCore._allUsers = filteredUsers;
+            window.FriendCore._allUsers         = filteredUsers;
             window.FriendCore.discoverableUsers = filteredUsers;
+            window.FriendCore._allUsersCache    = filteredUsers;
         }
         
         // Store original unfiltered users for debugging
@@ -7234,7 +7284,7 @@ async function fetchAllUsersFromBackend() {
     } catch (error) {
         Logger.error('fetchAllUsersFromBackend', 'Failed to fetch users', error);
         
-        // Try to load from cache
+        // Priority 1: In-memory FriendCacheManager (fastest, already loaded)
         const cached = FriendCacheManager.getAllUsers();
         if (cached.length > 0) {
             allUsers = cached;
@@ -7245,13 +7295,35 @@ async function fetchAllUsersFromBackend() {
             }));
             return { success: true, count: cached.length, cached: true, users: cached };
         }
+
+        // Priority 2: IndexedDB 'users' store (survives page refresh, works offline)
+        try {
+            const ls = window.KynectaFriendsLocalStore;
+            const idbUsers = ls ? (await ls.getAllUsers().catch(() => [])) : [];
+            if (Array.isArray(idbUsers) && idbUsers.length > 0) {
+                allUsers = idbUsers;
+                if (window.FriendCore) {
+                    window.FriendCore._allUsers         = idbUsers;
+                    window.FriendCore.discoverableUsers = idbUsers;
+                    window.FriendCore._allUsersCache    = idbUsers;
+                }
+                window._allUsersCache = idbUsers;
+                FriendCacheManager.setUsers(idbUsers);
+                window.dispatchEvent(new CustomEvent('allUsersLoaded', {
+                    detail: { users: idbUsers, count: idbUsers.length, cached: true, offline: !navigator.onLine }
+                }));
+                return { success: true, count: idbUsers.length, cached: true, users: idbUsers };
+            }
+        } catch (_) {}
+
+        // Priority 3: localStorage (quick-access fallback)
         try {
             const localUsers = JSON.parse(localStorage.getItem('discover_users') || '[]');
             console.log('[LOCAL LOAD]', localUsers);
             if (Array.isArray(localUsers) && localUsers.length > 0) {
                 allUsers = localUsers;
                 if (window.FriendCore) {
-                    window.FriendCore._allUsers = localUsers;
+                    window.FriendCore._allUsers         = localUsers;
                     window.FriendCore.discoverableUsers = localUsers;
                 }
                 window._allUsersCache = localUsers;
@@ -8588,6 +8660,39 @@ function startParallelDataLoading() {
         backgroundTasksStarted = true;
         loadCachedDataInstantly();
         OfflineFirstFriends._hydrateFromLocalStore().catch(() => {});
+
+        // FIX: hydrate discovery users from IndexedDB so the Discover tab is
+        // never blank when the app opens offline.
+        (async () => {
+            try {
+                const ls = window.KynectaFriendsLocalStore;
+                if (!ls) return;
+                const idbUsers = await ls.getAllUsers().catch(() => []);
+                if (!idbUsers.length) {
+                    // Last resort: localStorage
+                    const raw = JSON.parse(localStorage.getItem('discover_users') || '[]');
+                    if (raw.length) {
+                        window._allUsersCache = raw;
+                        if (window.FriendCore) window.FriendCore._allUsers = raw;
+                        window.dispatchEvent(new CustomEvent('allUsersLoaded', {
+                            detail: { users: raw, count: raw.length, cached: true, offline: true }
+                        }));
+                    }
+                    return;
+                }
+                window._allUsersCache = idbUsers;
+                if (window.FriendCore) {
+                    window.FriendCore._allUsers         = idbUsers;
+                    window.FriendCore.discoverableUsers = idbUsers;
+                    window.FriendCore._allUsersCache    = idbUsers;
+                }
+                if (window.FriendCacheManager?.setUsers) window.FriendCacheManager.setUsers(idbUsers);
+                window.dispatchEvent(new CustomEvent('allUsersLoaded', {
+                    detail: { users: idbUsers, count: idbUsers.length, cached: true, offline: true }
+                }));
+            } catch (_) {}
+        })();
+
         return;
     }
     

@@ -39,8 +39,9 @@
                 token: data.token,
                 refreshToken: data.refreshToken || null,
                 user: data.user || null,
-                expiresAt: data.expiresAt || (Date.now() + 24 * 60 * 60 * 1000),
+                expiresAt: data.expiresAt || (Date.now() + 30 * 24 * 60 * 60 * 1000), // 30-day default for offline persistence
                 issuedAt: data.issuedAt || Date.now(),
+                lastLogin: data.lastLogin || Date.now(), // track last successful login
                 savedAt: new Date().toISOString()
             };
 
@@ -106,7 +107,10 @@
     function hasValidAuth() {
         const auth = getAuth();
         if (!auth || !auth.token) return false;
-        if (auth.expiresAt && Date.now() > auth.expiresAt) return false;
+        // NOTE: Do NOT block on expiresAt here.
+        // Expired-but-present sessions are still valid for offline/auto-login.
+        // Background validation (api_auth.js validateSession) will handle logout
+        // if the server rejects the token when the device is online.
         return true;
     }
 

@@ -2596,10 +2596,26 @@ renderMoodChart() {
         if (sanitized.type === 'text') {
             previewText = UISanitizer.sanitizeHTML(sanitized.content || sanitized.text || '').substring(0, 100);
             if ((sanitized.content || sanitized.text || '').length > 100) previewText += '...';
-        } else if (sanitized.type === 'media') {
-            previewText = `<i class="fas fa-image"></i> ${UISanitizer.sanitizeHTML(sanitized.caption || 'Media status').substring(0, 50)}`;
+        } else if (sanitized.type === 'media' || sanitized.type === 'image') {
+            previewText = `<i class="fas fa-image"></i> ${UISanitizer.sanitizeHTML(sanitized.caption || sanitized.content || 'Photo').substring(0, 50)}`;
+        } else if (sanitized.type === 'video') {
+            previewText = `<i class="fas fa-video"></i> ${UISanitizer.sanitizeHTML(sanitized.caption || sanitized.content || 'Video').substring(0, 50)}`;
+        } else if (sanitized.type === 'audio') {
+            previewText = `<i class="fas fa-microphone"></i> ${UISanitizer.sanitizeHTML(sanitized.caption || sanitized.content || 'Audio').substring(0, 50)}`;
         } else if (sanitized.type === 'poll') {
-            previewText = `<i class="fas fa-poll"></i> ${UISanitizer.sanitizeHTML(sanitized.question || 'Poll status').substring(0, 50)}`;
+            previewText = `<i class="fas fa-poll"></i> ${UISanitizer.sanitizeHTML(sanitized.question || sanitized.content || 'Poll').substring(0, 50)}`;
+        } else if (sanitized.type === 'mood') {
+            previewText = `<i class="fas fa-smile"></i> ${UISanitizer.sanitizeHTML(sanitized.moodType || sanitized.content || 'Mood').substring(0, 50)}`;
+        } else if (sanitized.type === 'location') {
+            previewText = `<i class="fas fa-map-marker-alt"></i> ${UISanitizer.sanitizeHTML(sanitized.location || sanitized.content || 'Location').substring(0, 50)}`;
+        } else if (sanitized.mediaUrl) {
+            // Fallback: has a media URL even if type is unrecognised
+            const isVid = /\.(mp4|webm|ogg|mov)/i.test(sanitized.mediaUrl);
+            previewText = isVid
+                ? `<i class="fas fa-video"></i> Video`
+                : `<i class="fas fa-image"></i> ${UISanitizer.sanitizeHTML(sanitized.content || 'Media').substring(0, 50)}`;
+        } else {
+            previewText = UISanitizer.sanitizeHTML(sanitized.content || sanitized.text || '').substring(0, 100);
         }
         const timeAgo = sanitized.createdAt ? formatTimeAgo(sanitized.createdAt) : 'Just now';
         item.innerHTML = `
@@ -2932,8 +2948,27 @@ function loadViewerContent(statusData) {
         viewerContent.appendChild(createTextStatusSlide(sanitized));
     } else if (sanitized.type === 'media') {
         viewerContent.appendChild(createMediaStatusSlide(sanitized));
+    } else if (sanitized.type === 'image' || sanitized.type === 'video' || sanitized.type === 'audio') {
+        // Backend stores these as 'image'/'video'/'audio' — route to media renderer
+        viewerContent.appendChild(createMediaStatusSlide(sanitized));
     } else if (sanitized.type === 'poll') {
         viewerContent.appendChild(createPollStatusSlide(sanitized));
+    } else if (sanitized.type === 'mood') {
+        // Render mood as styled text slide
+        const moodSlide = document.createElement('div');
+        moodSlide.className = 'status-slide text-status-slide active mood-slide';
+        moodSlide.style.background = 'linear-gradient(135deg, #facc15 0%, #f472b6 100%)';
+        moodSlide.innerHTML = `
+            <div class="text-status-content" style="font-size:2rem">${UISanitizer.sanitizeHTML(sanitized.moodType || '')}</div>
+            <div class="text-status-content">${UISanitizer.sanitizeHTML(sanitized.content || '')}</div>
+        `;
+        viewerContent.appendChild(moodSlide);
+    } else if (sanitized.mediaUrl) {
+        // Fallback: unknown type but has media — use media renderer
+        viewerContent.appendChild(createMediaStatusSlide(sanitized));
+    } else {
+        // Last resort: render as text
+        viewerContent.appendChild(createTextStatusSlide(sanitized));
     }
     if (progressIndicators) {
         progressIndicators.innerHTML = `
@@ -2979,22 +3014,63 @@ function createMediaStatusSlide(statusData) {
     const slide = document.createElement('div');
     slide.className = 'status-slide media-status-slide active';
     let mediaContent = '';
-    if (statusData.mediaType === 'image') {
-        mediaContent = `<img src="${UISanitizer.sanitizeUrl(statusData.mediaUrl || '')}" class="media-status-content" alt="Status image" loading="lazy">`;
-    } else if (statusData.mediaType === 'video') {
-        mediaContent = `<video src="${UISanitizer.sanitizeUrl(statusData.mediaUrl || '')}" class="media-status-content" autoplay muted loop playsinline controls></video>`;
+
+    // Resolve media type: prefer explicit mediaType, fall back to type field,
+    // then sniff from URL extension so backend-stored statuses always render.
+    const rawUrl = statusData.mediaUrl || statusData.media || '';
+    const resolveMediaType = () => {
+        if (statusData.mediaType) return statusData.mediaType;
+        if (statusData.type === 'image' || statusData.type === 'video') return statusData.type;
+        if (/\.(mp4|webm|ogg|mov|avi|mkv)(\?|$)/i.test(rawUrl)) return 'video';
+        if (/\.(jpg|jpeg|png|gif|webp|svg|avif|bmp)(\?|$)/i.test(rawUrl)) return 'image';
+        // Data-URL sniff
+        if (rawUrl.startsWith('data:video')) return 'video';
+        if (rawUrl.startsWith('data:image')) return 'image';
+        return 'image'; // safe default
+    };
+    const mediaType = resolveMediaType();
+    const safeUrl = UISanitizer.sanitizeUrl(rawUrl);
+
+    if (!safeUrl) {
+        // No media URL — show placeholder so the slide isn't blank
+        mediaContent = `<div class="media-placeholder"><i class="fas fa-image"></i><p>Media unavailable</p></div>`;
+    } else if (mediaType === 'video') {
+        mediaContent = `<video
+            src="${safeUrl}"
+            class="media-status-content"
+            autoplay muted loop playsinline controls
+            onerror="this.style.display='none';this.insertAdjacentHTML('afterend','<div class=\\'media-error\\'><i class=\\'fas fa-exclamation-circle\\'></i> Video failed to load</div>')"
+        ></video>`;
+    } else {
+        mediaContent = `<img
+            src="${safeUrl}"
+            class="media-status-content"
+            alt="Status image"
+            loading="lazy"
+            onerror="this.style.display='none';this.insertAdjacentHTML('afterend','<div class=\\'media-error\\'><i class=\\'fas fa-exclamation-circle\\'></i> Image failed to load</div>')"
+        >`;
     }
+
+    // Caption: prefer explicit caption, fall back to content field
+    const captionText = statusData.caption || (statusData.type !== 'text' ? statusData.content : '');
+
     slide.innerHTML = `
         ${mediaContent}
-        ${statusData.caption ? `<div class="media-caption">${UISanitizer.sanitizeHTML(statusData.caption)}</div>` : ''}
+        ${captionText ? `<div class="media-caption">${UISanitizer.sanitizeHTML(captionText)}</div>` : ''}
     `;
+
     if (statusData.isSensitive) {
         const mediaElement = slide.querySelector('.media-status-content');
         if (mediaElement) {
             mediaElement.style.filter = 'blur(20px)';
-            mediaElement.addEventListener('click', () => {
+            const reveal = document.createElement('div');
+            reveal.className = 'sensitive-overlay';
+            reveal.innerHTML = '<span><i class="fas fa-eye-slash"></i> Sensitive content — tap to reveal</span>';
+            reveal.addEventListener('click', () => {
                 mediaElement.style.filter = 'none';
+                reveal.remove();
             });
+            slide.appendChild(reveal);
         }
     }
     return slide;

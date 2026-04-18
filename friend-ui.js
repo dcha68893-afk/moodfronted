@@ -2607,26 +2607,61 @@ window.safeArray = window.safeArray || function safeArray(data) {
     return Array.isArray(data) ? data : [];
 };
 
-// Update the cache from various sources
+// Update the cache from various sources (sync fast-path + async IndexedDB fallback)
 function updateAllUsersCache() {
-    if (window.FriendCore && window.FriendCore._allUsersCache && Array.isArray(window.FriendCore._allUsersCache)) {
+    // Priority 1: FriendCore in-memory cache (fastest)
+    if (window.FriendCore && window.FriendCore._allUsersCache && Array.isArray(window.FriendCore._allUsersCache) && window.FriendCore._allUsersCache.length > 0) {
         _allUsersCache = window.FriendCore._allUsersCache;
         console.log(`[All Users] Cache updated from FriendCore: ${_allUsersCache.length} users`);
-    } else if (window._allUsersCache && Array.isArray(window._allUsersCache)) {
+        return _allUsersCache;
+    }
+    // Priority 2: window global (set by fetchAllUsersFromBackend / syncEngine)
+    if (window._allUsersCache && Array.isArray(window._allUsersCache) && window._allUsersCache.length > 0) {
         _allUsersCache = window._allUsersCache;
         console.log(`[All Users] Cache updated from window: ${_allUsersCache.length} users`);
-    } else if (allUsers && Array.isArray(allUsers) && allUsers.length > 0) {
+        return _allUsersCache;
+    }
+    // Priority 3: imported module-level allUsers array
+    if (typeof allUsers !== 'undefined' && Array.isArray(allUsers) && allUsers.length > 0) {
         _allUsersCache = allUsers;
         console.log(`[All Users] Cache updated from imported allUsers: ${_allUsersCache.length} users`);
-    } else {
-        try {
-            _allUsersCache = window.safeArray(JSON.parse(localStorage.getItem('discover_users') || '[]'));
-            console.log('[LOCAL LOAD]', _allUsersCache);
-        } catch (_) {
-            _allUsersCache = [];
-        }
+        return _allUsersCache;
     }
-    return _allUsersCache;
+    // Priority 4: localStorage quick-access
+    try {
+        const lsUsers = window.safeArray(JSON.parse(localStorage.getItem('discover_users') || '[]'));
+        if (lsUsers.length > 0) {
+            _allUsersCache = lsUsers;
+            console.log('[LOCAL LOAD] discover_users from localStorage:', lsUsers.length);
+            return _allUsersCache;
+        }
+    } catch (_) {}
+
+    // Priority 5: IndexedDB 'users' store — async, fires a re-render when ready.
+    // This is the critical offline path: if localStorage was cleared or never
+    // populated, IndexedDB is the only durable offline source.
+    (async () => {
+        try {
+            const ls = window.KynectaFriendsLocalStore;
+            if (!ls || typeof ls.getAllUsers !== 'function') return;
+            const idbUsers = await ls.getAllUsers();
+            if (!Array.isArray(idbUsers) || idbUsers.length === 0) return;
+            _allUsersCache        = idbUsers;
+            window._allUsersCache = idbUsers;
+            if (window.FriendCore) {
+                window.FriendCore._allUsers         = idbUsers;
+                window.FriendCore._allUsersCache    = idbUsers;
+                window.FriendCore.discoverableUsers = idbUsers;
+            }
+            console.log(`[All Users] Cache hydrated from IndexedDB: ${idbUsers.length} users`);
+            // Re-render the discover tab with the newly loaded data
+            try { renderAllUsersList?.(); } catch (_) {}
+        } catch (e) {
+            console.warn('[All Users] IndexedDB hydration failed:', e.message);
+        }
+    })();
+
+    return _allUsersCache; // return current (possibly empty) value synchronously
 }
 
 // Get filtered users based on search term
@@ -2732,31 +2767,49 @@ async function refreshAllUsersFromAPI() {
 }
 
 export const renderAllUsersList = function() {
-    if (!isUIActive()) {
+    // FIX: Don't block rendering when offline — cached data should always render
+    // even if the lifecycle state is not ACTIVE yet.
+    const hasCachedUsers = (
+        (_allUsersCache && _allUsersCache.length > 0) ||
+        (window._allUsersCache && window._allUsersCache.length > 0) ||
+        (window.FriendCore?._allUsers?.length > 0)
+    );
+    if (!isUIActive() && !hasCachedUsers) {
         return null;
     }
     return ErrorHandler.createBoundary('renderAllUsersList', () => {
-        // Step 1: Update cache from all available sources
+        // Step 1: Update cache from all available sources (triggers async IndexedDB
+        // hydration if all sync sources are empty)
         updateAllUsersCache();
         
-        // Step 2: Render immediately from cache
+        // Step 2: Render immediately from whatever cache is available
         const hasData = renderAllUsersFromCache();
         
-        // Step 3: If no data, show loading and fetch
+        // Step 3: If still no data, show offline-aware empty state (not just spinner)
         if (!hasData && _allUsersCache.length === 0) {
             const allUsersListElement = document.getElementById('allUsersList');
             if (allUsersListElement) {
-                allUsersListElement.innerHTML = `
-                    <div class="empty-state">
-                        <i class="fas fa-spinner fa-spin" style="font-size: 32px; margin-bottom: 15px;"></i>
-                        <p>Loading users...</p>
-                    </div>
-                `;
+                if (!navigator.onLine) {
+                    allUsersListElement.innerHTML = `
+                        <div class="empty-state">
+                            <i class="fas fa-wifi-slash" style="font-size: 32px; margin-bottom: 15px; color: var(--text-muted);"></i>
+                            <p>You're offline</p>
+                            <p style="font-size:12px;color:var(--text-muted);">No cached users found. Connect to load the directory.</p>
+                        </div>
+                    `;
+                } else {
+                    allUsersListElement.innerHTML = `
+                        <div class="empty-state">
+                            <i class="fas fa-spinner fa-spin" style="font-size: 32px; margin-bottom: 15px;"></i>
+                            <p>Loading users...</p>
+                        </div>
+                    `;
+                }
             }
         }
         
-        // Step 4: Always refresh in background (unless already loading)
-        if (!window._allUsersRefreshing) {
+        // Step 4: Background refresh from API (only when online and not already in-flight)
+        if (navigator.onLine && !window._allUsersRefreshing) {
             window._allUsersRefreshing = true;
             refreshAllUsersFromAPI().finally(() => {
                 window._allUsersRefreshing = false;

@@ -178,6 +178,25 @@
                 this.initialized = true;
                 console.log('[SettingsManager] Initialized for user:', this.userId);
                 this.triggerChange('initialized', this.currentSettings);
+
+                // Push loaded settings into AppSettings (single source of truth)
+                if (window.AppSettings) {
+                    window.AppSettings.merge(this.currentSettings, { silent: false });
+                }
+
+                // Subscribe to AppSettings so external changes (other modules, iframes)
+                // flow back into MoodChatSettingsManager without infinite loops.
+                if (window.AppSettings && !this._appSettingsUnsub) {
+                    this._appSettingsUnsub = window.AppSettings.subscribe((settings, path) => {
+                        if (!path) return; // skip the initial full-call we just did
+                        const cur = this.getNestedValue(this.currentSettings, path);
+                        const next = window.AppSettings.get(path);
+                        if (JSON.stringify(cur) !== JSON.stringify(next)) {
+                            this.setNestedValue(this.currentSettings, path, next);
+                            this.applySetting(path, next);
+                        }
+                    });
+                }
             } catch (error) {
                 console.error('[SettingsManager] Init failed:', error);
                 this.currentSettings = this.cloneDeep(this.defaultSettings);
@@ -261,6 +280,12 @@
             // 7. Queue cloud sync (non-blocking)
             this.queueBackendSync(key, value);
 
+            // 8. Push into AppSettings (single source of truth) — avoids infinite loop
+            //    because AppSettings.set() checks JSON equality before re-notifying.
+            if (window.AppSettings) {
+                window.AppSettings.set(key, value);
+            }
+
             console.log('[SettingsManager] Saved:', key, '=', value);
         }
 
@@ -287,6 +312,8 @@
                     });
                 } catch (e) { console.error('[SettingsManager] Broadcast reset error:', e); }
             }
+            // Sync reset into AppSettings
+            if (window.AppSettings) window.AppSettings.merge(this.currentSettings);
             console.log('[SettingsManager] Reset to defaults');
         }
 

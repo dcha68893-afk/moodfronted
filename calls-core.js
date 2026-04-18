@@ -6323,7 +6323,44 @@ _escapeHtml: function(text) {
 };
     
     UIFailsafe.initialize();
-    
+
+    /**
+     * _showCallNotification — safe toast helper.
+     * Tries UIFailsafe.showFallbackMessage first (richest UI),
+     * then falls back to a simple DOM toast so the user ALWAYS sees the message.
+     * This fixes the "not implemented" / silent-failure path where UIFailsafe
+     * was not ready and the else-branch only did console.warn.
+     */
+    function _showCallNotification(message, type) {
+        type = type || 'info';
+        try {
+            if (typeof UIFailsafe !== 'undefined' && UIFailsafe && typeof UIFailsafe.showFallbackMessage === 'function') {
+                UIFailsafe.showFallbackMessage(message, type);
+                return;
+            }
+        } catch (_) {}
+
+        // DOM fallback — always works even if UIFailsafe isn't ready
+        try {
+            const colors = { success: '#4caf50', error: '#f44336', warning: '#ff9800', info: '#2196f3' };
+            const icons  = { success: '✓', error: '✕', warning: '⚠', info: 'ℹ' };
+            let container = document.getElementById('call-notification-container');
+            if (!container) {
+                container = document.createElement('div');
+                container.id = 'call-notification-container';
+                container.style.cssText = 'position:fixed;top:20px;right:20px;z-index:99999;display:flex;flex-direction:column;gap:10px;max-width:360px;pointer-events:none;';
+                document.body.appendChild(container);
+            }
+            const toast = document.createElement('div');
+            toast.style.cssText = `background:${colors[type]||colors.info};color:#fff;border-radius:10px;padding:12px 16px;box-shadow:0 4px 16px rgba(0,0,0,.25);display:flex;align-items:center;gap:10px;pointer-events:auto;font-size:14px;font-family:system-ui,sans-serif;`;
+            toast.innerHTML = `<span style="font-size:18px;flex-shrink:0">${icons[type]||icons.info}</span><span style="flex:1">${message}</span><span style="cursor:pointer;opacity:.7;font-size:18px;margin-left:8px" onclick="this.parentElement.remove()">&times;</span>`;
+            container.appendChild(toast);
+            setTimeout(() => { toast.style.opacity='0'; toast.style.transition='opacity .4s'; setTimeout(()=>toast.remove(), 400); }, 4500);
+        } catch (domErr) {
+            console.warn('[CallsCore] _showCallNotification DOM fallback failed:', message, domErr);
+        }
+    }
+
     // ==================== NAVIGATION GUARD ====================
     const NavigationGuard = {
         _currentPath: window.location.pathname,
@@ -6953,6 +6990,48 @@ _escapeHtml: function(text) {
     function handleCallInitiated(callData) {
     logCall(MODULE, 'handleCallInitiated', callData);
     
+    // ── Offline fix: backend returned success:false + offline:true ──────────
+    // chat.html now sends this when the callee has no active socket.
+    // Show a clear "user is offline" message and reset state — do NOT enter
+    // the initiating state or start the invitation timer.
+    if (callData.offline === true || (callData.success === false && callData.offline)) {
+        logWarn(MODULE, 'Receiver is offline — aborting call', callData);
+
+        // Clean up call state
+        resetCallState();
+        callsState.callActive  = false;
+        callsState.callState   = 'idle';
+        callsState.activeCallId = null;
+        callsState.serverCallId = null;
+        callsState.localCallId  = null;
+
+        // Unlock governor so next call attempt works immediately
+        if (CallsStateGovernor) {
+            CallsStateGovernor._transitionLock  = false;
+            CallsStateGovernor._previousState   = CallsStateGovernor._currentState;
+            CallsStateGovernor._currentState    = CALLS_STATE.ACTIVE;
+        }
+
+        // Clear any pending invitation timer
+        if (callsState.callInvitationTimer) {
+            clearTimeout(callsState.callInvitationTimer);
+            callsState.callInvitationTimer = null;
+        }
+
+        const offlineMsg = callData.error || callData.message || 'User is currently offline.';
+
+        // Notify listeners so calls-ui.js can react
+        notifyListeners('call_initiation_failed', {
+            callId:  callData.localCallId || callData.callId,
+            offline: true,
+            error:   offlineMsg
+        });
+
+        // Show toast — try UIFailsafe first, then direct DOM fallback
+        _showCallNotification(offlineMsg, 'warning');
+        return;
+    }
+
     // CRITICAL: Check if the call initiation was successful
     if (callData.success === false || callData.error) {
         logWarn(MODULE, 'Call initiation failed, cleaning up', { 
@@ -6989,15 +7068,8 @@ _escapeHtml: function(text) {
             error: callData.error || 'Call initiation failed'
         });
         
-        // Show error notification (safe check)
-        if (typeof UIFailsafe !== 'undefined' && UIFailsafe && UIFailsafe.showFallbackMessage) {
-            UIFailsafe.showFallbackMessage(
-                callData.error || 'Failed to start call', 
-                'error'
-            );
-        } else {
-            console.warn('[CallsCore] Cannot show notification - UIFailsafe not ready');
-        }
+        // Show error notification
+        _showCallNotification(callData.error || 'Failed to start call', 'error');
         return;
     }
     
@@ -7034,10 +7106,8 @@ _escapeHtml: function(text) {
     notifyListeners('call_initiated', callData);
     
     // Show success notification
-    if (typeof UIFailsafe !== 'undefined' && UIFailsafe && UIFailsafe.showFallbackMessage) {
-        const userName = callData.calleeName || callData.participants?.[0] || 'user';
-        UIFailsafe.showFallbackMessage(`Voice call started with ${userName}`, 'success');
-    }
+    const userName = callData.calleeName || callData.participants?.[0] || 'user';
+    _showCallNotification(`Voice call started with ${userName}`, 'success');
 }
 
     function handleCallAccepted(callData) {

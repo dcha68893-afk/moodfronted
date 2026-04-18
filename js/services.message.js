@@ -78,7 +78,8 @@
                     localId
                 });
 
-                const serverMsg = this._normalizeIncomingMessage(response?.data || response, {
+                const serverEnvelope = response?.data?.message || response?.message || response?.data || response;
+                const serverMsg = this._normalizeIncomingMessage(serverEnvelope, {
                     fallbackChatId: normalizedPayload.chatId,
                     fallbackSenderId: normalizedPayload.senderId || this._getCurrentUserId()
                 });

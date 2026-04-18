@@ -99,7 +99,9 @@
          */
         connect(token = null) {
             if (this._state === CONNECTION_STATE.CONNECTED || 
-                this._state === CONNECTION_STATE.AUTHENTICATED) {
+                this._state === CONNECTION_STATE.AUTHENTICATED ||
+                this._state === CONNECTION_STATE.RECONNECTING ||
+                this._state === CONNECTION_STATE.CONNECTING) {
                 return Promise.resolve(this);
             }
 
@@ -553,10 +555,23 @@
                 this._routeMessage(wrappedMessage);
             }
 
-            if (message && (message.type === 'PRESENCE_UPDATE' || message.type === 'presence:update')) {
-                const presenceUserId = message.payload?.userId || message.payload?.id;
+            if (message && (message.type === 'PRESENCE_UPDATE' || message.type === 'presence:update' ||
+                            message.type === 'user:online' || message.type === 'user:offline')) {
+                // FIX: Handle both PRESENCE_UPDATE {payload:{userId,online}} and
+                // direct user:online / user:offline {userId} shapes from backend
+                let presenceUserId, isOnline;
+                if (message.type === 'user:online') {
+                    presenceUserId = message.payload?.userId || message.userId;
+                    isOnline = true;
+                } else if (message.type === 'user:offline') {
+                    presenceUserId = message.payload?.userId || message.userId;
+                    isOnline = false;
+                } else {
+                    presenceUserId = message.payload?.userId || message.payload?.id;
+                    isOnline = message.payload?.online;
+                }
                 if (presenceUserId !== undefined && presenceUserId !== null) {
-                    if (message.payload?.online) {
+                    if (isOnline) {
                         this._onlineUsers.add(String(presenceUserId));
                     } else {
                         this._onlineUsers.delete(String(presenceUserId));
@@ -715,6 +730,11 @@
     if (window.__KYNECTA_AUTHORITIES__) {
         window.__KYNECTA_AUTHORITIES__.realtime = realtimeManager;
     }
+
+    // FIX: Notify SyncEngine and other modules that KynectaRealtime is now available
+    try {
+        window.dispatchEvent(new CustomEvent('kyn:realtimeReady', { detail: { manager: realtimeManager } }));
+    } catch (e) {}
 
     console.log('[Realtime] ✅ Ready');
 })();

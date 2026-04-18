@@ -3039,3 +3039,171 @@ input:focus + .toggle-slider,
 .search-input:focus {
   border-color: var(--color-primary) !important;
 }
+
+/* ================================================================
+   MOBILE & RESPONSIVE — COLOR CONSISTENCY FIX
+   Ensures the status module header gradient and all semantic colors
+   are IDENTICAL on mobile and desktop. No dark overrides on mobile.
+   ================================================================ */
+
+/* ── Ensure header-status variable is always available ── */
+:root {
+  --header-status: linear-gradient(135deg, #facc15 0%, #ec4899 60%, #8b5cf6 100%);
+}
+
+/* ── Status module sidebar header: same gradient on all screen sizes ── */
+body[data-module="status"] .sidebar-header,
+.create-status-header,
+.status-header {
+  background: var(--header-status) !important;
+  color: #ffffff !important;
+}
+
+@media (max-width: 768px) {
+  /* Force status header gradient on mobile — override any dark/blue leakage */
+  body[data-module="status"] .sidebar-header,
+  .create-status-header,
+  .status-header {
+    background: var(--header-status) !important;
+    color: #ffffff !important;
+  }
+
+  /* Keep all sidebar-header text white on mobile */
+  body[data-module="status"] .sidebar-header h2,
+  body[data-module="status"] .sidebar-header *,
+  .create-status-header h2,
+  .create-status-header * {
+    color: #ffffff !important;
+  }
+
+  /* Status module body background — same white/light as desktop */
+  body[data-module="status"] .sidebar,
+  .status-list-panel,
+  .status-content {
+    background-color: var(--bg-color, #ffffff) !important;
+  }
+
+  /* Remove any dark background that may bleed from chat module on mobile */
+  .sidebar-header:not(.calls-header):not(.groups-header) {
+    background: var(--header-status) !important;
+  }
+
+  /* Story rings — same gradient on mobile as desktop */
+  .my-status-avatar-ring:not(.viewed),
+  .status-ring:not(.viewed),
+  .status-avatar .status-ring:not(.viewed) {
+    background: var(--story-ring) !important;
+    border: none !important;
+  }
+
+  /* Viewed rings — same grey on mobile */
+  .my-status-avatar-ring.viewed,
+  .status-ring.viewed {
+    background: var(--viewed-story-ring, #d1d5db) !important;
+  }
+
+  /* Active category tab — blue (navigation role) on mobile too */
+  .category-btn.active,
+  .category-tab.active {
+    color: var(--color-secondary, #3b82f6) !important;
+    border-bottom-color: var(--color-secondary, #3b82f6) !important;
+  }
+
+  /* Action buttons — green on mobile */
+  .status-action-btn,
+  .create-status-btn {
+    color: var(--color-primary, #22c55e) !important;
+  }
+}
+
+@media (max-width: 480px) {
+  /* Very small screens — all color roles preserved */
+  body[data-module="status"] .sidebar-header,
+  .create-status-header {
+    background: var(--header-status) !important;
+    color: #ffffff !important;
+    padding: 14px 16px !important;
+  }
+}
+
+/* ================================================================
+   MEDIA STATUS CONTENT — display fixes
+   ================================================================ */
+.media-status-content {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  border-radius: 8px;
+}
+
+.media-placeholder,
+.media-error {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 220px;
+  background: #f3f4f6;
+  border-radius: 8px;
+  color: #9ca3af;
+  font-size: 14px;
+  gap: 8px;
+}
+
+.media-placeholder i,
+.media-error i {
+  font-size: 32px;
+}
+
+/* Sensitive content overlay */
+.sensitive-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  border-radius: 8px;
+  color: #fff;
+  font-size: 13px;
+  text-align: center;
+  padding: 16px;
+}
+
+/* Video in status viewer */
+.media-status-slide video.media-status-content {
+  max-height: 60vh;
+  border-radius: 8px;
+  background: #000;
+}
+
+/* ================================================================
+   OFFLINE / PENDING STATUS INDICATORS
+   ================================================================ */
+.status-item[data-pending="true"],
+.status-item.offline-pending {
+  opacity: 0.75;
+}
+
+.status-item[data-pending="true"] .status-ring,
+.status-item.offline-pending .status-ring {
+  background: repeating-linear-gradient(
+    45deg,
+    #d1d5db,
+    #d1d5db 4px,
+    #f9fafb 4px,
+    #f9fafb 8px
+  ) !important;
+}
+
+.offline-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 10px;
+  color: #f59e0b;
+  margin-left: 4px;
+}

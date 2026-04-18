@@ -217,8 +217,16 @@
       
       const validation = validateSession(sessionToValidate);
       if (!validation.isValid) {
-        // Don't auto-clear - just return null for invalid data
-        return null;
+        // ── OFFLINE-FIRST: Expired sessions still load the app ──────────────
+        // validation.expired = true means the token timestamp passed, but the
+        // session data is otherwise well-formed. We return it anyway and let
+        // background server validation decide whether to log the user out.
+        // Only truly malformed / structurally invalid sessions are discarded.
+        if (!validation.expired) {
+          console.warn('[Session] loadSessionFromStorage: discarding malformed session —', validation.reason);
+          return null;
+        }
+        console.log('[Session] loadSessionFromStorage: session expired locally — returning for background validation');
       }
       
       return {
@@ -305,7 +313,9 @@
       };
       
       const validation = validateSession(sessionToValidate);
-      if (!validation.isValid) {
+      if (!validation.isValid && !validation.expired) {
+        // Only reject structurally malformed sessions, not just expired ones
+        console.warn('[Session] setCentralSession: rejecting malformed session —', validation.reason);
         return false;
       }
       

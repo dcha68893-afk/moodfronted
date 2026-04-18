@@ -148,6 +148,59 @@
         async getPendingReceived() { return this.getAll('pending_received'); }
         async getBlocked() { return this.getAll('blocked'); }
 
+        // ── Users store (discovery cache) ─────────────────────────────────
+        // Persists the full user directory to IndexedDB so discovery works
+        // offline after the first online load.
+
+        /**
+         * Save an array of users to the IndexedDB 'users' store.
+         * Uses upsert semantics — existing records are overwritten.
+         * @param {Array} usersArray
+         */
+        async saveUsers(usersArray) {
+            await this.ready();
+            if (!Array.isArray(usersArray) || usersArray.length === 0) return;
+            const records = usersArray
+                .filter(u => u && u.id)
+                .map(u => ({
+                    ...u,
+                    id:        String(u.id),
+                    userId:    String(u.id),
+                    updatedAt: now(),
+                }));
+            if (records.length > 0) {
+                try {
+                    await window.AppCache.save('users', records);
+                    console.log('[CACHE] Users saved to IndexedDB:', records.length);
+                } catch (e) {
+                    console.warn('[CACHE] saveUsers IndexedDB failed:', e.message);
+                }
+            }
+        }
+
+        /**
+         * Retrieve all cached users from the IndexedDB 'users' store.
+         * Returns an empty array when offline or no data available.
+         * @returns {Promise<Array>}
+         */
+        async getAllUsers() {
+            await this.ready();
+            try {
+                const all = await window.AppCache.getAll('users');
+                return Array.isArray(all) ? all : [];
+            } catch (_) {
+                return [];
+            }
+        }
+
+        /**
+         * Delete all cached users from IndexedDB (call on logout).
+         */
+        async clearUsers() {
+            await this.ready();
+            try { await window.AppCache.clear('users'); } catch (_) {}
+        }
+
         on(event, callback) {
             if (!this._listeners.has(event)) this._listeners.set(event, new Set());
             this._listeners.get(event).add(callback);
