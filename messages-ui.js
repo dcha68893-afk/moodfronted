@@ -207,8 +207,6 @@
         _hasTriggeredInitialDataFetch: false,
         _pendingFetchTimer: null,
         _lastDataFetchAt: 0,
-        _lastLoggedLifecycleState: null,
-        _fetchRetryScheduled: false,
         
         init() {
             if (this._initialized) return this;
@@ -704,37 +702,22 @@
             const coreUserId = getMessagesCore()?.getCurrentUserId?.();
             
             if (coreHasSession && coreUserId && typeof coreUserId === 'number' && coreUserId !== 0) {
-                // Already correct — skip entirely to avoid log/fetch cascade
+                // FIX: If already ACTIVE with valid session, do nothing — no log, no re-trigger
                 if (this.state.sessionValid && this.state.lifecycleState === LIFECYCLE_STATES.ACTIVE) {
                     return false;
                 }
-                if (!this.state.sessionValid || this.state.lifecycleState !== LIFECYCLE_STATES.ACTIVE) {
-                    console.log('[UIStateManager] Force syncing session state - core has valid session');
-                    this.state.sessionValid = true;
-                    this.state.coreSessionValid = true;
-                    this.state.lifecycleState = LIFECYCLE_STATES.ACTIVE;
-                    this.state.sessionStatus = 'authenticated';
-                    this._notifyListeners('sessionValid', true);
-                    this._notifyListeners('lifecycleState', LIFECYCLE_STATES.ACTIVE);
-                    this._updateLifecycleUI(LIFECYCLE_STATES.ACTIVE);
-                    this._updateUIInteractionState(true);
-                    this._updateConnectionUI(true, 'excellent');
-                    this._triggerRealDataFetch();
-                    return true;
-                } else if (this.state.sessionValid === false && coreHasSession) {
-                    console.log('[UIStateManager] Fixing mismatched session state - core has session but UI says false');
-                    this.state.sessionValid = true;
-                    this.state.coreSessionValid = true;
-                    this.state.lifecycleState = LIFECYCLE_STATES.ACTIVE;
-                    this.state.sessionStatus = 'authenticated';
-                    this._notifyListeners('sessionValid', true);
-                    this._notifyListeners('lifecycleState', LIFECYCLE_STATES.ACTIVE);
-                    this._updateLifecycleUI(LIFECYCLE_STATES.ACTIVE);
-                    this._updateUIInteractionState(true);
-                    this._updateConnectionUI(true, 'excellent');
-                    this._triggerRealDataFetch();
-                    return true;
-                }
+                // Only log and act when state genuinely needs to change
+                this.state.sessionValid = true;
+                this.state.coreSessionValid = true;
+                this.state.lifecycleState = LIFECYCLE_STATES.ACTIVE;
+                this.state.sessionStatus = 'authenticated';
+                this._notifyListeners('sessionValid', true);
+                this._notifyListeners('lifecycleState', LIFECYCLE_STATES.ACTIVE);
+                this._updateLifecycleUI(LIFECYCLE_STATES.ACTIVE);
+                this._updateUIInteractionState(true);
+                this._updateConnectionUI(true, 'excellent');
+                this._triggerRealDataFetch();
+                return true;
             }
             return false;
         },
@@ -785,10 +768,7 @@
                 `);
             }
             
-            if (lifecycleState !== this._lastLoggedLifecycleState) {
-                console.log(`[messagesUI] Lifecycle: ${lifecycleState}`);
-                this._lastLoggedLifecycleState = lifecycleState;
-            }
+            // FIX: Removed console.log — fires on every state notification causing spam
             
             const hasSession = UIFailsafe.hasValidSession();
             this._updateUIInteractionState(info.action && hasSession);
@@ -829,21 +809,14 @@
             const coreIsActive = coreState?.state === 'ACTIVE';
             
             if (!coreIsActive) {
-                // Schedule exactly ONE retry — do not log on every attempt.
-                // The messagesLifecycleChange event listener will fire _triggerRealDataFetch
-                // again once the core actually reaches ACTIVE.
-                if (!this._fetchRetryScheduled) {
-                    this._fetchRetryScheduled = true;
-                    this._pendingFetchTimer = setTimeout(() => {
-                        this._pendingFetchTimer = null;
-                        this._fetchRetryScheduled = false;
-                        const retryState = getMessagesCore()?.getState?.();
-                        if (retryState?.state === 'ACTIVE') {
-                            this._triggerRealDataFetch();
-                        }
-                        // If still not ACTIVE, stop — the lifecycle event will retry later.
-                    }, 1000);
-                }
+                console.log('[messagesUI] Core not ACTIVE yet, scheduling retry for data fetch');
+                this._pendingFetchTimer = setTimeout(() => {
+                    this._pendingFetchTimer = null;
+                    const coreStateRetry = getMessagesCore()?.getState?.();
+                    if (coreStateRetry?.state === 'ACTIVE') {
+                        this._triggerRealDataFetch();
+                    }
+                }, 500);
                 return;
             }
             
@@ -1084,57 +1057,76 @@
                     }
                 });
             });
+
+            // FIX: Render cached chats when offline/unauthenticated boot fires the cache event
+            window.addEventListener('kyn:offlineCacheLoaded', (e) => {
+                UIFailsafe.queueAction(() => {
+                    const convs = e.detail?.convs;
+                    if (!convs || !convs.length) return;
+                    // Render using whatever is available — no session required for display
+                    if (UIRenderer && UIRenderer.renderChatsList) {
+                        UIRenderer.renderChatsList(convs, null, 'all', {});
+                    } else {
+                        window.dispatchEvent(new CustomEvent('conversationsUpdated', {
+                            detail: { conversations: convs }
+                        }));
+                    }
+                });
+            });
+
+            // FIX: Also handle kyn:chatSynced to refresh list after background sync
+            window.addEventListener('kyn:chatSynced', () => {
+                UIFailsafe.queueAction(() => {
+                    const core = getMessagesCore();
+                    if (!core) return;
+                    const convs = core.getConversations ? core.getConversations() : [];
+                    if (convs && convs.length && UIRenderer && UIRenderer.renderChatsList) {
+                        UIRenderer.renderChatsList(
+                            convs,
+                            core.getCurrentConversation?.(),
+                            core.getCurrentCategory?.() || 'all',
+                            {}
+                        );
+                    }
+                });
+            });
             
             this._eventListenersSetup = true;
         },
 
         _startPeriodicSync() {
-            setInterval(() => {
+            // FIX: Use slow interval (5s not 2s). Once ACTIVE+session is stable, stop entirely.
+            // All logging removed from steady-state path — only act on genuine state changes.
+            let _stableCount = 0;
+            const _interval = setInterval(() => {
                 UIFailsafe.queueAction(() => {
+                    // Already fully stable — no work needed
+                    if (this.state.sessionValid && this.state.lifecycleState === LIFECYCLE_STATES.ACTIVE) {
+                        _stableCount++;
+                        // After 12 stable ticks (60s) stop polling entirely
+                        if (_stableCount >= 12) {
+                            clearInterval(_interval);
+                        }
+                        return;
+                    }
+                    _stableCount = 0;
+
+                    // Only run sync logic when something is actually wrong
                     this._forceSyncSessionState();
-                    
+
                     const lifecycleState = UIFailsafe.getLifecycleState();
-                    if (lifecycleState !== this.state.lifecycleState && lifecycleState !== 'UNKNOWN') {
+                    if (lifecycleState && lifecycleState !== 'UNKNOWN' && lifecycleState !== this.state.lifecycleState) {
                         this.state.lifecycleState = lifecycleState;
                         this._notifyListeners('lifecycleState', lifecycleState);
                         this._updateLifecycleUI(lifecycleState);
-                    } else if (lifecycleState === 'UNKNOWN' && this.state.coreSessionValid) {
-                        this.state.lifecycleState = LIFECYCLE_STATES.ACTIVE;
-                        this._notifyListeners('lifecycleState', LIFECYCLE_STATES.ACTIVE);
-                        this._updateLifecycleUI(LIFECYCLE_STATES.ACTIVE);
                     }
-                    
-                    const sessionValid = UIFailsafe.hasValidSession();
-                    if (sessionValid !== this.state.sessionValid) {
-                        console.log('[UIStateManager] Periodic sync - session valid changed:', { was: this.state.sessionValid, now: sessionValid });
-                        this.state.sessionValid = sessionValid;
-                        this._notifyListeners('sessionValid', sessionValid);
-                        if (sessionValid && this.state.lifecycleState !== LIFECYCLE_STATES.ACTIVE) {
-                            this.state.lifecycleState = LIFECYCLE_STATES.ACTIVE;
-                            this._notifyListeners('lifecycleState', LIFECYCLE_STATES.ACTIVE);
-                            this._updateLifecycleUI(LIFECYCLE_STATES.ACTIVE);
-                            this._updateUIInteractionState(true);
-                            this._triggerRealDataFetch();
-                        }
-                    } else if (sessionValid && !this.state.sessionValid) {
-                        console.log('[UIStateManager] Periodic sync - fixing mismatched session state');
-                        this.state.sessionValid = true;
-                        this._notifyListeners('sessionValid', true);
-                        if (this.state.lifecycleState !== LIFECYCLE_STATES.ACTIVE) {
-                            this.state.lifecycleState = LIFECYCLE_STATES.ACTIVE;
-                            this._notifyListeners('lifecycleState', LIFECYCLE_STATES.ACTIVE);
-                            this._updateLifecycleUI(LIFECYCLE_STATES.ACTIVE);
-                            this._updateUIInteractionState(true);
-                            this._triggerRealDataFetch();
-                        }
-                    }
-                    
+
                     if (UIFailsafe.isParentReady() && !this.state.parentReady) {
                         this.state.parentReady = true;
                         this._notifyListeners('parentReady', true);
                     }
                 });
-            }, 2000);
+            }, 5000);
         },
         
         _initializeActiveUI() {
@@ -1327,38 +1319,19 @@
         },
 
         _showOfflineUI() {
-            // FIX: Show a non-blocking amber banner — never hide or block the chat UI.
-            // The message list stays interactive using IndexedDB cached data.
-            let banner = document.getElementById('kyn-offline-banner');
-            if (!banner) {
-                banner = document.createElement('div');
-                banner.id = 'kyn-offline-banner';
-                banner.setAttribute('role', 'status');
-                banner.setAttribute('aria-live', 'polite');
-                banner.style.cssText = [
-                    'position:fixed',
-                    'top:0',
-                    'left:0',
-                    'right:0',
-                    'z-index:99999',
-                    'background:#d97706',
-                    'color:#fff',
-                    'text-align:center',
-                    'padding:6px 16px',
-                    'font-size:13px',
-                    'font-weight:500',
-                    'letter-spacing:0.01em',
-                    'pointer-events:none'
-                ].join(';');
-                document.body.appendChild(banner);
-            }
-            banner.textContent = 'Offline — showing cached data';
-            banner.style.display = 'block';
+            // FIX: Offline is fully silent — no banner, no blocking screen.
+            // Cached data is already in IndexedDB and renders normally.
+            // The kyn:offlineCacheLoaded event handles populating the chat list.
+            // We only set a data attribute so CSS can optionally style things.
+            try {
+                document.documentElement.setAttribute('data-network', 'offline');
+            } catch (_) {}
         },
 
         _hideOfflineUI() {
-            const banner = document.getElementById('kyn-offline-banner');
-            if (banner) banner.style.display = 'none';
+            try {
+                document.documentElement.setAttribute('data-network', 'online');
+            } catch (_) {}
         },
 
         getFullState() {
@@ -3291,19 +3264,23 @@ Type: ${message.type || 'text'}`;
         },
 
         _canPerformAction(actionName) {
+            // FIX: Primary gate is session validity — lifecycle state can be transiently
+            // INITIALIZING during periodic sync without blocking user actions.
             if (UIFailsafe.hasValidSession()) {
                 return true;
             }
-            
-            const lifecycleState = UIStateManager.getState('lifecycleState');
-            const sessionValid = UIStateManager.getState('sessionValid');
-            
-            if (lifecycleState !== LIFECYCLE_STATES.ACTIVE || !sessionValid) {
-                UILogger.warn('UIEventHandlers', `Action '${actionName}' blocked - not ACTIVE or no valid session (state: ${lifecycleState}, sessionValid: ${sessionValid})`);
-                this._showPassiveNotification(`Please wait while connection is established...`);
-                return false;
+
+            // Secondary: check actual core state directly (not cached UIStateManager state
+            // which may lag behind the interval)
+            const core = getMessagesCore();
+            if (core && core.isAuthenticated && core.isAuthenticated()) {
+                return true;
             }
-            return true;
+
+            // Genuinely not ready
+            UILogger.warn('UIEventHandlers', `Action '${actionName}' blocked — no valid session`);
+            this._showPassiveNotification('Please wait while connection is established...');
+            return false;
         },
         
         _showPassiveNotification(message) {

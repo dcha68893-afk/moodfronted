@@ -2825,6 +2825,94 @@ if (window.SessionManager && token && user) {
     
  async autoLogin() {
     try {
+        // ── OFFLINE-FIRST AUTO-LOGIN ──────────────────────────────────────────
+        // If the device has no network, skip ALL server validation and authenticate
+        // purely from localStorage. The session was persisted by _saveAuthToLocalStorage()
+        // on last successful login, so it is safe to trust it offline.
+        const _isDeviceOnline = () => {
+            try { return navigator.onLine !== false; } catch(e) { return true; }
+        };
+
+        const _getLocalSession = () => {
+            // Read from canonical kynecta_auth key first
+            try {
+                const raw = localStorage.getItem('kynecta_auth');
+                if (raw) {
+                    const parsed = JSON.parse(raw);
+                    if (parsed && parsed.token && parsed.user) return parsed;
+                }
+            } catch(e) {}
+            // Legacy fallbacks
+            const token = localStorage.getItem('token') ||
+                          localStorage.getItem('accessToken') ||
+                          localStorage.getItem('authToken') ||
+                          localStorage.getItem('moodchat_token') ||
+                          localStorage.getItem('kynecta_token') ||
+                          localStorage.getItem('USER_TOKEN');
+            if (!token || token.length < 20) return null;
+            try {
+                const userRaw = localStorage.getItem('currentUser') ||
+                                localStorage.getItem('user') ||
+                                localStorage.getItem('moodchat_user');
+                const user = userRaw ? JSON.parse(userRaw) : null;
+                return user ? { token, user } : null;
+            } catch(e) { return null; }
+        };
+
+        // Token structure check only (no expiry enforcement offline)
+        const _isTokenStructurallyValid = (token) => {
+            if (!token || typeof token !== 'string' || token.length < 20) return false;
+            const parts = token.split('.');
+            return parts.length === 3;
+        };
+
+        if (!_isDeviceOnline()) {
+            console.log('[AUTH] Device is offline - attempting local-only auto-login');
+            const localSession = _getLocalSession();
+
+            if (localSession && _isTokenStructurallyValid(localSession.token)) {
+                const { token, user } = localSession;
+                console.log('[AUTH] Offline auto-login success for:', user.email || user.username || 'user');
+
+                // Hydrate app state from local session
+                await this._updateAuthStateImmediately('authenticated', user, token);
+                if (typeof window !== 'undefined') window.currentUser = user;
+                this._forceUIUpdate();
+
+                try {
+                    window.dispatchEvent(new CustomEvent('session:ready', {
+                        detail: { token, user, timestamp: Date.now(), offline: true, autoLogin: true }
+                    }));
+                    window.dispatchEvent(new CustomEvent('user-logged-in', {
+                        detail: { user, token, timestamp: Date.now(), autoLogin: true, offline: true }
+                    }));
+                } catch(e) {}
+
+                const currentPath = window.location.pathname;
+                if (!currentPath.includes('chat.html')) {
+                    console.log('[AUTH] Offline auto-login: redirecting to chat.html');
+                    setTimeout(() => { window.location.href = 'chat.html'; }, 300);
+                }
+
+                return {
+                    success: true,
+                    user,
+                    token,
+                    message: 'Auto-login successful (offline - local session)',
+                    offline: true
+                };
+            }
+
+            console.log('[AUTH] Offline auto-login: no valid local session found');
+            return {
+                success: false,
+                message: 'No saved session - please login when connected',
+                offline: true,
+                shouldRedirectToLogin: false  // Don't redirect - show login form in place
+            };
+        }
+        // ── END OFFLINE-FIRST BLOCK ───────────────────────────────────────────
+
         console.log('🔐 [AUTH] Auto-login attempt from stored token...');
         
         // ADD: Set timeout for auto-login to prevent hanging
@@ -3092,15 +3180,25 @@ if (window.SessionManager && token && user) {
             }
         }
         
-        // Validation failed - clear session
-        console.log('Auto-login: Token validation failed, clearing session');
+        // Validation failed
+        // OFFLINE-FIRST: Only wipe localStorage when we are ONLINE and the server
+        // explicitly rejected the token (401). If we are offline or had a network
+        // error, preserve the session so the user can still open the app later.
+        const _onlineAtFailure = (() => { try { return navigator.onLine !== false; } catch(e) { return true; } })();
+        console.log('[AUTH] Auto-login: validation failed. online=' + _onlineAtFailure);
+
         await this._updateAuthStateImmediately('unauthenticated', null, null);
-        
-        // Clear storage
-        localStorage.removeItem('token');
-        localStorage.removeItem('accessToken');
-        localStorage.removeItem('USER_TOKEN');
-        localStorage.removeItem('kynecta_auth');
+
+        if (_onlineAtFailure) {
+            // Safe to clear - server confirmed token is invalid
+            localStorage.removeItem('token');
+            localStorage.removeItem('accessToken');
+            localStorage.removeItem('USER_TOKEN');
+            localStorage.removeItem('kynecta_auth');
+            console.log('[AUTH] Session cleared (online validation failure)');
+        } else {
+            console.log('[AUTH] Offline - preserving local session, not clearing localStorage');
+        }
         
         this._validationInProgress = false;
         
@@ -4616,15 +4714,23 @@ if (window.SessionManager) {
             const payload = JSON.parse(atob(parts[1].replace(/-/g, '+').replace(/_/g, '/')));
             
             // Check expiration
-            if (payload.exp) {
+            // OFFLINE-FIRST: When device is offline, skip expiry enforcement.
+            // Background validation (when back online) will handle token refresh.
+            const _deviceOnlineForTokenCheck = (() => {
+                try { return navigator.onLine !== false; } catch(e) { return true; }
+            })();
+
+            if (payload.exp && _deviceOnlineForTokenCheck) {
                 const expiryTime = payload.exp * 1000;
                 const currentTime = Date.now();
                 const buffer = AUTH_GATEWAY_CONFIG.TOKEN_EXPIRY_BUFFER;
-                
+
                 if (currentTime >= expiryTime - buffer) {
-                    console.log('Token expired or about to expire');
+                    console.log('[AUTH] Token expired or about to expire (online check)');
                     return false;
                 }
+            } else if (payload.exp && !_deviceOnlineForTokenCheck) {
+                console.log('[AUTH] Offline: skipping token expiry check, trusting local session');
             }
             
             // Check issued at time

@@ -205,9 +205,17 @@
         };
     }
     
+    // Read-only actions that have their own IndexedDB cache fallback path —
+    // suppress the noisy lifecycle guard warn for these
+    const _SILENT_LIFECYCLE_BLOCKS = new Set([
+        'fetchConversations', 'fetchMessages', 'fetchFriends'
+    ]);
+
     function ensureActive(actionName) {
         if (currentState !== LIFECYCLE_STATES.ACTIVE) {
-            console.warn(`[${MODULE_NAME}][LifecycleGuard] ❌ Blocked action '${actionName}' - not ACTIVE (current: ${currentState})`);
+            if (!_SILENT_LIFECYCLE_BLOCKS.has(actionName)) {
+                console.warn(`[${MODULE_NAME}][LifecycleGuard] ❌ Blocked action '${actionName}' - not ACTIVE (current: ${currentState})`);
+            }
             return false;
         }
         return true;
@@ -1726,12 +1734,18 @@
     // ── OFFLINE-FIRST: Apply per-key setting changes immediately ──
     if (data && (data.type === 'SETTING_CHANGED' || data.type === 'SETTINGS_UPDATED')) {
         const payload = data.payload || data;
-        if (data.type === 'SETTING_CHANGED' && payload.section && payload.key !== undefined) {
-            const { section, key, value } = payload;
-            applySettingToMessagesModule(section, key, value);
-            window.dispatchEvent(new CustomEvent('settingChanged', {
-                detail: { section, key, value, timestamp: Date.now() }
-            }));
+        if (data.type === 'SETTING_CHANGED') {
+            const section = payload.section || payload.category;
+            const key     = payload.key     || payload.name;
+            const value   = payload.value   !== undefined ? payload.value : payload.data;
+            // FIX: Guard — do not dispatch if section or key is undefined (causes
+            // settingsManager.js to log "[SETTINGS UPDATED] undefined.undefined undefined")
+            if (section && key !== undefined && key !== null) {
+                applySettingToMessagesModule(section, key, value);
+                window.dispatchEvent(new CustomEvent('settingChanged', {
+                    detail: { section, key, value, timestamp: Date.now() }
+                }));
+            }
         }
         if (data.type === 'SETTINGS_UPDATED' && payload.settings) {
             const s = payload.settings;
@@ -1757,18 +1771,6 @@
     
     if (data.type === INCOMING_TYPES.SESSION_DATA || data.type === INCOMING_TYPES.SESSION_RESPONSE) {
         this._handleSessionData(data);
-    }
-    
-    // AUTH_READY carries the session before PARENT_READY arrives.
-    // Extract the session immediately so the state machine can progress.
-    if (data.type === 'AUTH_READY') {
-        const sessionData = (data.payload && (data.payload.session || data.payload)) || data;
-        const session = sessionData.session || sessionData;
-        if (session && session.token && session.userId) {
-            this._handleSessionData({ payload: session, type: 'SESSION_DATA' });
-        }
-        // If we are still in INITIALIZING we cannot transition yet, but the
-        // session is now stored so PARENT_READY (which comes next) will find it.
     }
     
     if (data.type === INCOMING_TYPES.PARENT_READY || data.type === INCOMING_TYPES.coreReady) {
@@ -1832,68 +1834,39 @@
                 console.log(`[${MODULE_NAME}] Session provided in PARENT_READY, userId: ${providedSession.userId}`);
                 SessionManager.setSession(providedSession);
             } else {
-                // No session in this payload — load offline cache for immediate display.
+                console.log(`[${MODULE_NAME}] No session in PARENT_READY payload, will wait for SESSION_DATA`);
+                // FIX: Never inject fake demo tokens. Load cached data for offline-first display instead.
                 if (window.KynectaLocalStore) {
                     window.KynectaLocalStore.getAllConversations().then(convs => {
                         if (convs && convs.length > 0) {
+                            console.log(`[${MODULE_NAME}] Offline-first: rendering ${convs.length} cached conversations`);
                             window.dispatchEvent(new CustomEvent('kyn:offlineCacheLoaded', { detail: { convs } }));
                         }
                     }).catch(() => {});
                 }
             }
             
-            // Accept PARENT_READY from WAIT_PARENT, INITIALIZING or READY —
-            // AUTH_READY+SESSION_DATA can arrive before CHILD_READY completes
-            // the transition to WAIT_PARENT, so we must not silently drop this.
-            const canActivate = (
-                currentState === LIFECYCLE_STATES.WAIT_PARENT ||
-                currentState === LIFECYCLE_STATES.INITIALIZING ||
-                currentState === LIFECYCLE_STATES.READY
-            );
-            
-            if (canActivate) {
-                // Force the state machine to WAIT_PARENT if it hasn't got there yet,
-                // then immediately evaluate the session.
-                if (currentState === LIFECYCLE_STATES.INITIALIZING) {
-                    // INITIALIZING → READY → WAIT_PARENT chain (may already be done async)
-                    if (!childReadySent) {
-                        // Let the normal boot sequence finish; we stored the session above.
-                        // The boot sequence will call notifyChildReady → WAIT_PARENT → active.
-                        return;
-                    }
-                }
-                if (currentState === LIFECYCLE_STATES.READY && !childReadySent) {
-                    ParentConnectionManager.notifyChildReady();
-                }
-                
+            if (currentState === LIFECYCLE_STATES.WAIT_PARENT) {
                 if (SessionManager.isAuthenticated()) {
-                    if (currentState !== LIFECYCLE_STATES.ACTIVE) {
-                        // Ensure we're at WAIT_PARENT before jumping to ACTIVE
-                        if (currentState === LIFECYCLE_STATES.READY) {
-                            setState(LIFECYCLE_STATES.WAIT_PARENT, 'parent_ready_bridge');
-                        }
-                        setState(LIFECYCLE_STATES.ACTIVE, 'parent_ready_with_valid_session');
-                    }
+                    setState(LIFECYCLE_STATES.ACTIVE, 'parent_ready_with_valid_session');
                     console.log(`[${MODULE_NAME}] ACTIVE (valid session)`);
+                    
                     initializeUISafe();
                     flushMessageQueue();
                     startDataFlow();
                 } else {
                     console.log(`[${MODULE_NAME}] WAITING_AUTH (no valid session yet)`);
-                    if (currentState === LIFECYCLE_STATES.READY) {
-                        setState(LIFECYCLE_STATES.WAIT_PARENT, 'parent_ready_bridge');
-                    }
-                    if (currentState === LIFECYCLE_STATES.WAIT_PARENT) {
-                        setState(LIFECYCLE_STATES.WAITING_AUTH, 'parent_ready_waiting_for_session');
-                    }
+                    setState(LIFECYCLE_STATES.WAITING_AUTH, 'parent_ready_waiting_for_session');
+                    
                     safeSend(OUTGOING_ACTIONS.REQUEST_SESSION, {
                         module: MODULE_NAME,
                         timestamp: Date.now()
                     }, { requireAck: false });
+                    
                     initializeUISafe();
                 }
             } else {
-                console.log(`[${MODULE_NAME}] PARENT_READY received in state: ${currentState} - ignoring`);
+                console.log(`[${MODULE_NAME}] PARENT_READY received in state: ${currentState} - ignoring (expected WAIT_PARENT)`);
             }
         },
 
@@ -4141,14 +4114,39 @@
                 console.log('[ConversationManager] Skipping fetchMessages for pending conversation:', conversationId);
                 return;
             }
-            if (!ensureActive('fetchMessages')) return;
+            // FIX: Allow cache reads even when not yet ACTIVE — only block write actions.
+            // If not ACTIVE but local store exists, load from IndexedDB immediately.
+            if (!ensureActive('fetchMessages')) {
+                if (conversationId && window.KynectaLocalStore) {
+                    window.KynectaLocalStore.getMessagesByChat(conversationId, { limit: 100 })
+                        .then(cached => {
+                            if (cached && cached.length > 0) {
+                                ChatManager.setMessages(cached);
+                                ChatManager._notifySubscribers?.();
+                            }
+                        }).catch(() => {});
+                }
+                return;
+            }
             if (!SessionManager.isAuthenticated()) return;
             
             await ChatManager.fetchMessages(conversationId, options);
         },
         
         async fetchConversations() {
-            if (!ensureActive('fetchConversations')) return;
+            // FIX: Allow cache reads before ACTIVE — renders cached chats immediately on boot
+            if (!ensureActive('fetchConversations')) {
+                if (window.KynectaLocalStore) {
+                    window.KynectaLocalStore.getAllConversations().then(convs => {
+                        if (convs && convs.length > 0) {
+                            ChatManager._conversations = convs;
+                            ChatManager._rebuildMap?.();
+                            window.dispatchEvent(new CustomEvent('kyn:offlineCacheLoaded', { detail: { convs } }));
+                        }
+                    }).catch(() => {});
+                }
+                return;
+            }
             if (!SessionManager.isAuthenticated()) return;
             
             await ChatManager.fetchConversations();
