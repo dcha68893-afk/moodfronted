@@ -155,8 +155,9 @@ body {
 
 /* Chat Header */
 .chat-header {
-    padding: 15px 20px;
-    background-color: var(--bg-color);
+    padding: 10px 16px;
+    background-color: transparent;
+    background: var(--bg-color, #fff);
     border-bottom: 1px solid var(--border-color);
     display: flex;
     align-items: center;
@@ -216,8 +217,13 @@ body {
 
 .chat-name {
     font-weight: 600;
-    font-size: 17px;
-    margin-bottom: 3px;
+    font-size: 15px;
+    margin-bottom: 2px;
+    text-align: left;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 200px;
 }
 
 .chat-status-text {
@@ -249,9 +255,7 @@ body {
     background-color: var(--secondary-color);
 }
 
-.chat-action-btn.back-btn {
-    display: none;
-}
+/* back-btn removed — device back navigation used instead */
 
 /* Messages Container */
 .messages-container {
@@ -2081,9 +2085,7 @@ body {
         background: var(--bg-color);
     }
     
-    .chat-action-btn.back-btn {
-        display: flex;
-    }
+    /* back-btn removed — device back navigation used instead */
     
     .thread-panel {
         width: 100%;
@@ -2674,7 +2676,7 @@ body {
 
 [data-theme="dark"] .chat-header,
 [data-theme="dark"] .input-area {
-    background-color: #1a1a1a;
+    background-color: var(--bg-color, #1a1a1a) !important;
     border-color: #404040;
 }
 
@@ -3175,21 +3177,17 @@ body {
    MODULE HEADER BARS — BLUE for navigation, GREEN for communication
    ================================================================ */
 
-/* Chat / Messages sidebar header → BLUE (navigation) */
+/* Chat / Messages header → use theme bg-color, not colored gradient */
 .sidebar-header,
+.new-chat-header,
 .new-call-header {
   background: var(--header-chat) !important;
 }
 
-/* Chat panel header — keep plain background so call/video icons stay visible */
+/* chat-header in the chat panel uses transparent/theme bg so icons are always visible */
 .chat-header {
-  background: var(--bg-color) !important;
+  background: var(--bg-color, #ffffff) !important;
   color: var(--text-primary) !important;
-}
-
-/* new-chat-header (contacts panel) stays neutral */
-.new-chat-header {
-  background: var(--bg-color) !important;
 }
 
 /* Calls sidebar header → GREEN (communication) */

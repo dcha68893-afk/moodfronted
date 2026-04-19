@@ -207,8 +207,6 @@
         _hasTriggeredInitialDataFetch: false,
         _pendingFetchTimer: null,
         _lastDataFetchAt: 0,
-        _lastLoggedLifecycleState: null,
-        _fetchRetryScheduled: false,
         
         init() {
             if (this._initialized) return this;
@@ -704,10 +702,6 @@
             const coreUserId = getMessagesCore()?.getCurrentUserId?.();
             
             if (coreHasSession && coreUserId && typeof coreUserId === 'number' && coreUserId !== 0) {
-                // Already correct — skip entirely to avoid log/fetch cascade
-                if (this.state.sessionValid && this.state.lifecycleState === LIFECYCLE_STATES.ACTIVE) {
-                    return false;
-                }
                 if (!this.state.sessionValid || this.state.lifecycleState !== LIFECYCLE_STATES.ACTIVE) {
                     console.log('[UIStateManager] Force syncing session state - core has valid session');
                     this.state.sessionValid = true;
@@ -785,10 +779,7 @@
                 `);
             }
             
-            if (lifecycleState !== this._lastLoggedLifecycleState) {
-                console.log(`[messagesUI] Lifecycle: ${lifecycleState}`);
-                this._lastLoggedLifecycleState = lifecycleState;
-            }
+            console.log(`[messagesUI] Lifecycle: ${lifecycleState}`);
             
             const hasSession = UIFailsafe.hasValidSession();
             this._updateUIInteractionState(info.action && hasSession);
@@ -829,19 +820,14 @@
             const coreIsActive = coreState?.state === 'ACTIVE';
             
             if (!coreIsActive) {
-                // Schedule exactly ONE retry — no repeated logs.
-                // The messagesLifecycleChange event will fire this again once core is ACTIVE.
-                if (!this._fetchRetryScheduled) {
-                    this._fetchRetryScheduled = true;
-                    this._pendingFetchTimer = setTimeout(() => {
-                        this._pendingFetchTimer = null;
-                        this._fetchRetryScheduled = false;
-                        const retryState = getMessagesCore()?.getState?.();
-                        if (retryState?.state === 'ACTIVE') {
-                            this._triggerRealDataFetch();
-                        }
-                    }, 1000);
-                }
+                console.log('[messagesUI] Core not ACTIVE yet, scheduling retry for data fetch');
+                this._pendingFetchTimer = setTimeout(() => {
+                    this._pendingFetchTimer = null;
+                    const coreStateRetry = getMessagesCore()?.getState?.();
+                    if (coreStateRetry?.state === 'ACTIVE') {
+                        this._triggerRealDataFetch();
+                    }
+                }, 500);
                 return;
             }
             
@@ -1325,33 +1311,15 @@
         },
 
         _showOfflineUI() {
-            // FIX: Show a non-blocking amber banner — never hide or block the chat UI.
-            // The message list stays interactive using IndexedDB cached data.
-            let banner = document.getElementById('kyn-offline-banner');
-            if (!banner) {
-                banner = document.createElement('div');
-                banner.id = 'kyn-offline-banner';
-                banner.setAttribute('role', 'status');
-                banner.setAttribute('aria-live', 'polite');
-                banner.style.cssText = [
-                    'position:fixed',
-                    'top:0',
-                    'left:0',
-                    'right:0',
-                    'z-index:99999',
-                    'background:#d97706',
-                    'color:#fff',
-                    'text-align:center',
-                    'padding:6px 16px',
-                    'font-size:13px',
-                    'font-weight:500',
-                    'letter-spacing:0.01em',
-                    'pointer-events:none'
-                ].join(';');
-                document.body.appendChild(banner);
-            }
-            banner.textContent = 'Offline — showing cached data';
-            banner.style.display = 'block';
+            // FIX: Do NOT display any "offline" or "cached data" text on screen.
+            // The app keeps working with cached data silently — no banner needed.
+            // Just ensure the UI stays interactive (no blocking overlays).
+            const banners = [
+                document.getElementById('kyn-offline-banner'),
+                document.querySelector('.offline-banner'),
+                document.querySelector('[data-offline-banner]')
+            ];
+            banners.forEach(b => { if (b) b.style.display = 'none'; });
         },
 
         _hideOfflineUI() {
@@ -2106,8 +2074,17 @@
                 const unreadCount = Number(chat?.unreadCount) || 0;
                 const unreadBadge = unreadCount > 0 ? `<span class="unread-badge">${unreadCount}</span>` : '';
                 const draftBadge = hasDraft ? '<span class="draft-badge">Draft</span>' : '';
-                const status = chat.online ? 'online' : 'offline';
                 const core = getMessagesCore();
+                // FIX: Always resolve online status from FriendManager for real-time accuracy
+                let _chatOnline = !!chat.online;
+                if (core && core.FriendManager) {
+                    const _fid = chat.friendId || chat.userId || (chat.otherParticipant && chat.otherParticipant.id);
+                    if (_fid) {
+                        const _f = core.FriendManager.getFriend(_fid) || core.FriendManager.getFriend(parseInt(_fid));
+                        if (_f) _chatOnline = !!(_f.online || _f.status === 'online');
+                    }
+                }
+                const status = _chatOnline ? 'online' : 'offline';
                 // Robust time: handle string ISO, number ms, or missing
                 const _rawTs = chat.lastMessageAt;
                 let _parsedTs = 0;
@@ -2274,7 +2251,8 @@
             const statusEl = UIFailsafe.safeGetElement('chatStatusText');
             const indicatorEl = UIFailsafe.safeGetElement('chatStatusIndicator');
 
-            if (nameEl) UIFailsafe.safeSetText(nameEl, chat.friendName || 'User');
+            const friendName = chat.friendName || chat.name || 'User';
+            if (nameEl) UIFailsafe.safeSetText(nameEl, friendName);
             // Use real online status from FriendManager if available
             const _core = getMessagesCore();
             let _isOnline = !!chat.online;
@@ -2296,12 +2274,20 @@
             
             if (avatarEl) {
                 if (chat.friendAvatar) {
-                    UIFailsafe.safeSetHTML(avatarEl, `<img src="${chat.friendAvatar}" alt="${chat.friendName}" loading="lazy">`);
+                    UIFailsafe.safeSetHTML(avatarEl, `<img src="${chat.friendAvatar}" alt="${friendName}" loading="lazy">`);
                 } else {
-                    UIFailsafe.safeSetHTML(avatarEl, '<i class="fas fa-user"></i>');
+                    // Show initials instead of generic icon
+                    const initials = friendName.charAt(0).toUpperCase();
+                    UIFailsafe.safeSetHTML(avatarEl, `<span style="width:36px;height:36px;border-radius:50%;background:linear-gradient(135deg,#667eea,#764ba2);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:15px;">${initials}</span>`);
                 }
                 if (indicatorEl) avatarEl.appendChild(indicatorEl);
             }
+
+            // Push history state so device back-button returns to sidebar
+            try {
+                const chatId = chat.id || chat.friendId || chat.userId;
+                history.pushState({ view: 'chat', chatId, friendName }, '', '');
+            } catch (_e) {}
         },
 
         _updateUserAvatar(user) {
@@ -2850,6 +2836,10 @@
                 const returnUserId = window.__messageChatReturnUserId;
                 const returnChatId = window.__messageChatReturnId;
                 const returnName = window.__messageChatReturnName;
+
+                // FIX: Restore back button since we're back in messages context
+                const backBtn = document.getElementById('backToChatsBtn');
+                if (backBtn) backBtn.style.display = '';
                 
                 if (returnUserId && window.messagesUI?.loadChatByFriendId) {
                     setTimeout(() => {
@@ -3293,6 +3283,15 @@ Type: ${message.type || 'text'}`;
                 return true;
             }
             
+            // FIXED: Also check core state directly — UIStateManager may lag behind core
+            const core = typeof getMessagesCore === 'function' ? getMessagesCore() : null;
+            if (core && core.getState) {
+                const coreState = core.getState();
+                if (coreState && coreState.state === 'ACTIVE' && coreState.hasValidSession) {
+                    return true;
+                }
+            }
+            
             const lifecycleState = UIStateManager.getState('lifecycleState');
             const sessionValid = UIStateManager.getState('sessionValid');
             
@@ -3331,6 +3330,8 @@ Type: ${message.type || 'text'}`;
                         if (chatPanel) UIFailsafe.safeAddClass(chatPanel, 'hidden');
                         if (sidebar) UIFailsafe.safeAddClass(sidebar, 'active');
                         UIStateManager.setState('chatVisible', false);
+                        // Notify parent that chat list is now shown (clears chat-panel-active on mobile)
+                        try { window.parent.postMessage({ type: 'CHAT_LIST_SHOWN', timestamp: Date.now() }, '*'); } catch(_) {}
                     });
                 });
             }
@@ -4234,24 +4235,24 @@ Type: ${message.type || 'text'}`;
         _setupOnlineOfflineHandlers() {
             window.addEventListener('online', () => {
                 UIFailsafe.queueAction(() => {
+                    // FIX: Hide any offline banners silently — no toasts about "back online"
+                    const banner = document.getElementById('kyn-offline-banner');
+                    if (banner) banner.style.display = 'none';
                     const offlineOverlay = UIFailsafe.safeGetElement('offlineOverlay');
                     if (offlineOverlay) UIFailsafe.safeRemoveClass(offlineOverlay, 'active');
-                    UIRenderer.showNotification('Back online', 'success');
                     
                     const core = getMessagesCore();
-                    if (core?.checkOfflineQueue) {
-                        core.checkOfflineQueue();
-                    }
-                    
-                    if (core?.fetchConversations) {
-                        core.fetchConversations();
-                    }
+                    if (core?.checkOfflineQueue) core.checkOfflineQueue();
+                    if (core?.fetchConversations) core.fetchConversations();
                 });
             });
 
             window.addEventListener('offline', () => {
                 UIFailsafe.queueAction(() => {
-                    MessageUIState.setState({ networkState: 'offline' });
+                    // FIX: Do NOT show any offline overlay or toast — stay silent.
+                    // The app continues working with cached data.
+                    UIStateManager.setState('networkState', 'offline');
+                    console.log('[MessageUI] Network offline — using cached data silently');
                 });
             });
         },
@@ -4315,58 +4316,48 @@ Type: ${message.type || 'text'}`;
             
             if (!content && !attachment) return;
 
-            // If core has no active conversation yet (e.g. opened from calls module),
-            // try to resolve and register one before sending.
-            let activeConv = core?.getCurrentConversation?.();
-            if (!activeConv) {
-                const friendName = window.currentFriendName;
-                const conversations = core?.getConversations?.() || [];
-                // Try to find by name or the last-displayed name in the header
-                const headerName = document.getElementById('chatFriendName')?.textContent?.trim();
-                activeConv = conversations.find(c =>
-                    (friendName && (c.friendName === friendName || c.name === friendName)) ||
-                    (headerName && (c.friendName === headerName || c.name === headerName))
-                );
-                if (activeConv && core?.openConversation) {
-                    await core.openConversation(activeConv.id, { minFetchGap: 60000 }).catch(() => {});
-                }
-            }
+            // FIX: Clear the input immediately and render an optimistic message bubble
+            // so the user sees their message right away — don't wait for the server round-trip.
+            input.value = '';
+            input.style.height = 'auto';
+
+            const _renderNow = () => {
+                try {
+                    const currentChat = core?.getCurrentConversation?.() || core?.ChatManager?.getActiveChat?.();
+                    const currentUser = core?.getCurrentUser?.();
+                    if (currentChat && currentUser) {
+                        const messages = core?.getMessages?.() || [];
+                        UIRenderer.renderMessages(messages, currentChat, currentUser);
+                    }
+                } catch (_e) {}
+            };
 
             const result = core?.sendMessage(content, {
                 type: attachment?.type || 'text',
                 attachment: attachment
             });
 
+            // Render optimistically right after sending (core adds the message locally)
+            setTimeout(_renderNow, 0);
+
             if (result && typeof result.then === 'function') {
                 result.then((response) => {
-                    if (response && response.success) {
-                        input.value = '';
-                        input.style.height = 'auto';
-                        if (core) {
-                            core.removeAttachment?.();
-                            if (core.replyToMessage) {
-                                core.setReplyToMessage?.(null);
-                            }
-                        }
-                        UIRenderer.showNotification(response.queued ? 'Message queued for sync' : 'Message sent');
-                    } else {
-                        UIRenderer.showNotification('Failed to send', 'error');
+                    if (core) {
+                        core.removeAttachment?.();
+                        if (core.replyToMessage) core.setReplyToMessage?.(null);
                     }
+                    // Re-render with confirmed status from server
+                    setTimeout(_renderNow, 0);
                 }).catch((error) => {
                     UIRenderer.showNotification('Failed to send: ' + error.message, 'error');
                 });
-            } else if (result && result.success) {
-                input.value = '';
-                input.style.height = 'auto';
+            } else if (result && result.success !== false) {
                 if (core) {
                     core.removeAttachment?.();
-                    if (core.replyToMessage) {
-                        core.setReplyToMessage?.(null);
-                    }
+                    if (core.replyToMessage) core.setReplyToMessage?.(null);
                 }
-                UIRenderer.showNotification('Message sent');
-            } else {
-                UIRenderer.showNotification('Failed to send', 'error');
+            } else if (result && result.success === false) {
+                UIRenderer.showNotification('Failed to send — check connection', 'error');
             }
         },
 
@@ -4844,18 +4835,19 @@ Type: ${message.type || 'text'}`;
         console.log('[MessageUI] Setting up auto-open chat listener');
         
         window.addEventListener('messages:openChat', function(event) {
-            const { userId, userName, recipientId, recipientName } = event.detail || {};
+            const { userId, userName, userAvatar, recipientId, recipientName, recipientAvatar } = event.detail || {};
             const targetUserId = userId || recipientId;
             const targetUserName = userName || recipientName || 'User';
+            const targetAvatar = userAvatar || recipientAvatar || null;
             
-            console.log('[MessageUI] Auto-open chat requested:', { targetUserId, targetUserName });
+            console.log('[MessageUI] Auto-open chat requested:', { targetUserId, targetUserName, targetAvatar });
             
             if (!targetUserId) {
                 console.error('[MessageUI] No user ID provided for auto-open');
                 return;
             }
             
-            openChatWithUserInUI(targetUserId, targetUserName);
+            openChatWithUserInUI(targetUserId, targetUserName, targetAvatar);
         });
 
         window.addEventListener('message', function(event) {
@@ -4865,6 +4857,7 @@ Type: ${message.type || 'text'}`;
             const payload = msg.payload || {};
             const targetUserId = payload.userId || payload.recipientId;
             const targetUserName = payload.userName || payload.recipientName || 'User';
+            const targetAvatar = payload.userAvatar || payload.recipientAvatar || null;
 
             console.log('[MessageUI] Received OPEN_CHAT_WITH_USER postMessage:', { targetUserId, targetUserName });
 
@@ -4873,49 +4866,87 @@ Type: ${message.type || 'text'}`;
                 return;
             }
 
-            openChatWithUserInUI(targetUserId, targetUserName);
+            openChatWithUserInUI(targetUserId, targetUserName, targetAvatar);
         });
         
-        const pendingChatRaw = sessionStorage.getItem('open_chat_on_load') || sessionStorage.getItem('pending_chat');
-        if (pendingChatRaw) {
-            try {
-                const chatData = JSON.parse(pendingChatRaw);
-                console.log('[MessageUI] Found pending chat in sessionStorage:', chatData);
-                
-                sessionStorage.removeItem('open_chat_on_load');
-                sessionStorage.removeItem('pending_chat');
-                
-                openChatWithUserInUI(chatData.userId, chatData.userName || 'User');
-            } catch (e) {
-                console.error('[MessageUI] Failed to parse pending chat:', e);
-            }
-        }
+        // FIX: Do NOT auto-open chat from sessionStorage on init.
+        // The chat panel must only open when the user explicitly triggers it:
+        //   - Clicking a chat in the sidebar
+        //   - Clicking "Message" in friends/calls module (OPEN_CHAT_WITH_USER postMessage)
+        // sessionStorage pending_chat is handled by message.html's checkSessionStorageForPendingChat
+        // which is called only after the lifecycle reaches ACTIVE and the user action is confirmed.
     }
 
-    function openChatWithUserInUI(userId, userName) {
-        console.log('[MessageUI] Opening chat with user:', { userId, userName });
+    function openChatWithUserInUI(userId, userName, userAvatar) {
+        console.log('[MessageUI] Opening chat with user:', { userId, userName, userAvatar });
         
         const numericUserId = parseInt(userId);
         const core = getMessagesCore();
+
+        // Resolve name/avatar from FriendManager if not provided
+        let resolvedName = userName || 'User';
+        let resolvedAvatar = userAvatar || null;
+        if (core && core.FriendManager) {
+            const friend = core.FriendManager.getFriend(numericUserId)
+                        || core.FriendManager.getFriend(String(numericUserId));
+            if (friend) {
+                resolvedName = friend.displayName || friend.username || friend.name || resolvedName;
+                resolvedAvatar = resolvedAvatar || friend.avatar || friend.photoURL || friend.avatarUrl || null;
+            }
+        }
         
         const chatPanel = document.getElementById('chatPanel');
         const sidebar = document.getElementById('sidebar');
         const contactsSidebar = document.getElementById('contactsSidebar');
         
-        if (contactsSidebar) contactsSidebar.classList.add('hidden');
+        if (contactsSidebar) { contactsSidebar.classList.add('hidden'); contactsSidebar.style.pointerEvents = 'none'; }
         if (sidebar) sidebar.classList.add('active');
         if (chatPanel) {
             chatPanel.classList.remove('hidden');
             UIStateManager.setState('chatVisible', true);
+            // FIX: If arriving from calls module, hide the back arrow so user can't
+            // navigate "back" to an empty sidebar frame — the call module handles navigation.
+            const sourceIsCall = (window.__messageChatReturnUserId && window.__messageChatReturnId);
+            const backBtn = document.getElementById('backToChatsBtn');
+            if (backBtn) {
+                // On mobile show back button normally; on call-return hide it
+                backBtn.style.display = (sourceIsCall && window.innerWidth <= 768) ? 'none' : '';
+            }
+            // Push history state for device-back navigation support
+            try {
+                history.pushState({ view: 'chat', userId: numericUserId, userName: resolvedName }, '', '');
+            } catch (_e) {}
             try {
                 window.parent?.postMessage({ type: 'CHAT_OPENED', timestamp: Date.now() }, '*');
             } catch (_error) {}
         }
+
+        // Update chat header immediately with correct name and avatar
+        const nameEl = document.getElementById('chatFriendName');
+        if (nameEl) nameEl.textContent = resolvedName;
+        const avatarEl = document.getElementById('chatFriendAvatar');
+        if (avatarEl) {
+            if (resolvedAvatar) {
+                avatarEl.innerHTML = `<img src="${resolvedAvatar}" alt="${resolvedName}" loading="lazy" style="width:100%;height:100%;border-radius:50%;object-fit:cover;">`;
+            } else {
+                const initials = resolvedName.charAt(0).toUpperCase();
+                avatarEl.innerHTML = `<span style="width:36px;height:36px;border-radius:50%;background:linear-gradient(135deg,#667eea,#764ba2);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:15px;">${initials}</span>`;
+            }
+        }
+        // Always enable the message input
+        const messageInput = document.getElementById('messageInput');
+        if (messageInput) {
+            messageInput.disabled = false;
+            messageInput.placeholder = `Message ${resolvedName}...`;
+        }
+        const sendButton = document.getElementById('sendButton');
+        if (sendButton) sendButton.disabled = false;
         
-        window.currentFriendName = userName;
+        window.currentFriendName = resolvedName;
+
         if (window.messagesUI && typeof window.messagesUI.loadChatByFriendId === 'function') {
             console.log('[MessageUI] Using messagesUI.loadChatByFriendId');
-            window.messagesUI.loadChatByFriendId(numericUserId, userName);
+            window.messagesUI.loadChatByFriendId(numericUserId, resolvedName);
             return;
         }
 
@@ -4924,8 +4955,8 @@ Type: ${message.type || 'text'}`;
             core.openConversation(numericUserId);
             
             setTimeout(() => {
-                const nameEl = document.getElementById('chatFriendName');
-                if (nameEl) nameEl.textContent = userName;
+                const _nameEl2 = document.getElementById('chatFriendName');
+                if (_nameEl2 && _nameEl2.textContent !== resolvedName) _nameEl2.textContent = resolvedName;
                 const statusEl = document.getElementById('chatStatusText');
                 if (statusEl) {
                     const _core2 = getMessagesCore();
@@ -4934,10 +4965,11 @@ Type: ${message.type || 'text'}`;
                         const _f = _core2.FriendManager.getFriend(numericUserId);
                         if (_f) _realOnline = !!_f.online;
                     }
-                    statusEl.textContent = _realOnline ? 'Active now' : 'Offline';
+                    // FIX: Only show "Active now" when online; leave blank otherwise (no "Offline" text)
+                    statusEl.textContent = _realOnline ? 'Active now' : '';
                 }
                 const indicatorEl = document.getElementById('chatStatusIndicator');
-                if (indicatorEl) indicatorEl.className = 'chat-status online';
+                if (indicatorEl) indicatorEl.className = `chat-status ${document.getElementById('chatStatusText')?.textContent === 'Active now' ? 'online' : 'offline'}`;
                 
                 const messagesContainer = document.getElementById('messagesContainer');
                 if (messagesContainer && messagesContainer.innerHTML.includes('loading-chat')) {
@@ -4945,7 +4977,7 @@ Type: ${message.type || 'text'}`;
                         <div class="empty-chat">
                             <i class="fas fa-comment-dots empty-chat-icon"></i>
                             <div class="empty-chat-title">No messages yet</div>
-                            <div class="empty-chat-message">Type your first message below to start the conversation with ${userName}</div>
+                            <div class="empty-chat-message">Type your first message below to start the conversation with ${resolvedName}</div>
                         </div>
                     `;
                 }
@@ -4959,15 +4991,15 @@ Type: ${message.type || 'text'}`;
             
             const openPanel = () => {
                 setTimeout(() => {
-                    const nameEl = document.getElementById('chatFriendName');
-                    if (nameEl) nameEl.textContent = userName;
+                    const _nameEl3 = document.getElementById('chatFriendName');
+                    if (_nameEl3) _nameEl3.textContent = resolvedName;
                     const messagesContainer = document.getElementById('messagesContainer');
                     if (messagesContainer && messagesContainer.innerHTML.includes('loading-chat')) {
                         messagesContainer.innerHTML = `
                             <div class="empty-chat">
                                 <i class="fas fa-comment-dots empty-chat-icon"></i>
                                 <div class="empty-chat-title">No messages yet</div>
-                                <div class="empty-chat-message">Type your first message below to start the conversation with ${userName}</div>
+                                <div class="empty-chat-message">Type your first message below to start the conversation with ${resolvedName}</div>
                             </div>
                         `;
                     }
@@ -4990,7 +5022,7 @@ Type: ${message.type || 'text'}`;
         
         if (window.ChatManager && typeof window.ChatManager.openChat === 'function') {
             console.log('[MessageUI] Using ChatManager.openChat');
-            window.ChatManager.openChat(numericUserId, userName);
+            window.ChatManager.openChat(numericUserId, resolvedName);
             return;
         }
         
@@ -5018,8 +5050,8 @@ Type: ${message.type || 'text'}`;
         
         const searchInput = document.querySelector('.contact-search, .search-input, #contactSearch, #searchUsers, .user-search, [placeholder*="search"]');
         if (searchInput) {
-            console.log('[MessageUI] Searching for user:', userName);
-            searchInput.value = userName;
+            console.log('[MessageUI] Searching for user:', resolvedName);
+            searchInput.value = resolvedName;
             searchInput.dispatchEvent(new Event('input', { bubbles: true }));
             searchInput.dispatchEvent(new Event('change', { bubbles: true }));
             
@@ -5039,13 +5071,13 @@ Type: ${message.type || 'text'}`;
                         }
                     }, 200);
                 } else {
-                    console.log('[MessageUI] No search results found for:', userName);
-                    showNotificationInMessages(`Click + New Chat to start conversation with ${userName}`, 'info');
+                    console.log('[MessageUI] No search results found for:', resolvedName);
+                    showNotificationInMessages(`Click + New Chat to start conversation with ${resolvedName}`, 'info');
                 }
             }, 600);
         } else {
             console.log('[MessageUI] Could not find way to open chat with user:', userId);
-            showNotificationInMessages(`Click + New Chat to start conversation with ${userName}`, 'info');
+            showNotificationInMessages(`Click + New Chat to start conversation with ${resolvedName}`, 'info');
             if (chatPanel) {
                 chatPanel.classList.remove('hidden');
                 UIStateManager.setState('chatVisible', true);
@@ -5064,6 +5096,23 @@ Type: ${message.type || 'text'}`;
             console.log('[MessageUI] Notification:', message);
         }
     }
+
+    // Device back-button handler — when user navigates back, hide chat panel and show sidebar
+    window.addEventListener('popstate', function(event) {
+        const chatPanel = document.getElementById('chatPanel');
+        const sidebar = document.getElementById('sidebar');
+        const contactsSidebar = document.getElementById('contactsSidebar');
+        const state = event.state || {};
+
+        if (state.view === 'chat' || UIStateManager.getState('chatVisible')) {
+            // Going back from chat → show sidebar
+            if (chatPanel) chatPanel.classList.add('hidden');
+            if (sidebar) sidebar.classList.add('active');
+            if (contactsSidebar) { contactsSidebar.classList.add('hidden'); contactsSidebar.style.pointerEvents = 'none'; }
+            UIStateManager.setState('chatVisible', false);
+            console.log('[MessageUI] Device back: returned to sidebar');
+        }
+    });
 
     // =============================================
     // UI INITIALIZATION (PASSIVE UNTIL ACTIVE)
@@ -5150,14 +5199,15 @@ Type: ${message.type || 'text'}`;
         let checkCount = 0;
         const checkCore = setInterval(() => {
             checkCount++;
-            const lifecycleState = UIFailsafe.getLifecycleState();
+            // FIX: Always check hasValidSession() first — it reads core.isAuthenticated() directly
+            // and is not blocked by UIStateManager.state.lifecycleState being stale.
             const hasValidSession = UIFailsafe.hasValidSession();
+            const lifecycleState = UIFailsafe.getLifecycleState();
             
-            console.log('[UI] CheckCore:', { lifecycleState, hasValidSession, checkCount });
-            
-            if ((lifecycleState === LIFECYCLE_STATES.ACTIVE && hasValidSession) || hasValidSession) {
+            if (hasValidSession) {
+                // Session is valid — enable UI immediately regardless of lifecycle state label
                 clearInterval(checkCore);
-                
+                UIFailsafe.forceEnableUI();
                 setupCoreSubscriptions();
                 
                 setTimeout(() => {
@@ -5192,15 +5242,11 @@ Type: ${message.type || 'text'}`;
                         UIStateManager._initializeActiveUI();
                     });
                 }, 0);
-            } else if (hasValidSession) {
-                console.log('[UI] Force enabling UI - valid session detected');
-                UIFailsafe.forceEnableUI();
-                clearInterval(checkCore);
-                setupCoreSubscriptions();
-                const core = getMessagesCore();
-                if (core && core.fetchConversations) core.fetchConversations();
-                if (core && core.FriendManager && core.FriendManager.fetchFriends) core.FriendManager.fetchFriends();
-            } else if (lifecycleState === LIFECYCLE_STATES.WAIT_PARENT) {
+                return;
+            }
+
+            // Not yet ready
+            if (lifecycleState === LIFECYCLE_STATES.WAIT_PARENT) {
                 const waitParentElements = UIFailsafe.safeQuerySelectorAll('.wait-parent-state, .connecting-overlay, .connection-waiting');
                 UIFailsafe.safeForEach(waitParentElements, (el) => {
                     if (el && el.remove) el.remove();
@@ -5213,7 +5259,7 @@ Type: ${message.type || 'text'}`;
                 }
             }
             
-            if (checkCount > 20) {
+            if (checkCount > 60) {
                 if (UIFailsafe.hasValidSession()) {
                     console.log('[UI] Timeout but session valid - forcing UI enable');
                     UIFailsafe.forceEnableUI();
@@ -5224,7 +5270,7 @@ Type: ${message.type || 'text'}`;
                 }
                 clearInterval(checkCore);
             }
-        }, 120);
+        }, 50);
 
         setTimeout(() => {
             if (UIFailsafe.hasValidSession() && UIStateManager.getState('sessionValid') !== true) {
@@ -5407,9 +5453,20 @@ Type: ${message.type || 'text'}`;
         getCore: getMessagesCore,
         
         openChat: (chat) => {
+            // FIXED: Always show the panel — pass full chat object so header renders correctly
+            const chatPanel = document.getElementById('chatPanel');
+            const sidebar = document.getElementById('sidebar');
+            if (chatPanel) {
+                chatPanel.classList.remove('hidden');
+                UIStateManager.setState('chatVisible', true);
+            }
+            if (sidebar && window.innerWidth <= 768) {
+                sidebar.classList.remove('active');
+            }
             const core = getMessagesCore();
             if (core && core.openConversation) {
-                core.openConversation(chat.id || chat);
+                const id = (chat && chat.id) ? chat.id : chat;
+                core.openConversation(id).catch?.(() => {});
             }
         },
         
@@ -5460,6 +5517,8 @@ Type: ${message.type || 'text'}`;
             if (chatPanel) {
                 chatPanel.classList.remove('hidden');
                 UIStateManager.setState('chatVisible', true);
+                // FIX: Send ACK immediately so chat.html retry loop stops on attempt 1
+                try { window.parent?.postMessage({ type: 'CHAT_OPENED', timestamp: Date.now() }, '*'); } catch(_) {}
                 
                 const messagesContainer = document.getElementById('messagesContainer');
                 if (messagesContainer) {
@@ -5506,7 +5565,10 @@ Type: ${message.type || 'text'}`;
                         const indicatorEl = document.getElementById('chatStatusIndicator');
                         
                         if (nameEl) nameEl.textContent = friend.displayName || friend.username || displayName;
-                        if (statusEl) statusEl.textContent = friend.online ? 'Online' : 'Offline';
+                        if (statusEl) {
+                            const friendOnline = !!friend.online;
+                            statusEl.textContent = friendOnline ? 'Active now' : '';
+                        }
                         if (indicatorEl) indicatorEl.className = `chat-status ${friend.online ? 'online' : 'offline'}`;
                         if (avatarEl) {
                             if (friend.avatar || friend.photoURL) {
@@ -5536,27 +5598,27 @@ Type: ${message.type || 'text'}`;
                 return;
             }
 
-            // No existing conversation — create one, then call openConversation so the
-            // core registers it as the active chat (required for send button to work).
-            const _afterCreate = (conversationId) => {
-                ensureChatPanelOpen(conversationId);
-                // Ensure core knows this is the active conversation
-                const coreInst = getMessagesCore();
-                if (coreInst && conversationId && typeof coreInst.openConversation === 'function') {
-                    coreInst.openConversation(conversationId, { minFetchGap: 25000 }).catch?.(() => {});
-                }
-            };
-
             if (core.ConversationManager?.createConversation) {
                 console.log('[messagesUI] Using ConversationManager.createConversation');
                 const result = core.ConversationManager.createConversation([id]);
+                
                 if (result && typeof result.then === 'function') {
                     result.then((conversation) => {
-                        const conversationId = (conversation === false || conversation === null) ? id : (conversation?.id || conversation);
-                        _afterCreate(conversationId);
-                    }).catch(() => _afterCreate(id));
+                        console.log('[messagesUI] Conversation created/opened:', conversation);
+                        if (conversation === false || conversation === null) {
+                            console.log('[messagesUI] createConversation returned false, opening panel anyway');
+                            ensureChatPanelOpen(id);
+                        } else {
+                            const conversationId = conversation?.id || conversation;
+                            ensureChatPanelOpen(conversationId);
+                        }
+                    }).catch((error) => {
+                        console.error('[messagesUI] Failed to create conversation:', error);
+                        ensureChatPanelOpen(id);
+                    });
                 } else {
-                    _afterCreate((result === false || result === null) ? id : (result?.id || result));
+                    const conversationId = (result === false || result === null) ? id : (result?.id || result);
+                    ensureChatPanelOpen(conversationId);
                 }
             } else if (core.createConversation) {
                 console.log('[messagesUI] Using core.createConversation');
@@ -5564,10 +5626,13 @@ Type: ${message.type || 'text'}`;
                 if (result && typeof result.then === 'function') {
                     result.then((conversation) => {
                         const conversationId = (conversation === false || conversation === null) ? id : (conversation?.id || conversation);
-                        _afterCreate(conversationId);
-                    }).catch(() => _afterCreate(id));
+                        ensureChatPanelOpen(conversationId);
+                    }).catch(() => {
+                        ensureChatPanelOpen(id);
+                    });
                 } else {
-                    _afterCreate((result === false || result === null) ? id : (result?.id || result));
+                    const conversationId = (result === false || result === null) ? id : (result?.id || result);
+                    ensureChatPanelOpen(conversationId);
                 }
             } else if (core.openConversation) {
                 console.log('[messagesUI] Using core.openConversation');

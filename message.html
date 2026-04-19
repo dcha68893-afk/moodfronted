@@ -1276,8 +1276,6 @@
         <!-- Chat Panel -->
         <div class="chat-panel hidden" id="chatPanel">
             <div class="chat-header">
-                <button class="chat-action-btn back-btn" id="backToChatsBtn" aria-label="Back to chats">
-                </button>
                 <div class="chat-info" style="cursor:pointer;" onclick="window.messagesUI?.viewReceiverProfile()">
                     <div class="chat-avatar" id="chatFriendAvatar">
                         <i class="fas fa-user"></i>
@@ -1578,41 +1576,21 @@
             const checkCoreInterval = setInterval(() => {
                 coreCheckCount++;
                 
-                // Check if core is ACTIVE
-                const isActive = window.messagesCore && 
-                                 window.messagesCore.isReady && 
-                                 window.messagesCore.isReady();
+                // FIX: Check both isReady() AND raw state — isReady() requires ACTIVE+authenticated
+                // but state==ACTIVE is enough for UI to become interactive
+                const coreState = window.messagesCore?.getState?.()?.state;
+                const isActive = (window.messagesCore?.isReady?.()) || coreState === 'ACTIVE';
                 
                 if (isActive) {
                     clearInterval(checkCoreInterval);
-                    console.log('[Messages] Core ACTIVE, UI ready for interaction');
-                    
-                    // FIX: token status hidden — connection is background-only
+                    // token status hidden — connection is background-only
                     const tokenStatus = document.getElementById('tokenStatus');
                     if (tokenStatus) { tokenStatus.style.display = 'none'; }
-                    
-                    // Remove any loading states
-                    const chatsList = document.getElementById('chatsList');
-                    if (chatsList && chatsList.children.length === 0) {
-                        // Keep empty state - real data will load
-                    }
                 } else if (coreCheckCount > 30) {
-                    // After 30 seconds, don't retry - just show passive message
+                    // After 30 seconds, stop polling silently
                     clearInterval(checkCoreInterval);
-                    console.log('[Messages] Core not ACTIVE, waiting for parent connection');
-                    
-                    // Get lifecycle state to determine UI behavior
-                    const lifecycleState = window.messagesCore?.getState?.()?.state || 'UNKNOWN';
-                    
-                    if (lifecycleState === 'WAIT_PARENT') {
-                        // WAIT_PARENT: No visible UI changes - background connection only
-                        const tokenStatus = document.getElementById('tokenStatus');
-                        if (tokenStatus) { tokenStatus.style.display = 'none'; }
-                    } else {
-                        // FIX: also hidden in other states — connection is background-only
-                        const tokenStatus = document.getElementById('tokenStatus');
-                        if (tokenStatus) { tokenStatus.style.display = 'none'; }
-                    }
+                    const tokenStatus = document.getElementById('tokenStatus');
+                    if (tokenStatus) { tokenStatus.style.display = 'none'; }
                 }
             }, 1000);
             
@@ -1867,10 +1845,12 @@
             console.log('[Message HTML] Received message:', data.type, data, 'Environment:', environment);
             
             // Handle opening chat with specific user
+            // FIX: Only open chat panel on explicit user-triggered OPEN_CHAT_WITH_USER.
+            // Never auto-open on page load or sessionStorage read.
             if (data.type === 'OPEN_CHAT_WITH_USER') {
                 console.log('[Message HTML] Opening chat with user:', data.payload);
                 
-                const { userId, userName, recipientId, recipientName } = data.payload;
+                const { userId, userName, recipientId, recipientName } = data.payload || {};
                 const targetUserId = userId || recipientId;
                 const targetUserName = userName || recipientName || 'User';
                 
@@ -1878,36 +1858,37 @@
                     console.error('[Message HTML] No userId provided');
                     return;
                 }
-                
-                // Store in sessionStorage as fallback
-                sessionStorage.setItem('open_chat_on_load', JSON.stringify({
-                    userId: targetUserId,
-                    userName: targetUserName,
-                    timestamp: Date.now(),
-                    source: 'parent-message',
-                    environment: environment
-                }));
-                
-                // Dispatch custom event for UI/core to handle
+
+                // ACK parent so retry loop stops
+                try { window.parent.postMessage({ type: 'CHAT_OPENED', userId: targetUserId, timestamp: Date.now() }, '*'); } catch(_) {}
+                // Clear stale sessionStorage so old pending_chat doesn't reopen on next navigation
+                sessionStorage.removeItem('open_chat_on_load');
+                sessionStorage.removeItem('pending_chat');
+
                 const eventDetail = {
                     userId: targetUserId,
                     userName: targetUserName,
                     recipientId: targetUserId,
                     recipientName: targetUserName
                 };
-                
-                window.dispatchEvent(new CustomEvent('messages:openChat', { detail: eventDetail }));
-                
-                // Also try to call core directly if available
-                if (window.messagesCore && window.messagesCore.createConversation) {
-                    setTimeout(() => {
-                        window.messagesCore.createConversation([targetUserId]);
-                    }, 100);
-                }
+
+                // If core is ACTIVE open immediately; otherwise queue with retries
+                const tryOpen = (attempts) => {
+                    const core = window.messagesCore;
+                    const coreActive = core && (typeof core.getState === 'function' ? core.getState() === 'ACTIVE' : !!core.isActive);
+                    if (coreActive) {
+                        window.dispatchEvent(new CustomEvent('messages:openChat', { detail: eventDetail }));
+                    } else if (attempts < 15) {
+                        setTimeout(() => tryOpen(attempts + 1), 300);
+                    } else {
+                        window.dispatchEvent(new CustomEvent('messages:openChat', { detail: eventDetail }));
+                    }
+                };
+                tryOpen(0);
             }
         });
         
-        // Check URL for pending chat parameters
+        // Check URL for pending chat parameters (deep link support)
         function checkUrlForPendingChat() {
             const urlParams = new URLSearchParams(window.location.search);
             const chatId = urlParams.get('chatId') || urlParams.get('openChat') || urlParams.get('userId');
@@ -1916,7 +1897,18 @@
             
             if (chatId) {
                 console.log('[Message HTML] Found chat in URL params:', { chatId, userName, type, environment });
-                
+                // URL params are an explicit deep-link trigger - open via tryOpen when core is ready
+                const _urlDetail = { userId: parseInt(chatId), userName: userName || 'User', recipientId: parseInt(chatId), recipientName: userName || 'User' };
+                const tryOpenUrl = (attempts) => {
+                    const core = window.messagesCore;
+                    const coreActive = core && (typeof core.getState === 'function' ? core.getState() === 'ACTIVE' : !!core.isActive);
+                    if (coreActive) { window.dispatchEvent(new CustomEvent('messages:openChat', { detail: _urlDetail })); }
+                    else if (attempts < 20) { setTimeout(() => tryOpenUrl(attempts + 1), 300); }
+                    else { window.dispatchEvent(new CustomEvent('messages:openChat', { detail: _urlDetail })); }
+                };
+                setTimeout(() => tryOpenUrl(0), 200);
+                // Keep sessionStorage only as last-resort fallback (no-op since checkSessionStorage is now a no-op)
+                // But we still keep this for any external tooling that might read it
                 sessionStorage.setItem('open_chat_on_load', JSON.stringify({
                     userId: parseInt(chatId),
                     userName: userName || 'User',
@@ -1944,46 +1936,14 @@
             }
         }
         
-        // Check sessionStorage for pending chat on load
+        // FIX: checkSessionStorageForPendingChat is intentionally a NO-OP.
+        // Chat panel must only open via explicit OPEN_CHAT_WITH_USER postMessage from parent
+        // (triggered by user clicking "Message" in friends/calls modules, or clicking a chat row).
+        // Auto-opening on page load causes the chat panel to appear before the user does anything.
         function checkSessionStorageForPendingChat() {
-            const pendingChat = sessionStorage.getItem('open_chat_on_load');
-            if (pendingChat && !window._chatOpened) {
-                window._chatOpened = true;
-                try {
-                    const chatData = JSON.parse(pendingChat);
-                    // Only process if not too old (within 30 seconds)
-                    if (Date.now() - (chatData.timestamp || 0) < 30000) {
-                        console.log('[Message HTML] Found pending chat in sessionStorage:', chatData, 'Environment:', environment);
-                        
-                        setTimeout(() => {
-                            window.dispatchEvent(new CustomEvent('messages:openChat', {
-                                detail: {
-                                    userId: chatData.userId,
-                                    userName: chatData.userName || 'User',
-                                    recipientId: chatData.userId,
-                                    recipientName: chatData.userName || 'User'
-                                }
-                            }));
-                            
-                            // Also try core directly
-                            if (window.messagesCore && window.messagesCore.createConversation) {
-                                window.messagesCore.createConversation([chatData.userId]);
-                            }
-                        }, 300);
-                        
-                        // Clear after processing
-                        setTimeout(() => {
-                            sessionStorage.removeItem('open_chat_on_load');
-                        }, 2000);
-                    } else {
-                        // Expired, just remove
-                        sessionStorage.removeItem('open_chat_on_load');
-                    }
-                } catch (e) {
-                    console.warn('[Message HTML] Failed to parse pending chat:', e);
-                    sessionStorage.removeItem('open_chat_on_load');
-                }
-            }
+            // Always clear stale session storage to prevent ghost reopens
+            sessionStorage.removeItem('open_chat_on_load');
+            sessionStorage.removeItem('pending_chat');
         }
         
         // Expose helper for parent to open chat programmatically

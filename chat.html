@@ -2172,6 +2172,8 @@
                     document.body.classList.add('chat-panel-active');
                     // Clear pending_chat so all retry loops stop
                     try { sessionStorage.removeItem('pending_chat'); } catch (_) {}
+                    // FIX: Stop the DIRECT_CHAT_REQUEST retry loop
+                    window.__dcChatOpened = true;
                 }
                 if (data.type === 'CHAT_LIST_SHOWN' || data.type === 'CHAT_CLOSED' || data.type === 'GO_BACK_TO_CHAT_LIST') {
                     if (window.innerWidth <= 768) {
@@ -3446,7 +3448,23 @@
                             }
                             return;
                         }
-                        if (!navigator.onLine) {
+                        // FIX: navigator.onLine can report false when local sync engines
+                        // broadcast a "network lost" event (e.g. realtime socket timeout).
+                        // We do a fast fetch probe to confirm real connectivity before skipping.
+                        // If the probe fails we return the offline payload; if it succeeds we proceed.
+                        const __isReallyOffline = async () => {
+                            if (navigator.onLine === false) {
+                                // Double-check with a tiny HEAD probe to our own server
+                                try {
+                                    await fetch('/favicon.ico', { method: 'HEAD', cache: 'no-store', signal: AbortSignal.timeout(2000) });
+                                    return false; // fetch succeeded — we are online
+                                } catch(_) {
+                                    return true;
+                                }
+                            }
+                            return false;
+                        };
+                        if (await __isReallyOffline()) {
                             const offlinePayload = {
                                 success: false,
                                 error: 'Offline - skipping API',
@@ -3543,19 +3561,17 @@
                     const chatPayload = {
                         userId:       data.payload.userId,
                         userName:     data.payload.userName || data.payload.name || 'User',
-                        findExisting: true,   // tells messages module to reuse existing chat
+                        findExisting: true,
                         timestamp:    Date.now()
                     };
-                    // Persist so it survives iframe navigation and is replayed by lifecycle ACTIVE handler
-                    sessionStorage.setItem('pending_chat', JSON.stringify(chatPayload));
-                    // Navigate to messages tab
                     navigateToPage('messages');
-                    // Apply mobile class immediately so nav hides before iframe responds
                     if (window.innerWidth <= 768) document.body.classList.add('chat-panel-active');
-                    // Retry posting until the iframe ACKs (message.html clears pending_chat on success,
-                    // which causes the CHAT_OPENED postMessage to flow back, stopping this loop)
+                    // FIX: Reset ACK flag and cap retries at 5 (3s total).
+                    // The retry stops as soon as message.html sends CHAT_OPENED (sets __dcChatOpened = true).
+                    window.__dcChatOpened = false;
                     let _dcAttempts = 0;
                     const _postChatOpen = () => {
+                        if (window.__dcChatOpened) return; // ACK received — stop immediately
                         const messagesIframe = document.getElementById('messagesIframe');
                         if (messagesIframe && messagesIframe.contentWindow) {
                             messagesIframe.contentWindow.postMessage({
@@ -3564,12 +3580,10 @@
                                 source:  'parent-frame',
                                 timestamp: Date.now()
                             }, '*');
-                            console.log('[chat.html] DIRECT_CHAT_REQUEST forwarded to messages iframe for userId:', chatPayload.userId);
+                            console.log('[chat.html] DIRECT_CHAT_REQUEST → OPEN_CHAT_WITH_USER sent, attempt', _dcAttempts + 1);
                         }
-                        if (_dcAttempts++ < 10) {
-                            setTimeout(() => {
-                                if (sessionStorage.getItem('pending_chat')) _postChatOpen();
-                            }, 800);
+                        if (_dcAttempts++ < 4 && !window.__dcChatOpened) {
+                            setTimeout(_postChatOpen, 600);
                         }
                     };
                     setTimeout(_postChatOpen, 300);

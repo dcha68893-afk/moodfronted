@@ -26,129 +26,7 @@
         if (DEBUG) console.log(...args);
     }
 
-    // =============================================
-    // DEMO CHAT DATA
-    // =============================================
-    const DEMO_CHATS = {
-        conversations: [
-            {
-                id: 1001,
-                friendId: 2001,
-                friendName: 'moodchat1',
-                friendAvatar: 'https://ui-avatars.com/api/?name=moodchat1&background=4caf50&color=fff&bold=true',
-                lastMessage: 'Hey! How are you doing today?',
-                lastMessageAt: Date.now() - 3600000,
-                unreadCount: 0,
-                online: true,
-                type: 'direct',
-                archived: false,
-                blocked: false
-            },
-            {
-                id: 1002,
-                friendId: 2002,
-                friendName: 'moodchat2',
-                friendAvatar: 'https://ui-avatars.com/api/?name=moodchat2&background=2196f3&color=fff&bold=true',
-                lastMessage: "I'm good, thanks for asking!",
-                lastMessageAt: Date.now() - 1800000,
-                unreadCount: 0,
-                online: true,
-                type: 'direct',
-                archived: false,
-                blocked: false
-            }
-        ],
-        messages: {
-            1001: [
-                {
-                    id: 'msg_demo_1001_1',
-                    content: 'Hey! How are you doing today?',
-                    type: 'text',
-                    senderId: 2001,
-                    sender: { id: 2001, displayName: 'moodchat1', avatar: 'https://ui-avatars.com/api/?name=moodchat1&background=4caf50&color=fff' },
-                    timestamp: Date.now() - 3600000,
-                    status: 'read',
-                    conversationId: 1001
-                },
-                {
-                    id: 'msg_demo_1001_2',
-                    content: "I'm doing great! Just finished some work. How about you?",
-                    type: 'text',
-                    senderId: 1001,
-                    sender: { id: 1001, displayName: 'Me', avatar: '' },
-                    timestamp: Date.now() - 3500000,
-                    status: 'read',
-                    conversationId: 1001,
-                    isSent: true
-                },
-                {
-                    id: 'msg_demo_1001_3',
-                    content: "That's awesome! What have you been working on?",
-                    type: 'text',
-                    senderId: 2001,
-                    sender: { id: 2001, displayName: 'moodchat1', avatar: 'https://ui-avatars.com/api/?name=moodchat1&background=4caf50&color=fff' },
-                    timestamp: Date.now() - 3400000,
-                    status: 'read',
-                    conversationId: 1001
-                },
-                {
-                    id: 'msg_demo_1001_4',
-                    content: 'Just some coding and design work. Really enjoying it!',
-                    type: 'text',
-                    senderId: 1001,
-                    sender: { id: 1001, displayName: 'Me', avatar: '' },
-                    timestamp: Date.now() - 3300000,
-                    status: 'read',
-                    conversationId: 1001,
-                    isSent: true
-                }
-            ],
-            1002: [
-                {
-                    id: 'msg_demo_1002_1',
-                    content: 'Hello! Long time no see!',
-                    type: 'text',
-                    senderId: 2002,
-                    sender: { id: 2002, displayName: 'moodchat2', avatar: 'https://ui-avatars.com/api/?name=moodchat2&background=2196f3&color=fff' },
-                    timestamp: Date.now() - 1800000,
-                    status: 'read',
-                    conversationId: 1002
-                },
-                {
-                    id: 'msg_demo_1002_2',
-                    content: "Hey! Yeah, it's been a while. How have you been?",
-                    type: 'text',
-                    senderId: 1001,
-                    sender: { id: 1001, displayName: 'Me', avatar: '' },
-                    timestamp: Date.now() - 1700000,
-                    status: 'read',
-                    conversationId: 1002,
-                    isSent: true
-                },
-                {
-                    id: 'msg_demo_1002_3',
-                    content: "I've been great! Traveled a bit, learned new things.",
-                    type: 'text',
-                    senderId: 2002,
-                    sender: { id: 2002, displayName: 'moodchat2', avatar: 'https://ui-avatars.com/api/?name=moodchat2&background=2196f3&color=fff' },
-                    timestamp: Date.now() - 1600000,
-                    status: 'read',
-                    conversationId: 1002
-                },
-                {
-                    id: 'msg_demo_1002_4',
-                    content: 'That sounds amazing! We should catch up more often.',
-                    type: 'text',
-                    senderId: 1001,
-                    sender: { id: 1001, displayName: 'Me', avatar: '' },
-                    timestamp: Date.now() - 1500000,
-                    status: 'read',
-                    conversationId: 1002,
-                    isSent: true
-                }
-            ]
-        }
-    };
+    // Real data only — no demo data
 
     // =============================================
     // SESSION VALIDATION UTILITY
@@ -205,20 +83,16 @@
         };
     }
     
-    // Read-only actions that have their own IndexedDB cache fallback path —
-    // suppress the noisy lifecycle guard warn for these
-    const _SILENT_LIFECYCLE_BLOCKS = new Set([
-        'fetchConversations', 'fetchMessages', 'fetchFriends'
-    ]);
-
     function ensureActive(actionName) {
-        if (currentState !== LIFECYCLE_STATES.ACTIVE) {
-            if (!_SILENT_LIFECYCLE_BLOCKS.has(actionName)) {
-                console.warn(`[${MODULE_NAME}][LifecycleGuard] ❌ Blocked action '${actionName}' - not ACTIVE (current: ${currentState})`);
-            }
-            return false;
+        if (currentState === LIFECYCLE_STATES.ACTIVE) return true;
+        // If session is valid but stuck pre-ACTIVE, force transition
+        if (_validSessionSet && _storedSession && __isValidSession(_storedSession)) {
+            console.warn(`[${MODULE_NAME}][LifecycleGuard] Session valid but state=${currentState} — forcing ACTIVE for '${actionName}'`);
+            setState(LIFECYCLE_STATES.ACTIVE, 'forced_by_ensureActive');
+            return true;
         }
-        return true;
+        console.warn(`[${MODULE_NAME}][LifecycleGuard] ❌ Blocked action '${actionName}' - not ACTIVE (current: ${currentState})`);
+        return false;
     }
     
     if (typeof window.__safeSendChildReady !== 'function' && typeof window.safeSendChildReady !== 'function') {
@@ -247,6 +121,10 @@
     if (typeof window.__guardAction !== 'function') {
         window.__guardAction = function(actionName, moduleName, state, fallbackReturn = false) {
             if (!window.__lifecycleCanPerformAction(state)) {
+                // Bypass guard if session is already valid — ensureActive will promote state
+                if (_validSessionSet && _storedSession && __isValidSession(_storedSession)) {
+                    return null; // allow through
+                }
                 console.warn(`[${moduleName}][LifecycleGuard] Blocked action '${actionName}' - not ACTIVE (current: ${state})`);
                 return fallbackReturn;
             }
@@ -293,8 +171,9 @@
     
     let _uiInitialized = false;
     
-    let _demoModeEnabled = false;
-    let _demoBootstrapFired = false;
+    // Demo mode is permanently disabled — real data only
+    const _demoModeEnabled = false;
+    const _demoBootstrapFired = false;
     
     let parentReadyResolver;
     let parentReadyPromise = new Promise((resolve) => {
@@ -338,8 +217,9 @@
 
         const validTransitions = {
             [LIFECYCLE_STATES.BOOT]: [LIFECYCLE_STATES.INITIALIZING],
-            [LIFECYCLE_STATES.INITIALIZING]: [LIFECYCLE_STATES.READY],
-            [LIFECYCLE_STATES.READY]: [LIFECYCLE_STATES.WAIT_PARENT],
+            // FIX: INITIALIZING can jump directly to ACTIVE when SESSION_DATA arrives early
+            [LIFECYCLE_STATES.INITIALIZING]: [LIFECYCLE_STATES.READY, LIFECYCLE_STATES.WAITING_AUTH, LIFECYCLE_STATES.ACTIVE],
+            [LIFECYCLE_STATES.READY]: [LIFECYCLE_STATES.WAIT_PARENT, LIFECYCLE_STATES.WAITING_AUTH, LIFECYCLE_STATES.ACTIVE],
             [LIFECYCLE_STATES.WAIT_PARENT]: [LIFECYCLE_STATES.WAITING_AUTH, LIFECYCLE_STATES.ACTIVE],
             [LIFECYCLE_STATES.WAITING_AUTH]: [LIFECYCLE_STATES.ACTIVE],
             [LIFECYCLE_STATES.ACTIVE]: []
@@ -371,37 +251,6 @@
         
         if (nextState === LIFECYCLE_STATES.ACTIVE && !_uiInitialized) {
             initializeUISafe();
-        }
-
-        // FIX: Replay any conversation/chat that was queued while session wasn't ready
-        if (nextState === LIFECYCLE_STATES.ACTIVE) {
-            setTimeout(() => {
-                // 1. Replay queued createConversation
-                const pendingCreate = window.__pendingCreateConversation;
-                if (pendingCreate) {
-                    window.__pendingCreateConversation = null;
-                    console.log('[Lifecycle→ACTIVE] Replaying queued createConversation:', pendingCreate.participants);
-                    ConversationManager.createConversation(pendingCreate.participants, pendingCreate.options);
-                }
-                // 2. Replay pending chat from sessionStorage (DIRECT_CHAT_REQUEST / URL params)
-                try {
-                    const raw = sessionStorage.getItem('pending_chat') || sessionStorage.getItem('open_chat_on_load');
-                    if (raw) {
-                        const chatData = JSON.parse(raw);
-                        if (chatData && chatData.userId && (Date.now() - (chatData.timestamp || 0)) < 60000) {
-                            sessionStorage.removeItem('pending_chat');
-                            sessionStorage.removeItem('open_chat_on_load');
-                            console.log('[Lifecycle→ACTIVE] Replaying sessionStorage pending chat:', chatData.userId);
-                            ConversationManager.createConversation(
-                                [parseInt(chatData.userId, 10)],
-                                { name: chatData.userName || chatData.name || 'User', type: 'direct' }
-                            );
-                        }
-                    }
-                } catch (_e) {}
-                // 3. Fire messagesCoreReady so message.html inline listeners can re-check
-                try { window.dispatchEvent(new CustomEvent('messagesCoreReady', { detail: { state: 'ACTIVE' } })); } catch (_e) {}
-            }, 250);
         }
         
         return true;
@@ -648,6 +497,7 @@
             }
             
             if (!_validSessionSet || !__isValidSession(_storedSession)) {
+                // For GET requests, still reject if no session — nothing to authorize with
                 reject(new Error(`No valid session for API request`));
                 return;
             }
@@ -714,32 +564,7 @@
     }
     
     function getDemoData(endpoint, method) {
-        if (endpoint === '/chats' || endpoint === '/api/chats') {
-            return DEMO_CHATS.conversations;
-        }
-        if (endpoint === '/messages' && method === 'GET') {
-            return {
-                status: 'success',
-                data: {
-                    messages: []
-                }
-            };
-        }
-        if (endpoint === '/messages/send' && method === 'POST') {
-            return {
-                status: 'success',
-                data: {
-                    id: generateMessageId(),
-                    status: 'sent'
-                }
-            };
-        }
-        if (endpoint === '/friends' || endpoint === '/api/friends') {
-            return [
-                { id: 2001, displayName: 'moodchat1', username: 'moodchat1', online: true, status: 'online' },
-                { id: 2002, displayName: 'moodchat2', username: 'moodchat2', online: true, status: 'online' }
-            ];
-        }
+        // Demo data fully removed — real data only
         return null;
     }
     
@@ -955,6 +780,7 @@
         MODULE_INIT_DATA: 'MODULE_INIT_DATA',
         PARENT_READY: 'PARENT_READY',
         ACK: 'ACK',
+        AUTH_READY: 'AUTH_READY',
         SESSION_ACTIVE: 'SESSION_ACTIVE',
         SESSION_NULL: 'SESSION_NULL',
         SESSION_REFRESHED: 'SESSION_REFRESHED',
@@ -1585,7 +1411,7 @@
             
             if (_demoModeEnabled) {
                 console.log('[SessionManager] Real session received - disabling demo mode');
-                _demoModeEnabled = false;
+                // demo mode removed
             }
             
             this._session.token = sessionData.token;
@@ -1628,6 +1454,16 @@
                 flushMessageQueue();
                 startDataFlow();
             } else if (currentState === LIFECYCLE_STATES.ACTIVE) {
+                startDataFlow();
+            }
+            // FIX: also handle session arriving during INITIALIZING/READY/WAIT_PARENT
+            // (the _handleSessionData caller also handles this, but belt-and-suspenders here)
+            else if ((currentState === LIFECYCLE_STATES.INITIALIZING ||
+                      currentState === LIFECYCLE_STATES.READY ||
+                      currentState === LIFECYCLE_STATES.WAIT_PARENT) && __isValidSession(this._session)) {
+                console.log(`[SessionManager] Session set in state ${currentState} — fast-promoting to ACTIVE`);
+                setState(LIFECYCLE_STATES.ACTIVE, 'session_set_early_promote');
+                flushMessageQueue();
                 startDataFlow();
             }
             
@@ -1765,18 +1601,12 @@
     // ── OFFLINE-FIRST: Apply per-key setting changes immediately ──
     if (data && (data.type === 'SETTING_CHANGED' || data.type === 'SETTINGS_UPDATED')) {
         const payload = data.payload || data;
-        if (data.type === 'SETTING_CHANGED') {
-            const section = payload.section || payload.category;
-            const key     = payload.key     || payload.name;
-            const value   = payload.value   !== undefined ? payload.value : payload.data;
-            // FIX: Guard — do not dispatch if section or key is undefined (causes
-            // settingsManager.js to log "[SETTINGS UPDATED] undefined.undefined undefined")
-            if (section && key !== undefined && key !== null) {
-                applySettingToMessagesModule(section, key, value);
-                window.dispatchEvent(new CustomEvent('settingChanged', {
-                    detail: { section, key, value, timestamp: Date.now() }
-                }));
-            }
+        if (data.type === 'SETTING_CHANGED' && payload.section && payload.key !== undefined) {
+            const { section, key, value } = payload;
+            applySettingToMessagesModule(section, key, value);
+            window.dispatchEvent(new CustomEvent('settingChanged', {
+                detail: { section, key, value, timestamp: Date.now() }
+            }));
         }
         if (data.type === 'SETTINGS_UPDATED' && payload.settings) {
             const s = payload.settings;
@@ -1800,7 +1630,28 @@
         handleApiResponse(data);
     }
     
+    // FIXED: Handle FRIENDS_LIST_UPDATE from parent — always update FriendManager regardless of lifecycle state
+    if (data.type === 'FRIENDS_LIST_UPDATE') {
+        try {
+            const payload = data.payload || data;
+            const friends = payload.friends || payload.data || payload;
+            if (Array.isArray(friends) && friends.length > 0) {
+                console.log(`[${MODULE_NAME}] FRIENDS_LIST_UPDATE: ${friends.length} friends received`);
+                FriendManager.mergeFriends(friends);
+                // Re-render contacts list if it's visible
+                try {
+                    window.dispatchEvent(new CustomEvent('friendsUpdated', { detail: { friends } }));
+                } catch(_) {}
+            }
+        } catch(_e) {}
+    }
+    
     if (data.type === INCOMING_TYPES.SESSION_DATA || data.type === INCOMING_TYPES.SESSION_RESPONSE) {
+        this._handleSessionData(data);
+    }
+    
+    // FIX: AUTH_READY and SESSION_ACTIVE also carry session payload — treat them identically to SESSION_DATA
+    if (data.type === INCOMING_TYPES.AUTH_READY || data.type === INCOMING_TYPES.SESSION_ACTIVE) {
         this._handleSessionData(data);
     }
     
@@ -1850,7 +1701,7 @@
                 return;
             }
             
-            console.log(`[${MODULE_NAME}] PARENT_READY received`);
+            console.log(`[${MODULE_NAME}] PARENT_READY received (state: ${currentState})`);
             
             parentReadyReceived = true;
             parentReadyData = data.payload || data;
@@ -1877,27 +1728,61 @@
                 }
             }
             
-            if (currentState === LIFECYCLE_STATES.WAIT_PARENT) {
+            // FIX: Handle PARENT_READY from ANY pre-ACTIVE state, including INITIALIZING.
+            // The key insight: INITIALIZING can now transition directly to ACTIVE (validTransitions updated).
+            const preActiveStates = [
+                LIFECYCLE_STATES.INITIALIZING,
+                LIFECYCLE_STATES.READY,
+                LIFECYCLE_STATES.WAIT_PARENT,
+                LIFECYCLE_STATES.WAITING_AUTH
+            ];
+
+            if (preActiveStates.includes(currentState)) {
                 if (SessionManager.isAuthenticated()) {
-                    setState(LIFECYCLE_STATES.ACTIVE, 'parent_ready_with_valid_session');
-                    console.log(`[${MODULE_NAME}] ACTIVE (valid session)`);
-                    
+                    // Session already available — go straight to ACTIVE
+                    const promoted = setState(LIFECYCLE_STATES.ACTIVE, 'parent_ready_with_valid_session');
+                    if (!promoted && currentState !== LIFECYCLE_STATES.ACTIVE) {
+                        // Couldn't transition — force it (shouldn't happen with updated validTransitions)
+                        console.warn(`[${MODULE_NAME}] Could not promote to ACTIVE from ${currentState} — forcing`);
+                        currentState = LIFECYCLE_STATES.ACTIVE;
+                    }
+                    console.log(`[${MODULE_NAME}] ✅ ACTIVE (parent ready + valid session)`);
                     initializeUISafe();
                     flushMessageQueue();
                     startDataFlow();
                 } else {
-                    console.log(`[${MODULE_NAME}] WAITING_AUTH (no valid session yet)`);
-                    setState(LIFECYCLE_STATES.WAITING_AUTH, 'parent_ready_waiting_for_session');
-                    
+                    // No session yet — request one, wait in WAITING_AUTH
+                    // Ensure we can reach WAITING_AUTH (skip READY/WAIT_PARENT if still in INITIALIZING)
+                    if (currentState === LIFECYCLE_STATES.INITIALIZING) {
+                        setState(LIFECYCLE_STATES.WAITING_AUTH, 'parent_ready_initializing_no_session');
+                    } else if (currentState === LIFECYCLE_STATES.READY) {
+                        setState(LIFECYCLE_STATES.WAIT_PARENT, 'parent_ready_skip_wait');
+                        setState(LIFECYCLE_STATES.WAITING_AUTH, 'parent_ready_waiting_for_session');
+                    } else if (currentState !== LIFECYCLE_STATES.WAITING_AUTH) {
+                        setState(LIFECYCLE_STATES.WAITING_AUTH, 'parent_ready_waiting_for_session');
+                    }
+                    console.log(`[${MODULE_NAME}] ⏳ WAITING_AUTH (no valid session yet) — requesting session`);
                     safeSend(OUTGOING_ACTIONS.REQUEST_SESSION, {
                         module: MODULE_NAME,
                         timestamp: Date.now()
                     }, { requireAck: false });
-                    
                     initializeUISafe();
                 }
+            } else if (currentState === LIFECYCLE_STATES.ACTIVE) {
+                // Already ACTIVE — just refresh data
+                console.log(`[${MODULE_NAME}] PARENT_READY received while already ACTIVE — refreshing data`);
+                if (SessionManager.isAuthenticated()) {
+                    flushMessageQueue();
+                    startDataFlow();
+                }
             } else {
-                console.log(`[${MODULE_NAME}] PARENT_READY received in state: ${currentState} - ignoring (expected WAIT_PARENT)`);
+                console.log(`[${MODULE_NAME}] PARENT_READY received in unexpected state: ${currentState}`);
+                if (SessionManager.isAuthenticated()) {
+                    setState(LIFECYCLE_STATES.ACTIVE, 'parent_ready_late_activate');
+                    initializeUISafe();
+                    flushMessageQueue();
+                    startDataFlow();
+                }
             }
         },
 
@@ -1920,6 +1805,25 @@
                 });
                 
                 SessionManager.setSession(sessionData);
+
+                // FIX: If session arrives while still in INITIALIZING (before CHILD_READY/PARENT_READY),
+                // promote directly to ACTIVE so the UI isn't stuck waiting for a handshake that
+                // may never arrive on first load.
+                const earlyStates = [
+                    LIFECYCLE_STATES.INITIALIZING,
+                    LIFECYCLE_STATES.READY,
+                    LIFECYCLE_STATES.WAIT_PARENT,
+                    LIFECYCLE_STATES.WAITING_AUTH
+                ];
+                if (earlyStates.includes(currentState) && SessionManager.isAuthenticated()) {
+                    console.log(`[${MODULE_NAME}] SESSION_DATA arrived early (state: ${currentState}) — promoting to ACTIVE`);
+                    const promoted = setState(LIFECYCLE_STATES.ACTIVE, 'early_session_data');
+                    if (promoted) {
+                        initializeUISafe();
+                        flushMessageQueue();
+                        startDataFlow();
+                    }
+                }
             } else {
                 console.warn('[ParentConnectionManager] Ignored invalid session data from parent', {
                     hasToken: !!sessionData?.token,
@@ -2483,28 +2387,7 @@
                     chatsArray = conversations.data.chats;
                 } else if (conversations && conversations.data && Array.isArray(conversations.data)) {
                     chatsArray = conversations.data;
-                } else if (conversations && conversations.success && conversations.data && Array.isArray(conversations.data)) {
-                    // /messages/chats response shape: { success:true, data: [...] }
-                    chatsArray = conversations.data;
-                } else if (conversations && conversations.success && conversations.data && conversations.data.chats && Array.isArray(conversations.data.chats)) {
-                    // chats.js response shape: { status:'success', data:{ chats:[...], pagination:{} } }
-                    chatsArray = conversations.data.chats;
                 }
-
-                // Normalize each chat so messages-core fields match regardless of which backend route served it
-                chatsArray = chatsArray.map(chat => {
-                    const otherP = chat.otherParticipant || (Array.isArray(chat.participants) && chat.participants[0]) || null;
-                    return {
-                        ...chat,
-                        // Ensure friendId / friendName / friendAvatar are always set for direct chats
-                        friendId:     chat.friendId     || (chat.type === 'direct' ? (otherP?.id || null) : null),
-                        friendName:   chat.friendName   || chat.chatName || (otherP?.displayName || otherP?.username || chat.name || 'Chat'),
-                        friendAvatar: chat.friendAvatar || chat.avatar   || (otherP?.avatar || null),
-                        // Normalize last-message fields
-                        lastMessage: chat.lastMessage || chat.lastMessageContent || null,
-                        unreadCount: parseInt(chat.unreadCount || 0, 10),
-                    };
-                });
                 
                 console.log(`[ChatManager] 📥 Extracted ${chatsArray.length} chats from response`);
                 
@@ -2624,11 +2507,6 @@
                     messagesArray = response.data.messages;
                 } else if (response && response.data && Array.isArray(response.data)) {
                     messagesArray = response.data;
-                } else if (response && response.success && response.data && Array.isArray(response.data)) {
-                    // messageService.getConversationMessages: { success, data: { messages, pagination } }
-                    messagesArray = response.data;
-                } else if (response && response.success && response.data && response.data.messages) {
-                    messagesArray = response.data.messages;
                 }
 
                 if (messagesArray.length > 0) {
@@ -2637,16 +2515,11 @@
                         localId: msg.localId || msg.id,
                         serverId: msg.serverId || msg.id,
                         content: msg.content || msg.text || '',
-                        // FIX: messageService returns "messageType" not "type"
                         type: msg.type || msg.messageType || 'text',
                         senderId: msg.senderId || msg.sender?.id,
-                        sender: msg.sender || null,
-                        timestamp: msg.createdAt || msg.sentAt || msg.timestamp || Date.now(),
-                        createdAt: msg.createdAt || msg.sentAt || msg.timestamp || Date.now(),
-                        isEdited: msg.isEdited || false,
-                        isDeleted: msg.isDeleted || false,
-                        reactions: msg.reactions || {},
-                        replyToId: msg.replyToId || null,
+                        sender: msg.sender,
+                        timestamp: msg.createdAt || msg.timestamp || Date.now(),
+                        createdAt: msg.createdAt || msg.timestamp || Date.now(),
                         status: msg.status || 'delivered',
                         conversationId: conversationId,
                         chatId: conversationId,
@@ -2795,6 +2668,13 @@
                     lastMessageTime = lastMsg.createdAt || lastMsg.timestamp;
                 }
                 
+                // FIX: Resolve online status from FriendManager if available (it has realtime updates),
+                // otherwise fall back to the API participant status field.
+                let _convOnline = otherUser?.status === 'online';
+                if (friendId && FriendManager) {
+                    const _fm = FriendManager.getFriend(friendId) || FriendManager.getFriend(parseInt(friendId));
+                    if (_fm) _convOnline = !!(_fm.online || _fm.status === 'online');
+                }
                 uniqueMap.set(chat.id, {
                     ...chat,
                     id: chat.id,
@@ -2804,7 +2684,7 @@
                     lastMessage: lastMessageText || '',
                     lastMessageAt: lastMessageTime || Date.now(),
                     unreadCount: chat.unreadCount || 0,
-                    online: otherUser?.status === 'online',
+                    online: _convOnline,
                     type: chat.type || 'direct',
                     archived: chat.archived || false,
                     blocked: chat.blocked || false
@@ -2831,6 +2711,23 @@
             this._rebuildMap();
             this._loaded = true;
             this._saveToCache();
+
+            // FIX: Update active conversation name if it was cached with "User"
+            if (this._activeConversation) {
+                const updated = this._conversationsMap.get(this._activeConversation.id);
+                if (updated && updated.friendName && updated.friendName !== 'User' &&
+                    (this._activeConversation.friendName === 'User' || !this._activeConversation.friendName)) {
+                    this._activeConversation = { ...this._activeConversation, ...updated };
+                    // Patch the DOM header immediately
+                    try {
+                        const nameEl = document.getElementById('chatFriendName');
+                        if (nameEl && nameEl.textContent === 'User') {
+                            nameEl.textContent = updated.friendName;
+                        }
+                    } catch (_e) {}
+                }
+            }
+
             this._notifySubscribers();
 
             if (window.KynectaLocalStore && this._conversations.length > 0) {
@@ -4079,9 +3976,7 @@
             
             const conversation = ChatManager.getConversation(actualId);
             const canUseCachedConversation = !!conversation;
-            if (!SessionManager.isAuthenticated() && !canUseCachedConversation) {
-                return false;
-            }
+            // FIXED: Always open from cache — even offline or pre-ACTIVE
             if (conversation) {
                 ChatManager.setActiveConversation(conversation);
                 this._showChatPanel(conversation);
@@ -4090,17 +3985,34 @@
                 ChatManager.setActiveConversation(tempConversation);
                 this._showChatPanel(tempConversation);
             }
-            
-            const result = safeSend(OUTGOING_ACTIONS.OPEN_CONVERSATION, {
-                conversationId: actualId
-            }, { requireAck: false });
-            
-            if (result.blocked) {
-                return false;
+
+            // Load cached messages immediately so the panel isn't blank offline
+            const isPending = typeof actualId === 'string' && actualId.startsWith('pending_');
+            if (!isPending) {
+                const cached = ChatManager.loadPreviousMessages ? ChatManager.loadPreviousMessages(actualId) : [];
+                if (cached && cached.length > 0) {
+                    ChatManager.setMessages(cached);
+                }
             }
             
-            if (typeof actualId !== 'string' || !actualId.startsWith('pending_')) {
-                await this.fetchMessages(actualId, options);
+            // Only send OPEN_CONVERSATION to parent when module is ACTIVE
+            if (currentState === LIFECYCLE_STATES.ACTIVE) {
+                safeSend(OUTGOING_ACTIONS.OPEN_CONVERSATION, {
+                    conversationId: actualId
+                }, { requireAck: false });
+            }
+            
+            // FIXED: Fetch live messages only when online AND authenticated, otherwise serve cache
+            if (!isPending) {
+                if (navigator.onLine && SessionManager.isAuthenticated() && currentState === LIFECYCLE_STATES.ACTIVE) {
+                    await ChatManager.fetchMessages(actualId, options).catch(() => {});
+                } else {
+                    // Offline / pre-ACTIVE — load from IndexedDB cache
+                    if (window.KynectaLocalStore) {
+                        const idbMsgs = await window.KynectaLocalStore.getMessagesByChat(actualId, { limit: 100 }).catch(() => []);
+                        if (idbMsgs && idbMsgs.length > 0) ChatManager.setMessages(idbMsgs);
+                    }
+                }
             } else {
                 console.log('[ConversationManager] Skipping message fetch for pending conversation:', actualId);
             }
@@ -4129,14 +4041,6 @@
             
             if (chatPanel) {
                 chatPanel.classList.remove('hidden');
-                // Notify parent shell so it can apply chat-panel-active class
-                // (hides bottom nav, shows mobile back button)
-                try {
-                    window.parent?.postMessage({ type: 'CHAT_OPENED', timestamp: Date.now() }, '*');
-                } catch (_) {}
-                try {
-                    window.dispatchEvent(new CustomEvent('chatPanelOpened', { detail: { conversation } }));
-                } catch (_) {}
             }
             if (sidebar && window.innerWidth <= 768) {
                 sidebar.classList.remove('active');
@@ -4153,17 +4057,34 @@
             if (nameEl) {
                 nameEl.textContent = conversation.friendName || conversation.name || 'Chat';
             }
+            // FIX: Always resolve real online status from FriendManager — not stale conversation snapshot
+            const _fid = conversation.friendId || conversation.otherUserId || (conversation.otherParticipant && conversation.otherParticipant.id);
+            let _realOnline = false;
+            if (_fid && FriendManager) {
+                const _f = FriendManager.getFriend(_fid) || FriendManager.getFriend(parseInt(_fid));
+                if (_f) {
+                    _realOnline = !!(_f.online || _f.status === 'online');
+                } else {
+                    // Fall back to participant data on the conversation itself
+                    const _op = conversation.otherParticipant;
+                    _realOnline = _op ? (_op.status === 'online') : !!conversation.online;
+                }
+            } else {
+                const _op = conversation.otherParticipant;
+                _realOnline = _op ? (_op.status === 'online') : !!conversation.online;
+            }
             if (statusEl) {
-                statusEl.textContent = conversation.online ? 'Online' : 'Offline';
+                statusEl.textContent = _realOnline ? 'Active now' : (conversation.lastSeen ? UIFeatures.formatLastSeen(conversation.lastSeen, false) : 'Offline');
             }
             if (indicatorEl) {
-                indicatorEl.className = `chat-status ${conversation.online ? 'online' : 'offline'}`;
+                indicatorEl.className = `chat-status ${_realOnline ? 'online' : 'offline'}`;
             }
             if (avatarEl) {
                 if (conversation.friendAvatar) {
-                    avatarEl.innerHTML = `<img src="${conversation.friendAvatar}" alt="${conversation.friendName || 'User'}">`;
+                    avatarEl.innerHTML = `<img src="${conversation.friendAvatar}" alt="${conversation.friendName || 'User'}" style="width:100%;height:100%;border-radius:50%;object-fit:cover;">`;
                 } else {
-                    avatarEl.innerHTML = '<i class="fas fa-user"></i>';
+                    const _initials = (conversation.friendName || 'U').charAt(0).toUpperCase();
+                    avatarEl.innerHTML = `<span style="width:100%;height:100%;border-radius:50%;background:linear-gradient(135deg,#667eea,#764ba2);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:16px;">${_initials}</span>`;
                 }
                 if (indicatorEl) avatarEl.appendChild(indicatorEl);
             }
@@ -4184,39 +4105,14 @@
                 console.log('[ConversationManager] Skipping fetchMessages for pending conversation:', conversationId);
                 return;
             }
-            // FIX: Allow cache reads even when not yet ACTIVE — only block write actions.
-            // If not ACTIVE but local store exists, load from IndexedDB immediately.
-            if (!ensureActive('fetchMessages')) {
-                if (conversationId && window.KynectaLocalStore) {
-                    window.KynectaLocalStore.getMessagesByChat(conversationId, { limit: 100 })
-                        .then(cached => {
-                            if (cached && cached.length > 0) {
-                                ChatManager.setMessages(cached);
-                                ChatManager._notifySubscribers?.();
-                            }
-                        }).catch(() => {});
-                }
-                return;
-            }
+            if (!ensureActive('fetchMessages')) return;
             if (!SessionManager.isAuthenticated()) return;
             
             await ChatManager.fetchMessages(conversationId, options);
         },
         
         async fetchConversations() {
-            // FIX: Allow cache reads before ACTIVE — renders cached chats immediately on boot
-            if (!ensureActive('fetchConversations')) {
-                if (window.KynectaLocalStore) {
-                    window.KynectaLocalStore.getAllConversations().then(convs => {
-                        if (convs && convs.length > 0) {
-                            ChatManager._conversations = convs;
-                            ChatManager._rebuildMap?.();
-                            window.dispatchEvent(new CustomEvent('kyn:offlineCacheLoaded', { detail: { convs } }));
-                        }
-                    }).catch(() => {});
-                }
-                return;
-            }
+            if (!ensureActive('fetchConversations')) return;
             if (!SessionManager.isAuthenticated()) return;
             
             await ChatManager.fetchConversations();
@@ -4251,27 +4147,7 @@
         
         createConversation: async function(participants, options = {}) {
             if (!participants || participants.length === 0) return false;
-
-            // FIX: If not yet authenticated, queue the request and replay once ACTIVE
-            // instead of silently dropping it (which caused "start chat" to do nothing)
-            if (!SessionManager.isAuthenticated()) {
-                console.log('[ConversationManager] Not yet authenticated — queuing createConversation for:', participants);
-                window.__pendingCreateConversation = { participants: participants.slice(), options: { ...options } };
-                // If the module becomes ACTIVE within 15 s, we'll replay automatically
-                const waitAndRetry = (retries = 0) => {
-                    if (SessionManager.isAuthenticated()) {
-                        const pending = window.__pendingCreateConversation;
-                        if (pending) {
-                            window.__pendingCreateConversation = null;
-                            ConversationManager.createConversation(pending.participants, pending.options);
-                        }
-                        return;
-                    }
-                    if (retries < 50) setTimeout(() => waitAndRetry(retries + 1), 300);
-                };
-                setTimeout(() => waitAndRetry(), 300);
-                return false;
-            }
+            if (!SessionManager.isAuthenticated()) return false;
 
             const type = options.type || 'direct';
 
@@ -4280,20 +4156,11 @@
                 const numericReceiverId = typeof receiverId === 'string' ? parseInt(receiverId, 10) : receiverId;
                 
                 try {
-                    let existing = ChatManager.getConversations().find(c => {
-                        if (c.type !== 'direct') return false;
-                        const id = numericReceiverId;
-                        // Check every field shape backends may return
-                        if (c.friendId         && Number(c.friendId)          === id) return true;
-                        if (c.otherUserId      && Number(c.otherUserId)       === id) return true;
-                        if (c.userId           && Number(c.userId)            === id) return true;
-                        if (c.recipientId      && Number(c.recipientId)       === id) return true;
-                        if (c.pendingReceiverId && Number(c.pendingReceiverId) === id) return true;
-                        if (c.otherParticipant && Number(c.otherParticipant.id) === id) return true;
-                        if (Array.isArray(c.participants) && c.participants.some(p =>
-                            Number(p?.id || p) === id)) return true;
-                        return false;
-                    });
+                    let existing = ChatManager.getConversations().find(c =>
+                        c.type === 'direct' &&
+                        (c.friendId === numericReceiverId || c.pendingReceiverId === numericReceiverId ||
+                         (c.participants && c.participants.some(p => (p.id || p) === numericReceiverId)))
+                    );
 
                     if (existing) {
                         await ConversationManager.openConversation(existing.id, options);
@@ -4428,19 +4295,11 @@
                 }
             }
             
-            const existingConversation = ChatManager.getConversations().find(c => {
-                if (c.type !== 'direct') return false;
-                const id = numericUserId;
-                if (c.friendId          && Number(c.friendId)          === id) return true;
-                if (c.otherUserId       && Number(c.otherUserId)       === id) return true;
-                if (c.userId            && Number(c.userId)            === id) return true;
-                if (c.recipientId       && Number(c.recipientId)       === id) return true;
-                if (c.pendingReceiverId && Number(c.pendingReceiverId) === id) return true;
-                if (c.otherParticipant  && Number(c.otherParticipant.id) === id) return true;
-                if (Array.isArray(c.participants) && c.participants.some(p =>
-                    Number(p?.id || p) === id)) return true;
-                return false;
-            });
+            const existingConversation = ChatManager.getConversations().find(c =>
+                c.type === 'direct' &&
+                (c.friendId === numericUserId || c.pendingReceiverId === numericUserId ||
+                 (c.participants && c.participants.some(p => (p.id || p) === numericUserId)))
+            );
             
             if (existingConversation) {
                 await this.openConversation(existingConversation.id);
@@ -5008,18 +4867,16 @@
             document.addEventListener('click', async (e) => {
                 const conversationItem = e.target.closest('.chat-item');
                 if (conversationItem) {
-                    const canAct = canSendUserMessages() || !!ChatManager.getConversation(conversationItem.dataset.chatId);
-                    if (canAct) {
-                        const conversationId = conversationItem.dataset.chatId;
-                        if (conversationId) {
-                            const startChatPanel = document.getElementById('startChatPanel');
-                            if (startChatPanel) startChatPanel.style.display = 'none';
-                            
-                            const chatPanel = document.getElementById('chatPanel');
-                            if (chatPanel) chatPanel.classList.remove('hidden');
-                            
-                            await ConversationManager.openConversation(conversationId);
-                        }
+                    const conversationId = conversationItem.dataset.chatId;
+                    if (conversationId) {
+                        const startChatPanel = document.getElementById('startChatPanel');
+                        if (startChatPanel) startChatPanel.style.display = 'none';
+                        
+                        const chatPanel = document.getElementById('chatPanel');
+                        if (chatPanel) chatPanel.classList.remove('hidden');
+                        
+                        // FIXED: Always open conversation — from cache when offline, live when online
+                        await ConversationManager.openConversation(conversationId);
                     }
                 }
             });
@@ -5222,6 +5079,27 @@
             } else {
                 ParentConnectionManager.notifyChildReady();
             }
+
+            // FIX: Proactively request session immediately after CHILD_READY.
+            // If the parent sends SESSION_DATA before PARENT_READY, our handler
+            // (_handleSessionData) will now promote directly to ACTIVE. This prevents
+            // the "stuck in INITIALIZING" bug on first load.
+            setTimeout(() => {
+                if (currentState !== LIFECYCLE_STATES.ACTIVE && !SessionManager.isAuthenticated()) {
+                    console.log(`[${MODULE_NAME}] Proactive REQUEST_SESSION after CHILD_READY`);
+                    try {
+                        window.parent && window.parent !== window && window.parent.postMessage({
+                            id: generateMessageId(),
+                            type: OUTGOING_ACTIONS.REQUEST_SESSION,
+                            source: MODULE_NAME,
+                            target: 'parent',
+                            requestId: generateRequestId(),
+                            payload: { module: MODULE_NAME, timestamp: Date.now() },
+                            timestamp: Date.now()
+                        }, '*');
+                    } catch (_e) {}
+                }
+            }, 50);
             
             const parentReadyTimeout = setTimeout(() => {
                 if (currentState === LIFECYCLE_STATES.WAIT_PARENT && !parentReadyReceived) {
@@ -5438,7 +5316,7 @@
         
         if (_demoModeEnabled) {
             console.log('[DataFlow] Real session active - disabling demo mode');
-            _demoModeEnabled = false;
+            // demo mode removed
         }
         
         Logger.info('DataFlow', 'Starting data flow');
@@ -5448,7 +5326,7 @@
             console.log('[DataFlow] Conversations already loaded from cache — syncing with server');
         }
         if (FriendManager._friends && FriendManager._friends.length > 0) {
-            const hasOnlyDemo = FriendManager._friends.every(f => f.id === 2001 || f.id === 2002);
+            const hasOnlyDemo = false; // Demo data fully removed
             if (hasOnlyDemo) {
                 console.log('[DataFlow] Clearing demo friends to load real data');
                 FriendManager._friends = [];
@@ -5473,8 +5351,8 @@
     // OPEN CHAT BY USER ID - Core function
     // =============================================
 
-    async function openChatWithUser(userId, userName) {
-        console.log('[MessageCore] openChatWithUser called:', { userId, userName });
+    async function openChatWithUser(userId, userName, userAvatar) {
+        console.log('[MessageCore] openChatWithUser called:', { userId, userName, userAvatar });
         
         if (!userId) {
             console.error('[MessageCore] Cannot open chat: No userId provided');
@@ -5484,10 +5362,12 @@
         const numericUserId = typeof userId === 'string' ? parseInt(userId, 10) : userId;
         
         let realUserName = userName;
+        let realAvatar = userAvatar;
         if (window.MessagesCore && window.MessagesCore.FriendManager) {
             const friend = window.MessagesCore.FriendManager.getFriend(numericUserId);
             if (friend) {
                 realUserName = friend.displayName || friend.username || friend.name || userName;
+                realAvatar = realAvatar || friend.avatar || friend.photoURL || friend.avatarUrl;
             }
         }
         
@@ -5533,8 +5413,10 @@
                 detail: {
                     userId: numericUserId,
                     userName: displayName,
+                    userAvatar: realAvatar || null,
                     recipientId: numericUserId,
                     recipientName: displayName,
+                    recipientAvatar: realAvatar || null,
                     timestamp: Date.now()
                 }
             }));
@@ -5695,7 +5577,7 @@
                     if (chatFriendId && String(chatFriendId) === String(uid)) {
                         const statusEl = document.getElementById('chatStatusText');
                         const indicatorEl = document.getElementById('chatStatusIndicator');
-                        if (statusEl) statusEl.textContent = isOnline ? 'Active now' : 'Offline';
+                        if (statusEl) statusEl.textContent = isOnline ? 'Active now' : '';
                         if (indicatorEl) indicatorEl.className = `chat-status ${isOnline ? 'online' : 'offline'}`;
                     }
                 }
@@ -5848,9 +5730,7 @@
             
             // Production requirement: never activate mock/demo data.
             setTimeout(() => {
-                if (!_demoBootstrapFired && currentState !== LIFECYCLE_STATES.ACTIVE && !parentReadyReceived) {
-                    _demoBootstrapFired = true;
-                    console.warn(`[${MODULE_NAME}] Demo bootstrap suppressed: waiting for parent/session for real data`);
+                if (false) { // Demo bootstrap fully removed
                 }
             }, 3000);
             
@@ -5934,7 +5814,7 @@
         stopTyping: () => TypingManager.stopTyping(),
         getTypingUsers: (conversationId) => TypingManager.getTypingUsersForConversation(conversationId),
         
-        openChatWithUser: openChatWithUser,
+        openChatWithUser: (userId, userName, userAvatar) => openChatWithUser(userId, userName, userAvatar),
         setCurrentCategory: (category) => ChatManager.setCurrentCategory(category),
         renderChatsList: () => ChatManager.renderChatsList(),
         
