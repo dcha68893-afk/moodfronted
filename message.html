@@ -1276,6 +1276,9 @@
         <!-- Chat Panel -->
         <div class="chat-panel hidden" id="chatPanel">
             <div class="chat-header">
+                <button class="chat-action-btn back-to-sidebar-btn" id="backToChatsBtn" title="Back to chats" style="margin-right:2px;flex-shrink:0;">
+                    <i class="fas fa-arrow-left"></i>
+                </button>
                 <div class="chat-info" style="cursor:pointer;" onclick="window.messagesUI?.viewReceiverProfile()">
                     <div class="chat-avatar" id="chatFriendAvatar">
                         <i class="fas fa-user"></i>
@@ -1562,6 +1565,7 @@
     <script type="module" src="messages-core.js"></script>
     <script type="module" src="messages-ui.js"></script>
 
+    
     <!-- Inline script for initialization and fallback - SILENT -->
     <script>
         (function() {
@@ -1999,5 +2003,6 @@
         console.log(`[Message HTML] Parent communication initialized. Environment: ${environment}, Host: ${hostname}`);
     })();
     </script>
+    
 </body>
 </html>

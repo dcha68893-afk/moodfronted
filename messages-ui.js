@@ -3283,7 +3283,7 @@ Type: ${message.type || 'text'}`;
                 return true;
             }
             
-            // FIXED: Also check core state directly — UIStateManager may lag behind core
+            // Check core state directly — UIStateManager may lag behind core
             const core = typeof getMessagesCore === 'function' ? getMessagesCore() : null;
             if (core && core.getState) {
                 const coreState = core.getState();
@@ -3291,6 +3291,30 @@ Type: ${message.type || 'text'}`;
                     return true;
                 }
             }
+
+            // FIX: SESSION_DATA can arrive ~80s after page load. If localStorage already
+            // has a recognised user/auth token, unblock immediately instead of making
+            // every click fail with "INITIALIZING / sessionValid: false".
+            try {
+                const hasLocalUser =
+                    localStorage.getItem('kynecta_auth') ||
+                    localStorage.getItem('token') ||
+                    localStorage.getItem('accessToken') ||
+                    localStorage.getItem('USER_TOKEN') ||
+                    localStorage.getItem('currentUser') ||
+                    localStorage.getItem('user');
+                if (hasLocalUser) {
+                    // Opportunistically patch UIStateManager so subsequent checks are free.
+                    if (window.messagesUI && window.messagesUI.UIStateManager) {
+                        const mgr = window.messagesUI.UIStateManager;
+                        if (!mgr.state.sessionValid) {
+                            mgr.state.sessionValid = true;
+                            mgr.state.lifecycleState = LIFECYCLE_STATES.ACTIVE;
+                        }
+                    }
+                    return true;
+                }
+            } catch (_) {}
             
             const lifecycleState = UIStateManager.getState('lifecycleState');
             const sessionValid = UIStateManager.getState('sessionValid');

@@ -89,12 +89,23 @@
             
             .app-container {
                 flex-direction: column !important;
-                height: auto !important;
-                min-height: 100vh !important;
+                /* Keep full-viewport height so the inner flex chain can scroll correctly */
+                height: 100vh !important;
+                min-height: 0 !important;
+                overflow: hidden !important;
             }
-            
+
+            /* The sidebar must fill remaining height and allow its child to scroll */
+            .sidebar {
+                height: 100vh !important;
+                /* flex column already set globally — keep it */
+            }
+
             .friend-list-content {
-                padding-bottom: 20px !important;
+                /* Must be scrollable on mobile — explicit overflow + safe-area bottom padding */
+                overflow-y: auto !important;
+                -webkit-overflow-scrolling: touch !important;
+                padding-bottom: calc(80px + env(safe-area-inset-bottom, 0px)) !important;
             }
         }
         
@@ -226,13 +237,19 @@
             flex: 1;
             display: flex;
             flex-direction: column;
+            /* Was 'overflow: hidden' — that clipped the scroll container on iOS/Android.
+               Keep hidden for x-axis but allow the column children to size correctly. */
             overflow: hidden;
+            min-height: 0; /* critical: lets flex child shrink below its content height */
         }
         
         .friend-list-content {
             flex: 1;
             overflow-y: auto;
+            -webkit-overflow-scrolling: touch; /* smooth momentum scroll on iOS */
+            overscroll-behavior-y: contain;    /* prevent scroll chaining into parent iframe */
             padding: 10px 0;
+            min-height: 0; /* prevent collapse on small viewports */
         }
         
         .section-title {

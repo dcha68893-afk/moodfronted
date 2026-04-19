@@ -2876,3 +2876,21 @@ input:focus + .toggle-slider,
 .search-input:focus {
   border-color: var(--color-primary) !important;
 }
+/* Audio call pulse animation */
+@keyframes pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.5; transform: scale(1.2); }
+}
+
+.audio-call-indicator {
+  animation: none;
+}
+
+.audio-call-indicator span {
+  display: inline-block;
+  animation: pulse 1.2s ease-in-out infinite;
+}
+
+.video-container.remote-video-container {
+  position: relative;
+}

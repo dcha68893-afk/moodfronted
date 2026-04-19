@@ -34,14 +34,39 @@
     };
 
     // Environment detection for WebSocket URL
+    // FIXED: In production the frontend (moodfronted.onrender.com) and backend
+    // (moodchat-fy56.onrender.com) are on different domains.  We must always
+    // connect to the BACKEND domain, not window.location.host.
+    function detectLocalEnvironment() {
+        const h = window.location.hostname;
+        return h === 'localhost' || h === '127.0.0.1' || h.startsWith('192.168.');
+    }
+
+    function getBackendBaseUrl() {
+        // 1. Explicit override injected by chat.html / server
+        if (window.__API_BASE_URL__) return window.__API_BASE_URL__.replace(/\/api\/?$/, '');
+        // 2. api.core.js sets this after detecting production
+        if (window.Environment && window.Environment.backendUrl) {
+            return window.Environment.backendUrl.replace(/\/api\/?$/, '');
+        }
+        // 3. Hardcoded production fallback
+        if (!detectLocalEnvironment()) {
+            return 'https://moodchat-fy56.onrender.com';
+        }
+        return 'http://localhost:4000';
+    }
+
     function getWebSocketUrl() {
+        // 1. Explicit WS URL override
         if (window.Environment && window.Environment.wsBaseUrl) {
             return window.Environment.wsBaseUrl;
         }
-        
-        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        const host = window.location.host;
-        return `${protocol}//${host}/ws`;
+        // 2. Derive from backend base URL (CORRECT for split-domain deployments)
+        const base = getBackendBaseUrl();
+        const wsBase = base.replace(/^http/, 'ws');
+        // FIX: Try Socket.IO websocket transport first (most backends use Socket.IO, not raw /ws)
+        // If your backend is raw WebSocket on /ws, change this back to `${wsBase}/ws`
+        return `${wsBase}/socket.io/?EIO=4&transport=websocket`;
     }
 
     /**
@@ -322,28 +347,55 @@
 
         _onOpen() {
             clearTimeout(this._connectionTimeout);
-            
-            this._state = CONNECTION_STATE.CONNECTED;
             this._reconnectAttempts = 0;
             this._manualDisconnect = false;
-            this._emitStateChange();
 
-            // The backend WS server authenticates via connection context/querystring
-            // and does not ACK a dedicated AUTHENTICATE frame.
-            this._authenticated = true;
-            this._state = CONNECTION_STATE.AUTHENTICATED;
-            this._emitStateChange();
-            this._resolveConnectPromise();
-            this._processQueue();
+            // Check if this is a Socket.IO connection (URL contains /socket.io/)
+            const isSocketIO = this._url && this._url.includes('/socket.io/');
 
-            // Start heartbeat
-            this._startHeartbeat();
+            if (isSocketIO) {
+                // Socket.IO: do NOT authenticate here — wait for the '0' open packet,
+                // then '40' connect-to-namespace packet. Authentication is done in _onMessage.
+                this._state = CONNECTION_STATE.CONNECTING;
+                this._emitStateChange();
+            } else {
+                // Raw WebSocket: authenticate immediately
+                this._state = CONNECTION_STATE.CONNECTED;
+                this._emitStateChange();
+                this._authenticated = true;
+                this._state = CONNECTION_STATE.AUTHENTICATED;
+                this._emitStateChange();
+                this._resolveConnectPromise();
+                this._processQueue();
+                this._startHeartbeat();
+            }
         }
 
         _authenticate() {
             this._state = CONNECTION_STATE.AUTHENTICATING;
             this._emitStateChange();
 
+            const isSocketIO = this._url && this._url.includes('/socket.io/');
+
+            if (isSocketIO) {
+                // Socket.IO: emit authenticate event as  42["authenticate",{token}]
+                try {
+                    if (this._socket && this._socket.readyState === WebSocket.OPEN) {
+                        this._socket.send(`42${JSON.stringify(['authenticate', { token: this._sessionToken }])}`);
+                    }
+                } catch (_) {}
+                // Assume authenticated after short delay — most backends don't ACK this
+                setTimeout(() => {
+                    this._authenticated = true;
+                    this._state = CONNECTION_STATE.AUTHENTICATED;
+                    this._emitStateChange();
+                    this._resolveConnectPromise();
+                    this._processQueue();
+                }, 300);
+                return;
+            }
+
+            // Raw WebSocket path: send JSON auth frame
             const authMessage = {
                 type: 'AUTHENTICATE',
                 payload: { token: this._sessionToken },
@@ -369,6 +421,102 @@
                 if (typeof event.data !== 'string') return;
                 const rawMessage = event.data.trim();
                 if (!rawMessage) return;
+
+                // ── Socket.IO protocol handling ──────────────────────────────
+                // Socket.IO over raw WebSocket prefixes packets with a numeric code:
+                //   0  = open (contains sid/pingInterval)
+                //   2  = ping  →  reply with "3" (pong)
+                //   3  = pong
+                //   40 = connect  →  we are connected; now authenticate
+                //   42 = event  →  ["eventName", payload]
+                //   41 = disconnect
+                if (/^\d/.test(rawMessage)) {
+                    const code = rawMessage.match(/^(\d+)/)[1];
+
+                    if (code === '0') {
+                        // Open packet — connection established, send connect packet
+                        try {
+                            const openData = JSON.parse(rawMessage.slice(code.length));
+                            this._socketIoPingInterval = openData.pingInterval || 25000;
+                        } catch(_) {}
+                        // Send Socket.IO connect packet for the default namespace
+                        if (this._socket && this._socket.readyState === WebSocket.OPEN) {
+                            this._socket.send('40');
+                        }
+                        return;
+                    }
+
+                    if (code === '40') {
+                        // Connected to namespace — authenticate
+                        this._state = CONNECTION_STATE.CONNECTED;
+                        this._emitStateChange();
+                        this._startHeartbeat();
+                        this._authenticate();
+                        return;
+                    }
+
+                    if (code === '2') {
+                        // Ping from server → reply with pong
+                        this._clearHeartbeatTimeout();
+                        if (this._socket && this._socket.readyState === WebSocket.OPEN) {
+                            this._socket.send('3');
+                        }
+                        return;
+                    }
+
+                    if (code === '3') {
+                        // Pong
+                        this._clearHeartbeatTimeout();
+                        return;
+                    }
+
+                    if (code === '41') {
+                        // Server disconnected namespace
+                        this._onClose({ code: 1000, reason: 'namespace disconnect' });
+                        return;
+                    }
+
+                    if (code === '42') {
+                        // Event packet: 42["eventName", payload]
+                        try {
+                            const arr = JSON.parse(rawMessage.slice(2));
+                            if (Array.isArray(arr) && arr.length >= 1) {
+                                const eventName = arr[0];
+                                const payload   = arr[1] !== undefined ? arr[1] : {};
+                                // Synthesise a message object our router understands
+                                const message = {
+                                    type:    eventName,
+                                    payload: payload,
+                                    data:    payload
+                                };
+                                this._stats.messagesReceived++;
+                                this._routeMessage(message);
+                                if (window.KynectaEventBus) {
+                                    window.KynectaEventBus.emit(`REALTIME_${eventName}`, payload, { async: true });
+                                }
+                            }
+                        } catch(e) {
+                            console.error('[Realtime] Socket.IO event parse error:', e);
+                        }
+                        return;
+                    }
+
+                    if (code === '43') {
+                        // ACK packet: 43id[...args]
+                        try {
+                            const arr = JSON.parse(rawMessage.replace(/^43\d*/, ''));
+                            if (Array.isArray(arr) && arr[0]) {
+                                this._handleAck({ messageId: null, payload: arr[0] });
+                            }
+                        } catch(_) {}
+                        return;
+                    }
+
+                    // Unknown numeric prefix — ignore silently
+                    return;
+                }
+
+                // ── Non–Socket.IO path (raw WebSocket server) ──────────────
                 if (rawMessage === 'connected' || rawMessage === 'ping' || rawMessage === 'pong' || rawMessage === 'PONG') {
                     if (rawMessage === 'pong' || rawMessage === 'PONG') this._clearHeartbeatTimeout();
                     return;
@@ -626,19 +774,31 @@
         _startHeartbeat() {
             this._clearHeartbeatTimer();
 
+            const interval = this._socketIoPingInterval || SOCKET_CONFIG.heartbeatInterval;
+            const isSocketIO = this._url && this._url.includes('/socket.io/');
+
             this._heartbeatTimer = setInterval(() => {
-                if (this._state === CONNECTION_STATE.AUTHENTICATED && this._socket) {
+                if (this._state === CONNECTION_STATE.AUTHENTICATED && this._socket &&
+                    this._socket.readyState === WebSocket.OPEN) {
                     this._stats.heartbeats++;
-                    
-                    this._sendMessage({ type: 'ping', timestamp: Date.now() })
-                        .then(() => {
-                            this._heartbeatTimeoutTimer = setTimeout(() => {
-                                this._onError(new Error('Heartbeat timeout'));
-                            }, SOCKET_CONFIG.heartbeatTimeout);
-                        })
-                        .catch(() => {});
+
+                    if (isSocketIO) {
+                        // Socket.IO ping is just "2"
+                        try { this._socket.send('2'); } catch(_) {}
+                        this._heartbeatTimeoutTimer = setTimeout(() => {
+                            this._onError(new Error('Heartbeat timeout'));
+                        }, SOCKET_CONFIG.heartbeatTimeout);
+                    } else {
+                        this._sendMessage({ type: 'ping', timestamp: Date.now() })
+                            .then(() => {
+                                this._heartbeatTimeoutTimer = setTimeout(() => {
+                                    this._onError(new Error('Heartbeat timeout'));
+                                }, SOCKET_CONFIG.heartbeatTimeout);
+                            })
+                            .catch(() => {});
+                    }
                 }
-            }, SOCKET_CONFIG.heartbeatInterval);
+            }, interval);
         }
 
         _clearHeartbeatTimer() {

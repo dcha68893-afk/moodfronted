@@ -3501,16 +3501,31 @@ if (message.type === 'SETTING_CHANGED' || message.type === 'SETTINGS_UPDATED') {
     }
     
     function setActiveCall(callId, callType, participants) {
-    // CRITICAL: Check if there's already an active call
+    // FIXED RACE: forceResetCallState clears callActive synchronously but
+    // sometimes JS microtask ordering means callActive is still true by the
+    // time we arrive here.  A truly stale block only applies when BOTH
+    // callActive===true AND activeCallId is a non-empty string different from
+    // the incoming callId.  All other stale-flag cases are self-healed below.
     if (callsState.callActive && callsState.activeCallId && callsState.activeCallId !== callId) {
-        logWarn(MODULE, 'Cannot set active call - another call already active', { existing: callsState.activeCallId });
-        return false;
+        // Extra safety: if the stale call is old (>60s), force-clear it rather than block
+        const staleAge = callsState.callStartTime ? Date.now() - callsState.callStartTime : Infinity;
+        if (staleAge < 60000) {
+            logWarn(MODULE, 'Cannot set active call - another call already active', { existing: callsState.activeCallId });
+            return false;
+        }
+        logWarn(MODULE, 'Stale call detected (>60s old) — force-clearing before new call', { existing: callsState.activeCallId });
+        resetCallState();
+        callsState.callActive = false;
+        callsState.activeCallId = null;
     }
     
-    // If there's a stale call with the same ID, clean it first
-    if (callsState.activeCallId === callId && callsState.callActive) {
-        logWarn(MODULE, 'Call already active with same ID, resetting first', { callId });
+    // If there's a stale call with the same ID, or callActive with no ID, clean it first
+    if ((callsState.activeCallId === callId && callsState.callActive) ||
+        (callsState.callActive && !callsState.activeCallId)) {
+        logWarn(MODULE, 'Stale call state detected, resetting before new call', { callId });
         resetCallState();
+        callsState.callActive = false;
+        callsState.activeCallId = null;
     }
     
     callsState.activeCall = {

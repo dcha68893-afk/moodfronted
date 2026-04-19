@@ -3798,6 +3798,57 @@
                 window.wsService.on('call:ice_candidate',  d => _fwdToCallsIframe('ICE_CANDIDATE',  d));
                 window.wsService.on('webrtc:signal',       d => _fwdToCallsIframe('WEBRTC_SIGNAL',  d));
                 window.wsService.on('webrtc_signal',       d => _fwdToCallsIframe('WEBRTC_SIGNAL',  d));
+
+                // ── REAL-TIME MESSAGE BRIDGE ──────────────────────────────────
+                // Forward incoming chat messages from WebSocket to the messages iframe.
+                // This is what makes the receiver's screen update instantly without polling.
+                function _fwdNewMessage(payload) {
+                    const msgIframe = document.getElementById('messagesIframe');
+                    if (msgIframe && msgIframe.contentWindow) {
+                        // Forward as both event name variants so messages-core.js handleRealtimePayload picks it up
+                        msgIframe.contentWindow.postMessage({ type: 'message:new',  payload: payload, source: 'ws-bridge' }, '*');
+                        msgIframe.contentWindow.postMessage({ type: 'new_message',  payload: payload, source: 'ws-bridge' }, '*');
+                    }
+                    // Also update the sidebar unread badge by bumping the conversation last message
+                    if (payload && payload.chatId) {
+                        if (msgIframe && msgIframe.contentWindow) {
+                            msgIframe.contentWindow.postMessage({ type: 'CONVERSATION_UPDATED', payload: { chatId: payload.chatId, lastMessage: payload.content, lastMessageAt: payload.createdAt || Date.now() }, source: 'ws-bridge' }, '*');
+                        }
+                    }
+                }
+                function _fwdMessageDelivered(payload) {
+                    const msgIframe = document.getElementById('messagesIframe');
+                    if (msgIframe && msgIframe.contentWindow) {
+                        msgIframe.contentWindow.postMessage({ type: 'message:delivered', payload: payload, source: 'ws-bridge' }, '*');
+                        msgIframe.contentWindow.postMessage({ type: 'message_delivered', payload: payload, source: 'ws-bridge' }, '*');
+                    }
+                }
+                function _fwdMessageRead(payload) {
+                    const msgIframe = document.getElementById('messagesIframe');
+                    if (msgIframe && msgIframe.contentWindow) {
+                        msgIframe.contentWindow.postMessage({ type: 'message:read', payload: payload, source: 'ws-bridge' }, '*');
+                        msgIframe.contentWindow.postMessage({ type: 'message_read', payload: payload, source: 'ws-bridge' }, '*');
+                    }
+                }
+                function _fwdPresence(payload) {
+                    const msgIframe = document.getElementById('messagesIframe');
+                    if (msgIframe && msgIframe.contentWindow) {
+                        msgIframe.contentWindow.postMessage({ type: payload.online ? 'FRIEND_ONLINE' : 'FRIEND_OFFLINE', payload: payload, source: 'ws-bridge' }, '*');
+                    }
+                }
+
+                // All naming conventions the backend might use
+                window.wsService.on('message:new',        _fwdNewMessage);
+                window.wsService.on('new_message',        _fwdNewMessage);
+                window.wsService.on('newMessage',         _fwdNewMessage);
+                window.wsService.on('chat:message',       _fwdNewMessage);
+                window.wsService.on('message:delivered',  _fwdMessageDelivered);
+                window.wsService.on('message_delivered',  _fwdMessageDelivered);
+                window.wsService.on('message:read',       _fwdMessageRead);
+                window.wsService.on('message_read',       _fwdMessageRead);
+                window.wsService.on('user:online',        _fwdPresence);
+                window.wsService.on('user:offline',       d => _fwdPresence({ ...d, online: false }));
+                window.wsService.on('presence:update',    _fwdPresence);
             }
 
             // Bind now if wsService is already real

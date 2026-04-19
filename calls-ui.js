@@ -3777,6 +3777,10 @@ sanitizeHTML: function(str) {
             // Remove existing container for this stream if any
             const existingContainer = document.querySelector(`.video-container[data-stream-id="${streamId}"]`);
             if (existingContainer) existingContainer.remove();
+
+            // Also remove any stale dedicated audio element for this stream
+            const existingAudio = document.getElementById('remoteAudio_' + streamId);
+            if (existingAudio) existingAudio.remove();
             
             // Hide placeholder
             const placeholder = document.getElementById('offlineCallPlaceholder');
@@ -3786,50 +3790,90 @@ sanitizeHTML: function(str) {
             container.className = 'video-container remote-video-container';
             container.dataset.streamId = streamId;
             
-            const video = document.createElement('video');
-            video.className = 'video-element';
-            video.autoplay = true;
-            video.playsInline = true;
-            video.srcObject = stream;
-            // Never mute remote — we want to hear them
-            video.muted = false;
-            
-            // If call is audio-only, hide the video element
-            const hasVideoTracks = stream.getVideoTracks().length > 0;
-            if (!hasVideoTracks) {
-                video.style.display = 'none';
-                // Show avatar fallback
+            const hasVideoTracks = stream.getVideoTracks().filter(t => t.enabled && t.readyState === 'live').length > 0;
+
+            if (hasVideoTracks) {
+                // ── VIDEO CALL ────────────────────────────────────────────────
+                const video = document.createElement('video');
+                video.className = 'video-element';
+                video.autoplay = true;
+                video.playsInline = true;
+                video.muted = false;
+                video.volume = 1.0;
+                video.srcObject = stream;
+
+                const overlay = document.createElement('div');
+                overlay.className = 'video-overlay';
+                overlay.innerHTML = `<div class="video-name"><span>${participantName || 'Participant'}</span></div>`;
+
+                container.appendChild(video);
+                container.appendChild(overlay);
+                elements.videoGrid.appendChild(container);
+
+                const playVideo = () => video.play().catch(() => {
+                    // Autoplay blocked — play muted first then unmute (browser policy workaround)
+                    video.muted = true;
+                    video.play().then(() => {
+                        video.muted = false;
+                        video.volume = 1.0;
+                    }).catch(() => {});
+                });
+                playVideo();
+
+            } else {
+                // ── AUDIO-ONLY CALL ───────────────────────────────────────────
+                // Use a real <audio> element (not a hidden <video>) — browsers
+                // autoplay audio elements far more reliably than hidden videos.
+                const audio = document.createElement('audio');
+                audio.id = 'remoteAudio_' + streamId;
+                audio.autoplay = true;
+                audio.muted = false;
+                audio.volume = 1.0;
+                audio.srcObject = stream;
+                // Keep out of DOM flow but attached so it doesn't get GC'd
+                audio.style.cssText = 'position:absolute;width:0;height:0;overflow:hidden;left:-9999px;';
+                document.body.appendChild(audio);
+
+                const playAudio = () => audio.play().catch(() => {
+                    // Some browsers require a user-gesture; try once more
+                    const resume = () => {
+                        audio.play().catch(() => {});
+                        document.removeEventListener('click', resume);
+                        document.removeEventListener('touchstart', resume);
+                    };
+                    document.addEventListener('click', resume, { once: true });
+                    document.addEventListener('touchstart', resume, { once: true });
+                });
+                playAudio();
+
+                // Show avatar UI in the container
                 const avatar = document.createElement('div');
                 avatar.className = 'video-avatar-fallback';
                 avatar.style.cssText = 'width:80px;height:80px;border-radius:50%;background:var(--primary,#7c3aed);display:flex;align-items:center;justify-content:center;font-size:32px;color:#fff;margin:auto;';
                 const name = participantName || 'Participant';
                 avatar.textContent = name.charAt(0).toUpperCase();
+
+                const nameLabel = document.createElement('div');
+                nameLabel.style.cssText = 'text-align:center;color:#fff;margin-top:8px;font-size:14px;';
+                nameLabel.textContent = name;
+
+                // Audio indicator (animated mic icon)
+                const audioIndicator = document.createElement('div');
+                audioIndicator.className = 'audio-call-indicator';
+                audioIndicator.style.cssText = 'display:flex;align-items:center;gap:6px;margin-top:6px;color:#a3e635;font-size:12px;';
+                audioIndicator.innerHTML = '<span style="animation:pulse 1s infinite">🔊</span> Audio Connected';
+
+                container.style.cssText = 'display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:160px;';
                 container.appendChild(avatar);
+                container.appendChild(nameLabel);
+                container.appendChild(audioIndicator);
+                elements.videoGrid.appendChild(container);
             }
-            
-            const overlay = document.createElement('div');
-            overlay.className = 'video-overlay';
-            overlay.innerHTML = `
-                <div class="video-name">
-                    <span>${participantName || 'Participant'}</span>
-                </div>
-            `;
-            
-            container.appendChild(video);
-            container.appendChild(overlay);
-            elements.videoGrid.appendChild(container);
             
             // Update call status text
             if (elements.callStatusText) {
                 elements.callStatusText.textContent = 'Connected';
             }
-            
-            video.play().catch(e => {
-                UILogger.warn('Error playing remote video', e);
-                // Try unmuted play (browser may require interaction)
-                video.muted = false;
-                video.play().catch(() => {});
-            });
         },
         
         addChatMessage: function(sender, message, timestamp) {
@@ -4140,6 +4184,8 @@ sanitizeHTML: function(str) {
                 UIState.localStream.getTracks().forEach(t => t.stop());
                 UIState.localStream = null;
             }
+            // Cleanup any detached audio elements from audio-only calls
+            document.querySelectorAll('audio[id^="remoteAudio_"]').forEach(a => { a.srcObject = null; a.remove(); });
             UIState.remoteStreams.clear();
             
             if (elements.videoGrid) {
@@ -4216,6 +4262,9 @@ sanitizeHTML: function(str) {
                 UIState.remoteStreams.delete(payload.streamId);
                 const videoEl = document.querySelector(`.video-container[data-stream-id="${payload.streamId}"]`);
                 if (videoEl) videoEl.remove();
+                // Also remove dedicated audio element if it exists
+                const audioEl = document.getElementById('remoteAudio_' + payload.streamId);
+                if (audioEl) { audioEl.srcObject = null; audioEl.remove(); }
             }
         },
         
@@ -5723,6 +5772,8 @@ sanitizeHTML: function(str) {
             UIState.callType = null;
             UIState.callActive = false;
             UIState.callState = 'idle';
+            // Cleanup any detached audio elements from audio-only calls
+            document.querySelectorAll('audio[id^="remoteAudio_"]').forEach(a => { a.srcObject = null; a.remove(); });
             UIState.remoteStreams.clear();
             UIState.remoteStream = null;
             

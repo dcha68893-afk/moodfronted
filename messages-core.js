@@ -2441,7 +2441,7 @@
                 try {
                     const localMsgs = await window.KynectaLocalStore.getMessagesByChat(conversationId, { limit: options.limit || 100 });
                     if (localMsgs && localMsgs.length > 0) {
-                        this.setMessages(localMsgs);
+                        this.setMessages(localMsgs, conversationId);
                     }
                 } catch (_lsErr) {}
             }
@@ -2450,7 +2450,7 @@
                 console.log('[ChatManager] Offline mode - using local store data');
                 const cachedMessages = this.loadPreviousMessages(conversationId);
                 if (cachedMessages && cachedMessages.length > 0) {
-                    this.setMessages(cachedMessages);
+                    this.setMessages(cachedMessages, conversationId);
                     this._notifySubscribers();
                 }
                 return;
@@ -2462,7 +2462,7 @@
                 if (conversationId && window.KynectaLocalStore) {
                     window.KynectaLocalStore.getMessagesByChat(conversationId).then(cached => {
                         if (cached && cached.length > 0) {
-                            this.setMessages(cached);
+                            this.setMessages(cached, conversationId);
                             this._notifySubscribers();
                         }
                     }).catch(() => {});
@@ -2493,7 +2493,7 @@
                         before: options.before || null
                     });
 
-                    this.setMessages(hydratedMessages);
+                    this.setMessages(hydratedMessages, conversationId);
                     this._notifySuccess('Messages loaded');
                     return;
                 }
@@ -2532,10 +2532,10 @@
                         chatId: conversationId,
                         isLocalOnly: false
                     }));
-                    this.setMessages(normalizedMessages);
+                    this.setMessages(normalizedMessages, conversationId);
                     this._notifySuccess('Messages loaded');
                 } else {
-                    this.setMessages([]);
+                    this.setMessages([], conversationId);
                 }
             } catch (error) {
                 console.error('[ChatManager] Failed to fetch messages:', error);
@@ -2545,10 +2545,10 @@
                         limit: options.limit || 100,
                         before: options.before || null
                     }).catch(() => []);
-                    this.setMessages(fallbackMessages || []);
+                    this.setMessages(fallbackMessages || [], conversationId);
                 } else {
                     this._notifyError(error.message);
-                    this.setMessages([]);
+                    this.setMessages([], conversationId);
                 }
             } finally {
                 this._loadingMessages = false;
@@ -2749,7 +2749,7 @@
             console.log(`[ChatManager] Set ${this._conversations.length} unique conversations`);
         },
         
-        setMessages: function(messages) {
+        setMessages: function(messages, conversationId) {
             // Deduplicate: for each message, a serverId-confirmed copy wins over
             // an optimistic copy with the same localId.
             const byId = new Map();
@@ -2774,12 +2774,16 @@
 
             this._messages = uniqueMessages;
             this._rebuildMessagesMap();
-            this._saveMessagesToCache();
+            // FIX: Use the explicitly-passed conversationId as the authoritative cache key.
+            // Deriving it from uniqueMessages[0]?.chatId or _activeConversation is unreliable
+            // when fetchMessages resolves asynchronously after the user has switched chats.
+            const cacheId = conversationId || this._activeConversation?.id;
+            this._saveMessagesToCache(cacheId);
             this._notifySubscribers();
 
             // ── OFFLINE-FIRST: persist ALL messages to IndexedDB ─────────────
             if (window.KynectaLocalStore && uniqueMessages.length > 0) {
-                const chatId = uniqueMessages[0]?.chatId || uniqueMessages[0]?.conversationId;
+                const chatId = cacheId || uniqueMessages[0]?.chatId || uniqueMessages[0]?.conversationId;
                 if (chatId) {
                     window.KynectaLocalStore.saveMessages(
                         uniqueMessages.map(m => ({
@@ -2930,6 +2934,8 @@
                         lastChatId: conversation.id,
                         timestamp: Date.now()
                     });
+                    // Also write to the flat key so restoreLastChat can read it immediately
+                    SafeStorage.set('lastChatId', String(conversation.id));
                 } catch (e) {}
             }
         },
@@ -3000,10 +3006,14 @@
             } catch (e) {}
         },
         
-        _saveMessagesToCache: function() {
-            if (this._activeConversation) {
+        _saveMessagesToCache: function(chatId) {
+            // FIX: Prefer the explicitly-passed chatId. Falling back to
+            // _activeConversation.id is unsafe when called from an async fetch
+            // that completed after the user has already switched to a different chat.
+            const targetId = chatId || this._activeConversation?.id;
+            if (targetId) {
                 try {
-                    SafeStorage.setJSON(`${LOCAL_STORAGE_KEYS.MESSAGES_PREFIX}${this._activeConversation.id}`, this._messages);
+                    SafeStorage.setJSON(`${LOCAL_STORAGE_KEYS.MESSAGES_PREFIX}${targetId}`, this._messages);
                 } catch (e) {}
             }
         },
@@ -5341,15 +5351,21 @@
             }
         }
         
-        ConversationManager.fetchConversations().catch(e => {
-            Logger.error('DataFlow', 'Failed to fetch conversations', e);
-        });
+        ConversationManager.fetchConversations()
+            .then(() => {
+                // Restore last open chat AFTER conversations are loaded so the
+                // conversation object exists in ChatManager when we look it up.
+                restoreLastChat();
+            })
+            .catch(e => {
+                Logger.error('DataFlow', 'Failed to fetch conversations', e);
+                // Still attempt restore in case cache has data
+                restoreLastChat();
+            });
         
         FriendManager.fetchFriends().catch(e => {
             Logger.error('DataFlow', 'Failed to fetch friends', e);
         });
-        
-        restoreLastChat();
         
         Logger.success('DataFlow', 'Data flow started');
     }
@@ -5670,12 +5686,32 @@
     
     function restoreLastChat() {
         const lastChatId = SafeStorage.get('lastChatId');
-        if (lastChatId) {
-            const conversation = ChatManager.getConversation(lastChatId);
-            if (conversation) {
-                ConversationManager.openConversation(lastChatId);
-            }
+        if (!lastChatId) return;
+
+        const conversation = ChatManager.getConversation(lastChatId);
+        if (conversation) {
+            ConversationManager.openConversation(lastChatId);
+            return;
         }
+
+        // Conversation not in memory yet (fetch still in flight or first load).
+        // Poll briefly then give up to avoid infinite loop.
+        let attempts = 0;
+        const MAX_ATTEMPTS = 10;
+        const poll = setInterval(() => {
+            attempts++;
+            const conv = ChatManager.getConversation(lastChatId);
+            if (conv) {
+                clearInterval(poll);
+                ConversationManager.openConversation(lastChatId);
+            } else if (attempts >= MAX_ATTEMPTS) {
+                clearInterval(poll);
+                // Last resort: try by numeric id search across all conversations
+                const all = ChatManager.getConversations ? ChatManager.getConversations() : [];
+                const found = all.find(c => String(c.id) === String(lastChatId));
+                if (found) ConversationManager.openConversation(found.id);
+            }
+        }, 300);
     }
 
     // =============================================

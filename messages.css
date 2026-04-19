@@ -511,9 +511,11 @@ body {
     border-radius: 14px;
     position: relative;
     word-wrap: break-word;
+    word-break: break-word;
     line-height: 1.4;
     font-size: 14px;
-    max-width: 68%;
+    max-width: 72%;
+    width: fit-content;
     display: inline-block;
 }
 
@@ -551,10 +553,12 @@ body {
     background: #0084ff;
     color: #ffffff;
     border-radius: 14px 14px 3px 14px;
-    max-width: 68%;
+    max-width: 72%;
+    width: fit-content;
     padding: 7px 11px;
     font-size: 14px;
     box-shadow: 0 1px 2px rgba(0,132,255,0.2);
+    word-break: break-word;
 }
 
 /* RECEIVED: left side, light grey bubble */
@@ -562,10 +566,12 @@ body {
     background: #e8e8ed;
     color: #1c1c1e;
     border-radius: 14px 14px 14px 3px;
-    max-width: 68%;
+    max-width: 72%;
+    width: fit-content;
     padding: 7px 11px;
     font-size: 14px;
     box-shadow: 0 1px 2px rgba(0,0,0,0.07);
+    word-break: break-word;
 }
 
 /* Time inside sent bubbles — white/translucent */
@@ -3780,4 +3786,18 @@ body[data-module="friends"] .friend-item:hover {
 input:focus + .toggle-slider,
 .search-input:focus {
   border-color: var(--color-primary) !important;
+}
+/* ── Back-to-sidebar button ─────────────────────────────────────────────── */
+/* Desktop: sidebar is always visible, hide the back button */
+#backToChatsBtn {
+    display: none;
+}
+
+/* Mobile: sidebar slides out when chat opens, show the back button */
+@media (max-width: 768px) {
+    #backToChatsBtn {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
 }
