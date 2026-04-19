@@ -532,6 +532,7 @@ body {
     flex-direction: column;
     align-items: flex-end;
     margin-bottom: 6px;
+    padding-right: 4px;
 }
 
 .message.received {
@@ -539,18 +540,54 @@ body {
     flex-direction: column;
     align-items: flex-start;
     margin-bottom: 6px;
+    padding-left: 4px;
 }
 
+/* SENT: right side, blue bubble */
 .message.sent .message-bubble {
     background: #0084ff;
-    color: #fff;
+    color: #ffffff;
     border-radius: 18px 18px 4px 18px;
+    max-width: 72%;
+    box-shadow: 0 1px 3px rgba(0,132,255,0.25);
 }
 
+/* RECEIVED: left side, light grey bubble */
 .message.received .message-bubble {
     background: #e8e8ed;
     color: #1c1c1e;
     border-radius: 18px 18px 18px 4px;
+    max-width: 72%;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+}
+
+/* Time inside sent bubbles — white/translucent */
+.message.sent .message-time {
+    color: rgba(255,255,255,0.75) !important;
+}
+
+/* Time inside received bubbles — grey */
+.message.received .message-time {
+    color: rgba(28,28,30,0.55) !important;
+}
+
+/* Status icons on sent messages */
+.message.sent .message-status {
+    color: rgba(255,255,255,0.85);
+    font-size: 11px;
+}
+
+/* Failed messages */
+.message.sent.message-failed .message-bubble {
+    background: #ff3b30;
+    color: #fff;
+}
+
+/* Pending/sending — lighter blue */
+.message.sent.message-sending .message-bubble {
+    background: #5aabff;
+    color: #fff;
+    opacity: 0.85;
 }
 
 /* Sticky context menu */
@@ -3156,11 +3193,11 @@ body {
   --away-color: #f59e0b;
   --offline-color: #9ca3af;
 
-  /* ── CHAT BUBBLES (green sent, gray received) ── */
-  --bubble-sent-bg: #22c55e;
+  /* ── CHAT BUBBLES (blue sent, gray received) ── */
+  --bubble-sent-bg: #0084ff;
   --bubble-sent-text: #ffffff;
-  --bubble-received-bg: #f3f4f6;
-  --bubble-received-text: #111827;
+  --bubble-received-bg: #e8e8ed;
+  --bubble-received-text: #1c1c1e;
 
   /* ── ACTIVE TABS & NAV (blue) ── */
   --tab-active-color: #3b82f6;
@@ -3622,9 +3659,9 @@ body[data-module="friends"] .friend-item:hover {
    ================================================================ */
 
 [data-theme="dark"] {
-  --bubble-sent-bg: #16a34a;
-  --bubble-received-bg: #374151;
-  --bubble-received-text: #f9fafb;
+  --bubble-sent-bg: #0066cc;
+  --bubble-received-bg: #2d2d2d;
+  --bubble-received-text: #f0f0f0;
   --color-friend-bg: #1f2937;
   --color-friend-card: #111827;
   --color-friend-border: #374151;
@@ -3632,13 +3669,14 @@ body[data-module="friends"] .friend-item:hover {
 
 [data-theme="dark"] .message-bubble.sent,
 [data-theme="dark"] .message.sent .message-bubble {
-  background-color: #16a34a !important;
+  background-color: #0066cc !important;
+  color: #ffffff !important;
 }
 
 [data-theme="dark"] .message-bubble.received,
 [data-theme="dark"] .message.received .message-bubble {
-  background-color: #374151 !important;
-  color: #f9fafb !important;
+  background-color: #2d2d2d !important;
+  color: #f0f0f0 !important;
 }
 
 /* ================================================================

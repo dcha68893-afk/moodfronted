@@ -2172,8 +2172,6 @@
                     document.body.classList.add('chat-panel-active');
                     // Clear pending_chat so all retry loops stop
                     try { sessionStorage.removeItem('pending_chat'); } catch (_) {}
-                    // FIX: Stop the DIRECT_CHAT_REQUEST retry loop
-                    window.__dcChatOpened = true;
                 }
                 if (data.type === 'CHAT_LIST_SHOWN' || data.type === 'CHAT_CLOSED' || data.type === 'GO_BACK_TO_CHAT_LIST') {
                     if (window.innerWidth <= 768) {
@@ -3566,12 +3564,13 @@
                     };
                     navigateToPage('messages');
                     if (window.innerWidth <= 768) document.body.classList.add('chat-panel-active');
-                    // FIX: Reset ACK flag and cap retries at 5 (3s total).
-                    // The retry stops as soon as message.html sends CHAT_OPENED (sets __dcChatOpened = true).
+                    // FIX: Use a flag instead of sessionStorage to control the retry loop.
+                    // message.html's tryOpen() will send CHAT_OPENED when the panel actually opens,
+                    // which sets window.__dcChatOpened = true and stops the loop.
                     window.__dcChatOpened = false;
                     let _dcAttempts = 0;
                     const _postChatOpen = () => {
-                        if (window.__dcChatOpened) return; // ACK received — stop immediately
+                        if (window.__dcChatOpened) return; // ACK received — stop
                         const messagesIframe = document.getElementById('messagesIframe');
                         if (messagesIframe && messagesIframe.contentWindow) {
                             messagesIframe.contentWindow.postMessage({
@@ -3582,7 +3581,7 @@
                             }, '*');
                             console.log('[chat.html] DIRECT_CHAT_REQUEST → OPEN_CHAT_WITH_USER sent, attempt', _dcAttempts + 1);
                         }
-                        if (_dcAttempts++ < 4 && !window.__dcChatOpened) {
+                        if (_dcAttempts++ < 12) {
                             setTimeout(_postChatOpen, 600);
                         }
                     };
@@ -3706,154 +3705,109 @@
 
             // ======================================================================
             // WEBSOCKET CALL EVENT LISTENERS WITH SOURCE: 'ws-bridge'
+            // ── Bound once; re-bound if KynectaRealtime initialises late ────────
             // ======================================================================
-            if (window.wsService && typeof window.wsService.on === 'function') {
-                // call:incoming - show banner on ALL pages
-                window.wsService.on('call:incoming', function(callData) {
-                    console.log('[WS] call:incoming received - showing banner');
-                    if (window.showIncomingCallBanner) {
-                        window.showIncomingCallBanner(callData);
-                    }
-                    const callsFrame = document.getElementById('callsIframe');
-                    if (callsFrame && callsFrame.contentWindow) {
-                        callsFrame.contentWindow.postMessage({ type: 'CALL_INCOMING', payload: callData, source: 'ws-bridge' }, '*');
-                    }
-                });
+            var _wsCallListenersBound = false;
+            function _bindWsCallListeners() {
+                if (_wsCallListenersBound) return;
+                if (!window.wsService || typeof window.wsService.on !== 'function') return;
+                _wsCallListenersBound = true;
 
-                // Gap 5 fix: backend may emit 'incoming_call' (underscore) instead of 'call:incoming'.
-                // Register both naming conventions so the incoming banner always fires.
-                window.wsService.on('incoming_call', function(callData) {
-                    console.log('[WS] incoming_call (underscore) received - showing banner');
-                    if (window.showIncomingCallBanner) {
-                        window.showIncomingCallBanner(callData);
-                    }
-                    const callsFrame = document.getElementById('callsIframe');
-                    if (callsFrame && callsFrame.contentWindow) {
-                        callsFrame.contentWindow.postMessage({ type: 'CALL_INCOMING', payload: callData, source: 'ws-bridge' }, '*');
-                    }
-                });
-
-                // call_incoming — emitted by routes/calls.js POST / and /start via notifyUser()
-                window.wsService.on('call_incoming', function(callData) {
-                    console.log('[WS] call_incoming received - showing banner');
-                    if (window.showIncomingCallBanner) {
-                        window.showIncomingCallBanner(callData);
-                    }
-                    const callsFrame = document.getElementById('callsIframe');
-                    if (callsFrame && callsFrame.contentWindow) {
-                        callsFrame.contentWindow.postMessage({ type: 'CALL_INCOMING', payload: callData, source: 'ws-bridge' }, '*');
-                    }
-                });
-
-                // call:answered — receiver accepted, tell caller's iframe
-                window.wsService.on('call:answered', function(callData) {
-                    console.log('[WS] call:answered - receiver accepted');
+                function _fwdIncoming(callData) {
+                    if (window.showIncomingCallBanner) window.showIncomingCallBanner(callData);
+                    const f = document.getElementById('callsIframe');
+                    if (f && f.contentWindow) f.contentWindow.postMessage({ type: 'CALL_INCOMING', payload: callData, source: 'ws-bridge' }, '*');
+                }
+                function _fwdAccepted(callData) {
                     hideGlobalBanner();
-                    const callsFrame = document.getElementById('callsIframe');
-                    if (callsFrame && callsFrame.contentWindow) {
-                        callsFrame.contentWindow.postMessage({ type: 'CALL_ACCEPTED', payload: callData, source: 'ws-bridge' }, '*');
-                    }
+                    const f = document.getElementById('callsIframe');
+                    if (f && f.contentWindow) f.contentWindow.postMessage({ type: 'CALL_ACCEPTED', payload: callData, source: 'ws-bridge' }, '*');
                     setTimeout(() => refreshCallHistoryForUser(cachedUserId), 1000);
-                });
-
-                // call:accepted / call_accepted — same as call:answered (backend may use either)
-                window.wsService.on('call:accepted', function(callData) {
-                    console.log('[WS] call:accepted received');
+                }
+                function _fwdEnded(callData) {
                     hideGlobalBanner();
-                    const callsFrame = document.getElementById('callsIframe');
-                    if (callsFrame && callsFrame.contentWindow) {
-                        callsFrame.contentWindow.postMessage({ type: 'CALL_ACCEPTED', payload: callData, source: 'ws-bridge' }, '*');
-                    }
+                    document.body.classList.remove('call-screen-active');
+                    window.__activeCallInProgress = false;
+                    const f = document.getElementById('callsIframe');
+                    if (f && f.contentWindow) f.contentWindow.postMessage({ type: 'CALL_ENDED', payload: callData, source: 'ws-bridge' }, '*');
+                    setTimeout(() => refreshCallHistoryForUser(cachedUserId), 500);
+                }
+                function _fwdForceEnded(callData) {
+                    hideGlobalBanner();
+                    document.body.classList.remove('call-screen-active');
+                    window.__activeCallInProgress = false;
+                    const f = document.getElementById('callsIframe');
+                    if (f && f.contentWindow) f.contentWindow.postMessage({ type: 'CALL_FORCE_ENDED', payload: callData, source: 'ws-bridge' }, '*');
+                    setTimeout(() => refreshCallHistoryForUser(cachedUserId), 500);
+                }
+                function _fwdRejected(callData) {
+                    hideGlobalBanner();
+                    document.body.classList.remove('call-screen-active');
+                    window.__activeCallInProgress = false;
+                    const f = document.getElementById('callsIframe');
+                    if (f && f.contentWindow) f.contentWindow.postMessage({ type: 'CALL_REJECTED', payload: callData, source: 'ws-bridge' }, '*');
                     setTimeout(() => refreshCallHistoryForUser(cachedUserId), 1000);
-                });
-
-                window.wsService.on('call_accepted', function(callData) {
-                    console.log('[WS] call_accepted received');
-                    hideGlobalBanner();
-                    const callsFrame = document.getElementById('callsIframe');
-                    if (callsFrame && callsFrame.contentWindow) {
-                        callsFrame.contentWindow.postMessage({ type: 'CALL_ACCEPTED', payload: callData, source: 'ws-bridge' }, '*');
-                    }
-                    setTimeout(() => refreshCallHistoryForUser(cachedUserId), 1000);
-                });
-                
-                // call:rejected
-                window.wsService.on('call:rejected', function(callData) {
-                    console.log('[WS] call:rejected - dismissing banner');
+                }
+                function _fwdCancelled(callData) {
                     hideGlobalBanner();
                     document.body.classList.remove('call-screen-active');
                     window.__activeCallInProgress = false;
-                    const callsFrame = document.getElementById('callsIframe');
-                    if (callsFrame && callsFrame.contentWindow) {
-                        callsFrame.contentWindow.postMessage({ type: 'CALL_REJECTED', payload: callData, source: 'ws-bridge' }, '*');
-                    }
-                    setTimeout(() => refreshCallHistoryForUser(cachedUserId), 1000);
-                });
-                
-                // call:ended - with ws-bridge source
-                window.wsService.on('call:ended', function(callData) {
-                    console.log('[WS] call:ended - dismissing banner, no API call');
-                    hideGlobalBanner();
-                    document.body.classList.remove('call-screen-active');
-                    window.__activeCallInProgress = false;
-                    const callsFrame = document.getElementById('callsIframe');
-                    if (callsFrame && callsFrame.contentWindow) {
-                        callsFrame.contentWindow.postMessage({ type: 'CALL_ENDED', payload: callData, source: 'ws-bridge' }, '*');
-                    }
+                    const f = document.getElementById('callsIframe');
+                    if (f && f.contentWindow) f.contentWindow.postMessage({ type: 'CALL_CANCELLED', payload: callData, source: 'ws-bridge' }, '*');
                     setTimeout(() => refreshCallHistoryForUser(cachedUserId), 500);
-                });
-                
-                // call_force_ended
-                window.wsService.on('call_force_ended', function(callData) {
-                    console.log('[WS] call_force_ended - dismissing banner');
-                    hideGlobalBanner();
-                    document.body.classList.remove('call-screen-active');
-                    window.__activeCallInProgress = false;
-                    const callsFrame = document.getElementById('callsIframe');
-                    if (callsFrame && callsFrame.contentWindow) {
-                        callsFrame.contentWindow.postMessage({ type: 'CALL_FORCE_ENDED', payload: callData, source: 'ws-bridge' }, '*');
-                    }
-                    setTimeout(() => refreshCallHistoryForUser(cachedUserId), 500);
-                });
-                
-                // call:force_end alias
-                window.wsService.on('call:force_end', function(callData) {
-                    console.log('[WS] call:force_end alias - dismissing banner');
-                    hideGlobalBanner();
-                    document.body.classList.remove('call-screen-active');
-                    window.__activeCallInProgress = false;
-                    const callsFrame = document.getElementById('callsIframe');
-                    if (callsFrame && callsFrame.contentWindow) {
-                        callsFrame.contentWindow.postMessage({ type: 'CALL_FORCE_ENDED', payload: callData, source: 'ws-bridge' }, '*');
-                    }
-                    setTimeout(() => refreshCallHistoryForUser(cachedUserId), 500);
-                });
-                
-                // call:cancelled
-                window.wsService.on('call:cancelled', function(callData) {
-                    console.log('[WS] call:cancelled - dismissing banner');
-                    hideGlobalBanner();
-                    document.body.classList.remove('call-screen-active');
-                    window.__activeCallInProgress = false;
-                    const callsFrame = document.getElementById('callsIframe');
-                    if (callsFrame && callsFrame.contentWindow) {
-                        callsFrame.contentWindow.postMessage({ type: 'CALL_CANCELLED', payload: callData, source: 'ws-bridge' }, '*');
-                    }
-                    setTimeout(() => refreshCallHistoryForUser(cachedUserId), 500);
-                });
-
-                // WebRTC Signaling Bridge inbound
+                }
                 function _fwdToCallsIframe(type, payload) {
                     const f = document.getElementById('callsIframe');
                     if (f && f.contentWindow) f.contentWindow.postMessage({ type, payload, source: 'ws-bridge' }, '*');
                 }
-                window.wsService.on('call_offer', d => _fwdToCallsIframe('SIGNAL_OFFER', d));
-                window.wsService.on('call_answer', d => _fwdToCallsIframe('SIGNAL_ANSWER', d));
-                window.wsService.on('ice_candidate', d => _fwdToCallsIframe('ICE_CANDIDATE', d));
-                window.wsService.on('call:offer', d => _fwdToCallsIframe('SIGNAL_OFFER', d));
-                window.wsService.on('call:answer', d => _fwdToCallsIframe('SIGNAL_ANSWER', d));
-                window.wsService.on('call:ice_candidate', d => _fwdToCallsIframe('ICE_CANDIDATE', d));
+
+                // ── Incoming call — all naming conventions ────────────────────
+                window.wsService.on('call:incoming',  _fwdIncoming);
+                window.wsService.on('incoming_call',  _fwdIncoming);
+                window.wsService.on('call_incoming',  _fwdIncoming);
+
+                // ── Answered / accepted ───────────────────────────────────────
+                window.wsService.on('call:answered',  _fwdAccepted);
+                window.wsService.on('call:accepted',  _fwdAccepted);
+                window.wsService.on('call_accepted',  _fwdAccepted);
+                window.wsService.on('call_answered',  _fwdAccepted);
+
+                // ── Rejected ──────────────────────────────────────────────────
+                window.wsService.on('call:rejected',  _fwdRejected);
+                window.wsService.on('call_rejected',  _fwdRejected);
+
+                // ── Ended ─────────────────────────────────────────────────────
+                window.wsService.on('call:ended',     _fwdEnded);
+                window.wsService.on('call_ended',     _fwdEnded);
+
+                // ── Force ended ───────────────────────────────────────────────
+                window.wsService.on('call_force_ended',  _fwdForceEnded);
+                window.wsService.on('call:force_end',    _fwdForceEnded);
+                window.wsService.on('call:force_ended',  _fwdForceEnded);
+
+                // ── Cancelled ─────────────────────────────────────────────────
+                window.wsService.on('call:cancelled', _fwdCancelled);
+                window.wsService.on('call_cancelled', _fwdCancelled);
+
+                // ── WebRTC Signaling Bridge ────────────────────────────────────
+                window.wsService.on('call_offer',          d => _fwdToCallsIframe('SIGNAL_OFFER',   d));
+                window.wsService.on('call_answer',         d => _fwdToCallsIframe('SIGNAL_ANSWER',  d));
+                window.wsService.on('ice_candidate',       d => _fwdToCallsIframe('ICE_CANDIDATE',  d));
+                window.wsService.on('call:offer',          d => _fwdToCallsIframe('SIGNAL_OFFER',   d));
+                window.wsService.on('call:answer',         d => _fwdToCallsIframe('SIGNAL_ANSWER',  d));
+                window.wsService.on('call:ice_candidate',  d => _fwdToCallsIframe('ICE_CANDIDATE',  d));
+                window.wsService.on('webrtc:signal',       d => _fwdToCallsIframe('WEBRTC_SIGNAL',  d));
+                window.wsService.on('webrtc_signal',       d => _fwdToCallsIframe('WEBRTC_SIGNAL',  d));
             }
+
+            // Bind now if wsService is already real
+            _bindWsCallListeners();
+
+            // Also re-bind when KynectaRealtime finishes initialising (may be after this code runs)
+            window.addEventListener('kyn:realtimeReady', function() {
+                _wsCallListenersBound = false; // allow re-bind with the real service
+                _bindWsCallListeners();
+            }, { once: true });
 
             // Calls iframe load handler
             const callsIframe = document.getElementById('callsIframe');

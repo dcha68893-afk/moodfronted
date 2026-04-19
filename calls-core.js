@@ -16,12 +16,10 @@
 function __isValidSession(session) {
     if (!session) return false;
     
-    // Token validation
     if (!session.token || typeof session.token !== 'string' || session.token.length < 10) {
         return false;
     }
     
-    // Extract userId from various possible locations
     let userId = session.userId;
     if (!userId && session.user) {
         userId = session.user.id || session.user.userId;
@@ -30,43 +28,30 @@ function __isValidSession(session) {
         userId = session.userData.id || session.userData.userId;
     }
     
-    // userId validation - CRITICAL: Reject fake/default values
     if (userId === undefined || userId === null) {
-        // For initial validation, if we don't have userId but have token, we might still accept
-        // This helps with debugging - we'll see that userId is missing
-        console.log(`[${MODULE_NAME}][__isValidSession] No userId found, but token present`);
         return false;
     }
     
-    // Reject invalid userId patterns
     if (typeof userId === 'string') {
         const trimmedUserId = userId.trim();
         if (trimmedUserId === '' || trimmedUserId === 'user' || trimmedUserId === 'default' || 
             trimmedUserId === 'null' || trimmedUserId === 'undefined') {
-            console.log(`[${MODULE_NAME}][__isValidSession] Invalid userId string: ${trimmedUserId}`);
             return false;
         }
     }
     
-    // Reject numeric userId 0 (fake/default)
     if (typeof userId === 'number' && userId === 0) {
-        console.log(`[${MODULE_NAME}][__isValidSession] Invalid userId number: 0`);
         return false;
     }
     
-    // Authenticated flag must be true for valid session
     if (session.authenticated !== true) {
-        console.log(`[${MODULE_NAME}][__isValidSession] authenticated flag not true`);
         return false;
     }
     
-    // Optional: Check expiration
     if (session.expiresAt && session.expiresAt < Date.now()) {
-        console.log(`[${MODULE_NAME}][__isValidSession] Session expired`);
         return false;
     }
     
-    console.log(`[${MODULE_NAME}][__isValidSession] Session valid, userId: ${userId}`);
     return true;
 }
 
@@ -558,12 +543,12 @@ const VERIFICATION_COOLDOWN = 5000;
   function handleParentReady(message) {
     // CRITICAL: Only accept PARENT_READY in WAIT_PARENT state
     if (currentState !== LifecycleState.WAIT_PARENT) {
-        console.warn(`[${MODULE_NAME}][LIFECYCLE] Cannot handle PARENT_READY — invalid state: ${currentState} (requires WAIT_PARENT) — ignoring duplicate`);
+        // Silent — duplicates are expected on navigation, no need to spam console
         return;
     }
     
     if (parentReadyReceived) {
-        console.warn(`[${MODULE_NAME}][LIFECYCLE] PARENT_READY already received — ignoring duplicate`);
+        // Silent — already handled
         return;
     }
     
@@ -1024,8 +1009,7 @@ function applySession(sessionData) {
         }
         
         if (registrationSent) {
-            console.warn(`[${MODULE_NAME}] REGISTER_MODULE already sent, ignoring`);
-            return;
+            return; // already registered — silent
         }
         
         if (!parentReady) {
@@ -3580,21 +3564,32 @@ if (message.type === 'SETTING_CHANGED' || message.type === 'SETTINGS_UPDATED') {
     callsState.callData = null;
     callsState.pendingCallReturnTo = null;
     callsState.pendingCallSource = null;
-    
+    callsState.serverCallId = null;
+    callsState.localCallId = null;
+
     if (callsState.callInvitationTimer) {
         clearTimeout(callsState.callInvitationTimer);
         callsState.callInvitationTimer = null;
     }
-    
-    if (MediaManager && MediaManager.stopLocalStream) MediaManager.stopLocalStream();
-    if (WebRTCManager && WebRTCManager.close) WebRTCManager.close();
-    
+
+    if (MediaManager && MediaManager.stopLocalStream) { try { MediaManager.stopLocalStream(); } catch(e) {} }
+    if (WebRTCManager && WebRTCManager.close) { try { WebRTCManager.close(); } catch(e) {} }
+
     callsState.remoteStream = null;
-    callsState.remoteStreams.clear();
+    if (callsState.remoteStreams) callsState.remoteStreams.clear();
     callsState.iceCandidates = [];
     callsState.iceRestartCount = 0;
-    
-    console.log('[CallsCore] Call state fully reset');
+
+    // Also end the session manager so next call can start fresh
+    try {
+        const mgr = window.KynectaCallSession;
+        if (mgr && mgr.isActive) mgr.end('force_reset');
+    } catch(e) {}
+
+    // Unlock governor transition lock so next call isn't blocked
+    if (typeof CallsStateGovernor !== 'undefined' && CallsStateGovernor) {
+        CallsStateGovernor._transitionLock = false;
+    }
 }
 
     // ==================== CALL STATE GOVERNOR (REAL) ====================
@@ -6931,11 +6926,17 @@ _escapeHtml: function(text) {
             logWarn(MODULE, 'Incoming call ignored - not ACTIVE');
             return;
         }
-        
-        // CRITICAL: Check for existing active call
-        if (callsState.callActive) {
-            logWarn(MODULE, 'Incoming call rejected - already in a call');
-            // Bug 1 fix: use direct CALL_REJECT so parent hits backend /reject
+
+        // ── DEDUP: ignore duplicate incoming events for the same call ────────
+        const incomingId = callData.callId || callData.id;
+        if (callsState.activeCallId && callsState.activeCallId === incomingId && callsState.callState === 'incoming') {
+            return; // already processing this call
+        }
+
+        // CRITICAL: Check for existing GENUINELY active call (not just stale state)
+        // Only block if we're actually in a call (in-call state), not idle/ended stale
+        if (callsState.callActive && callsState.callState === 'in-call') {
+            logWarn(MODULE, 'Incoming call rejected - already in a call (in-call state)');
             safeSend('CALL_REJECT', {
                 callId: callData.callId,
                 reason: 'busy',
@@ -6943,7 +6944,15 @@ _escapeHtml: function(text) {
             }, false);
             return;
         }
-        
+
+        // If stale state from a previous call, reset it first
+        if (callsState.callActive && callsState.callState !== 'in-call') {
+            logWarn(MODULE, 'Resetting stale call state before incoming call');
+            callsState.callActive = false;
+            callsState.callState = 'idle';
+            callsState.activeCallId = null;
+        }
+
         // CRITICAL FIX: Set activeCallId for incoming calls
         callsState.callData = callData;
         callsState.callState = 'incoming';

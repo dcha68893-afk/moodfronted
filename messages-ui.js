@@ -1672,7 +1672,7 @@
             const content = core?.formatMessageText ? 
                 core.formatMessageText(message.content) : 
                 message.content;
-            // Use createdAt first (set at send time for sender, server time for receiver)
+            // FIX: Always use createdAt (real server time) first, fallback to timestamp
             const msgTs = message.createdAt || message.timestamp || Date.now();
             const time = core?.formatTime ? 
                 core.formatTime(msgTs) : 
@@ -1707,8 +1707,8 @@
             
             const reactions = this._renderReactions(message.reactions);
             const time = core?.formatTime ? 
-                core.formatTime(message.timestamp) : 
-                new Date(message.timestamp).toLocaleTimeString();
+                core.formatTime(message.createdAt || message.timestamp) : 
+                new Date(message.createdAt || message.timestamp).toLocaleTimeString([], {hour:"numeric",minute:"2-digit",hour12:true});
             
             const safeMessage = JSON.stringify(message).replace(/"/g, '&quot;');
             
@@ -1740,8 +1740,8 @@
             
             const reactions = this._renderReactions(message.reactions);
             const time = core?.formatTime ? 
-                core.formatTime(message.timestamp) : 
-                new Date(message.timestamp).toLocaleTimeString();
+                core.formatTime(message.createdAt || message.timestamp) : 
+                new Date(message.createdAt || message.timestamp).toLocaleTimeString([], {hour:"numeric",minute:"2-digit",hour12:true});
             
             const safeMessage = JSON.stringify(message).replace(/"/g, '&quot;');
             
@@ -1774,8 +1774,8 @@
             const reactions = this._renderReactions(message.reactions);
             const duration = message.duration ? this._formatDuration(message.duration) : '';
             const time = core?.formatTime ? 
-                core.formatTime(message.timestamp) : 
-                new Date(message.timestamp).toLocaleTimeString();
+                core.formatTime(message.createdAt || message.timestamp) : 
+                new Date(message.createdAt || message.timestamp).toLocaleTimeString([], {hour:"numeric",minute:"2-digit",hour12:true});
             
             const safeMessage = JSON.stringify(message).replace(/"/g, '&quot;');
             
@@ -1813,8 +1813,8 @@
                 core.formatFileSize(message.fileSize) : '';
             const fileIcon = this._getFileIcon(message.fileName || '');
             const time = core?.formatTime ? 
-                core.formatTime(message.timestamp) : 
-                new Date(message.timestamp).toLocaleTimeString();
+                core.formatTime(message.createdAt || message.timestamp) : 
+                new Date(message.createdAt || message.timestamp).toLocaleTimeString([], {hour:"numeric",minute:"2-digit",hour12:true});
             
             const safeMessage = JSON.stringify(message).replace(/"/g, '&quot;');
             
@@ -1850,8 +1850,8 @@
             
             const reactions = this._renderReactions(message.reactions);
             const time = core?.formatTime ? 
-                core.formatTime(message.timestamp) : 
-                new Date(message.timestamp).toLocaleTimeString();
+                core.formatTime(message.createdAt || message.timestamp) : 
+                new Date(message.createdAt || message.timestamp).toLocaleTimeString([], {hour:"numeric",minute:"2-digit",hour12:true});
             
             const safeMessage = JSON.stringify(message).replace(/"/g, '&quot;');
             
@@ -1884,8 +1884,8 @@
             const reactions = this._renderReactions(message.reactions);
             const totalVotes = message.options?.reduce((sum, opt) => sum + (opt.votes || 0), 0) || 0;
             const time = core?.formatTime ? 
-                core.formatTime(message.timestamp) : 
-                new Date(message.timestamp).toLocaleTimeString();
+                core.formatTime(message.createdAt || message.timestamp) : 
+                new Date(message.createdAt || message.timestamp).toLocaleTimeString([], {hour:"numeric",minute:"2-digit",hour12:true});
             
             const safeMessage = JSON.stringify(message).replace(/"/g, '&quot;');
             
@@ -1935,8 +1935,8 @@
                 core.formatMessageText(message.content) : 
                 message.content;
             const time = core?.formatTime ? 
-                core.formatTime(message.timestamp) : 
-                new Date(message.timestamp).toLocaleTimeString();
+                core.formatTime(message.createdAt || message.timestamp) : 
+                new Date(message.createdAt || message.timestamp).toLocaleTimeString([], {hour:"numeric",minute:"2-digit",hour12:true});
             
             const safeMessage = JSON.stringify(message).replace(/"/g, '&quot;');
             

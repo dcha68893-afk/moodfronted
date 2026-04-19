@@ -3414,6 +3414,10 @@ sanitizeHTML: function(str) {
                     break;
                 case 'call_cancelled':
                     // FIXED: Caller cancelled before receiver answered — dismiss incoming modal immediately
+                    if (window._incomingRingtone) {
+                        try { window._incomingRingtone.pause(); window._incomingRingtone.currentTime = 0; } catch(e) {}
+                        window._incomingRingtone = null;
+                    }
                     if (elements.incomingCallModal && elements.incomingCallModal.classList.contains('active')) {
                         elements.incomingCallModal.classList.remove('active');
                         UIState.activeModals.delete('incomingCallModal');
@@ -3845,6 +3849,12 @@ sanitizeHTML: function(str) {
         },
         
         handleIncomingCall: function(callData) {
+            // ── DEDUP: ignore if same call already ringing ───────────────────
+            const incomingId = callData.callId || callData.id || null;
+            if (window._currentIncomingCallId && window._currentIncomingCallId === incomingId) {
+                return; // already showing this call
+            }
+
             // ── LOCAL-FIRST: record ringing state immediately ────────────────
             (function _saveIncomingLocally() {
                 const store = window.KynectaCallLocalStore;
@@ -3855,7 +3865,7 @@ sanitizeHTML: function(str) {
                     id: id,
                     serverId: id,
                     callerId: callData.callerId || null,
-                    receiverId: null, // us
+                    receiverId: null,
                     type: callData.callType || callData.type || 'audio',
                     status: 'ringing',
                     callerName: callData.callerName || null,
@@ -3865,8 +3875,61 @@ sanitizeHTML: function(str) {
                     createdAt: callData.timestamp || Date.now()
                 }).catch(() => {});
             })();
+
+            // ── RINGTONE: play ringtone for receiver ─────────────────────────
+            (function _playRingtone() {
+                try {
+                    if (window._incomingRingtone) {
+                        try { window._incomingRingtone.pause(); window._incomingRingtone.currentTime = 0; } catch(e) {}
+                    }
+                    // Use a data-URI ringtone so it works without a separate file
+                    // Falls back to Web Audio API beep if Audio fails
+                    const audioSrc = window.__callRingtone ||
+                        'data:audio/wav;base64,UklGRl9vT19XQVZFZm10IBAAAA' + // minimal fallback
+                        'AAAQABAAQAAAA==';
+                    let ring;
+                    try {
+                        ring = new Audio();
+                        ring.src = audioSrc;
+                        ring.loop = true;
+                        ring.volume = 0.8;
+                        const playPromise = ring.play();
+                        if (playPromise && typeof playPromise.catch === 'function') {
+                            playPromise.catch(() => {
+                                // Autoplay blocked — try Web Audio beep instead
+                                _tryWebAudioRing();
+                            });
+                        }
+                        window._incomingRingtone = ring;
+                    } catch(e) {
+                        _tryWebAudioRing();
+                    }
+
+                    function _tryWebAudioRing() {
+                        try {
+                            const ctx = new (window.AudioContext || window.webkitAudioContext)();
+                            let ringing = true;
+                            window._incomingRingtone = { _ctx: ctx, pause: function() { ringing = false; try { ctx.close(); } catch(e) {} }, currentTime: 0 };
+                            (function beep() {
+                                if (!ringing || ctx.state === 'closed') return;
+                                const osc = ctx.createOscillator();
+                                const gain = ctx.createGain();
+                                osc.connect(gain);
+                                gain.connect(ctx.destination);
+                                osc.frequency.value = 520;
+                                gain.gain.setValueAtTime(0.4, ctx.currentTime);
+                                gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.4);
+                                osc.start(ctx.currentTime);
+                                osc.stop(ctx.currentTime + 0.4);
+                                osc.onended = function() { if (ringing) setTimeout(beep, 800); };
+                            })();
+                        } catch(e) { /* silent fail */ }
+                    }
+                } catch(e) { /* silent fail — ringtone is cosmetic */ }
+            })();
+
             // Track for later accept/decline
-            window._currentIncomingCallId = callData.callId || callData.id || null;
+            window._currentIncomingCallId = incomingId;
             if (elements.incomingCallModal) {
                 if (elements.incomingCallName) {
                     elements.incomingCallName.textContent = callData.callerName || 'Incoming Call';
@@ -3884,27 +3947,32 @@ sanitizeHTML: function(str) {
                 if (elements.incomingCallIntention) {
                     elements.incomingCallIntention.dataset.intention = callData.callerIntention || 'quick';
                 }
-                
-              let timeLeft = 60; // Changed from 30 to 60 seconds
-if (elements.declineTimer) {
-    elements.declineTimer.textContent = timeLeft;
-}
 
-const timer = setInterval(() => {
-    timeLeft--;
-    if (elements.declineTimer) {
-        elements.declineTimer.textContent = timeLeft;
-    }
-    if (timeLeft <= 0) {
-        clearInterval(timer);
-        if (elements.incomingCallModal && elements.incomingCallModal.classList.contains('active')) {
-            UIEventHandlers.declineIncomingCall();
-        }
-    }
-}, 1000);
-                
+                // ── Clear any old timer ──────────────────────────────────────
+                const oldTimer = parseInt(elements.incomingCallModal.dataset.timer);
+                if (oldTimer) clearInterval(oldTimer);
+
+                // ── 2-MINUTE ring timer (120 seconds) ───────────────────────
+                let timeLeft = 120;
+                if (elements.declineTimer) elements.declineTimer.textContent = timeLeft;
+
+                const timer = setInterval(() => {
+                    timeLeft--;
+                    if (elements.declineTimer) elements.declineTimer.textContent = timeLeft;
+                    if (timeLeft <= 0) {
+                        clearInterval(timer);
+                        if (elements.incomingCallModal && elements.incomingCallModal.classList.contains('active')) {
+                            // Stop ringtone
+                            if (window._incomingRingtone) {
+                                try { window._incomingRingtone.pause(); window._incomingRingtone.currentTime = 0; } catch(e) {}
+                                window._incomingRingtone = null;
+                            }
+                            UIEventHandlers.declineIncomingCall();
+                        }
+                    }
+                }, 1000);
+
                 elements.incomingCallModal.dataset.timer = timer;
-                
                 elements.incomingCallModal.classList.add('active');
                 UIState.activeModals.add('incomingCallModal');
             }
@@ -4037,6 +4105,11 @@ const timer = setInterval(() => {
             UIState.callStartTime = null;
             UIState.callType = null;
             window._currentIncomingCallId = null;
+            // Stop any playing ringtone immediately
+            if (window._incomingRingtone) {
+                try { window._incomingRingtone.pause(); window._incomingRingtone.currentTime = 0; } catch(e) {}
+                window._incomingRingtone = null;
+            }
             // Clear dedup locks so next call can proceed immediately
             if (window.__uiCallDispatchLock) window.__uiCallDispatchLock = { ts: 0, userId: null };
             if (window.__earlyCallLock) window.__earlyCallLock = { ts: 0, userId: null };
@@ -6093,7 +6166,12 @@ acceptIncomingCallGeneric: async function(asVideo) {
     if (elements.incomingCallModal && elements.incomingCallModal.dataset.timer) {
         clearInterval(parseInt(elements.incomingCallModal.dataset.timer));
     }
-    
+    // Stop ringtone
+    if (window._incomingRingtone) {
+        try { window._incomingRingtone.pause(); window._incomingRingtone.currentTime = 0; } catch(e) {}
+        window._incomingRingtone = null;
+    }
+
     const callerName = elements.incomingCallName?.textContent || 'Caller';
     const isVideoCall = elements.incomingCallType?.textContent?.includes('Video') || false;
     const callType = asVideo ? 'video' : (isVideoCall ? 'video' : 'voice');
@@ -6154,7 +6232,12 @@ declineIncomingCall: async function() {
     if (elements.incomingCallModal && elements.incomingCallModal.dataset.timer) {
         clearInterval(parseInt(elements.incomingCallModal.dataset.timer));
     }
-    
+    // Stop ringtone
+    if (window._incomingRingtone) {
+        try { window._incomingRingtone.pause(); window._incomingRingtone.currentTime = 0; } catch(e) {}
+        window._incomingRingtone = null;
+    }
+
     const callId = window._currentIncomingCallId || UIState.activeCallId;
     
     // Hide incoming call modal
