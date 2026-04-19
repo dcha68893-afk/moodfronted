@@ -3310,6 +3310,13 @@ Type: ${message.type || 'text'}`;
                         if (chatPanel) UIFailsafe.safeAddClass(chatPanel, 'hidden');
                         if (sidebar) UIFailsafe.safeAddClass(sidebar, 'active');
                         UIStateManager.setState('chatVisible', false);
+                        // FIX: Notify parent to remove chat-panel-active so mobile nav reappears
+                        try { window.dispatchEvent(new CustomEvent('chatListShown')); } catch (_) {}
+                        try {
+                            if (window.parent && window.parent !== window) {
+                                window.parent.postMessage({ type: 'CHAT_LIST_SHOWN', timestamp: Date.now() }, '*');
+                            }
+                        } catch (_) {}
                     });
                 });
             }
@@ -4864,8 +4871,15 @@ Type: ${message.type || 'text'}`;
         const sidebar = document.getElementById('sidebar');
         const contactsSidebar = document.getElementById('contactsSidebar');
         
-        if (contactsSidebar) contactsSidebar.classList.add('hidden');
-        if (sidebar) sidebar.classList.add('active');
+        if (contactsSidebar) { contactsSidebar.classList.add('hidden'); contactsSidebar.style.pointerEvents = 'none'; }
+        // FIX: On mobile the sidebar must HIDE when chat panel opens; on desktop it stays visible
+        if (sidebar) {
+            if (window.innerWidth <= 768) {
+                sidebar.classList.remove('active');
+            } else {
+                sidebar.classList.add('active');
+            }
+        }
         if (chatPanel) {
             chatPanel.classList.remove('hidden');
             UIStateManager.setState('chatVisible', true);
@@ -5399,20 +5413,33 @@ Type: ${message.type || 'text'}`;
                 return;
             }
 
-            const existingConversation = core.getConversations?.()?.find?.((conversation) =>
-                String(conversation?.friendId) === String(id) ||
-                String(conversation?.otherParticipant?.id) === String(id) ||
-                String(conversation?.otherUserId) === String(id) ||
-                String(conversation?.userId) === String(id) ||
-                (Array.isArray(conversation?.participants) && conversation.participants.some((participant) => String(participant?.id || participant) === String(id)))
-            );
+            const existingConversation = core.getConversations?.()?.find?.((conversation) => {
+                if (conversation?.type === 'group') return false;
+                const sid = String(id);
+                if (String(conversation?.friendId)              === sid) return true;
+                if (String(conversation?.otherParticipant?.id)  === sid) return true;
+                if (String(conversation?.otherUserId)           === sid) return true;
+                if (String(conversation?.userId)                === sid) return true;
+                if (String(conversation?.recipientId)           === sid) return true;
+                if (String(conversation?.pendingReceiverId)     === sid) return true;
+                if (Array.isArray(conversation?.participants) &&
+                    conversation.participants.some(p => String(p?.id || p) === sid)) return true;
+                return false;
+            });
 
             const contactsSidebar = document.getElementById('contactsSidebar');
             const sidebar = document.getElementById('sidebar');
             const chatPanel = document.getElementById('chatPanel');
             
             if (contactsSidebar) { contactsSidebar.classList.add('hidden'); contactsSidebar.style.pointerEvents = 'none'; }
-            if (sidebar) sidebar.classList.add('active');
+            // FIX: On mobile sidebar should hide when chat opens; desktop keeps sidebar visible
+            if (sidebar) {
+                if (window.innerWidth <= 768) {
+                    sidebar.classList.remove('active');
+                } else {
+                    sidebar.classList.add('active');
+                }
+            }
             
             const nameEl = document.getElementById('chatFriendName');
             if (nameEl) {

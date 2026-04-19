@@ -427,6 +427,23 @@ function isUIActive() {
     return _cachedUIActive;
 }
 
+/**
+ * canRenderCached — returns true when we have local data to show even if the
+ * lifecycle hasn't reached ACTIVE yet (offline or slow parent handshake).
+ * Use this instead of isUIActive() for all read-only rendering paths.
+ */
+function canRenderCached() {
+    if (isUIActive()) return true;
+    // Allow rendering if we have ANY local data — friends list, requests, or users
+    const hasFriends   = (window.friends?.length  || friends?.length)  > 0;
+    const hasRequests  = (window.friendRequests?.length || friendRequests?.length) > 0;
+    const hasUsers     = (window._allUsersCache?.length) > 0;
+    const hasCached    = hasFriends || hasRequests || hasUsers;
+    // Also allow if IndexedDB hydration has been triggered (offline-first path)
+    const offlineHydrated = !navigator.onLine && hasCached;
+    return offlineHydrated || hasCached;
+}
+
 function getLifecycleState() {
     if (LifecycleStateMachine && LifecycleStateMachine.current) {
         return LifecycleStateMachine.current;
@@ -1101,8 +1118,10 @@ export const RenderPipeline = {
     },
 
     renderProgressive: function() {
-        if (!isUIActive()) {
-            logUI('renderProgressive blocked - not active');
+        // FIX: Allow progressive render when we have cached data offline,
+        // even if the lifecycle hasn't reached ACTIVE yet.
+        if (!isUIActive() && !canRenderCached()) {
+            logUI('renderProgressive blocked - not active and no cache');
             return;
         }
         if (this.status.progressive) return;
@@ -1135,13 +1154,23 @@ export const RenderPipeline = {
 
         window.addEventListener('friendsUpdated', (event) => {
             updateFriendCounts();
-            // PRODUCTION FIX: render from cache even before ACTIVE state (instant=true means from cache)
-            const fromCache = event.detail?.instant || event.detail?.cached;
-            this.queueRender('friends', debounce(() => {
-                if (UIState.activeSection === 'friendsSection') renderFriends();
-                else if (UIState.activeSection === 'allFriendsSection') renderAllFriendsList();
-                else renderAllFriendsList();
-            }, fromCache ? 0 : 300));
+            const fromCache = event.detail?.instant || event.detail?.cached || event.detail?.offline;
+            // FIX: When data comes from cache/offline, force-render immediately
+            // without waiting for isUIActive() — the render functions already
+            // have their own data-presence checks.
+            if (fromCache || canRenderCached()) {
+                // Zero-delay: render synchronously in next microtask
+                this.queueRender('friends', debounce(() => {
+                    if (UIState.activeSection === 'friendsSection') renderFriends();
+                    else renderAllFriendsList();
+                }, 0));
+            } else {
+                this.queueRender('friends', debounce(() => {
+                    if (UIState.activeSection === 'friendsSection') renderFriends();
+                    else if (UIState.activeSection === 'allFriendsSection') renderAllFriendsList();
+                    else renderAllFriendsList();
+                }, 300));
+            }
         });
 
         // Catch any data load completion events and update counts
@@ -1153,10 +1182,10 @@ export const RenderPipeline = {
 
         
         window.addEventListener('requestsUpdated', (event) => {
-            if (!isUIActive()) return;
-            
-            // FIXED: Always update badge counts regardless of active section
+            // Always update counts; render if we have data or are active
             updateFriendCounts();
+            const hasRequests = (window.friendRequests?.length || friendRequests?.length || 0) > 0;
+            if (!isUIActive() && !hasRequests) return;
             
             this.queueRender('requests', debounce(() => {
                 if (UIState.activeSection === 'requestsSection') {
@@ -1168,19 +1197,21 @@ export const RenderPipeline = {
         
         // FIXED: sentRequestsUpdated listener - also update counts
         window.addEventListener('sentRequestsUpdated', () => {
-            if (!isUIActive()) return;
+            updateFriendCounts();
+            const hasSent = (window.sentRequests?.length || sentRequests?.length || 0) > 0;
+            if (!isUIActive() && !hasSent) return;
             
             this.queueRender('sentRequests', debounce(() => {
                 if (UIState.activeSection === 'requestsSection') {
                     renderSentRequests();
                 }
-                // FIXED: Update the sent requests count badge
                 updateFriendCounts();
             }, 300));
         });
 
         window.addEventListener('contactsUpdated', () => {
-            if (!isUIActive()) return;
+            const hasContacts = (window.contacts?.length || contacts?.length || 0) > 0;
+            if (!isUIActive() && !hasContacts) return;
             
             this.queueRender('contacts', debounce(() => {
                 if (UIState.activeSection === 'contactsSection') renderContacts();
@@ -1230,14 +1261,18 @@ export const RenderPipeline = {
         
         // Listen for allUsersLoaded event to trigger re-render
         window.addEventListener('allUsersLoaded', (event) => {
-            if (!isUIActive()) return;
             const { users, count } = event.detail || {};
             logUI('allUsersLoaded event received', { count: count || users?.length });
+            // Update cache immediately regardless of lifecycle state
+            if (Array.isArray(users) && users.length > 0) {
+                _allUsersCache = users;
+                window._allUsersCache = users;
+            }
             this.queueRender('allUsers', debounce(() => {
                 // Check if all-users tab is active before re-rendering
                 const allUsersTab = document.querySelector('.add-friend-tab[data-tab="all-users"]');
                 const allUsersContent = document.getElementById('all-usersTab');
-                if (allUsersTab && allUsersTab.classList.contains('active') && 
+                if (allUsersTab && allUsersTab.classList.contains('active') &&
                     allUsersContent && allUsersContent.classList.contains('active')) {
                     renderAllUsersList();
                 }
@@ -1279,20 +1314,82 @@ export const RenderPipeline = {
         return ErrorHandler.createBoundary('renderFriendsListInstantly', () => {
             if (!domElements.allFriendsList) return;
 
-            domElements.allFriendsList.innerHTML = '';
-
-            const pinnedArray = Array.isArray(pinnedFriends) ? pinnedFriends : [];
-            const friendArray = Array.isArray(friends) ? friends : [];
-            const contactArray = Array.isArray(contacts) ? contacts : [];
+            // FIX: Always prefer window globals (set by loadCachedDataInstantly/syncToGlobals)
+            // over the module-level imported arrays which may not be populated yet.
+            const pinnedArray  = Array.isArray(window.pinnedFriends)  ? window.pinnedFriends  : (Array.isArray(pinnedFriends)  ? pinnedFriends  : []);
+            const friendArray  = Array.isArray(window.friends)        ? window.friends        : (Array.isArray(friends)        ? friends        : []);
+            const contactArray = Array.isArray(window.contacts)       ? window.contacts       : (Array.isArray(contacts)       ? contacts       : []);
 
             const allToDisplay = [...pinnedArray, ...friendArray, ...contactArray].slice(0, 25);
 
             if (allToDisplay.length === 0) {
-                if (!isUIActive()) {
-                    domElements.allFriendsList.innerHTML = UIBoundaries.createPassiveLoadingState('allFriendsSection');
+                // FIX: When arrays are empty offline, trigger IndexedDB hydration
+                // instead of immediately showing passive-loading. The hydration will
+                // dispatch friendsUpdated which re-renders with real data.
+                if (!navigator.onLine || !isUIActive()) {
+                    // Check if there's anything in localStorage first (fastest path)
+                    try {
+                        const lsKey = 'knecta_friends_cache';
+                        const raw = JSON.parse(localStorage.getItem(lsKey) || localStorage.getItem('friends') || '[]');
+                        if (Array.isArray(raw) && raw.length > 0) {
+                            // Populate module globals and re-render
+                            if (window.FriendCacheManager?.setFriends) {
+                                window.FriendCacheManager.setFriends(raw);
+                                window.FriendCacheManager.syncToGlobals?.();
+                            }
+                            // Render immediately from localStorage data
+                            const fragment = document.createDocumentFragment();
+                            raw.slice(0, 25).forEach(item => {
+                                if (!item?.id) return;
+                                const el = createFriendItemElement(item, 'friend', true);
+                                if (el) fragment.appendChild(el);
+                            });
+                            domElements.allFriendsList.innerHTML = '';
+                            domElements.allFriendsList.appendChild(fragment);
+                            domElements.allFriendsList.classList.add('instant-load');
+                            return;
+                        }
+                    } catch (_) {}
+
+                    // Nothing in localStorage — trigger async IndexedDB hydration.
+                    // Show skeleton while we wait (not a blank screen).
+                    if (!domElements.allFriendsList.querySelector('.skeleton-item')) {
+                        domElements.allFriendsList.innerHTML = UIBoundaries.createPassiveLoadingState('allFriendsSection');
+                    }
+                    // Kick off IndexedDB hydration — result fires friendsUpdated
+                    (async () => {
+                        try {
+                            const ls = window.KynectaFriendsLocalStore;
+                            if (!ls) return;
+                            await ls.ready();
+                            const idbFriends = await ls.getFriends();
+                            if (!idbFriends.length) return;
+                            // Normalize and populate globals
+                            const normalized = idbFriends.map(r => ({
+                                id:          r.friendId,
+                                localId:     r.id,
+                                displayName: r.displayName || r.username || r.friendId,
+                                username:    r.username || '',
+                                avatar:      r.avatar || '',
+                                photoURL:    r.avatar || '',
+                                status:      r.status,
+                                addedAt:     r.createdAt,
+                                isLocalOnly: r.isLocalOnly,
+                            }));
+                            if (window.FriendCacheManager?.setFriends) {
+                                window.FriendCacheManager.setFriends(normalized);
+                                window.FriendCacheManager.syncToGlobals?.();
+                            }
+                            window.dispatchEvent(new CustomEvent('friendsUpdated', {
+                                detail: { friends: normalized, count: normalized.length, cached: true, offline: !navigator.onLine }
+                            }));
+                        } catch (e) {
+                            console.warn('[renderFriendsListInstantly] IndexedDB hydration failed:', e.message);
+                        }
+                    })();
                     return;
                 }
-                
+
                 domElements.allFriendsList.innerHTML = `
                     <div class="empty-state">
                         <i class="fas fa-user-friends"></i>
@@ -1317,8 +1414,10 @@ export const RenderPipeline = {
                 return;
             }
 
+            domElements.allFriendsList.innerHTML = '';
             const fragment = document.createDocumentFragment();
             allToDisplay.forEach(item => {
+                if (!item?.id) return;
                 const friendElement = createFriendItemElement(item,
                     pinnedArray.some(f => f && f.id === item.id) ? 'pinned' :
                     friendArray.some(f => f && f.id === item.id) ? 'friend' : 'contact',
@@ -1449,8 +1548,9 @@ export const CoreIntegration = {
             const data = this.validateEventData(event);
             if (data?.friends) {
                 updateFriendCounts();
+                // FIX: always render — render functions have their own data-presence guards
                 if (UIState.activeSection === 'friendsSection') renderFriends();
-                if (UIState.activeSection === 'allFriendsSection') renderAllFriendsList();
+                else renderAllFriendsList();
             }
         });
 
@@ -1732,7 +1832,9 @@ export const updateFriendCounts = function() {
 };
 
 export const updateCurrentSection = function() {
-    if (!isUIActive()) {
+    // FIX: Use canRenderCached so cached friends always render offline,
+    // even before the parent handshake / ACTIVE lifecycle state.
+    if (!isUIActive() && !canRenderCached()) {
         return null;
     }
     return ErrorHandler.createBoundary('updateCurrentSection', () => {
@@ -1861,7 +1963,8 @@ export const renderAllFriendsList = function() {
 };
 
 export const renderContacts = function() {
-    if (!isUIActive()) {
+    const _contactArr = Array.isArray(window.contacts) ? window.contacts : (Array.isArray(contacts) ? contacts : []);
+    if (_contactArr.length === 0 && !isUIActive()) {
         return null;
     }
     return ErrorHandler.createBoundary('renderContacts', () => {
@@ -2029,7 +2132,8 @@ export const renderFriends = function() {
 };
 
 export const renderFriendRequests = function() {
-    if (!isUIActive()) {
+    const _reqArr = window.friendRequests || friendRequests || [];
+    if (_reqArr.length === 0 && !isUIActive()) {
         return null;
     }
     return ErrorHandler.createBoundary('renderFriendRequests', () => {
@@ -2423,9 +2527,15 @@ async function optimisticDeclineRequest(requestData, button) {
     }
 }
 
-// Add this function to manually refresh friend requests
+// Manually refresh friend requests — renders from cache when offline
 export const refreshFriendRequests = async function() {
+    // If offline or not active but we have cached requests, just re-render them
+    const hasRequests = (window.friendRequests?.length || friendRequests?.length || 0) > 0;
     if (!isUIActive()) {
+        if (hasRequests) {
+            renderFriendRequests();
+            renderSentRequests();
+        }
         return null;
     }
     return ErrorHandler.createBoundary('refreshFriendRequests', async () => {
@@ -2446,10 +2556,10 @@ export const refreshFriendRequests = async function() {
 
 // FIXED: renderSentRequests - read from window.sentRequests to avoid stale ES module binding
 export const renderSentRequests = function() {
-    const sentArray = window.sentRequests || [];
+    const sentArray = window.sentRequests || sentRequests || [];
     
     console.log('[UI] renderSentRequests called, count:', sentArray.length);
-    if (!isUIActive()) {
+    if (sentArray.length === 0 && !isUIActive()) {
         return null;
     }
     return ErrorHandler.createBoundary('renderSentRequests', () => {
@@ -2490,7 +2600,8 @@ export const renderSentRequests = function() {
 };
 
 export const renderTemporaryFriends = function() {
-    if (!isUIActive()) {
+    const _tempArr = Array.isArray(window.temporaryFriends) ? window.temporaryFriends : (Array.isArray(temporaryFriends) ? temporaryFriends : []);
+    if (_tempArr.length === 0 && !isUIActive()) {
         return null;
     }
     return ErrorHandler.createBoundary('renderTemporaryFriends', () => {
@@ -2526,7 +2637,8 @@ export const renderTemporaryFriends = function() {
 };
 
 export const renderPinnedFriends = function() {
-    if (!isUIActive()) {
+    const _pinnedArr = Array.isArray(window.pinnedFriends) ? window.pinnedFriends : (Array.isArray(pinnedFriends) ? pinnedFriends : []);
+    if (_pinnedArr.length === 0 && !isUIActive()) {
         return null;
     }
     return ErrorHandler.createBoundary('renderPinnedFriends', () => {
@@ -2562,7 +2674,8 @@ export const renderPinnedFriends = function() {
 };
 
 export const renderMutedFriends = function() {
-    if (!isUIActive()) {
+    const _mutedArr = Array.isArray(window.mutedFriends) ? window.mutedFriends : (Array.isArray(mutedFriends) ? mutedFriends : []);
+    if (_mutedArr.length === 0 && !isUIActive()) {
         return null;
     }
     return ErrorHandler.createBoundary('renderMutedFriends', () => {
@@ -5722,6 +5835,16 @@ function initializeUI() {
     _uiInitialized = true;
     
     logUI('Initializing UI...');
+
+    // FIX: Load cached data into window globals BEFORE RenderPipeline.init()
+    // so renderFriendsListInstantly() sees populated arrays on first paint.
+    // This is synchronous (localStorage reads) so it completes immediately.
+    try {
+        if (typeof loadCachedDataInstantly === 'function') {
+            loadCachedDataInstantly();
+        }
+    } catch (_) {}
+
     bindAllEvents();
     RenderPipeline.init();
     CoreIntegration.init();

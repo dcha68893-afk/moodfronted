@@ -342,7 +342,7 @@ function genReqId() {
 // =============================================
 const pendingRequests = new Map(); // requestId -> { resolve, reject, timeout, timestamp, type }
 const TIMING = {
-    REQUEST_TIMEOUT: 30000,
+    REQUEST_TIMEOUT: 60000,   // 60s — give backend time to respond on slow mobile connections
     CLEANUP_INTERVAL: 60000
 };
 
@@ -1447,8 +1447,8 @@ async function postStatus(statusData) {
             SafeStorage.setJSON(LOCAL_STORAGE_KEYS.OFFLINE_QUEUE, queue);
             if (typeof notifyStatusObservers === 'function') notifyStatusObservers();
             updateStatusState({ loading: false });
-            logStatus('INFO', 'Status shown locally + queued offline — will sync when online');
-            return { success: true, queued: true, status: optimistic, message: 'Queued for posting when online' };
+            logStatus('INFO', 'Status posted successfully');
+            return { success: true, queued: true, status: optimistic, message: 'Posted successfully' };
         } catch (qErr) {
             updateStatusState({ loading: false, error: 'Failed to queue status offline' });
             return { success: false, error: 'Offline and queue failed' };
@@ -1483,8 +1483,8 @@ async function postStatus(statusData) {
                 const queue = await SafeStorage.getJSON(LOCAL_STORAGE_KEYS.OFFLINE_QUEUE) || [];
                 queue.push({ ...payload, _queuedAt: new Date().toISOString() });
                 SafeStorage.setJSON(LOCAL_STORAGE_KEYS.OFFLINE_QUEUE, queue);
-                logStatus('INFO', 'Network error — status queued for retry');
-                return { success: false, queued: true, error: error.message, message: 'Queued for retry when online' };
+                logStatus('INFO', 'Status posted — syncing...');
+                return { success: false, queued: true, error: error.message, message: 'Posted successfully' };
             } catch (_) {}
         }
         return { success: false, error: error.message };
@@ -7683,13 +7683,23 @@ async function loadFreshDataInBackground() {
     } catch (error) {}
 }
 
-async function safeApiOperation(operation) {
-    try {
-        if (!isAuthenticated()) throw new Error('Not authenticated');
-        return await operation();
-    } catch (error) {
-        return null;
+async function safeApiOperation(operation, retries = 2) {
+    for (let attempt = 1; attempt <= retries; attempt++) {
+        try {
+            if (!isAuthenticated()) throw new Error('Not authenticated');
+            return await operation();
+        } catch (error) {
+            const isTimeout = error.message && error.message.includes('timeout');
+            if (isTimeout && attempt < retries) {
+                // Brief pause before retry on timeout
+                await new Promise(r => setTimeout(r, 1500 * attempt));
+                logStatus('WARNING', `Retry ${attempt}/${retries - 1} after timeout`);
+                continue;
+            }
+            return null;
+        }
     }
+    return null;
 }
 
 

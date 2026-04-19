@@ -2168,9 +2168,10 @@
                 
                 // Handle chat panel state
                 if (data.type === 'CHAT_OPENED' || data.type === 'CONVERSATION_OPENED') {
-                    if (window.innerWidth <= 768) {
-                        document.body.classList.add('chat-panel-active');
-                    }
+                    // Apply on all widths — CSS only shows effect on mobile
+                    document.body.classList.add('chat-panel-active');
+                    // Clear pending_chat so all retry loops stop
+                    try { sessionStorage.removeItem('pending_chat'); } catch (_) {}
                 }
                 if (data.type === 'CHAT_LIST_SHOWN' || data.type === 'CHAT_CLOSED' || data.type === 'GO_BACK_TO_CHAT_LIST') {
                     if (window.innerWidth <= 768) {
@@ -3250,6 +3251,14 @@
                         if (iframe && iframe.contentWindow) {
                             if (cachedToken && cachedUserId) {
                                 sendSessionToModule(iframe, targetModule);
+                                // Re-send after 350ms: messages-core may still be in INITIALIZING
+                                // state on the first send and silently drops PARENT_READY.
+                                // The second send lands after its internal init completes.
+                                setTimeout(() => {
+                                    if (iframe && iframe.contentWindow && cachedToken && cachedUserId) {
+                                        sendSessionToModule(iframe, targetModule);
+                                    }
+                                }, 350);
                             } else {
                                 updateSessionCache();
                                 if (cachedToken && cachedUserId) sendSessionToModule(iframe, targetModule);
@@ -3499,13 +3508,30 @@
                     navigateToPage(data.module);
                     if (data.payload?.returnFromCall) {
                         if (data.module === 'messages' && data.payload?.openChatWith) {
-                            const msgIframe = document.getElementById('messagesIframe');
-                            if (msgIframe && msgIframe.contentWindow) {
-                                setTimeout(() => {
-                                    msgIframe.contentWindow.postMessage({ type: 'OPEN_CHAT_WITH_USER', payload: { userId: data.payload.openChatWith, returnFromCall: true, timestamp: Date.now() }, source: 'parent-frame' }, '*');
-                                    if (window.innerWidth <= 768) document.body.classList.add('chat-panel-active');
-                                }, 300);
-                            }
+                            const _callChatPayload = {
+                                userId: data.payload.openChatWith,
+                                userName: data.payload.openChatWithName || 'User',
+                                returnFromCall: true,
+                                timestamp: Date.now()
+                            };
+                            sessionStorage.setItem('pending_chat', JSON.stringify(_callChatPayload));
+                            if (window.innerWidth <= 768) document.body.classList.add('chat-panel-active');
+                            // Retry until iframe ACKs (clears pending_chat via CHAT_OPENED)
+                            let _rfcAttempts = 0;
+                            const _postRFC = () => {
+                                const msgIframe = document.getElementById('messagesIframe');
+                                if (msgIframe && msgIframe.contentWindow) {
+                                    msgIframe.contentWindow.postMessage({
+                                        type: 'OPEN_CHAT_WITH_USER',
+                                        payload: _callChatPayload,
+                                        source: 'parent-frame'
+                                    }, '*');
+                                }
+                                if (_rfcAttempts++ < 10) {
+                                    setTimeout(() => { if (sessionStorage.getItem('pending_chat')) _postRFC(); }, 800);
+                                }
+                            };
+                            setTimeout(_postRFC, 400);
                         } else if (data.module === 'friends') {
                             const friendsIframe = document.getElementById('friendsIframe');
                             if (friendsIframe && friendsIframe.contentWindow) setTimeout(() => friendsIframe.contentWindow.postMessage({ type: 'RETURN_FROM_CALL', payload: { returnFromCall: true, timestamp: Date.now() }, source: 'parent-frame' }, '*'), 300);
@@ -3514,14 +3540,39 @@
                 }
 
                 if (data.type === 'DIRECT_CHAT_REQUEST') {
-                    const chatPayload = { userId: data.payload.userId, userName: data.payload.userName || data.payload.name || 'User', timestamp: Date.now() };
+                    const chatPayload = {
+                        userId:       data.payload.userId,
+                        userName:     data.payload.userName || data.payload.name || 'User',
+                        findExisting: true,   // tells messages module to reuse existing chat
+                        timestamp:    Date.now()
+                    };
+                    // Persist so it survives iframe navigation and is replayed by lifecycle ACTIVE handler
                     sessionStorage.setItem('pending_chat', JSON.stringify(chatPayload));
+                    // Navigate to messages tab
                     navigateToPage('messages');
-                    const messagesIframe = document.getElementById('messagesIframe');
-                    if (messagesIframe && messagesIframe.contentWindow) {
-                        messagesIframe.contentWindow.postMessage({ type: 'OPEN_CHAT_WITH_USER', payload: chatPayload, source: 'parent-frame', timestamp: Date.now() }, '*');
-                        if (window.innerWidth <= 768) document.body.classList.add('chat-panel-active');
-                    }
+                    // Apply mobile class immediately so nav hides before iframe responds
+                    if (window.innerWidth <= 768) document.body.classList.add('chat-panel-active');
+                    // Retry posting until the iframe ACKs (message.html clears pending_chat on success,
+                    // which causes the CHAT_OPENED postMessage to flow back, stopping this loop)
+                    let _dcAttempts = 0;
+                    const _postChatOpen = () => {
+                        const messagesIframe = document.getElementById('messagesIframe');
+                        if (messagesIframe && messagesIframe.contentWindow) {
+                            messagesIframe.contentWindow.postMessage({
+                                type:    'OPEN_CHAT_WITH_USER',
+                                payload: chatPayload,
+                                source:  'parent-frame',
+                                timestamp: Date.now()
+                            }, '*');
+                            console.log('[chat.html] DIRECT_CHAT_REQUEST forwarded to messages iframe for userId:', chatPayload.userId);
+                        }
+                        if (_dcAttempts++ < 10) {
+                            setTimeout(() => {
+                                if (sessionStorage.getItem('pending_chat')) _postChatOpen();
+                            }, 800);
+                        }
+                    };
+                    setTimeout(_postChatOpen, 300);
                 }
 
                 if (data.type === 'DIRECT_CALL_REQUEST') {
@@ -3574,18 +3625,11 @@
                         const callsIframe = document.getElementById('callsIframe');
 
                         // Offline fix: backend returns HTTP 200 with success:false + offline:true
-                        // when the callee has no active socket. Must be caught BEFORE the success
-                        // branch (which only checks resp.ok + call.id — both true in the offline case).
-                        if (respData.offline === true || respData.data?.offline === true || respData.data?.receiverOnline === false) {
-                            const offlineMsg = respData.message || respData.data?.message || 'User is currently offline.';
-                            console.warn('[Parent] CALL_INITIATE — receiver offline:', offlineMsg);
-                            if (callsIframe && callsIframe.contentWindow) {
-                                callsIframe.contentWindow.postMessage({
-                                    type: 'CALL_INITIATED',
-                                    payload: { success: false, offline: true, error: offlineMsg, localCallId }
-                                }, '*');
-                            }
-                        } else if (resp.ok && (respData.data?.call?.id || respData.data?.callId)) {
+                        // when the callee has no active socket.
+                        // NOTE: receiverOnline is an advisory hint only — the backend ALWAYS creates
+                        // the call and fires the socket notification regardless. We never abort here.
+                        // Genuine no-answer is handled by the 30-second ring timeout on the caller side.
+                        if (resp.ok && (respData.data?.call?.id || respData.data?.callId)) {
                             const serverCallId = respData.data?.call?.id || respData.data?.callId;
                             window.__callIdMap = window.__callIdMap || {};
                             window.__callIdMap[localCallId] = serverCallId;
@@ -3687,9 +3731,30 @@
                     }
                 });
 
-                // call:answered
+                // call:answered — receiver accepted, tell caller's iframe
                 window.wsService.on('call:answered', function(callData) {
-                    console.log('[WS] call:answered - dismissing banner');
+                    console.log('[WS] call:answered - receiver accepted');
+                    hideGlobalBanner();
+                    const callsFrame = document.getElementById('callsIframe');
+                    if (callsFrame && callsFrame.contentWindow) {
+                        callsFrame.contentWindow.postMessage({ type: 'CALL_ACCEPTED', payload: callData, source: 'ws-bridge' }, '*');
+                    }
+                    setTimeout(() => refreshCallHistoryForUser(cachedUserId), 1000);
+                });
+
+                // call:accepted / call_accepted — same as call:answered (backend may use either)
+                window.wsService.on('call:accepted', function(callData) {
+                    console.log('[WS] call:accepted received');
+                    hideGlobalBanner();
+                    const callsFrame = document.getElementById('callsIframe');
+                    if (callsFrame && callsFrame.contentWindow) {
+                        callsFrame.contentWindow.postMessage({ type: 'CALL_ACCEPTED', payload: callData, source: 'ws-bridge' }, '*');
+                    }
+                    setTimeout(() => refreshCallHistoryForUser(cachedUserId), 1000);
+                });
+
+                window.wsService.on('call_accepted', function(callData) {
+                    console.log('[WS] call_accepted received');
                     hideGlobalBanner();
                     const callsFrame = document.getElementById('callsIframe');
                     if (callsFrame && callsFrame.contentWindow) {
@@ -3814,14 +3879,27 @@
             if (pendingChat) {
                 try {
                     const chatData = JSON.parse(pendingChat);
-                    const messagesIframe = document.getElementById('messagesIframe');
-                    if (messagesIframe && messagesIframe.contentWindow) {
-                        setTimeout(() => {
-                            messagesIframe.contentWindow.postMessage({ type: 'OPEN_CHAT_WITH_USER', payload: chatData, source: 'parent-frame', timestamp: Date.now() }, '*');
-                            sessionStorage.removeItem('pending_chat');
-                            if (window.innerWidth <= 768) document.body.classList.add('chat-panel-active');
-                        }, 1000);
-                    }
+                    if (window.innerWidth <= 768) document.body.classList.add('chat-panel-active');
+                    // Retry posting until message.html ACKs by clearing pending_chat
+                    let _loadAttempts = 0;
+                    const _postPending = () => {
+                        const messagesIframe = document.getElementById('messagesIframe');
+                        if (messagesIframe && messagesIframe.contentWindow) {
+                            messagesIframe.contentWindow.postMessage({
+                                type: 'OPEN_CHAT_WITH_USER',
+                                payload: chatData,
+                                source: 'parent-frame',
+                                timestamp: Date.now()
+                            }, '*');
+                        }
+                        if (_loadAttempts++ < 12) {
+                            setTimeout(() => { if (sessionStorage.getItem('pending_chat')) _postPending(); }, 700);
+                        } else {
+                            // Give up — lifecycle ACTIVE in message.html will still replay from sessionStorage
+                            console.warn('[chat.html] pending_chat not consumed after retries — lifecycle will handle it');
+                        }
+                    };
+                    setTimeout(_postPending, 600);
                 } catch(e) {}
             }
             const pendingCall = sessionStorage.getItem('pending_call');

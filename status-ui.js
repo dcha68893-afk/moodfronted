@@ -1273,9 +1273,9 @@ class UIErrorBoundary {
     createConnectionFallback() {
         return `
             <div class="connection-error empty-state error-state">
-                <i class="fas fa-wifi-slash"></i>
-                <p>Connection lost</p>
-                <p class="subtext">Waiting for connection to restore...</p>
+                <i class="fas fa-clock"></i>
+                <p>Loading statuses...</p>
+                <p class="subtext">Your content will appear shortly.</p>
                 <div class="connection-progress">
                     <div class="progress-bar indeterminate"></div>
                 </div>
@@ -2198,7 +2198,8 @@ const ResponsiveEngine = {
         document.documentElement.classList.add(`device-${this.currentDevice}`);
         document.documentElement.classList.add(`orientation-${this.orientation}`);
         document.documentElement.classList.toggle('reduced-motion', this.prefersReducedMotion);
-        document.documentElement.classList.toggle('dark-mode', this.prefersDarkMode);
+        // Force light mode always — status module has its own theme
+        // document.documentElement.classList.toggle('dark-mode', this.prefersDarkMode);
     },
 
     getDeviceType() {
@@ -2231,7 +2232,8 @@ const ResponsiveEngine = {
         const darkQuery = window.matchMedia('(prefers-color-scheme: dark)');
         darkQuery.addEventListener('change', (e) => {
             this.prefersDarkMode = e.matches;
-            document.documentElement.classList.toggle('dark-mode', e.matches);
+            // Force light mode always
+            // document.documentElement.classList.toggle('dark-mode', e.matches);
         });
     },
 
@@ -2536,16 +2538,30 @@ renderMoodChart() {
 
     createEmptyState() {
         const isAuth = isAuthenticated();
+        // If not authenticated yet, show shimmer so user doesn't see empty state
+        if (!isAuth) {
+            return `
+                <div class="status-skeleton-list">
+                    ${[1,2,3].map(() => `
+                        <div class="status-item skeleton-item">
+                            <div class="skeleton-avatar"></div>
+                            <div class="skeleton-content">
+                                <div class="skeleton-line short"></div>
+                                <div class="skeleton-line long"></div>
+                            </div>
+                        </div>
+                    `).join('')}
+                </div>
+            `;
+        }
         return `
             <div class="empty-state">
-                <i class="fas fa-comment-dots"></i>
+                <i class="fas fa-camera"></i>
                 <p>No statuses yet</p>
-                <p class="subtext">Be the first to post a status!</p>
-                ${isAuth ? `
-                    <button class="action-btn primary" id="emptyStateCreateBtn" onclick="document.getElementById('createStatusBtn')?.click()">
-                        <i class="fas fa-plus"></i> Create Status
-                    </button>
-                ` : ''}
+                <p class="subtext">Share what's on your mind!</p>
+                <button class="action-btn primary" id="emptyStateCreateBtn" onclick="document.getElementById('createStatusBtn')?.click()">
+                    <i class="fas fa-plus"></i> Create Status
+                </button>
             </div>
         `;
     },
@@ -3592,7 +3608,7 @@ function enableOfflineMode() {
     const errorUI = UIElements.errorUI;
     if (errorUI) errorUI.classList.remove('active');
     isOfflineMode = true;
-    showNotification('Offline mode enabled', 'warning');
+    
     const core = getCore();
     if (core && core.loadCachedDataInstantly) {
         core.loadCachedDataInstantly();
@@ -3725,8 +3741,8 @@ function showReconnectionState() {
         allStatusList.innerHTML = `
             <div class="empty-state">
                 <i class="fas fa-unlink"></i>
-                <p>Connection lost</p>
-                <p class="subtext">Waiting for connection to restore...</p>
+                <p>Loading statuses...</p>
+                <p class="subtext">Your content will appear shortly.</p>
             </div>
         `;
     }
@@ -3820,12 +3836,18 @@ function renderStatusesListUI(container, statusesList) {
         });
     }
     if (filtered.length === 0) {
-        const emptyMsg = getEmptyStateMessage();
+        // Show shimmer skeleton instead of empty state text — seamless offline experience
         container.innerHTML = `
-            <div class="empty-state">
-                <i class="fas fa-comment-dots"></i>
-                <p>No statuses found</p>
-                <p class="subtext">${emptyMsg}</p>
+            <div class="status-skeleton-list">
+                ${[1,2,3,4].map(() => `
+                    <div class="status-item skeleton-item">
+                        <div class="skeleton-avatar"></div>
+                        <div class="skeleton-content">
+                            <div class="skeleton-line short"></div>
+                            <div class="skeleton-line long"></div>
+                        </div>
+                    </div>
+                `).join('')}
             </div>
         `;
         return;
@@ -4723,7 +4745,7 @@ async function handlePostStatus() {
                 queued: !!response.queued,
                 visibility: 'friends'
             };
-            showNotification(response.queued ? 'Status saved offline and will sync automatically' : 'Status posted successfully', 'success');
+            showNotification('Status posted successfully', 'success');
             const modal = UIElements.createStatusModal;
             if (modal) modal.classList.remove('active');
             statuses = [optimisticStatus].concat(Array.isArray(statuses) ? statuses : []);

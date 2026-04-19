@@ -3207,3 +3207,255 @@ body[data-module="status"] .sidebar-header,
   color: #f59e0b;
   margin-left: 4px;
 }
+
+/* ================================================================
+   FORCE LIGHT MODE — STATUS MODULE ALWAYS LIGHT
+   Android/iOS dark system theme must NOT affect this module.
+   All colors are explicitly white/light regardless of OS setting.
+   ================================================================ */
+
+/* Override any dark-mode class the JS may have added */
+html.dark-mode,
+html.dark-mode body,
+html.dark-mode .app-container,
+html.dark-mode .sidebar,
+html.dark-mode .status-list-content,
+html.dark-mode .status-item,
+html.dark-mode .status-header,
+html.dark-mode .sidebar-header,
+html.dark-mode .create-status-header,
+html.dark-mode .status-categories,
+html.dark-mode .quick-actions,
+html.dark-mode .modal,
+html.dark-mode .modal-content,
+html.dark-mode .status-viewer-panel,
+html.dark-mode .viewer-container {
+  --bg-color: #ffffff !important;
+  --text-primary: #050505 !important;
+  --text-secondary: #65676b !important;
+  --border-color: #dddfe2 !important;
+  --secondary-color: #f0f2f5 !important;
+  background-color: #ffffff !important;
+  color: #050505 !important;
+}
+
+/* Ensure body and root are always light */
+html, body, .app-container {
+  background-color: #ffffff !important;
+  color: #050505 !important;
+}
+
+/* Status list items always white */
+.status-list-content,
+.status-item,
+.status-content,
+.sidebar {
+  background-color: #ffffff !important;
+  color: #050505 !important;
+}
+
+/* Status preview text always dark on white */
+.status-preview,
+.status-name-text,
+.status-time,
+.status-details {
+  color: var(--text-secondary, #65676b) !important;
+}
+
+/* Category tabs always light */
+.status-categories {
+  background-color: #ffffff !important;
+  border-bottom: 1px solid #dddfe2 !important;
+}
+
+.category-btn {
+  color: #65676b !important;
+  background: transparent !important;
+}
+
+.category-btn.active {
+  color: #3b82f6 !important;
+  border-bottom-color: #3b82f6 !important;
+}
+
+/* Quick action cards always white */
+.quick-action-btn {
+  background-color: #ffffff !important;
+  color: #050505 !important;
+  border: 1px solid #dddfe2 !important;
+}
+
+/* Modals always white */
+.modal-content,
+.create-status-modal,
+.viewer-modal {
+  background-color: #ffffff !important;
+  color: #050505 !important;
+}
+
+/* ================================================================
+   ICONS — Ensure FontAwesome glyphs always render
+   ================================================================ */
+
+/* Force font-family on all icon elements so fallback CDN works */
+.fas, .far, .fab, .fal, .fad, [class*="fa-"] {
+  font-family: "Font Awesome 6 Free", "Font Awesome 6 Brands",
+               "FontAwesome", "Font Awesome 5 Free", sans-serif !important;
+  -webkit-font-smoothing: antialiased;
+  font-style: normal;
+  font-variant: normal;
+  text-rendering: auto;
+  line-height: 1;
+  display: inline-block;
+}
+
+/* Prevent broken icon boxes showing on mobile */
+.fas::before, .far::before, .fab::before,
+.fal::before, .fad::before { display: inline-block; }
+
+/* ================================================================
+   OFFLINE PENDING — Invisible to user, no text labels
+   ================================================================ */
+
+/* Hide any offline badges or pending indicators from user view */
+.offline-badge,
+.offline-indicator,
+.offline-banner,
+.offline-bar,
+.network-status-bar,
+.connection-status {
+  display: none !important;
+}
+
+/* Pending items look identical to normal items */
+.status-item[data-pending="true"],
+.status-item.offline-pending {
+  opacity: 1 !important;
+}
+
+.status-item[data-pending="true"] .status-ring,
+.status-item.offline-pending .status-ring {
+  background: var(--story-ring) !important;
+}
+
+/* ================================================================
+   MOBILE TYPOGRAPHY & SPACING CONSISTENCY
+   ================================================================ */
+
+@media (max-width: 768px) {
+  html, body {
+    background-color: #ffffff !important;
+  }
+
+  .sidebar-header {
+    background: var(--header-status, linear-gradient(135deg, #facc15 0%, #ec4899 60%, #8b5cf6 100%)) !important;
+    color: #ffffff !important;
+  }
+
+  .status-list-content {
+    background-color: #ffffff !important;
+  }
+
+  .status-item {
+    background-color: #ffffff !important;
+    border-bottom: 1px solid #f0f2f5 !important;
+  }
+
+  .status-name-text {
+    color: #050505 !important;
+    font-weight: 600;
+  }
+
+  .status-time,
+  .status-preview {
+    color: #65676b !important;
+  }
+
+  /* Quick action grid cards on mobile */
+  .quick-action-btn {
+    background-color: #ffffff !important;
+    border: 1px solid #e5e7eb !important;
+    border-radius: 12px !important;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.08) !important;
+  }
+
+  .quick-action-icon {
+    color: var(--color-primary, #22c55e) !important;
+  }
+
+  .quick-action-text {
+    color: #374151 !important;
+    font-size: 12px !important;
+  }
+
+  /* Category tabs */
+  .category-btn {
+    background: transparent !important;
+    color: #65676b !important;
+  }
+  .category-btn.active {
+    color: #3b82f6 !important;
+    border-bottom: 2px solid #3b82f6 !important;
+  }
+}
+
+/* ================================================================
+   SHIMMER SKELETON — shown instead of empty/offline state
+   User sees loading animation rather than "no content" messages
+   ================================================================ */
+
+.status-skeleton-list {
+  padding: 8px 0;
+}
+
+.skeleton-item {
+  display: flex;
+  align-items: center;
+  padding: 12px 16px;
+  gap: 12px;
+  border-bottom: 1px solid #f0f2f5;
+  background: #ffffff !important;
+}
+
+.skeleton-avatar {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: linear-gradient(90deg, #f0f2f5 25%, #e4e6eb 50%, #f0f2f5 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.4s ease-in-out infinite;
+  flex-shrink: 0;
+}
+
+.skeleton-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.skeleton-line {
+  height: 12px;
+  border-radius: 6px;
+  background: linear-gradient(90deg, #f0f2f5 25%, #e4e6eb 50%, #f0f2f5 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.4s ease-in-out infinite;
+}
+
+.skeleton-line.short { width: 45%; }
+.skeleton-line.long  { width: 75%; }
+
+@keyframes shimmer {
+  0%   { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+/* Stagger each skeleton item's animation */
+.skeleton-item:nth-child(1) .skeleton-avatar,
+.skeleton-item:nth-child(1) .skeleton-line { animation-delay: 0s; }
+.skeleton-item:nth-child(2) .skeleton-avatar,
+.skeleton-item:nth-child(2) .skeleton-line { animation-delay: 0.15s; }
+.skeleton-item:nth-child(3) .skeleton-avatar,
+.skeleton-item:nth-child(3) .skeleton-line { animation-delay: 0.3s; }
+.skeleton-item:nth-child(4) .skeleton-avatar,
+.skeleton-item:nth-child(4) .skeleton-line { animation-delay: 0.45s; }

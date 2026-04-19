@@ -339,23 +339,49 @@ async function loadCallHistory() {
     }
     
     try {
-        // Use numeric userId
-        const userId = window.__CHILD_SESSION__?.userId || 8;
-        
-        const data = await window.apiRequest('GET', '/api/calls/history?limit=50', null, token);
-        
-        if (data && data.success !== false) {
-            const calls = data?.data?.calls || data?.calls || [];
+        // Route via parent postMessage API_REQUEST to ensure correct backend URL
+        // (direct fetch inside calls iframe hits wrong port — parent has the right gateway)
+        const data = await new Promise((resolve, reject) => {
+            const reqId = 'calls_hist_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6);
+            const timeout = setTimeout(() => {
+                window.removeEventListener('message', handler);
+                reject(new Error('History request timeout'));
+            }, 10000);
+            function handler(ev) {
+                const msg = ev.data;
+                if (msg && msg.type === 'API_RESPONSE' && msg.requestId === reqId) {
+                    clearTimeout(timeout);
+                    window.removeEventListener('message', handler);
+                    resolve(msg.payload || msg.data || {});
+                }
+                // Also handle CALL_HISTORY_UPDATE pushed directly by parent
+                if (msg && msg.type === 'CALL_HISTORY_UPDATE' && msg._reqId === reqId) {
+                    clearTimeout(timeout);
+                    window.removeEventListener('message', handler);
+                    resolve({ data: { calls: msg.calls || [] }, success: true });
+                }
+            }
+            window.addEventListener('message', handler);
+            window.parent.postMessage({
+                type:      'API_REQUEST',
+                requestId: reqId,
+                source:    'calls-iframe',
+                payload:   { method: 'GET', endpoint: '/calls/history?limit=50', requestId: reqId }
+            }, '*');
+        });
+
+        const calls = data?.data?.calls || data?.calls || [];
+        if (calls.length > 0 || data?.success !== false) {
             console.log('[Calls UI] Loaded call history:', calls.length, 'calls');
             displayCallHistory(calls);
             return calls;
         } else {
             console.error('[Calls UI] Failed to load call history:', data?.status);
-            displayCallHistory([]);
+            loadCachedCallHistory();
             return [];
         }
     } catch (error) {
-        console.error('[Calls UI] Error loading call history:', error);
+        console.error('[Calls UI] Error loading call history:', error.message);
         loadCachedCallHistory();
         return [];
     }
@@ -439,11 +465,19 @@ function displayCallHistory(calls) {
     
     function formatCallDateTime(dateString) {
         try {
-            const date = new Date(dateString);
+            // Normalize PostgreSQL timestamps: '2024-01-15 14:30:00+03' needs 'T' not space
+            var normalizedDate = dateString;
+            if (typeof dateString === 'string') {
+                normalizedDate = dateString.replace(' ', 'T');
+                // Fix bare offset like +0300 -> +03:00
+                normalizedDate = normalizedDate.replace(/([+-])(\d{2})(\d{2})$/, '$1$2:$3');
+            }
+            const date = new Date(normalizedDate);
+            if (isNaN(date.getTime())) return { dateStr: 'Unknown date', timeStr: '' };
             const now = new Date();
             const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
             const callDate = new Date(date.getFullYear(), date.getMonth(), date.getDate());
-            
+
             const diffDays = Math.floor((today - callDate) / (1000 * 60 * 60 * 24));
             
             let dateStr = '';
@@ -466,16 +500,36 @@ function displayCallHistory(calls) {
     }
     
     function getCallDirectionInfo(call) {
-        const currentUserId = window.__CHILD_SESSION__?.userId;
-        const isOutgoing = call.callerId == currentUserId;
-        const isMissed = call.status === 'missed' && !isOutgoing;
-        
+        // PRIORITY 1: Use server-computed direction field (already relative to current user).
+        // The /history endpoint sets obj.direction = 'outgoing'|'incoming' and obj.isMissed.
+        // This is the only reliable source because window.__CHILD_SESSION__ may not be set yet.
+        let isOutgoing, isMissed;
+
+        if (call.direction === 'outgoing') {
+            isOutgoing = true;
+            isMissed   = false;
+        } else if (call.direction === 'incoming') {
+            isOutgoing = false;
+            isMissed   = call.status === 'missed';
+        } else {
+            // FALLBACK: derive from callerId when server direction is missing
+            const currentUserId = window.__CHILD_SESSION__?.userId
+                || window.__SESSION__?.userId
+                || window.__currentUserId
+                || (window.callsState && window.callsState.userId);
+            isOutgoing = currentUserId != null && (String(call.callerId) === String(currentUserId));
+            isMissed   = call.status === 'missed' && !isOutgoing;
+        }
+
+        // Override: if status is missed and we are the receiver, always show as missed
+        if (call.status === 'missed' && !isOutgoing) isMissed = true;
+
         let directionIcon = '';
         let directionText = '';
         let directionColor = '';
-        
+
         if (isOutgoing) {
-            directionIcon = '<i class="fas fa-arrow-up"></i>';
+            directionIcon = '<i class="fas fa-phone" style="transform:rotate(-45deg);font-size:10px;"></i>';
             directionText = 'Outgoing';
             directionColor = '#10b981';
         } else if (isMissed) {
@@ -483,18 +537,23 @@ function displayCallHistory(calls) {
             directionText = 'Missed';
             directionColor = '#ef4444';
         } else {
-            directionIcon = '<i class="fas fa-arrow-down"></i>';
+            directionIcon = '<i class="fas fa-phone" style="transform:rotate(135deg);font-size:10px;"></i>';
             directionText = 'Incoming';
             directionColor = '#3b82f6';
         }
-        
+
         return { directionIcon, directionText, directionColor, isOutgoing, isMissed };
     }
     
     calls.forEach(function(call) {
         const otherParticipant = (call.otherParticipants && call.otherParticipants[0]) || call.caller;
-        const currentUserId = window.__CHILD_SESSION__?.userId;
-        const otherId = call.callerId == currentUserId ? call.receiverId : call.callerId;
+        // Use server-computed direction to determine the other party (avoids stale session userId)
+        const currentUserId = window.__CHILD_SESSION__?.userId
+            || window.__SESSION__?.userId
+            || window.__currentUserId;
+        // direction is set by server: 'outgoing' means currentUser is the caller
+        const isOutgoingCall = call.direction === 'outgoing' || (call.direction == null && String(call.callerId) === String(currentUserId));
+        const otherId = isOutgoingCall ? call.receiverId : call.callerId;
         const contactMatch = (UIState.contacts || window.__cachedCallContacts || []).find(c => c.id == otherId || c.userId == otherId);
         
         const name = (otherParticipant && (otherParticipant.displayName || otherParticipant.username))
@@ -512,11 +571,20 @@ function displayCallHistory(calls) {
         // FIXED: use createdAt as fallback when startedAt is null (e.g. missed/cancelled calls)
         const { dateStr, timeStr } = formatCallDateTime(call.startedAt || call.createdAt);
         
-        let durationDisplay = call.displayDuration || '0:00';
-        if (call.duration && call.duration > 0) {
+        // Duration: show real time for completed calls, meaningful label for others
+        let durationDisplay;
+        if (call.status === 'missed') {
+            durationDisplay = '<span style="color:#ef4444;">Missed</span>';
+        } else if (call.status === 'cancelled') {
+            durationDisplay = '<span style="color:#f59e0b;">Cancelled</span>';
+        } else if (call.status === 'rejected') {
+            durationDisplay = '<span style="color:#f59e0b;">Declined</span>';
+        } else if (call.duration && call.duration > 0) {
             const mins = Math.floor(call.duration / 60);
             const secs = call.duration % 60;
-            durationDisplay = `${mins}:${secs.toString().padStart(2, '0')}`;
+            durationDisplay = mins + ':' + String(secs).padStart(2, '0');
+        } else {
+            durationDisplay = call.displayDuration || '0:00';
         }
         
         const item = document.createElement('div');
@@ -553,9 +621,14 @@ function displayCallHistory(calls) {
                     </span>
                 </div>
             </div>
-            <button class="call-action-btn" data-user-id="${escapeHtml(String(otherParticipant?.id || otherId || ''))}" data-user-name="${escapeHtml(name)}" data-call-type="${call.type || 'voice'}" title="Call back" style="width: 32px; height: 32px; font-size: 14px; flex-shrink: 0;">
-                <i class="fas fa-phone"></i>
-            </button>
+            <div style="display:flex;flex-direction:column;gap:4px;flex-shrink:0;align-items:center;">
+                <button class="call-action-btn" data-user-id="${escapeHtml(String(otherParticipant?.id || otherId || ''))}" data-user-name="${escapeHtml(name)}" data-call-type="${call.type || 'voice'}" title="Call ${escapeHtml(name)}" style="width:32px;height:32px;font-size:13px;border:none;border-radius:50%;background:#10b98120;color:#10b981;cursor:pointer;display:flex;align-items:center;justify-content:center;">
+                    <i class="fas fa-phone"></i>
+                </button>
+                <button class="chat-action-btn" data-user-id="${escapeHtml(String(otherParticipant?.id || otherId || ''))}" data-user-name="${escapeHtml(name)}" title="Message ${escapeHtml(name)}" style="width:32px;height:32px;font-size:13px;border:none;border-radius:50%;background:#3b82f620;color:#3b82f6;cursor:pointer;display:flex;align-items:center;justify-content:center;">
+                    <i class="fas fa-comment"></i>
+                </button>
+            </div>
         `;
         
         allCallsList.appendChild(item);
@@ -580,13 +653,55 @@ function displayCallHistory(calls) {
         }
     }
     
-    // Re-attach click handlers
+    // Re-attach call-back button handlers
     document.querySelectorAll('.call-action-btn').forEach(function(btn) {
         btn.removeEventListener('click', handleCallActionClick);
         btn.addEventListener('click', function(e) {
             window.__pendingCallReturnTo = 'calls';
             window.__pendingCallChatUserId = null;
             handleCallActionClick.call(btn, e);
+        });
+    });
+
+    // Attach Start Chat button handlers
+    document.querySelectorAll('.chat-action-btn').forEach(function(btn) {
+        btn.addEventListener('click', function(e) {
+            e.stopPropagation();
+            e.preventDefault();
+            var userId   = this.dataset.userId;
+            var userName = this.dataset.userName || 'User';
+            if (!userId) return;
+
+            console.log('[Calls UI] Opening chat with userId:', userId, userName);
+
+            // Strategy 1: postMessage to parent frame (chat.html handles DIRECT_CHAT_REQUEST)
+            try {
+                window.parent.postMessage({
+                    type:    'DIRECT_CHAT_REQUEST',
+                    payload: { userId: userId, userName: userName, findExisting: true },
+                    source:  'calls-iframe',
+                    timestamp: Date.now()
+                }, '*');
+                return;
+            } catch (err) {
+                console.warn('[Calls UI] postMessage failed, trying fallback:', err.message);
+            }
+
+            // Strategy 2: if we ARE the top window, try navigating directly
+            try {
+                if (window.navigateToPage) { window.navigateToPage('messages'); }
+                var msgIframe = document.getElementById('messagesIframe');
+                if (msgIframe && msgIframe.contentWindow) {
+                    msgIframe.contentWindow.postMessage({
+                        type:    'OPEN_CHAT_WITH_USER',
+                        payload: { userId: userId, userName: userName, findExisting: true },
+                        source:  'calls-module',
+                        timestamp: Date.now()
+                    }, '*');
+                }
+            } catch (err2) {
+                console.warn('[Calls UI] Fallback chat navigation failed:', err2.message);
+            }
         });
     });
 }
