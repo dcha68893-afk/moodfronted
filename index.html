@@ -2463,5 +2463,62 @@
             initializeDashboardButtons();
         });
     </script>
+    <!-- ====================================================================== -->
+<!-- SERVICE WORKER REGISTRATION                                           -->
+<!-- PASTE THIS BLOCK just before </body> in index.html                  -->
+<!-- ====================================================================== -->
+<script>
+(function() {
+  'use strict';
+
+  if (!('serviceWorker' in navigator)) {
+    console.warn('[SW-REG] Service Workers not supported in this browser.');
+    return;
+  }
+
+  // Register the service worker from the root so its scope covers the entire app.
+  navigator.serviceWorker.register('/service-worker.js', { scope: '/' })
+    .then(function(reg) {
+      console.log('[SW-REG] ✅ Registered. Scope:', reg.scope);
+
+      // Immediately activate any waiting SW so users always get the latest version.
+      if (reg.waiting) {
+        reg.waiting.postMessage({ type: 'SKIP_WAITING' });
+      }
+
+      reg.addEventListener('updatefound', function() {
+        var newWorker = reg.installing;
+        if (!newWorker) return;
+        newWorker.addEventListener('statechange', function() {
+          if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+            console.log('[SW-REG] New SW installed – activating immediately.');
+            newWorker.postMessage({ type: 'SKIP_WAITING' });
+          }
+        });
+      });
+    })
+    .catch(function(err) {
+      console.error('[SW-REG] ❌ Registration failed:', err);
+    });
+
+  // When the SW takes control of a new version, reload once to pick up fresh cache.
+  var refreshing = false;
+  navigator.serviceWorker.addEventListener('controllerchange', function() {
+    if (!refreshing) {
+      refreshing = true;
+      console.log('[SW-REG] Controller changed – reloading for fresh cache.');
+      window.location.reload();
+    }
+  });
+
+  // Listen for SW messages
+  navigator.serviceWorker.addEventListener('message', function(event) {
+    if (event.data && event.data.type === 'SW_ACTIVATED') {
+      console.log('[SW-REG] SW activated, version:', event.data.version);
+    }
+  });
+})();
+</script>
+
 </body>
 </html>

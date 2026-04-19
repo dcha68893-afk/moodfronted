@@ -491,9 +491,16 @@
             // IndexedDB cache as the offline fallback.
             
             const isReadOnly = (method === 'GET');
+            // FIX: For write operations, allow if session is valid even if ensureActive fails.
+            // This is critical for queue retries which run after page navigation resets lifecycle.
             if (!isReadOnly && !ensureActive(`API_REQUEST: ${endpoint}`)) {
-                reject(new Error(`Module not ACTIVE for write actions (current: ${currentState})`));
-                return;
+                // Secondary check: if session is valid, allow the write through
+                if (!_validSessionSet || !__isValidSession(_storedSession)) {
+                    reject(new Error(`Module not ACTIVE for write actions (current: ${currentState})`));
+                    return;
+                }
+                // Session valid but not ACTIVE — allow write through for queue retries
+                console.log(`[${MODULE_NAME}] ⚠️ Write allowed despite non-ACTIVE state — valid session present`);
             }
             
             if (!_validSessionSet || !__isValidSession(_storedSession)) {

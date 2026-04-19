@@ -275,71 +275,66 @@
         async _sendToServer(item) {
             const payload = item.payload;
 
-            // Use parent iframe API if available (messages-core postMessage flow)
+            // PRIMARY PATH: use MessagesCore.ChatManager which routes via parent postMessage.
+            // This is the only path that works correctly from inside the message.html iframe
+            // because direct fetch to localhost:4000 is cross-origin from 127.0.0.1:5501.
             if (window.MessagesCore && window.MessagesCore.ChatManager) {
                 const cm = window.MessagesCore.ChatManager;
                 if (cm.sendMessageToBackend) {
-                    return cm.sendMessageToBackend(payload.content, payload.chatId, {
+                    return cm.sendMessageToBackend(payload.content, payload.chatId || payload.conversationId, {
                         type: payload.type || 'text',
-                        attachment: payload.attachment
+                        attachment: payload.attachment || null,
+                        localId: payload.localId || payload.id,
+                        replyToId: payload.replyToId || null,
+                        receiverId: payload.receiverId || null
                     });
                 }
             }
 
-            // Fallback: direct API call via api gateway
-            const token = this._getToken();
-            const baseUrl =
-                window.api?.env?.getBaseUrl?.() ||
-                window.__getApiBase?.() ||
-                'http://localhost:4000/api';
+            // SECONDARY: postMessage to parent window directly (works from iframe)
+            if (window.parent && window.parent !== window) {
+                return new Promise((resolve, reject) => {
+                    const requestId = 'queue_' + Date.now() + '_' + Math.random().toString(36).slice(2);
+                    const timeout = setTimeout(() => reject(new Error('Queue send timeout')), 20000);
 
-            const body = {
-                chatId:   payload.chatId,
-                content:  payload.content,
-                type:     payload.type || 'text'
-            };
+                    const handler = (event) => {
+                        if (event.data?.type === 'API_RESPONSE' && event.data?.requestId === requestId) {
+                            clearTimeout(timeout);
+                            window.removeEventListener('message', handler);
+                            const r = event.data.payload;
+                            if (r?.success === false) {
+                                reject(new Error(r.error || r.message || 'Send failed'));
+                            } else {
+                                // Extract message from response
+                                const serverData = r?.data?.message || r?.data || r;
+                                const serverId = serverData?.id;
+                                if (serverId && window.KynectaLocalStore) {
+                                    window.KynectaLocalStore.confirmMessage(
+                                        payload.localId || payload.id,
+                                        String(serverId),
+                                        { chatId: serverData?.chatId || payload.chatId, createdAt: serverData?.createdAt || Date.now(), status: 'sent' }
+                                    ).catch(() => {});
+                                }
+                                resolve(r?.data || r);
+                            }
+                        }
+                    };
+                    window.addEventListener('message', handler);
 
-            if (payload.receiverId) body.receiverId = payload.receiverId;
+                    const body = { chatId: payload.chatId, content: payload.content, type: payload.type || 'text' };
+                    if (payload.receiverId) body.receiverId = payload.receiverId;
 
-            const doFetch = async () => {
-                const res = await fetch(`${baseUrl}/messages`, {
-                    method:  'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        ...(token ? { 'Authorization': `Bearer ${token}` } : {})
-                    },
-                    credentials: 'include',
-                    body: JSON.stringify(body)
-                });
-
-                if (!res.ok) {
-                    const text = await res.text().catch(() => '');
-                    throw new Error(`HTTP ${res.status}: ${text.slice(0, 100)}`);
-                }
-
-                return res.json();
-            };
-
-            const data = typeof window.safeApiCall === 'function'
-                ? await window.safeApiCall(doFetch, null)
-                : await doFetch();
-
-            if (!data) {
-                throw new Error('Message send failed');
-            }
-
-            // FIX: Extract server message from data.message (new format) or fallbacks
-            const serverMessage = data?.data?.message || data?.message || data?.data || data;
-            const serverId = serverMessage?.id || data?.data?.id || data?.id;
-            if (serverId && window.KynectaLocalStore) {
-                await window.KynectaLocalStore.confirmMessage(item.messageId, String(serverId), {
-                    chatId:    serverMessage?.chatId || data?.data?.chatId || payload.chatId,
-                    createdAt: serverMessage?.createdAt || data?.data?.createdAt || Date.now(),
-                    status: serverMessage?.status || (data?.data?.delivered ? 'delivered' : 'sent')
+                    window.parent.postMessage({
+                        type: 'API_REQUEST',
+                        source: 'messages',
+                        target: 'parent',
+                        requestId,
+                        payload: { endpoint: '/messages', method: 'POST', body }
+                    }, '*');
                 });
             }
 
-            return data;
+            throw new Error('No available send path — MessagesCore and parent postMessage unavailable');
         }
 
         _getToken() {
