@@ -1,5 +1,4 @@
-﻿
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 <head>
     <link rel="manifest" href="manifest.json">
@@ -1378,71 +1377,21 @@
             border: 0;
         }
 
-        /* ============================================================ */
-        /* WHATSAPP-STYLE SPLASH SCREEN                                  */
-        /* Shown immediately on load, hidden once session is resolved    */
-        /* ============================================================ */
-        #moodchat-splash {
-            position: fixed;
-            inset: 0;
-            z-index: 99999;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            color: white;
-            transition: opacity 0.35s ease, visibility 0.35s ease;
-        }
-        #moodchat-splash.hidden {
-            opacity: 0;
+        /* OFFLINE-FIRST: Auth panel hidden by default.
+           Only revealed when session check confirms no saved session.
+           Prevents the login form flashing during auto-login / redirect. */
+        #authPanel {
             visibility: hidden;
-            pointer-events: none;
+            opacity: 0;
+            transition: opacity 0.25s ease;
         }
-        #moodchat-splash .splash-icon {
-            font-size: 72px;
-            margin-bottom: 20px;
-            animation: splashPulse 1.4s ease-in-out infinite;
+        #authPanel.show-auth {
+            visibility: visible;
+            opacity: 1;
         }
-        #moodchat-splash .splash-name {
-            font-size: 2.2rem;
-            font-weight: 800;
-            letter-spacing: 1px;
-            margin-bottom: 8px;
-        }
-        #moodchat-splash .splash-tagline {
-            font-size: 0.95rem;
-            opacity: 0.8;
-            margin-bottom: 48px;
-        }
-        #moodchat-splash .splash-spinner {
-            width: 36px;
-            height: 36px;
-            border: 3px solid rgba(255,255,255,0.3);
-            border-top-color: white;
-            border-radius: 50%;
-            animation: spin 0.85s linear infinite;
-        }
-        @keyframes splashPulse {
-            0%, 100% { transform: scale(1);   opacity: 1;   }
-            50%       { transform: scale(1.08); opacity: 0.85; }
-        }
-
-        /* Auth panel hidden by default — only revealed when no session exists */
-        #authPanel { visibility: hidden; opacity: 0; transition: opacity 0.3s ease; }
-        #authPanel.auth-visible { visibility: visible; opacity: 1; }
     </style>
 </head>
 <body>
-
-    <!-- WhatsApp-style splash screen: shown while session is resolving -->
-    <div id="moodchat-splash">
-        <div class="splash-icon">&#x1F4AC;</div>
-        <div class="splash-name">MoodChat</div>
-        <div class="splash-tagline">Connecting you to the world</div>
-        <div class="splash-spinner"></div>
-    </div>
-
     <div id="app-container"></div>
     <div id="iframe-container"></div>
     
@@ -2212,9 +2161,8 @@
                                 if (window.SessionManager && rememberMe && user) {
                                     window.SessionManager.createSession(user, token, true);
                                 }
-                                localStorage.setItem('isLoggedIn', 'true');
-                                window.CoreUtils.showNotification('Success', 'Logging in...', 'success');
-                                setTimeout(() => { window.location.replace('chat.html'); }, 400);
+                                window.CoreUtils.showNotification('Success', 'Login successful! Redirecting...', 'success');
+                                setTimeout(() => { window.location.href = 'chat.html'; }, 1000);
                             } else throw new Error('No token');
                         } else {
                             const msg = response?.message || response?.error || 'Login failed';
@@ -2346,168 +2294,42 @@
             document.getElementById('forgot-form')?.addEventListener('submit', e => { e.preventDefault(); document.getElementById('forgot-button')?.click(); });
         }
         
-        // ── WHATSAPP-STYLE SESSION RESOLVER ─────────────────────────────────────
-        // Rules:
-        //   1. Splash screen shows immediately on load (CSS default)
-        //   2. Read local session synchronously — no network needed
-        //   3a. Session found → redirect to chat.html silently (user never sees login)
-        //   3b. No session → fade out splash, reveal login form
-        //   4. If online: validate token in background, refresh silently if expired
-        //   5. Login form is ONLY shown when there is genuinely no saved session,
-        //      or after an explicit logout
-
-        function _getSavedSession() {
-            // kynecta_auth is the canonical key written by authStorage.js
-            try {
-                const raw = localStorage.getItem('kynecta_auth');
-                if (raw) {
-                    const p = JSON.parse(raw);
-                    if (p && p.token && p.token.length > 20 && p.user) return p;
-                }
-            } catch(e) {}
-            // Legacy fallback keys
-            const legacyToken =
-                localStorage.getItem('authToken')   ||
-                localStorage.getItem('accessToken') ||
-                localStorage.getItem('token')       ||
-                localStorage.getItem('moodchat_token') ||
-                localStorage.getItem('kynecta_token') ||
-                localStorage.getItem('USER_TOKEN');
-            if (!legacyToken || legacyToken.length < 20) return null;
-            try {
-                const userRaw =
-                    localStorage.getItem('currentUser') ||
-                    localStorage.getItem('user')        ||
-                    localStorage.getItem('moodchat_user');
-                const user = userRaw ? JSON.parse(userRaw) : null;
-                if (user) return { token: legacyToken, user };
-            } catch(e) {}
-            return null;
-        }
-
-        function _isTokenStructurallyValid(token) {
-            if (!token || typeof token !== 'string' || token.length < 20) return false;
-            return token.split('.').length === 3;
-        }
-
-        function _isTokenExpiredOnline(token) {
-            // Only enforced when online — offline we always trust local session
-            try {
-                const payload = JSON.parse(atob(token.split('.')[1].replace(/-/g,'+').replace(/_/g,'/')));
-                if (!payload.exp) return false;
-                return Date.now() > (payload.exp * 1000) - 60000; // 60s buffer
-            } catch(e) { return false; }
-        }
-
-        function _hideSplash() {
-            const splash = document.getElementById('moodchat-splash');
-            if (splash) splash.classList.add('hidden');
-        }
-
-        function _showAuthPanel() {
-            _hideSplash();
-            const panel = document.getElementById('authPanel');
-            if (panel) panel.classList.add('auth-visible');
-        }
-
-        function _backgroundTokenRefresh(token) {
-            // Silently refresh an expired/expiring token in the background
-            // so the user never sees a logout or login prompt
-            if (!navigator.onLine) return;
-            const refreshToken =
-                (() => { try { return JSON.parse(localStorage.getItem('kynecta_auth') || '{}').refreshToken; } catch(e) { return null; } })() ||
-                localStorage.getItem('refreshToken');
-            if (!refreshToken) return;
-
-            const baseUrl = window.__getApiOrigin
-                ? window.__getApiOrigin()
-                : (location.hostname === 'localhost' ? 'http://localhost:4000' : 'https://moodchat-fy56.onrender.com');
-
-            fetch(baseUrl + '/api/auth/refresh', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ refreshToken })
-            })
-            .then(r => r.json())
-            .then(data => {
-                if (data && (data.token || data.accessToken)) {
-                    const newToken = data.token || data.accessToken;
-                    const newRefresh = data.refreshToken || refreshToken;
-                    // Update all storage locations silently
-                    if (window.AuthStorage && window.AuthStorage.saveAuth) {
-                        const existing = window.AuthStorage.getAuth() || {};
-                        window.AuthStorage.saveAuth({ ...existing, token: newToken, refreshToken: newRefresh });
-                    } else {
-                        try {
-                            const existing = JSON.parse(localStorage.getItem('kynecta_auth') || '{}');
-                            localStorage.setItem('kynecta_auth', JSON.stringify({ ...existing, token: newToken, refreshToken: newRefresh }));
-                        } catch(e) {}
-                    }
-                    localStorage.setItem('authToken', newToken);
-                    localStorage.setItem('accessToken', newToken);
-                    localStorage.setItem('token', newToken);
-                    if (window.SessionState && window.SessionState.setToken) window.SessionState.setToken(newToken);
-                    console.log('[MoodChat] Background token refresh successful');
-                }
-            })
-            .catch(() => { /* silent - network error during refresh is fine */ });
-        }
-
-        function _backgroundServerValidation(session) {
-            // Silently validate with server when online.
-            // Only acts on confirmed 401 — network errors are ignored.
-            if (!navigator.onLine) return;
-            const baseUrl = window.__getApiOrigin
-                ? window.__getApiOrigin()
-                : (location.hostname === 'localhost' ? 'http://localhost:4000' : 'https://moodchat-fy56.onrender.com');
-
-            fetch(baseUrl + '/api/auth/validate-token', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': 'Bearer ' + session.token
-                },
-                body: JSON.stringify({ token: session.token })
-            })
-            .then(r => r.json())
-            .then(data => {
-                if (data && data.valid === false) {
-                    // Server hard-rejected the token — try refresh first
-                    _backgroundTokenRefresh(session.token);
-                }
-            })
-            .catch(() => { /* network error — session stays valid */ });
-        }
-
         async function checkExistingSession() {
-            // ── STEP 1: Synchronous local session check (zero network) ──────────
-            const session = _getSavedSession();
-
-            if (session && _isTokenStructurallyValid(session.token)) {
-                // We have a local session — redirect immediately, no login form shown
-                window.currentUser = session.user;
-                if (window.SessionState) {
-                    window.SessionState.setToken(session.token);
-                    window.SessionState.setUser(session.user);
-                }
-
-                // If token is expired AND we are online, refresh silently before redirect
-                if (navigator.onLine && _isTokenExpiredOnline(session.token)) {
-                    console.log('[MoodChat] Token near expiry — refreshing in background before redirect');
-                    _backgroundTokenRefresh(session.token);
-                }
-
-                // Redirect — splash stays visible during the navigation so user
-                // never sees the login form flash
-                console.log('[MoodChat] Local session found — redirecting to chat.html');
+            const runtimeSession = window.AppRuntimeAuthority?.getSessionSnapshot?.();
+            if (runtimeSession?.authenticated) {
                 window.location.replace('chat.html');
                 return true;
             }
 
-            // ── STEP 2: No local session — show login form ──────────────────────
-            console.log('[MoodChat] No saved session — showing login form');
+            const token = window.SessionState.getToken();
+            const user = window.SessionState.getUser();
+            const isLoggedIn = localStorage.getItem('isLoggedIn') === 'true';
+            if (isLoggedIn && token && token.length > 20 && user) {
+                window.currentUser = user;
+                window.location.href = 'chat.html';
+                return true;
+            }
+            if (token && token.length > 20) {
+                if (user) {
+                    window.currentUser = user;
+                    document.getElementById('authPanel').classList.add('show-auth');
+                    switchForm('dashboard');
+                    document.getElementById('dashboardGreeting').textContent = `Welcome, ${user.displayName || user.username || 'User'}!`;
+                    document.getElementById('dashboardEmail').textContent = user.email || '';
+                    document.getElementById('dashboardAvatar').textContent = (user.displayName || user.username || 'U').charAt(0).toUpperCase();
+                    const quickCard = document.getElementById('quickLoginCard');
+                    if (quickCard) {
+                        document.getElementById('quickLoginName').textContent = `Welcome back, ${user.displayName || user.username || 'User'}!`;
+                        document.getElementById('quickLoginEmail').textContent = user.email || '';
+                        document.getElementById('quickLoginAvatar').textContent = (user.displayName || user.username || 'U').charAt(0).toUpperCase();
+                        quickCard.classList.add('visible');
+                    }
+                    return true;
+                }
+            }
+            // No saved session — reveal the auth panel now and show login form
+            document.getElementById('authPanel').classList.add('show-auth');
             switchForm('login');
-            _showAuthPanel();  // fade in auth panel, hide splash
             return false;
         }
         
@@ -2557,19 +2379,8 @@
                     window.SessionState.clearToken();
                     window.SessionState.clearUser();
                     if (window.SessionManager) window.SessionManager.logout(false);
-                    // Clear all session storage on explicit logout
-                    localStorage.removeItem('kynecta_auth');
-                    localStorage.removeItem('isLoggedIn');
-                    localStorage.removeItem('authToken');
-                    localStorage.removeItem('accessToken');
-                    localStorage.removeItem('token');
-                    localStorage.removeItem('USER_TOKEN');
-                    localStorage.removeItem('moodchat_token');
-                    localStorage.removeItem('currentUser');
-                    localStorage.removeItem('user');
                     window.CoreUtils.showNotification('Success', 'Logged out successfully', 'success');
                     switchForm('login');
-                    _showAuthPanel();
                 });
             }
             const enter = document.getElementById('enterChatBtn');
