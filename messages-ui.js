@@ -207,6 +207,8 @@
         _hasTriggeredInitialDataFetch: false,
         _pendingFetchTimer: null,
         _lastDataFetchAt: 0,
+        _lastLoggedLifecycleState: null,
+        _fetchRetryScheduled: false,
         
         init() {
             if (this._initialized) return this;
@@ -702,22 +704,37 @@
             const coreUserId = getMessagesCore()?.getCurrentUserId?.();
             
             if (coreHasSession && coreUserId && typeof coreUserId === 'number' && coreUserId !== 0) {
-                // FIX: If already ACTIVE with valid session, do nothing — no log, no re-trigger
+                // Already correct — skip entirely to avoid log/fetch cascade
                 if (this.state.sessionValid && this.state.lifecycleState === LIFECYCLE_STATES.ACTIVE) {
                     return false;
                 }
-                // Only log and act when state genuinely needs to change
-                this.state.sessionValid = true;
-                this.state.coreSessionValid = true;
-                this.state.lifecycleState = LIFECYCLE_STATES.ACTIVE;
-                this.state.sessionStatus = 'authenticated';
-                this._notifyListeners('sessionValid', true);
-                this._notifyListeners('lifecycleState', LIFECYCLE_STATES.ACTIVE);
-                this._updateLifecycleUI(LIFECYCLE_STATES.ACTIVE);
-                this._updateUIInteractionState(true);
-                this._updateConnectionUI(true, 'excellent');
-                this._triggerRealDataFetch();
-                return true;
+                if (!this.state.sessionValid || this.state.lifecycleState !== LIFECYCLE_STATES.ACTIVE) {
+                    console.log('[UIStateManager] Force syncing session state - core has valid session');
+                    this.state.sessionValid = true;
+                    this.state.coreSessionValid = true;
+                    this.state.lifecycleState = LIFECYCLE_STATES.ACTIVE;
+                    this.state.sessionStatus = 'authenticated';
+                    this._notifyListeners('sessionValid', true);
+                    this._notifyListeners('lifecycleState', LIFECYCLE_STATES.ACTIVE);
+                    this._updateLifecycleUI(LIFECYCLE_STATES.ACTIVE);
+                    this._updateUIInteractionState(true);
+                    this._updateConnectionUI(true, 'excellent');
+                    this._triggerRealDataFetch();
+                    return true;
+                } else if (this.state.sessionValid === false && coreHasSession) {
+                    console.log('[UIStateManager] Fixing mismatched session state - core has session but UI says false');
+                    this.state.sessionValid = true;
+                    this.state.coreSessionValid = true;
+                    this.state.lifecycleState = LIFECYCLE_STATES.ACTIVE;
+                    this.state.sessionStatus = 'authenticated';
+                    this._notifyListeners('sessionValid', true);
+                    this._notifyListeners('lifecycleState', LIFECYCLE_STATES.ACTIVE);
+                    this._updateLifecycleUI(LIFECYCLE_STATES.ACTIVE);
+                    this._updateUIInteractionState(true);
+                    this._updateConnectionUI(true, 'excellent');
+                    this._triggerRealDataFetch();
+                    return true;
+                }
             }
             return false;
         },
@@ -768,7 +785,10 @@
                 `);
             }
             
-            // FIX: Removed console.log — fires on every state notification causing spam
+            if (lifecycleState !== this._lastLoggedLifecycleState) {
+                console.log(`[messagesUI] Lifecycle: ${lifecycleState}`);
+                this._lastLoggedLifecycleState = lifecycleState;
+            }
             
             const hasSession = UIFailsafe.hasValidSession();
             this._updateUIInteractionState(info.action && hasSession);
@@ -809,14 +829,19 @@
             const coreIsActive = coreState?.state === 'ACTIVE';
             
             if (!coreIsActive) {
-                console.log('[messagesUI] Core not ACTIVE yet, scheduling retry for data fetch');
-                this._pendingFetchTimer = setTimeout(() => {
-                    this._pendingFetchTimer = null;
-                    const coreStateRetry = getMessagesCore()?.getState?.();
-                    if (coreStateRetry?.state === 'ACTIVE') {
-                        this._triggerRealDataFetch();
-                    }
-                }, 500);
+                // Schedule exactly ONE retry — no repeated logs.
+                // The messagesLifecycleChange event will fire this again once core is ACTIVE.
+                if (!this._fetchRetryScheduled) {
+                    this._fetchRetryScheduled = true;
+                    this._pendingFetchTimer = setTimeout(() => {
+                        this._pendingFetchTimer = null;
+                        this._fetchRetryScheduled = false;
+                        const retryState = getMessagesCore()?.getState?.();
+                        if (retryState?.state === 'ACTIVE') {
+                            this._triggerRealDataFetch();
+                        }
+                    }, 1000);
+                }
                 return;
             }
             
@@ -1057,76 +1082,57 @@
                     }
                 });
             });
-
-            // FIX: Render cached chats when offline/unauthenticated boot fires the cache event
-            window.addEventListener('kyn:offlineCacheLoaded', (e) => {
-                UIFailsafe.queueAction(() => {
-                    const convs = e.detail?.convs;
-                    if (!convs || !convs.length) return;
-                    // Render using whatever is available — no session required for display
-                    if (UIRenderer && UIRenderer.renderChatsList) {
-                        UIRenderer.renderChatsList(convs, null, 'all', {});
-                    } else {
-                        window.dispatchEvent(new CustomEvent('conversationsUpdated', {
-                            detail: { conversations: convs }
-                        }));
-                    }
-                });
-            });
-
-            // FIX: Also handle kyn:chatSynced to refresh list after background sync
-            window.addEventListener('kyn:chatSynced', () => {
-                UIFailsafe.queueAction(() => {
-                    const core = getMessagesCore();
-                    if (!core) return;
-                    const convs = core.getConversations ? core.getConversations() : [];
-                    if (convs && convs.length && UIRenderer && UIRenderer.renderChatsList) {
-                        UIRenderer.renderChatsList(
-                            convs,
-                            core.getCurrentConversation?.(),
-                            core.getCurrentCategory?.() || 'all',
-                            {}
-                        );
-                    }
-                });
-            });
             
             this._eventListenersSetup = true;
         },
 
         _startPeriodicSync() {
-            // FIX: Use slow interval (5s not 2s). Once ACTIVE+session is stable, stop entirely.
-            // All logging removed from steady-state path — only act on genuine state changes.
-            let _stableCount = 0;
-            const _interval = setInterval(() => {
+            setInterval(() => {
                 UIFailsafe.queueAction(() => {
-                    // Already fully stable — no work needed
-                    if (this.state.sessionValid && this.state.lifecycleState === LIFECYCLE_STATES.ACTIVE) {
-                        _stableCount++;
-                        // After 12 stable ticks (60s) stop polling entirely
-                        if (_stableCount >= 12) {
-                            clearInterval(_interval);
-                        }
-                        return;
-                    }
-                    _stableCount = 0;
-
-                    // Only run sync logic when something is actually wrong
                     this._forceSyncSessionState();
-
+                    
                     const lifecycleState = UIFailsafe.getLifecycleState();
-                    if (lifecycleState && lifecycleState !== 'UNKNOWN' && lifecycleState !== this.state.lifecycleState) {
+                    if (lifecycleState !== this.state.lifecycleState && lifecycleState !== 'UNKNOWN') {
                         this.state.lifecycleState = lifecycleState;
                         this._notifyListeners('lifecycleState', lifecycleState);
                         this._updateLifecycleUI(lifecycleState);
+                    } else if (lifecycleState === 'UNKNOWN' && this.state.coreSessionValid) {
+                        this.state.lifecycleState = LIFECYCLE_STATES.ACTIVE;
+                        this._notifyListeners('lifecycleState', LIFECYCLE_STATES.ACTIVE);
+                        this._updateLifecycleUI(LIFECYCLE_STATES.ACTIVE);
                     }
-
+                    
+                    const sessionValid = UIFailsafe.hasValidSession();
+                    if (sessionValid !== this.state.sessionValid) {
+                        console.log('[UIStateManager] Periodic sync - session valid changed:', { was: this.state.sessionValid, now: sessionValid });
+                        this.state.sessionValid = sessionValid;
+                        this._notifyListeners('sessionValid', sessionValid);
+                        if (sessionValid && this.state.lifecycleState !== LIFECYCLE_STATES.ACTIVE) {
+                            this.state.lifecycleState = LIFECYCLE_STATES.ACTIVE;
+                            this._notifyListeners('lifecycleState', LIFECYCLE_STATES.ACTIVE);
+                            this._updateLifecycleUI(LIFECYCLE_STATES.ACTIVE);
+                            this._updateUIInteractionState(true);
+                            this._triggerRealDataFetch();
+                        }
+                    } else if (sessionValid && !this.state.sessionValid) {
+                        console.log('[UIStateManager] Periodic sync - fixing mismatched session state');
+                        this.state.sessionValid = true;
+                        this._notifyListeners('sessionValid', true);
+                        if (this.state.lifecycleState !== LIFECYCLE_STATES.ACTIVE) {
+                            this.state.lifecycleState = LIFECYCLE_STATES.ACTIVE;
+                            this._notifyListeners('lifecycleState', LIFECYCLE_STATES.ACTIVE);
+                            this._updateLifecycleUI(LIFECYCLE_STATES.ACTIVE);
+                            this._updateUIInteractionState(true);
+                            this._triggerRealDataFetch();
+                        }
+                    }
+                    
                     if (UIFailsafe.isParentReady() && !this.state.parentReady) {
                         this.state.parentReady = true;
                         this._notifyListeners('parentReady', true);
                     }
                 });
-            }, 5000);
+            }, 2000);
         },
         
         _initializeActiveUI() {
@@ -1319,19 +1325,38 @@
         },
 
         _showOfflineUI() {
-            // FIX: Offline is fully silent — no banner, no blocking screen.
-            // Cached data is already in IndexedDB and renders normally.
-            // The kyn:offlineCacheLoaded event handles populating the chat list.
-            // We only set a data attribute so CSS can optionally style things.
-            try {
-                document.documentElement.setAttribute('data-network', 'offline');
-            } catch (_) {}
+            // FIX: Show a non-blocking amber banner — never hide or block the chat UI.
+            // The message list stays interactive using IndexedDB cached data.
+            let banner = document.getElementById('kyn-offline-banner');
+            if (!banner) {
+                banner = document.createElement('div');
+                banner.id = 'kyn-offline-banner';
+                banner.setAttribute('role', 'status');
+                banner.setAttribute('aria-live', 'polite');
+                banner.style.cssText = [
+                    'position:fixed',
+                    'top:0',
+                    'left:0',
+                    'right:0',
+                    'z-index:99999',
+                    'background:#d97706',
+                    'color:#fff',
+                    'text-align:center',
+                    'padding:6px 16px',
+                    'font-size:13px',
+                    'font-weight:500',
+                    'letter-spacing:0.01em',
+                    'pointer-events:none'
+                ].join(';');
+                document.body.appendChild(banner);
+            }
+            banner.textContent = 'Offline — showing cached data';
+            banner.style.display = 'block';
         },
 
         _hideOfflineUI() {
-            try {
-                document.documentElement.setAttribute('data-network', 'online');
-            } catch (_) {}
+            const banner = document.getElementById('kyn-offline-banner');
+            if (banner) banner.style.display = 'none';
         },
 
         getFullState() {
@@ -3264,23 +3289,19 @@ Type: ${message.type || 'text'}`;
         },
 
         _canPerformAction(actionName) {
-            // FIX: Primary gate is session validity — lifecycle state can be transiently
-            // INITIALIZING during periodic sync without blocking user actions.
             if (UIFailsafe.hasValidSession()) {
                 return true;
             }
-
-            // Secondary: check actual core state directly (not cached UIStateManager state
-            // which may lag behind the interval)
-            const core = getMessagesCore();
-            if (core && core.isAuthenticated && core.isAuthenticated()) {
-                return true;
+            
+            const lifecycleState = UIStateManager.getState('lifecycleState');
+            const sessionValid = UIStateManager.getState('sessionValid');
+            
+            if (lifecycleState !== LIFECYCLE_STATES.ACTIVE || !sessionValid) {
+                UILogger.warn('UIEventHandlers', `Action '${actionName}' blocked - not ACTIVE or no valid session (state: ${lifecycleState}, sessionValid: ${sessionValid})`);
+                this._showPassiveNotification(`Please wait while connection is established...`);
+                return false;
             }
-
-            // Genuinely not ready
-            UILogger.warn('UIEventHandlers', `Action '${actionName}' blocked — no valid session`);
-            this._showPassiveNotification('Please wait while connection is established...');
-            return false;
+            return true;
         },
         
         _showPassiveNotification(message) {
@@ -3310,13 +3331,6 @@ Type: ${message.type || 'text'}`;
                         if (chatPanel) UIFailsafe.safeAddClass(chatPanel, 'hidden');
                         if (sidebar) UIFailsafe.safeAddClass(sidebar, 'active');
                         UIStateManager.setState('chatVisible', false);
-                        // FIX: Notify parent to remove chat-panel-active so mobile nav reappears
-                        try { window.dispatchEvent(new CustomEvent('chatListShown')); } catch (_) {}
-                        try {
-                            if (window.parent && window.parent !== window) {
-                                window.parent.postMessage({ type: 'CHAT_LIST_SHOWN', timestamp: Date.now() }, '*');
-                            }
-                        } catch (_) {}
                     });
                 });
             }
@@ -4301,6 +4315,23 @@ Type: ${message.type || 'text'}`;
             
             if (!content && !attachment) return;
 
+            // If core has no active conversation yet (e.g. opened from calls module),
+            // try to resolve and register one before sending.
+            let activeConv = core?.getCurrentConversation?.();
+            if (!activeConv) {
+                const friendName = window.currentFriendName;
+                const conversations = core?.getConversations?.() || [];
+                // Try to find by name or the last-displayed name in the header
+                const headerName = document.getElementById('chatFriendName')?.textContent?.trim();
+                activeConv = conversations.find(c =>
+                    (friendName && (c.friendName === friendName || c.name === friendName)) ||
+                    (headerName && (c.friendName === headerName || c.name === headerName))
+                );
+                if (activeConv && core?.openConversation) {
+                    await core.openConversation(activeConv.id, { minFetchGap: 60000 }).catch(() => {});
+                }
+            }
+
             const result = core?.sendMessage(content, {
                 type: attachment?.type || 'text',
                 attachment: attachment
@@ -4871,15 +4902,8 @@ Type: ${message.type || 'text'}`;
         const sidebar = document.getElementById('sidebar');
         const contactsSidebar = document.getElementById('contactsSidebar');
         
-        if (contactsSidebar) { contactsSidebar.classList.add('hidden'); contactsSidebar.style.pointerEvents = 'none'; }
-        // FIX: On mobile the sidebar must HIDE when chat panel opens; on desktop it stays visible
-        if (sidebar) {
-            if (window.innerWidth <= 768) {
-                sidebar.classList.remove('active');
-            } else {
-                sidebar.classList.add('active');
-            }
-        }
+        if (contactsSidebar) contactsSidebar.classList.add('hidden');
+        if (sidebar) sidebar.classList.add('active');
         if (chatPanel) {
             chatPanel.classList.remove('hidden');
             UIStateManager.setState('chatVisible', true);
@@ -5413,33 +5437,20 @@ Type: ${message.type || 'text'}`;
                 return;
             }
 
-            const existingConversation = core.getConversations?.()?.find?.((conversation) => {
-                if (conversation?.type === 'group') return false;
-                const sid = String(id);
-                if (String(conversation?.friendId)              === sid) return true;
-                if (String(conversation?.otherParticipant?.id)  === sid) return true;
-                if (String(conversation?.otherUserId)           === sid) return true;
-                if (String(conversation?.userId)                === sid) return true;
-                if (String(conversation?.recipientId)           === sid) return true;
-                if (String(conversation?.pendingReceiverId)     === sid) return true;
-                if (Array.isArray(conversation?.participants) &&
-                    conversation.participants.some(p => String(p?.id || p) === sid)) return true;
-                return false;
-            });
+            const existingConversation = core.getConversations?.()?.find?.((conversation) =>
+                String(conversation?.friendId) === String(id) ||
+                String(conversation?.otherParticipant?.id) === String(id) ||
+                String(conversation?.otherUserId) === String(id) ||
+                String(conversation?.userId) === String(id) ||
+                (Array.isArray(conversation?.participants) && conversation.participants.some((participant) => String(participant?.id || participant) === String(id)))
+            );
 
             const contactsSidebar = document.getElementById('contactsSidebar');
             const sidebar = document.getElementById('sidebar');
             const chatPanel = document.getElementById('chatPanel');
             
             if (contactsSidebar) { contactsSidebar.classList.add('hidden'); contactsSidebar.style.pointerEvents = 'none'; }
-            // FIX: On mobile sidebar should hide when chat opens; desktop keeps sidebar visible
-            if (sidebar) {
-                if (window.innerWidth <= 768) {
-                    sidebar.classList.remove('active');
-                } else {
-                    sidebar.classList.add('active');
-                }
-            }
+            if (sidebar) sidebar.classList.add('active');
             
             const nameEl = document.getElementById('chatFriendName');
             if (nameEl) {
@@ -5525,27 +5536,27 @@ Type: ${message.type || 'text'}`;
                 return;
             }
 
+            // No existing conversation — create one, then call openConversation so the
+            // core registers it as the active chat (required for send button to work).
+            const _afterCreate = (conversationId) => {
+                ensureChatPanelOpen(conversationId);
+                // Ensure core knows this is the active conversation
+                const coreInst = getMessagesCore();
+                if (coreInst && conversationId && typeof coreInst.openConversation === 'function') {
+                    coreInst.openConversation(conversationId, { minFetchGap: 25000 }).catch?.(() => {});
+                }
+            };
+
             if (core.ConversationManager?.createConversation) {
                 console.log('[messagesUI] Using ConversationManager.createConversation');
                 const result = core.ConversationManager.createConversation([id]);
-                
                 if (result && typeof result.then === 'function') {
                     result.then((conversation) => {
-                        console.log('[messagesUI] Conversation created/opened:', conversation);
-                        if (conversation === false || conversation === null) {
-                            console.log('[messagesUI] createConversation returned false, opening panel anyway');
-                            ensureChatPanelOpen(id);
-                        } else {
-                            const conversationId = conversation?.id || conversation;
-                            ensureChatPanelOpen(conversationId);
-                        }
-                    }).catch((error) => {
-                        console.error('[messagesUI] Failed to create conversation:', error);
-                        ensureChatPanelOpen(id);
-                    });
+                        const conversationId = (conversation === false || conversation === null) ? id : (conversation?.id || conversation);
+                        _afterCreate(conversationId);
+                    }).catch(() => _afterCreate(id));
                 } else {
-                    const conversationId = (result === false || result === null) ? id : (result?.id || result);
-                    ensureChatPanelOpen(conversationId);
+                    _afterCreate((result === false || result === null) ? id : (result?.id || result));
                 }
             } else if (core.createConversation) {
                 console.log('[messagesUI] Using core.createConversation');
@@ -5553,13 +5564,10 @@ Type: ${message.type || 'text'}`;
                 if (result && typeof result.then === 'function') {
                     result.then((conversation) => {
                         const conversationId = (conversation === false || conversation === null) ? id : (conversation?.id || conversation);
-                        ensureChatPanelOpen(conversationId);
-                    }).catch(() => {
-                        ensureChatPanelOpen(id);
-                    });
+                        _afterCreate(conversationId);
+                    }).catch(() => _afterCreate(id));
                 } else {
-                    const conversationId = (result === false || result === null) ? id : (result?.id || result);
-                    ensureChatPanelOpen(conversationId);
+                    _afterCreate((result === false || result === null) ? id : (result?.id || result));
                 }
             } else if (core.openConversation) {
                 console.log('[messagesUI] Using core.openConversation');

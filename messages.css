@@ -3175,12 +3175,21 @@ body {
    MODULE HEADER BARS — BLUE for navigation, GREEN for communication
    ================================================================ */
 
-/* Chat / Messages header → BLUE (navigation) */
+/* Chat / Messages sidebar header → BLUE (navigation) */
 .sidebar-header,
-.chat-header,
-.new-chat-header,
 .new-call-header {
   background: var(--header-chat) !important;
+}
+
+/* Chat panel header — keep plain background so call/video icons stay visible */
+.chat-header {
+  background: var(--bg-color) !important;
+  color: var(--text-primary) !important;
+}
+
+/* new-chat-header (contacts panel) stays neutral */
+.new-chat-header {
+  background: var(--bg-color) !important;
 }
 
 /* Calls sidebar header → GREEN (communication) */

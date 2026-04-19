@@ -1276,8 +1276,7 @@
         <!-- Chat Panel -->
         <div class="chat-panel hidden" id="chatPanel">
             <div class="chat-header">
-                <button class="chat-action-btn back-btn" id="backToChatsBtn">
-                    <i class="fas fa-arrow-left"></i>
+                <button class="chat-action-btn back-btn" id="backToChatsBtn" aria-label="Back to chats">
                 </button>
                 <div class="chat-info" style="cursor:pointer;" onclick="window.messagesUI?.viewReceiverProfile()">
                     <div class="chat-avatar" id="chatFriendAvatar">
@@ -1870,17 +1869,17 @@
             // Handle opening chat with specific user
             if (data.type === 'OPEN_CHAT_WITH_USER') {
                 console.log('[Message HTML] Opening chat with user:', data.payload);
-
-                const { userId, userName, recipientId, recipientName } = data.payload || {};
+                
+                const { userId, userName, recipientId, recipientName } = data.payload;
                 const targetUserId = userId || recipientId;
                 const targetUserName = userName || recipientName || 'User';
-
+                
                 if (!targetUserId) {
                     console.error('[Message HTML] No userId provided');
                     return;
                 }
-
-                // Always persist to sessionStorage — lifecycle ACTIVE handler will replay
+                
+                // Store in sessionStorage as fallback
                 sessionStorage.setItem('open_chat_on_load', JSON.stringify({
                     userId: targetUserId,
                     userName: targetUserName,
@@ -1888,59 +1887,23 @@
                     source: 'parent-message',
                     environment: environment
                 }));
-
-                // Fire UI event immediately in case core is already ready
-                window.dispatchEvent(new CustomEvent('messages:openChat', {
-                    detail: {
-                        userId: targetUserId,
-                        userName: targetUserName,
-                        recipientId: targetUserId,
-                        recipientName: targetUserName
-                    }
-                }));
-
-                // FIX: Retry calling core until it reports ready — replaces single 100ms attempt
-                // which raced against the ACTIVE lifecycle state and lost silently
-                let _openChatAttempts = 0;
-                const _tryOpenChat = () => {
-                    const core = window.messagesCore;
-                    const coreReady = core && (
-                        (typeof core.isReady === 'function' && core.isReady()) ||
-                        (typeof core.waitForBoot === 'function' && core._state === 'ACTIVE') ||
-                        core._isActive === true
-                    );
-                    if (coreReady && typeof core.createConversation === 'function') {
-                        console.log('[Message HTML] Core ready — opening chat with:', targetUserId);
-                        core.createConversation(
-                            [parseInt(targetUserId, 10)],
-                            { name: targetUserName, type: 'direct' }
-                        );
-                        sessionStorage.removeItem('open_chat_on_load');
-                    } else if (_openChatAttempts < 50) {
-                        _openChatAttempts++;
-                        setTimeout(_tryOpenChat, 300);
-                    } else {
-                        console.warn('[Message HTML] Core never became ready — chat will open on next ACTIVE event');
-                    }
+                
+                // Dispatch custom event for UI/core to handle
+                const eventDetail = {
+                    userId: targetUserId,
+                    userName: targetUserName,
+                    recipientId: targetUserId,
+                    recipientName: targetUserName
                 };
-                _tryOpenChat();
-
-                // Also listen for messagesCoreReady in case we missed the ACTIVE transition
-                window.addEventListener('messagesCoreReady', function _onCoreReady() {
-                    window.removeEventListener('messagesCoreReady', _onCoreReady);
-                    const raw = sessionStorage.getItem('open_chat_on_load');
-                    if (!raw) return; // already handled by retry loop above
-                    try {
-                        const pending = JSON.parse(raw);
-                        if (pending && pending.userId && window.messagesCore?.createConversation) {
-                            sessionStorage.removeItem('open_chat_on_load');
-                            window.messagesCore.createConversation(
-                                [parseInt(pending.userId, 10)],
-                                { name: pending.userName || 'User', type: 'direct' }
-                            );
-                        }
-                    } catch (_e) {}
-                }, { once: true });
+                
+                window.dispatchEvent(new CustomEvent('messages:openChat', { detail: eventDetail }));
+                
+                // Also try to call core directly if available
+                if (window.messagesCore && window.messagesCore.createConversation) {
+                    setTimeout(() => {
+                        window.messagesCore.createConversation([targetUserId]);
+                    }, 100);
+                }
             }
         });
         
@@ -2072,31 +2035,7 @@
             console.log('[Message HTML] Core ready, checking for pending chat again');
             checkSessionStorageForPendingChat();
         });
-
-        // FIX: When messages-core opens a chat panel, ACK back to parent so:
-        //  1. Parent stops its retry postMessage loops (pending_chat cleared)
-        //  2. Parent applies chat-panel-active CSS class for mobile nav hiding
-        window.addEventListener('chatPanelOpened', function(e) {
-            try {
-                // Clear both storage keys so parent and core retry loops stop
-                sessionStorage.removeItem('pending_chat');
-                sessionStorage.removeItem('open_chat_on_load');
-                // Notify parent shell
-                if (window.parent && window.parent !== window) {
-                    window.parent.postMessage({ type: 'CHAT_OPENED', timestamp: Date.now() }, '*');
-                }
-            } catch (_e) {}
-        });
-
-        // FIX: Also catch the back-to-list event so parent removes chat-panel-active
-        window.addEventListener('chatListShown', function() {
-            try {
-                if (window.parent && window.parent !== window) {
-                    window.parent.postMessage({ type: 'CHAT_LIST_SHOWN', timestamp: Date.now() }, '*');
-                }
-            } catch (_e) {}
-        });
-
+        
         console.log(`[Message HTML] Parent communication initialized. Environment: ${environment}, Host: ${hostname}`);
     })();
     </script>
