@@ -1,433 +1,256 @@
 /**
- * localStore.calls.js
- * Local-first call history storage using IndexedDB with localStorage fallback.
- * NEVER stores active call sessions — only completed call history records.
- * @version 1.0.0
+ * localStore.calls.js  (Offline-First Edition v2)
+ * ─────────────────────────────────────────────────────────────────────────────
+ * Call-history local storage.  Uses the shared AppCache (app.cache.js) as its
+ * SINGLE storage back-end instead of maintaining a private IndexedDB database.
+ *
+ * Standard interface exposed on window.KynectaCallLocalStore:
+ *   getAll()          — all call records
+ *   getById(id)       — single record by local id
+ *   save(record)      — upsert (create or full replace)
+ *   update(id, patch) — partial update
+ *   delete(id)        — remove record
+ *
+ * Additional helpers (backwards-compatible):
+ *   createCall(data)          — create a new initiated call record
+ *   getHistory(opts)          — filtered / sorted list
+ *   getMissedCalls(userId)    — unread missed calls
+ *   markAsRead(id)            — set readAt timestamp
+ *   updateFields(id, fields)  — alias for update()
+ *   updateStatus(id, status)  — smart status patch with duration calc
+ *   linkServerId(localId, serverId)
+ *   clearAll()                — logout wipe
+ *   prune()                   — trim to MAX_RECORDS
+ *   count()                   — record count
+ *   generateId()              — expose id generator
+ *
+ * @version 2.0.0
  */
-
 (function () {
-    'use strict';
+  'use strict';
 
-    const DB_NAME    = 'kynecta_calls_db';
-    const DB_VERSION = 1;
-    const STORE_NAME = 'call_history';
-    const LS_KEY     = 'kynecta_call_history_fallback';
-    const MAX_RECORDS = 500;
+  const COLLECTION  = 'calls';
+  const MAX_RECORDS = 500;
 
-    // ── Minimal UUID generator (no crypto dependency) ────────────────────────
-    function generateLocalId() {
-        return 'local-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9);
+  /* ── ID generator ───────────────────────────────────────────────────────── */
+  function generateLocalId() {
+    if (window.crypto && typeof window.crypto.randomUUID === 'function') {
+      return 'call_' + window.crypto.randomUUID();
     }
+    return 'call-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9);
+  }
 
-    // ── IndexedDB wrapper ────────────────────────────────────────────────────
-    class CallHistoryDB {
-        constructor() {
-            this._db   = null;
-            this._ready = false;
-            this._queue = [];
-            this._fallback = false;
-            this._init();
+  /* ── Wait for AppCache to be available ──────────────────────────────────── */
+  function getCache() {
+    if (window.AppCache) return Promise.resolve(window.AppCache);
+    return new Promise((resolve, reject) => {
+      let tries = 0;
+      const timer = setInterval(() => {
+        tries++;
+        if (window.AppCache) { clearInterval(timer); resolve(window.AppCache); return; }
+        if (tries >= 100) {
+          clearInterval(timer);
+          reject(new Error('[CallLocalStore] AppCache never became available'));
         }
+      }, 50);
+    });
+  }
 
-        _init() {
-            if (!window.indexedDB) {
-                console.warn('[CallLocalStore] IndexedDB unavailable — using localStorage fallback');
-                this._fallback = true;
-                this._ready    = true;
-                this._drainQueue();
-                return;
-            }
+  /* ── Normalise a raw call record ────────────────────────────────────────── */
+  function normalise(raw) {
+    const r = raw || {};
+    return {
+      id:          r.id          || generateLocalId(),
+      serverId:    r.serverId    || null,
+      callerId:    r.callerId    || null,
+      receiverId:  r.receiverId  || null,
+      type:        r.type        || 'audio',
+      status:      r.status      || 'initiated',
+      duration:    r.duration    || 0,
+      startedAt:   r.startedAt   || null,
+      endedAt:     r.endedAt     || null,
+      isLocalOnly: r.isLocalOnly !== false,
+      isGroupCall: r.isGroupCall || false,
+      participants:r.participants || [],
+      callerName:  r.callerName  || null,
+      callerAvatar:r.callerAvatar|| null,
+      createdAt:   r.createdAt   || Date.now(),
+      updatedAt:   Date.now(),
+      metadata:    r.metadata    || {},
+      readAt:      r.readAt      || null
+    };
+  }
 
-            const req = window.indexedDB.open(DB_NAME, DB_VERSION);
+  /* ── Public API ──────────────────────────────────────────────────────────── */
+  const KynectaCallLocalStore = {
 
-            req.onupgradeneeded = (e) => {
-                const db    = e.target.result;
-                if (!db.objectStoreNames.contains(STORE_NAME)) {
-                    const store = db.createObjectStore(STORE_NAME, { keyPath: 'id' });
-                    store.createIndex('by_status',    'status',    { unique: false });
-                    store.createIndex('by_startedAt', 'startedAt', { unique: false });
-                    store.createIndex('by_callerId',  'callerId',  { unique: false });
-                    store.createIndex('by_receiverId','receiverId',{ unique: false });
-                }
-            };
+    /* ── Standard interface ──────────────────────────────────────────────── */
 
-            req.onsuccess = (e) => {
-                this._db    = e.target.result;
-                this._ready = true;
-                console.log('[CallLocalStore] ✅ IndexedDB ready');
-                this._drainQueue();
-            };
+    /** Return all call history records (newest first). */
+    async getAll() {
+      const cache = await getCache();
+      const records = await cache.getAll(COLLECTION);
+      return records.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+    },
 
-            req.onerror = (e) => {
-                console.warn('[CallLocalStore] IndexedDB open failed — falling back to localStorage', e.target.error);
-                this._fallback = true;
-                this._ready    = true;
-                this._drainQueue();
-            };
-        }
-
-        _drainQueue() {
-            while (this._queue.length) {
-                const { fn, resolve, reject } = this._queue.shift();
-                fn().then(resolve).catch(reject);
-            }
-        }
-
-        _exec(fn) {
-            if (this._ready) return fn();
-            return new Promise((resolve, reject) => {
-                this._queue.push({ fn, resolve, reject });
-            });
-        }
-
-        // ── localStorage fallback helpers ────────────────────────────────────
-        _lsLoad() {
-            try {
-                const raw = localStorage.getItem(LS_KEY);
-                return raw ? JSON.parse(raw) : [];
-            } catch { return []; }
-        }
-
-        _lsSave(records) {
-            try {
-                // Trim to MAX_RECORDS
-                const trimmed = records.slice(-MAX_RECORDS);
-                localStorage.setItem(LS_KEY, JSON.stringify(trimmed));
-            } catch (e) {
-                console.warn('[CallLocalStore] localStorage save failed', e.message);
-            }
-        }
-
-        // ── Public CRUD API ──────────────────────────────────────────────────
-
-        /**
-         * Save or update a call record.
-         * If record.id already exists it is fully replaced (upsert).
-         */
-        save(record) {
-            return this._exec(() => {
-                if (!record || !record.id) {
-                    return Promise.reject(new Error('Record must have an id'));
-                }
-                // Ensure required fields have defaults
-                const normalized = {
-                    id:          record.id,
-                    serverId:    record.serverId    || null,
-                    callerId:    record.callerId    || null,
-                    receiverId:  record.receiverId  || null,
-                    type:        record.type        || 'audio',
-                    status:      record.status      || 'initiated',
-                    duration:    record.duration    || 0,
-                    startedAt:   record.startedAt   || null,
-                    endedAt:     record.endedAt     || null,
-                    isLocalOnly: record.isLocalOnly !== false,
-                    isGroupCall: record.isGroupCall || false,
-                    participants:record.participants|| [],
-                    callerName:  record.callerName  || null,
-                    callerAvatar:record.callerAvatar|| null,
-                    createdAt:   record.createdAt   || Date.now(),
-                    updatedAt:   Date.now(),
-                    metadata:    record.metadata    || {}
-                };
-
-                if (this._fallback) {
-                    const records = this._lsLoad();
-                    const idx     = records.findIndex(r => r.id === normalized.id);
-                    if (idx >= 0) records[idx] = normalized;
-                    else          records.push(normalized);
-                    this._lsSave(records);
-                    return Promise.resolve(normalized);
-                }
-
-                return new Promise((resolve, reject) => {
-                    const tx  = this._db.transaction(STORE_NAME, 'readwrite');
-                    const req = tx.objectStore(STORE_NAME).put(normalized);
-                    req.onsuccess = () => resolve(normalized);
-                    req.onerror   = (e) => reject(e.target.error);
-                });
-            });
-        }
-
-        /**
-         * Get a single call record by local id.
-         */
-        getById(id) {
-            return this._exec(() => {
-                if (this._fallback) {
-                    const found = this._lsLoad().find(r => r.id === id) || null;
-                    return Promise.resolve(found);
-                }
-                return new Promise((resolve, reject) => {
-                    const tx  = this._db.transaction(STORE_NAME, 'readonly');
-                    const req = tx.objectStore(STORE_NAME).get(id);
-                    req.onsuccess = () => resolve(req.result || null);
-                    req.onerror   = (e) => reject(e.target.error);
-                });
-            });
-        }
-
-        /**
-         * Get recent call history, newest first.
-         * @param {Object} options  { limit, status, callerId, receiverId }
-         */
-        getHistory(options = {}) {
-            const limit = options.limit || 100;
-
-            return this._exec(() => {
-                if (this._fallback) {
-                    let records = this._lsLoad();
-                    if (options.status)     records = records.filter(r => r.status === options.status);
-                    if (options.callerId)   records = records.filter(r => r.callerId   == options.callerId);
-                    if (options.receiverId) records = records.filter(r => r.receiverId == options.receiverId);
-                    records.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
-                    return Promise.resolve(records.slice(0, limit));
-                }
-
-                return new Promise((resolve, reject) => {
-                    const tx      = this._db.transaction(STORE_NAME, 'readonly');
-                    const store   = tx.objectStore(STORE_NAME);
-                    const results = [];
-                    const req     = store.index('by_startedAt').openCursor(null, 'prev');
-
-                    req.onsuccess = (e) => {
-                        const cursor = e.target.result;
-                        if (!cursor || results.length >= limit) {
-                            resolve(results);
-                            return;
-                        }
-                        const r = cursor.value;
-                        let match = true;
-                        if (options.status     && r.status     !== options.status)       match = false;
-                        if (options.callerId   && r.callerId   != options.callerId)      match = false;
-                        if (options.receiverId && r.receiverId != options.receiverId)    match = false;
-                        if (match) results.push(r);
-                        cursor.continue();
-                    };
-                    req.onerror = (e) => reject(e.target.error);
-                });
-            });
-        }
-
-        /**
-         * Get all missed calls for a userId that have not been read.
-         */
-        getMissedCalls(userId) {
-            return this._exec(async () => {
-                const all = await this.getHistory({ status: 'missed', receiverId: userId });
-                return all.filter(r => !r.readAt);
-            });
-        }
-
-        /**
-         * Mark a call as read (seen by receiver).
-         */
-        markAsRead(id) {
-            return this._exec(async () => {
-                const record = await this.getById(id);
-                if (!record) return null;
-                record.readAt    = Date.now();
-                record.updatedAt = Date.now();
-                return this.save(record);
-            });
-        }
-
-        /**
-         * Update only specific fields on a call record.
-         */
-        updateFields(id, fields) {
-            return this._exec(async () => {
-                const record = await this.getById(id);
-                if (!record) {
-                    // Create minimal record if not found
-                    return this.save({ id, ...fields });
-                }
-                return this.save({ ...record, ...fields, id });
-            });
-        }
-
-        /**
-         * Delete a call record by id.
-         */
-        delete(id) {
-            return this._exec(() => {
-                if (this._fallback) {
-                    const records = this._lsLoad().filter(r => r.id !== id);
-                    this._lsSave(records);
-                    return Promise.resolve(true);
-                }
-                return new Promise((resolve, reject) => {
-                    const tx  = this._db.transaction(STORE_NAME, 'readwrite');
-                    const req = tx.objectStore(STORE_NAME).delete(id);
-                    req.onsuccess = () => resolve(true);
-                    req.onerror   = (e) => reject(e.target.error);
-                });
-            });
-        }
-
-        /**
-         * Clear ALL call history (used for logout / data reset).
-         */
-        clearAll() {
-            return this._exec(() => {
-                if (this._fallback) {
-                    localStorage.removeItem(LS_KEY);
-                    return Promise.resolve(true);
-                }
-                return new Promise((resolve, reject) => {
-                    const tx  = this._db.transaction(STORE_NAME, 'readwrite');
-                    const req = tx.objectStore(STORE_NAME).clear();
-                    req.onsuccess = () => resolve(true);
-                    req.onerror   = (e) => reject(e.target.error);
-                });
-            });
-        }
-
-        /**
-         * Count total records.
-         */
-        count() {
-            return this._exec(() => {
-                if (this._fallback) {
-                    return Promise.resolve(this._lsLoad().length);
-                }
-                return new Promise((resolve, reject) => {
-                    const tx  = this._db.transaction(STORE_NAME, 'readonly');
-                    const req = tx.objectStore(STORE_NAME).count();
-                    req.onsuccess = () => resolve(req.result);
-                    req.onerror   = (e) => reject(e.target.error);
-                });
-            });
-        }
-
-        /**
-         * Prune oldest records to stay under MAX_RECORDS.
-         */
-        prune() {
-            return this._exec(async () => {
-                const total = await this.count();
-                if (total <= MAX_RECORDS) return 0;
-
-                const toDelete = total - MAX_RECORDS;
-
-                if (this._fallback) {
-                    const records = this._lsLoad();
-                    records.sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
-                    const pruned = records.splice(0, toDelete);
-                    this._lsSave(records);
-                    return pruned.length;
-                }
-
-                // Get oldest records by startedAt
-                const oldest = await new Promise((resolve, reject) => {
-                    const tx      = this._db.transaction(STORE_NAME, 'readonly');
-                    const results = [];
-                    const req     = tx.objectStore(STORE_NAME).index('by_startedAt').openCursor(null, 'next');
-                    req.onsuccess = (e) => {
-                        const cursor = e.target.result;
-                        if (!cursor || results.length >= toDelete) { resolve(results); return; }
-                        results.push(cursor.value.id);
-                        cursor.continue();
-                    };
-                    req.onerror = (e) => reject(e.target.error);
-                });
-
-                await Promise.all(oldest.map(id => this.delete(id)));
-                return oldest.length;
-            });
-        }
-    }
-
-    // ── Singleton ────────────────────────────────────────────────────────────
-    const db = new CallHistoryDB();
+    /** Get a single record by its local id. */
+    async getById(id) {
+      if (!id) return null;
+      const cache = await getCache();
+      return cache.get(COLLECTION, String(id));
+    },
 
     /**
-     * Public API — window.KynectaCallLocalStore
+     * Upsert a call record (create or full replace).
+     * @param {Object} record — must have an id field
      */
-    window.KynectaCallLocalStore = {
-        /**
-         * Create a new local call record (status = 'initiated').
-         * Returns the saved record with a generated local id.
-         */
-        createCall(data = {}) {
-            const record = {
-                id:          generateLocalId(),
-                serverId:    data.serverId    || null,
-                callerId:    data.callerId    || null,
-                receiverId:  data.receiverId  || null,
-                type:        data.type        || 'audio',
-                status:      'initiated',
-                duration:    0,
-                startedAt:   null,
-                endedAt:     null,
-                isLocalOnly: true,
-                isGroupCall: data.isGroupCall || false,
-                participants:data.participants|| [],
-                callerName:  data.callerName  || null,
-                callerAvatar:data.callerAvatar|| null,
-                createdAt:   Date.now(),
-                updatedAt:   Date.now(),
-                metadata:    data.metadata    || {}
-            };
-            return db.save(record);
-        },
+    async save(record) {
+      if (!record) return null;
+      const cache = await getCache();
+      const normalised = normalise(record);
+      return cache.save(COLLECTION, normalised);
+    },
 
-        /** Save / update any call record. */
-        save: (record)        => db.save(record),
+    /**
+     * Partial update — merges fields onto the existing record.
+     * @param {string} id
+     * @param {Object} patch
+     */
+    async update(id, patch) {
+      if (!id) return null;
+      const cache = await getCache();
+      const existing = await cache.get(COLLECTION, String(id));
+      if (!existing) {
+        // Create minimal record if not found (forward-compatible)
+        return cache.save(COLLECTION, normalise({ id, ...patch }));
+      }
+      return cache.save(COLLECTION, normalise({ ...existing, ...patch, id: existing.id }));
+    },
 
-        /** Get by local id. */
-        getById: (id)         => db.getById(id),
+    /** Remove a record by id. */
+    async delete(id) {
+      if (!id) return false;
+      const cache = await getCache();
+      return cache.remove(COLLECTION, String(id));
+    },
 
-        /** Get history with optional filters. */
-        getHistory: (opts)    => db.getHistory(opts),
+    /* ── Extended helpers (backwards-compatible) ──────────────────────── */
 
-        /** Get all missed, unread calls for a userId. */
-        getMissedCalls: (uid) => db.getMissedCalls(uid),
+    /**
+     * Create a brand-new call record with status 'initiated'.
+     * @param {Object} data
+     * @returns {Promise<Object>} saved record
+     */
+    async createCall(data = {}) {
+      return this.save({ ...data, id: generateLocalId(), status: 'initiated', isLocalOnly: true });
+    },
 
-        /** Mark call as read. */
-        markAsRead: (id)      => db.markAsRead(id),
+    /**
+     * Get filtered / sorted call history.
+     * @param {Object} opts  { limit, status, callerId, receiverId }
+     */
+    async getHistory(opts = {}) {
+      let records = await this.getAll();
+      if (opts.status)     records = records.filter(r => r.status     === opts.status);
+      if (opts.callerId)   records = records.filter(r => String(r.callerId)   === String(opts.callerId));
+      if (opts.receiverId) records = records.filter(r => String(r.receiverId) === String(opts.receiverId));
+      const limit = opts.limit || 100;
+      return records.slice(0, limit);
+    },
 
-        /** Patch specific fields only. */
-        updateFields: (id, fields) => db.updateFields(id, fields),
+    /** Unread missed calls for a userId. */
+    async getMissedCalls(userId) {
+      const records = await this.getHistory({ status: 'missed', receiverId: userId });
+      return records.filter(r => !r.readAt);
+    },
 
-        /** Update the status of a call and compute duration if ending. */
-        async updateStatus(id, status, extra = {}) {
-            const record = await db.getById(id);
-            if (!record) return db.save({ id, status, ...extra, updatedAt: Date.now() });
+    /** Mark a call as seen by receiver. */
+    async markAsRead(id) {
+      return this.update(id, { readAt: Date.now() });
+    },
 
-            const patch = { status, updatedAt: Date.now(), ...extra };
+    /** Alias for update() — patch specific fields only. */
+    async updateFields(id, fields) {
+      return this.update(id, fields);
+    },
 
-            if (status === 'connected' && !record.startedAt) {
-                patch.startedAt = Date.now();
-            }
-            if (['ended', 'missed', 'rejected', 'failed', 'cancelled'].includes(status)) {
-                patch.endedAt = patch.endedAt || Date.now();
-                if (record.startedAt && !extra.duration) {
-                    patch.duration = Math.floor((patch.endedAt - record.startedAt) / 1000);
-                }
-            }
-            return db.save({ ...record, ...patch });
-        },
+    /**
+     * Smart status update — computes duration automatically when ending.
+     * @param {string} id
+     * @param {string} status
+     * @param {Object} extra
+     */
+    async updateStatus(id, status, extra = {}) {
+      const record = await this.getById(id);
+      const patch  = { status, updatedAt: Date.now(), ...extra };
 
-        /** Attach the real server-side UUID after backend confirms. */
-        async linkServerId(localId, serverId) {
-            return db.updateFields(localId, { serverId, isLocalOnly: false });
-        },
+      if (status === 'connected' && (!record || !record.startedAt)) {
+        patch.startedAt = Date.now();
+      }
+      if (['ended', 'missed', 'rejected', 'failed', 'cancelled'].includes(status)) {
+        patch.endedAt = patch.endedAt || Date.now();
+        if (record && record.startedAt && !extra.duration) {
+          patch.duration = Math.floor((patch.endedAt - record.startedAt) / 1000);
+        }
+      }
+      return this.update(id, patch);
+    },
 
-        /** Delete a call record. */
-        delete: (id)  => db.delete(id),
+    /** Link the server-assigned UUID to a locally-created call record. */
+    async linkServerId(localId, serverId) {
+      return this.update(localId, { serverId, isLocalOnly: false });
+    },
 
-        /** Clear all history (logout). */
-        clearAll: ()  => db.clearAll(),
+    /** Remove ALL call history (called on logout). */
+    async clearAll() {
+      const cache = await getCache();
+      return cache.clear(COLLECTION);
+    },
 
-        /** Prune oldest records. */
-        prune: ()     => db.prune(),
+    /** Trim oldest records so we stay under MAX_RECORDS. */
+    async prune() {
+      const cache   = await getCache();
+      const records = await cache.getAll(COLLECTION);
+      if (records.length <= MAX_RECORDS) return 0;
+      const sorted  = records.sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
+      const toDelete = sorted.slice(0, records.length - MAX_RECORDS);
+      await Promise.all(toDelete.map(r => cache.remove(COLLECTION, r.id)));
+      return toDelete.length;
+    },
 
-        /** Count total. */
-        count: ()     => db.count(),
+    /** Total number of records in the collection. */
+    async count() {
+      const cache = await getCache();
+      const all   = await cache.getAll(COLLECTION);
+      return all.length;
+    },
 
-        /** Generate a new local ID (useful externally). */
-        generateId: () => generateLocalId()
-    };
+    /** Expose id generator for external callers. */
+    generateId: generateLocalId,
 
-    console.log('[CallLocalStore] ✅ Initialized');
+    /* ── Bulk helpers used by sync engine ───────────────────────────────── */
+
+    /**
+     * Merge server records without wiping local-only entries.
+     * @param {Array} serverRecords
+     */
+    async mergeFromServer(serverRecords) {
+      const cache = await getCache();
+      if (window.CacheUnified && typeof window.CacheUnified.mergeFromServer === 'function') {
+        return window.CacheUnified.mergeFromServer(COLLECTION, serverRecords);
+      }
+      // Fallback: simple upsert
+      if (!Array.isArray(serverRecords)) return;
+      const toSave = serverRecords.map(r => normalise({ ...r, isLocalOnly: false }));
+      return cache.save(COLLECTION, toSave);
+    }
+  };
+
+  /* ── Expose globally ─────────────────────────────────────────────────────── */
+  window.KynectaCallLocalStore = KynectaCallLocalStore;
+
+  // Legacy alias so any code using window.CallStore still works
+  window.CallStore = KynectaCallLocalStore;
+
+  console.log('[CallLocalStore] ✅ Initialized (unified cache v2)');
 })();
