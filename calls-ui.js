@@ -11,6 +11,7 @@
 
 // ==================== UI STATE DEFINITION ====================
 const UIState = {
+    // Call state
     activeCallId: null,
     callActive: false,
     callState: 'idle',
@@ -27,18 +28,124 @@ const UIState = {
     isScreenSharing: false,
     isSpeakerOn: true,
     currentFocusMode: false,
+    
+    // UI state
     currentView: 'sidebar',
+    viewHistory: [],
+    restorePoints: new Map(),
     activeModals: new Set(),
     activePanels: new Set(),
+    activeOverlays: new Set(),
     cachedElements: new Map(),
     renderStages: { skeleton: false, initial: false, enhanced: false, live: false },
+    renderStartTime: 0,
+    lastRenderTime: 0,
     renderCount: 0,
+    cachedTemplates: new Map(),
+    mutationObserver: null,
+    breakpoints: { mobile: 480, tablet: 768, desktop: 1024, wide: 1440 },
+    inputMode: 'mouse',
+    errorRecovery: { attempts: new Map(), maxAttempts: 3, backoffMs: 1000 },
+    security: { sanitizing: false, maxSanitizeDepth: 10, currentDepth: 0 },
+    initialized: false,
+    
+    // Call-specific UI state
+    selectedMood: 'neutral',
+    selectedIntention: 'quick',
+    currentCallCategory: 'all',
+    currentNewCallTab: 'contacts',
+    selectedContacts: [],
+    selectedGroupContacts: [],
+    groupCallOption: null,
+    callLink: null,
+    
+    // Chat and collaboration
+    chatMessages: [],
+    unreadChatCount: 0,
+    activePolls: [],
+    pollResults: [],
+    sharedNotes: [],
+    privateNotes: {},
+    relationshipData: null,
+    
+    // Legacy compatibility
     contacts: [],
     callChatMessages: [],
     callNotes: '',
     callPolls: [],
-    privateNotes: {},
-    callHistory: []
+    callHistory: [],
+    
+    // No polling intervals - rely on core events
+    handshakeCheckInterval: null,
+    
+    // Pending call user info for modal pre-fill
+    pendingCallUser: null
+};
+
+// ==================== GLOBAL CALL HISTORY UPDATES ====================
+// Centralized call history update system for cross-module consistency
+
+const GlobalCallHistory = {
+    // Emit call history update event globally
+    emitUpdate: function(eventType, data = {}) {
+        const eventData = {
+            type: eventType,
+            timestamp: Date.now(),
+            source: 'calls-module',
+            ...data
+        };
+        
+        // 1. Use existing EventBus if available
+        if (window.KynectaEventBus) {
+            window.KynectaEventBus.emit('CALL_HISTORY_UPDATE', eventData);
+        }
+        
+        // 2. DOM events for UI components
+        window.dispatchEvent(new CustomEvent('kyn:callHistory:update', { detail: eventData }));
+        document.dispatchEvent(new CustomEvent('callHistory:update', { detail: eventData }));
+        
+        // 3. PostMessage for iframe communication
+        if (window.parent && window.parent !== window) {
+            window.parent.postMessage({
+                type: 'CALL_HISTORY_UPDATE',
+                payload: eventData
+            }, '*');
+        }
+        
+        console.log('[Calls UI] Global call history update emitted:', eventType);
+    },
+    
+    // Listen for call history updates
+    onUpdate: function(callback) {
+        if (typeof callback !== 'function') return;
+        
+        // EventBus listener
+        let eventBusUnsub = null;
+        if (window.KynectaEventBus) {
+            eventBusUnsub = window.KynectaEventBus.on('CALL_HISTORY_UPDATE', callback);
+        }
+        
+        // DOM event listeners
+        const domHandler = (event) => callback(event.detail);
+        window.addEventListener('kyn:callHistory:update', domHandler);
+        document.addEventListener('callHistory:update', domHandler);
+        
+        // PostMessage listener
+        const messageHandler = (event) => {
+            if (event.data && event.data.type === 'CALL_HISTORY_UPDATE') {
+                callback(event.data.payload);
+            }
+        };
+        window.addEventListener('message', messageHandler);
+        
+        // Return unsubscribe function
+        return () => {
+            if (eventBusUnsub) eventBusUnsub();
+            window.removeEventListener('kyn:callHistory:update', domHandler);
+            document.removeEventListener('callHistory:update', domHandler);
+            window.removeEventListener('message', messageHandler);
+        };
+    }
 };
 
 (function setupEarlyCallListener() {
@@ -327,26 +434,30 @@ async function requestMediaPermissions(callType) {
 })();
 
 async function loadCallHistory() {
-    console.log('[Calls UI] Loading call history...');
+    console.log('[Calls UI] Loading call history (OFFLINE-FIRST)...');
     
+    // Load cached data FIRST for instant UI
+    const cacheLoaded = loadCachedCallHistory();
+    if (cacheLoaded) {
+        console.log('[Calls UI] Loaded cached history for instant UI');
+    }
+    
+    // Then try to sync with API in background
     const token = window.__CHILD_SESSION__?.token || localStorage.getItem('authToken') || localStorage.getItem('token');
-    console.log('[AUTH TOKEN]', token);
     
     if (!token) {
-        console.warn('[Calls UI] No token for call history');
-        loadCachedCallHistory();
+        console.warn('[Calls UI] No token for call history sync - using cache only');
         return [];
     }
     
     try {
-        // Route via parent postMessage API_REQUEST to ensure correct backend URL
-        // (direct fetch inside calls iframe hits wrong port — parent has the right gateway)
+        // Background sync with API (non-blocking)
         const data = await new Promise((resolve, reject) => {
-            const reqId = 'calls_hist_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6);
+            const reqId = 'calls_hist_sync_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6);
             const timeout = setTimeout(() => {
                 window.removeEventListener('message', handler);
-                reject(new Error('History request timeout'));
-            }, 10000);
+                resolve(null); // Don't fail, just return null for silent fallback
+            }, 8000); // Shorter timeout for background sync
             function handler(ev) {
                 const msg = ev.data;
                 if (msg && msg.type === 'API_RESPONSE' && msg.requestId === reqId) {
@@ -372,17 +483,17 @@ async function loadCallHistory() {
 
         const calls = data?.data?.calls || data?.calls || [];
         if (calls.length > 0 || data?.success !== false) {
-            console.log('[Calls UI] Loaded call history:', calls.length, 'calls');
+            console.log('[Calls UI] Background sync: Updated call history:', calls.length, 'calls');
+            // Update UI with fresh data and cache it
             displayCallHistory(calls);
+            cacheCallHistory(calls); // Cache the fresh data
             return calls;
         } else {
-            console.error('[Calls UI] Failed to load call history:', data?.status);
-            loadCachedCallHistory();
+            console.warn('[Calls UI] Background sync failed, keeping cache');
             return [];
         }
     } catch (error) {
-        console.error('[Calls UI] Error loading call history:', error.message);
-        loadCachedCallHistory();
+        console.warn('[Calls UI] Background sync error, keeping cache:', error.message);
         return [];
     }
 }
@@ -405,6 +516,43 @@ function formatCallChatTimestamp(timestamp) {
         return formatCallClockTime(date);
     }
     return `${date.toLocaleDateString([], { month: 'short', day: 'numeric' })} ${formatCallClockTime(date)}`;
+}
+
+// Add this BEFORE displayCallHistory function (around line 760)
+function handleCallActionClick(e) {
+    if (e) {
+        e.stopPropagation();
+        e.preventDefault();
+    }
+    var btn = this;
+    var userId   = btn.dataset && btn.dataset.userId;
+    var userName = (btn.dataset && btn.dataset.userName) || 'User';
+    var callType = (btn.dataset && btn.dataset.callType) || 'voice';
+
+    if (!userId) {
+        console.warn('[Calls UI] handleCallActionClick: missing data-user-id on button', btn);
+        return;
+    }
+
+    console.log('[Calls UI] Call-back triggered:', { userId: userId, userName: userName, callType: callType });
+
+    if (typeof startCallWithUser === 'function') {
+        startCallWithUser(userId, userName, callType);
+    } else if (window.callCore && typeof window.callCore.startCall === 'function') {
+        window.callCore.startCall(userId, callType);
+    } else {
+        // Fallback: post message to parent so the host page can initiate the call
+        try {
+            window.parent.postMessage({
+                type:    'INITIATE_CALL',
+                payload: { userId: userId, userName: userName, callType: callType },
+                source:  'calls-iframe',
+                timestamp: Date.now()
+            }, '*');
+        } catch (err) {
+            console.error('[Calls UI] handleCallActionClick: could not initiate call', err);
+        }
+    }
 }
 
 function displayCallHistory(calls) {
@@ -726,27 +874,23 @@ function loadCachedCallHistory() {
     return false;
 }
 
-function handleCallActionClick(e) {
-    e.stopPropagation();
-    const userId = this.dataset.userId;
-    const userName = this.dataset.userName;
-    const callType = this.dataset.callType || 'voice';
-    
-    if (userId) {
-        // Call history is in the calls page - return to calls after call ends
-        window.__pendingCallReturnTo = 'calls';
-        window.__pendingCallChatUserId = null;
-        const event = new CustomEvent('OPEN_CALL_WITH_USER', {
-            detail: { userId, userName, callType, source: 'calls', returnTo: 'calls' }
-        });
-        window.dispatchEvent(event);
+function cacheCallHistory(calls) {
+    try {
+        if (calls && calls.length > 0) {
+            localStorage.setItem('cached_call_history', JSON.stringify({
+                calls: calls,
+                timestamp: Date.now(),
+                userId: window.__CHILD_SESSION__?.userId
+            }));
+            console.log('[Calls UI] Cached call history:', calls.length, 'calls');
+        }
+    } catch(e) {
+        console.warn('[Calls UI] Failed to cache call history:', e);
     }
-}
+} // <--- Added closing brace here
 
+// ==================== MODULE INITIALIZATION ====================
 (function() {
-    'use strict';
-
-    // ==================== MODULE IDENTIFIER ====================
     const CURRENT_MODULE_NAME = 'calls-ui';
     const MODULE_INIT_FLAG = '__CALLS_UI_INIT__';
     
@@ -2565,95 +2709,7 @@ async function initiateCallWithPendingUser() {
         }
     };
 
-    // ==================== UI STATE MANAGEMENT ====================
-    const UIState = {
-        currentView: 'sidebar',
-        viewHistory: [],
-        restorePoints: new Map(),
-        
-        activePanels: new Set(),
-        activeModals: new Set(),
-        activeOverlays: new Set(),
-        
-        renderStages: {
-            skeleton: false,
-            initial: false,
-            enhanced: false,
-            live: false
-        },
-        
-        renderStartTime: 0,
-        lastRenderTime: 0,
-        renderCount: 0,
-        
-        cachedElements: new Map(),
-        cachedTemplates: new Map(),
-        mutationObserver: null,
-        
-        breakpoints: {
-            mobile: 480,
-            tablet: 768,
-            desktop: 1024,
-            wide: 1440
-        },
-        
-        inputMode: 'mouse',
-        
-        errorRecovery: {
-            attempts: new Map(),
-            maxAttempts: 3,
-            backoffMs: 1000
-        },
-        
-        security: {
-            sanitizing: false,
-            maxSanitizeDepth: 10,
-            currentDepth: 0
-        },
-        
-        initialized: false,
-        
-        selectedMood: 'neutral',
-        selectedIntention: 'quick',
-        currentCallCategory: 'all',
-        currentNewCallTab: 'contacts',
-        selectedContacts: [],
-        selectedGroupContacts: [],
-        groupCallOption: null,
-        callLink: null,
-        
-        localStream: null,
-        remoteStreams: new Map(),
-        screenStream: null,
-        isMuted: false,
-        isVideoOff: false,
-        isScreenSharing: false,
-        isSpeakerOn: true,
-        currentFocusMode: false,
-        
-        callStartTime: null,
-        callDurationInterval: null,
-        activeCallId: null,
-        callType: null,
-        callParticipants: [],
-        
-        chatMessages: [],
-        unreadChatCount: 0,
-        
-        activePolls: [],
-        pollResults: [],
-        
-        sharedNotes: [],
-        privateNotes: {}, // Memory only, not persisted to localStorage
-        
-        relationshipData: null,
-        
-        // No polling intervals - rely on core events
-        handshakeCheckInterval: null,
-        
-        // Pending call user info for modal pre-fill
-        pendingCallUser: null
-    };
+    // UIState already defined globally - using the merged definition
 
     // ==================== RENDERING PIPELINE ====================
     const RenderingPipeline = {
@@ -2932,16 +2988,6 @@ handleContactItemClick: function(e) {
             this.classList.remove('selected');
         }
     }
-},
-
-sanitizeHTML: function(str) {
-    if (!str) return '';
-    return str
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#39;');
 },
 
         renderCachedContacts: function() {
@@ -3383,13 +3429,21 @@ sanitizeHTML: function(str) {
                     this.handleCallInitiated(data);
                     break;
                 case 'call_initiation_failed':
-                    // Offline fix: call_initiation_failed fires for both generic failures
-                    // AND when the receiver is offline (data.offline === true).
-                    // Reset any "calling..." UI and show the appropriate message.
-                    this.handleCallEnded(data);
+                    // Offline fix: When receiver is offline, show call UI for 2 minutes instead of ending
                     if (data && data.offline) {
-                        showNotification('User is currently offline.', 'warning');
+                        // Show call UI even though receiver is offline
+                        this.handleCallInitiated({
+                            callId: data.callId,
+                            callType: 'audio',
+                            receiverOnline: false,
+                            participants: data.participants || [],
+                            calleeName: data.calleeName,
+                            offline: true
+                        });
+                        showNotification('User is offline. Call will display for 2 minutes.', 'info');
                     } else {
+                        // For other failures, end the call
+                        this.handleCallEnded(data);
                         showNotification(data && data.error ? data.error : 'Failed to start call', 'error');
                     }
                     break;
@@ -3582,23 +3636,22 @@ sanitizeHTML: function(str) {
                 logOnce('info', 'Refreshing call history after call ended');
             }
             
-            // Request updated call history from parent
-            if (window.parent && window.parent !== window) {
-                window.parent.postMessage({
-                    type: 'GET_CALL_HISTORY',
-                    payload: { requestId: 'req_history_' + Date.now() }
-                }, '*');
-            }
+            // Emit global update event
+            GlobalCallHistory.emitUpdate('call_ended', { reason: 'call_completed' });
             
-            // Also request from core if available
-            if (coreInstance && coreInstance.sendAction) {
-                coreInstance.sendAction('GET_CALL_HISTORY', {})
-                    .catch(err => {
-                        if (DEBUG) {
-                            logOnce('warn', 'Failed to refresh call history via core', err);
-                        }
+            setTimeout(() => {
+                if (typeof loadCallHistory === 'function') {
+                    loadCallHistory().then(() => {
+                        console.log('[Calls UI] Call history refreshed after call ended');
+                        // Emit success event
+                        GlobalCallHistory.emitUpdate('history_refreshed', { source: 'local_refresh' });
+                    }).catch(err => {
+                        console.error('[Calls UI] Failed to refresh call history:', err);
+                        // Emit error event
+                        GlobalCallHistory.emitUpdate('history_refresh_error', { error: err.message });
                     });
-            }
+                }
+            }, 500);
             
             // Refresh the calls list in UI if it exists
             if (elements.allCallsList) {
@@ -4087,6 +4140,82 @@ sanitizeHTML: function(str) {
             // Timer will start in handleCallAccepted (when receiver picks up)
             // Show placeholder until then
             if (elements.callDuration) elements.callDuration.textContent = '--:--';
+            
+            // If receiver is offline, play ringtone for caller and set 2-minute auto-dismiss
+            if (!UIState.callReceiverOnline) {
+                // Play ringtone for caller
+                (function _playCallerRingtone() {
+                    try {
+                        if (window._callerRingtone) {
+                            try { window._callerRingtone.pause(); window._callerRingtone.currentTime = 0; } catch(e) {}
+                        }
+                        const audioSrc = window.__callRingtone ||
+                            'data:audio/wav;base64,UklGRl9vT19XQVZFZm10IBAAAA' + // minimal fallback
+                            'AAAQABAAQAAAA==';
+                        let ring;
+                        try {
+                            ring = new Audio();
+                            ring.src = audioSrc;
+                            ring.loop = true;
+                            ring.volume = 0.6;
+                            const playPromise = ring.play();
+                            if (playPromise && typeof playPromise.catch === 'function') {
+                                playPromise.catch(() => {
+                                    // Autoplay blocked - try Web Audio beep
+                                    _tryWebAudioBeep();
+                                });
+                            }
+                            window._callerRingtone = ring;
+                        } catch(e) {
+                            _tryWebAudioBeep();
+                        }
+
+                        function _tryWebAudioBeep() {
+                            try {
+                                const ctx = new (window.AudioContext || window.webkitAudioContext)();
+                                let ringing = true;
+                                window._callerRingtone = { _ctx: ctx, pause: function() { ringing = false; try { ctx.close(); } catch(e) {} }, currentTime: 0 };
+                                (function beep() {
+                                    if (!ringing || ctx.state === 'closed') return;
+                                    const osc = ctx.createOscillator();
+                                    const gain = ctx.createGain();
+                                    osc.connect(gain);
+                                    gain.connect(ctx.destination);
+                                    osc.frequency.value = 600;
+                                    gain.gain.setValueAtTime(0.3, ctx.currentTime);
+                                    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.3);
+                                    osc.start(ctx.currentTime);
+                                    osc.stop(ctx.currentTime + 0.3);
+                                    osc.onended = function() { if (ringing) setTimeout(beep, 1000); };
+                                })();
+                            } catch(e) { /* silent fail */ }
+                        }
+                    } catch(e) { /* silent fail */ }
+                })();
+                
+                // Set 2-minute auto-dismiss timer for offline calls
+                let timeLeft = 120;
+                const offlineTimer = setInterval(() => {
+                    timeLeft--;
+                    if (elements.callStatusText) {
+                        elements.callStatusText.textContent = `Calling... (${timeLeft}s)`;
+                    }
+                    if (timeLeft <= 0) {
+                        clearInterval(offlineTimer);
+                        // Stop ringtone
+                        if (window._callerRingtone) {
+                            try { window._callerRingtone.pause(); window._callerRingtone.currentTime = 0; } catch(e) {}
+                            window._callerRingtone = null;
+                        }
+                        // Auto-end the call
+                        this.handleCallEnded({ reason: 'timeout', status: 'missed' });
+                        showNotification('Call ended - user did not answer', 'info');
+                    }
+                }, 1000);
+                
+                // Store timer reference for cleanup
+                elements.callContainer.dataset.offlineTimer = offlineTimer;
+            }
         },
         
         handleCallStarted: function(callData) {
@@ -4153,6 +4282,17 @@ sanitizeHTML: function(str) {
             if (window._incomingRingtone) {
                 try { window._incomingRingtone.pause(); window._incomingRingtone.currentTime = 0; } catch(e) {}
                 window._incomingRingtone = null;
+            }
+            // Stop caller ringtone for offline calls
+            if (window._callerRingtone) {
+                try { window._callerRingtone.pause(); window._callerRingtone.currentTime = 0; } catch(e) {}
+                window._callerRingtone = null;
+            }
+            // Clear offline timer
+            if (elements.callContainer && elements.callContainer.dataset.offlineTimer) {
+                const offlineTimer = parseInt(elements.callContainer.dataset.offlineTimer);
+                if (offlineTimer) clearInterval(offlineTimer);
+                elements.callContainer.dataset.offlineTimer = '';
             }
             // Clear dedup locks so next call can proceed immediately
             if (window.__uiCallDispatchLock) window.__uiCallDispatchLock = { ts: 0, userId: null };
@@ -7420,16 +7560,6 @@ function setupFriendsListListener() {
         }
     });
 
-function escapeHtmlForCall(str) {
-    if (!str) return '';
-    return str
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#39;');
-}
-    
     // Request friends list explicitly
     setTimeout(() => {
         if (window.parent && window.parent !== window) {
@@ -7771,6 +7901,48 @@ function escapeHtmlForCall(str) {
         .replace(/>/g, '&gt;')
         .replace(/"/g, '&quot;')
         .replace(/'/g, '&#39;');
+}
+
+/**
+ * handleCallActionClick
+ * Click handler for .call-action-btn elements.
+ * Reads data-user-id, data-user-name, data-call-type from the button
+ * (or from `this` when called via .call(btn, e)) and starts a call.
+ */
+function handleCallActionClick(e) {
+    if (e) {
+        e.stopPropagation();
+        e.preventDefault();
+    }
+    var btn = this;
+    var userId   = btn.dataset && btn.dataset.userId;
+    var userName = (btn.dataset && btn.dataset.userName) || 'User';
+    var callType = (btn.dataset && btn.dataset.callType) || 'voice';
+
+    if (!userId) {
+        console.warn('[Calls UI] handleCallActionClick: missing data-user-id on button', btn);
+        return;
+    }
+
+    console.log('[Calls UI] Call-back triggered:', { userId: userId, userName: userName, callType: callType });
+
+    if (typeof startCallWithUser === 'function') {
+        startCallWithUser(userId, userName, callType);
+    } else if (window.callCore && typeof window.callCore.startCall === 'function') {
+        window.callCore.startCall(userId, callType);
+    } else {
+        // Fallback: post message to parent so the host page can initiate the call
+        try {
+            window.parent.postMessage({
+                type:    'INITIATE_CALL',
+                payload: { userId: userId, userName: userName, callType: callType },
+                source:  'calls-iframe',
+                timestamp: Date.now()
+            }, '*');
+        } catch (err) {
+            console.error('[Calls UI] handleCallActionClick: could not initiate call', err);
+        }
+    }
 }
 
     // ==================== EXPORTS ====================

@@ -44,7 +44,7 @@
         }
         
         if (!userId) {
-            return true;
+            return false; // Fixed: Require userId for valid session
         }
         
         if (typeof userId === 'string') {
@@ -140,7 +140,7 @@
         MAX_QUEUE_SIZE: 500,
         TYPING_TIMEOUT: 3000,
         TYPING_RATE_LIMIT: 2000,
-        REQUEST_TIMEOUT: 30000
+        REQUEST_TIMEOUT: 45000
     };
 
     // =============================================

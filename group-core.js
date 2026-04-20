@@ -407,7 +407,7 @@ function safeSend(type, payload = {}) {
 // =============================================
 // API REQUEST FUNCTION - STRICT PARENT PIPELINE
 // =============================================
-function apiRequest(endpoint, method = 'GET', body = null) {
+function apiRequest(endpoint, method = 'GET', body = null, timeoutMs = 45000) {
     return new Promise((resolve, reject) => {
         // STRICT: Only allow in ACTIVE state
         if (!LifecycleState.ensureActive()) {
@@ -429,8 +429,22 @@ function apiRequest(endpoint, method = 'GET', body = null) {
         
         const requestId = generateRequestId();
         
-        // Register for response
-        registerRequest(requestId, resolve, reject);
+        // Set up timeout
+        const timeoutId = setTimeout(() => {
+            if (pendingRequests.has(requestId)) {
+                pendingRequests.delete(requestId);
+                reject(new Error(`API request timeout: ${method} ${normalizedEndpoint}`));
+            }
+        }, timeoutMs);
+        
+        // Register for response with timeout cleanup
+        registerRequest(requestId, (response) => {
+            clearTimeout(timeoutId);
+            resolve(response);
+        }, (error) => {
+            clearTimeout(timeoutId);
+            reject(error);
+        });
         
         // Send to parent
         const message = createMessage('API_REQUEST', {
@@ -1969,7 +1983,7 @@ const GroupCore = {
         
         debugLog('GroupCore initialized');
         
-        // Load cached data (non-auth only)
+        // Load cached data (OFFLINE-FIRST PRIORITY)
         this.loadCachedData();
         
         return this;
@@ -2106,47 +2120,136 @@ const GroupCore = {
     // GROUP MANAGEMENT API CALLS - USING apiRequest
     // =============================================
     
-    // Request group list from parent using apiRequest
+    // Request group list from parent using apiRequest - OFFLINE-FIRST
     async requestGroupList() {
         if (!LifecycleState.ensureActive()) {
             debugLog('Cannot request groups: not active');
             return { success: false, reason: 'not_active' };
         }
         
+        // CRITICAL: Load from cache FIRST for instant UI
+        await this.loadGroupsFromCache();
+        
         if (!sessionReady) {
-            debugLog('Cannot request groups: session not ready');
+            debugLog('Cannot request groups: session not ready - using cache only');
             requestSession();
-            return { success: false, reason: 'session_not_ready' };
+            return { success: true, fromCache: true, data: this.getGroupsData() };
         }
         
-        debugLog('Requesting group list via apiRequest');
+        debugLog('Requesting group list via apiRequest for sync');
         
         try {
             const response = await apiRequest('/groups/user', 'GET');
             
             if (response && response.success && response.data) {
                 const groupsData = response.data;
-                this.groups = groupsData.groups || [];
-                this.myGroups = groupsData.myGroups || [];
-                this.joinedGroups = groupsData.joinedGroups || [];
-                this.adminGroups = groupsData.adminGroups || [];
+                
+                // Merge with cache - server wins for conflicts
+                await this.mergeWithServerData(groupsData);
                 
                 this.saveGroups();
                 this.emit('groups:list-updated', {
                     groups: this.groups,
                     myGroups: this.myGroups,
                     joinedGroups: this.joinedGroups,
-                    adminGroups: this.adminGroups
+                    adminGroups: this.adminGroups,
+                    fromServer: true
                 });
                 
-                debugLog(`Loaded ${this.groups.length} groups from backend`);
-                return { success: true, data: response.data };
+                debugLog(`Synced ${this.groups.length} groups with backend`);
+                return { success: true, fromServer: true, data: this.getGroupsData() };
             }
-            return { success: false, error: 'Invalid response' };
+            return { success: true, fromCache: true, data: this.getGroupsData() };
         } catch (error) {
-            debugLog('Failed to load groups:', error);
-            return { success: false, error: error.message };
+            debugLog('Failed to sync groups, using cache:', error);
+            return { success: true, fromCache: true, data: this.getGroupsData() };
         }
+    },
+
+    // Load groups from cache - OFFLINE-FIRST PRIORITY
+    async loadGroupsFromCache() {
+        try {
+            if (window.LocalGroupStore && typeof window.LocalGroupStore.getAll === 'function') {
+                const cachedGroups = await window.LocalGroupStore.getAll();
+                
+                if (cachedGroups && cachedGroups.length > 0) {
+                    // Process cached groups into arrays
+                    this.groups = cachedGroups;
+                    this.myGroups = cachedGroups.filter(g => g.createdBy === (this.currentUser?.uid || this.currentUser?.id));
+                    this.joinedGroups = cachedGroups.filter(g => g.createdBy !== (this.currentUser?.uid || this.currentUser?.id) && g.members?.some(m => m.userId === (this.currentUser?.uid || this.currentUser?.id)));
+                    this.adminGroups = cachedGroups.filter(g => g.members?.some(m => m.userId === (this.currentUser?.uid || this.currentUser?.id) && (m.role === 'admin' || m.role === 'owner')));
+                    
+                    this.emit('groups:list-updated', {
+                        groups: this.groups,
+                        myGroups: this.myGroups,
+                        joinedGroups: this.joinedGroups,
+                        adminGroups: this.adminGroups,
+                        fromCache: true
+                    });
+                    
+                    debugLog(`Loaded ${this.groups.length} groups from cache - OFFLINE-FIRST`);
+                    return true;
+                }
+            }
+        } catch (error) {
+            debugLog('Cache load failed, will fallback to API:', error);
+        }
+        return false;
+    },
+
+    // Merge server data with cache - server wins for conflicts
+    async mergeWithServerData(serverData) {
+        try {
+            const serverGroups = serverData.groups || [];
+            const serverMap = new Map(serverGroups.map(g => [g.id, g]));
+            
+            // Update existing groups or add new ones
+            for (const [id, serverGroup] of serverMap) {
+                const existingIndex = this.groups.findIndex(g => g.id === id);
+                if (existingIndex >= 0) {
+                    // Merge - server data wins but preserve local-only fields
+                    const existing = this.groups[existingIndex];
+                    this.groups[existingIndex] = {
+                        ...serverGroup,
+                        syncState: 'synced',
+                        isLocalOnly: false,
+                        // Preserve local cache metadata
+                        cachedAt: existing.cachedAt,
+                        localMessages: existing.localMessages || []
+                    };
+                } else {
+                    // New group from server
+                    this.groups.push({
+                        ...serverGroup,
+                        syncState: 'synced',
+                        isLocalOnly: false
+                    });
+                }
+            }
+            
+            // Remove groups that no longer exist on server (unless local-only)
+            this.groups = this.groups.filter(g => 
+                g.isLocalOnly || serverMap.has(g.id)
+            );
+            
+            // Re-categorize groups
+            this.myGroups = this.groups.filter(g => g.createdBy === (this.currentUser?.uid || this.currentUser?.id));
+            this.joinedGroups = this.groups.filter(g => g.createdBy !== (this.currentUser?.uid || this.currentUser?.id) && g.members?.some(m => m.userId === (this.currentUser?.uid || this.currentUser?.id)));
+            this.adminGroups = this.groups.filter(g => g.members?.some(m => m.userId === (this.currentUser?.uid || this.currentUser?.id) && (m.role === 'admin' || m.role === 'owner')));
+            
+        } catch (error) {
+            debugLog('Failed to merge server data:', error);
+        }
+    },
+
+    // Get current groups data structure
+    getGroupsData() {
+        return {
+            groups: this.groups,
+            myGroups: this.myGroups,
+            joinedGroups: this.joinedGroups,
+            adminGroups: this.adminGroups
+        };
     },
     
     // Create a new group using apiRequest

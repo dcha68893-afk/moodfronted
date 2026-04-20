@@ -18,7 +18,6 @@
     <!-- Font Awesome: local first, CDN fallback so icons work offline via SW cache -->
     <link rel="stylesheet" href="/css/vendor/font-awesome.min.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css"
-          integrity="sha512-z3gLpd7yknf1YoNbCzqRKc4qyor8gaKU1qmn+CShxbuBusANI9QpRohGBreCFkKxLhei6S9CQXFEbbKuqLzsA=="
           crossorigin="anonymous" referrerpolicy="no-referrer"
           id="fa-cdn-fallback">
     <script>
@@ -33,10 +32,20 @@
           // Local loaded fine — check a test glyph renders
           var t = document.createElement('span');
           t.className = 'fas fa-check'; t.style.cssText = 'position:absolute;visibility:hidden';
-          document.body.appendChild(t);
+          if (document.body) {
+            document.body.appendChild(t);
+          } else {
+            // DOM not ready, wait for it
+            document.addEventListener('DOMContentLoaded', function() {
+              document.body.appendChild(t);
+            });
+          }
           setTimeout(function() {
             var w = getComputedStyle(t).width;
-            document.body.removeChild(t);
+            // Check if node still exists before removing
+            if (t && t.parentNode && t.parentNode === document.body) {
+              document.body.removeChild(t);
+            }
             // If width is 0 local FA didn't really render — keep CDN
             if (parseFloat(w) === 0) return;
             var cdn = document.getElementById('fa-cdn-fallback');
@@ -1799,10 +1808,43 @@
     </style>
     
     <!-- API.js must load BEFORE status.js -->
+
+    <!-- New Status System Components -->
+    <!-- Dynamic loaders: if a file is missing or returns non-JS, we skip it gracefully -->
+    <script>
+      (function() {
+        var scripts = ['/js/status-api.js', '/js/status-cache.js', '/js/status-websocket.js'];
+        scripts.forEach(function(src) {
+          var el = document.createElement('script');
+          el.src = src;
+          el.onerror = function() {
+            console.warn('[Status] Optional script not available (skipped):', src);
+          };
+          document.head.appendChild(el);
+        });
+      })();
+    </script>
     
     <script type="module" src="status-core.js"></script>
     <script type="module" src="status-ui.js"></script>
     <script>
+        // =============================================
+        // DEBUGGING: Verify Status System Components
+        // =============================================
+        console.log('[STATUS DEBUG] Checking component loading...');
+        console.log('[STATUS DEBUG] StatusAPI available:', !!window.StatusAPI);
+        console.log('[STATUS DEBUG] StatusCache available:', !!window.StatusCache);
+        console.log('[STATUS DEBUG] StatusWebSocket available:', !!window.StatusWebSocket);
+        
+        // Initialize status system components if available
+        if (window.StatusCache) {
+            window.StatusCache.init().catch(console.error);
+        }
+        
+        if (window.StatusWebSocket) {
+            window.StatusWebSocket.init();
+        }
+        
         // =============================================
         // ENHANCED INITIALIZATION WITH RESILIENCE
         // =============================================

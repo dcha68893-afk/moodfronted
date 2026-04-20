@@ -1903,45 +1903,52 @@ export function handleUITheme(payload) {
 /**
  * Create secure group item element - XSS protected
  */
-export function createSecureGroupItemElement(groupData, type) {
+export function createSecureGroupItemElement(groupData, type = 'group') {
     try {
-        if (!groupData || !groupData.id) return null;
+        // Validate and sanitize inputs with comprehensive safety checks
+        if (!groupData || typeof groupData !== 'object') {
+            console.warn('[GroupUI] Invalid group data provided, using fallback');
+            groupData = {};
+        }
         
-        const cacheKey = `group_${groupData.id}_${type}`;
+        const safeType = validateInput(type);
+        const cacheKey = `group_${groupData.id || 'unknown'}_${safeType}`;
+        
+        // Check cache first
         if (_UI_CACHE.groupItems.has(cacheKey)) {
             return _UI_CACHE.groupItems.get(cacheKey).cloneNode(true);
         }
         
-        const groupItem = document.createElement('div');
-        groupItem.className = 'group-item';
-        groupItem.dataset.groupId = String(groupData.id);
-        groupItem.dataset.type = String(type);
-        groupItem.dataset.enhanced = 'true';
-        groupItem.setAttribute('role', 'button');
-        groupItem.setAttribute('tabindex', '0');
-        
-        const name = validateInput(groupData.name || 'Unnamed Group');
-        const initials = name.split(' ').map(word => word[0] || '').join('').toUpperCase().substring(0, 2) || 'G';
-        
-        const groupType = validateInput(groupData.type || 'private');
-        const typeInfo = groupTypes && groupTypes[groupType] ? groupTypes[groupType] : { name: 'Private', icon: 'fas fa-lock' };
-        const theme = validateInput(groupData.theme || 'blue');
+        // Extract and validate group properties with comprehensive fallbacks
+        const id = String(groupData.id || groupData.groupId || `temp_${Date.now()}`);
+        const name = sanitizeInput(groupData.name || groupData.title || 'Unnamed Group');
+        const description = sanitizeInput(groupData.description || groupData.subtitle || '');
+        const avatar = validateURL(groupData.avatar) || groupData.avatar || null;
+        const memberCount = Math.max(0, parseInt(groupData.memberCount) || parseInt(groupData.member_count) || 0);
+        const privacy = sanitizeInput(groupData.privacy || groupData.type || 'private');
+        const purpose = sanitizeInput(groupData.purpose || 'social');
+        const mood = sanitizeInput(groupData.mood || 'neutral');
+        const lastActivity = groupData.lastActivity || groupData.last_activity || null;
+        const unreadCount = Math.max(0, parseInt(groupData.unreadCount) || parseInt(groupData.unread_count) || 0);
+        const isOnline = Boolean(groupData.isOnline || groupData.is_online);
+        const typingUsers = Array.isArray(groupData.typingUsers) ? groupData.typingUsers : 
+                           Array.isArray(groupData.typing_users) ? groupData.typing_users : [];
+        const isAdmin = Boolean(groupData.isAdmin || groupData.is_admin || groupData.role === 'admin');
+        const isCreator = Boolean(groupData.isCreator || groupData.is_creator || 
+                          groupData.createdBy === (currentUser?.id || currentUser?.uid) ||
+                          groupData.created_by === (currentUser?.id || currentUser?.uid));
+        const groupTopic = sanitizeInput(groupData.topic || groupData.subject || '');
+        const groupType = sanitizeInput(groupData.type || groupData.group_type || privacy);
+        const theme = sanitizeInput(groupData.theme || 'blue');
         const themeInfo = groupThemes && groupThemes[theme] ? groupThemes[theme] : { gradient: 'linear-gradient(135deg, #2196F3, #1976D2)', name: 'Blue' };
         
-        const purpose = validateInput(groupData.purpose || '');
-        const mood = validateInput(groupData.mood || '');
-        const postingRule = validateInput(groupData.postingRule || 'everyone');
         const purposeInfo = purpose && groupPurposes ? groupPurposes[purpose] : null;
         const moodInfo = mood && groupMoods ? groupMoods[mood] : null;
         const ruleInfo = postingRules && postingRules[postingRule] ? postingRules[postingRule] : { name: 'Everyone can post', color: '#4CAF50' };
         
         const pulse = typeof calculateGroupPulse === 'function' ? calculateGroupPulse(groupData) : null;
-        const groupTopic = validateInput(groupData.topic || '');
         const groupDescription = validateInput(groupData.description || '');
-        const memberCount = parseInt(groupData.memberCount) || 0;
         const photoURL = groupData.photoURL ? sanitizeURL(groupData.photoURL) : '';
-        const isAdmin = !!groupData.isAdmin;
-        const isCreator = !!groupData.isCreator;
         
         let html = `
             <div class="group-avatar" ${photoURL ? `style="background-image: url('${photoURL}');"` : `style="background: ${themeInfo.gradient};"`}>
@@ -1974,8 +1981,6 @@ export function createSecureGroupItemElement(groupData, type) {
             </div>
             <div class="group-actions">
         `;
-        
-        const safeType = validateInput(type);
         
         if (safeType === 'group_invite') {
             html += `
@@ -3323,9 +3328,26 @@ export function setupFriendSelectionModal() {
 }
 
 /**
- * Setup create group modal
+ * Setup create group modal with retry mechanism
  */
 export function setupCreateGroupModal() {
+    // Try to bind events immediately
+    bindCreateGroupModalEvents();
+    
+    // Also try after DOM is fully loaded
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', bindCreateGroupModalEvents);
+    } else {
+        // DOM already loaded, try after a short delay
+        setTimeout(bindCreateGroupModalEvents, 100);
+    }
+}
+
+/**
+ * Bind create group modal events
+ */
+function bindCreateGroupModalEvents() {
+    console.log('[GroupUI] Binding create group modal events...');
     // Close (×) button at top
     const createGroupClose = safeGetElement('#createGroupClose');
     if (createGroupClose) {
@@ -3344,52 +3366,133 @@ export function setupCreateGroupModal() {
         });
     }
 
-    // FIXED: Cancel button — had no listener at all
+    // FIXED: Cancel button - direct event binding
     const cancelCreateGroupBtn = safeGetElement('#cancelCreateGroupBtn');
     if (cancelCreateGroupBtn) {
-        registerUIEventListener(cancelCreateGroupBtn, 'click', () => {
-            const m = safeGetElement('#createGroupModal');
-            if (m) { m.classList.remove('active'); m.style.display = 'none'; }
+        // Remove any existing listeners by cloning
+        const newCancelBtn = cancelCreateGroupBtn.cloneNode(true);
+        cancelCreateGroupBtn.parentNode.replaceChild(newCancelBtn, cancelCreateGroupBtn);
+        
+        newCancelBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            
+            console.log('[GroupUI] Cancel button clicked');
+            
+            const modal = safeGetElement('#createGroupModal');
+            if (modal) { 
+                modal.classList.remove('active'); 
+                modal.style.display = 'none'; 
+            }
+            
+            // Reset form
+            resetCreateGroupForm();
+            
             // Reset members selection
             if (window._cgSelectedMembers) window._cgSelectedMembers.clear();
             const chips = safeGetElement('#selectedMembersChips');
             if (chips) chips.innerHTML = '';
+            
+            console.log('[GroupUI] Create group modal cancelled');
         });
+        
+        console.log('[GroupUI] Cancel button event listener attached');
+    } else {
+        console.warn('[GroupUI] Cancel button not found in DOM');
     }
 
-    // FIXED: Create Group button — had no listener at all
+    // FIXED: Create Group button - direct event binding
     const createGroupBtnModal = safeGetElement('#createGroupBtnModal');
     if (createGroupBtnModal) {
-        registerUIEventListener(createGroupBtnModal, 'click', async () => {
+        // Remove any existing listeners by cloning
+        const newCreateBtn = createGroupBtnModal.cloneNode(true);
+        createGroupBtnModal.parentNode.replaceChild(newCreateBtn, createGroupBtnModal);
+        
+        newCreateBtn.addEventListener('click', async (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            
+            console.log('[GroupUI] Create Group button clicked');
+            
             const nameInput = safeGetElement('#groupNameInput');
             if (!nameInput || !nameInput.value.trim()) {
-                if (typeof showNotification === 'function') showNotification('Please enter a group name', 'error');
+                if (typeof showNotification === 'function') {
+                    showNotification('Please enter a group name', 'error');
+                }
+                nameInput?.focus();
                 return;
             }
-            const btn = safeGetElement('#createGroupBtnModal');
-            if (btn) { btn.disabled = true; btn.textContent = 'Creating…'; }
+            
+            // Disable button and show loading state
+            newCreateBtn.disabled = true;
+            newCreateBtn.textContent = 'Creating...';
+            
             try {
                 const groupData = collectGroupFormData();
-                // Bridge Members-tab selections into the core invite flow.
-                // createGroupOnline reads `selectedFriends` from core scope;
-                // we patch window.__pendingGroupInvites so the post-create
-                // invite loop in createGroupOnline can read our selections.
+                
+                // Include selected friends from members tab with invitation method tracking
                 if (window._cgSelectedMembers && window._cgSelectedMembers.size > 0) {
-                    groupData.memberIds = [...window._cgSelectedMembers];
-                    // Also expose as a global for the core to pick up
-                    window.__pendingGroupInvites = [...window._cgSelectedMembers];
+                    const selectedMemberIds = [...window._cgSelectedMembers];
+                    const invitationMethods = window._cgInvitationMethods || new Map();
+                    
+                    // Separate direct additions from invitations
+                    const directAdditions = [];
+                    const pendingInvitations = [];
+                    
+                    selectedMemberIds.forEach(friendId => {
+                        const method = invitationMethods.get(friendId);
+                        if (method?.canAddDirectly) {
+                            directAdditions.push(friendId);
+                        } else {
+                            pendingInvitations.push(friendId);
+                        }
+                    });
+                    
+                    // Add direct members to group data
+                    groupData.memberIds = directAdditions;
+                    
+                    // Store pending invitations for post-creation
+                    window.__pendingGroupInvites = pendingInvitations;
+                    window.__pendingInvitationMethods = new Map();
+                    pendingInvitations.forEach(friendId => {
+                        window.__pendingInvitationMethods.set(friendId, 'invite');
+                    });
+                    
+                    console.log(`[GroupUI] Creating group with ${directAdditions.length} direct members and ${pendingInvitations.length} pending invitations`);
                 }
+                
+                // Create the group
                 await createGroupOnline(groupData);
+                
+                // Reset selection
                 window._cgSelectedMembers = new Set();
-                // Ensure modal closes via both mechanisms
+                
+                // Close modal
                 const modal = safeGetElement('#createGroupModal');
-                if (modal) { modal.classList.remove('active'); modal.style.display = 'none'; }
+                if (modal) { 
+                    modal.classList.remove('active'); 
+                    modal.style.display = 'none'; 
+                }
+                
+                if (typeof showNotification === 'function') {
+                    showNotification('Group created successfully!', 'success');
+                }
+                
             } catch (e) {
-                showNotification('Failed to create group: ' + (e.message || 'Unknown error'), 'error');
+                console.error('[GroupUI] Create group error:', e);
+                if (typeof showNotification === 'function') {
+                    showNotification('Failed to create group: ' + (e.message || 'Unknown error'), 'error');
+                }
             } finally {
-                if (btn) { btn.disabled = false; btn.textContent = 'Create Group'; }
+                // Reset button state
+                newCreateBtn.disabled = false;
+                newCreateBtn.textContent = 'Create Group';
             }
         });
+        
+        console.log('[GroupUI] Create Group button event listener attached');
+    } else {
+        console.warn('[GroupUI] Create Group button not found in DOM');
     }
 
     // Theme option selection (visual feedback)
@@ -3583,6 +3686,330 @@ export function setupAdminManagementClose() {
     }
 }
 
+
+/**
+ * Setup friend picker for create group modal
+ */
+export function setupFriendPicker() {
+    const memberSearchInput = safeGetElement('#memberSearchInput');
+    const friendsPickerList = safeGetElement('#friendsPickerList');
+    
+    if (!memberSearchInput || !friendsPickerList) return;
+    
+    // Initialize selected members set
+    if (!window._cgSelectedMembers) {
+        window._cgSelectedMembers = new Set();
+    }
+    
+    // Load friends when members tab is clicked
+    const membersTab = safeGetElement('[data-tab="members"]');
+    if (membersTab) {
+        registerUIEventListener(membersTab, 'click', () => {
+            loadFriendsForGroupCreation();
+        });
+    }
+    
+    // Search functionality
+    registerUIEventListener(memberSearchInput, 'input', (e) => {
+        const searchTerm = e.target.value.toLowerCase();
+        filterFriendsForGroupCreation(searchTerm);
+    });
+}
+
+/**
+ * Load friends for group creation
+ */
+async function loadFriendsForGroupCreation() {
+    const friendsPickerList = safeGetElement('#friendsPickerList');
+    if (!friendsPickerList) return;
+    
+    friendsPickerList.innerHTML = `
+        <div style="text-align:center;padding:20px;color:var(--text-secondary)">
+            <i class="fas fa-spinner fa-spin"></i> Loading friends...
+        </div>
+    `;
+    
+    try {
+        // Fetch friends from API
+        const token = localStorage.getItem('auth_token') || sessionStorage.getItem('auth_token');
+        if (!token) {
+            friendsPickerList.innerHTML = `
+                <div style="text-align:center;padding:20px;color:var(--text-secondary)">
+                    <i class="fas fa-exclamation-triangle"></i> Please log in to add friends
+                </div>
+            `;
+            return;
+        }
+        
+        const response = await fetch('/api/friends', {
+            headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
+            }
+        });
+        
+        if (!response.ok) {
+            throw new Error('Failed to fetch friends');
+        }
+        
+        const data = await response.json();
+        const friends = data?.data?.friends || data?.data || [];
+        
+        if (friends.length === 0) {
+            friendsPickerList.innerHTML = `
+                <div style="text-align:center;padding:20px;color:var(--text-secondary)">
+                    <i class="fas fa-user-friends"></i>
+                    <p>No friends found</p>
+                    <p style="font-size:12px;">Add friends first to create groups with them</p>
+                </div>
+            `;
+            return;
+        }
+        
+        // Store friends globally
+        window._cgAvailableFriends = friends;
+        
+        // Render friends list
+        renderFriendsForGroupCreation(friends);
+        
+    } catch (error) {
+        console.error('[GroupUI] Error loading friends:', error);
+        friendsPickerList.innerHTML = `
+            <div style="text-align:center;padding:20px;color:var(--text-secondary)">
+                <i class="fas fa-exclamation-triangle"></i>
+                <p>Failed to load friends</p>
+                <button onclick="loadFriendsForGroupCreation()" style="margin-top:10px;padding:5px 10px;border:1px solid var(--border-color);border-radius:4px;background:none;cursor:pointer;">
+                    Retry
+                </button>
+            </div>
+        `;
+    }
+}
+
+/**
+ * Render friends for group creation with invitation restrictions
+ */
+function renderFriendsForGroupCreation(friends) {
+    const friendsPickerList = safeGetElement('#friendsPickerList');
+    if (!friendsPickerList) return;
+    
+    const fragment = document.createDocumentFragment();
+    
+    friends.forEach(friend => {
+        const isSelected = window._cgSelectedMembers.has(friend.id);
+        const canAddDirectly = !friend.privacySettings?.restrictGroupInvites;
+        const invitationStatus = friend.invitationStatus || 'none';
+        
+        const friendItem = document.createElement('div');
+        friendItem.className = 'friend-picker-item';
+        friendItem.style.cssText = `
+            display: flex;
+            align-items: center;
+            padding: 10px;
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            margin-bottom: 6px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            ${isSelected ? 'background: var(--primary-color); color: white; border-color: var(--primary-color);' : ''}
+            ${!canAddDirectly ? 'opacity: 0.7;' : ''}
+        `;
+        
+        const statusBadge = invitationStatus === 'pending' ? 
+            '<span style="background: #ff9800; color: white; padding: 2px 6px; border-radius: 10px; font-size: 10px;">Pending</span>' :
+            invitationStatus === 'declined' ? 
+            '<span style="background: #f44336; color: white; padding: 2px 6px; border-radius: 10px; font-size: 10px;">Declined</span>' : '';
+        
+        const restrictionBadge = !canAddDirectly ? 
+            '<span style="background: #9c27b0; color: white; padding: 2px 6px; border-radius: 10px; font-size: 10px;">Invite Only</span>' : '';
+        
+        friendItem.innerHTML = `
+            <div style="flex: 1; display: flex; align-items: center; gap: 10px;">
+                <div style="width: 32px; height: 32px; border-radius: 50%; background: linear-gradient(135deg, #667eea, #764ba2); display: flex; align-items: center; justify-content: center; color: white; font-weight: bold;">
+                    ${(friend.displayName || friend.username || 'U').charAt(0).toUpperCase()}
+                </div>
+                <div>
+                    <div style="font-weight: 500; display: flex; align-items: center; gap: 5px;">
+                        ${sanitizeInput(friend.displayName || friend.username || 'Unknown')}
+                        ${statusBadge}
+                        ${restrictionBadge}
+                    </div>
+                    <div style="font-size: 12px; opacity: 0.7;">@${sanitizeInput(friend.username || 'user')}</div>
+                    ${!canAddDirectly ? '<div style="font-size: 11px; color: #9c27b0;">This user restricts direct group additions</div>' : ''}
+                </div>
+            </div>
+            <div class="friend-checkbox" style="
+                width: 20px;
+                height: 20px;
+                border: 2px solid ${isSelected ? 'white' : 'var(--border-color)'};
+                border-radius: 4px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                ${isSelected ? 'background: white;' : ''}
+            ">
+                ${isSelected ? '<i class="fas fa-check" style="color: var(--primary-color); font-size: 12px;"></i>' : ''}
+            </div>
+        `;
+        
+        registerUIEventListener(friendItem, 'click', () => {
+            if (invitationStatus === 'pending' || invitationStatus === 'declined') {
+                if (typeof showNotification === 'function') {
+                    showNotification(`This user has ${invitationStatus} your previous invitation`, 'warning');
+                }
+                return;
+            }
+            
+            toggleFriendSelection(friend.id, friendItem);
+            
+            // Track invitation method for this friend
+            if (!window._cgInvitationMethods) {
+                window._cgInvitationMethods = new Map();
+            }
+            window._cgInvitationMethods.set(friend.id, {
+                canAddDirectly,
+                method: canAddDirectly ? 'direct' : 'invite'
+            });
+        });
+        
+        fragment.appendChild(friendItem);
+    });
+    
+    friendsPickerList.innerHTML = '';
+    friendsPickerList.appendChild(fragment);
+}
+
+/**
+ * Toggle friend selection
+ */
+function toggleFriendSelection(friendId, friendItem) {
+    if (window._cgSelectedMembers.has(friendId)) {
+        window._cgSelectedMembers.delete(friendId);
+        friendItem.style.background = '';
+        friendItem.style.color = '';
+        friendItem.style.borderColor = 'var(--border-color)';
+        const checkbox = friendItem.querySelector('.friend-checkbox');
+        if (checkbox) {
+            checkbox.style.borderColor = 'var(--border-color)';
+            checkbox.style.background = '';
+            checkbox.innerHTML = '';
+        }
+    } else {
+        window._cgSelectedMembers.add(friendId);
+        friendItem.style.background = 'var(--primary-color)';
+        friendItem.style.color = 'white';
+        friendItem.style.borderColor = 'var(--primary-color)';
+        const checkbox = friendItem.querySelector('.friend-checkbox');
+        if (checkbox) {
+            checkbox.style.borderColor = 'white';
+            checkbox.style.background = 'white';
+            checkbox.innerHTML = '<i class="fas fa-check" style="color: var(--primary-color); font-size: 12px;"></i>';
+        }
+    }
+    
+    updateSelectedMembersChips();
+}
+
+/**
+ * Update selected members chips
+ */
+function updateSelectedMembersChips() {
+    const selectedMembersChips = safeGetElement('#selectedMembersChips');
+    if (!selectedMembersChips) return;
+    
+    selectedMembersChips.innerHTML = '';
+    
+    if (window._cgSelectedMembers.size === 0) {
+        selectedMembersChips.innerHTML = `
+            <div style="color: var(--text-secondary); font-size: 12px; padding: 5px;">
+                No friends selected
+            </div>
+        `;
+        return;
+    }
+    
+    const fragment = document.createDocumentFragment();
+    
+    window._cgSelectedMembers.forEach(friendId => {
+        const friend = window._cgAvailableFriends?.find(f => f.id === friendId);
+        if (!friend) return;
+        
+        const chip = document.createElement('div');
+        chip.className = 'member-chip';
+        chip.style.cssText = `
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            padding: 4px 8px;
+            background: var(--primary-color);
+            color: white;
+            border-radius: 16px;
+            font-size: 12px;
+            margin: 2px;
+        `;
+        
+        chip.innerHTML = `
+            <span>${sanitizeInput(friend.displayName || friend.username || 'Unknown')}</span>
+            <button onclick="removeFriendChip('${friendId}')" style="
+                background: none;
+                border: none;
+                color: white;
+                cursor: pointer;
+                padding: 0;
+                margin-left: 4px;
+                font-size: 10px;
+            ">×</button>
+        `;
+        
+        fragment.appendChild(chip);
+    });
+    
+    selectedMembersChips.appendChild(fragment);
+}
+
+/**
+ * Remove friend from selection (global function for onclick)
+ */
+window.removeFriendChip = function(friendId) {
+    if (window._cgSelectedMembers.has(friendId)) {
+        window._cgSelectedMembers.delete(friendId);
+        
+        // Update friend item visual
+        const friendItems = safeGetElements('.friend-picker-item');
+        friendItems.forEach(item => {
+            const friend = window._cgAvailableFriends?.find(f => f.id === friendId);
+            if (friend && item.textContent.includes(friend.displayName || friend.username)) {
+                item.style.background = '';
+                item.style.color = '';
+                item.style.borderColor = 'var(--border-color)';
+                const checkbox = item.querySelector('.friend-checkbox');
+                if (checkbox) {
+                    checkbox.style.borderColor = 'var(--border-color)';
+                    checkbox.style.background = '';
+                    checkbox.innerHTML = '';
+                }
+            }
+        });
+        
+        updateSelectedMembersChips();
+    }
+};
+
+/**
+ * Filter friends for group creation
+ */
+function filterFriendsForGroupCreation(searchTerm) {
+    const friends = window._cgAvailableFriends || [];
+    const filtered = searchTerm 
+        ? friends.filter(friend => 
+            (friend.displayName || '').toLowerCase().includes(searchTerm) ||
+            (friend.username || '').toLowerCase().includes(searchTerm)
+          )
+        : friends;
+    
+    renderFriendsForGroupCreation(filtered);
+}
+
 /**
  * Setup group invite modal
  */
@@ -3732,6 +4159,23 @@ export function initGroupUI() {
  * Register UI core events
  */
 export function registerUICoreEvents() {
+    // Setup UI components
+    setupCreateGroupModal();
+    setupFriendPicker();
+    setupGroupDetailsPanel();
+    setupChatControls();
+    setupAdminManagement();
+    setupMoodSelectButtons();
+    setupSaveGroupSettings();
+    setupAdminManagementClose();
+    setupGroupInviteModal();
+    setupFriendSelectionModal();
+    setupAddMembersButton();
+    setupThemeSelection();
+    setupMoodSelection();
+    setupReactionSelection();
+    setupPostingRulesSelect();
+    
     document.addEventListener('coreDataUpdated', () => {
         if (_UI_STATE.initialRenderComplete && _protocolReady) {
             renderGroupsListSecure();
@@ -4268,4 +4712,124 @@ if (typeof document !== 'undefined') {
         if (cached) { var parsed = JSON.parse(cached); var settings = (parsed && parsed.data) ? parsed.data : parsed; if (parsed.timestamp && (Date.now() - parsed.timestamp) < 86400000) applyAll(settings); }
     } catch(e) {}
 })();
+
+// Global fallback click handler for create group modal buttons
+document.addEventListener('click', function(e) {
+    if (e.target.id === 'cancelCreateGroupBtn') {
+        e.preventDefault();
+        e.stopPropagation();
+        
+        console.log('[GroupUI] Cancel button clicked (global handler)');
+        
+        const modal = document.querySelector('#createGroupModal');
+        if (modal) { 
+            modal.classList.remove('active'); 
+            modal.style.display = 'none'; 
+        }
+        
+        // Reset form
+        if (typeof resetCreateGroupForm === 'function') {
+            resetCreateGroupForm();
+        }
+        
+        // Reset members selection
+        if (window._cgSelectedMembers) window._cgSelectedMembers.clear();
+        const chips = document.querySelector('#selectedMembersChips');
+        if (chips) chips.innerHTML = '';
+        
+        console.log('[GroupUI] Create group modal cancelled (global handler)');
+    }
+    
+    if (e.target.id === 'createGroupBtnModal') {
+        e.preventDefault();
+        e.stopPropagation();
+        
+        console.log('[GroupUI] Create Group button clicked (global handler)');
+        
+        const nameInput = document.querySelector('#groupNameInput');
+        if (!nameInput || !nameInput.value.trim()) {
+            if (typeof showNotification === 'function') {
+                showNotification('Please enter a group name', 'error');
+            }
+            nameInput?.focus();
+            return;
+        }
+        
+        // Disable button and show loading state
+        e.target.disabled = true;
+        e.target.textContent = 'Creating...';
+        
+        // Create the group async
+        createGroupAsync(e.target);
+    }
+});
+
+/**
+ * Async group creation function
+ */
+async function createGroupAsync(buttonElement) {
+    try {
+        const groupData = typeof collectGroupFormData === 'function' ? collectGroupFormData() : {};
+        
+        // Include selected friends from members tab with invitation method tracking
+        if (window._cgSelectedMembers && window._cgSelectedMembers.size > 0) {
+            const selectedMemberIds = [...window._cgSelectedMembers];
+            const invitationMethods = window._cgInvitationMethods || new Map();
+            
+            // Separate direct additions from invitations
+            const directAdditions = [];
+            const pendingInvitations = [];
+            
+            selectedMemberIds.forEach(friendId => {
+                const method = invitationMethods.get(friendId);
+                if (method?.canAddDirectly) {
+                    directAdditions.push(friendId);
+                } else {
+                    pendingInvitations.push(friendId);
+                }
+            });
+            
+            // Add direct members to group data
+            groupData.memberIds = directAdditions;
+            
+            // Store pending invitations for post-creation
+            window.__pendingGroupInvites = pendingInvitations;
+            window.__pendingInvitationMethods = new Map();
+            pendingInvitations.forEach(friendId => {
+                window.__pendingInvitationMethods.set(friendId, 'invite');
+            });
+            
+            console.log(`[GroupUI] Creating group with ${directAdditions.length} direct members and ${pendingInvitations.length} pending invitations`);
+        }
+        
+        // Create the group
+        if (typeof createGroupOnline === 'function') {
+            await createGroupOnline(groupData);
+        }
+        
+        // Reset selection
+        window._cgSelectedMembers = new Set();
+        
+        // Close modal
+        const modal = document.querySelector('#createGroupModal');
+        if (modal) { 
+            modal.classList.remove('active'); 
+            modal.style.display = 'none'; 
+        }
+        
+        if (typeof showNotification === 'function') {
+            showNotification('Group created successfully!', 'success');
+        }
+        
+    } catch (e) {
+        console.error('[GroupUI] Create group error:', e);
+        if (typeof showNotification === 'function') {
+            showNotification('Failed to create group: ' + (e.message || 'Unknown error'), 'error');
+        }
+    } finally {
+        // Reset button state
+        buttonElement.disabled = false;
+        buttonElement.textContent = 'Create Group';
+    }
+}
 

@@ -1456,14 +1456,14 @@ function applySession(sessionData) {
         ACTION: 'ACTION',
         
         // ==================== CALL SIGNALING (REAL BACKEND) ====================
-        CALL_INITIATE: 'CALL_INITIATE',
-        CALL_INCOMING: 'CALL_INCOMING',
-        CALL_ACCEPT: 'CALL_ACCEPT',
-        CALL_REJECT: 'CALL_REJECT',
-        CALL_INITIATED: 'CALL_INITIATED',
-        CALL_CONNECTING: 'CALL_CONNECTING',
-        CALL_STARTED: 'CALL_STARTED',
-        CALL_CONNECTED: 'CALL_CONNECTED',
+        CALL_INITIATE: 'call:initiate',
+        CALL_INCOMING: 'call:incoming',
+        CALL_ACCEPT: 'call:accept',
+        CALL_REJECT: 'call:reject',
+        CALL_INITIATED: 'call:initiated',
+        CALL_CONNECTING: 'call:connecting',
+        CALL_STARTED: 'call:started',
+        CALL_CONNECTED: 'call:connected',
         CALL_ENDED: 'CALL_ENDED',
         CALL_REJECTED: 'CALL_REJECTED',
         CALL_FAILED: 'CALL_FAILED',
@@ -3684,7 +3684,7 @@ if (message.type === 'SETTING_CHANGED' || message.type === 'SETTINGS_UPDATED') {
         
         _isLegalTransition: function(from, to) {
             const legalTransitions = {
-                [CALLS_STATE.INIT]: [CALLS_STATE.REGISTERING, CALLS_STATE.ACTIVE], // ACTIVE added for recovery
+                [CALLS_STATE.INIT]: [CALLS_STATE.REGISTERING, CALLS_STATE.ACTIVE, CALLS_STATE.CALL_READY], // CALL_READY added for direct call initiation
                 [CALLS_STATE.REGISTERING]: [CALLS_STATE.REGISTERED, CALLS_STATE.SESSION_PENDING],
                 [CALLS_STATE.REGISTERED]: [CALLS_STATE.SESSION_PENDING, CALLS_STATE.REGISTERING],
                 [CALLS_STATE.SESSION_PENDING]: [CALLS_STATE.SESSION_RECEIVED],
@@ -4255,19 +4255,19 @@ initiateCall: async function(callType, participants = []) {
             result = await new Promise((resolve) => {
                 retryEngine.execute(
                     async (attempt) => {
-                        logCall(MODULE, `CALL_INITIATE attempt ${attempt}`, { callId });
-                        const r = await safeSend('CALL_INITIATE', { ..._signalPayload, timestamp: Date.now() }, true);
+                        logCall(MODULE, `call:initiate attempt ${attempt}`, { callId });
+                        const r = await safeSend('call:initiate', { ..._signalPayload, timestamp: Date.now() }, true);
                         if (r && r.success !== false) return { success: true, ...r };
                         throw new Error(r?.reason || r?.error || 'signal_failed');
                     },
                     (successResult) => resolve(successResult),
                     (failInfo)      => resolve({ success: false, reason: failInfo.reason || 'retries_exhausted' }),
-                    { label: 'CALL_INITIATE', maxAttempts: 3, baseDelay: 3000 }
+                    { label: 'call:initiate', maxAttempts: 3, baseDelay: 3000 }
                 );
             });
         } else {
             // Fallback: direct send (no retry available or already retrying)
-            result = await safeSend('CALL_INITIATE', _signalPayload, true);
+            result = await safeSend('call:initiate', _signalPayload, true);
         }
 
         if (result.success === false) {
@@ -4359,10 +4359,10 @@ initiateCall: async function(callType, participants = []) {
                 WebRTCManager.setCurrentCallId(callId);
                 WebRTCManager.setConnectionTimeout(CONFIG.CALL_CONNECTION_TIMEOUT);
                 
-                // ── Bug 1 fix: send CALL_ACCEPT as a direct postMessage type
-                // so chat.html's dedicated CALL_ACCEPT handler fires it to
+                // ── Bug 1 fix: send call:accept as a direct postMessage type
+                // so chat.html's dedicated call:accept handler fires it to
                 // POST /calls/:id/answer on the backend. ───────────────────────
-                const result = await safeSend('CALL_ACCEPT', {
+                const result = await safeSend('call:accept', {
                     callId,
                     timestamp: Date.now()
                 }, false);  // no ack needed — backend confirms via ws event
@@ -7014,46 +7014,20 @@ _escapeHtml: function(text) {
     function handleCallInitiated(callData) {
     logCall(MODULE, 'handleCallInitiated', callData);
     
-    // ── Offline fix: backend returned success:false + offline:true ──────────
-    // chat.html now sends this when the callee has no active socket.
-    // Show a clear "user is offline" message and reset state — do NOT enter
-    // the initiating state or start the invitation timer.
+    // Offline fix: backend returned success:false + offline:true
+    // Show call UI anyway for 2 minutes with ringtone even if receiver is offline
     if (callData.offline === true || (callData.success === false && callData.offline)) {
-        logWarn(MODULE, 'Receiver is offline — aborting call', callData);
+        logWarn(MODULE, 'Receiver is offline - showing call UI for 2 minutes', callData);
 
-        // Clean up call state
-        resetCallState();
-        callsState.callActive  = false;
-        callsState.callState   = 'idle';
-        callsState.activeCallId = null;
-        callsState.serverCallId = null;
-        callsState.localCallId  = null;
-
-        // Unlock governor so next call attempt works immediately
-        if (CallsStateGovernor) {
-            CallsStateGovernor._transitionLock  = false;
-            CallsStateGovernor._previousState   = CallsStateGovernor._currentState;
-            CallsStateGovernor._currentState    = CALLS_STATE.ACTIVE;
-        }
-
-        // Clear any pending invitation timer
-        if (callsState.callInvitationTimer) {
-            clearTimeout(callsState.callInvitationTimer);
-            callsState.callInvitationTimer = null;
-        }
-
-        const offlineMsg = callData.error || callData.message || 'User is currently offline.';
-
-        // Notify listeners so calls-ui.js can react
-        notifyListeners('call_initiation_failed', {
-            callId:  callData.localCallId || callData.callId,
-            offline: true,
-            error:   offlineMsg
-        });
-
-        // Show toast — try UIFailsafe first, then direct DOM fallback
-        _showCallNotification(offlineMsg, 'warning');
-        return;
+        // Continue with call flow but mark receiver as offline
+        callData.receiverOnline = false;
+        callData.success = true; // Force success to show UI
+        
+        // Show notification that user is offline but continue
+        const offlineMsg = callData.error || callData.message || 'User is currently offline. Call will display for 2 minutes.';
+        _showCallNotification(offlineMsg, 'info');
+        
+        // Continue to normal call UI flow below
     }
 
     // CRITICAL: Check if the call initiation was successful

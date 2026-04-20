@@ -84,7 +84,8 @@
             return window.Environment.wsBaseUrl;
         const base  = getBackendBaseUrl();
         const wsBase = base.replace(/^http/, 'ws');
-        return `${wsBase}/socket.io/?EIO=4&transport=websocket`;
+        // Backend uses raw WebSocket at /ws, not Socket.IO
+        return `${wsBase}/ws`;
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -407,15 +408,41 @@
                 this._state = CONNECTION_STATE.CONNECTING;
                 this._emitStateChange();
             } else {
-                // Raw WebSocket — authenticate immediately
-                this._state         = CONNECTION_STATE.CONNECTED;
-                this._authenticated = true;
-                this._state         = CONNECTION_STATE.AUTHENTICATED;
-                this._emitStateChange();
-                this._resolveConnectPromise();
-                this._processQueue();
-                this._startHeartbeat();
-                this._registerMessageBridgeListeners();
+                // Raw WebSocket — authenticate immediately with token
+                this._state = CONNECTION_STATE.CONNECTED;
+                
+                // Send authentication message for raw WebSocket
+                if (this._sessionToken) {
+                    this._socket.send(JSON.stringify({
+                        type: 'authenticate',
+                        token: this._sessionToken
+                    }));
+                    
+                    // Wait for auth response
+                    this._state = CONNECTION_STATE.AUTHENTICATING;
+                    this._emitStateChange();
+                    
+                    // Set auth timeout
+                    clearTimeout(this._authTimer);
+                    this._authTimer = setTimeout(() => {
+                        this._authenticated = true;
+                        this._state = CONNECTION_STATE.AUTHENTICATED;
+                        this._emitStateChange();
+                        this._resolveConnectPromise();
+                        this._processQueue();
+                        this._startHeartbeat();
+                        this._registerMessageBridgeListeners();
+                    }, 1000);
+                } else {
+                    // No token - consider authenticated for development
+                    this._authenticated = true;
+                    this._state = CONNECTION_STATE.AUTHENTICATED;
+                    this._emitStateChange();
+                    this._resolveConnectPromise();
+                    this._processQueue();
+                    this._startHeartbeat();
+                    this._registerMessageBridgeListeners();
+                }
             }
         }
 
@@ -577,6 +604,21 @@
                     this._emitStateChange();
                     this._resolveConnectPromise();
                     this._processQueue();
+                    this._startHeartbeat();
+                    this._registerMessageBridgeListeners();
+                    this._triggerSync();
+                    return;
+                }
+                
+                // Handle authentication response from backend
+                if (message.type === 'authenticated' && message.payload && message.payload.authenticated) {
+                    clearTimeout(this._authTimer);
+                    this._authenticated = true;
+                    this._state = CONNECTION_STATE.AUTHENTICATED;
+                    this._emitStateChange();
+                    this._resolveConnectPromise();
+                    this._processQueue();
+                    this._startHeartbeat();
                     this._registerMessageBridgeListeners();
                     this._triggerSync();
                     return;
@@ -637,6 +679,9 @@
             this._state = CONNECTION_STATE.ERROR;
             this._emitStateChange();
 
+            // Log error but don't block messages module - allow it to work without WebSocket
+            console.warn('[Realtime] WebSocket connection failed, messages module will work without real-time updates');
+
             if (window.KynectaEventBus) {
                 window.KynectaEventBus.emit('REALTIME_ERROR', { error: error.message, timestamp: Date.now() });
             }
@@ -646,7 +691,16 @@
                 try { this._socket.close(); } catch (_) {}
                 this._socket = null;
             }
-            this._scheduleReconnect();
+            
+            // Only reconnect if we haven't exceeded max attempts or if this is a network error
+            if (this._reconnectAttempts < SOCKET_CONFIG.reconnectAttempts && 
+                error.message && (error.message.includes('network') || error.message.includes('connection'))) {
+                this._scheduleReconnect();
+            } else {
+                console.warn('[Realtime] WebSocket disabled - messages module will work in offline mode');
+                this._state = CONNECTION_STATE.DEGRADED;
+                this._emitStateChange();
+            }
         }
 
         // ── PRIVATE: MESSAGE ROUTING ─────────────────────────────────────────
@@ -687,7 +741,8 @@
             }
         }
 
-        // ── PRIVATE: MESSAGE BRIDGE (replaces socket-message-listener.js) ───
+        // -------------------------------------------------------------
+        // PRIVATE: MESSAGE BRIDGE (replaces socket-message-listener.js) ───
         //
         // Registers Socket.IO event names ONCE after authentication so that
         // incoming messages are forwarded to MessagesCore and the DOM.
@@ -696,18 +751,27 @@
 
         _registerMessageBridgeListeners() {
             const MESSAGE_EVENTS = ['message:new', 'new_message', 'chat:message', 'MESSAGE_RECEIVED'];
+            const GROUP_EVENTS = ['group:message', 'group:membership_change', 'group:updated', 'group:localSync'];
             let registered = 0;
 
+            // Message events
             for (const eventType of MESSAGE_EVENTS) {
                 if (this._registeredSocketListeners.has(eventType)) continue;
                 this._registeredSocketListeners.add(eventType);
-                // Register via our own on() which already deduplicates by handler reference
                 this.on(eventType, (payload) => this._handleIncomingMessage(payload));
                 registered++;
             }
 
+            // Group events
+            for (const eventType of GROUP_EVENTS) {
+                if (this._registeredSocketListeners.has(eventType)) continue;
+                this._registeredSocketListeners.add(eventType);
+                this.on(eventType, (payload) => this._handleGroupEvent(eventType, payload));
+                registered++;
+            }
+
             if (registered > 0) {
-                console.log(`[Realtime] Registered ${registered} message bridge listener(s).`);
+                console.log(`[Realtime] Registered ${registered} message & group bridge listener(s).`);
             }
         }
 

@@ -240,7 +240,7 @@
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
                 const data = await res.json();
-                return data?.data?.messages || data?.messages || data?.data || [];
+                return data?.data?.messages || data?.messages || [];
             };
 
             if (typeof window.safeApiCall === 'function') {

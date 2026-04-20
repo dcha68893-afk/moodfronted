@@ -2027,13 +2027,68 @@ export const renderContacts = function() {
 };
 
 export const renderFriends = function() {
-    // Use window globals (always fresh from syncToGlobals)
-    const _friendArray = Array.isArray(window.friends) ? window.friends : (Array.isArray(friends) ? friends : []);
-    const _pinnedArray = Array.isArray(window.pinnedFriends) ? window.pinnedFriends : (Array.isArray(pinnedFriends) ? pinnedFriends : []);
+    // PRIORITY: Use FriendService if available (unified data structure)
+    let _friendArray = [];
+    let _pinnedArray = [];
+    
+    if (window.FriendService) {
+        // Get data from unified FriendService (offline-first)
+        const cacheInfo = window.FriendService.getCacheInfo();
+        _friendArray = cacheInfo.friends > 0 ? 
+            (window.FriendService._lastFriendsData || []) : 
+            (Array.isArray(window.friends) ? window.friends : (Array.isArray(friends) ? friends : []));
+        _pinnedArray = Array.isArray(window.pinnedFriends) ? window.pinnedFriends : (Array.isArray(pinnedFriends) ? pinnedFriends : []);
+        
+        console.log('[UI] renderFriends via FriendService, count:', _friendArray.length, 'cache:', cacheInfo);
+        
+        // If no data in cache, try loading from FriendService
+        if (_friendArray.length === 0 && !window.FriendService.isLoading('friends')) {
+            console.log('[UI] No friends in cache, loading from FriendService...');
+            window.FriendService.loadFriends().then(friends => {
+                window.FriendService._lastFriendsData = friends;
+                if (UIState.activeSection === 'friendsSection') {
+                    renderFriends(); // Re-render after data loads
+                }
+            }).catch(error => {
+                console.warn('[UI] FriendService load failed:', error);
+            });
+        }
+    } else {
+        // Fallback to window globals (legacy)
+        _friendArray = Array.isArray(window.friends) ? window.friends : (Array.isArray(friends) ? friends : []);
+        _pinnedArray = Array.isArray(window.pinnedFriends) ? window.pinnedFriends : (Array.isArray(pinnedFriends) ? pinnedFriends : []);
+        console.log('[UI] renderFriends via legacy globals, count:', _friendArray.length);
+    }
+    
+    // Normalize all friends to canonical structure
+    const normalizedFriends = _friendArray.map(friend => {
+        if (!friend) return null;
+        
+        // Use normalizeFriend if available (from FriendService)
+        if (window.normalizeFriend) {
+            return window.normalizeFriend(friend);
+        }
+        
+        // Fallback normalization
+        return {
+            id: friend.id || friend.friendId,
+            name: friend.name || friend.displayName || friend.username || `User ${friend.id || ''}`,
+            avatar: friend.avatar || friend.photoURL || null,
+            status: friend.status || 'offline',
+            lastSeen: friend.lastSeen || friend.lastActive || null,
+            isOnline: (friend.status === 'online') || (friend.isOnline === true),
+            username: friend.username || '',
+            displayName: friend.displayName || friend.name || friend.username || '',
+            firstName: friend.firstName || '',
+            lastName: friend.lastName || '',
+            online: friend.online || friend.status === 'online',
+            // Legacy compatibility
+            ...friend
+        };
+    }).filter(Boolean);
 
-    console.log('[UI] renderFriends called, count:', _friendArray.length);
     // Only block if truly no data and not active yet
-    if (_friendArray.length === 0 && !isUIActive()) {
+    if (normalizedFriends.length === 0 && !isUIActive()) {
         return null;
     }
     
@@ -3025,58 +3080,96 @@ function renderFilteredUsersList(users, searchTerm) {
     });
     allUsersListElement.appendChild(fragment);
 }
-
-// =============================================
 // [9] UI ELEMENT CREATORS - STRICT LIFECYCLE COMPLIANCE
 // =============================================
 
 function createFriendItemElement(friendData, type, instantMode = false) {
-    if (!friendData || !friendData.id) return null;
+    // Enhanced validation with multiple fallback checks
+    if (!friendData) {
+        console.warn('[createFriendItemElement] No friendData provided');
+        return null;
+    }
+    
+    const friendId = friendData.id || friendData.friendId || friendData.userId;
+    if (!friendId) {
+        console.warn('[createFriendItemElement] No valid ID found in friendData:', friendData);
+        return null;
+    }
 
-    return ErrorHandler.createBoundary(`createFriendItem:${friendData.id}`, () => {
-        const friendId = friendData.id;
+    return ErrorHandler.createBoundary(`createFriendItem:${friendId}`, () => {
         const friendItem = document.createElement('div');
         friendItem.className = 'friend-item';
         friendItem.dataset.userId = friendId;
-        friendItem.dataset.type = type;
+        friendItem.dataset.type = type || 'friend';
 
-        const displayName = escapeHtml(friendData.displayName || 'Unknown User');
-        const username = friendData.username ? escapeHtml(friendData.username) : null;
-        const photoURL = friendData.photoURL || friendData.avatar;
+        // Enhanced display name fallbacks with multiple sources
+        const displayName = escapeHtml(
+            friendData.displayName || 
+            friendData.name || 
+            friendData.username || 
+            friendData.friendName || 
+            `User ${friendId}`.substring(0, 20)
+        );
+        
+        // Enhanced username fallbacks
+        const username = friendData.username || friendData.handle || friendData.screenName;
+        const escapedUsername = username ? escapeHtml(username) : null;
+        
+        // Enhanced avatar URL fallbacks
+        const photoURL = friendData.photoURL || friendData.avatar || friendData.profileImage || friendData.image;
         const avatarUrl = photoURL ? escapeHtml(photoURL) : null;
 
+        // Enhanced initials generation with better fallbacks
         const initials = displayName
             .split(' ')
+            .filter(word => word && word.length > 0)
             .map(word => word.charAt(0))
             .join('')
             .toUpperCase()
             .substring(0, 2)
-            .replace(/[^A-Z0-9]/g, 'U');
+            .replace(/[^A-Z0-9]/g, 'U')
+            .padEnd(2, 'U'); // Ensure always 2 characters
 
-        // Use enhanced online status detection
-        const statusClass = getUserOnlineStatusClass(friendData);
-        const statusText = getUserOnlineStatusText(friendData);
+        // Enhanced online status detection with safe fallbacks
+        const statusClass = typeof getUserOnlineStatusClass === 'function' 
+            ? getUserOnlineStatusClass(friendData) 
+            : 'offline';
+        const statusText = typeof getUserOnlineStatusText === 'function' 
+            ? getUserOnlineStatusText(friendData) 
+            : 'Offline';
 
-        const lastInteraction = getLastInteraction(friendId);
-        const displayStatusText = lastInteraction || statusText;
+        // Safe last interaction fallback
+        const lastInteraction = typeof getLastInteraction === 'function' 
+            ? getLastInteraction(friendId) 
+            : null;
+        const displayStatusText = lastInteraction || statusText || 'Unknown status';
 
-        const mutualCount = mutualFriendsCache && mutualFriendsCache[friendId] ? mutualFriendsCache[friendId] : 0;
+        // Safe mutual friends count fallback
+        const mutualCount = (mutualFriendsCache && mutualFriendsCache[friendId]) 
+            ? mutualFriendsCache[friendId] 
+            : 0;
+        
+        // Safe category fallbacks
         const category = friendData.category || 'friend';
-        const categoryInfo = friendCategories[category] || friendCategories.friend;
+        const categoryInfo = (friendCategories && friendCategories[category]) 
+            ? friendCategories[category] 
+            : friendCategories.friend || { name: 'Friend', icon: 'fas fa-user' };
 
-        const isPinned = pinnedFriends && pinnedFriends.some(f => f && f.id === friendId);
-        const isMuted = mutedFriends && mutedFriends.some(f => f && f.id === friendId);
+        // Safe pinned/muted checks with array validation
+        const isPinned = Array.isArray(pinnedFriends) && pinnedFriends.some(f => f && f.id === friendId);
+        const isMuted = Array.isArray(mutedFriends) && mutedFriends.some(f => f && f.id === friendId);
         const isTemporary = friendData.isTemporary === true;
         const isBusiness = friendData.isBusiness === true;
 
+        const isDemo = friendData.isDemo === true;
+
+        // Avatar HTML generation
         let avatarHtml = '';
         if (avatarUrl) {
             avatarHtml = `<div class="friend-avatar" style="background-image: url('${avatarUrl}');"></div>`;
         } else {
             avatarHtml = `<div class="friend-avatar"><span>${initials}</span></div>`;
         }
-
-        const isDemo = friendData.isDemo === true;
 
         let badgesHtml = '';
         if (isDemo) badgesHtml += '<span class="temp-friend-badge" style="background:rgba(108,99,255,.15);color:#6C63FF;border:1px solid rgba(108,99,255,.3)"><i class="fas fa-flask"></i> Demo</span>';

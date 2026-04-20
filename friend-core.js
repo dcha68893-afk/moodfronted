@@ -6529,98 +6529,124 @@ function clearFriendsLoading() {
 
 function loadCachedDataInstantly() {
     try {
+        // Load user data from cache (existing logic)
         const cachedUser = SafeStorage.getItem(LOCAL_STORAGE_KEYS.USER_DATA) || 
                            SafeStorage.getItem(LOCAL_STORAGE_KEYS.USER);
         if (cachedUser) {
-            currentUser = JSON.parse(cachedUser);
-            userData = currentUser;
+            userData = cachedUser;
+            currentUser = cachedUser;
+            Logger.info('loadCachedDataInstantly', 'User data loaded from cache');
         }
-        
-        // Priority 1: FriendCacheManager already has data (re-entry / hot path)
-        if (FriendCacheManager._cache.friends.size === 0) {
-            // Priority 2: canonical localStorage key used by services_friend.js
-            const lsKeys = [
-                LOCAL_STORAGE_KEYS.FRIENDS,
-                'knecta_friends_cache',
-                'friends'
-            ];
-            for (const key of lsKeys) {
-                try {
-                    const raw = localStorage.getItem(key);
-                    if (!raw) continue;
-                    const parsed = JSON.parse(raw);
-                    const arr = Array.isArray(parsed) ? parsed : (parsed?.list || []);
-                    if (arr.length > 0) {
-                        arr.forEach(f => { if (f && f.id) FriendCacheManager._cache.friends.set(String(f.id), f); });
-                        break;
-                    }
-                } catch (_) {}
+
+        // Load friends data from localStorage cache
+        const cachedFriends = SafeStorage.getItem('knecta_friends_cache_v8') || 
+                              SafeStorage.getItem('friends') || 
+                              localStorage.getItem('knecta_friends_cache_v8');
+        if (cachedFriends) {
+            try {
+                const friendsData = JSON.parse(cachedFriends);
+                const friends = friendsData.friends || friendsData; // Handle both formats
+                if (Array.isArray(friends) && friends.length > 0) {
+                    friends.forEach(friend => {
+                        FriendCacheManager._cache.friends.set(String(friend.id), friend);
+                    });
+                    FriendCacheManager.syncToGlobals();
+                    window.dispatchEvent(new CustomEvent('friendsUpdated', {
+                        detail: { friends: friends, count: friends.length, cached: true, offline: !navigator.onLine }
+                    }));
+                    Logger.info('loadCachedDataInstantly', `Loaded ${friends.length} friends from localStorage cache`);
+                }
+            } catch (e) {
+                Logger.warn('loadCachedDataInstantly', 'Failed to parse cached friends data', e);
             }
         }
-        
-        const cachedFriends = FriendCacheManager.getAllFriends();
-        FriendCacheManager.syncToGlobals();
-        
-        // Fire friendsUpdated immediately so UI renders from cache before ACTIVE state
-        if (cachedFriends.length > 0) {
-            window.dispatchEvent(new CustomEvent('friendsUpdated', {
-                detail: { friends: cachedFriends, count: cachedFriends.length, source: 'cache', instant: true, cached: true }
-            }));
-        } else {
-            // Priority 3: IndexedDB — async, fires friendsUpdated when ready
-            // This path runs when localStorage was cleared but IndexedDB still has data
-            (async () => {
-                try {
-                    const ls = window.KynectaFriendsLocalStore;
-                    if (!ls) return;
-                    await ls.ready();
-                    const [idbFriends, idbIncoming, idbSent] = await Promise.all([
-                        ls.getFriends(),
-                        ls.getPendingReceived(),
-                        ls.getPendingSent(),
-                    ]);
-                    if (idbFriends.length > 0) {
-                        const normalized = idbFriends.map(r => ({
-                            id: r.friendId, localId: r.id, serverId: r.serverId,
-                            displayName: r.displayName || r.username || r.friendId,
-                            username: r.username || '', avatar: r.avatar || '', photoURL: r.avatar || '',
-                            status: r.status, addedAt: r.createdAt, isLocalOnly: r.isLocalOnly,
-                        }));
-                        normalized.forEach(f => FriendCacheManager._cache.friends.set(String(f.id), f));
+
+        // Priority 1: LocalStorage — sync, fires friendsUpdated when ready
+        try {
+            const raw = JSON.parse(
+                localStorage.getItem(LOCAL_STORAGE_KEYS.FRIENDS) ||
+                localStorage.getItem('friends') || '[]'
+            );
+            if (Array.isArray(raw) && raw.length > 0) {
+                FriendCacheManager.setFriends(raw);
+                FriendCacheManager.syncToGlobals();
+                updateFriendCounts?.();
+                window.dispatchEvent(new CustomEvent('friendsUpdated', {
+                    detail: { friends: raw, count: raw.length, cached: true }
+                }));
+            }
+        } catch (_) {}
+
+        // Priority 2: SafeStorage — async, fires friendsUpdated when ready
+        const storagePromise = SafeStorage.getItem(LOCAL_STORAGE_KEYS.FRIENDS);
+        if (storagePromise && typeof storagePromise.then === 'function') {
+            storagePromise.then((raw) => {
+                if (raw) {
+                    const friends = JSON.parse(raw);
+                    if (Array.isArray(friends) && friends.length > 0) {
+                        FriendCacheManager.setFriends(friends);
                         FriendCacheManager.syncToGlobals();
                         window.dispatchEvent(new CustomEvent('friendsUpdated', {
-                            detail: { friends: normalized, count: normalized.length, cached: true, offline: !navigator.onLine }
+                            detail: { friends: friends, count: friends.length, cached: true }
                         }));
                     }
-                    if (idbIncoming.length > 0) {
-                        const reqs = idbIncoming.map(r => ({
-                            id: r.serverId || r.id, localId: r.id,
-                            senderId: r.friendId, receiverId: r.userId, status: 'pending',
-                            displayName: r.displayName || r.username || r.friendId,
-                            username: r.username || '', avatar: r.avatar || '', createdAt: r.createdAt,
-                        }));
-                        reqs.forEach(r => FriendCacheManager._cache.requests.set(String(r.id), r));
-                        window.dispatchEvent(new CustomEvent('requestsUpdated', {
-                            detail: { requests: reqs, count: reqs.length, cached: true }
-                        }));
-                    }
-                    if (idbSent.length > 0) {
-                        const sent = idbSent.map(r => ({
-                            id: r.serverId || r.id, localId: r.id,
-                            senderId: r.userId, receiverId: r.friendId, status: 'pending',
-                            displayName: r.displayName || r.username || r.friendId,
-                            username: r.username || '', avatar: r.avatar || '', createdAt: r.createdAt,
-                        }));
-                        sent.forEach(r => FriendCacheManager._cache.sentRequests.set(String(r.id), r));
-                        window.dispatchEvent(new CustomEvent('sentRequestsUpdated', {
-                            detail: { requests: sent, count: sent.length, cached: true }
-                        }));
-                    }
-                } catch (e) {
-                    Logger.warn('loadCachedDataInstantly', 'IndexedDB hydration failed', e.message);
                 }
-            })();
+            })
+            .catch(() => {});
         }
+
+        // Priority 3: IndexedDB — async, fires friendsUpdated when ready
+        (async () => {
+            try {
+                const ls = window.KynectaFriendsLocalStore;
+                if (!ls) return;
+                await ls.ready();
+                const [idbFriends, idbIncoming, idbSent] = await Promise.all([
+                    ls.getFriends(),
+                    ls.getPendingReceived(),
+                    ls.getPendingSent(),
+                ]);
+                if (idbFriends.length > 0) {
+                    const normalized = idbFriends.map(r => ({
+                        id: r.friendId, localId: r.id, serverId: r.serverId,
+                        displayName: r.displayName || r.username || r.friendId,
+                        username: r.username || '', avatar: r.avatar || '', photoURL: r.avatar || '',
+                        status: r.status, addedAt: r.createdAt, isLocalOnly: r.isLocalOnly,
+                    }));
+                    normalized.forEach(f => FriendCacheManager._cache.friends.set(String(f.id), f));
+                    FriendCacheManager.syncToGlobals();
+                    window.dispatchEvent(new CustomEvent('friendsUpdated', {
+                        detail: { friends: normalized, count: normalized.length, cached: true, offline: !navigator.onLine }
+                    }));
+                }
+                if (idbIncoming.length > 0) {
+                    const reqs = idbIncoming.map(r => ({
+                        id: r.serverId || r.id, localId: r.id,
+                        senderId: r.friendId, receiverId: r.userId, status: 'pending',
+                        displayName: r.displayName || r.username || r.friendId,
+                        username: r.username || '', avatar: r.avatar || '', createdAt: r.createdAt,
+                    }));
+                    reqs.forEach(r => FriendCacheManager._cache.requests.set(String(r.id), r));
+                    window.dispatchEvent(new CustomEvent('requestsUpdated', {
+                        detail: { requests: reqs, count: reqs.length, cached: true }
+                    }));
+                }
+                if (idbSent.length > 0) {
+                    const sent = idbSent.map(r => ({
+                        id: r.serverId || r.id, localId: r.id,
+                        senderId: r.userId, receiverId: r.friendId, status: 'pending',
+                        displayName: r.displayName || r.username || r.friendId,
+                        username: r.username || '', avatar: r.avatar || '', createdAt: r.createdAt,
+                    }));
+                    sent.forEach(r => FriendCacheManager._cache.sentRequests.set(String(r.id), r));
+                    window.dispatchEvent(new CustomEvent('sentRequestsUpdated', {
+                        detail: { requests: sent, count: sent.length, cached: true }
+                    }));
+                }
+            } catch (e) {
+                Logger.warn('loadCachedDataInstantly', 'IndexedDB hydration failed', e.message);
+            }
+        })();
 
         // Always fire cached requests if present
         const cachedRequests = FriendCacheManager.getAllRequests();

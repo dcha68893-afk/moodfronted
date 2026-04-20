@@ -329,7 +329,7 @@
                         source: 'messages',
                         target: 'parent',
                         requestId,
-                        payload: { endpoint: '/messages', method: 'POST', body }
+                        payload: { endpoint: '/api/messages', method: 'POST', body }
                     }, '*');
                 });
             }

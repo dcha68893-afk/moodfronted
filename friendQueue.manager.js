@@ -293,7 +293,7 @@
 
                 this._save();
             }
-        }
+        } // <-- THIS CLOSING BRACE WAS MISSING!
 
         /**
          * After a successful server response, update the localStore record.
@@ -320,6 +320,31 @@
                 }
             } catch (e) {
                 console.warn('[FriendQueue] LocalStore confirmation failed:', e);
+            }
+
+            // INTEGRATION: Update FriendService cache after successful operation
+            if (window.FriendService) {
+                try {
+                    // Invalidate relevant cache to force refresh
+                    if (item.action === 'add' || item.action === 'accept' || item.action === 'remove' || item.action === 'block' || item.action === 'unblock') {
+                        window.FriendService.clearCache();
+                        
+                        // Trigger fresh data load
+                        setTimeout(async () => {
+                            try {
+                                await window.FriendService.loadFriends({ silent: true });
+                                await window.FriendService.loadFriendRequests({ silent: true });
+                                await window.FriendService.loadSentRequests({ silent: true });
+                                
+                                console.log('[FriendQueue] FriendService cache refreshed after:', item.action);
+                            } catch (e) {
+                                console.warn('[FriendQueue] Failed to refresh FriendService:', e.message);
+                            }
+                        }, 500);
+                    }
+                } catch (e) {
+                    console.warn('[FriendQueue] FriendService integration failed:', e.message);
+                }
             }
 
             // Notify sync engine to reconcile

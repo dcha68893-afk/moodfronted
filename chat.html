@@ -2054,11 +2054,16 @@
         }
 
         function navigateToPage(page, options = {}) {
-            if (!page) return;
+            console.log('[Navigation] navigateToPage called with:', page, options);
+            if (!page) {
+                console.warn('[Navigation] No page provided to navigateToPage');
+                return;
+            }
             const fromHistory = !!options.fromHistory;
             if (window.__currentPage !== page) {
                 window.__lastActivePage = window.__currentPage || 'messages';
                 window.__currentPage = page;
+                console.log('[Navigation] Page changed from', window.__lastActivePage, 'to', page);
             }
             updateHeaderContext(page);
             updateHeaderActions(page);
@@ -2104,23 +2109,43 @@
             }
         }
 
-        document.querySelectorAll('.nav-icon, .mobile-nav-icon').forEach(btn => {
-            btn.addEventListener('click', (e) => {
-                e.preventDefault();
-                if (btn.dataset.page) navigateToPage(btn.dataset.page);
+        // Wait for DOM to be ready before attaching event listeners
+        function attachNavigationListeners() {
+            console.log('[Navigation] Attaching navigation listeners...');
+            
+            // Navigation click handlers
+            const navElements = document.querySelectorAll('.nav-icon, .mobile-nav-icon');
+            console.log('[Navigation] Found navigation elements:', navElements.length);
+            
+            navElements.forEach((btn, index) => {
+                console.log(`[Navigation] Setting up listener for element ${index}:`, btn.dataset.page, btn.className);
+                btn.addEventListener('click', (e) => {
+                    console.log('[Navigation] Navigation element clicked:', btn.dataset.page);
+                    e.preventDefault();
+                    if (btn.dataset.page) navigateToPage(btn.dataset.page);
+                });
             });
-        });
 
-        document.querySelectorAll('.content-iframe').forEach((iframe) => {
-            iframe.addEventListener('load', () => applyParentShellToIframe(iframe, iframe.dataset.module || 'messages'));
-            applyParentShellToIframe(iframe, iframe.dataset.module || 'messages');
-        });
-
-        const mobileBackBtn = document.getElementById('mobileBackBtn');
-        if (mobileBackBtn) {
-            mobileBackBtn.addEventListener('click', () => {
-                handleAppBackNavigation();
+            // Iframe load handlers
+            document.querySelectorAll('.content-iframe').forEach((iframe) => {
+                iframe.addEventListener('load', () => applyParentShellToIframe(iframe, iframe.dataset.module || 'messages'));
+                applyParentShellToIframe(iframe, iframe.dataset.module || 'messages');
             });
+
+            // Mobile back button
+            const mobileBackBtn = document.getElementById('mobileBackBtn');
+            if (mobileBackBtn) {
+                mobileBackBtn.addEventListener('click', () => {
+                    handleAppBackNavigation();
+                });
+            }
+        }
+
+        // Attach listeners immediately if DOM is ready, otherwise wait
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', attachNavigationListeners);
+        } else {
+            attachNavigationListeners();
         }
 
         syncBrowserHistoryState(window.__currentPage || 'messages', true);

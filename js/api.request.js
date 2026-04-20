@@ -2491,7 +2491,7 @@ fetchOptions.signal = controller.signal;
     
     async function getMessages() {
         const functionName = 'getMessages';
-        const endpoint = '/messages';
+        const endpoint = '/api/messages';
         
         try {
             const normalizedEndpoint = normalizeEndpoint(endpoint);
@@ -2775,7 +2775,7 @@ fetchOptions.signal = controller.signal;
     // 🔧 FIXED sendMessage with correct body structure
     async function sendMessage(messageData) {
         const functionName = 'sendMessage';
-        const endpoint = '/messages';
+        const endpoint = '/api/messages';
         
         try {
             if (!messageData) {
@@ -3613,7 +3613,7 @@ fetchOptions.signal = controller.signal;
     // 🔧 NEW: getChats
     async function getChats() {
         const functionName = 'getChats';
-        const endpoint = '/chats';
+        const endpoint = '/api/messages/chats';
         
         try {
             const normalizedEndpoint = normalizeEndpoint(endpoint);
@@ -3840,7 +3840,7 @@ fetchOptions.signal = controller.signal;
     // 🔧 NEW: getUnreadCounts
     async function getUnreadCounts() {
         const functionName = 'getUnreadCounts';
-        const endpoint = '/messages/unread/counts';
+        const endpoint = '/api/messages/unread-counts';
         
         try {
             const normalizedEndpoint = normalizeEndpoint(endpoint);
@@ -3969,7 +3969,7 @@ fetchOptions.signal = controller.signal;
     // 🔧 NEW: markMessagesRead
     async function markMessagesRead(chatId, messageIds) {
         const functionName = 'markMessagesRead';
-        const endpoint = `/chats/${chatId}/messages/read`;
+        const endpoint = '/api/messages/mark-read/batch';
         
         try {
             if (!chatId) {
@@ -7186,6 +7186,258 @@ fetchOptions.signal = controller.signal;
         }
     }
     
+    // ============================================================================
+    // CRITICAL MISSING MESSAGE FUNCTIONS - FRONTEND IS CALLING THESE
+    // ============================================================================
+    
+    // Delete message API function
+    async function deleteMessage(messageId, deleteForEveryone = false) {
+        const functionName = 'deleteMessage';
+        const endpoint = `/api/messages/${messageId}`;
+        
+        try {
+            if (!messageId) {
+                console.error("[API] deleteMessage called without messageId");
+                return {
+                    ok: false,
+                    success: false,
+                    status: 400,
+                    statusText: 'Bad Request',
+                    data: { message: 'Message ID is required' },
+                    headers: {},
+                    validationError: true
+                };
+            }
+            
+            const normalizedEndpoint = normalizeEndpoint(endpoint);
+            const isPublic = isPublicEndpointCheck(normalizedEndpoint);
+            
+            if (!isPublic && !isSessionReady()) {
+                const requestId = generateRequestId(endpoint, 'DELETE');
+                logRequest(requestId, `Protected endpoint waiting for session ready: ${normalizedEndpoint}`);
+                await waitForSessionReady();
+            }
+            
+            const requestId = generateRequestId(endpoint, 'DELETE');
+            if (!checkDependencyGates(requestId, normalizedEndpoint)) {
+                return queueRequest(
+                    () => deleteMessage(messageId, deleteForEveryone),
+                    `DELETE message ${messageId}`,
+                    endpoint
+                );
+            }
+            
+            const body = deleteForEveryone ? { deleteForEveryone: true } : {};
+            
+            const result = await makeApiRequest({
+                method: 'DELETE',
+                url: normalizedEndpoint,
+                data: body,
+                requestId,
+                timeout: 15000,
+                requiresAuth: !isPublic,
+                source: 'api.request.js'
+            });
+            
+            if (result.success) {
+                if (shouldLogSuccess(normalizedEndpoint, 'delete_message_success')) {
+                    console.log(`[API] deleteMessage successful: ${messageId}`);
+                }
+                return {
+                    ok: true,
+                    success: true,
+                    status: result.status || 200,
+                    statusText: result.statusText || 'OK',
+                    data: result.data || { message: 'Message deleted successfully' },
+                    headers: result.headers || {}
+                };
+            } else {
+                if (shouldLogError(normalizedEndpoint, 'delete_message_failed')) {
+                    console.error(`[API] deleteMessage failed: ${result.status} - ${result.message}`);
+                }
+                
+                const errorObj = {
+                    ok: false,
+                    success: false,
+                    status: result.status || 500,
+                    statusText: result.statusText || 'Delete Failed',
+                    data: result.data || { message: result.message || 'Failed to delete message' },
+                    headers: result.headers || {}
+                };
+                
+                return errorObj;
+            }
+            
+        } catch (error) {
+            console.error("[API] deleteMessage critical error:", error);
+            return getSafeDefaultResponse(endpoint, functionName, error);
+        }
+    }
+    
+    // Edit message API function
+    async function editMessage(messageId, content) {
+        const functionName = 'editMessage';
+        const endpoint = `/api/messages/${messageId}`;
+        
+        try {
+            if (!messageId || !content) {
+                console.error("[API] editMessage called without messageId or content");
+                return {
+                    ok: false,
+                    success: false,
+                    status: 400,
+                    statusText: 'Bad Request',
+                    data: { message: 'Message ID and content are required' },
+                    headers: {},
+                    validationError: true
+                };
+            }
+            
+            const normalizedEndpoint = normalizeEndpoint(endpoint);
+            const isPublic = isPublicEndpointCheck(normalizedEndpoint);
+            
+            if (!isPublic && !isSessionReady()) {
+                const requestId = generateRequestId(endpoint, 'PATCH');
+                logRequest(requestId, `Protected endpoint waiting for session ready: ${normalizedEndpoint}`);
+                await waitForSessionReady();
+            }
+            
+            const requestId = generateRequestId(endpoint, 'PATCH');
+            if (!checkDependencyGates(requestId, normalizedEndpoint)) {
+                return queueRequest(
+                    () => editMessage(messageId, content),
+                    `PATCH message ${messageId}`,
+                    endpoint
+                );
+            }
+            
+            const result = await makeApiRequest({
+                method: 'PATCH',
+                url: normalizedEndpoint,
+                data: { content: content.trim() },
+                requestId,
+                timeout: 15000,
+                requiresAuth: !isPublic,
+                source: 'api.request.js'
+            });
+            
+            if (result.success) {
+                if (shouldLogSuccess(normalizedEndpoint, 'edit_message_success')) {
+                    console.log(`[API] editMessage successful: ${messageId}`);
+                }
+                return {
+                    ok: true,
+                    success: true,
+                    status: result.status || 200,
+                    statusText: result.statusText || 'OK',
+                    data: result.data || { message: 'Message edited successfully' },
+                    headers: result.headers || {}
+                };
+            } else {
+                if (shouldLogError(normalizedEndpoint, 'edit_message_failed')) {
+                    console.error(`[API] editMessage failed: ${result.status} - ${result.message}`);
+                }
+                
+                const errorObj = {
+                    ok: false,
+                    success: false,
+                    status: result.status || 500,
+                    statusText: result.statusText || 'Edit Failed',
+                    data: result.data || { message: result.message || 'Failed to edit message' },
+                    headers: result.headers || {}
+                };
+                
+                return errorObj;
+            }
+            
+        } catch (error) {
+            console.error("[API] editMessage critical error:", error);
+            return getSafeDefaultResponse(endpoint, functionName, error);
+        }
+    }
+    
+    // Add reaction API function
+    async function addReaction(messageId, emoji) {
+        const functionName = 'addReaction';
+        const endpoint = `/api/messages/${messageId}/react`;
+        
+        try {
+            if (!messageId || !emoji) {
+                console.error("[API] addReaction called without messageId or emoji");
+                return {
+                    ok: false,
+                    success: false,
+                    status: 400,
+                    statusText: 'Bad Request',
+                    data: { message: 'Message ID and emoji are required' },
+                    headers: {},
+                    validationError: true
+                };
+            }
+            
+            const normalizedEndpoint = normalizeEndpoint(endpoint);
+            const isPublic = isPublicEndpointCheck(normalizedEndpoint);
+            
+            if (!isPublic && !isSessionReady()) {
+                const requestId = generateRequestId(endpoint, 'POST');
+                logRequest(requestId, `Protected endpoint waiting for session ready: ${normalizedEndpoint}`);
+                await waitForSessionReady();
+            }
+            
+            const requestId = generateRequestId(endpoint, 'POST');
+            if (!checkDependencyGates(requestId, normalizedEndpoint)) {
+                return queueRequest(
+                    () => addReaction(messageId, emoji),
+                    `POST reaction to message ${messageId}`,
+                    endpoint
+                );
+            }
+            
+            const result = await makeApiRequest({
+                method: 'POST',
+                url: normalizedEndpoint,
+                data: { emoji },
+                requestId,
+                timeout: 15000,
+                requiresAuth: !isPublic,
+                source: 'api.request.js'
+            });
+            
+            if (result.success) {
+                if (shouldLogSuccess(normalizedEndpoint, 'add_reaction_success')) {
+                    console.log(`[API] addReaction successful: ${messageId} ${emoji}`);
+                }
+                return {
+                    ok: true,
+                    success: true,
+                    status: result.status || 200,
+                    statusText: result.statusText || 'OK',
+                    data: result.data || { message: 'Reaction added successfully' },
+                    headers: result.headers || {}
+                };
+            } else {
+                if (shouldLogError(normalizedEndpoint, 'add_reaction_failed')) {
+                    console.error(`[API] addReaction failed: ${result.status} - ${result.message}`);
+                }
+                
+                const errorObj = {
+                    ok: false,
+                    success: false,
+                    status: result.status || 500,
+                    statusText: result.statusText || 'Reaction Failed',
+                    data: result.data || { message: result.message || 'Failed to add reaction' },
+                    headers: result.headers || {}
+                };
+                
+                return errorObj;
+            }
+            
+        } catch (error) {
+            console.error("[API] addReaction critical error:", error);
+            return getSafeDefaultResponse(endpoint, functionName, error);
+        }
+    }
+    
     function initPublicInterface() {
         try {
             initDependencies();
@@ -7224,6 +7476,9 @@ fetchOptions.signal = controller.signal;
                 getMessages,
                 getMessageById,
                 sendMessage,
+                deleteMessage,
+                editMessage,
+                addReaction,
                 
                 // Friend methods
                 getFriends,

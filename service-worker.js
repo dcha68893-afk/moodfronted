@@ -33,6 +33,15 @@ const CORE_STATIC_ASSETS = [
   // Pages
   '/friend.html',
   '/chat.html',
+  '/calls.html',
+
+  // Calls module assets (critical for offline UI)
+  '/calls-core.js',
+  '/calls-ui.js',
+  '/calls.css',
+  '/callSession.manager.js',
+  '/callRetry.engine.js',
+  '/localStore.calls.js',
 
   // ── ALL APP JS MODULES (must be cached for offline to work) ──────────────
   // API layer

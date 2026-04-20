@@ -487,6 +487,41 @@
                 b.set('friends.blocked', blockedList);
             });
 
+            // INTEGRATION: Update FriendService cache with latest data
+            if (window.FriendService) {
+                try {
+                    // Update FriendService cache with normalized data
+                    const normalizedFriends = friendList.map(friend => {
+                        if (window.normalizeFriend) {
+                            return window.normalizeFriend(friend);
+                        }
+                        return friend;
+                    });
+
+                    const normalizedRequests = requestList.map(request => {
+                        if (window.normalizeFriend) {
+                            return window.normalizeFriend(request);
+                        }
+                        return request;
+                    });
+
+                    // Update FriendService internal cache
+                    window.FriendService._lastFriendsData = normalizedFriends;
+                    window.FriendService._lastRequestsData = normalizedRequests;
+                    
+                    // Emit events to update UI
+                    window.FriendService.emit('friends-loaded', normalizedFriends);
+                    window.FriendService.emit('requests-loaded', normalizedRequests);
+                    
+                    console.log('[FriendSync] FriendService cache updated:', {
+                        friends: normalizedFriends.length,
+                        requests: normalizedRequests.length
+                    });
+                } catch (e) {
+                    console.warn('[FriendSync] Failed to update FriendService:', e.message);
+                }
+            }
+
             // ── Persist to AppStorage (single source of truth — patch v1) ──
             if (window.AppStorage) {
                 window.AppStorage.set('knecta_friends_cache', friendList);
@@ -557,6 +592,41 @@
                 if (window.api?.request?.request) {
                     return window.api.request.request(endpoint, { ...options, headers });
                 }
+                // Use parent communication system like other modules
+                if (window.parent && window.parent !== window) {
+                    return new Promise((resolve, reject) => {
+                        const requestId = 'friendSync_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+                        const timeoutId = setTimeout(() => {
+                            reject(new Error('API request timeout'));
+                        }, REQUEST_TIMEOUT_MS);
+
+                        const handleMessage = (event) => {
+                            if (event.data && event.data.type === 'API_RESPONSE' && event.data.requestId === requestId) {
+                                clearTimeout(timeoutId);
+                                window.parent.removeEventListener('message', handleMessage);
+                                
+                                if (event.data.payload && event.data.payload.success !== false) {
+                                    resolve(event.data.payload);
+                                } else {
+                                    reject(new Error(event.data.payload?.message || 'API operation failed'));
+                                }
+                            }
+                        };
+
+                        window.parent.addEventListener('message', handleMessage);
+                        
+                        // Send API request to parent
+                        window.parent.postMessage({
+                            type: 'API_REQUEST',
+                            endpoint: endpoint,
+                            method: options.method || 'GET',
+                            requestId: requestId,
+                            timestamp: Date.now()
+                        }, '*');
+                    });
+                }
+                
+                // Fallback to direct fetch (should not reach here in iframe mode)
                 const res = await fetch(endpoint, {
                     method: 'GET',
                     ...options,

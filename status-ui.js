@@ -4729,8 +4729,30 @@ async function handlePostStatus() {
             btn.disabled = true;
             btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Posting...';
         }
-        const core = getCore();
-        const response = await core.postStatus(statusData);
+        const api = window.StatusAPI;
+        let response;
+
+        // Handle media upload if present
+        if (statusData.type === 'media' && statusData.file) {
+            showNotification('Uploading media...', 'info');
+            const uploadResult = await api.uploadMedia(statusData.file);
+            if (uploadResult.success) {
+                statusData.mediaUrl = uploadResult.url;
+                statusData.mediaType = statusData.file.type.startsWith('video') ? 'video' : 'image';
+            } else {
+                throw new Error(uploadResult.error);
+            }
+        }
+
+        // Create the status
+        response = await api.createStatus(statusData);
+        
+        // Handle offline queue if not online
+        if (!navigator.onLine && window.StatusCache) {
+            await window.StatusCache.addToSyncQueue(statusData);
+            response = { success: true, queued: true, offline: true };
+        }
+        
         if (response && (response.success || response.queued)) {
             const optimisticStatus = response.status || {
                 id: response.id || `local_status_${Date.now()}`,

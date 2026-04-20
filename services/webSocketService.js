@@ -309,4 +309,95 @@ export class WebSocketService {
       }
     });
   }
+
+  // =============================================
+  // [FRIEND STATUS UPDATE METHODS]
+  // =============================================
+  
+  /**
+   * Update friend status and broadcast to all connected clients
+   */
+  updateFriendStatus(userId, status, lastSeen = null) {
+    const statusUpdate = {
+      userId,
+      status: status || 'offline',
+      lastSeen: lastSeen || new Date().toISOString(),
+      isOnline: status === 'online',
+      timestamp: Date.now()
+    };
+
+    // Broadcast to all users (in a real app, you'd only broadcast to friends)
+    this.broadcast('friend_status_update', statusUpdate);
+    
+    console.log('[WS] Friend status updated:', statusUpdate);
+  }
+
+  /**
+   * Handle user online/offline presence updates
+   */
+  broadcastPresenceUpdate(userId, isOnline) {
+    const presenceUpdate = {
+      userId,
+      online: isOnline,
+      status: isOnline ? 'online' : 'offline',
+      lastSeen: isOnline ? null : new Date().toISOString(),
+      timestamp: Date.now()
+    };
+
+    this.broadcast('presence:update', presenceUpdate);
+    
+    // Also update FriendService if available
+    if (typeof window !== 'undefined' && window.FriendService) {
+      window.FriendService.updateFriendStatus(userId, presenceUpdate.status, presenceUpdate.lastSeen);
+    }
+    
+    console.log('[WS] Presence update broadcasted:', presenceUpdate);
+  }
+
+  /**
+   * Send friend request notification to specific user
+   */
+  sendFriendRequestNotification(receiverId, requestData) {
+    const notification = {
+      type: 'friend_request',
+      senderId: requestData.senderId,
+      senderName: requestData.senderName,
+      requestId: requestData.requestId,
+      timestamp: Date.now()
+    };
+
+    this.sendToUser(receiverId, 'friend_request_received', notification);
+    console.log('[WS] Friend request notification sent to:', receiverId);
+  }
+
+  /**
+   * Send friend request response notification
+   */
+  sendFriendRequestResponse(senderId, responseData) {
+    const notification = {
+      type: 'friend_request_response',
+      receiverId: responseData.receiverId,
+      action: responseData.action, // 'accepted' or 'rejected'
+      timestamp: Date.now()
+    };
+
+    this.sendToUser(senderId, 'friend_request_response', notification);
+    console.log('[WS] Friend request response sent to:', senderId);
+  }
+
+  /**
+   * Handle friend relationship changes (add/remove/block)
+   */
+  broadcastFriendshipChange(userId, friendId, action, extraData = {}) {
+    const changeNotification = {
+      userId,
+      friendId,
+      action, // 'added', 'removed', 'blocked', 'unblocked'
+      ...extraData,
+      timestamp: Date.now()
+    };
+
+    this.broadcast('friendship_changed', changeNotification);
+    console.log('[WS] Friendship change broadcasted:', changeNotification);
+  }
 }
