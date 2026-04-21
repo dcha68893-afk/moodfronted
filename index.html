@@ -7,7 +7,6 @@
     <link rel="icon" type="image/png" sizes="192x192" href="icons/moodchat-192.png">
     <link rel="icon" type="image/png" sizes="512x512" href="icons/moodchat-512.png">
     <link rel="apple-touch-icon" href="icons/moodchat-192.png">
-    <meta name="theme-color" content="#000000">
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>MoodChat - Global Chat Platform</title>
@@ -2134,50 +2133,39 @@
                     try {
                         let response;
                         if (window.api?.auth?.login) {
-                            const loginPromise = window.api.auth.login({ email: identifier, password: password, rememberMe });
+                            const loginPromise = window.api.auth.login({ identifier: identifier, password: password, rememberMe: rememberMe });
                             const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), 30000));
                             response = await Promise.race([loginPromise, timeout]);
                         } else {
                             const baseUrl = window.__getApiOrigin ? window.__getApiOrigin() : (location.hostname === 'localhost' ? 'http://localhost:4000' : 'https://moodchat-fy56.onrender.com');
                             const res = await fetch(`${baseUrl}/api/auth/login`, {
                                 method: 'POST', headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify({ identifier, password })
+                                body: JSON.stringify({ identifier: identifier, password: password })
                             });
                             const data = await res.json();
-                            response = { success: res.ok, data, message: data.message };
+                            response = { success: res.ok, data: data, message: data.message };
                         }
                         if (response?.success || response?.token || response?.data?.token) {
                             const token = response.token || response.data?.token || response.accessToken;
                             const user = response.user || response.data?.user;
                             if (token) {
                                 window.AppRuntimeAuthority?.persistSession?.({
-                                    token,
+                                    token: token,
                                     refreshToken: response.refreshToken || response.data?.refreshToken || null,
                                     user: user || null,
                                     expiresAt: response.expiresAt || response.data?.expiresAt || null
                                 });
-                                window.SessionState.setToken(token);
-                                if (user) window.SessionState.setUser(user);
-                                if (window.SessionManager && rememberMe && user) {
-                                    window.SessionManager.createSession(user, token, true);
-                                }
-                                window.CoreUtils.showNotification('Success', 'Login successful! Redirecting...', 'success');
-                                setTimeout(() => { window.location.href = 'chat.html'; }, 1000);
-                            } else throw new Error('No token');
-                        } else {
-                            const msg = response?.message || response?.error || 'Login failed';
-                            window.CoreUtils.showNotification('Error', msg, 'error');
-                            showError('loginIdentifier', msg);
-                        }
-                    } catch (error) {
-                        const stored = window.SessionState.getToken();
-                        if (stored) {
+                            }
                             window.CoreUtils.showNotification('Success', 'Login successful! Redirecting...', 'success');
                             setTimeout(() => { window.location.href = 'chat.html'; }, 1000);
                         } else {
-                            window.CoreUtils.showNotification('Error', error.message || 'Network error', 'error');
-                            showError('loginIdentifier', error.message || 'Login failed');
+                            const errorMsg = response?.message || response?.data?.message || 'Login failed';
+                            window.CoreUtils.showNotification('Error', errorMsg, 'error');
+                            showError('loginIdentifier', errorMsg);
                         }
+                    } catch (error) {
+                        window.CoreUtils.showNotification('Error', error.message || 'Network error', 'error');
+                        showError('loginIdentifier', error.message || 'Login failed');
                     } finally {
                         setButtonLoadingState('login-button', 'loginButtonText', 'loginSpinner', 'Login to MoodChat', false);
                     }
@@ -2203,24 +2191,24 @@
                     try {
                         let response;
                         if (window.api?.auth?.register) {
-                            const regPromise = window.api.auth.register({ email, username, password, displayName: displayName || username });
+                            const regPromise = window.api.auth.register({ email: email, username: username, password: password, displayName: displayName || username });
                             const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), 30000));
                             response = await Promise.race([regPromise, timeout]);
                         } else {
                             const baseUrl = window.__getApiOrigin ? window.__getApiOrigin() : (location.hostname === 'localhost' ? 'http://localhost:4000' : 'https://moodchat-fy56.onrender.com');
                             const res = await fetch(`${baseUrl}/api/auth/register`, {
                                 method: 'POST', headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify({ email, username, password, displayName: displayName || username })
+                                body: JSON.stringify({ email: email, username: username, password: password, displayName: displayName || username })
                             });
                             const data = await res.json();
-                            response = { success: res.ok, data };
+                            response = { success: res.ok, data: data };
                         }
                         if (response?.success === true) {
                             const token = response.token || response.data?.token;
                             const user = response.user || response.data?.user;
                             if (token) {
                                 window.AppRuntimeAuthority?.persistSession?.({
-                                    token,
+                                    token: token,
                                     refreshToken: response.refreshToken || response.data?.refreshToken || null,
                                     user: user || null,
                                     expiresAt: response.expiresAt || response.data?.expiresAt || null
@@ -2228,14 +2216,12 @@
                                 window.SessionState.setToken(token);
                                 if (user) window.SessionState.setUser(user);
                                 if (window.SessionManager && user) window.SessionManager.createSession(user, token, true);
-                                window.CoreUtils.showNotification('Success', 'Account created! Redirecting...', 'success');
-                                setTimeout(() => { window.location.href = 'chat.html'; }, 1000);
-                            } else {
-                                window.CoreUtils.showNotification('Success', 'Account created! Please login.', 'success');
-                                switchForm('login');
                             }
+                            window.CoreUtils.showNotification('Success', 'Account created! Please login to continue', 'success');
+                            // CRITICAL FIX: Don't auto-redirect to prevent login flicker loop
+                            switchForm('login');
                         } else {
-                            const msg = response?.message || response?.error || 'Registration failed';
+                            const msg = response?.message || response?.data?.message || 'Registration failed';
                             window.CoreUtils.showNotification('Error', msg, 'error');
                             showError('registerEmail', msg);
                         }
@@ -2264,12 +2250,12 @@
                     try {
                         let response;
                         if (window.api?.auth?.forgotPassword) {
-                            response = await window.api.auth.forgotPassword({ email });
+                            response = await window.api.auth.forgotPassword({ email: email });
                         } else {
                             const baseUrl = window.__getApiOrigin ? window.__getApiOrigin() : (location.hostname === 'localhost' ? 'http://localhost:4000' : 'https://moodchat-fy56.onrender.com');
                             const res = await fetch(`${baseUrl}/api/auth/forgot-password`, {
                                 method: 'POST', headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify({ email })
+                                body: JSON.stringify({ email: email })
                             });
                             const data = await res.json();
                             response = { success: res.ok, message: data.message };
@@ -2297,7 +2283,8 @@
         async function checkExistingSession() {
             const runtimeSession = window.AppRuntimeAuthority?.getSessionSnapshot?.();
             if (runtimeSession?.authenticated) {
-                window.location.replace('chat.html');
+                // CRITICAL FIX: Don't auto-redirect to prevent login flicker loop
+                console.log('[Auth] Existing session found, staying on current page');
                 return true;
             }
 
@@ -2306,7 +2293,8 @@
             const isLoggedIn = localStorage.getItem('isLoggedIn') === 'true';
             if (isLoggedIn && token && token.length > 20 && user) {
                 window.currentUser = user;
-                window.location.href = 'chat.html';
+                // CRITICAL FIX: Don't auto-redirect to prevent login flicker loop
+                console.log('[Auth] Valid session found, staying on current page');
                 return true;
             }
             if (token && token.length > 20) {
@@ -2343,10 +2331,10 @@
                     const token = window.SessionState.getToken();
                     const user = window.SessionState.getUser();
                     if (token && user) {
-                        window.AppRuntimeAuthority?.persistSession?.({ token, user });
+                        window.AppRuntimeAuthority?.persistSession?.({ token: token, user: user });
                         window.currentUser = user;
-                        window.CoreUtils.showNotification('Success', 'Quick login successful! Redirecting...', 'success');
-                        setTimeout(() => { window.location.href = 'chat.html'; }, 1000);
+                        window.CoreUtils.showNotification('Success', 'Quick login successful!', 'success');
+                        console.log('[Auth] Quick login successful, staying on current page');
                     } else {
                         window.CoreUtils.showNotification('Error', 'Session expired. Please login again.', 'error');
                         card.classList.remove('visible');
@@ -2388,24 +2376,30 @@
         }
         
         function switchForm(formName) {
-            document.getElementById('login-container')?.classList.remove('active');
-            document.getElementById('register-container')?.classList.remove('active');
-            document.getElementById('forgot-container')?.classList.remove('active');
-            document.getElementById('dashboardPanel')?.classList.remove('active');
+            const loginContainer = document.getElementById('login-container');
+            const registerContainer = document.getElementById('register-container');
+            const forgotContainer = document.getElementById('forgot-container');
+            const dashboardPanel = document.getElementById('dashboardPanel');
+            
+            if (loginContainer) loginContainer.classList.remove('active');
+            if (registerContainer) registerContainer.classList.remove('active');
+            if (forgotContainer) forgotContainer.classList.remove('active');
+            if (dashboardPanel) dashboardPanel.classList.remove('active');
+            
             if (formName === 'login') {
-                document.getElementById('login-container')?.classList.add('active');
+                if (loginContainer) loginContainer.classList.add('active');
                 document.getElementById('panelTitle').textContent = 'Welcome to MoodChat';
                 document.getElementById('panelSubtitle').textContent = 'Login to continue';
             } else if (formName === 'register') {
-                document.getElementById('register-container')?.classList.add('active');
+                if (registerContainer) registerContainer.classList.add('active');
                 document.getElementById('panelTitle').textContent = 'Create Account';
                 document.getElementById('panelSubtitle').textContent = 'Join our global community';
             } else if (formName === 'forgot') {
-                document.getElementById('forgot-container')?.classList.add('active');
+                if (forgotContainer) forgotContainer.classList.add('active');
                 document.getElementById('panelTitle').textContent = 'Reset Password';
                 document.getElementById('panelSubtitle').textContent = 'Enter your email to receive reset instructions';
             } else if (formName === 'dashboard') {
-                document.getElementById('dashboardPanel')?.classList.add('active');
+                if (dashboardPanel) dashboardPanel.classList.add('active');
                 document.getElementById('panelTitle').textContent = 'Dashboard';
                 document.getElementById('panelSubtitle').textContent = 'Welcome back!';
             }
@@ -2414,24 +2408,58 @@
         
         function validateLoginInputs(identifier, password, method) {
             let valid = true;
-            if (!identifier) { showError('loginIdentifier', `${method === 'email' ? 'Email' : method === 'mobile' ? 'Mobile number' : 'Username'} is required`); valid = false; }
-            else if (method === 'email' && !window.CoreUtils.validateEmail(identifier)) { showError('loginIdentifier', 'Please enter a valid email address'); valid = false; }
-            if (!password) { showError('loginPassword', 'Password is required'); valid = false; }
+            if (!identifier) { 
+                showError('loginIdentifier', `${method === 'email' ? 'Email' : method === 'mobile' ? 'Mobile number' : 'Username'} is required`); 
+                valid = false; 
+            } else if (method === 'email' && !window.CoreUtils.validateEmail(identifier)) { 
+                showError('loginIdentifier', 'Please enter a valid email address'); 
+                valid = false; 
+            }
+            if (!password) { 
+                showError('loginPassword', 'Password is required'); 
+                valid = false; 
+            }
             return valid;
         }
         
         function validateRegisterInputs(displayName, username, email, password, confirm, accept) {
             let valid = true;
-            if (!displayName) { showError('registerName', 'Display name is required'); valid = false; }
-            else if (displayName.length < 2) { showError('registerName', 'Display name must be at least 2 characters'); valid = false; }
-            if (!username) { showError('registerUsername', 'Username is required'); valid = false; }
-            else if (username.length < 3) { showError('registerUsername', 'Username must be at least 3 characters'); valid = false; }
-            if (!email) { showError('registerEmail', 'Email is required'); valid = false; }
-            else if (!window.CoreUtils.validateEmail(email)) { showError('registerEmail', 'Please enter a valid email address'); valid = false; }
-            if (!password) { showError('registerPassword', 'Password is required'); valid = false; }
-            else if (password.length < 6) { showError('registerPassword', 'Password must be at least 6 characters'); valid = false; }
-            if (password !== confirm) { showError('registerConfirmPassword', 'Passwords do not match'); valid = false; }
-            if (!accept) { window.CoreUtils.showNotification('Warning', 'You must accept the terms and conditions', 'warning'); valid = false; }
+            if (!displayName) { 
+                showError('registerName', 'Display name is required'); 
+                valid = false; 
+            } else if (displayName.length < 2) { 
+                showError('registerName', 'Display name must be at least 2 characters'); 
+                valid = false; 
+            }
+            if (!username) { 
+                showError('registerUsername', 'Username is required'); 
+                valid = false; 
+            } else if (username.length < 3) { 
+                showError('registerUsername', 'Username must be at least 3 characters'); 
+                valid = false; 
+            }
+            if (!email) { 
+                showError('registerEmail', 'Email is required'); 
+                valid = false; 
+            } else if (!window.CoreUtils.validateEmail(email)) { 
+                showError('registerEmail', 'Please enter a valid email address'); 
+                valid = false; 
+            }
+            if (!password) { 
+                showError('registerPassword', 'Password is required'); 
+                valid = false; 
+            } else if (password.length < 6) { 
+                showError('registerPassword', 'Password must be at least 6 characters'); 
+                valid = false; 
+            }
+            if (password !== confirm) { 
+                showError('registerConfirmPassword', 'Passwords do not match'); 
+                valid = false; 
+            }
+            if (!accept) { 
+                window.CoreUtils.showNotification('Warning', 'You must accept the terms and conditions', 'warning'); 
+                valid = false; 
+            }
             return valid;
         }
         
@@ -2442,11 +2470,25 @@
         
         function showError(fieldId, message) {
             const el = document.getElementById(fieldId + 'Error');
-            if (el) { const span = el.querySelector('span'); if (span) span.textContent = message; el.classList.add('visible'); }
+            if (el) { 
+                const span = el.querySelector('span'); 
+                if (span) span.textContent = message; 
+                el.classList.add('visible'); 
+            } else {
+                // Fallback for fields without specific error element
+                window.CoreUtils.showNotification('Error', message, 'error');
+            }
         }
         
-        function hideError(fieldId) { document.getElementById(fieldId + 'Error')?.classList.remove('visible'); }
-        function showSuccess(fieldId) { document.getElementById(fieldId + 'Success')?.classList.add('visible'); }
+        function hideError(fieldId) { 
+            const el = document.getElementById(fieldId + 'Error');
+            if (el) el.classList.remove('visible'); 
+        }
+        
+        function showSuccess(fieldId) { 
+            const el = document.getElementById(fieldId + 'Success');
+            if (el) el.classList.add('visible'); 
+        }
         
         function setButtonLoadingState(btnId, textId, spinnerId, text, loading) {
             const btn = document.getElementById(btnId);
@@ -2463,62 +2505,22 @@
             initializeDashboardButtons();
         });
     </script>
+    
     <!-- ====================================================================== -->
-<!-- SERVICE WORKER REGISTRATION                                           -->
-<!-- PASTE THIS BLOCK just before </body> in index.html                  -->
-<!-- ====================================================================== -->
-<script>
-(function() {
-  'use strict';
-
-  if (!('serviceWorker' in navigator)) {
-    console.warn('[SW-REG] Service Workers not supported in this browser.');
-    return;
-  }
-
-  // Register the service worker from the root so its scope covers the entire app.
-  navigator.serviceWorker.register('/service-worker.js', { scope: '/' })
-    .then(function(reg) {
-      console.log('[SW-REG] ✅ Registered. Scope:', reg.scope);
-
-      // Immediately activate any waiting SW so users always get the latest version.
-      if (reg.waiting) {
-        reg.waiting.postMessage({ type: 'SKIP_WAITING' });
-      }
-
-      reg.addEventListener('updatefound', function() {
-        var newWorker = reg.installing;
-        if (!newWorker) return;
-        newWorker.addEventListener('statechange', function() {
-          if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
-            console.log('[SW-REG] New SW installed – activating immediately.');
-            newWorker.postMessage({ type: 'SKIP_WAITING' });
-          }
-        });
+    <!-- SERVICE WORKER REGISTRATION - TEMPORARILY DISABLED FOR DEBUGGING -->
+    <!-- ====================================================================== -->
+    <script>
+    console.log('[SW-REG] Service Worker temporarily disabled to test redirect loop issue');
+    
+    // Clear any existing service worker registration
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.getRegistrations().then(function(registrations) {
+        for(var i = 0; i < registrations.length; i++) {
+          registrations[i].unregister();
+          console.log('[SW-REG] Unregistered existing service worker');
+        }
       });
-    })
-    .catch(function(err) {
-      console.error('[SW-REG] ❌ Registration failed:', err);
-    });
-
-  // When the SW takes control of a new version, reload once to pick up fresh cache.
-  var refreshing = false;
-  navigator.serviceWorker.addEventListener('controllerchange', function() {
-    if (!refreshing) {
-      refreshing = true;
-      console.log('[SW-REG] Controller changed – reloading for fresh cache.');
-      window.location.reload();
     }
-  });
-
-  // Listen for SW messages
-  navigator.serviceWorker.addEventListener('message', function(event) {
-    if (event.data && event.data.type === 'SW_ACTIVATED') {
-      console.log('[SW-REG] SW activated, version:', event.data.version);
-    }
-  });
-})();
-</script>
-
+    </script>
 </body>
 </html>

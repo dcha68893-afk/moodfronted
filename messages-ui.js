@@ -820,14 +820,29 @@
             const coreIsActive = coreState?.state === 'ACTIVE';
             
             if (!coreIsActive) {
-                console.log('[messagesUI] Core not ACTIVE yet, scheduling retry for data fetch');
-                this._pendingFetchTimer = setTimeout(() => {
-                    this._pendingFetchTimer = null;
-                    const coreStateRetry = getMessagesCore()?.getState?.();
-                    if (coreStateRetry?.state === 'ACTIVE') {
-                        this._triggerRealDataFetch();
-                    }
-                }, 500);
+                if (!this._pendingFetchTimer) {
+                    console.log('[messagesUI] Core not ACTIVE yet, polling until ready...');
+                    let attempts = 0;
+                    const maxAttempts = 40; // 40 × 250ms = 10 seconds max
+                    const poll = () => {
+                        attempts++;
+                        const retryCore = getMessagesCore();
+                        const retryState = retryCore?.getState?.();
+                        if (retryState?.state === 'ACTIVE') {
+                            this._pendingFetchTimer = null;
+                            this._triggerRealDataFetch();
+                        } else if (attempts < maxAttempts) {
+                            this._pendingFetchTimer = setTimeout(poll, 250);
+                        } else {
+                            // Last resort: force-enable and fetch anyway
+                            this._pendingFetchTimer = null;
+                            console.log('[messagesUI] Core still not ACTIVE after polling — forcing fetch');
+                            UIFailsafe.forceEnableUI();
+                            if (retryCore && retryCore.fetchConversations) retryCore.fetchConversations();
+                        }
+                    };
+                    this._pendingFetchTimer = setTimeout(poll, 250);
+                }
                 return;
             }
             
@@ -5488,9 +5503,27 @@ Type: ${message.type || 'text'}`;
                 sidebar.classList.remove('active');
             }
             const core = getMessagesCore();
+            const coreState = core?.getState?.();
             if (core && core.openConversation) {
-                const id = (chat && chat.id) ? chat.id : chat;
-                core.openConversation(id).catch?.(() => {});
+                if (coreState?.state === 'ACTIVE') {
+                    const id = (chat && chat.id) ? chat.id : chat;
+                    core.openConversation(id).catch?.(() => {});
+                } else {
+                    // Core not ready yet — poll until it is, then open
+                    let attempts = 0;
+                    const waitAndOpen = () => {
+                        attempts++;
+                        const c = getMessagesCore();
+                        const s = c?.getState?.();
+                        if (s?.state === 'ACTIVE') {
+                            const id = (chat && chat.id) ? chat.id : chat;
+                            c.openConversation(id).catch?.(() => {});
+                        } else if (attempts < 20) {
+                            setTimeout(waitAndOpen, 250);
+                        }
+                    };
+                    setTimeout(waitAndOpen, 250);
+                }
             }
         },
         
@@ -5812,6 +5845,7 @@ Type: ${message.type || 'text'}`;
         }
         if (section === 'advanced') {
             if (key === 'reduceMotion') { document.body.classList.toggle('reduce-motion', !!value); document.documentElement.setAttribute('data-reduce-motion', value ? 'true' : 'false'); }
+        }
     }
 
     // Legacy event listeners for backwards compatibility

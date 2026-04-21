@@ -162,6 +162,11 @@
         }
     }
     
+    // CRITICAL: Add saveSession method that matches expected interface
+    function saveSession(data) {
+        return saveAuth(data);
+    }
+    
     // CRITICAL: Add getSession alias that never throws
     function getSession() {
         try {
@@ -236,7 +241,7 @@
         return getAuth()?.user || null;
     }
 
-    const AuthStorage = { saveAuth, getAuth, clearAuth, hasValidAuth, updateAuthTokens, getToken, getUser };
+    const AuthStorage = { saveAuth, saveSession, getAuth, getSession, clearAuth, hasValidAuth, updateAuthTokens, getToken, getUser };
 
     window.AuthStorage = AuthStorage;
     window.api = window.api || {};

@@ -2470,9 +2470,18 @@
     // Load page by key - CRASH-PROOF
     // FIXED: Added infinite recursion protection
     // UI RESILIENCE PATCH: Safe routing layer - never throws (PHASE 4)
+    // CRITICAL FIX: Add navigation lock to prevent reset loops
     loadPageByKey: async function(pageKey, pushState = true) {
+      // CRITICAL FIX: Navigation lock to prevent reset loops
+      if (window.__NAVIGATION_IN_PROGRESS__) {
+        console.log('[UI] ð Navigation already in progress, preventing duplicate navigation');
+        return { type: 'skipped', reason: 'navigation_in_progress' };
+      }
+      window.__NAVIGATION_IN_PROGRESS__ = true;
+      
       // UI RESILIENCE PATCH: Async guard
       if (!UI_SAFETY.guard(this._componentId, () => true)) {
+        window.__NAVIGATION_IN_PROGRESS__ = false;
         return { type: 'error', reason: 'router_destroyed' };
       }
       
@@ -2502,7 +2511,11 @@
       }
       
       const pageConfig = validation.pageConfig || { id: pageKey, file: pageKey + '.html', isIframe: false };
-      return this.loadPage(pageConfig.file || pageKey + '.html', pushState);
+      const result = this.loadPage(pageConfig.file || pageKey + '.html', pushState);
+      
+      // CRITICAL FIX: Release navigation lock
+      window.__NAVIGATION_IN_PROGRESS__ = false;
+      return result;
     },
     
     // Resolve page from config - CRASH-PROOF
@@ -4132,7 +4145,7 @@
     },
     
     // ========================================
-    // 6️⃣ HISTORY & RESTORE SYSTEM
+    // 6â³ HISTORY & RESTORE SYSTEM
     // ========================================
     
     // Push state
@@ -4206,50 +4219,20 @@
           }
         }
       } catch (error) {
-        console.warn('⚠️ Error in deep linking:', error);
+        console.warn(' Error in deep linking:', error);
       }
       
       return false;
     },
     
-    // Refresh recovery - MODIFIED: Non-fatal resource missing no longer triggers recovery
+    // Refresh recovery - DISABLED to prevent auto-reset loops
     refreshRecovery: function() {
-      console.log('🔄 Attempting refresh recovery...');
-      
-      // Try to restore from session storage first
-      try {
-        const savedPage = sessionStorage.getItem('moodchat_last_page');
-        if (savedPage) {
-          const validation = this.validatePageExists(savedPage);
-          if (validation.valid) {
-            // Check if user can access this page
-            if (this.isAuthRequiredPage(savedPage) && !UI_SAFETY.userLoggedIn()) {
-              console.warn(`⚠️ Saved page requires auth: ${savedPage}`);
-              const loginPageKey = this.findLoginPage();
-              if (loginPageKey) {
-                return this.loadPageByKey(loginPageKey, false);
-              }
-            }
-            console.log(`✅ Refresh recovery: restoring ${savedPage}`);
-            return this.loadPageByKey(savedPage, false);
-          }
-        }
-      } catch (error) {
-        console.warn('⚠️ Refresh recovery from session failed:', error);
-      }
-      
-      // Try to restore from URL
-      if (this.setupDeepLinking()) {
-        return Promise.resolve();
-      }
-      
-      // Fallback to default page
-      console.log('🔄 Refresh recovery: loading default page');
-      return this.loadDefaultPage();
+      console.log('[UI]  refreshRecovery disabled to prevent auto-reset loops');
+      return Promise.resolve({ type: 'disabled', reason: 'auto_reset_prevention' });
     },
     
     // ========================================
-    // 7️⃣ ERROR RECOVERY SYSTEM - NON-BLOCKING
+    // 7 ERROR RECOVERY SYSTEM - NON-BLOCKING
     // ========================================
     
     // Show page error - NON-BLOCKING

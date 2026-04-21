@@ -6930,7 +6930,7 @@ fetchOptions.signal = controller.signal;
                 ['/auth/login', '/api/auth/login'],
                 ['/api/auth/login', '/api/auth/login'],
                 ['auth/register', '/api/auth/register'],
-                ['user/profile', '/api/profile'],
+                ['user/profile', '/api/user/profile'],
                 ['status', '/api/status'],
                 ['', '/api/'],
                 [null, '/api/'],

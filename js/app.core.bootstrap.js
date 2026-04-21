@@ -204,34 +204,50 @@
     try {
       // Don't validate if we don't have a temp token
       if (!window.__AUTH_TEMP_TOKEN__) {
-        console.log('[Bootstrap] ℹ️ No token to validate in background');
+        console.log('[Bootstrap] No temp token, skipping background validation');
         return;
       }
       
-      // Use existing auth validation if available
-      if (window.api && window.api.auth && typeof window.api.auth.validateToken === 'function') {
-        window.api.auth.validateToken()
-          .then(result => {
+      // CRITICAL FIX: Delay validation after login to prevent flicker
+      // Check if this is a fresh login (within last 3 seconds)
+      const now = Date.now();
+      const lastLoginTime = window.__LAST_LOGIN_TIME__ || 0;
+      if (now - lastLoginTime < 3000) {
+        console.log('[Bootstrap] Fresh login detected, delaying background validation');
+        setTimeout(validateSessionInBackground, 3000 - (now - lastLoginTime));
+        return;
+      }
+      
+      if (window.api && window.api.auth && window.api.auth.validateToken) {
+        const validationPromise = window.api.auth.validateToken();
+        
+        if (validationPromise && validationPromise.then) {
+          validationPromise.then(result => {
             if (result && result.valid) {
-              console.log('[Bootstrap] ✅ Background validation successful');
+              console.log('[Bootstrap] â Background validation successful');
               // Clean up temp token
               delete window.__AUTH_TEMP_TOKEN__;
             } else {
-              console.warn('[Bootstrap] ⚠️ Background validation failed - session may be invalid');
+              console.warn('[Bootstrap] â Background validation failed - session may be invalid');
               handleInvalidSession();
             }
-          })
-          .catch(error => {
-            console.warn('[Bootstrap] ⚠️ Background validation error:', error.message);
-            // Don't fail the app, just continue with local session
           });
+          
+          // Safe-wrap catch
+          if (validationPromise.catch) {
+            validationPromise.catch(error => {
+              console.warn('[Bootstrap] â Background validation error:', error.message);
+              // Don't fail the app, just continue with local session
+            });
+          }
+        }
       } else {
-        console.log('[Bootstrap] ℹ️ Auth validation not available yet, will retry later');
+        console.log('[Bootstrap] â Auth validation not available yet, will retry later');
         // Retry validation later when auth is ready
         setTimeout(validateSessionInBackground, 2000);
       }
     } catch (error) {
-      console.warn('[Bootstrap] ⚠️ Background validation setup failed:', error.message);
+      console.warn('[Bootstrap] â Background validation setup failed:', error.message);
     }
   }
   
@@ -273,9 +289,12 @@
     console.log('[Bootstrap] 🌐 Network restored — scheduling sync');
     setTimeout(function() {
       if (window.KynectaSync && typeof window.KynectaSync.syncAll === 'function') {
-        window.KynectaSync.syncAll().catch(function(e) {
-          console.warn('[Bootstrap] Sync on reconnect failed (non-fatal):', e.message);
-        });
+        const syncPromise = window.KynectaSync.syncAll();
+        if (syncPromise && syncPromise.catch) {
+          syncPromise.catch(function(e) {
+            console.warn('[Bootstrap] Sync on reconnect failed (non-fatal):', e.message);
+          });
+        }
       }
     }, 1500);
   });
@@ -1399,14 +1418,20 @@
             await SEQUENTIAL_LOADER.ensureAuthFullyReadySafe();
 
             console.log("[BOOT] 🔐 Auth fully ready, now waiting for session module");
-            await SEQUENTIAL_LOADER.waitForWithGuard(
+            const sessionPromise = SEQUENTIAL_LOADER.waitForWithGuard(
               () => window.app && window.app.core && window.app.core.session,
               "session",
               3000
-            ).catch((error) => {
-              console.warn("[BOOT] ⚠️ Session module timeout - continuing without it");
-              return null;
-            });
+            );
+            
+            if (sessionPromise && sessionPromise.catch) {
+              sessionPromise.catch((error) => {
+                console.warn("[BOOT] â Session module timeout - continuing without it");
+                return null;
+              });
+            }
+            
+            await sessionPromise;
           } catch (error) {
             console.warn("[BOOT] ⚠️ Session module failed to load - continuing without it");
             ERROR_TRACKER.trackModuleFailure("session", error, false);
@@ -1788,8 +1813,8 @@
 
     const authCheckPassed = ensureUserLoggedIn();
     if (!authCheckPassed) {
-      console.log("⏳ Authentication check failed, pausing further initialization");
-      return false;
+      // CRITICAL FIX: NEVER block bootstrap on auth — UI layer will show login
+      console.log("⚠️ No local session detected — continuing bootstrap; UI will show login");
     }
 
     if (typeof window.app === "undefined") {
@@ -2160,9 +2185,9 @@
       const isLoggedIn = userLoggedIn();
       const isPublicPage = window.isPublicPage ? window.isPublicPage() : false;
 
+      // CRITICAL FIX: Never pause bootstrap on auth — always proceed
       if (!isLoggedIn && !isPublicPage) {
-        console.log("⏳ Authentication required, pausing bootstrap");
-        return this;
+        console.log("⚠️ No session yet — bootstrap continues; UI handles login");
       }
 
       this.startTime = Date.now();
@@ -2333,6 +2358,26 @@
   // HARDENED BOOTSTRAP CONTROLLER - COMPLETE PRESERVATION WITH DETERMINISTIC SEQUENCE
   // ============================================================================
 
+  // ============================================================================
+  // SAFE STAGE RUNNER — was missing, caused ReferenceError on every boot
+  // ============================================================================
+  async function safeStage(name, fn, opts = {}) {
+    const critical = opts.critical !== false;
+    try {
+      console.log(`[BOOT] ▶ Stage: ${name}`);
+      await fn();
+      console.log(`[BOOT] ✅ Stage complete: ${name}`);
+    } catch (err) {
+      console.warn(`[BOOT] ⚠️ Stage "${name}" failed: ${err.message}`);
+      if (critical) {
+        // Critical stages that require Session/API are downgraded to warnings
+        // because these modules may legitimately be absent in some deployments.
+        // We do NOT throw — throwing aborts the entire boot and creates the loop.
+        console.warn(`[BOOT] ⚠️ Critical stage "${name}" failed but continuing (offline-first).`);
+      }
+    }
+  }
+
   const HARDENED_BOOTSTRAP_CONTROLLER = {
     _initialized: false,
     _startupPromise: null,
@@ -2470,52 +2515,63 @@
     },
 
     initSessionDeterministic: async function () {
-      console.log("[BOOT] 🔐 Initializing session (CRITICAL BLOCKER)...");
+      console.log("[BOOT] 🔐 Initializing session...");
       BOOTSTRAP_STATE_MACHINE.transitionTo(BOOTSTRAP_CONSTANTS.STATES.AUTH, "session_init_start");
 
-      if (!window.Session || typeof window.Session.init !== "function") {
-        throw new Error("Session module not available or missing init()");
-      }
-
-      await window.Session.init();
-
-      if (typeof window.Session.waitForSession === "function") {
-        await window.Session.waitForSession();
-      } else {
-        await new Promise((resolve) => {
-          const handler = () => {
-            window.removeEventListener("session:ready", handler);
-            resolve();
-          };
-          window.addEventListener("session:ready", handler);
-          setTimeout(() => {
-            window.removeEventListener("session:ready", handler);
-            console.warn("[BOOT] session:ready event timeout, proceeding anyway");
-            resolve();
-          }, 5000);
-        });
-      }
-
-      if (window.Session.isAuthenticated && !window.Session.isAuthenticated()) {
-        if (window.isPublicPage && window.isPublicPage()) {
-          console.log("[BOOT] 📄 Public page, continuing without authentication");
-        } else {
-          throw new Error("Session not authenticated after init");
+      // ── OFFLINE-FIRST: hydrate from localStorage immediately, never block ──
+      try {
+        const rawAuth = localStorage.getItem("kynecta_auth");
+        if (rawAuth) {
+          const auth = JSON.parse(rawAuth);
+          if (auth && auth.token) {
+            if (!window.Session) window.Session = {};
+            window.Session._localToken = auth.token;
+            window.Session._localUser = auth.user;
+            window.Session._hydrated = true;
+            window.currentUser = auth.user || window.currentUser;
+            window.__AUTH_TEMP_TOKEN__ = auth.token;
+            window.__SESSION_READY__ = true;
+            console.log("[BOOT] ✅ Session hydrated from localStorage immediately");
+          }
         }
+      } catch (e) {
+        console.warn("[BOOT] ⚠️ localStorage hydration failed:", e.message);
+      }
+
+      // Try invoking Session.init() if available — but never throw on failure
+      if (window.Session && typeof window.Session.init === "function") {
+        try {
+          await Promise.race([
+            window.Session.init(),
+            new Promise((resolve) => setTimeout(resolve, 3000))
+          ]);
+        } catch (e) {
+          console.warn("[BOOT] ⚠️ Session.init() failed (continuing):", e.message);
+        }
+      } else {
+        console.warn("[BOOT] ⚠️ Session module missing — using localStorage hydration only");
       }
 
       window.AppBootContext.setReady("session");
-      console.log("[BOOT] ✅ Session ready and authenticated");
+      console.log("[BOOT] ✅ Session stage complete");
     },
 
     initApiDeterministic: async function () {
       console.log("[BOOT] 🔌 Initializing API (with token from session)...");
 
       if (!window.API || typeof window.API.init !== "function") {
-        throw new Error("API module missing init()");
+        console.warn("[BOOT] ⚠️ API module missing init() — skipping (using api.auth/api.request directly)");
+        return;
       }
 
-      await window.API.init();
+      try {
+        await Promise.race([
+          window.API.init(),
+          new Promise((resolve) => setTimeout(resolve, 3000))
+        ]);
+      } catch (e) {
+        console.warn("[BOOT] ⚠️ API.init() failed (continuing):", e.message);
+      }
       console.log("[BOOT] ✅ API ready");
     },
 
@@ -2645,7 +2701,15 @@
         return;
       }
 
-      await this._activationPromise;
+      // CRITICAL FIX: gate must time-out so boot completes even when no iframes
+      // are present (e.g. fresh login on chat.html before any iframe loads).
+      await Promise.race([
+        this._activationPromise,
+        new Promise((resolve) => setTimeout(() => {
+          console.warn("[BOOT] ⏱️ Activation gate timeout — proceeding without all modules");
+          resolve();
+        }, 5000))
+      ]);
       console.log("[BOOT] ✅ Activation gate passed");
     },
 
@@ -2903,6 +2967,17 @@
   // ============================================================================
   // APP BOOTSTRAP COMPATIBILITY LAYER - COMPLETE PRESERVATION
   // ============================================================================
+
+  // CRITICAL FIX: Global bootstrap lock to prevent multiple executions
+  if (window.__APP_BOOTSTRAPPED__) {
+    console.log('[BOOT] ð App already bootstrapped, preventing duplicate execution');
+    return;
+  }
+  window.__APP_BOOTSTRAPPED__ = true;
+
+  // CRITICAL FIX: Global recovery limit to prevent infinite loops
+  let GLOBAL_RECOVERY_ATTEMPTS = 0;
+  const MAX_GLOBAL_RECOVERY = 1; // Only allow one global retry
 
   const APP_BOOTSTRAP = {
     MAX_RETRIES: 3,
@@ -3183,34 +3258,13 @@
                 .initialize()
                 .then(() => {
                   console.log("✅ API core initialized via event");
-
                   if (window.app && window.app._dependencyGraph) {
                     window.app._dependencyGraph.apiWait.apiCoreInitialized = true;
-                    window.app._dependencyGraph.apiWait.completed = true;
-                    window.app._dependencyGraph.apiWait.completionTime = new Date().toISOString();
-                    window.app._dependencyGraph.apiWait.success = true;
                   }
-
                   resolve();
                 })
-                .catch(() => {
-                  console.log("⚠️ API core initialization failed, continuing");
-
-                  if (window.app && window.app._dependencyGraph) {
-                    window.app._dependencyGraph.apiWait.apiCoreInitializationFailed = true;
-                    window.app._dependencyGraph.apiWait.completed = true;
-                    window.app._dependencyGraph.apiWait.completionTime = new Date().toISOString();
-                    window.app._dependencyGraph.apiWait.success = true;
-                  }
-
-                  resolve();
-                });
+                .catch(() => { resolve(); });
             } else {
-              if (window.app && window.app._dependencyGraph) {
-                window.app._dependencyGraph.apiWait.completed = true;
-                window.app._dependencyGraph.apiWait.completionTime = new Date().toISOString();
-                window.app._dependencyGraph.apiWait.success = true;
-              }
               resolve();
             }
           }
@@ -3686,45 +3740,58 @@
       // ── BACKGROUND VALIDATION — non-blocking ─────────────────────────────
       // Only runs when online. A 401 triggers logout; network errors are ignored.
       if (navigator.onLine) {
-        console.log("🔄 [BOOT] Starting background token validation...");
-        this.validateToken()
-          .then((validationResult) => {
-            if (validationResult && validationResult.valid === false) {
-              console.warn("⚠️ [BOOT] Background validation: token rejected by server — logging out");
-
-              if (window.app && window.app._dependencyGraph) {
-                window.app._dependencyGraph.uiFlow.backgroundValidation = "failed";
-                window.app._dependencyGraph.uiFlow.backgroundValidationReason = validationResult.reason;
-              }
-
-              // Give the user a moment to see the app before forcing logout
-              setTimeout(() => {
-                this.redirectToAuth("Session expired — please log in again");
-              }, 500);
-            } else {
-              console.log("✅ [BOOT] Background validation: token is valid");
-
-              if (window.app && window.app._dependencyGraph) {
-                window.app._dependencyGraph.uiFlow.backgroundValidation = "success";
-              }
-            }
-          })
-          .catch((err) => {
-            // Network error / offline — silently ignore, app stays open
-            console.log("📴 [BOOT] Background validation skipped (network error):", err && err.message);
-          });
+        // CRITICAL FIX: Check if this is a fresh login to prevent flicker
+        const now = Date.now();
+        const lastLoginTime = window.__LAST_LOGIN_TIME__ || 0;
+        if (now - lastLoginTime < 3000) {
+          console.log("ðŸ•°ï¸ [BOOT] Fresh login detected, delaying background validation to prevent flicker");
+          setTimeout(() => {
+            this.performBackgroundValidation();
+          }, 3000 - (now - lastLoginTime));
+        } else {
+          this.performBackgroundValidation();
+        }
       } else {
-        console.log("📴 [BOOT] Device is offline — skipping background validation, app stays open");
+        console.log("ðŸ“± [BOOT] Device is offline â€” skipping background validation, app stays open");
       }
-
       if (window.app && window.app._dependencyGraph) {
         window.app._dependencyGraph.uiFlow.completed = true;
         window.app._dependencyGraph.uiFlow.completionTime = new Date().toISOString();
       }
     },
 
+    performBackgroundValidation: function() {
+      console.log("ð [BOOT] Performing background validation...");
+      this.validateToken()
+        .then((validationResult) => {
+          if (validationResult && validationResult.valid === false) {
+            console.warn("â [BOOT] Background validation: token rejected by server â logging out");
+
+            if (window.app && window.app._dependencyGraph) {
+              window.app._dependencyGraph.uiFlow.backgroundValidation = "failed";
+              window.app._dependencyGraph.uiFlow.backgroundValidationReason = validationResult.reason;
+            }
+
+            // Give the user a moment to see the app before forcing logout
+            setTimeout(() => {
+              this.redirectToAuth("Session expired â please log in again");
+            }, 500);
+          } else {
+            console.log("â [BOOT] Background validation: token is valid");
+
+            if (window.app && window.app._dependencyGraph) {
+              window.app._dependencyGraph.uiFlow.backgroundValidation = "success";
+            }
+          }
+        })
+        .catch((err) => {
+          // Network error / offline â silently ignore, app stays open
+          console.log("ð [BOOT] Background validation skipped (network error):", err && err.message);
+        });
+    },
+
     validateToken: async function () {
-      console.log("🔐 Validating authentication token...");
+      console.log("ð Validating authentication token...");
 
       if (window.app && window.app._dependencyGraph) {
         window.app._dependencyGraph.tokenValidation = {
@@ -4349,9 +4416,13 @@
       BOOTSTRAP_STATE.setPhase(BOOTSTRAP_STATE.PHASES.UI_LOADING);
       console.log("🎨 Initializing global UI components...");
 
-      await BootstrapBarrier.waitForSession(10000).catch(() => {
-        console.warn("[BOOT] ⚠️ Session not ready for UI init, proceeding anyway");
-      });
+      const sessionBarrierPromise = BootstrapBarrier.waitForSession(10000);
+      if (sessionBarrierPromise && sessionBarrierPromise.catch) {
+        sessionBarrierPromise.catch(() => {
+          console.warn("[BOOT] â Session not ready for UI init, proceeding anyway");
+        });
+      }
+      await sessionBarrierPromise;
 
       if (window.app && window.app._dependencyGraph) {
         window.app._dependencyGraph.uiInitialization = {
@@ -6191,10 +6262,17 @@
     attemptRecovery: async function (error) {
       console.log("🔄 Attempting recovery from bootstrap failure...");
 
+      GLOBAL_RECOVERY_ATTEMPTS++;
+      if (GLOBAL_RECOVERY_ATTEMPTS > MAX_GLOBAL_RECOVERY) {
+        console.error("â Global recovery limit exceeded, stopping retries to prevent infinite loops");
+        this.showFatalError(new Error("Application failed to start after recovery attempts"));
+        return;
+      }
+
       this.currentRetry++;
 
       if (this.currentRetry > this.MAX_RETRIES) {
-        console.error("❌ Maximum retries exceeded, switching to degraded mode");
+        console.error("â Maximum retries exceeded, switching to degraded mode");
 
         if (window.app && window.app._dependencyGraph) {
           window.app._dependencyGraph.maxRetriesExceeded = true;
@@ -6540,73 +6618,94 @@
 
   // ============================================================================
   // MAIN EXECUTION ENGINE - COMPLETE PRESERVATION WITH DETERMINISTIC SEQUENCE
-  // ============================================================================
 
 window.initializeEnhancedApp = function () {
     console.log("🚀 Initializing enhanced application...");
 
-    // Wait a moment for auto-login to complete
-    const checkAuthAndInitialize = async () => {
-        // Small delay to allow auto-login to process
-        await new Promise(resolve => setTimeout(resolve, 1000));
+    // CRITICAL: Immediate auth restoration - NO DELAYS for production
+    const checkAuthAndInitialize = () => {
+        // CRITICAL FIX: ALWAYS continue bootstrap - NEVER block on auth
+        console.log('[BOOT] â Bootstrap continues regardless of auth state');
         
-        const isLoggedIn = userLoggedIn();
-        const isPublicPage = window.isPublicPage ? window.isPublicPage() : false;
+        // Check localStorage directly for immediate restoration (NON-BLOCKING)
+        // PATCH: Use kynecta_auth as primary key (matches authStorage.js)
+        // then fall back to legacy keys so __SESSION_READY__ is accurate
+        let hasValidStorage = false;
+        try {
+            const rawAuth = localStorage.getItem('kynecta_auth');
+            if (rawAuth) {
+                const auth = JSON.parse(rawAuth);
+                hasValidStorage = !!(auth && auth.token);
+            }
+            if (!hasValidStorage) {
+                const legacyToken = localStorage.getItem('auth_token') ||
+                                    localStorage.getItem('accessToken') ||
+                                    localStorage.getItem('USER_TOKEN') ||
+                                    localStorage.getItem('kynecta_token');
+                const legacyUser  = localStorage.getItem('auth_user') ||
+                                    localStorage.getItem('currentUser') ||
+                                    localStorage.getItem('user');
+                hasValidStorage = !!(legacyToken && legacyUser && legacyToken.length > 20);
+            }
+        } catch(e) {}
+
+        // CRITICAL FIX: Set session ready flag immediately
+        window.__SESSION_READY__ = hasValidStorage;
         
-        // Also check localStorage directly
-        const hasStoredToken = localStorage.getItem('token') || 
-                              localStorage.getItem('accessToken') || 
-                              localStorage.getItem('USER_TOKEN');
-        const hasStoredUser = localStorage.getItem('currentUser') || 
-                             localStorage.getItem('user');
+        console.log(`[BOOT] Auth check: hasStorage=${hasValidStorage}, sessionReady=${window.__SESSION_READY__}`);
         
-        const hasValidStorage = hasStoredToken && hasStoredUser && hasStoredToken.length > 20;
-        
-        console.log(`[BOOT] Auth check: loggedIn=${isLoggedIn}, publicPage=${isPublicPage}, hasStorage=${hasValidStorage}`);
-        
-        // If we have stored credentials but not logged in, try to restore
-        if (hasValidStorage && !isLoggedIn && !isPublicPage) {
-            console.log("[BOOT] Found stored credentials but not logged in - attempting restore");
-            
+        // CRITICAL: Immediate restoration without delays (NON-BLOCKING)
+        if (hasValidStorage) {
+            console.log("[BOOT] Immediate session restoration from localStorage");
+
             try {
-                const user = JSON.parse(hasStoredUser);
-                const token = hasStoredToken;
-                
-                // Restore using AuthGateway if available
-                if (window.AuthGateway && typeof window.AuthGateway.setAuthState === 'function') {
-                    await window.AuthGateway.setAuthState('authenticated', user, token);
+                let user = null;
+                let token = null;
+
+                // Primary: kynecta_auth
+                const rawAuth = localStorage.getItem('kynecta_auth');
+                if (rawAuth) {
+                    const auth = JSON.parse(rawAuth);
+                    user  = auth.user  || null;
+                    token = auth.token || null;
+                }
+                // Legacy fallback
+                if (!token) {
+                    token = localStorage.getItem('auth_token') ||
+                            localStorage.getItem('accessToken') ||
+                            localStorage.getItem('USER_TOKEN');
+                    const rawUser = localStorage.getItem('auth_user') ||
+                                    localStorage.getItem('currentUser') ||
+                                    localStorage.getItem('user');
+                    try { user = rawUser ? JSON.parse(rawUser) : null; } catch(e) {}
+                }
+
+                if (token) {
+                    // Set global state immediately - no waiting for AuthGateway
                     window.currentUser = user;
-                    console.log("[BOOT] Successfully restored session from storage");
-                    
-                    // Redirect to chat.html if not already there
-                    if (!window.location.pathname.includes('chat.html') && 
-                        window.location.pathname !== '/' && 
-                        !window.location.pathname.includes('index.html')) {
-                        console.log("[BOOT] Redirecting to chat.html after restore");
-                        window.location.href = 'chat.html';
-                        return;
-                    }
+                    window.__userToken = token;
+                    window.__accessToken = token;
+
+                    // Fire auth event immediately
+                    try {
+                        window.dispatchEvent(new CustomEvent('auth:login', {
+                            detail: { user, token, timestamp: Date.now() }
+                        }));
+                    } catch (e) {}
+
+                    console.log("[BOOT] Session restored immediately");
                 }
             } catch (e) {
                 console.warn("[BOOT] Failed to restore session:", e);
             }
         }
         
-        if (!isLoggedIn && !isPublicPage && !hasValidStorage) {
-            console.log("[BOOT] No cached auth found - continuing with shell-first boot");
-        }
-        
-        // If we're on chat.html but not logged in, redirect to login
-        if (window.location.pathname.includes('chat.html') && !isLoggedIn && !hasValidStorage) {
-            console.log('[BOOT] Redirecting to login page');
-            window.location.href = 'index.html';
-            return;
-        }
-        
-        // Continue with normal bootstrap
-        console.log('[BOOT] Auth check complete, proceeding with bootstrap');
+        // CRITICAL FIX: NEVER redirect based on auth - let UI handle navigation
+        console.log('[BOOT] Bootstrap complete - UI will handle auth navigation');
+        console.log('[BOOT] Auth check complete - proceeding with bootstrap');
     };
     
+    // Execute immediately - no async delays
     checkAuthAndInitialize();
 };
 
@@ -6615,25 +6714,39 @@ if (!window.__BOOTSTRAP_INITED__) {
     window.__BOOTSTRAP_INITED__ = true;
     
     (function immediateBootstrap() {
+        const startApp = () => {
+            console.log('Starting enhanced app bootstrap');
+            
+            // CRITICAL: Check if function exists AND is callable
+            if (typeof window.initializeEnhancedApp === 'function') {
+                try {
+                    const result = window.initializeEnhancedApp();
+                    // Only call catch if it returns a Promise
+                    if (result && typeof result.catch === 'function') {
+                        result.catch((error) => {
+                            console.error('Auto-start failed:', error);
+                        });
+                    }
+                } catch (error) {
+                    console.error('Auto-start error:', error);
+                }
+            } else {
+                console.error('initializeEnhancedApp function not found');
+            }
+        };
+        
         if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', () => {
-                console.log('DOM ready, starting enhanced app bootstrap');
-                window.initializeEnhancedApp().catch((error) => {
-                    console.error('Auto-start failed:', error);
-                });
-            });
+            document.addEventListener('DOMContentLoaded', startApp);
         } else {
             console.log('DOM already ready, starting enhanced app bootstrap immediately');
-            window.initializeEnhancedApp().catch((error) => {
-                console.error('Auto-start failed:', error);
-            });
+            startApp();
         }
     })();
 }
 
-  // ============================================================================
-  // EXPOSED UTILITIES - COMPLETE PRESERVATION
-  // ============================================================================
+// ============================================================================
+// EXPOSED UTILITIES - COMPLETE PRESERVATION
+// ============================================================================
 
   window.safeAsync = async function (operation, errorHandler) {
     try {

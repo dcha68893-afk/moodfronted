@@ -352,11 +352,10 @@
                 }));
             } catch (error) {}
             
+            // CRITICAL FIX: Don't auto-redirect to chat.html - let user stay where they are
+            // This prevents redirect loops and flicker after login
             if (isOnIndexPage) {
-                console.log('[SessionManager] Auto-login successful, redirecting to chat.html');
-                setTimeout(() => {
-                    window.location.href = 'chat.html';
-                }, 500);
+                console.log('[SessionManager] Auto-login successful, staying on current page to prevent redirect loop');
             } else if (isOnChatPage) {
                 console.log('[SessionManager] Already on chat page, session restored');
             }
@@ -517,7 +516,7 @@
             }
         }
         
-        __SESSION_MANAGER_LOCK__ = true;
+        __SESSION_MANAGER_INITIALIZED__ = true;
         
         try {
             console.log('[SessionManager] Initializing...');
@@ -532,81 +531,133 @@
             // CRITICAL: Check if bootstrap already hydrated session
             const bootstrapHydrated = window.Session && window.Session._hydrated === true;
             if (bootstrapHydrated) {
-                console.log('[SessionManager] ✅ Bootstrap already hydrated session, skipping auto-login');
-                __SESSION_MANAGER_INITIALIZED__ = true;
+                console.log('[SessionManager] ð Bootstrap already hydrated session, skipping auto-login');
                 return { success: true, bootstrapHandled: true };
+            }
+            
+            // CRITICAL: Try immediate session restoration using exact keys specified
+            const token = localStorage.getItem("auth_token");
+            const user = token ? JSON.parse(localStorage.getItem("auth_user") || "null") : null;
+            
+            // CRITICAL FIX: Set global session ready flag immediately
+            window.__SESSION_READY__ = !!(token && user);
+            
+            if (token && user) {
+                console.log('[SessionManager] ð Session found via auth_token/auth_user keys, restoring immediately');
+                
+                // Set global state immediately
+                window.currentUser = user;
+                window.__userToken = token;
+                window.__accessToken = token;
+                
+                // Update currentSession state
+                currentSession = {
+                    userId: user?.id,
+                    token: token,
+                    user: user,
+                    lastActivity: Date.now()
+                };
+                
+                // Fire session restored event
+                try {
+                    window.dispatchEvent(new CustomEvent('session:restored', {
+                        detail: { token: token, user: user, timestamp: Date.now() }
+                    }));
+                } catch (e) {}
+                
+                return { success: true, sessionRestored: true };
             }
             
             if (isOnIndexPage) {
                 const shouldLogin = shouldPromptLogin();
                 if (!shouldLogin && !__AUTO_LOGIN_IN_PROGRESS__) {
-                    await performAutoLogin();
+                    __AUTO_LOGIN_IN_PROGRESS__ = true;
+                    try {
+                        await performAutoLogin();
+                    } finally {
+                        __AUTO_LOGIN_IN_PROGRESS__ = false;
+                    }
                 } else {
                     console.log('[SessionManager] User needs to login - showing login form');
                 }
             } else if (window.location.pathname.includes('chat.html')) {
-                const session = loadSession();
-                if (!session || !isTokenValid(session.token)) {
-                    console.log('[SessionManager] No valid session on chat page, redirecting to index');
-                    // CRITICAL: Prevent redirect loops by checking current page
-                    if (!window.location.pathname.includes('index.html')) {
-                        setTimeout(() => {
-                            window.location.href = 'index.html';
-                        }, 1000);
-                    }
-                } else {
-                    try {
-                        localStorage.setItem('token', session.token);
-                        localStorage.setItem('accessToken', session.token);
-                        localStorage.setItem('moodchat_token', session.token);
-                        if (session.user) {
-                            localStorage.setItem('currentUser', JSON.stringify(session.user));
-                            window.currentUser = session.user;
-                        }
-                        console.log('[SessionManager] Session restored on chat page');
-                    } catch (error) {}
-                }
+                console.log('[SessionManager] No valid session on chat page - staying on page to prevent redirect loops');
             }
             
-            __SESSION_MANAGER_INITIALIZED__ = true;
             console.log('[SessionManager] Initialized');
             return { success: true };
         } catch (error) {
             console.error('[SessionManager] Initialization failed:', error);
             return { success: false, error: error.message };
-        } finally {
-            __SESSION_MANAGER_LOCK__ = false;
         }
     }
     
     // ============================================================================
     // PUBLIC API
     // ============================================================================
+
+    // PATCH: Synchronous session getter for bootstrap hydration (race-free)
+    function getSessionSync() {
+        try {
+            // Primary: kynecta_auth (used by authStorage.js and the whole app)
+            const raw = localStorage.getItem('kynecta_auth');
+            if (raw) {
+                const auth = JSON.parse(raw);
+                if (auth && auth.token) return auth;
+            }
+            // Fallback: own session key
+            const ownRaw = localStorage.getItem(CONFIG.SESSION_KEY);
+            if (ownRaw) {
+                const session = JSON.parse(ownRaw);
+                if (session && session.token) return session;
+            }
+            return null;
+        } catch(e) {
+            return null;
+        }
+    }
+
     const SessionManager = {
         initialize,
         createSession,
         destroySession,
         logout,
         performAutoLogin,
-        
+
         getSavedAccounts,
         addAccount,
         removeAccount,
         getMaxAccounts: () => CONFIG.MAX_ACCOUNTS_PER_DEVICE,
-        
+
         getCurrentSession: () => currentSession || loadSession(),
+        getSessionSync,
         isSessionValid: () => {
-            const session = loadSession();
+            const session = getSessionSync() || loadSession();
             return session && session.token && isTokenValid(session.token);
         },
         shouldPromptLogin,
         updateActivity,
-        
+
         setMaxAccounts: (max) => { CONFIG.MAX_ACCOUNTS_PER_DEVICE = max; },
         setSessionDurationDays: (days) => { CONFIG.SESSION_DURATION_DAYS = days; }
     };
-    
+
     window.SessionManager = SessionManager;
+
+    // PATCH: Expose getSessionSync on AuthStorage so bootstrap can call it
+    if (window.AuthStorage) {
+        window.AuthStorage.getSessionSync = getSessionSync;
+    } else {
+        // AuthStorage not loaded yet — attach when it appears
+        Object.defineProperty(window, 'AuthStorage', {
+            configurable: true,
+            set: function(val) {
+                if (val && !val.getSessionSync) val.getSessionSync = getSessionSync;
+                Object.defineProperty(window, 'AuthStorage', { value: val, writable: true, configurable: true });
+            },
+            get: function() { return undefined; }
+        });
+    }
     
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', () => initialize());

@@ -6,8 +6,6 @@
 
 // ==================== EARLY OPEN_CALL_WITH_USER LISTENER ====================
 // Set up immediately when script loads, before any initialization
-// ==================== EARLY OPEN_CALL_WITH_USER LISTENER ====================
-// Set up immediately when script loads, before any initialization
 
 // ==================== UI STATE DEFINITION ====================
 const UIState = {
@@ -83,10 +81,7 @@ const UIState = {
 };
 
 // ==================== GLOBAL CALL HISTORY UPDATES ====================
-// Centralized call history update system for cross-module consistency
-
 const GlobalCallHistory = {
-    // Emit call history update event globally
     emitUpdate: function(eventType, data = {}) {
         const eventData = {
             type: eventType,
@@ -95,16 +90,13 @@ const GlobalCallHistory = {
             ...data
         };
         
-        // 1. Use existing EventBus if available
         if (window.KynectaEventBus) {
             window.KynectaEventBus.emit('CALL_HISTORY_UPDATE', eventData);
         }
         
-        // 2. DOM events for UI components
         window.dispatchEvent(new CustomEvent('kyn:callHistory:update', { detail: eventData }));
         document.dispatchEvent(new CustomEvent('callHistory:update', { detail: eventData }));
         
-        // 3. PostMessage for iframe communication
         if (window.parent && window.parent !== window) {
             window.parent.postMessage({
                 type: 'CALL_HISTORY_UPDATE',
@@ -115,22 +107,18 @@ const GlobalCallHistory = {
         console.log('[Calls UI] Global call history update emitted:', eventType);
     },
     
-    // Listen for call history updates
     onUpdate: function(callback) {
         if (typeof callback !== 'function') return;
         
-        // EventBus listener
         let eventBusUnsub = null;
         if (window.KynectaEventBus) {
             eventBusUnsub = window.KynectaEventBus.on('CALL_HISTORY_UPDATE', callback);
         }
         
-        // DOM event listeners
         const domHandler = (event) => callback(event.detail);
         window.addEventListener('kyn:callHistory:update', domHandler);
         document.addEventListener('callHistory:update', domHandler);
         
-        // PostMessage listener
         const messageHandler = (event) => {
             if (event.data && event.data.type === 'CALL_HISTORY_UPDATE') {
                 callback(event.data.payload);
@@ -138,7 +126,6 @@ const GlobalCallHistory = {
         };
         window.addEventListener('message', messageHandler);
         
-        // Return unsubscribe function
         return () => {
             if (eventBusUnsub) eventBusUnsub();
             window.removeEventListener('kyn:callHistory:update', domHandler);
@@ -148,6 +135,7 @@ const GlobalCallHistory = {
     }
 };
 
+// ==================== EARLY LISTENER SETUP ====================
 (function setupEarlyCallListener() {
     'use strict';
 
@@ -156,135 +144,113 @@ const GlobalCallHistory = {
         return;
     }
     
-    // Store pending call for later processing
     let pendingOpenCall = null;
     let listenerEstablished = false;
-async function startCallWithUser(userId, userName, callType) {
-    console.log('[Calls UI] Starting call with:', { userId, userName, callType });
-    
-    pendingOpenCall = null;
-    window.__pendingCallData = null;
-    
-    if (!userId) {
-        console.error('[Calls UI] Cannot start call: No userId');
-        showNotificationInCalls('Cannot start call: Missing user information', 'error');
-        return;
-    }
-    
-    // Force reset any stale call state first
-    if (window.callCore && window.callCore.forceResetCallState) {
-        window.callCore.forceResetCallState();
-        await new Promise(resolve => setTimeout(resolve, 300));
-    }
-    
-    // Check if already in a call after reset
-    if (window.callCore && window.callCore.isInCall && window.callCore.isInCall()) {
-        showNotificationInCalls('You are already in a call', 'warning');
-        return;
-    }
-    
-    // Request permissions first
-    try {
-        const hasPermissions = await requestMediaPermissions(callType);
-        if (!hasPermissions) {
-            showNotificationInCalls('Microphone access is required for calls. Please grant permission and try again.', 'error');
+
+    async function startCallWithUser(userId, userName, callType) {
+        console.log('[Calls UI] Starting call with:', { userId, userName, callType });
+        
+        pendingOpenCall = null;
+        window.__pendingCallData = null;
+        
+        if (!userId) {
+            console.error('[Calls UI] Cannot start call: No userId');
+            showNotificationInCalls('Cannot start call: Missing user information', 'error');
             return;
         }
-    } catch (permError) {
-        console.error('[Calls UI] Permission error:', permError);
-        showNotificationInCalls('Cannot access microphone. Please check your browser permissions.', 'error');
-        return;
-    }
-    
-    showNotificationInCalls(`Starting ${callType} call with ${userName}...`, 'info');
-    
-    const callId = `call_${Date.now()}_${userId}`;
-    
-    const callContainer = document.getElementById('callContainer');
-    const sidebar = document.getElementById('sidebar');
-    if (callContainer) callContainer.classList.add('active');
-    if (sidebar) sidebar.style.display = 'none';
-    
-    // Show header end button & update type icon
-    const callHeaderEndBtn = document.getElementById('callHeaderEndBtn');
-    if (callHeaderEndBtn) callHeaderEndBtn.style.display = 'flex';
-    const callTypeIconEl = document.getElementById('callTypeIcon');
-    if (callTypeIconEl) callTypeIconEl.innerHTML = callType === 'video' ? '<i class="fas fa-video"></i>' : '<i class="fas fa-phone"></i>';
+        
+        if (window.callCore && window.callCore.forceResetCallState) {
+            window.callCore.forceResetCallState();
+            await new Promise(resolve => setTimeout(resolve, 300));
+        }
+        
+        if (window.callCore && window.callCore.isInCall && window.callCore.isInCall()) {
+            showNotificationInCalls('You are already in a call', 'warning');
+            return;
+        }
+        
+        try {
+            const hasPermissions = await requestMediaPermissions(callType);
+            if (!hasPermissions) {
+                showNotificationInCalls('Microphone access is required for calls. Please grant permission and try again.', 'error');
+                return;
+            }
+        } catch (permError) {
+            console.error('[Calls UI] Permission error:', permError);
+            showNotificationInCalls('Cannot access microphone. Please check your browser permissions.', 'error');
+            return;
+        }
+        
+        showNotificationInCalls(`Starting ${callType} call with ${userName}...`, 'info');
+        
+        const callId = `call_${Date.now()}_${userId}`;
+        
+        const callContainer = document.getElementById('callContainer');
+        const sidebar = document.getElementById('sidebar');
+        if (callContainer) callContainer.classList.add('active');
+        if (sidebar) sidebar.style.display = 'none';
+        
+        const callHeaderEndBtn = document.getElementById('callHeaderEndBtn');
+        if (callHeaderEndBtn) callHeaderEndBtn.style.display = 'flex';
+        const callTypeIconEl = document.getElementById('callTypeIcon');
+        if (callTypeIconEl) callTypeIconEl.innerHTML = callType === 'video' ? '<i class="fas fa-video"></i>' : '<i class="fas fa-phone"></i>';
 
-    const callWithName = document.getElementById('callWithName');
-    if (callWithName) callWithName.textContent = userName;
-    const callStatusText = document.getElementById('callStatusText');
-    if (callStatusText) callStatusText.textContent = 'Initiating call...';
-    
-    if (window.callCore && window.callCore.initiateCall) {
-        const result = await window.callCore.initiateCall(callType, [parseInt(userId)]);
-        if (result && result.success) {
-            showNotificationInCalls(`${callType === 'video' ? 'Video call' : 'Voice call'} started with ${userName}`, 'success');
-            if (callStatusText) {
-                callStatusText.textContent = 'Connecting...';
+        const callWithName = document.getElementById('callWithName');
+        if (callWithName) callWithName.textContent = userName;
+        const callStatusText = document.getElementById('callStatusText');
+        if (callStatusText) callStatusText.textContent = 'Initiating call...';
+        
+        if (window.callCore && window.callCore.initiateCall) {
+            const result = await window.callCore.initiateCall(callType, [parseInt(userId)]);
+            if (result && result.success) {
+                showNotificationInCalls(`${callType === 'video' ? 'Video call' : 'Voice call'} started with ${userName}`, 'success');
+                if (callStatusText) {
+                    callStatusText.textContent = 'Connecting...';
+                }
+            } else {
+                console.error('[Calls UI] Call initiation failed:', result);
+                showNotificationInCalls(result?.error || result?.reason || 'Failed to start call', 'error');
+                if (callContainer) callContainer.classList.remove('active');
+                if (sidebar) sidebar.style.display = 'flex';
+                if (window.callCore && window.callCore.forceResetCallState) window.callCore.forceResetCallState();
+            }
+        } else if (window.callCore && window.callCore.startCall) {
+            const result = await window.callCore.startCall(parseInt(userId), callType);
+            if (result && result.success) {
+                showNotificationInCalls(`${callType === 'video' ? 'Video call' : 'Voice call'} started with ${userName}`, 'success');
+            } else {
+                console.error('[Calls UI] startCall failed:', result);
+                showNotificationInCalls(result?.error || result?.reason || 'Failed to start call', 'error');
+                if (callContainer) callContainer.classList.remove('active');
+                if (sidebar) sidebar.style.display = 'flex';
+                if (window.callCore && window.callCore.forceResetCallState) window.callCore.forceResetCallState();
             }
         } else {
-            console.error('[Calls UI] Call initiation failed:', result);
-            showNotificationInCalls(result?.error || result?.reason || 'Failed to start call', 'error');
-            if (callContainer) {
-                callContainer.classList.remove('active');
-            }
-            if (sidebar) {
-                sidebar.style.display = 'flex';
-            }
-            // Force reset on failure
-            if (window.callCore && window.callCore.forceResetCallState) {
-                window.callCore.forceResetCallState();
-            }
-        }
-    } else if (window.callCore && window.callCore.startCall) {
-        const result = await window.callCore.startCall(parseInt(userId), callType);
-        if (result && result.success) {
-            showNotificationInCalls(`${callType === 'video' ? 'Video call' : 'Voice call'} started with ${userName}`, 'success');
-        } else {
-            console.error('[Calls UI] startCall failed:', result);
-            showNotificationInCalls(result?.error || result?.reason || 'Failed to start call', 'error');
-            if (callContainer) {
-                callContainer.classList.remove('active');
-            }
-            if (sidebar) {
-                sidebar.style.display = 'flex';
-            }
-            if (window.callCore && window.callCore.forceResetCallState) {
-                window.callCore.forceResetCallState();
-            }
-        }
-    } else {
-        console.error('[Calls UI] No call initiation method available');
-        showNotificationInCalls('Call system not ready', 'error');
-        if (callContainer) {
-            callContainer.classList.remove('active');
-        }
-        if (sidebar) {
-            sidebar.style.display = 'flex';
+            console.error('[Calls UI] No call initiation method available');
+            showNotificationInCalls('Call system not ready', 'error');
+            if (callContainer) callContainer.classList.remove('active');
+            if (sidebar) sidebar.style.display = 'flex';
         }
     }
-}
 
-// Add this helper function
-async function requestMediaPermissions(callType) {
-    try {
-        const constraints = {
-            audio: true,
-            video: callType === 'video'
-        };
-        const stream = await navigator.mediaDevices.getUserMedia(constraints);
-        // Stop tracks immediately - we just need permission
-        stream.getTracks().forEach(track => track.stop());
-        return true;
-    } catch (error) {
-        console.error('[Calls UI] Permission request failed:', error);
-        if (error.name === 'NotAllowedError') {
-            showNotificationInCalls('Please allow microphone access to make calls', 'error');
+    async function requestMediaPermissions(callType) {
+        try {
+            const constraints = {
+                audio: true,
+                video: callType === 'video'
+            };
+            const stream = await navigator.mediaDevices.getUserMedia(constraints);
+            stream.getTracks().forEach(track => track.stop());
+            return true;
+        } catch (error) {
+            console.error('[Calls UI] Permission request failed:', error);
+            if (error.name === 'NotAllowedError') {
+                showNotificationInCalls('Please allow microphone access to make calls', 'error');
+            }
+            return false;
         }
-        return false;
     }
-}
+    
     function showNotificationInCalls(message, type = 'info') {
         const notificationArea = document.getElementById('notificationArea') || document.getElementById('call-notification-container') || document.body;
         const notification = document.createElement('div');
@@ -331,7 +297,6 @@ async function requestMediaPermissions(callType) {
         const callData = pendingOpenCall;
         pendingOpenCall = null;
         
-        // Check if core is ready
         const isCoreActive = window.callCore && 
             ((window.callCore.getLifecycleState && window.callCore.getLifecycleState() === 'ACTIVE') ||
              (window.callCore.isCoreReady && window.callCore.isCoreReady()));
@@ -339,20 +304,16 @@ async function requestMediaPermissions(callType) {
         if (isCoreActive) {
             startCallWithUser(callData.userId, callData.userName, callData.callType);
         } else {
-            // Wait for core
             console.log('[Calls UI] Core not ready, waiting...');
             pendingOpenCall = callData;
             setTimeout(processPendingCall, 500);
         }
     }
     
-    // Listen for OPEN_CALL_WITH_USER events immediately
-    // Guard against duplicate events (e.g. from both early IIFE + setupOpenCallWithUserListener)
     if (!window.__earlyCallLock) window.__earlyCallLock = { ts: 0, userId: null };
     window.addEventListener('OPEN_CALL_WITH_USER', function(event) {
         const data = event.detail || event.data || {};
         const userId = data.userId || data.user_id || data.id;
-        // Dedup: same user within 2s = duplicate, skip
         if (userId) {
             const lock = window.__earlyCallLock;
             if (lock.userId === String(userId) && (Date.now() - lock.ts) < 2000) {
@@ -363,37 +324,25 @@ async function requestMediaPermissions(callType) {
         }
         const userName = data.userName || data.name || data.user_name || 'User';
         const callType = data.callType || data.type || data.call_type || 'voice';
-        // Determine where the call was started from:
-        //   'friends'   → came from Friends page  → return to friends page after call
-        //   'messages'  → came from Messages/chat  → return to messages page (specific chat) after call
-        //   'calls'     → came from Calls sidebar  → stay on calls page after call
         const source = data.source || data.origin || data.from || 'calls';
         let returnTo = data.returnTo || source;
-        // Normalise known source labels
         if (returnTo === 'friends-page' || returnTo === 'friends' || returnTo === 'friend') returnTo = 'friends';
         else if (returnTo === 'messages' || returnTo === 'chat' || returnTo === 'message') returnTo = 'messages';
         else returnTo = 'calls';
 
-        // For messages origin we may also receive the target conversationId / chatUserId
         const chatUserId = data.chatUserId || data.conversationUserId || null;
         
         console.log('[Calls UI][Early] Received OPEN_CALL_WITH_USER:', { userId, userName, callType, returnTo, chatUserId });
         
         if (!userId) return;
         
-        // Store returnTo so endCall can navigate back.
-        // Write BOTH the mutable pending vars AND persistent origin backup.
-        // The pending vars may be cleared by intermediate reset code; the
-        // __callOrigin* backup is only cleared at the end of the actual call.
         window.__pendingCallReturnTo = returnTo;
         window.__pendingCallChatUserId = chatUserId || userId;
-        window.__callOriginReturnTo = returnTo;           // persistent backup
-        window.__callOriginChatUserId = chatUserId || userId; // persistent backup
+        window.__callOriginReturnTo = returnTo;
+        window.__callOriginChatUserId = chatUserId || userId;
         
-        // Store for processing
         pendingOpenCall = { userId, userName, callType };
         
-        // Try to process immediately
         const isCoreActive = window.callCore && 
             ((window.callCore.getLifecycleState && window.callCore.getLifecycleState() === 'ACTIVE') ||
              (window.callCore.isCoreReady && window.callCore.isCoreReady()));
@@ -401,7 +350,6 @@ async function requestMediaPermissions(callType) {
         if (isCoreActive) {
             processPendingCall();
         } else {
-            // Wait for core to be ready
             const checkInterval = setInterval(() => {
                 const isReady = window.callCore && 
                     ((window.callCore.getLifecycleState && window.callCore.getLifecycleState() === 'ACTIVE') ||
@@ -413,7 +361,6 @@ async function requestMediaPermissions(callType) {
                 }
             }, 200);
             
-            // Timeout after 10 seconds
             setTimeout(() => {
                 clearInterval(checkInterval);
                 if (pendingOpenCall) {
@@ -425,24 +372,18 @@ async function requestMediaPermissions(callType) {
         }
     });
     
-    // NOTE: postMessage from parent is handled by setupOpenCallWithUserListener.
-    // The early IIFE only handles the CustomEvent path (dispatched internally).
-    // We do NOT re-dispatch postMessage as CustomEvent here — that would cause
-    // duplicate call triggers (early listener + setup listener both firing).
-    
     console.log('[Calls UI][Early] OPEN_CALL_WITH_USER listener established');
 })();
 
+// ==================== LOAD CALL HISTORY ====================
 async function loadCallHistory() {
     console.log('[Calls UI] Loading call history (OFFLINE-FIRST)...');
     
-    // Load cached data FIRST for instant UI
     const cacheLoaded = loadCachedCallHistory();
     if (cacheLoaded) {
         console.log('[Calls UI] Loaded cached history for instant UI');
     }
     
-    // Then try to sync with API in background
     const token = window.__CHILD_SESSION__?.token || localStorage.getItem('authToken') || localStorage.getItem('token');
     
     if (!token) {
@@ -451,13 +392,12 @@ async function loadCallHistory() {
     }
     
     try {
-        // Background sync with API (non-blocking)
         const data = await new Promise((resolve, reject) => {
             const reqId = 'calls_hist_sync_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6);
             const timeout = setTimeout(() => {
                 window.removeEventListener('message', handler);
-                resolve(null); // Don't fail, just return null for silent fallback
-            }, 8000); // Shorter timeout for background sync
+                resolve(null);
+            }, 8000);
             function handler(ev) {
                 const msg = ev.data;
                 if (msg && msg.type === 'API_RESPONSE' && msg.requestId === reqId) {
@@ -465,7 +405,6 @@ async function loadCallHistory() {
                     window.removeEventListener('message', handler);
                     resolve(msg.payload || msg.data || {});
                 }
-                // Also handle CALL_HISTORY_UPDATE pushed directly by parent
                 if (msg && msg.type === 'CALL_HISTORY_UPDATE' && msg._reqId === reqId) {
                     clearTimeout(timeout);
                     window.removeEventListener('message', handler);
@@ -474,19 +413,18 @@ async function loadCallHistory() {
             }
             window.addEventListener('message', handler);
             window.parent.postMessage({
-                type:      'API_REQUEST',
+                type: 'API_REQUEST',
                 requestId: reqId,
-                source:    'calls-iframe',
-                payload:   { method: 'GET', endpoint: '/calls/history?limit=50', requestId: reqId }
+                source: 'calls-iframe',
+                payload: { method: 'GET', endpoint: '/calls/history?limit=50', requestId: reqId }
             }, '*');
         });
 
         const calls = data?.data?.calls || data?.calls || [];
         if (calls.length > 0 || data?.success !== false) {
             console.log('[Calls UI] Background sync: Updated call history:', calls.length, 'calls');
-            // Update UI with fresh data and cache it
             displayCallHistory(calls);
-            cacheCallHistory(calls); // Cache the fresh data
+            cacheCallHistory(calls);
             return calls;
         } else {
             console.warn('[Calls UI] Background sync failed, keeping cache');
@@ -497,10 +435,6 @@ async function loadCallHistory() {
         return [];
     }
 }
-
-// Call this in initializeUISystem after cacheElements()
-// Add this line inside initializeUISystem:
-loadCachedCallHistory();
 
 function formatCallClockTime(timestamp) {
     const date = new Date(timestamp || Date.now());
@@ -518,14 +452,13 @@ function formatCallChatTimestamp(timestamp) {
     return `${date.toLocaleDateString([], { month: 'short', day: 'numeric' })} ${formatCallClockTime(date)}`;
 }
 
-// Add this BEFORE displayCallHistory function (around line 760)
 function handleCallActionClick(e) {
     if (e) {
         e.stopPropagation();
         e.preventDefault();
     }
     var btn = this;
-    var userId   = btn.dataset && btn.dataset.userId;
+    var userId = btn.dataset && btn.dataset.userId;
     var userName = (btn.dataset && btn.dataset.userName) || 'User';
     var callType = (btn.dataset && btn.dataset.callType) || 'voice';
 
@@ -541,12 +474,11 @@ function handleCallActionClick(e) {
     } else if (window.callCore && typeof window.callCore.startCall === 'function') {
         window.callCore.startCall(userId, callType);
     } else {
-        // Fallback: post message to parent so the host page can initiate the call
         try {
             window.parent.postMessage({
-                type:    'INITIATE_CALL',
+                type: 'INITIATE_CALL',
                 payload: { userId: userId, userName: userName, callType: callType },
-                source:  'calls-iframe',
+                source: 'calls-iframe',
                 timestamp: Date.now()
             }, '*');
         } catch (err) {
@@ -561,7 +493,6 @@ function displayCallHistory(calls) {
     
     if (!allCallsList) return;
     
-    // Save to localStorage for persistence
     if (calls && calls.length > 0) {
         try {
             localStorage.setItem('cached_call_history', JSON.stringify({
@@ -573,7 +504,6 @@ function displayCallHistory(calls) {
     }
     
     if (!calls || calls.length === 0) {
-        // Try to load from cache
         try {
             const cached = localStorage.getItem('cached_call_history');
             if (cached) {
@@ -613,11 +543,9 @@ function displayCallHistory(calls) {
     
     function formatCallDateTime(dateString) {
         try {
-            // Normalize PostgreSQL timestamps: '2024-01-15 14:30:00+03' needs 'T' not space
             var normalizedDate = dateString;
             if (typeof dateString === 'string') {
                 normalizedDate = dateString.replace(' ', 'T');
-                // Fix bare offset like +0300 -> +03:00
                 normalizedDate = normalizedDate.replace(/([+-])(\d{2})(\d{2})$/, '$1$2:$3');
             }
             const date = new Date(normalizedDate);
@@ -648,28 +576,23 @@ function displayCallHistory(calls) {
     }
     
     function getCallDirectionInfo(call) {
-        // PRIORITY 1: Use server-computed direction field (already relative to current user).
-        // The /history endpoint sets obj.direction = 'outgoing'|'incoming' and obj.isMissed.
-        // This is the only reliable source because window.__CHILD_SESSION__ may not be set yet.
         let isOutgoing, isMissed;
 
         if (call.direction === 'outgoing') {
             isOutgoing = true;
-            isMissed   = false;
+            isMissed = false;
         } else if (call.direction === 'incoming') {
             isOutgoing = false;
-            isMissed   = call.status === 'missed';
+            isMissed = call.status === 'missed';
         } else {
-            // FALLBACK: derive from callerId when server direction is missing
             const currentUserId = window.__CHILD_SESSION__?.userId
                 || window.__SESSION__?.userId
                 || window.__currentUserId
                 || (window.callsState && window.callsState.userId);
             isOutgoing = currentUserId != null && (String(call.callerId) === String(currentUserId));
-            isMissed   = call.status === 'missed' && !isOutgoing;
+            isMissed = call.status === 'missed' && !isOutgoing;
         }
 
-        // Override: if status is missed and we are the receiver, always show as missed
         if (call.status === 'missed' && !isOutgoing) isMissed = true;
 
         let directionIcon = '';
@@ -695,11 +618,9 @@ function displayCallHistory(calls) {
     
     calls.forEach(function(call) {
         const otherParticipant = (call.otherParticipants && call.otherParticipants[0]) || call.caller;
-        // Use server-computed direction to determine the other party (avoids stale session userId)
         const currentUserId = window.__CHILD_SESSION__?.userId
             || window.__SESSION__?.userId
             || window.__currentUserId;
-        // direction is set by server: 'outgoing' means currentUser is the caller
         const isOutgoingCall = call.direction === 'outgoing' || (call.direction == null && String(call.callerId) === String(currentUserId));
         const otherId = isOutgoingCall ? call.receiverId : call.callerId;
         const contactMatch = (UIState.contacts || window.__cachedCallContacts || []).find(c => c.id == otherId || c.userId == otherId);
@@ -716,10 +637,8 @@ function displayCallHistory(calls) {
             ? 'Online'
             : (contactStatus === 'away' ? 'Away' : (contactStatus === 'missed' ? 'Missed call' : 'Offline'));
         const directionInfo = getCallDirectionInfo(call);
-        // FIXED: use createdAt as fallback when startedAt is null (e.g. missed/cancelled calls)
         const { dateStr, timeStr } = formatCallDateTime(call.startedAt || call.createdAt);
         
-        // Duration: show real time for completed calls, meaningful label for others
         let durationDisplay;
         if (call.status === 'missed') {
             durationDisplay = '<span style="color:#ef4444;">Missed</span>';
@@ -740,7 +659,6 @@ function displayCallHistory(calls) {
         item.style.cssText = 'padding: 8px 12px; margin: 4px 8px;';
         item.dataset.callId = call.id || '';
         
-        // REMOVED fake carrier/network info - only real data shown
         item.innerHTML = `
             <div class="call-avatar" style="width: 44px; height: 44px; background-color: #6c5ce7; flex-shrink: 0;">
                 ${avatarUrl ? `<img src="${escapeHtml(avatarUrl)}" alt="${escapeHtml(name)}">` : `<span style="font-size: 14px;">${escapeHtml(initials)}</span>`}
@@ -801,7 +719,6 @@ function displayCallHistory(calls) {
         }
     }
     
-    // Re-attach call-back button handlers
     document.querySelectorAll('.call-action-btn').forEach(function(btn) {
         btn.removeEventListener('click', handleCallActionClick);
         btn.addEventListener('click', function(e) {
@@ -811,23 +728,21 @@ function displayCallHistory(calls) {
         });
     });
 
-    // Attach Start Chat button handlers
     document.querySelectorAll('.chat-action-btn').forEach(function(btn) {
         btn.addEventListener('click', function(e) {
             e.stopPropagation();
             e.preventDefault();
-            var userId   = this.dataset.userId;
+            var userId = this.dataset.userId;
             var userName = this.dataset.userName || 'User';
             if (!userId) return;
 
             console.log('[Calls UI] Opening chat with userId:', userId, userName);
 
-            // Strategy 1: postMessage to parent frame (chat.html handles DIRECT_CHAT_REQUEST)
             try {
                 window.parent.postMessage({
-                    type:    'DIRECT_CHAT_REQUEST',
+                    type: 'DIRECT_CHAT_REQUEST',
                     payload: { userId: userId, userName: userName, findExisting: true },
-                    source:  'calls-iframe',
+                    source: 'calls-iframe',
                     timestamp: Date.now()
                 }, '*');
                 return;
@@ -835,15 +750,14 @@ function displayCallHistory(calls) {
                 console.warn('[Calls UI] postMessage failed, trying fallback:', err.message);
             }
 
-            // Strategy 2: if we ARE the top window, try navigating directly
             try {
                 if (window.navigateToPage) { window.navigateToPage('messages'); }
                 var msgIframe = document.getElementById('messagesIframe');
                 if (msgIframe && msgIframe.contentWindow) {
                     msgIframe.contentWindow.postMessage({
-                        type:    'OPEN_CHAT_WITH_USER',
+                        type: 'OPEN_CHAT_WITH_USER',
                         payload: { userId: userId, userName: userName, findExisting: true },
-                        source:  'calls-module',
+                        source: 'calls-module',
                         timestamp: Date.now()
                     }, '*');
                 }
@@ -859,7 +773,6 @@ function loadCachedCallHistory() {
         const cached = localStorage.getItem('cached_call_history');
         if (cached) {
             const parsed = JSON.parse(cached);
-            // Check if cache is less than 24 hours old
             if (parsed.timestamp && (Date.now() - parsed.timestamp) < 86400000) {
                 if (parsed.calls && parsed.calls.length > 0) {
                     console.log('[Calls UI] Restoring call history from cache:', parsed.calls.length);
@@ -887,7 +800,7 @@ function cacheCallHistory(calls) {
     } catch(e) {
         console.warn('[Calls UI] Failed to cache call history:', e);
     }
-} // <--- Added closing brace here
+}
 
 // ==================== MODULE INITIALIZATION ====================
 (function() {
@@ -899,26 +812,20 @@ function cacheCallHistory(calls) {
     }
     window[MODULE_INIT_FLAG] = true;
 
-    // Session cache - memory only, no localStorage persistence
-    // CRITICAL: Call state is in-memory only - no storage dependency
     window.__CHILD_SESSION__ = window.__CHILD_SESSION__ || {
         token: null,
         userId: null,
         expires: null
     };
 
-    // ==================== DEBUG FLAG ====================
     window.__IFRAME_DEBUG__ = window.__IFRAME_DEBUG__ || false;
     const DEBUG = window.__IFRAME_DEBUG__;
 
-    // ==================== CORE REFERENCE ====================
     let coreInstance = null;
     let coreReady = false;
     let coreInitializationStartTime = Date.now();
     let _coreListenersInitialized = false;
 
-    // ==================== LIFECYCLE STATE TRACKING ====================
-    // These are now synced from core events, not set by UI
     let parentReady = false;
     let sessionReady = false;
     let handshakeComplete = false;
@@ -927,9 +834,6 @@ function cacheCallHistory(calls) {
     let coreLifecycleState = 'BOOT';
     let _sessionInvalid = false;
     
-    // No polling - rely on core events
-
-    // ==================== PENDING CALL STATE (for OPEN_CALL_WITH_USER) ====================
     let pendingCall = {
         userId: null,
         userName: null,
@@ -941,7 +845,6 @@ function cacheCallHistory(calls) {
         retryTimer: null
     };
 
-    // ==================== ERROR CACHE FOR ONCE LOGGING ====================
     const _onceErrors = new Map();
     const _onceTimers = new Map();
 
@@ -966,19 +869,16 @@ function cacheCallHistory(calls) {
         }
     }
 
-    // ==================== CORE STATE ASSERTION HELPER ====================
     function assertCoreActive(actionName) {
         if (!coreInstance) {
             logOnce('warn', `Cannot perform ${actionName} - core not available`);
             return false;
         }
         
-        // Use core's assertActive if available
         if (coreInstance.assertActive && typeof coreInstance.assertActive === 'function') {
             return coreInstance.assertActive(actionName);
         }
         
-        // Fallback to checking core's lifecycle state
         if (coreInstance.getLifecycleState) {
             const state = coreInstance.getLifecycleState();
             coreLifecycleState = state;
@@ -989,20 +889,16 @@ function cacheCallHistory(calls) {
             return true;
         }
         
-        // Check if there's an active call blocking actions
         if (coreInstance.isInCall && coreInstance.isInCall()) {
             logOnce('warn', `Cannot perform ${actionName} - already in a call`);
             return false;
         }
         
-        // Last resort fallback
         return coreReady && parentReady && sessionReady;
     }
 
-    // ==================== PARENT CONNECTION WRAPPER ====================
     function sendToParent(type, payload = {}) {
         try {
-            // Don't send if in passive mode
             if (inPassiveMode) {
                 if (DEBUG) {
                     logOnce('info', `Not sending ${type} - in passive mode`);
@@ -1022,7 +918,6 @@ function cacheCallHistory(calls) {
                     return true;
                 }
                 
-                // Use modern message format as fallback
                 const message = {
                     protocol: 'KYN-9.0',
                     type: type,
@@ -1046,9 +941,7 @@ function cacheCallHistory(calls) {
         return false;
     }
 
-    // ==================== SESSION VALIDATION ====================
     function isSessionValid() {
-        // Check core first
         if (coreInstance && coreInstance.isAuthenticated) {
             return coreInstance.isAuthenticated();
         }
@@ -1064,7 +957,6 @@ function cacheCallHistory(calls) {
             }
         }
         
-        // Fallback to memory cache
         return !!(window.__CHILD_SESSION__ && 
                  window.__CHILD_SESSION__.token && 
                  window.__CHILD_SESSION__.token.length > 10 &&
@@ -1072,7 +964,6 @@ function cacheCallHistory(calls) {
                   window.__CHILD_SESSION__.expires > Date.now()));
     }
 
-    // ==================== ACTION PERMISSION CHECK ====================
     function canPerformAction(actionName) {
         if (inPassiveMode) {
             showNotification('Waiting for parent connection...', 'info');
@@ -1084,7 +975,6 @@ function cacheCallHistory(calls) {
             return false;
         }
         
-        // Media actions are allowed in any active call state — don't block on coreReady
         const mediaActions = ['toggleMute', 'toggleVideo', 'toggleScreenShare'];
         if (mediaActions.includes(actionName)) {
             const activeStates = ['connected', 'ongoing', 'active', 'call_ready', 'in_call', 'ACTIVE', 'initiating'];
@@ -1093,7 +983,6 @@ function cacheCallHistory(calls) {
             }
         }
         
-        // Use core's assertActive if available
         if (coreInstance && coreInstance.assertActive) {
             if (!coreInstance.assertActive(actionName)) {
                 showNotification('Call system initializing...', 'info');
@@ -1104,7 +993,6 @@ function cacheCallHistory(calls) {
             return false;
         }
         
-        // For actions that require authentication
         const authRequiredActions = [
             'startCall', 'answerCall', 'sendReaction', 
             'setMood', 'setIntention', 'saveNotes'
@@ -1115,7 +1003,6 @@ function cacheCallHistory(calls) {
             return false;
         }
         
-        // Check if already in a call for actions that require call context
         const callRequiredActions = ['sendReaction', 'sendChatMessage', 'saveNotes'];
         if (callRequiredActions.includes(actionName)) {
             if (coreInstance && coreInstance.isInCall && !coreInstance.isInCall()) {
@@ -7576,49 +7463,42 @@ function setupFriendsListListener() {
 
 // Call this in initializeUISystem
 setupFriendsListListener();
-
 // ==================== SETTINGS SYNC LISTENER ====================
 // Listen for settings changes broadcast by the parent and apply them
 // to the local in-page toggles (emotional context, focus mode, etc.)
 (function setupCallsSettingsListener() {
     function applyCallUISetting(section, key, value) {
-        // --- calls section: sync in-page toggle checkboxes ---
         if (section === 'calls') {
             const map = {
-                emotionalContext:   'emotionalContextToggle',
-                callIntention:      'callIntentionToggle',
-                inCallChat:         'inCallChatToggle',
-                whiteboard:         'whiteboardToggle',
-                polls:              'pollsToggle',
-                sharedNotes:        'notesToggle',
-                focusMode:          'focusModeToggle',
-                liveReactions:      'liveReactionsToggle',
-                // alternate key names
+                emotionalContext: 'emotionalContextToggle',
+                callIntention: 'callIntentionToggle',
+                inCallChat: 'inCallChatToggle',
+                whiteboard: 'whiteboardToggle',
+                polls: 'pollsToggle',
+                sharedNotes: 'notesToggle',
+                focusMode: 'focusModeToggle',
+                liveReactions: 'liveReactionsToggle',
                 emotionalContextEnabled: 'emotionalContextToggle',
-                callIntentionEnabled:    'callIntentionToggle',
-                inCallChatEnabled:       'inCallChatToggle',
-                whiteboardEnabled:       'whiteboardToggle',
-                pollsEnabled:            'pollsToggle',
-                notesEnabled:            'notesToggle',
-                focusModeEnabled:        'focusModeToggle',
-                liveReactionsEnabled:    'liveReactionsToggle'
+                callIntentionEnabled: 'callIntentionToggle',
+                inCallChatEnabled: 'inCallChatToggle',
+                whiteboardEnabled: 'whiteboardToggle',
+                pollsEnabled: 'pollsToggle',
+                notesEnabled: 'notesToggle',
+                focusModeEnabled: 'focusModeToggle',
+                liveReactionsEnabled: 'liveReactionsToggle'
             };
             const elId = map[key];
             if (elId) {
                 const el = document.getElementById(elId);
                 if (el) el.checked = !!value;
             }
-            // Video quality / audio quality cosmetic indicator
             if (key === 'videoQuality' || key === 'audioQuality' || key === 'voiceQuality') {
                 window['__' + key] = value;
             }
         }
-        // --- appearance: theme, font size, accent colour ---
         if (section === 'appearance') {
             if (key === 'theme') {
-                const t = value === 'auto'
-                    ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
-                    : value;
+                const t = value === 'auto' ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light') : value;
                 document.documentElement.setAttribute('data-theme', t);
                 document.body.setAttribute('data-theme', t);
             }
@@ -7633,7 +7513,6 @@ setupFriendsListListener();
                 document.body.classList.toggle('no-animations', !value);
             }
         }
-        // --- notifications ---
         if (section === 'notifications') {
             if (key === 'soundEnabled' || key === 'notificationSound') window.__notificationSoundEnabled = value;
             if (key === 'callNotifications') window.__callNotificationsEnabled = value;
@@ -7643,12 +7522,10 @@ setupFriendsListListener();
     window.addEventListener('message', function(event) {
         const data = event.data;
         if (!data || typeof data !== 'object') return;
-
         if (data.type === 'SETTING_CHANGED') {
             const { section, key, value } = data.payload || data;
             if (section && key !== undefined) applyCallUISetting(section, key, value);
         }
-
         if (data.type === 'SETTINGS_UPDATED') {
             const settings = (data.payload || data).settings || {};
             Object.entries(settings).forEach(function([sec, secVal]) {
@@ -7657,39 +7534,35 @@ setupFriendsListListener();
                         applyCallUISetting(sec, k, v);
                     });
                 }
-            } catch(err) {
-                console.warn('[CallsUI] Settings subscription error:', err);
-            }
-        });
-    } else {
-        // Fallback: Wait for AppSettings to be ready
-        window.addEventListener('appSettingsReady', function() {
-            if (window.AppSettings) {
-                window.AppSettings.subscribe(function(settings, path, value) {
-                    try {
-                        if (path && path !== '*') {
-                            const parts = path.split('.');
-                            const section = parts[0];
-                            const key = parts.slice(1).join('.');
-                            applyCallUISetting(section, key, value);
-                        } else {
-                            Object.entries(settings).forEach(function([sec, secVal]) {
-                                if (secVal && typeof secVal === 'object') {
-                                    Object.entries(secVal).forEach(function([k, v]) {
-                                        applyCallUISetting(sec, k, v);
-                                    });
-                                }
-                            });
-                        }
-                    } catch(err) {
-                        console.warn('[CallsUI] Settings subscription error:', err);
-                    }
-                });
-            }
-        }, { once: true });
-    }
+            });
+        }
+    });
 
-    // Legacy event listeners for backwards compatibility
+    window.addEventListener('appSettingsReady', function() {
+        if (window.AppSettings) {
+            window.AppSettings.subscribe(function(settings, path, value) {
+                try {
+                    if (path && path !== '*') {
+                        const parts = path.split('.');
+                        const section = parts[0];
+                        const key = parts.slice(1).join('.');
+                        applyCallUISetting(section, key, value);
+                    } else {
+                        Object.entries(settings).forEach(function([sec, secVal]) {
+                            if (secVal && typeof secVal === 'object') {
+                                Object.entries(secVal).forEach(function([k, v]) {
+                                    applyCallUISetting(sec, k, v);
+                                });
+                            }
+                        });
+                    }
+                } catch(err) {
+                    console.warn('[CallsUI] Settings subscription error:', err);
+                }
+            });
+        }
+    }, { once: true });
+
     window.addEventListener('settingChanged', function(e) {
         const { section, key, value } = e.detail || {};
         if (section && key !== undefined) applyCallUISetting(section, key, value);
@@ -7706,98 +7579,82 @@ setupFriendsListListener();
     });
 })();
 
-    async function initializeUISystem() {
-        if (UIState.initialized) {
-            if (DEBUG) {
-                logOnce('info', 'UI system already initialized');
-            }
-            return { success: true, stages: UIState.renderStages };
-        }
-        
+// ==================== INITIALIZE UI SYSTEM ====================
+async function initializeUISystem() {
+    if (UIState.initialized) {
         if (DEBUG) {
-            logOnce('info', 'Initializing UI system');
+            logOnce('info', 'UI system already initialized');
         }
-
-        // ── Inject contact call-button styles ─────────────────────────────────
-        if (!document.getElementById('kyn-contact-call-btn-styles')) {
-            const s = document.createElement('style');
-            s.id = 'kyn-contact-call-btn-styles';
-            s.textContent = `
-                .contact-item { display:flex; align-items:center; gap:10px; padding:10px 12px; cursor:pointer; border-radius:10px; transition:background 0.15s; }
-                .contact-item:hover { background: rgba(108,92,231,0.08); }
-                .contact-call-actions { display:flex; gap:6px; margin-left:auto; flex-shrink:0; }
-                .contact-audio-call-btn, .contact-video-call-btn {
-                    width:34px; height:34px; border-radius:50%; border:none; cursor:pointer;
-                    display:flex; align-items:center; justify-content:center;
-                    font-size:13px; transition:all 0.18s;
-                }
-                .contact-audio-call-btn { background:#10b981; color:#fff; }
-                .contact-audio-call-btn:hover { background:#059669; transform:scale(1.1); }
-                .contact-video-call-btn { background:#6c5ce7; color:#fff; }
-                .contact-video-call-btn:hover { background:#5a4bd1; transform:scale(1.1); }
-            `;
-            document.head.appendChild(s);
-        }
-        // ──────────────────────────────────────────────────────────────────────
-        
-        cacheElements();
-        await RenderingPipeline.execute();
-        
-        // Load cached call history for persistence
-        loadCachedCallHistory();
-        
-        if (coreInstance && !fallbackModeActive) {
-            CoreIntegration.subscribeToCore();
-        }
-        
-        if (window.ResponsiveEngine) {
-            ResponsiveEngine.initialize();
-        }
-        
-        UIState.renderStages.initial = true;
-        UIState.initialized = true;
-        
-        // Set up OPEN_CALL_WITH_USER listener
-        setupOpenCallWithUserListener();
-        
-        // Set up mobile back button
-        setupMobileBackButton();
-        
-        window.dispatchEvent(new CustomEvent('calls.ui.ready', {
-            detail: { 
-                timestamp: Date.now()
-            }
-        }));
-        
-        if (DEBUG) {
-            logOnce('info', 'UI initialization complete', {
-                renderStages: UIState.renderStages,
-                renderCount: UIState.renderCount,
-                elementsCached: UIState.cachedElements.size,
-                handshake: {
-                    parentReady,
-                    sessionReady,
-                    handshakeComplete,
-                    inPassiveMode,
-                    coreReady,
-                    coreLifecycleState
-                },
-                session: {
-                    valid: isSessionValid(),
-                    invalid: _sessionInvalid
-                },
-                coreLifecycle: coreLifecycleState
-            });
-        }
-        
-        return {
-            success: true,
-            stages: UIState.renderStages,
-            diagnostics: UIDiagnostics.getReport()
-        };
+        return { success: true, stages: UIState.renderStages };
+    }
+    
+    if (DEBUG) {
+        logOnce('info', 'Initializing UI system');
     }
 
-    // Add message listener for direct call history display
+    // Inject contact call-button styles
+    if (!document.getElementById('kyn-contact-call-btn-styles')) {
+        const s = document.createElement('style');
+        s.id = 'kyn-contact-call-btn-styles';
+        s.textContent = `
+            .contact-item { display:flex; align-items:center; gap:10px; padding:10px 12px; cursor:pointer; border-radius:10px; transition:background 0.15s; }
+            .contact-item:hover { background: rgba(108,92,231,0.08); }
+            .contact-call-actions { display:flex; gap:6px; margin-left:auto; flex-shrink:0; }
+            .contact-audio-call-btn, .contact-video-call-btn {
+                width:34px; height:34px; border-radius:50%; border:none; cursor:pointer;
+                display:flex; align-items:center; justify-content:center;
+                font-size:13px; transition:all 0.18s;
+            }
+            .contact-audio-call-btn { background:#10b981; color:#fff; }
+            .contact-audio-call-btn:hover { background:#059669; transform:scale(1.1); }
+            .contact-video-call-btn { background:#6c5ce7; color:#fff; }
+            .contact-video-call-btn:hover { background:#5a4bd1; transform:scale(1.1); }
+        `;
+        document.head.appendChild(s);
+    }
+    
+    cacheElements();
+    await RenderingPipeline.execute();
+    
+    loadCachedCallHistory();
+    
+    if (coreInstance && !fallbackModeActive) {
+        CoreIntegration.subscribeToCore();
+    }
+    
+    if (window.ResponsiveEngine) {
+        ResponsiveEngine.initialize();
+    }
+    
+    UIState.renderStages.initial = true;
+    UIState.initialized = true;
+    
+    setupOpenCallWithUserListener();
+    setupMobileBackButton();
+    
+    window.dispatchEvent(new CustomEvent('calls.ui.ready', {
+        detail: { timestamp: Date.now() }
+    }));
+    
+    if (DEBUG) {
+        logOnce('info', 'UI initialization complete', {
+            renderStages: UIState.renderStages,
+            renderCount: UIState.renderCount,
+            elementsCached: UIState.cachedElements.size,
+            handshake: { parentReady, sessionReady, handshakeComplete, inPassiveMode, coreReady, coreLifecycleState },
+            session: { valid: isSessionValid(), invalid: _sessionInvalid },
+            coreLifecycle: coreLifecycleState
+        });
+    }
+    
+    return {
+        success: true,
+        stages: UIState.renderStages,
+        diagnostics: UIDiagnostics.getReport()
+    };
+}
+
+// ==================== MESSAGE LISTENER FOR CALL HISTORY ====================
 window.addEventListener('message', function(event) {
     const data = event.data;
     if (data && data.type === 'CALL_HISTORY_UPDATE') {
@@ -7807,7 +7664,6 @@ window.addEventListener('message', function(event) {
         
         console.log('[Calls UI] CALL_HISTORY_UPDATE received:', calls.length, 'calls, loading:', isLoading, 'error:', hasError);
 
-        // Store in UIState so panels (Relationship etc.) can use it
         if (calls && calls.length > 0) {
             UIState.callHistory = calls;
             window.__cachedCallHistory = calls;
@@ -7817,38 +7673,20 @@ window.addEventListener('message', function(event) {
         if (!allCallsList) return;
         
         if (isLoading) {
-            allCallsList.innerHTML = `
-                <div class="offline-state">
-                    <i class="fas fa-spinner fa-spin"></i>
-                    <p>Loading calls...</p>
-                </div>
-            `;
+            allCallsList.innerHTML = `<div class="offline-state"><i class="fas fa-spinner fa-spin"></i><p>Loading calls...</p></div>`;
             return;
         }
         
         if (hasError) {
-            allCallsList.innerHTML = `
-                <div class="offline-state">
-                    <i class="fas fa-exclamation-triangle"></i>
-                    <p>Unable to load call history</p>
-                    <p class="subtext">Please try again later</p>
-                </div>
-            `;
+            allCallsList.innerHTML = `<div class="offline-state"><i class="fas fa-exclamation-triangle"></i><p>Unable to load call history</p><p class="subtext">Please try again later</p></div>`;
             return;
         }
         
         if (!calls || calls.length === 0) {
-            allCallsList.innerHTML = `
-                <div class="offline-state">
-                    <i class="fas fa-phone-slash"></i>
-                    <p>No recent calls</p>
-                    <p class="subtext">Your call history will appear here</p>
-                </div>
-            `;
+            allCallsList.innerHTML = `<div class="offline-state"><i class="fas fa-phone-slash"></i><p>No recent calls</p><p class="subtext">Your call history will appear here</p></div>`;
             return;
         }
         
-        // Clear and rebuild list
         allCallsList.innerHTML = '';
         
         calls.forEach(function(call) {
@@ -7865,20 +7703,13 @@ window.addEventListener('message', function(event) {
             const isMissed = call.status === 'missed' && !isOutgoing;
             const direction = isOutgoing ? 'outgoing' : (isMissed ? 'missed' : 'incoming');
             const iconClass = call.type === 'video' ? 'fa-video' : 'fa-phone';
-            // Direction arrow icon: outgoing = arrow-up-right, incoming = arrow-down-left, missed = slash
             const statusIconClass = isMissed ? 'fa-phone-slash' : (isOutgoing ? 'fa-arrow-up' : 'fa-arrow-down');
-            // Direction label colour via CSS class (missed=red, outgoing=green, incoming=blue)
             
             const item = document.createElement('div');
             item.className = 'call-history-item ' + direction;
             
             let timeDisplay = '';
-            try {
-                timeDisplay = new Date(call.startedAt).toLocaleString();
-            } catch(e) {
-                timeDisplay = '';
-            }
-
+            try { timeDisplay = new Date(call.startedAt).toLocaleString(); } catch(e) { timeDisplay = ''; }
             const directionLabel = isMissed ? 'Missed' : (isOutgoing ? 'Outgoing' : 'Incoming');
             
             item.innerHTML = `
@@ -7904,15 +7735,12 @@ window.addEventListener('message', function(event) {
                     <i class="fas fa-phone"></i>
                 </button>
             `;
-            
             allCallsList.appendChild(item);
         });
         
-        // Attach click handlers
         document.querySelectorAll('.call-action-btn').forEach(function(btn) {
             btn.removeEventListener('click', handleCallActionClick);
             btn.addEventListener('click', function(e) {
-                // Call-back from history stays in calls page
                 window.__pendingCallReturnTo = 'calls';
                 window.__pendingCallChatUserId = null;
                 handleCallActionClick.call(btn, e);
@@ -7921,6 +7749,7 @@ window.addEventListener('message', function(event) {
     }
 });
 
+// ==================== HELPER FUNCTIONS ====================
 function escapeHtmlForCall(str) {
     if (!str) return '';
     return String(str)
@@ -7931,19 +7760,13 @@ function escapeHtmlForCall(str) {
         .replace(/'/g, '&#39;');
 }
 
-/**
- * handleCallActionClick
- * Click handler for .call-action-btn elements.
- * Reads data-user-id, data-user-name, data-call-type from the button
- * (or from `this` when called via .call(btn, e)) and starts a call.
- */
 function handleCallActionClick(e) {
     if (e) {
         e.stopPropagation();
         e.preventDefault();
     }
     var btn = this;
-    var userId   = btn.dataset && btn.dataset.userId;
+    var userId = btn.dataset && btn.dataset.userId;
     var userName = (btn.dataset && btn.dataset.userName) || 'User';
     var callType = (btn.dataset && btn.dataset.callType) || 'voice';
 
@@ -7959,12 +7782,11 @@ function handleCallActionClick(e) {
     } else if (window.callCore && typeof window.callCore.startCall === 'function') {
         window.callCore.startCall(userId, callType);
     } else {
-        // Fallback: post message to parent so the host page can initiate the call
         try {
             window.parent.postMessage({
-                type:    'INITIATE_CALL',
+                type: 'INITIATE_CALL',
                 payload: { userId: userId, userName: userName, callType: callType },
-                source:  'calls-iframe',
+                source: 'calls-iframe',
                 timestamp: Date.now()
             }, '*');
         } catch (err) {
@@ -7973,285 +7795,260 @@ function handleCallActionClick(e) {
     }
 }
 
-    // ==================== EXPORTS ====================
-    // Create bound functions safely
-    const safeBind = (fn, context) => {
-        if (typeof fn === 'function') {
-            return fn.bind(context);
-        }
-        return function() {};
-    };
-
-
-    const PanelHandlers = UIPanelHandlers;
-    const openParticipantsPanel = safeBind(UIPanelHandlers.openParticipantsPanel, UIPanelHandlers);
-    const openChatPanel = safeBind(UIPanelHandlers.openChatPanel, UIPanelHandlers);
-    const openWhiteboardPanel = safeBind(UIPanelHandlers.openWhiteboardPanel, UIPanelHandlers);
-    const openNotesPanel = safeBind(UIPanelHandlers.openNotesPanel, UIPanelHandlers);
-    const openPollsPanel = safeBind(UIPanelHandlers.openPollsPanel, UIPanelHandlers);
-    const openRelationshipPanel = safeBind(UIPanelHandlers.openRelationshipPanel, UIPanelHandlers);
-    const createParticipantsPanel = safeBind(UIPanelHandlers.createParticipantsPanel, UIPanelHandlers);
-    const createChatPanel = safeBind(UIPanelHandlers.createChatPanel, UIPanelHandlers);
-    const createWhiteboardPanel = safeBind(UIPanelHandlers.createWhiteboardPanel, UIPanelHandlers);
-    const createNotesPanel = safeBind(UIPanelHandlers.createNotesPanel, UIPanelHandlers);
-    const createPollsPanel = safeBind(UIPanelHandlers.createPollsPanel, UIPanelHandlers);
-    const createRelationshipPanel = safeBind(UIPanelHandlers.createRelationshipPanel, UIPanelHandlers);
-
-    const EventHandlers = UIEventHandlers;
-    const toggleMenuDots = safeBind(UIEventHandlers.toggleMenuDots, UIEventHandlers);
-    const closeMenuDots = safeBind(UIEventHandlers.closeMenuDots, UIEventHandlers);
-    const openNewCallModal = safeBind(UIEventHandlers.openNewCallModal, UIEventHandlers);
-    const closeNewCallModal = safeBind(UIEventHandlers.closeNewCallModal, UIEventHandlers);
-    const searchContacts = safeBind(UIEventHandlers.searchContacts, UIEventHandlers);
-    const searchGroupContacts = safeBind(UIEventHandlers.searchGroupContacts, UIEventHandlers);
-    const selectGroupOption = safeBind(UIEventHandlers.selectGroupOption, UIEventHandlers);
-    
-    // Fixed bindings for startVoiceCall and startVideoCall - use arrow functions
-    const startVoiceCall = () => UIEventHandlers.startCallGeneric('voice');
-    const startVideoCall = () => UIEventHandlers.startCallGeneric('video');
-    
-    const startGroupCall = safeBind(UIEventHandlers.startGroupCall, UIEventHandlers);
-    const generateVoiceCallLink = safeBind(UIEventHandlers.generateVoiceCallLink, UIEventHandlers);
-    const generateVideoCallLink = safeBind(UIEventHandlers.generateVideoCallLink, UIEventHandlers);
-    const copyCallLink = safeBind(UIEventHandlers.copyCallLink, UIEventHandlers);
-    const shareCallLink = safeBind(UIEventHandlers.shareCallLink, UIEventHandlers);
-    const toggleMute = safeBind(UIEventHandlers.toggleMute, UIEventHandlers);
-    const toggleVideo = safeBind(UIEventHandlers.toggleVideo, UIEventHandlers);
-    const toggleScreenShare = safeBind(UIEventHandlers.toggleScreenShare, UIEventHandlers);
-    const toggleSpeaker = safeBind(UIEventHandlers.toggleSpeaker, UIEventHandlers);
-    const openMoodSelectionModal = safeBind(UIEventHandlers.openMoodSelectionModal, UIEventHandlers);
-    const closeMoodSelectionModal = safeBind(UIEventHandlers.closeMoodSelectionModal, UIEventHandlers);
-    const setMood = safeBind(UIEventHandlers.setMood, UIEventHandlers);
-    const openIntentionSelectionModal = safeBind(UIEventHandlers.openIntentionSelectionModal, UIEventHandlers);
-    const closeIntentionSelectionModal = safeBind(UIEventHandlers.closeIntentionSelectionModal, UIEventHandlers);
-    const setIntention = safeBind(UIEventHandlers.setIntention, UIEventHandlers);
-    const toggleFocusMode = safeBind(UIEventHandlers.toggleFocusMode, UIEventHandlers);
-    const enableFocusMode = safeBind(UIEventHandlers.enableFocusMode, UIEventHandlers);
-    const disableFocusMode = safeBind(UIEventHandlers.disableFocusMode, UIEventHandlers);
-    const endCall = safeBind(UIEventHandlers.endCall, UIEventHandlers);
-    const skipPrivateNotes = safeBind(UIEventHandlers.skipPrivateNotes, UIEventHandlers);
-    const savePrivateNotes = safeBind(UIEventHandlers.savePrivateNotes, UIEventHandlers);
-    const showCallSummary = safeBind(UIEventHandlers.showCallSummary, UIEventHandlers);
-    const closeCallSummary = safeBind(UIEventHandlers.closeCallSummary, UIEventHandlers);
-    const declineIncomingCall = safeBind(UIEventHandlers.declineIncomingCall, UIEventHandlers);
-    const acceptIncomingCall = safeBind(UIEventHandlers.acceptIncomingCall, UIEventHandlers);
-    const acceptIncomingCallAsVideo = safeBind(UIEventHandlers.acceptIncomingCallAsVideo, UIEventHandlers);
-    const switchCallCategory = safeBind(UIEventHandlers.switchCallCategory, UIEventHandlers);
-    const switchNewCallTab = safeBind(UIEventHandlers.switchNewCallTab, UIEventHandlers);
-    const toggleSettingsPanel = safeBind(UIEventHandlers.toggleSettingsPanel, UIEventHandlers);
-    const openPaymentModal = safeBind(UIEventHandlers.openPaymentModal, UIEventHandlers);
-    const closePaymentModal = safeBind(UIEventHandlers.closePaymentModal, UIEventHandlers);
-    const selectPaymentOption = safeBind(UIEventHandlers.selectPaymentOption, UIEventHandlers);
-    const processPayment = safeBind(UIEventHandlers.processPayment, UIEventHandlers);
-    const closePremiumLimitModal = safeBind(UIEventHandlers.closePremiumLimitModal, UIEventHandlers);
-    const sendReaction = safeBind(UIEventHandlers.sendReaction, UIEventHandlers);
-    const handleLogout = safeBind(UIEventHandlers.handleLogout, UIEventHandlers);
-
-    const requestMediaPermissionsFnExport = requestMediaPermissionsFn;
-
-    const EventSystemExport = EventSystem;
-    const RenderingPipelineExport = RenderingPipeline;
-    const CoreIntegrationExport = CoreIntegration;
-    const ResponsiveEngineExport = ResponsiveEngine;
-    const SecuritySanitizerExport = SecuritySanitizer;
-    const ViewHistoryExport = ViewHistory;
-
-    const UIStateExport = UIState;
-    const UIDiagnosticsExport = UIDiagnostics;
-    const UILoggerExport = UILogger;
-    const UIErrorBoundaryExport = UIErrorBoundary;
-
-    const elementsExport = elements;
-    
-    // Define handleContactClick to fix the bind error
-    const handleContactClick = function(e) {
-        if (e.target.closest('.contact-checkbox')) return;
-        
-        const checkbox = this.querySelector('.contact-checkbox');
-        if (checkbox) {
-            checkbox.checked = !checkbox.checked;
-            
-            if (checkbox.checked) {
-                this.classList.add('selected');
-            } else {
-                this.classList.remove('selected');
-            }
-        }
-    };
-
-    window.callsUI = {
-        initializeUISystem,
-        cacheElements,
-        PanelHandlers,
-        openParticipantsPanel,
-        openChatPanel,
-        openWhiteboardPanel,
-        openNotesPanel,
-        openPollsPanel,
-        openRelationshipPanel,
-        createParticipantsPanel,
-        createChatPanel,
-        createWhiteboardPanel,
-        createNotesPanel,
-        createPollsPanel,
-        createRelationshipPanel,
-        EventHandlers,
-        toggleMenuDots,
-        closeMenuDots,
-        openNewCallModal,
-        closeNewCallModal,
-        searchContacts,
-        searchGroupContacts,
-        selectGroupOption,
-        startVoiceCall,
-        startVideoCall,
-        startGroupCall,
-        generateVoiceCallLink,
-        generateVideoCallLink,
-        copyCallLink,
-        shareCallLink,
-        toggleMute,
-        toggleVideo,
-        toggleScreenShare,
-        toggleSpeaker,
-        openMoodSelectionModal,
-        closeMoodSelectionModal,
-        setMood,
-        openIntentionSelectionModal,
-        closeIntentionSelectionModal,
-        setIntention,
-        toggleFocusMode,
-        enableFocusMode,
-        disableFocusMode,
-        endCall,
-        skipPrivateNotes,
-        savePrivateNotes,
-        showCallSummary,
-        closeCallSummary,
-        declineIncomingCall,
-        acceptIncomingCall,
-        acceptIncomingCallAsVideo,
-        switchCallCategory,
-        switchNewCallTab,
-        toggleSettingsPanel,
-        openPaymentModal,
-        closePaymentModal,
-        selectPaymentOption,
-        processPayment,
-        closePremiumLimitModal,
-        sendReaction,
-        handleLogout,
-        requestMediaPermissionsFn: requestMediaPermissionsFnExport,
-        EventSystem: EventSystemExport,
-        RenderingPipeline: RenderingPipelineExport,
-        CoreIntegration: CoreIntegrationExport,
-        ResponsiveEngine: ResponsiveEngineExport,
-        SecuritySanitizer: SecuritySanitizerExport,
-        ViewHistory: ViewHistoryExport,
-        UIState: UIStateExport,
-        UIDiagnostics: UIDiagnosticsExport,
-        UILogger: UILoggerExport,
-        UIErrorBoundary: UIErrorBoundaryExport,
-        elements: elementsExport,
-        showNotification,
-        getSessionCache: () => window.__CHILD_SESSION__,
-        getHandshakeStatus: () => ({
-            parentReady,
-            sessionReady,
-            handshakeComplete,
-            fallbackModeActive,
-            inPassiveMode,
-            coreReady,
-            coreLifecycleState,
-            sessionInvalid: _sessionInvalid
-        }),
-        // Added session validation helper
-        isSessionValid,
-        // Added core state assertion helper
-        assertCoreActive,
-        getDiagnostics: () => UIDiagnostics.getReport(),
-        getUIState: () => ({ ...UIState }),
-        // Added core reference
-        getCoreInstance: () => coreInstance,
-        // Added method to check if core is in ACTIVE state
-        isCoreActive: () => {
-            if (coreInstance && coreInstance.getLifecycleState) {
-                return coreInstance.getLifecycleState() === 'ACTIVE';
-            }
-            return coreReady && parentReady;
-        },
-        // Get core lifecycle state
-        getCoreLifecycleState: () => coreLifecycleState,
-        // Check if in a call
-        isInCall: () => {
-            if (coreInstance && coreInstance.isInCall) {
-                return coreInstance.isInCall();
-            }
-            const activeStates = ['connected', 'ongoing', 'active', 'call_ready', 'in_call', 'incoming', 'ringing', 'initiating'];
-            return UIState.callActive === true || activeStates.includes(UIState.callState);
-        },
-        // Refresh session sync indicator
-        refreshSyncIndicator: () => {
-            if (RenderingPipeline && RenderingPipeline.updateSyncIndicator) {
-                RenderingPipeline.updateSyncIndicator();
-            }
-        },
-        // Get pending call status
-        getPendingCall: () => ({ ...pendingCall }),
-        // Manually trigger a call with a user (for external use)
-        initiateCallWithUser: (userId, userName, callType = 'voice') => {
-            console.log('[Calls UI] initiateCallWithUser called:', { userId, userName, callType });
-            
-            if (!userId) {
-                console.error('[Calls UI] Cannot initiate call: No userId');
-                return;
-            }
-            
-            // Dispatch the event to trigger the call
-            const eventObj = new CustomEvent('OPEN_CALL_WITH_USER', { 
-                detail: { userId, userName, callType, source: 'manual' } 
-            });
-            window.dispatchEvent(eventObj);
-        }
-    };
-
-    // ==================== BOOTSTRAP ====================
-    
-    coreInitializationStartTime = Date.now();
-    
-    setupCoreReadyListener();
-    
-    if (detectExistingCore()) {
-        if (DEBUG) {
-            logOnce('success', 'Core already available, initializing UI immediately');
-        }
-        initializeUISystem().catch(error => {
-            if (DEBUG) {
-                logOnce('error', 'Auto-initialization failed', error);
-            }
-            RenderingPipeline.skeleton();
-        });
-    } else {
-        if (DEBUG) {
-            logOnce('info', 'Core not immediately available, showing skeleton and waiting for events');
-        }
-        
-        RenderingPipeline.skeleton();
-        
-        // No timeout - just wait for events
-        waitForCoreReady().then((ready) => {
-            if (ready) {
-                if (DEBUG) {
-                    logOnce('success', 'Core became ready after ' + (Date.now() - coreInitializationStartTime) + 'ms, initializing full UI');
-                }
-                performFullInitialization();
-            } else {
-                // This should not happen with the event-driven approach
-                logOnce('error', 'Core ready promise resolved false - this should not happen');
-                // Keep showing skeleton UI
-                RenderingPipeline.initialRender().catch(() => {});
-            }
-        });
+// ==================== EXPORTS ====================
+const safeBind = (fn, context) => {
+    if (typeof fn === 'function') {
+        return fn.bind(context);
     }
+    return function() {};
+};
 
+const PanelHandlers = UIPanelHandlers;
+const openParticipantsPanel = safeBind(UIPanelHandlers.openParticipantsPanel, UIPanelHandlers);
+const openChatPanel = safeBind(UIPanelHandlers.openChatPanel, UIPanelHandlers);
+const openWhiteboardPanel = safeBind(UIPanelHandlers.openWhiteboardPanel, UIPanelHandlers);
+const openNotesPanel = safeBind(UIPanelHandlers.openNotesPanel, UIPanelHandlers);
+const openPollsPanel = safeBind(UIPanelHandlers.openPollsPanel, UIPanelHandlers);
+const openRelationshipPanel = safeBind(UIPanelHandlers.openRelationshipPanel, UIPanelHandlers);
+const createParticipantsPanel = safeBind(UIPanelHandlers.createParticipantsPanel, UIPanelHandlers);
+const createChatPanel = safeBind(UIPanelHandlers.createChatPanel, UIPanelHandlers);
+const createWhiteboardPanel = safeBind(UIPanelHandlers.createWhiteboardPanel, UIPanelHandlers);
+const createNotesPanel = safeBind(UIPanelHandlers.createNotesPanel, UIPanelHandlers);
+const createPollsPanel = safeBind(UIPanelHandlers.createPollsPanel, UIPanelHandlers);
+const createRelationshipPanel = safeBind(UIPanelHandlers.createRelationshipPanel, UIPanelHandlers);
+
+const EventHandlers = UIEventHandlers;
+const toggleMenuDots = safeBind(UIEventHandlers.toggleMenuDots, UIEventHandlers);
+const closeMenuDots = safeBind(UIEventHandlers.closeMenuDots, UIEventHandlers);
+const openNewCallModal = safeBind(UIEventHandlers.openNewCallModal, UIEventHandlers);
+const closeNewCallModal = safeBind(UIEventHandlers.closeNewCallModal, UIEventHandlers);
+const searchContacts = safeBind(UIEventHandlers.searchContacts, UIEventHandlers);
+const searchGroupContacts = safeBind(UIEventHandlers.searchGroupContacts, UIEventHandlers);
+const selectGroupOption = safeBind(UIEventHandlers.selectGroupOption, UIEventHandlers);
+
+const startVoiceCall = () => UIEventHandlers.startCallGeneric('voice');
+const startVideoCall = () => UIEventHandlers.startCallGeneric('video');
+
+const startGroupCall = safeBind(UIEventHandlers.startGroupCall, UIEventHandlers);
+const generateVoiceCallLink = safeBind(UIEventHandlers.generateVoiceCallLink, UIEventHandlers);
+const generateVideoCallLink = safeBind(UIEventHandlers.generateVideoCallLink, UIEventHandlers);
+const copyCallLink = safeBind(UIEventHandlers.copyCallLink, UIEventHandlers);
+const shareCallLink = safeBind(UIEventHandlers.shareCallLink, UIEventHandlers);
+const toggleMute = safeBind(UIEventHandlers.toggleMute, UIEventHandlers);
+const toggleVideo = safeBind(UIEventHandlers.toggleVideo, UIEventHandlers);
+const toggleScreenShare = safeBind(UIEventHandlers.toggleScreenShare, UIEventHandlers);
+const toggleSpeaker = safeBind(UIEventHandlers.toggleSpeaker, UIEventHandlers);
+const openMoodSelectionModal = safeBind(UIEventHandlers.openMoodSelectionModal, UIEventHandlers);
+const closeMoodSelectionModal = safeBind(UIEventHandlers.closeMoodSelectionModal, UIEventHandlers);
+const setMood = safeBind(UIEventHandlers.setMood, UIEventHandlers);
+const openIntentionSelectionModal = safeBind(UIEventHandlers.openIntentionSelectionModal, UIEventHandlers);
+const closeIntentionSelectionModal = safeBind(UIEventHandlers.closeIntentionSelectionModal, UIEventHandlers);
+const setIntention = safeBind(UIEventHandlers.setIntention, UIEventHandlers);
+const toggleFocusMode = safeBind(UIEventHandlers.toggleFocusMode, UIEventHandlers);
+const enableFocusMode = safeBind(UIEventHandlers.enableFocusMode, UIEventHandlers);
+const disableFocusMode = safeBind(UIEventHandlers.disableFocusMode, UIEventHandlers);
+const endCall = safeBind(UIEventHandlers.endCall, UIEventHandlers);
+const skipPrivateNotes = safeBind(UIEventHandlers.skipPrivateNotes, UIEventHandlers);
+const savePrivateNotes = safeBind(UIEventHandlers.savePrivateNotes, UIEventHandlers);
+const showCallSummary = safeBind(UIEventHandlers.showCallSummary, UIEventHandlers);
+const closeCallSummary = safeBind(UIEventHandlers.closeCallSummary, UIEventHandlers);
+const declineIncomingCall = safeBind(UIEventHandlers.declineIncomingCall, UIEventHandlers);
+const acceptIncomingCall = safeBind(UIEventHandlers.acceptIncomingCall, UIEventHandlers);
+const acceptIncomingCallAsVideo = safeBind(UIEventHandlers.acceptIncomingCallAsVideo, UIEventHandlers);
+const switchCallCategory = safeBind(UIEventHandlers.switchCallCategory, UIEventHandlers);
+const switchNewCallTab = safeBind(UIEventHandlers.switchNewCallTab, UIEventHandlers);
+const toggleSettingsPanel = safeBind(UIEventHandlers.toggleSettingsPanel, UIEventHandlers);
+const openPaymentModal = safeBind(UIEventHandlers.openPaymentModal, UIEventHandlers);
+const closePaymentModal = safeBind(UIEventHandlers.closePaymentModal, UIEventHandlers);
+const selectPaymentOption = safeBind(UIEventHandlers.selectPaymentOption, UIEventHandlers);
+const processPayment = safeBind(UIEventHandlers.processPayment, UIEventHandlers);
+const closePremiumLimitModal = safeBind(UIEventHandlers.closePremiumLimitModal, UIEventHandlers);
+const sendReaction = safeBind(UIEventHandlers.sendReaction, UIEventHandlers);
+const handleLogout = safeBind(UIEventHandlers.handleLogout, UIEventHandlers);
+
+const requestMediaPermissionsFnExport = requestMediaPermissionsFn;
+
+const EventSystemExport = EventSystem;
+const RenderingPipelineExport = RenderingPipeline;
+const CoreIntegrationExport = CoreIntegration;
+const ResponsiveEngineExport = ResponsiveEngine;
+const SecuritySanitizerExport = SecuritySanitizer;
+const ViewHistoryExport = ViewHistory;
+
+const UIStateExport = UIState;
+const UIDiagnosticsExport = UIDiagnostics;
+const UILoggerExport = UILogger;
+const UIErrorBoundaryExport = UIErrorBoundary;
+
+const elementsExport = elements;
+
+const handleContactClick = function(e) {
+    if (e.target.closest('.contact-checkbox')) return;
+    const checkbox = this.querySelector('.contact-checkbox');
+    if (checkbox) {
+        checkbox.checked = !checkbox.checked;
+        if (checkbox.checked) {
+            this.classList.add('selected');
+        } else {
+            this.classList.remove('selected');
+        }
+    }
+};
+
+window.callsUI = {
+    initializeUISystem,
+    cacheElements,
+    PanelHandlers,
+    openParticipantsPanel,
+    openChatPanel,
+    openWhiteboardPanel,
+    openNotesPanel,
+    openPollsPanel,
+    openRelationshipPanel,
+    createParticipantsPanel,
+    createChatPanel,
+    createWhiteboardPanel,
+    createNotesPanel,
+    createPollsPanel,
+    createRelationshipPanel,
+    EventHandlers,
+    toggleMenuDots,
+    closeMenuDots,
+    openNewCallModal,
+    closeNewCallModal,
+    searchContacts,
+    searchGroupContacts,
+    selectGroupOption,
+    startVoiceCall,
+    startVideoCall,
+    startGroupCall,
+    generateVoiceCallLink,
+    generateVideoCallLink,
+    copyCallLink,
+    shareCallLink,
+    toggleMute,
+    toggleVideo,
+    toggleScreenShare,
+    toggleSpeaker,
+    openMoodSelectionModal,
+    closeMoodSelectionModal,
+    setMood,
+    openIntentionSelectionModal,
+    closeIntentionSelectionModal,
+    setIntention,
+    toggleFocusMode,
+    enableFocusMode,
+    disableFocusMode,
+    endCall,
+    skipPrivateNotes,
+    savePrivateNotes,
+    showCallSummary,
+    closeCallSummary,
+    declineIncomingCall,
+    acceptIncomingCall,
+    acceptIncomingCallAsVideo,
+    switchCallCategory,
+    switchNewCallTab,
+    toggleSettingsPanel,
+    openPaymentModal,
+    closePaymentModal,
+    selectPaymentOption,
+    processPayment,
+    closePremiumLimitModal,
+    sendReaction,
+    handleLogout,
+    requestMediaPermissionsFn: requestMediaPermissionsFnExport,
+    EventSystem: EventSystemExport,
+    RenderingPipeline: RenderingPipelineExport,
+    CoreIntegration: CoreIntegrationExport,
+    ResponsiveEngine: ResponsiveEngineExport,
+    SecuritySanitizer: SecuritySanitizerExport,
+    ViewHistory: ViewHistoryExport,
+    UIState: UIStateExport,
+    UIDiagnostics: UIDiagnosticsExport,
+    UILogger: UILoggerExport,
+    UIErrorBoundary: UIErrorBoundaryExport,
+    elements: elementsExport,
+    showNotification,
+    getSessionCache: () => window.__CHILD_SESSION__,
+    getHandshakeStatus: () => ({
+        parentReady,
+        sessionReady,
+        handshakeComplete,
+        fallbackModeActive,
+        inPassiveMode,
+        coreReady,
+        coreLifecycleState,
+        sessionInvalid: _sessionInvalid
+    }),
+    isSessionValid,
+    assertCoreActive,
+    getDiagnostics: () => UIDiagnostics.getReport(),
+    getUIState: () => ({ ...UIState }),
+    getCoreInstance: () => coreInstance,
+    isCoreActive: () => {
+        if (coreInstance && coreInstance.getLifecycleState) {
+            return coreInstance.getLifecycleState() === 'ACTIVE';
+        }
+        return coreReady && parentReady;
+    },
+    getCoreLifecycleState: () => coreLifecycleState,
+    isInCall: () => {
+        if (coreInstance && coreInstance.isInCall) {
+            return coreInstance.isInCall();
+        }
+        const activeStates = ['connected', 'ongoing', 'active', 'call_ready', 'in_call', 'incoming', 'ringing', 'initiating'];
+        return UIState.callActive === true || activeStates.includes(UIState.callState);
+    },
+    refreshSyncIndicator: () => {
+        if (RenderingPipeline && RenderingPipeline.updateSyncIndicator) {
+            RenderingPipeline.updateSyncIndicator();
+        }
+    },
+    getPendingCall: () => ({ ...pendingCall }),
+    initiateCallWithUser: (userId, userName, callType = 'voice') => {
+        console.log('[Calls UI] initiateCallWithUser called:', { userId, userName, callType });
+        if (!userId) {
+            console.error('[Calls UI] Cannot initiate call: No userId');
+            return;
+        }
+        const eventObj = new CustomEvent('OPEN_CALL_WITH_USER', {
+            detail: { userId, userName, callType, source: 'manual' }
+        });
+        window.dispatchEvent(eventObj);
+    }
+};
+
+// ==================== BOOTSTRAP ====================
+coreInitializationStartTime = Date.now();
+
+setupCoreReadyListener();
+
+if (detectExistingCore()) {
+    if (DEBUG) {
+        logOnce('success', 'Core already available, initializing UI immediately');
+    }
+    initializeUISystem().catch(error => {
+        if (DEBUG) {
+            logOnce('error', 'Auto-initialization failed', error);
+        }
+        RenderingPipeline.skeleton();
+    });
+} else {
+    if (DEBUG) {
+        logOnce('info', 'Core not immediately available, showing skeleton and waiting for events');
+    }
+    RenderingPipeline.skeleton();
+    waitForCoreReady().then((ready) => {
+        if (ready) {
+            if (DEBUG) {
+                logOnce('success', 'Core became ready after ' + (Date.now() - coreInitializationStartTime) + 'ms, initializing full UI');
+            }
+            performFullInitialization();
+        } else {
+            logOnce('error', 'Core ready promise resolved false - this should not happen');
+            RenderingPipeline.initialRender().catch(() => {});
+        }
+    });
+}
 })();

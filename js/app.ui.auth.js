@@ -762,34 +762,35 @@ class ApiAuthReadinessManager {
                 const maxRetries = AUTH_GATEWAY_CONFIG.API_AUTH_INIT_MAX_RETRIES;
                 const retryInterval = AUTH_GATEWAY_CONFIG.API_AUTH_INIT_RETRY_INTERVAL;
                 const maxWait = AUTH_GATEWAY_CONFIG.API_AUTH_INIT_MAX_WAIT;
+
+                // CRITICAL: Poll for API auth readiness with timeout and deduplication
+                if (window.__API_AUTH_POLLING__) {
+                    console.warn('⚠️ API Auth polling already in progress, skipping');
+                    return;
+                }
                 
-                let attempts = 0;
-                const startTime = Date.now();
+                window.__API_AUTH_POLLING__ = true;
+                let pollAttempts = 0;
+                const maxPollAttempts = 30; // 3 seconds max
                 
                 const poll = () => {
-                    attempts++;
+                    pollAttempts++;
                     
-                    // Check if we've waited too long
-                    if (Date.now() - startTime > maxWait) {
-                        console.warn(`⏰ Polling timeout after ${maxWait}ms`);
-                        resolve(false);
-                        return;
-                    }
-                    
-                    // Check for api.auth
-                    if (this._checkApiAuthPresence()) {
-                        console.log(`✅ api.auth.js found after ${attempts} attempts`);
+                    if (window.api?.auth && typeof window.api.auth.login === 'function') {
+                        console.log('🔍 DEBUG - api.auth.js detected after polling');
+                        delete window.__API_AUTH_POLLING__;
                         resolve(true);
                         return;
                     }
                     
-                    // Check if we've reached max retries
-                    if (attempts >= maxRetries) {
-                        console.warn(`🔄 Max retries reached (${maxRetries})`);
-                        resolve(false);
+                    if (pollAttempts >= maxPollAttempts) {
+                        console.warn('⏰ api.auth.js polling timeout after 3s');
+                        delete window.__API_AUTH_POLLING__;
+                        this._markAsFailed();
                         return;
                     }
                     
+                    setTimeout(poll, 100);
                     // Continue polling
                     setTimeout(poll, retryInterval);
                 };

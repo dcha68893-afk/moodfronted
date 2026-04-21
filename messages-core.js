@@ -527,15 +527,29 @@
                     reject(new Error(`API request timeout: ${method} ${normalizedEndpoint}`));
                 }
             }, TIMING.REQUEST_TIMEOUT);
-            
             pendingRequests.set(requestId, {
-                resolve,
-                reject,
-                if (!window.parent || window.parent === window) {
-                    throw new Error('No parent window');
-                }
-                window.parent.postMessage(message, '*');
-            } catch (error) {
+    resolve,
+    reject,
+    timestamp: timestamp,
+    type: 'API_REQUEST'
+});
+
+try {
+    const message = {
+        type: 'API_REQUEST',
+        requestId: requestId,
+        endpoint: normalizedEndpoint,
+        method: method,
+        data: data,
+        params: params,
+        timestamp: timestamp
+    };
+    
+    if (!window.parent || window.parent === window) {
+        throw new Error('No parent window');
+    }
+    window.parent.postMessage(message, '*');
+} catch (error) {
                 console.error(`[${MODULE_NAME}] Failed to send API_REQUEST:`, error);
                 if (pendingRequests.has(requestId)) {
                     const pending = pendingRequests.get(requestId);

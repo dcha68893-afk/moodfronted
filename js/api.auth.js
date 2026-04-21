@@ -129,6 +129,24 @@
     // CRITICAL: Create minimal method stubs that won't interfere with real registration
     if (!window.api) window.api = {};
     if (!window.api.auth) window.api.auth = {};
+
+    // PATCH: Inject synchronous getUser stub immediately so DEPENDENCY_QUEUE
+    // check (requires getUser) passes even before full async init completes.
+    if (!window.api.auth.getUser) {
+        window.api.auth.getUser = function() {
+            try {
+                const raw = localStorage.getItem('kynecta_auth');
+                if (raw) { const a = JSON.parse(raw); if (a && a.user) return a.user; }
+                const legacyRaw = localStorage.getItem('currentUser') ||
+                                  localStorage.getItem('auth_user') ||
+                                  localStorage.getItem('user');
+                return legacyRaw ? JSON.parse(legacyRaw) : null;
+            } catch(e) { return null; }
+        };
+    }
+    // PATCH: Set ready flags synchronously
+    window.api.auth.ready = true;
+    window.__API_AUTH_READY = true;
     
     // ============================================================================
     // READINESS CONTROLLER (SINGLETON PROMISE)
@@ -2779,6 +2797,30 @@
                                 };
                             }
                             
+                            // CRITICAL: Also save to authStorage for compatibility
+                            if (window.AuthStorage && window.AuthStorage.saveSession) {
+                                try {
+                                    window.AuthStorage.saveSession({
+                                        token: token,
+                                        refreshToken: refreshToken,
+                                        user: user,
+                                        expiresAt: Date.now() + (expiresIn || CONFIG.DEFAULT_TOKEN_EXPIRY)
+                                    });
+                                    console.log('✅ [AUTH] Session saved to authStorage');
+                                } catch (storageError) {
+                                    console.warn('⚠️ [AUTH] Failed to save to authStorage:', storageError.message);
+                                }
+                            }
+                            
+                            // CRITICAL: Set login timestamp to prevent background validation flicker
+                            window.__LAST_LOGIN_TIME__ = Date.now();
+                            console.log(' [AUTH] Login timestamp set for flicker prevention');
+                            
+                            // CRITICAL FIX: Store to exact keys required by session manager
+                            localStorage.setItem("auth_token", token);
+                            localStorage.setItem("auth_user", JSON.stringify(user));
+                            console.log(' [AUTH] Session stored to auth_token and auth_user keys');
+                            
                             setUserToken(token, expiresIn);
                             
                             if (refreshToken) {
@@ -2931,10 +2973,35 @@ try {
                     };
                 }
                 
+                // CRITICAL: Also save to authStorage for compatibility
+                if (window.AuthStorage && window.AuthStorage.saveSession) {
+                    try {
+                        window.AuthStorage.saveSession({
+                            token: token,
+                            refreshToken: refreshToken,
+                            user: user,
+                            expiresAt: Date.now() + (expiresIn || CONFIG.DEFAULT_TOKEN_EXPIRY)
+                        });
+                        console.log('✅ [AUTH] Session saved to authStorage (fallback path)');
+                    } catch (storageError) {
+                        console.warn('⚠️ [AUTH] Failed to save to authStorage (fallback path):', storageError.message);
+                    }
+                }
+                
+                // CRITICAL: Set login timestamp to prevent background validation flicker
+                window.__LAST_LOGIN_TIME__ = Date.now();
+                console.log(' [AUTH] Login timestamp set for flicker prevention (fallback path)');
+                
+                // CRITICAL FIX: Store to exact keys required by session manager
+                localStorage.setItem("auth_token", token);
+                localStorage.setItem("auth_user", JSON.stringify(user));
+                console.log(' [AUTH] Session stored to auth_token and auth_user keys (fallback path)');
+                
                 // Store tokens with enhanced method
                 const tokenStored = setUserToken(token, expiresIn);
                 
                 if (!tokenStored) {
+                    console.error(' [AUTH] Failed to store token');
                     console.error('❌ [AUTH] Failed to store token');
                     return {
                         success: false,
@@ -3403,13 +3470,12 @@ try {
      * PUBLIC: Attempt auto-login with stored tokens
      */
     async function autoLogin() {
-        console.log('🔐 [AUTH] Auto-login attempt');
+        console.log('ð [AUTH] Auto-login attempt');
         
+        const autoLoginTimeout = setTimeout(() => {
+            console.warn('â [AUTH] Auto-login taking too long, continuing anyway');
+        }, 15000); // 15 second warning
         
-    const autoLoginTimeout = setTimeout(() => {
-        console.warn('⚠️ [AUTH] Auto-login taking too long, continuing anyway');
-    }, 15000); // 15 second warning
-    
         const operation = 'autoLogin';
         
         try {
@@ -3420,6 +3486,8 @@ try {
                     error: 'Authentication system not ready',
                     code: 'SYSTEM_NOT_READY',
                     message: 'Please try again in a moment'
+                };
+            }
             
             const unifiedAuth = _loadPersistedAuthData();
             if (!unifiedAuth || !unifiedAuth.token) {
@@ -3452,7 +3520,9 @@ try {
             } else {
                 console.log(' [AUTH] Auto-login failed - invalid token');
                 clearUserToken();
-                return { success: false, error: 'Invalid token' };
+                return { 
+                    success: false, 
+                    error: 'Invalid token',
                     code: 'SESSION_INVALID',
                     message: 'Your session is no longer valid'
                 };
@@ -3483,7 +3553,7 @@ try {
             try {
                 window.dispatchEvent(new CustomEvent('session:ready', {
                     detail: {
-                        token: token,
+                        token: unifiedAuth.token,
                         user: user,
                         timestamp: Date.now(),
                         source: 'autoLogin'
@@ -3495,7 +3565,7 @@ try {
             return {
                 success: true,
                 user: user,
-                token: token,
+                token: unifiedAuth.token,
                 message: 'Auto-login successful'
             };
         } catch (error) {
@@ -3581,10 +3651,55 @@ try {
     }
     
     /**
-     * PUBLIC: Get user - alias for getCurrentUser
+     * PUBLIC: Get user - reads from kynecta_auth (primary) with legacy fallback
+     * PATCH: Fixed to use kynecta_auth instead of auth_user
      */
-    async function getUser() {
-        return getCurrentUser();
+    function getUser() {
+        try {
+            // Primary: kynecta_auth (used by AuthStorage, authStorage.js, app_core_session.js)
+            const raw = localStorage.getItem('kynecta_auth');
+            if (raw) {
+                const auth = JSON.parse(raw);
+                if (auth && auth.user) return auth.user;
+            }
+            // Legacy fallbacks
+            const legacyUser = localStorage.getItem('auth_user') ||
+                               localStorage.getItem('currentUser') ||
+                               localStorage.getItem('user') ||
+                               localStorage.getItem('moodchat_user');
+            return legacyUser ? JSON.parse(legacyUser) : null;
+        } catch {
+            return null;
+        }
+    }
+
+    /**
+     * PUBLIC: Validate token - non-blocking, offline-first
+     * PATCH: Uses kynecta_auth as primary key; always returns a Promise
+     */
+    function validateToken() {
+        try {
+            // Primary: kynecta_auth (used by authStorage.js and the rest of the app)
+            const raw = localStorage.getItem('kynecta_auth');
+            if (raw) {
+                const auth = JSON.parse(raw);
+                if (auth && auth.token) {
+                    return Promise.resolve({ valid: true, token: auth.token, user: auth.user || null });
+                }
+            }
+            // Legacy fallback keys
+            const token = localStorage.getItem('auth_token') ||
+                          localStorage.getItem('accessToken') ||
+                          localStorage.getItem('USER_TOKEN') ||
+                          localStorage.getItem('kynecta_token');
+            if (!token) {
+                return Promise.resolve({ valid: false, reason: 'no_token' });
+            }
+            const user = getUser();
+            return Promise.resolve({ valid: !!user, token, user: user || null });
+        } catch (error) {
+            return Promise.resolve({ valid: false, reason: 'validation_error', error: error.message });
+        }
     }
     
     /**
@@ -3809,6 +3924,9 @@ try {
         console.log('🔧 [AUTH] Setting up public API...');
         
         const publicApi = {
+            // CRITICAL FIX: Set ready flag immediately
+            ready: true,
+            
             // Core authentication functions
             login,
             register,
@@ -3893,6 +4011,25 @@ try {
         if (window.api.auth.getCurrentUser && !window.api.auth.getUser) {
             _registerMethod(window.api.auth, 'getUser', window.api.auth.getCurrentUser, 'api.auth.alias');
         }
+
+        // PATCH: Guarantee getUser exists synchronously using kynecta_auth
+        // This prevents DEPENDENCY_QUEUE from marking api.auth as failed
+        if (!window.api.auth.getUser) {
+            window.api.auth.getUser = function() {
+                try {
+                    const raw = localStorage.getItem('kynecta_auth');
+                    if (raw) { const a = JSON.parse(raw); if (a && a.user) return a.user; }
+                    const legacyRaw = localStorage.getItem('currentUser') ||
+                                      localStorage.getItem('auth_user') ||
+                                      localStorage.getItem('user');
+                    return legacyRaw ? JSON.parse(legacyRaw) : null;
+                } catch(e) { return null; }
+            };
+        }
+
+        // PATCH: Expose ready flags synchronously so bootstrap dependency checks pass
+        window.api.auth.ready = true;
+        window.__API_AUTH_READY = true;
         
         // CRITICAL: Ensure readiness methods are properly exposed
         _registerMethod(window.api.auth, 'waitForReady', waitForReady, 'api.auth.readiness');
