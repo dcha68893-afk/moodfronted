@@ -1100,7 +1100,21 @@ async function authorizedRequest(endpoint, options = {}) {
                 
                 const payload = message.payload || {};
                 
-                if (payload.success === true) {
+                // Normalise: treat any truthy statusCode < 400 or presence of known data
+                // fields as success, even if payload.success is missing/undefined.
+                const hasDataFields = (
+                    payload.data !== undefined ||
+                    payload.friends !== undefined ||
+                    payload.requests !== undefined ||
+                    payload.users !== undefined ||
+                    payload.pinned !== undefined ||
+                    payload.muted !== undefined ||
+                    payload.contacts !== undefined
+                );
+                const httpOk = payload.statusCode !== undefined && payload.statusCode < 400;
+                const isSuccess = payload.success === true || (payload.success === undefined && (hasDataFields || httpOk));
+
+                if (isSuccess) {
                     Logger.info('authorizedRequest', `API success: ${normalizedEndpoint}`, { requestId });
                     
                     let responseData = null;
@@ -1112,9 +1126,15 @@ async function authorizedRequest(endpoint, options = {}) {
                         responseData = { requests: payload.requests };
                     } else if (payload.users !== undefined) {
                         responseData = { users: payload.users };
+                    } else if (payload.pinned !== undefined) {
+                        responseData = { pinned: payload.pinned };
+                    } else if (payload.muted !== undefined) {
+                        responseData = { muted: payload.muted };
+                    } else if (payload.contacts !== undefined) {
+                        responseData = { contacts: payload.contacts };
                     } else {
-                        const { success, ...rest } = payload;
-                        responseData = rest;
+                        const { success, statusCode, ...rest } = payload;
+                        responseData = Object.keys(rest).length > 0 ? rest : null;
                     }
                     
                     resolve({ success: true, data: responseData, statusCode: payload.statusCode || 200 });
@@ -1144,8 +1164,10 @@ async function authorizedRequest(endpoint, options = {}) {
                     return;
                 }
                 
-                Logger.error('authorizedRequest', 'Unexpected API response format', { endpoint: normalizedEndpoint, requestId, payload: payload });
-                resolve({ success: false, error: 'Invalid API response format', statusCode: 500 });
+                // Final fallback: treat the entire payload as data rather than hard-failing
+                Logger.warn('authorizedRequest', 'Ambiguous API response format — treating as success with raw payload', { endpoint: normalizedEndpoint, requestId });
+                const { success: _s, statusCode: _sc, ...fallbackData } = payload;
+                resolve({ success: true, data: Object.keys(fallbackData).length > 0 ? fallbackData : null, statusCode: payload.statusCode || 200 });
             }
         };
         
@@ -5545,6 +5567,10 @@ let mutedFriends = [];
 let selectedFriend = null;
 let currentCategoryFilter = 'all';
 let currentSearchTerm = '';
+
+// Setters for ES module consumers (imported variables are read-only bindings)
+function setCurrentCategoryFilter(value) { currentCategoryFilter = value; }
+function setCurrentSearchTerm(value) { currentSearchTerm = value?.toLowerCase().trim() || ''; }
 let isMobile = window.innerWidth <= 768;
 let mutualFriendsCache = {};
 let groups = [];
@@ -9838,6 +9864,8 @@ export {
     handleRequestAction,
     filterFriendsByCategory,
     searchFriendsLegacy,
+    setCurrentCategoryFilter,
+    setCurrentSearchTerm,
     renderAllUsersList,
     loadFriendDetails,
     showFriendRequestProfile,

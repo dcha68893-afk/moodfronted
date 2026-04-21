@@ -2271,7 +2271,8 @@ const GroupCore = {
             const response = await apiRequest('/groups', 'POST', {
                 name: groupData.name,
                 description: groupData.description || '',
-                members: groupData.members || [],
+                members: groupData.members || groupData.memberIds || [],
+                memberIds: groupData.memberIds || groupData.members || [],
                 privacy: groupData.privacy || 'private',
                 purpose: groupData.purpose || '',
                 mood: groupData.mood || '',
@@ -5510,10 +5511,21 @@ async function showFriendSelection() {
         // FIXED: Actually fetch friends from the real API
         try {
             const token = (session && session.token) ||
+                          localStorage.getItem('authToken') ||
+                          localStorage.getItem('token') ||
                           localStorage.getItem('auth_token') ||
                           sessionStorage.getItem('auth_token');
             if (token) {
-                const res = await fetch('/api/friends', {
+                const rawBase =
+                    window.__API_CORE?.getBaseUrl?.() ||
+                    window.api?.env?.getBaseUrl?.() ||
+                    window.__getApiBase?.() ||
+                    window.parent?.__API_CORE?.getBaseUrl?.() ||
+                    window.parent?.api?.env?.getBaseUrl?.() ||
+                    window.parent?.__getApiBase?.() ||
+                    '/api';
+                const requestUrl = `${String(rawBase).replace(/\/+$/, '').replace(/\/api\/?$/, '/api')}/friends`;
+                const res = await fetch(requestUrl, {
                     headers: {
                         'Authorization': `Bearer ${token}`,
                         'Content-Type': 'application/json'

@@ -2,30 +2,93 @@
 <html lang="en">
 <head>
 <script>
-// Suppress iframe sandbox warnings (usually from extensions)
+// ✅ CRITICAL SW UPDATE CHECK — runs FIRST, before any other JS loads.
+(function() {
+    if (!('serviceWorker' in navigator)) return;
+    navigator.serviceWorker.getRegistration('/').then(function(reg) {
+        if (!reg) return;
+        var sw = reg.waiting || reg.installing;
+        if (sw) {
+            console.log('[SW-BOOT] New SW waiting/installing — forcing activation');
+            sw.postMessage({ type: 'SKIP_WAITING' });
+            navigator.serviceWorker.addEventListener('controllerchange', function() {
+                window.location.reload();
+            });
+        }
+    }).catch(function() {});
+})();
+</script>
+<script>
+// Suppress iframe sandbox warnings and raw WebSocket error Events
 (function() {
     const originalError = console.error;
     const originalWarn = console.warn;
-    
+
+    // ✅ FIX: Raw WebSocket onerror fires a DOM Event (isTrusted:true, type:'error'),
+    // NOT a JS Error. The UIFailsafe in messages-ui.js calls console.error() with it,
+    // producing "UI Error caught Event {isTrusted: true, type: 'error', target: WebSocket...}"
+    // We suppress this noise here while still logging a clean string instead.
+    function isRawWebSocketEvent(arg) {
+        return arg && typeof arg === 'object' &&
+               arg.isTrusted === true &&
+               arg.type === 'error' &&
+               arg.target instanceof WebSocket;
+    }
+
     console.error = function(msg) {
+        // Suppress sandbox warnings
         if (msg && msg.includes && (
             msg.includes('iframe which has both') ||
             msg.includes('sandbox')
-        )) {
+        )) return;
+        // Suppress raw WebSocket DOM Events — log clean string instead
+        if (isRawWebSocketEvent(msg)) {
+            originalWarn.call(console, '[Realtime] WebSocket connection failed, messages module will work without real-time updates');
             return;
+        }
+        // Check all args for raw Event (UIFailsafe passes it as any argument)
+        for (let i = 0; i < arguments.length; i++) {
+            if (isRawWebSocketEvent(arguments[i])) {
+                originalWarn.call(console, '[Realtime] WebSocket connection failed, messages module will work without real-time updates');
+                return;
+            }
         }
         originalError.apply(console, arguments);
     };
-    
+
     console.warn = function(msg) {
         if (msg && msg.includes && (
             msg.includes('iframe which has both') ||
             msg.includes('sandbox')
-        )) {
-            return;
-        }
+        )) return;
         originalWarn.apply(console, arguments);
     };
+
+    // ✅ FIX: Listen for SW_ACTIVATED so fresh JS is picked up after deploy
+    if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.addEventListener('message', function(evt) {
+            if (!evt.data) return;
+            if (evt.data.type === 'SW_ACTIVATED' || evt.data.type === 'SW_UPDATE_AVAILABLE') {
+                // Iframe reload: ask parent to reload, or reload self
+                try {
+                    if (window.parent && window.parent !== window) {
+                        window.parent.postMessage({ type: 'SW_UPDATE_AVAILABLE', version: evt.data.version }, '*');
+                    } else {
+                        setTimeout(function() { window.location.reload(); }, 500);
+                    }
+                } catch (_) {}
+            }
+        });
+        navigator.serviceWorker.addEventListener('controllerchange', function() {
+            try {
+                if (window.parent && window.parent !== window) {
+                    window.parent.postMessage({ type: 'SW_CONTROLLER_CHANGED' }, '*');
+                } else {
+                    window.location.reload();
+                }
+            } catch (_) {}
+        });
+    }
 })();
 
 // Add lifecycle state listener for UI feedback - DETERMINISTIC: WAIT_PARENT = NO VISIBLE LOADING

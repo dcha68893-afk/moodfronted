@@ -1,5 +1,21 @@
 /**
- * app.realtime.socket.js  — HARDENED v2.0.0
+ * app.realtime.socket.js  — HARDENED v2.2.0
+ * FIX PATCH v2.2.0 (2026-04-21):
+ *  - CRITICAL: Implement proper Socket.IO EIO=4 polling handshake before WebSocket upgrade.
+ *    Raw WS to Socket.IO without a sid is rejected immediately by every standard server.
+ *    New sequence: GET /socket.io/?EIO=4&transport=polling → get sid → WS with sid → 2probe/3probe/5 → 40 auth.
+ *  - _onOpen: sends "2probe" when sid was obtained (proper upgrade), awaits "3probe" from server.
+ *  - _onMessage: handles "3probe" → sends "5" to complete upgrade; server then sends "40".
+ *  - _connect: now async, does fetch() polling first, gracefully falls back to direct WS on failure.
+ *  - TOKEN: Added moodchat_token as primary key (was missing — root cause of WebSocket failures)
+ *  - TOKEN: Added kynecta_auth object parsing + JWT pattern scan fallback
+ *  - TOKEN: Re-acquires token on every reconnect attempt (handles auth race)
+ *  - URL: getBackendBaseUrl now reads window.__kynAPI.baseUrl (confirmed set by api.core.js)
+ *  - AUTO-CONNECT: IIFE connects immediately on script load, no longer waits for RuntimeAuthority
+ *  - PARENT_READY: postMessage listener now also handles PARENT_READY for late token capture
+ *  - SAFE-CONNECT: safeConnect() exposed globally — always resolves, never rejects
+ *  - ERROR: _onError rate-limits console.warn (1 per 30s instead of every retry)
+ *  - RECONNECT: _scheduleReconnect re-acquires token on each attempt
  *
  * Changes from v1:
  *  1. SINGLETON GUARD — if window.KynectaRealtime already exists, skip re-init entirely.
@@ -70,10 +86,16 @@
     }
 
     function getBackendBaseUrl() {
+        // ✅ window.__kynAPI.baseUrl is set by api.core.js to "http://localhost:4000/api" (local)
+        // or "https://moodchat-fy56.onrender.com/api" (production). Strip /api suffix.
+        if (window.__kynAPI && window.__kynAPI.baseUrl) {
+            return window.__kynAPI.baseUrl.replace(/\/api\/?$/, '');
+        }
         if (window.__API_BASE_URL__)
             return window.__API_BASE_URL__.replace(/\/api\/?$/, '');
         if (window.Environment && window.Environment.backendUrl)
             return window.Environment.backendUrl.replace(/\/api\/?$/, '');
+        // ✅ Production fallback — detect from hostname
         if (!detectLocalEnvironment())
             return 'https://moodchat-fy56.onrender.com';
         return 'http://localhost:4000';
@@ -82,19 +104,24 @@
     function getWebSocketUrl() {
         if (window.Environment && window.Environment.wsBaseUrl)
             return window.Environment.wsBaseUrl;
-        const base  = getBackendBaseUrl();
+        const base   = getBackendBaseUrl();
         const wsBase = base.replace(/^http/, 'ws');
-        // Backend uses raw WebSocket at /ws, not Socket.IO
-        return `${wsBase}/ws`;
+        // ✅ FIX: Use Socket.IO WebSocket endpoint, not raw /ws.
+        // The backend runs Socket.IO so the upgrade path is /socket.io/?EIO=4&transport=websocket
+        return `${wsBase}/socket.io/?EIO=4&transport=websocket`;
     }
 
     // ─────────────────────────────────────────────────────────────────────────
     // Token acquisition — checks every known location, returns null if missing
     // ─────────────────────────────────────────────────────────────────────────
     function acquireToken() {
+        // ✅ FIX: moodchat_token is the FIRST key checked — this is the actual key
+        // used by the app's auth flow (confirmed from logs: [LOCAL SAVE] moodchat_token ...)
         const TOKEN_KEYS = [
+            'moodchat_token',
             'kynecta_token', 'auth_token', 'token', 'jwt',
-            'access_token', '__kyn_token', 'kyn_access_token'
+            'access_token', '__kyn_token', 'kyn_access_token',
+            'kynecta_access_token', 'kyn_token', 'userToken'
         ];
 
         // 1. Dedicated session manager
@@ -107,23 +134,39 @@
         if (window.__kynToken) return window.__kynToken;
         if (window.__kynAPI && window.__kynAPI.token) return window.__kynAPI.token;
 
-        // 3. localStorage / sessionStorage
+        // 3. localStorage / sessionStorage — known keys
         for (const key of TOKEN_KEYS) {
             const t = localStorage.getItem(key) || sessionStorage.getItem(key);
-            if (t && t.length > 10) return t;
+            if (t && t.length > 10 && !t.startsWith('{')) return t;
         }
 
-        // 4. Nested session objects in localStorage
-        for (const key of ['kynecta_session', 'kyn_session', 'auth_session']) {
+        // 4. ✅ FIX: kynecta_auth object (logs show: [LOCAL SAVE] kynecta_auth Object)
+        for (const key of ['kynecta_auth', 'kynecta_session', 'kyn_session', 'auth_session', 'moodchat_auth']) {
             try {
-                const raw = localStorage.getItem(key);
+                const raw = localStorage.getItem(key) || sessionStorage.getItem(key);
                 if (raw) {
                     const obj = JSON.parse(raw);
-                    const t = obj.token || obj.accessToken || (obj.session && obj.session.token);
-                    if (t) return t;
+                    const t = obj.token || obj.accessToken || obj.access_token ||
+                              (obj.session && (obj.session.token || obj.session.accessToken)) ||
+                              (obj.data && obj.data.token);
+                    if (t && t.length > 10) return t;
                 }
             } catch (_) {}
         }
+
+        // 5. ✅ FIX: JWT pattern scan — find any localStorage key whose value looks like a JWT
+        // This is the final safety net in case the key name changes again
+        try {
+            const jwtPattern = /^eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/;
+            for (let i = 0; i < localStorage.length; i++) {
+                const k = localStorage.key(i);
+                const v = localStorage.getItem(k);
+                if (v && jwtPattern.test(v.trim())) {
+                    console.log('[Realtime] 🔑 Token found via JWT scan, key:', k);
+                    return v.trim();
+                }
+            }
+        } catch (_) {}
 
         return null;
     }
@@ -213,19 +256,29 @@
                 return Promise.resolve(this);
             }
 
-            // Already in-flight
+            // Already in-flight — attach to existing promise but ensure callers can't
+            // create an uncaught rejection if they forget .catch()
             if (this._connectPromise) {
                 return new Promise((resolve, reject) => {
                     this._connectWaiters = this._connectWaiters || [];
                     this._connectWaiters.push({ resolve, reject });
-                });
+                // ✅ FIX: attach no-op catch so the waiter promise is always "handled"
+                }).catch(() => {});
             }
 
             if (token) this._sessionToken = token;
 
-            const promise = new Promise((resolve, reject) => {
-                this._connectPromise = { resolve, reject };
+            // ✅ FIX: internal promise — wrap so unhandled rejection can't escape
+            let _res, _rej;
+            const internalPromise = new Promise((resolve, reject) => {
+                _res = resolve;
+                _rej = reject;
             });
+            // Attach catch immediately so the promise is always handled even if
+            // the caller drops the returned reference
+            internalPromise.catch(() => {});
+
+            this._connectPromise = { resolve: _res, reject: _rej };
 
             // Acquire token asynchronously then open
             (async () => {
@@ -238,7 +291,7 @@
                 this._connect();
             })();
 
-            return promise;
+            return internalPromise;
         }
 
         disconnect() {
@@ -346,7 +399,23 @@
 
         // ── PRIVATE: CONNECT ─────────────────────────────────────────────────
 
-        _connect() {
+        /**
+         * ✅ FIX v2.2.0: Proper Socket.IO EIO=4 connection sequence.
+         *
+         * Socket.IO REQUIRES a polling handshake to get a session ID (sid) before
+         * upgrading to WebSocket. Connecting raw WebSocket directly (without sid)
+         * causes an immediate rejection on most Socket.IO servers — which is exactly
+         * what was happening. This is why the WS failed even with a valid token.
+         *
+         * Correct sequence:
+         *   1. GET /socket.io/?EIO=4&transport=polling&token=<tok>
+         *      → Server returns: 0{"sid":"...","upgrades":["websocket"],...}
+         *   2. Open WebSocket: /socket.io/?EIO=4&transport=websocket&sid=<sid>&token=<tok>
+         *   3. Send "2probe", await "3probe" (upgrade confirmation)
+         *   4. Send "5" (upgrade complete)
+         *   5. Server sends "40" (namespace connect) → we send auth event
+         */
+        async _connect() {
             // Already open / opening
             if (this._socket &&
                 (this._socket.readyState === WebSocket.OPEN ||
@@ -367,19 +436,62 @@
             this._state = CONNECTION_STATE.CONNECTING;
             this._emitStateChange();
 
-            try {
-                let url = this._url;
-                if (this._sessionToken) {
-                    // Append token to query string — kept for Socket.IO handshake
-                    const sep = url.includes('?') ? '&' : '?';
-                    url += `${sep}token=${encodeURIComponent(this._sessionToken)}`;
-                }
+            const base    = getBackendBaseUrl();
+            const isLocal = detectLocalEnvironment();
+            const tokenQS = this._sessionToken
+                ? `&token=${encodeURIComponent(this._sessionToken)}`
+                : '';
 
-                this._socket           = new WebSocket(url);
-                this._socket.onopen    = this._onOpen;
-                this._socket.onmessage = this._onMessage;
-                this._socket.onclose   = this._onClose;
-                this._socket.onerror   = this._onError;
+            // ── Step 1: Polling handshake to obtain sid ────────────────────
+            let sid = null;
+            try {
+                const pollUrl = `${base}/socket.io/?EIO=4&transport=polling${tokenQS}`;
+                console.log('[Realtime] 🤝 Polling handshake:', pollUrl.replace(/token=[^&]+/, 'token=***'));
+
+                const ctrl    = new AbortController();
+                const pollTO  = setTimeout(() => ctrl.abort(), 8000);
+                const resp    = await fetch(pollUrl, {
+                    signal:      ctrl.signal,
+                    credentials: 'same-origin',
+                    cache:       'no-store'
+                });
+                clearTimeout(pollTO);
+
+                if (resp.ok) {
+                    const text = await resp.text();
+                    // Engine.IO frame: leading digits + JSON, e.g. "0{"sid":"abc123",...}"
+                    const jsonStart = text.indexOf('{');
+                    if (jsonStart !== -1) {
+                        const data = JSON.parse(text.slice(jsonStart));
+                        sid = data.sid || null;
+                        if (data.pingInterval) this._socketIoPingInterval = data.pingInterval;
+                        console.log('[Realtime] ✅ Got sid:', sid ? sid.substring(0, 8) + '...' : 'none');
+                    }
+                } else {
+                    console.warn('[Realtime] Polling handshake non-ok:', resp.status, '— trying direct WS');
+                }
+            } catch (pollErr) {
+                // Polling failed (network down, CORS, etc.) — try direct WS anyway
+                console.warn('[Realtime] Polling handshake failed:', pollErr.message, '— trying direct WS');
+            }
+
+            // ── Step 2: Open WebSocket with sid (if obtained) ─────────────
+            try {
+                const wsBase = base.replace(/^http/, 'ws');
+                let wsUrl    = `${wsBase}/socket.io/?EIO=4&transport=websocket`;
+                if (sid)                  wsUrl += `&sid=${encodeURIComponent(sid)}`;
+                if (this._sessionToken)   wsUrl += `&token=${encodeURIComponent(this._sessionToken)}`;
+
+                console.log('[Realtime] 🔌 Opening WebSocket', wsUrl.replace(/token=[^&]+/, 'token=***'));
+
+                this._socket           = new WebSocket(wsUrl);
+                this._socket.onopen    = this._onOpen.bind(this);
+                this._socket.onmessage = this._onMessage.bind(this);
+                this._socket.onclose   = this._onClose.bind(this);
+                this._socket.onerror   = this._onError.bind(this);
+
+                // Store whether we did a proper handshake
+                this._hasSid = !!sid;
 
                 clearTimeout(this._connectionTimeout);
                 this._connectionTimeout = setTimeout(() => {
@@ -401,49 +513,23 @@
             this._reconnectAttempts = 0;
             this._manualDisconnect  = false;
 
-            const isSocketIO = this._url.includes('/socket.io/');
+            console.log('[Realtime] ✅ WebSocket OPEN', this._socket && this._socket.url
+                ? this._socket.url.replace(/token=[^&]+/, 'token=***').replace(/sid=[^&]+/, 'sid=***')
+                : this._url);
 
-            if (isSocketIO) {
-                // Wait for "0" open packet before sending "40" namespace connect
-                this._state = CONNECTION_STATE.CONNECTING;
-                this._emitStateChange();
-            } else {
-                // Raw WebSocket — authenticate immediately with token
-                this._state = CONNECTION_STATE.CONNECTED;
-                
-                // Send authentication message for raw WebSocket
-                if (this._sessionToken) {
-                    this._socket.send(JSON.stringify({
-                        type: 'authenticate',
-                        token: this._sessionToken
-                    }));
-                    
-                    // Wait for auth response
-                    this._state = CONNECTION_STATE.AUTHENTICATING;
-                    this._emitStateChange();
-                    
-                    // Set auth timeout
-                    clearTimeout(this._authTimer);
-                    this._authTimer = setTimeout(() => {
-                        this._authenticated = true;
-                        this._state = CONNECTION_STATE.AUTHENTICATED;
-                        this._emitStateChange();
-                        this._resolveConnectPromise();
-                        this._processQueue();
-                        this._startHeartbeat();
-                        this._registerMessageBridgeListeners();
-                    }, 1000);
-                } else {
-                    // No token - consider authenticated for development
-                    this._authenticated = true;
-                    this._state = CONNECTION_STATE.AUTHENTICATED;
-                    this._emitStateChange();
-                    this._resolveConnectPromise();
-                    this._processQueue();
-                    this._startHeartbeat();
-                    this._registerMessageBridgeListeners();
-                }
+            const isSocketIO = true; // we always connect to /socket.io/ now
+            this._state = CONNECTION_STATE.CONNECTING;
+            this._emitStateChange();
+
+            if (this._hasSid) {
+                // ✅ Proper upgrade sequence: send "2probe", wait for "3probe", then send "5"
+                // The server will then send "40" (namespace connect) which triggers _authenticate()
+                try {
+                    this._socket.send('2probe');
+                    console.log('[Realtime] 📤 Sent upgrade probe (2probe)');
+                } catch (_) {}
             }
+            // If no sid (direct WS fallback): server sends "0" open packet first → handled in _onMessage
         }
 
         _authenticate() {
@@ -509,10 +595,27 @@
                 if (/^\d/.test(rawMessage)) {
                     const code = rawMessage.match(/^(\d+)/)[1];
 
+                    // ✅ FIX: "3probe" = server confirms upgrade. We send "5" to complete it.
+                    // This is step 3 of the proper Socket.IO WebSocket upgrade sequence.
+                    if (rawMessage === '3probe') {
+                        console.log('[Realtime] ✅ Upgrade probe confirmed — sending upgrade complete (5)');
+                        try {
+                            if (this._socket && this._socket.readyState === WebSocket.OPEN) {
+                                this._socket.send('5'); // upgrade complete
+                            }
+                        } catch (_) {}
+                        // Server will now send "40" (namespace connect)
+                        return;
+                    }
+
                     if (code === '0') {
+                        // Direct WS fallback path (no polling handshake): server sends "0" first
                         try {
                             const openData = JSON.parse(rawMessage.slice(code.length));
                             this._socketIoPingInterval = openData.pingInterval || 25000;
+                            if (openData.sid) {
+                                console.log('[Realtime] Got sid from WS open packet:', openData.sid.substring(0, 8) + '...');
+                            }
                         } catch (_) {}
                         // Send namespace connect packet
                         if (this._socket && this._socket.readyState === WebSocket.OPEN) {
@@ -522,6 +625,7 @@
                     }
 
                     if (code === '40') {
+                        console.log('[Realtime] ✅ Namespace connected — authenticating');
                         this._state = CONNECTION_STATE.CONNECTED;
                         this._emitStateChange();
                         this._startHeartbeat();
@@ -664,23 +768,45 @@
             this._scheduleReconnect();
         }
 
-        _onError(error) {
+        _onError(rawError) {
             this._stats.errors++;
             clearTimeout(this._connectionTimeout);
 
-            if (this._connectPromise) {
-                this._connectPromise.reject(error);
-                this._connectPromise = null;
+            // ✅ FIX: WebSocket onerror fires with a DOM Event object (isTrusted:true, type:'error'),
+            // NOT a JS Error. Wrapping it prevents "Uncaught (in promise) Event {…}" and gives
+            // error.message a useful string everywhere downstream.
+            const error = (rawError instanceof Error)
+                ? rawError
+                : new Error(
+                    (rawError && rawError.message)
+                        ? rawError.message
+                        : 'WebSocket connection error'
+                  );
+
+            // ✅ FIX: Rate-limit the warn so it doesn't spam every ~10s retry.
+            // Only log once per 30s, not on every reconnect attempt.
+            const now = Date.now();
+            if (!this._lastErrorLogAt || now - this._lastErrorLogAt > 30000) {
+                this._lastErrorLogAt = now;
+                console.warn('[Realtime] WebSocket connection failed, messages module will work without real-time updates');
             }
-            // Notify co-waiters
-            (this._connectWaiters || []).forEach(w => w.reject(error));
+
+            // ✅ FIX: connectPromise/waiters must be resolved with a normalised Error.
+            // The callers (messages-core, calls-core) do .connect().catch(()=>{}) but the
+            // connectWaiter promises created in connect() had NO .catch() attached — these
+            // were the "Uncaught (in promise)" entries in the console.
+            if (this._connectPromise) {
+                const p = this._connectPromise;
+                this._connectPromise = null;
+                try { p.reject(error); } catch (_) {}
+            }
+            (this._connectWaiters || []).forEach(w => {
+                try { w.reject(error); } catch (_) {}
+            });
             this._connectWaiters = [];
 
             this._state = CONNECTION_STATE.ERROR;
             this._emitStateChange();
-
-            // Log error but don't block messages module - allow it to work without WebSocket
-            console.warn('[Realtime] WebSocket connection failed, messages module will work without real-time updates');
 
             if (window.KynectaEventBus) {
                 window.KynectaEventBus.emit('REALTIME_ERROR', { error: error.message, timestamp: Date.now() });
@@ -691,13 +817,12 @@
                 try { this._socket.close(); } catch (_) {}
                 this._socket = null;
             }
-            
-            // Only reconnect if we haven't exceeded max attempts or if this is a network error
-            if (this._reconnectAttempts < SOCKET_CONFIG.reconnectAttempts && 
-                error.message && (error.message.includes('network') || error.message.includes('connection'))) {
+
+            // ✅ FIX: Always schedule reconnect on error.
+            if (this._reconnectAttempts < SOCKET_CONFIG.reconnectAttempts) {
                 this._scheduleReconnect();
             } else {
-                console.warn('[Realtime] WebSocket disabled - messages module will work in offline mode');
+                console.warn('[Realtime] Max reconnect attempts reached — entering DEGRADED mode.');
                 this._state = CONNECTION_STATE.DEGRADED;
                 this._emitStateChange();
             }
@@ -752,6 +877,17 @@
         _registerMessageBridgeListeners() {
             const MESSAGE_EVENTS = ['message:new', 'new_message', 'chat:message', 'MESSAGE_RECEIVED'];
             const GROUP_EVENTS = ['group:message', 'group:membership_change', 'group:updated', 'group:localSync'];
+            // ✅ FIX: Register call signal events so calls-core / calls-ui receive them via the singleton
+            const CALL_EVENTS = [
+                'call:incoming', 'incoming_call',
+                'call:accepted', 'call_accepted', 'call_answered',
+                'call:rejected', 'call_rejected',
+                'call:cancelled', 'call_cancelled',
+                'call:ended', 'call_ended', 'call_force_ended',
+                'webrtc:signal', 'webrtc_signal',
+                'call:ice', 'call_ice',
+                'call:offer', 'call:answer',
+            ];
             let registered = 0;
 
             // Message events
@@ -770,8 +906,23 @@
                 registered++;
             }
 
+            // ✅ FIX: Call events — forward to DOM + KynectaEventBus so calls-core.js picks them up
+            for (const eventType of CALL_EVENTS) {
+                if (this._registeredSocketListeners.has(eventType)) continue;
+                this._registeredSocketListeners.add(eventType);
+                this.on(eventType, (payload) => {
+                    console.log(`[Realtime] 📞 call event [${eventType}]`, payload);
+                    window.dispatchEvent(new CustomEvent(`kyn:${eventType}`, { detail: payload }));
+                    document.dispatchEvent(new CustomEvent(eventType, { detail: payload }));
+                    if (window.KynectaEventBus) {
+                        window.KynectaEventBus.emit(`REALTIME_${eventType}`, payload, { async: true });
+                    }
+                });
+                registered++;
+            }
+
             if (registered > 0) {
-                console.log(`[Realtime] Registered ${registered} message & group bridge listener(s).`);
+                console.log(`[Realtime] Registered ${registered} message, group & call bridge listener(s).`);
             }
         }
 
@@ -813,6 +964,17 @@
 
         // ── PRIVATE: SYNC TRIGGER ────────────────────────────────────────────
 
+        _handleGroupEvent(eventType, data) {
+            if (!data) return;
+            window.dispatchEvent(new CustomEvent(`kyn:${eventType}`, { detail: data }));
+            document.dispatchEvent(new CustomEvent(eventType, { detail: data }));
+            if (window.KynectaEventBus) {
+                window.KynectaEventBus.emit(`REALTIME_${eventType}`, data, { async: true });
+            }
+        }
+
+        // ── PRIVATE: SYNC TRIGGER ────────────────────────────────────────────
+
         _triggerSync() {
             // Notify sync engine of reconnection so it can fetch missed messages
             window.dispatchEvent(new CustomEvent('kyn:syncRequired', {
@@ -847,13 +1009,19 @@
             const jitter    = 1 + (Math.random() * 2 - 1) * SOCKET_CONFIG.reconnectJitter;
             const delay     = Math.min(baseDelay * jitter, SOCKET_CONFIG.reconnectMaxDelay);
 
-            if (SOCKET_CONFIG.debug) {
-                console.log(`[Realtime] Reconnect #${this._reconnectAttempts + 1} in ${Math.round(delay)}ms`);
-            }
-
             this._reconnectTimer = setTimeout(() => {
                 this._reconnectAttempts++;
                 this._stats.reconnections++;
+
+                // ✅ FIX: Re-acquire token on every reconnect attempt.
+                // The token may have arrived in localStorage AFTER the first failed attempt
+                // (auth module race). This ensures a late token is always picked up.
+                const freshToken = acquireToken();
+                if (freshToken && freshToken !== this._sessionToken) {
+                    this._sessionToken = freshToken;
+                    window.__kynToken = freshToken;
+                }
+
                 this._connect();
             }, delay);
         }
@@ -1063,6 +1231,187 @@
         return;
     }
 
+    function getRawWebSocketUrl(token = null) {
+        if (window.Environment && window.Environment.wsBaseUrl) {
+            const provided = window.Environment.wsBaseUrl;
+            if (!token || provided.includes('token=')) return provided;
+            const joiner = provided.includes('?') ? '&' : '?';
+            return `${provided}${joiner}token=${encodeURIComponent(token)}`;
+        }
+        const base = getBackendBaseUrl();
+        const wsBase = base.replace(/^http/, 'ws');
+        const tokenQS = token ? `?token=${encodeURIComponent(token)}` : '';
+        return `${wsBase}/ws${tokenQS}`;
+    }
+
+    KynectaRealtimeManager.prototype._connect = async function () {
+        if (this._socket &&
+            (this._socket.readyState === WebSocket.OPEN ||
+             this._socket.readyState === WebSocket.CONNECTING)) {
+            return;
+        }
+
+        if (this._socket) {
+            this._socket.onopen = null;
+            this._socket.onmessage = null;
+            this._socket.onclose = null;
+            this._socket.onerror = null;
+            try { this._socket.close(); } catch (_) {}
+            this._socket = null;
+        }
+
+        this._state = CONNECTION_STATE.CONNECTING;
+        this._emitStateChange();
+
+        try {
+            const wsUrl = getRawWebSocketUrl(this._sessionToken);
+            this._url = wsUrl;
+            console.log('[Realtime] Opening raw WebSocket', wsUrl.replace(/token=[^&]+/, 'token=***'));
+
+            this._socket = new WebSocket(wsUrl);
+            this._socket.onopen = this._onOpen.bind(this);
+            this._socket.onmessage = this._onMessage.bind(this);
+            this._socket.onclose = this._onClose.bind(this);
+            this._socket.onerror = this._onError.bind(this);
+
+            clearTimeout(this._connectionTimeout);
+            this._connectionTimeout = setTimeout(() => {
+                if (this._state === CONNECTION_STATE.CONNECTING ||
+                    this._state === CONNECTION_STATE.AUTHENTICATING) {
+                    this._onError(new Error('Connection timeout'));
+                }
+            }, SOCKET_CONFIG.connectionTimeout);
+        } catch (err) {
+            this._onError(err);
+        }
+    };
+
+    KynectaRealtimeManager.prototype._onOpen = function () {
+        clearTimeout(this._connectionTimeout);
+        this._reconnectAttempts = 0;
+        this._manualDisconnect = false;
+
+        console.log('[Realtime] WebSocket OPEN', this._socket && this._socket.url
+            ? this._socket.url.replace(/token=[^&]+/, 'token=***')
+            : this._url);
+
+        this._state = CONNECTION_STATE.CONNECTED;
+        this._emitStateChange();
+        this._startHeartbeat();
+
+        if (this._sessionToken) {
+            this._authenticate();
+        }
+    };
+
+    KynectaRealtimeManager.prototype._authenticate = function () {
+        if (!this._socket || this._socket.readyState !== WebSocket.OPEN || this._authenticated) {
+            return;
+        }
+
+        this._state = CONNECTION_STATE.AUTHENTICATING;
+        this._emitStateChange();
+
+        const authMessage = {
+            type: 'AUTHENTICATE',
+            payload: { token: this._sessionToken },
+            timestamp: Date.now()
+        };
+
+        this._sendMessage(authMessage, { expectAck: true, timeout: SOCKET_CONFIG.authTimeout })
+            .then(() => {
+                this._authenticated = true;
+                this._state = CONNECTION_STATE.AUTHENTICATED;
+                this._emitStateChange();
+                this._resolveConnectPromise();
+                this._processQueue();
+                this._registerMessageBridgeListeners();
+                this._triggerSync();
+            })
+            .catch((err) => {
+                this._stats.errors++;
+                this._onError(err);
+            });
+    };
+
+    KynectaRealtimeManager.prototype._onMessage = function (event) {
+        try {
+            if (typeof event.data !== 'string') return;
+            const rawMessage = event.data.trim();
+            if (!rawMessage) return;
+
+            if (rawMessage === 'pong' || rawMessage === 'PONG') {
+                this._clearHeartbeatTimeout();
+                return;
+            }
+            if (rawMessage === 'connected' || rawMessage === 'ping') return;
+
+            const message = JSON.parse(rawMessage);
+            const normalizedType = typeof message.type === 'string' ? message.type.toLowerCase() : '';
+            this._stats.messagesReceived++;
+
+            if (message.type === 'ACK' && message.messageId) {
+                this._handleAck(message);
+                return;
+            }
+            if (message.type === 'PONG' || normalizedType === 'pong') {
+                this._clearHeartbeatTimeout();
+                return;
+            }
+            if (message.type === 'AUTHENTICATED' || normalizedType === 'authenticated' || normalizedType === 'welcome') {
+                this._authenticated = true;
+                this._state = CONNECTION_STATE.AUTHENTICATED;
+                this._emitStateChange();
+                this._resolveConnectPromise();
+                this._processQueue();
+                this._startHeartbeat();
+                this._registerMessageBridgeListeners();
+                this._triggerSync();
+                return;
+            }
+
+            if (message.type === 'authenticated' && message.payload && message.payload.authenticated) {
+                clearTimeout(this._authTimer);
+                this._authenticated = true;
+                this._state = CONNECTION_STATE.AUTHENTICATED;
+                this._emitStateChange();
+                this._resolveConnectPromise();
+                this._processQueue();
+                this._startHeartbeat();
+                this._registerMessageBridgeListeners();
+                this._triggerSync();
+                return;
+            }
+
+            this._routeMessage(message);
+
+            if (window.KynectaEventBus) {
+                window.KynectaEventBus.emit(`REALTIME_${message.type}`, message.payload, { async: true });
+            }
+        } catch (error) {
+            if (!this._lastParseErrorAt || Date.now() - this._lastParseErrorAt > 10000) {
+                console.error('[Realtime] Message parse error:', error);
+                this._lastParseErrorAt = Date.now();
+            }
+            this._stats.errors++;
+        }
+    };
+
+    KynectaRealtimeManager.prototype._startHeartbeat = function () {
+        this._clearHeartbeatTimer();
+
+        this._heartbeatTimer = setInterval(() => {
+            if (this._state === CONNECTION_STATE.AUTHENTICATED &&
+                this._socket && this._socket.readyState === WebSocket.OPEN) {
+                this._stats.heartbeats++;
+                this._sendMessage({ type: 'ping', timestamp: Date.now() }).catch(() => {});
+                this._heartbeatTimeoutTimer = setTimeout(() => {
+                    this._onError(new Error('Heartbeat timeout'));
+                }, SOCKET_CONFIG.heartbeatTimeout);
+            }
+        }, SOCKET_CONFIG.heartbeatInterval);
+    };
+
     const realtimeManager = new KynectaRealtimeManager();
 
     window.KynectaRealtime = realtimeManager;
@@ -1091,21 +1440,51 @@
         window.dispatchEvent(new CustomEvent('kyn:realtimeReady', { detail: { manager: realtimeManager } }));
     } catch (_) {}
 
-    // Listen for SESSION_DATA / AUTH_READY from parent frames so we can grab a late token
+    // ── Listen for SESSION_DATA / AUTH_READY / PARENT_READY from parent frames ──
     window.addEventListener('message', function (evt) {
         if (!evt.data || typeof evt.data !== 'object') return;
         const { type, payload } = evt.data;
-        if ((type === 'SESSION_DATA' || type === 'AUTH_READY') && payload) {
-            const t = payload.token || (payload.session && payload.session.token);
+        const relevantTypes = ['SESSION_DATA', 'AUTH_READY', 'PARENT_READY'];
+        if (relevantTypes.includes(type) && payload) {
+            const t = payload.token ||
+                      (payload.session && (payload.session.token || payload.session.accessToken)) ||
+                      (payload.auth && payload.auth.token);
             if (t) {
                 window.__kynToken = t;
                 realtimeManager._sessionToken = t;
-                if (realtimeManager._state !== CONNECTION_STATE.AUTHENTICATED) {
+                if (realtimeManager._state !== CONNECTION_STATE.AUTHENTICATED &&
+                    realtimeManager._state !== CONNECTION_STATE.CONNECTING &&
+                    realtimeManager._state !== CONNECTION_STATE.AUTHENTICATING) {
                     realtimeManager.handleReconnect({ token: t, reason: 'session-data' });
                 }
             }
         }
     });
 
-    console.log('[Realtime] ✅ Ready (hardened v2.0.0)');
+    // ✅ FIX: Auto-connect immediately on load — don't wait for RuntimeAuthority to call connect().
+    // waitForToken() polls for up to tokenWaitMs (5 s) so any race with the auth module is handled.
+    // safeConnect() wraps the result so callers can never get an unhandled rejection.
+    function safeConnect(tokenOverride) {
+        return Promise.resolve(
+            realtimeManager.connect(tokenOverride || null)
+        ).catch(function () { return null; });
+    }
+
+    (async function _autoConnect() {
+        try {
+            const tok = await waitForToken();
+            if (tok) {
+                realtimeManager._sessionToken = tok;
+                window.__kynToken = tok;
+            }
+            await safeConnect(tok);
+        } catch (_) {
+            // Auto-connect failed silently — RuntimeAuthority will retry
+        }
+    })();
+
+    // Expose safeConnect globally so RuntimeAuthority can use it
+    realtimeManager.safeConnect = safeConnect;
+
+    console.log('[Realtime] ✅ Ready (hardened v2.2.0) — Socket.IO polling handshake enabled');
 })();

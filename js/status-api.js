@@ -7,9 +7,40 @@ class StatusAPI {
         this.uploadURL = '/api/cloudinary/direct-upload';
     }
 
+    getApiBase() {
+        const rawBase =
+            window.__API_CORE?.getBaseUrl?.() ||
+            window.api?.env?.getBaseUrl?.() ||
+            window.__getApiBase?.() ||
+            window.parent?.__API_CORE?.getBaseUrl?.() ||
+            window.parent?.api?.env?.getBaseUrl?.() ||
+            window.parent?.__getApiBase?.() ||
+            '/api';
+
+        if (typeof rawBase !== 'string') return '/api';
+        return rawBase.replace(/\/api\/?$/, '/api');
+    }
+
+    resolveUrl(path) {
+        if (/^https?:\/\//i.test(path)) return path;
+
+        const base = this.getApiBase().replace(/\/+$/, '');
+        const normalizedPath = path.startsWith('/') ? path : `/${path}`;
+
+        if (normalizedPath.startsWith('/api/')) {
+            return `${base}${normalizedPath.slice(4)}`;
+        }
+
+        return `${base}${normalizedPath}`;
+    }
+
     // Helper to get auth token
     getAuthHeaders() {
-        const token = localStorage.getItem('moodchat_token') || localStorage.getItem('accessToken');
+        const token =
+            localStorage.getItem('authToken') ||
+            localStorage.getItem('token') ||
+            localStorage.getItem('moodchat_token') ||
+            localStorage.getItem('accessToken');
         return token ? { 'Authorization': `Bearer ${token}` } : {};
     }
 
@@ -29,7 +60,7 @@ class StatusAPI {
                 background: statusData.background || null
             };
 
-            const response = await fetch(this.baseURL, {
+            const response = await fetch(this.resolveUrl(this.baseURL), {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -85,7 +116,7 @@ class StatusAPI {
             const formData = new FormData();
             formData.append('file', file);
 
-            const response = await fetch(this.uploadURL, {
+            const response = await fetch(this.resolveUrl(this.uploadURL), {
                 method: 'POST',
                 headers: this.getAuthHeaders(),
                 body: formData
@@ -140,7 +171,7 @@ class StatusAPI {
                 includeExpired: options.includeExpired || false
             });
 
-            const response = await fetch(`${this.baseURL}/user/${userId}?${params}`, {
+            const response = await fetch(this.resolveUrl(`${this.baseURL}/user/${userId}?${params}`), {
                 headers: this.getAuthHeaders()
             });
 
@@ -193,7 +224,7 @@ class StatusAPI {
                 limit: options.limit || 50
             });
 
-            const response = await fetch(`${this.baseURL}/friends?${params}`, {
+            const response = await fetch(this.resolveUrl(`${this.baseURL}/friends?${params}`), {
                 headers: this.getAuthHeaders()
             });
 
@@ -227,7 +258,7 @@ class StatusAPI {
                 moodType: options.moodType || ''
             });
 
-            const response = await fetch(`${this.baseURL}?${params}`, {
+            const response = await fetch(this.resolveUrl(`${this.baseURL}?${params}`), {
                 headers: this.getAuthHeaders()
             });
 
@@ -254,7 +285,7 @@ class StatusAPI {
     // Get single status by ID
     async getStatusById(statusId) {
         try {
-            const response = await fetch(`${this.baseURL}/${statusId}`, {
+            const response = await fetch(this.resolveUrl(`${this.baseURL}/${statusId}`), {
                 headers: this.getAuthHeaders()
             });
 
@@ -283,7 +314,7 @@ class StatusAPI {
             if (updateData.content !== undefined) payload.content = updateData.content;
             if (updateData.isPublic !== undefined) payload.isPublic = updateData.isPublic;
 
-            const response = await fetch(`${this.baseURL}/${statusId}`, {
+            const response = await fetch(this.resolveUrl(`${this.baseURL}/${statusId}`), {
                 method: 'PUT',
                 headers: {
                     'Content-Type': 'application/json',
@@ -314,7 +345,7 @@ class StatusAPI {
     // Delete status
     async deleteStatus(statusId) {
         try {
-            const response = await fetch(`${this.baseURL}/${statusId}`, {
+            const response = await fetch(this.resolveUrl(`${this.baseURL}/${statusId}`), {
                 method: 'DELETE',
                 headers: this.getAuthHeaders()
             });
@@ -339,7 +370,7 @@ class StatusAPI {
     // Like status
     async likeStatus(statusId) {
         try {
-            const response = await fetch(`${this.baseURL}/${statusId}/like`, {
+            const response = await fetch(this.resolveUrl(`${this.baseURL}/${statusId}/like`), {
                 method: 'POST',
                 headers: this.getAuthHeaders()
             });

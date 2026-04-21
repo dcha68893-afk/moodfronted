@@ -707,4 +707,16 @@
   const cache = new UnifiedAppCache();
   window.AppCache = cache;
   window.KynectaCache = cache;
+
+  // ✅ FIX: Signal that the cache singleton is ready.
+  // Dependent modules (calls-core.js, message modules) should listen for this
+  // event before accessing window.AppCache / window.KynectaCache.
+  //
+  // Usage in dependent scripts:
+  //   if (window.AppCache) { init(); }
+  //   else { window.addEventListener('kyn:cacheReady', init, { once: true }); }
+  try {
+    window.dispatchEvent(new CustomEvent('kyn:cacheReady', { detail: { cache } }));
+  } catch (_) {}
+  console.log('[AppCache] ✅ Cache ready, kyn:cacheReady dispatched');
 })();

@@ -3726,8 +3726,51 @@ const marketplace = new MarketplaceCoreImpl();
 // CRITICAL FIX: AUTHORIZED FETCH FUNCTION (UPDATED)
 // =============================================
 
+function normalizeToolsEndpoint(url) {
+    if (!url || typeof url !== 'string') return url;
+
+    const exactAliases = {
+        '/api/premium/features': '/api/tools/premium/features',
+        '/api/user/subscription': '/api/tools/user/subscription'
+    };
+
+    if (exactAliases[url]) {
+        return exactAliases[url];
+    }
+
+    if (url.startsWith('/api/marketplace/')) {
+        return url.replace('/api/marketplace/', '/api/tools/marketplace/');
+    }
+
+    return url;
+}
+
+function resolveToolsApiUrl(url) {
+    if (!url || /^https?:\/\//i.test(url)) return url;
+
+    const rawBase =
+        window.__API_CORE?.getBaseUrl?.() ||
+        window.api?.env?.getBaseUrl?.() ||
+        window.__getApiBase?.() ||
+        window.parent?.__API_CORE?.getBaseUrl?.() ||
+        window.parent?.api?.env?.getBaseUrl?.() ||
+        window.parent?.__getApiBase?.() ||
+        '/api';
+
+    const base = String(rawBase).replace(/\/+$/, '').replace(/\/api\/?$/, '/api');
+    const normalizedUrl = url.startsWith('/') ? url : `/${url}`;
+
+    if (normalizedUrl.startsWith('/api/')) {
+        return `${base}${normalizedUrl.slice(4)}`;
+    }
+
+    return `${base}${normalizedUrl}`;
+}
+
 function authorizedFetch(url, options = {}) {
     return new Promise((resolve, reject) => {
+        const normalizedUrl = normalizeToolsEndpoint(url);
+        const requestUrl = resolveToolsApiUrl(normalizedUrl);
         const token = sessionClient.getToken ? sessionClient.getToken() : null;
         if (!token) {
             const error = new Error('No authentication token');
@@ -3743,7 +3786,7 @@ function authorizedFetch(url, options = {}) {
             'Content-Type': options.headers?.['Content-Type'] || 'application/json'
         };
 
-        fetch(url, {
+        fetch(requestUrl, {
             ...options,
             headers,
             credentials: 'include'
@@ -5208,8 +5251,10 @@ export function handleForceReload() {
 // =============================================
 
 export async function secureApiCall(method, endpoint, data = null, options = {}) {
+    const normalizedEndpoint = normalizeToolsEndpoint(endpoint);
+
     if (!isActive()) {
-        if (endpoint.includes('/marketplace/listings') && method === 'GET') {
+        if (normalizedEndpoint.includes('/marketplace/listings') && method === 'GET') {
             try {
                 const cached = await safeStorage.get(LOCAL_STORAGE_KEYS.ALL_LISTINGS);
                 if (cached) return { listings: cached };
@@ -5222,14 +5267,14 @@ export async function secureApiCall(method, endpoint, data = null, options = {})
     // If no token, fall back to cache for GET requests
     const token = sessionClient.getToken ? sessionClient.getToken() : null;
     if (!token) {
-        if (method !== 'GET' || endpoint.includes('/auth/')) {
+        if (method !== 'GET' || normalizedEndpoint.includes('/auth/')) {
             safeSend('NEED_REFRESH', {
                 reason: 'api_call_without_session',
-                endpoint: endpoint,
+                endpoint: normalizedEndpoint,
                 method: method
             });
         }
-        if (endpoint.includes('/marketplace/listings') && method === 'GET') {
+        if (normalizedEndpoint.includes('/marketplace/listings') && method === 'GET') {
             try {
                 const cached = await safeStorage.get(LOCAL_STORAGE_KEYS.ALL_LISTINGS);
                 if (cached) return { listings: cached };
@@ -5239,7 +5284,7 @@ export async function secureApiCall(method, endpoint, data = null, options = {})
     }
     
     try {
-        const response = await authorizedFetch(endpoint, {
+        const response = await authorizedFetch(normalizedEndpoint, {
             method,
             body: data ? JSON.stringify(data) : undefined,
             headers: {
@@ -5248,7 +5293,7 @@ export async function secureApiCall(method, endpoint, data = null, options = {})
         });
         return response;
     } catch (error) {
-        return handleApiError(error, method, endpoint);
+        return handleApiError(error, method, normalizedEndpoint);
     }
 }
 

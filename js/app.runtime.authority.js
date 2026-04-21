@@ -665,12 +665,26 @@
         }
 
         runtimeState.lastRealtimeToken = auth.token;
-        Promise.resolve(window.KynectaRealtime.connect(auth.token)).catch(function (error) {
+
+        // ✅ FIX: Use safeConnect if available (never throws/rejects — always resolves null on failure)
+        // This prevents "realtime connect failed: Event" from leaking raw DOM Event objects.
+        const connectFn = (window.KynectaRealtime.safeConnect)
+            ? () => window.KynectaRealtime.safeConnect(auth.token)
+            : () => Promise.resolve(window.KynectaRealtime.connect(auth.token)).catch(function (e) {
+                // Normalize raw DOM Event to Error so message is always a string
+                const msg = (e instanceof Error) ? e.message
+                    : (e && e.type) ? `WebSocket ${e.type} event`
+                    : String(e || 'connect-failed');
+                return Promise.reject(new Error(msg));
+            });
+
+        connectFn().catch(function (error) {
+            const msg = (error instanceof Error) ? error.message : String(error || 'connect-failed');
             emit('SOCKET_DISCONNECTED', {
-                reason: error?.message || 'connect-failed',
+                reason: msg,
                 timestamp: Date.now()
             });
-            console.warn('[RuntimeAuthority] realtime connect failed:', error?.message || error);
+            console.warn('[RuntimeAuthority] realtime connect failed:', msg);
         }).then(function () {
             if (window.KynectaRealtime && typeof window.KynectaRealtime.isConnected === 'function' && window.KynectaRealtime.isConnected()) {
                 emit('SOCKET_CONNECTED', {

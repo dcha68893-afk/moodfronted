@@ -6,39 +6,43 @@
 }
 
 :root {
-    --primary-color: #0084ff;
-    --secondary-color: #f0f2f5;
+    --primary-color: #00a884;
+    --secondary-color: #202c33;
     --danger-color: #ff3b30;
-    --success-color: #34c759;
+    --success-color: #00a884;
     --warning-color: #ff9500;
     --info-color: #5ac8fa;
-    --text-primary: #050505;
-    --text-secondary: #65676b;
-    --bg-color: #ffffff;
-    --border-color: #dddfe2;
-    --chat-gradient: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    --shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-    --shadow-lg: 0 10px 30px rgba(0, 0, 0, 0.2);
-    --message-bg-sent: #0084ff;
-    --message-bg-received: #f0f0f0;
-    --message-text-sent: #ffffff;
-    --message-text-received: #050505;
-    --online-indicator: #34c759;
-    --typing-indicator: #0084ff;
-    --offline-overlay: rgba(255, 255, 255, 0.95);
+    --text-primary: #e9edef;
+    --text-secondary: #8696a0;
+    --bg-color: #111b21;
+    --border-color: #2a3942;
+    --chat-gradient: linear-gradient(135deg, #005c4b 0%, #00a884 100%);
+    --shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+    --shadow-lg: 0 10px 30px rgba(0, 0, 0, 0.5);
+    --message-bg-sent: #005c4b;
+    --message-bg-received: #202c33;
+    --message-text-sent: #e9edef;
+    --message-text-received: #e9edef;
+    --online-indicator: #00a884;
+    --typing-indicator: #00a884;
+    --offline-overlay: rgba(11, 20, 26, 0.95);
     --archived-color: #ff9500;
     --blocked-color: #ff3b30;
     --starred-color: #ffd700;
-    
+
     /* Custom theme variables */
-    --chat-bubble-sent: var(--primary-color);
-    --chat-bubble-received: var(--secondary-color);
-    --chat-background: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="400" height="400" viewBox="0 0 400 400"><rect width="400" height="400" fill="%23ffffff"/></svg>');
+    --chat-bubble-sent: #005c4b;
+    --chat-bubble-received: #202c33;
+    --chat-background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='80' height='80'%3E%3Ccircle cx='20' cy='20' r='7' fill='%23ffffff' opacity='0.03'/%3E%3Crect x='48' y='10' width='14' height='14' rx='3' fill='%23ffffff' opacity='0.03'/%3E%3Cpath d='M10 52 Q20 42 30 52 Q40 62 50 52' stroke='%23ffffff' stroke-width='1.5' fill='none' opacity='0.03'/%3E%3Ccircle cx='62' cy='62' r='5' fill='%23ffffff' opacity='0.03'/%3E%3C/svg%3E");
     --chat-font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    --bubble-sent-bg: #005c4b;
+    --bubble-sent-text: #e9edef;
+    --bubble-received-bg: #202c33;
+    --bubble-received-text: #e9edef;
 }
 
 body {
-    background-color: var(--bg-color);
+    background-color: #0b141a;
     color: var(--text-primary);
     height: 100vh;
     overflow: hidden;
@@ -86,7 +90,7 @@ body {
 /* Sidebar */
 .sidebar {
     width: 380px;
-    background-color: var(--bg-color);
+    background-color: #111b21;
     border-right: 1px solid var(--border-color);
     display: flex;
     flex-direction: column;
@@ -105,7 +109,7 @@ body {
     flex: 1;
     display: flex;
     flex-direction: column;
-    background-color: var(--bg-color);
+    background-color: #0b141a;
     position: relative;
     overflow: hidden;
 }
@@ -156,8 +160,7 @@ body {
 /* Chat Header */
 .chat-header {
     padding: 10px 16px;
-    background-color: transparent;
-    background: var(--bg-color, #fff);
+    background-color: #202c33;
     border-bottom: 1px solid var(--border-color);
     display: flex;
     align-items: center;
@@ -262,9 +265,9 @@ body {
     flex: 1;
     overflow-y: auto;
     padding: 20px;
-    background-color: var(--bg-color);
+    background-color: #0b141a;
     background-image: var(--chat-background);
-    background-size: cover;
+    background-size: 80px 80px;
     background-position: center;
     display: flex;
     flex-direction: column;
@@ -303,16 +306,18 @@ body {
 
 .date-divider {
     text-align: center;
-    margin: 20px 0;
+    margin: 12px 0;
     position: relative;
 }
 
 .date-divider span {
-    background-color: var(--secondary-color);
-    padding: 6px 12px;
-    border-radius: 20px;
+    background-color: rgba(11, 20, 26, 0.85);
+    padding: 5px 12px;
+    border-radius: 8px;
     font-size: 12px;
-    color: var(--text-secondary);
+    color: #8696a0;
+    font-weight: 500;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.4);
 }
 
 /* NEW: Floating Jump Button */
@@ -475,7 +480,7 @@ body {
 
 /* Message Items */
 .message-group {
-    margin-bottom: 20px;
+    margin-bottom: 2px;
     display: flex;
     flex-direction: column;
 }
@@ -496,8 +501,8 @@ body {
 }
 
 .message-item {
-    max-width: 65%;
-    margin-bottom: 8px;
+    max-width: none;
+    margin-bottom: 0;
     position: relative;
     animation: messageSlide 0.3s ease;
 }
@@ -507,28 +512,49 @@ body {
 }
 
 .message-bubble {
-    padding: 7px 12px;
-    border-radius: 14px;
+    padding: 6px 10px 4px 10px;
+    border-radius: 7.5px;
     position: relative;
     word-wrap: break-word;
     word-break: break-word;
-    line-height: 1.4;
-    font-size: 14px;
-    max-width: 72%;
+    line-height: 1.45;
+    font-size: 14.2px;
+    max-width: 75%;
     width: fit-content;
     display: inline-block;
+    box-shadow: 0 1px 1px rgba(0,0,0,0.3);
 }
 
 .message-bubble.sent {
-    background-color: var(--chat-bubble-sent);
-    color: var(--message-text-sent);
-    border-bottom-right-radius: 4px;
+    background-color: #005c4b;
+    color: #e9edef;
+    border-radius: 7.5px 0 7.5px 7.5px;
+}
+
+.message-bubble.sent::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    right: -8px;
+    border-width: 0 0 9px 9px;
+    border-style: solid;
+    border-color: transparent transparent transparent #005c4b;
 }
 
 .message-bubble.received {
-    background-color: #e8e8ed;
-    color: #1c1c1e;
-    border-bottom-left-radius: 4px;
+    background-color: #202c33;
+    color: #e9edef;
+    border-radius: 0 7.5px 7.5px 7.5px;
+}
+
+.message-bubble.received::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: -8px;
+    border-width: 0 9px 9px 0;
+    border-style: solid;
+    border-color: transparent #202c33 transparent transparent;
 }
 
 /* ── sent vs received message alignment ── */
@@ -536,58 +562,80 @@ body {
     display: flex;
     flex-direction: column;
     align-items: flex-end;
-    margin-bottom: 6px;
-    padding-right: 4px;
+    margin-bottom: 2px;
+    padding: 0 6px 0 60px;
 }
 
 .message.received {
     display: flex;
     flex-direction: column;
     align-items: flex-start;
-    margin-bottom: 6px;
-    padding-left: 4px;
+    margin-bottom: 2px;
+    padding: 0 60px 0 6px;
 }
 
-/* SENT: right side, blue bubble */
+/* SENT: right side, dark green bubble */
 .message.sent .message-bubble {
-    background: #0084ff;
-    color: #ffffff;
-    border-radius: 14px 14px 3px 14px;
-    max-width: 72%;
+    background: #005c4b;
+    color: #e9edef;
+    border-radius: 7.5px 0 7.5px 7.5px;
+    max-width: 75%;
     width: fit-content;
-    padding: 7px 11px;
-    font-size: 14px;
-    box-shadow: 0 1px 2px rgba(0,132,255,0.2);
+    padding: 6px 10px 4px 10px;
+    font-size: 14.2px;
+    box-shadow: 0 1px 1px rgba(0,0,0,0.3);
     word-break: break-word;
+    position: relative;
 }
 
-/* RECEIVED: left side, light grey bubble */
+.message.sent .message-bubble::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    right: -8px;
+    border-width: 0 0 9px 9px;
+    border-style: solid;
+    border-color: transparent transparent transparent #005c4b;
+}
+
+/* RECEIVED: left side, dark grey bubble */
 .message.received .message-bubble {
-    background: #e8e8ed;
-    color: #1c1c1e;
-    border-radius: 14px 14px 14px 3px;
-    max-width: 72%;
+    background: #202c33;
+    color: #e9edef;
+    border-radius: 0 7.5px 7.5px 7.5px;
+    max-width: 75%;
     width: fit-content;
-    padding: 7px 11px;
-    font-size: 14px;
-    box-shadow: 0 1px 2px rgba(0,0,0,0.07);
+    padding: 6px 10px 4px 10px;
+    font-size: 14.2px;
+    box-shadow: 0 1px 1px rgba(0,0,0,0.3);
     word-break: break-word;
+    position: relative;
 }
 
-/* Time inside sent bubbles — white/translucent */
+.message.received .message-bubble::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: -8px;
+    border-width: 0 9px 9px 0;
+    border-style: solid;
+    border-color: transparent #202c33 transparent transparent;
+}
+
+/* Time inside sent bubbles */
 .message.sent .message-time {
-    color: rgba(255,255,255,0.75) !important;
+    color: #8696a0 !important;
 }
 
-/* Time inside received bubbles — grey */
+/* Time inside received bubbles */
 .message.received .message-time {
-    color: rgba(28,28,30,0.55) !important;
+    color: #8696a0 !important;
 }
 
 /* Status icons on sent messages */
 .message.sent .message-status {
-    color: rgba(255,255,255,0.85);
-    font-size: 11px;
+    color: #53bdeb;
+    font-size: 12px;
 }
 
 /* Failed messages */
@@ -596,19 +644,19 @@ body {
     color: #fff;
 }
 
-/* Pending/sending — lighter blue */
+/* Pending/sending — lighter green */
 .message.sent.message-sending .message-bubble {
-    background: #5aabff;
-    color: #fff;
+    background: #128c7e;
+    color: #e9edef;
     opacity: 0.85;
 }
 
 /* Sticky context menu */
 .msg-ctx-menu {
     position: fixed;
-    background: #fff;
+    background: #233138;
     border-radius: 14px;
-    box-shadow: 0 6px 28px rgba(0,0,0,0.18);
+    box-shadow: 0 6px 28px rgba(0,0,0,0.5);
     z-index: 99999;
     min-width: 180px;
     overflow: hidden;
@@ -646,7 +694,7 @@ body {
     padding: 11px 16px;
     cursor: pointer;
     font-size: 14px;
-    color: #1c1c1e;
+    color: #e9edef;
     transition: background .15s;
     border: none;
     background: none;
@@ -654,10 +702,10 @@ body {
     text-align: left;
 }
 
-.msg-ctx-menu .ctx-item:hover { background: #f5f5f7; }
+.msg-ctx-menu .ctx-item:hover { background: #2a3942; }
 .msg-ctx-menu .ctx-item.danger { color: #ff3b30; }
 .msg-ctx-menu .ctx-item i { width: 18px; text-align: center; }
-.msg-ctx-menu hr { border: none; border-top: 1px solid #f0f0f0; margin: 4px 0; }
+.msg-ctx-menu hr { border: none; border-top: 1px solid #2a3942; margin: 4px 0; }
 
 /* multi-send cancel button */
 .multi-send-cancel-btn {
@@ -720,20 +768,26 @@ body {
     display: flex;
     justify-content: flex-end;
     align-items: center;
-    gap: 6px;
-    margin-top: 4px;
+    gap: 3px;
+    margin-top: 2px;
     font-size: 11px;
-    opacity: 0.8;
+    float: right;
+    margin-left: 8px;
+    margin-bottom: -2px;
+    padding-left: 6px;
+    line-height: 1;
 }
 
 .message-time {
-    color: inherit;
+    color: #8696a0;
+    font-size: 11px;
 }
 
 .message-status {
     display: flex;
     align-items: center;
     gap: 2px;
+    color: #8696a0;
 }
 
 .message-status i {
@@ -2751,19 +2805,19 @@ body {
     color: #a0a0a0;
 }
 
-/* Light theme (default) */
+/* Light theme (default) — unified to WhatsApp dark */
 [data-theme="light"] {
-    --bg-primary: #ffffff;
-    --bg-secondary: #f0f2f5;
-    --text-primary: #050505;
-    --text-secondary: #65676b;
-    --border-color: #dddfe2;
-    --chat-bubble-sent: #0084ff;
-    --chat-bubble-received: #e4e6eb;
-    --message-bg-sent: #0084ff;
-    --message-bg-received: #e4e6eb;
-    --message-text-sent: #ffffff;
-    --message-text-received: #050505;
+    --bg-primary: #111b21;
+    --bg-secondary: #202c33;
+    --text-primary: #e9edef;
+    --text-secondary: #8696a0;
+    --border-color: #2a3942;
+    --chat-bubble-sent: #005c4b;
+    --chat-bubble-received: #202c33;
+    --message-bg-sent: #005c4b;
+    --message-bg-received: #202c33;
+    --message-text-sent: #e9edef;
+    --message-text-received: #e9edef;
 }
 
 [data-theme="light"] body,
@@ -2771,7 +2825,7 @@ body {
 [data-theme="light"] .sidebar,
 [data-theme="light"] .chat-panel,
 [data-theme="light"] .messages-container {
-    background-color: #ffffff;
+    background-color: #0b141a;
 }
 
 /* Remove "No messages yet" text when there are actual messages */
@@ -3089,30 +3143,30 @@ body {
 /* ── Message bubbles: strong sent / received distinction ── */
 .message.sent  .message-bubble,
 .message-bubble.sent {
-    background: #0084ff !important;
-    color: #fff !important;
-    border-radius: 18px 18px 4px 18px !important;
-    box-shadow: 0 1px 3px rgba(0,132,255,0.25);
+    background: #005c4b !important;
+    color: #e9edef !important;
+    border-radius: 7.5px 0 7.5px 7.5px !important;
+    box-shadow: 0 1px 1px rgba(0,0,0,0.3);
 }
 
 .message.received .message-bubble,
 .message-bubble.received {
-    background: #e8e8ed !important;
-    color: #1c1c1e !important;
-    border-radius: 18px 18px 18px 4px !important;
+    background: #202c33 !important;
+    color: #e9edef !important;
+    border-radius: 0 7.5px 7.5px 7.5px !important;
 }
 
 /* ── Dark theme overrides ── */
 [data-theme="dark"] .message.sent .message-bubble,
 [data-theme="dark"] .message-bubble.sent {
-    background: #0a5abf !important;
-    color: #fff !important;
+    background: #005c4b !important;
+    color: #e9edef !important;
 }
 
 [data-theme="dark"] .message.received .message-bubble,
 [data-theme="dark"] .message-bubble.received {
-    background: #3a3a3c !important;
-    color: #f2f2f7 !important;
+    background: #202c33 !important;
+    color: #e9edef !important;
 }
 
 [data-theme="dark"] .msg-ctx-menu {
@@ -3206,11 +3260,11 @@ body {
   --away-color: #f59e0b;
   --offline-color: #9ca3af;
 
-  /* ── CHAT BUBBLES (blue sent, gray received) ── */
-  --bubble-sent-bg: #0084ff;
-  --bubble-sent-text: #ffffff;
-  --bubble-received-bg: #e8e8ed;
-  --bubble-received-text: #1c1c1e;
+  /* ── CHAT BUBBLES (WhatsApp dark green sent, dark grey received) ── */
+  --bubble-sent-bg: #005c4b;
+  --bubble-sent-text: #e9edef;
+  --bubble-received-bg: #202c33;
+  --bubble-received-text: #e9edef;
 
   /* ── ACTIVE TABS & NAV (blue) ── */
   --tab-active-color: #3b82f6;
@@ -3344,6 +3398,28 @@ body[data-module="friends"] .add-friend-btn {
 .message.sent {
   background-color: var(--bubble-sent-bg) !important;
   color: var(--bubble-sent-text) !important;
+}
+
+.message.sent {
+  background: transparent !important;
+  color: inherit !important;
+}
+
+.message.sent .message-bubble,
+.message.received .message-bubble,
+.message-bubble.sent,
+.message-bubble.received {
+  max-width: min(100%, 75%) !important;
+  width: fit-content;
+}
+
+@media (max-width: 768px) {
+  .message.sent .message-bubble,
+  .message.received .message-bubble,
+  .message-bubble.sent,
+  .message-bubble.received {
+    max-width: min(100%, 82%) !important;
+  }
 }
 
 /* ================================================================
@@ -3672,9 +3748,9 @@ body[data-module="friends"] .friend-item:hover {
    ================================================================ */
 
 [data-theme="dark"] {
-  --bubble-sent-bg: #0066cc;
-  --bubble-received-bg: #2d2d2d;
-  --bubble-received-text: #f0f0f0;
+  --bubble-sent-bg: #005c4b;
+  --bubble-received-bg: #202c33;
+  --bubble-received-text: #e9edef;
   --color-friend-bg: #1f2937;
   --color-friend-card: #111827;
   --color-friend-border: #374151;
@@ -3682,14 +3758,14 @@ body[data-module="friends"] .friend-item:hover {
 
 [data-theme="dark"] .message-bubble.sent,
 [data-theme="dark"] .message.sent .message-bubble {
-  background-color: #0066cc !important;
-  color: #ffffff !important;
+  background-color: #005c4b !important;
+  color: #e9edef !important;
 }
 
 [data-theme="dark"] .message-bubble.received,
 [data-theme="dark"] .message.received .message-bubble {
-  background-color: #2d2d2d !important;
-  color: #f0f0f0 !important;
+  background-color: #202c33 !important;
+  color: #e9edef !important;
 }
 
 /* ================================================================
@@ -3713,8 +3789,8 @@ body[data-module="friends"] .friend-item:hover {
   /* Chat bubbles stay green on mobile */
   .message-bubble.sent,
   .message.sent .message-bubble {
-    background-color: var(--bubble-sent-bg) !important;
-    color: var(--bubble-sent-text) !important;
+    background-color: #005c4b !important;
+    color: #e9edef !important;
   }
 
   /* Story rings stay gradient on mobile */
@@ -3748,13 +3824,12 @@ body[data-module="friends"] .friend-item:hover {
    are overridden for communication elements
    ================================================================ */
 
-/* Legacy variable bridge — module will still reference --primary-color
-   but for communication elements we inject our green */
-.message-bubble.sent { background-color: var(--bubble-sent-bg) !important; }
-.chat-input-btn.send  { background-color: var(--color-primary) !important; }
-.quick-action-icon    { color: var(--color-primary) !important; }
-.friend-status.online { background-color: var(--online-color) !important; }
-.chat-status.online   { background-color: var(--online-color) !important; }
+/* Legacy variable bridge */
+.message-bubble.sent { background-color: #005c4b !important; color: #e9edef !important; }
+.chat-input-btn.send  { background-color: #00a884 !important; }
+.quick-action-icon    { color: #00a884 !important; }
+.friend-status.online { background-color: #00a884 !important; }
+.chat-status.online   { background-color: #00a884 !important; }
 
 /* Group member count badge → green */
 .member-count {

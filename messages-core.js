@@ -5606,13 +5606,46 @@ try {
                 });
             });
         }
-    }
+
+        // ✅ FIX: Also bind to KynectaRealtime singleton if available now or when it becomes ready.
+        // messages-core previously ONLY checked window.wsService which is the legacy shim.
+        // The hardened manager exposes window.KynectaRealtime.on() — we must bind to it too.
+        function _bindKynectaRealtime() {
+            const rt = window.KynectaRealtime;
+            if (!rt || !rt.on || rt.__msgCoreBound) return;
+            rt.__msgCoreBound = true;
+            ['message:new', 'new_message', 'chat:message', 'MESSAGE_RECEIVED',
+             'message:delivered', 'message:read'].forEach((eventName) => {
+                rt.on(eventName, (payload) => {
+                    handleRealtimePayload(eventName, payload);
+                });
+            });
+            console.log('[messages] ✅ Bound to KynectaRealtime singleton events');
+        }
+        _bindKynectaRealtime();
+        window.addEventListener('kyn:realtimeReady', _bindKynectaRealtime, { once: false });
+
+        // ✅ FIX: Bridge from DOM CustomEvents emitted by app.realtime.socket.js bridge listeners.
+        // This path activates when KynectaRealtime is connected but wsService.on was missed.
+        window.addEventListener('kyn:message:received', function(evt) {
+            if (evt.detail) handleRealtimePayload('message:new', evt.detail);
+        });
+        document.addEventListener('message:new', function(evt) {
+            if (evt.detail) handleRealtimePayload('message:new', evt.detail);
+        });
+    }   // end setupRealtimeMessageListener
+
     function startRealtimeSync() {
         setupRealtimeMessageListener();
 
         const realtimeToken = window.__PARENT_SESSION__?.token || SessionManager.getToken?.() || null;
         if (window.KynectaRealtime?.connect && realtimeToken) {
-            window.KynectaRealtime.connect(realtimeToken).catch(() => {});
+            // ✅ FIX: Attach .catch() immediately on the returned promise so any
+            // rejection (including the normalised WebSocket Event errors) is always
+            // handled — prevents "Uncaught (in promise)" in the console.
+            window.KynectaRealtime.connect(realtimeToken).catch((err) => {
+                console.warn('[messages] Realtime connect failed (will retry):', err && err.message || err);
+            });
         }
         
         if (ChatManager && ChatManager.getActiveChat) {

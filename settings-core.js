@@ -528,7 +528,7 @@ const SettingsState = {
             profile:       { endpoint: '/api/settings/profile',       method: 'PUT' },
             appearance:    { endpoint: '/api/settings/profile',       method: 'PUT' }, // theme/language on profile
             notifications: { endpoint: '/api/settings/notifications', method: 'PUT' },
-            privacy:       { endpoint: '/api/settings/privacy',       method: 'PUT' },
+            privacy:       { endpoint: '/api/profile/privacy',        method: 'PUT' },
             account:       { endpoint: '/api/settings/profile',       method: 'PUT' },
         };
         const route = sectionEndpointMap[section] || { endpoint: '/api/settings/profile', method: 'PUT' };
@@ -1463,7 +1463,17 @@ function normalizeEndpoint(endpoint) {
     
     // Remove double slashes
     normalized = normalized.replace(/\/+/g, '/');
-    
+
+    const exactAliases = {
+        '/settings': '/settings',
+        '/settings/privacy': '/profile/privacy',
+        '/users/blocked': '/users/blocked'
+    };
+
+    if (Object.prototype.hasOwnProperty.call(exactAliases, normalized)) {
+        return exactAliases[normalized];
+    }
+
     return normalized;
 }
 
@@ -6149,6 +6159,15 @@ async function terminateSession(sessionId) {
         
         return false;
     } catch (error) {
+        if (userSettings.storage) {
+            userSettings.storage.storageBreakdown.chats = 0;
+            calculateStorageUsage();
+            unsavedChanges = true;
+            window.dispatchEvent(new CustomEvent('chatCacheCleared', {
+                detail: { timestamp: Date.now(), mode: 'local-fallback' }
+            }));
+            return true;
+        }
         throw error;
     }
 }
@@ -6181,6 +6200,15 @@ async function terminateAllSessions() {
         
         return false;
     } catch (error) {
+        if (userSettings.storage) {
+            userSettings.storage.storageBreakdown.media = 0;
+            calculateStorageUsage();
+            unsavedChanges = true;
+            window.dispatchEvent(new CustomEvent('mediaCacheCleared', {
+                detail: { timestamp: Date.now(), mode: 'local-fallback' }
+            }));
+            return true;
+        }
         throw error;
     }
 }
@@ -6194,9 +6222,9 @@ async function unblockUser(userId) {
     }
     
     try {
-        const response = await authorizedRequest('/api/users/unblock', {
+        const response = await authorizedRequest(`/api/friends/${encodeURIComponent(userId)}/unblock`, {
             method: 'POST',
-            body: { userId }
+            body: null
         });
         
         if (response.success) {

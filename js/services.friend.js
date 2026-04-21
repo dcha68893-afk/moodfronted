@@ -90,8 +90,8 @@
                 console.warn('[FriendService] sendFriendRequest: missing userId');
                 return null;
             }
-            const response = await this._makeRequest('POST', '/api/friends/requests', {
-                userId,
+            const response = await this._makeRequest('POST', '/api/friends/requests/send', {
+                receiverId: userId,
                 message
             });
             if (!response) return null; // offline / error
@@ -181,7 +181,7 @@
          */
         async blockUser(userId) {
             if (!userId) return null;
-            const response = await this._makeRequest('POST', '/api/users/block', { userId });
+            const response = await this._makeRequest('POST', `/api/friends/${encodeURIComponent(userId)}/block`);
             if (!response) return null;
 
             // Update store
@@ -210,7 +210,7 @@
          */
         async unblockUser(userId) {
             if (!userId) return null;
-            const response = await this._makeRequest('POST', '/api/users/unblock', { userId });
+            const response = await this._makeRequest('POST', `/api/friends/${encodeURIComponent(userId)}/unblock`);
             if (!response) return null;
 
             // Update store
@@ -233,13 +233,22 @@
          * @returns {Promise} Resolves with online friend IDs
          */
         async getOnlineFriends() {
-            const response = await this._makeRequest('GET', '/api/friends/online');
+            const cachedOnline = window.KynectaStore?.get('friends.online');
+            if (cachedOnline instanceof Set) {
+                return Array.from(cachedOnline);
+            }
+
+            const response = await this._makeRequest('GET', '/api/friends');
             if (!response) return []; // offline or error
 
             // ── safeArray guard (patch v1) ─────────────────────────────────
-            const onlineList = (typeof safeArray === 'function')
+            const friends = (typeof safeArray === 'function')
                 ? safeArray(response.data)
                 : (Array.isArray(response.data) ? response.data : []);
+            const onlineList = friends
+                .filter(friend => friend?.online === true || friend?.status === 'online' || friend?.presence === 'online')
+                .map(friend => String(friend.userId || friend.friendId || friend.id))
+                .filter(Boolean);
             
             // Update store
             if (window.KynectaStore) {
@@ -261,19 +270,28 @@
          */
         subscribeToPresence(callback) {
             if (window.KynectaRealtime) {
-                return window.KynectaRealtime.on('PRESENCE_UPDATE', (payload) => {
-                    // Update store
-                    if (window.KynectaStore) {
-                        const online = window.KynectaStore.get('friends.online') || new Set();
-                        if (payload.online) {
-                            online.add(payload.userId);
-                        } else {
-                            online.delete(payload.userId);
-                        }
-                        window.KynectaStore.set('friends.online', online);
+                const eventTypes = ['presence:update', 'PRESENCE_UPDATE', 'user:online', 'user:offline'];
+                const unsubscribers = eventTypes.map((eventType) => window.KynectaRealtime.on(eventType, (payload = {}) => {
+                    const userId = payload.userId || payload.id;
+                    const online = eventType === 'user:online'
+                        ? true
+                        : eventType === 'user:offline'
+                            ? false
+                            : payload.online;
+
+                    if (window.KynectaStore && userId != null) {
+                        const current = window.KynectaStore.get('friends.online');
+                        const onlineUsers = current instanceof Set ? new Set(current) : new Set(Array.isArray(current) ? current : []);
+                        if (online) onlineUsers.add(String(userId));
+                        else onlineUsers.delete(String(userId));
+                        window.KynectaStore.set('friends.online', onlineUsers);
                     }
 
-                    callback(payload);
+                    callback({ ...payload, userId, online });
+                }));
+
+                return () => unsubscribers.forEach(unsubscribe => {
+                    try { unsubscribe(); } catch (_) {}
                 });
             }
 

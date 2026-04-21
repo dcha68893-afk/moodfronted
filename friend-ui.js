@@ -168,7 +168,11 @@ import {
     NearbyManager,
 
     // Authorized HTTP request helper
-    authorizedRequest
+    authorizedRequest,
+
+    // State setters (ES module bindings are read-only; use these to mutate)
+    setCurrentCategoryFilter,
+    setCurrentSearchTerm
 
 } from './friend-core.js';
 
@@ -4794,7 +4798,7 @@ export const filterFriendsByCategory = function(category) {
         return null;
     }
     return ErrorHandler.createBoundary('filterFriendsByCategory', () => {
-        currentCategoryFilter = category;
+        setCurrentCategoryFilter(category);
         updateCurrentSection();
 
         document.querySelectorAll('.category-filter-btn').forEach(btn => {

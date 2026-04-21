@@ -193,7 +193,7 @@
                 chat: settings.chat, syncEnabled: settings.syncEnabled,
                 updatedAt: settings.updatedAt
             };
-            const res = await _parentRequest('/settings', 'PUT', payload);
+            const res = await _parentRequest('/api/settings', 'PUT', payload);
             _setState(SYNC_STATE.SYNCED);
             _store() && _store().setMeta('lastServerSync', new Date().toISOString());
             _emit('synced', { direction: 'push', ts: Date.now() });
@@ -211,7 +211,7 @@
 
         _setState(SYNC_STATE.SYNCING);
         try {
-            const res = await _parentRequest('/settings', 'GET', null);
+            const res = await _parentRequest('/api/settings', 'GET', null);
             const remote = res.data?.settings || res.data?.data || res.data || {};
 
             const validator = _validator();

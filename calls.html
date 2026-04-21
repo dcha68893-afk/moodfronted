@@ -2,6 +2,27 @@
 <html lang="en">
 <head>
 <script>
+// ✅ CRITICAL SW UPDATE CHECK — runs FIRST, before any other JS loads.
+// If a new service worker is waiting (installed but not yet active), force it
+// to take control immediately and reload. This guarantees the fresh network-first
+// JS files are served instead of stale cached ones.
+(function() {
+    if (!('serviceWorker' in navigator)) return;
+    navigator.serviceWorker.getRegistration('/').then(function(reg) {
+        if (!reg) return;
+        var sw = reg.waiting || reg.installing;
+        if (sw) {
+            console.log('[SW-BOOT] New SW waiting/installing — forcing activation');
+            sw.postMessage({ type: 'SKIP_WAITING' });
+            // Reload once after a short delay to let the new SW take control
+            navigator.serviceWorker.addEventListener('controllerchange', function() {
+                window.location.reload();
+            });
+        }
+    }).catch(function() {});
+})();
+</script>
+<script>
 // Suppress iframe sandbox warnings (usually from extensions)
 (function() {
     const originalError = console.error;
@@ -3469,18 +3490,37 @@ window.__CALLS_IFRAME__ = {
         // Re-use the root SW. No-op if already controlling this scope.
         navigator.serviceWorker.register('/service-worker.js', { scope: '/' })
             .then(function(reg) {
-                console.log('[friend.html] SW registered. Scope:', reg.scope);
+                console.log('[calls.html] SW registered. Scope:', reg.scope);
+                // ✅ FIX: If a waiting SW exists, activate it immediately
                 if (reg.waiting) reg.waiting.postMessage({ type: 'SKIP_WAITING' });
                 reg.addEventListener('updatefound', function() {
                     var nw = reg.installing;
-                    if (nw) nw.addEventListener('statechange', function() {
-                        if (nw.state === 'installed' && navigator.serviceWorker.controller) {
+                    if (!nw) return;
+                    nw.addEventListener('statechange', function() {
+                        if (nw.state === 'installed') {
+                            // Immediately take over — no waiting for tab close
                             nw.postMessage({ type: 'SKIP_WAITING' });
                         }
                     });
                 });
             })
-            .catch(function(err) { console.warn('[friend.html] SW registration failed:', err); });
+            .catch(function(err) { console.warn('[calls.html] SW registration failed:', err); });
+
+        // ✅ FIX: Listen for SW_ACTIVATED / SW_UPDATE_AVAILABLE — reload to pick up new JS
+        navigator.serviceWorker.addEventListener('message', function(evt) {
+            if (!evt.data) return;
+            if (evt.data.type === 'SW_ACTIVATED' || evt.data.type === 'SW_UPDATE_AVAILABLE') {
+                console.log('[calls.html] New SW v' + evt.data.version + ' active — reloading for fresh JS');
+                // Small delay to let SW finish claiming before reload
+                setTimeout(function() { window.location.reload(); }, 500);
+            }
+        });
+
+        // ✅ FIX: Detect controller change (SW took over) and reload
+        navigator.serviceWorker.addEventListener('controllerchange', function() {
+            console.log('[calls.html] SW controller changed — reloading');
+            window.location.reload();
+        });
     })();
     </script>
 </body>

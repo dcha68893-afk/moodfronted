@@ -117,6 +117,28 @@
                 _fallbackSocket.on(evt, _handleFallbackMessage);
             });
 
+            // ✅ FIX: Also bridge call events through the fallback so calls work
+            // even when the primary singleton never came up.
+            const CALL_EVENTS = [
+                'call:incoming', 'incoming_call', 'call_incoming',
+                'call:initiated', 'call_initiated',
+                'call:accepted', 'call_accepted', 'call_answered',
+                'call:rejected', 'call_rejected',
+                'call:cancelled', 'call_cancelled',
+                'call:ended', 'call_ended', 'call_force_ended',
+                'webrtc:signal', 'webrtc_signal',
+            ];
+            CALL_EVENTS.forEach(function (evt) {
+                _fallbackSocket.on(evt, function (data) {
+                    console.log('[SocketListener] FALLBACK 📞 call event', evt, data);
+                    window.dispatchEvent(new CustomEvent('kyn:' + evt, { detail: data }));
+                    document.dispatchEvent(new CustomEvent(evt, { detail: data }));
+                    if (window.KynectaEventBus && typeof window.KynectaEventBus.emit === 'function') {
+                        window.KynectaEventBus.emit('REALTIME_' + evt, data, { async: true });
+                    }
+                });
+            });
+
             window.__socket    = _fallbackSocket;
             window.__kynSocket = _fallbackSocket;
 
@@ -129,7 +151,8 @@
         if (!data) return;
         const chatId = String(data.chatId || data.conversationId || '');
         if (!chatId) return;
-        console.log('[SocketListener] FALLBACK 📨 message for chat', chatId);
+        // ✅ FIX: Required log per spec
+        console.log('[SocketListener] RECEIVED MESSAGE:', data);
 
         const core = window.MessagesCore || window.messagesCore;
         if (core) {
@@ -144,6 +167,9 @@
             }
         }
 
+        // ✅ FIX: updateMessageUI shim — delegates to whatever UI layer is available
+        updateMessageUI(data);
+
         window.dispatchEvent(new CustomEvent('kyn:message:received', { detail: data }));
         document.dispatchEvent(new CustomEvent('message:new', { detail: data }));
 
@@ -156,6 +182,32 @@
             }).catch(() => {});
         }
     }
+
+    /**
+     * updateMessageUI — thin shim that routes an incoming message payload to
+     * whichever UI layer is present.  Called from _handleFallbackMessage and
+     * can be called directly by other scripts via window.updateMessageUI.
+     */
+    function updateMessageUI(msg) {
+        if (!msg) return;
+        try {
+            // 1. ChatManager (primary UI controller)
+            const cm = window.ChatManager || window.chatManager;
+            if (cm) {
+                if (typeof cm.appendMessage  === 'function') { cm.appendMessage(msg);  return; }
+                if (typeof cm.addMessage     === 'function') { cm.addMessage(msg);      return; }
+                if (typeof cm.renderMessage  === 'function') { cm.renderMessage(msg);   return; }
+                if (typeof cm.onNewMessage   === 'function') { cm.onNewMessage(msg);    return; }
+            }
+            // 2. Standalone render helper
+            if (typeof window.renderNewMessage === 'function') { window.renderNewMessage(msg); return; }
+            if (typeof window.appendChatMessage === 'function') { window.appendChatMessage(msg); return; }
+        } catch (e) {
+            console.warn('[SocketListener] updateMessageUI error:', e.message);
+        }
+    }
+    // Expose globally so other modules can call it
+    window.updateMessageUI = updateMessageUI;
 
     // ── Token / userId helpers (kept for fallback path only) ─────────────────
     function _getToken() {

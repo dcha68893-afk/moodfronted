@@ -1543,7 +1543,10 @@ function applySession(sessionData) {
         MAX_ICE_RESTARTS: 3,
         
         CALL_INVITATION_TIMEOUT: 120000,  // 2 minutes ring timeout
-        CALL_CONNECTION_TIMEOUT: 15000,
+        // ✅ FIX: Raised from 15s → 45s. The WebSocket may take a few retries
+        // to connect (exponential backoff). Giving it more time prevents the
+        // "Connection timeout reached" teardown while the socket is still reconnecting.
+        CALL_CONNECTION_TIMEOUT: 45000,
         
         STORAGE_PREFIX: 'calls_core_',
         
@@ -4223,10 +4226,24 @@ initiateCall: async function(callType, participants = []) {
         })();
 
         // ── SESSION MANAGER: register outgoing session ──────────────────────
-        (function _registerSession() {
+        // ✅ FIX: Pre-warm AppCache before calling startOutgoing so
+        // callSession.manager.js _createLocalHistory never hits "AppCache never became available"
+        (async function _registerSession() {
             const mgr = window.KynectaCallSession;
             if (!mgr || mgr.isActive) return;
             try {
+                // Give AppCache a chance to initialise (max 2s, non-blocking)
+                if (window.AppCache && typeof window.AppCache.ready === 'function') {
+                    try { await Promise.race([
+                        window.AppCache.ready(),
+                        new Promise(r => setTimeout(r, 2000))
+                    ]); } catch(_) {}
+                } else if (window.KynectaCache && typeof window.KynectaCache.ready === 'function') {
+                    try { await Promise.race([
+                        window.KynectaCache.ready(),
+                        new Promise(r => setTimeout(r, 2000))
+                    ]); } catch(_) {}
+                }
                 mgr.startOutgoing({
                     callerId: callsState.session?.userId,
                     receiverId: (!isGroupCall && participants[0]) ? (typeof participants[0] === 'object' ? participants[0].id : parseInt(participants[0])) : null,
@@ -8983,6 +9000,92 @@ clearActiveCall: function() {
     } else {
         initializeModule();
     }
+
+    // ✅ FIX: Bridge DOM CustomEvents dispatched by app.realtime.socket.js.
+    //
+    // calls-core.js ONLY listens to window.postMessage (source === 'parent').
+    // But app.realtime.socket.js dispatches call events as CustomEvents:
+    //   window.dispatchEvent(new CustomEvent('kyn:call:incoming', { detail: payload }))
+    //   document.dispatchEvent(new CustomEvent('call:incoming', { detail: payload }))
+    //
+    // Without this bridge those events are silently dropped and calls never ring.
+    // Each handler normalises the payload and calls the existing internal function.
+    (function _installCallEventBridge() {
+        // Map: kyn: event name → internal handler function
+        const CALL_EVENT_MAP = [
+            // incoming / initiated
+            { event: 'kyn:call:incoming',   fn: (d) => handleIncomingCall(d) },
+            { event: 'kyn:incoming_call',    fn: (d) => handleIncomingCall(d) },
+            { event: 'kyn:call_incoming',    fn: (d) => handleIncomingCall(d) },
+            { event: 'kyn:call:initiated',   fn: (d) => handleCallInitiated(d) },
+            { event: 'kyn:call_initiated',   fn: (d) => handleCallInitiated(d) },
+            // accepted / started / connected
+            { event: 'kyn:call:accepted',    fn: (d) => handleCallAccepted(d) },
+            { event: 'kyn:call_accepted',    fn: (d) => handleCallAccepted(d) },
+            { event: 'kyn:call_answered',    fn: (d) => handleCallAccepted(d) },
+            { event: 'kyn:call:started',     fn: (d) => handleCallStarted(d) },
+            { event: 'kyn:call:connected',   fn: (d) => handleCallConnected(d) },
+            // rejected / cancelled / ended
+            { event: 'kyn:call:rejected',    fn: (d) => handleCallRejected(d) },
+            { event: 'kyn:call_rejected',    fn: (d) => handleCallRejected(d) },
+            { event: 'kyn:call:cancelled',   fn: (d) => handleCallEnded(d) },
+            { event: 'kyn:call_cancelled',   fn: (d) => handleCallEnded(d) },
+            { event: 'kyn:call:ended',       fn: (d) => handleCallEnded(d) },
+            { event: 'kyn:call_ended',       fn: (d) => handleCallEnded(d) },
+            { event: 'kyn:call_force_ended', fn: (d) => handleCallEnded(d) },
+            // failed
+            { event: 'kyn:call:failed',      fn: (d) => handleCallFailed(d) },
+        ];
+
+        CALL_EVENT_MAP.forEach(({ event, fn }) => {
+            window.addEventListener(event, function (evt) {
+                if (!evt.detail) return;
+                console.log(`[${MODULE_NAME}] 📞 DOM bridge event [${event}]`, evt.detail);
+                try { fn(evt.detail); } catch (e) {
+                    console.warn(`[${MODULE_NAME}] Call event bridge error (${event}):`, e.message);
+                }
+            });
+        });
+
+        // Also listen on KynectaRealtime singleton directly (in case the kyn: events
+        // were already emitted before this script loaded)
+        function _bindRealtime() {
+            const rt = window.KynectaRealtime;
+            if (!rt || !rt.on || rt.__callsCoreBound) return;
+            rt.__callsCoreBound = true;
+
+            const RT_MAP = [
+                ['call:incoming',  (p) => handleIncomingCall(p)],
+                ['incoming_call',  (p) => handleIncomingCall(p)],
+                ['call:initiated', (p) => handleCallInitiated(p)],
+                ['call:accepted',  (p) => handleCallAccepted(p)],
+                ['call_accepted',  (p) => handleCallAccepted(p)],
+                ['call_answered',  (p) => handleCallAccepted(p)],
+                ['call:started',   (p) => handleCallStarted(p)],
+                ['call:connected', (p) => handleCallConnected(p)],
+                ['call:rejected',  (p) => handleCallRejected(p)],
+                ['call_rejected',  (p) => handleCallRejected(p)],
+                ['call:ended',     (p) => handleCallEnded(p)],
+                ['call_ended',     (p) => handleCallEnded(p)],
+                ['call_force_ended',(p) => handleCallEnded(p)],
+                ['call_cancelled', (p) => handleCallEnded(p)],
+                ['call:failed',    (p) => handleCallFailed(p)],
+            ];
+            RT_MAP.forEach(([evtName, handler]) => {
+                rt.on(evtName, (payload) => {
+                    console.log(`[${MODULE_NAME}] 📞 KynectaRealtime event [${evtName}]`, payload);
+                    try { handler(payload); } catch (e) {
+                        console.warn(`[${MODULE_NAME}] KynectaRealtime call handler error (${evtName}):`, e.message);
+                    }
+                });
+            });
+            console.log(`[${MODULE_NAME}] ✅ Bound to KynectaRealtime call events`);
+        }
+        _bindRealtime();
+        window.addEventListener('kyn:realtimeReady', _bindRealtime, { once: false });
+
+        console.log(`[${MODULE_NAME}] ✅ Call event DOM bridge installed`);
+    })();
     
     window.addEventListener('beforeunload', () => {
         if (window.callCore) window.callCore.cleanup();

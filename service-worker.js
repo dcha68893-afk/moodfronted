@@ -8,13 +8,14 @@
 
 'use strict';
 
-// PATCH v1.3: Version bumped to 14.0.0 — forces full cache replacement on every
-// installed PWA. When the phone opens the app, the SW detects the version mismatch,
-// deletes the entire v13 cache (which held the buggy auth JS files), and fetches
-// fresh copies from the server. This is the only reliable way to push JS fixes
-// to installed mobile PWAs without requiring manual browser data clearing.
-const SW_VERSION = '14.0.0';
-const CACHE_NAME = 'moodchat-static-v14-offline'; // differs from v13 → triggers full wipe
+// PATCH v1.4: Version bumped to 15.0.0 — forces full cache replacement.
+// Every file listed in NETWORK_FIRST_PATTERNS is now fetched fresh on every
+// page load so code fixes reach the browser without manual cache clearing.
+// Critically, app.realtime.socket.js and calls-core.js are now network-first
+// because stale cached versions of these files caused the WebSocket / call
+// failures diagnosed in the console logs.
+const SW_VERSION = '16.0.0';
+const CACHE_NAME = 'moodchat-static-v16-offline'; // differs from v14 → triggers full wipe
 const CACHE_MAX_AGE = 7 * 24 * 60 * 60 * 1000; // 7 days in ms
 
 // ---------------------------------------------------------------------------
@@ -91,19 +92,43 @@ const CORE_STATIC_ASSETS = [
   '/css/suppress-webgl.css'
 ];
 
-// ---------------------------------------------------------------------------
-// PATCH v1.3: AUTH JS FILES — always network-first, never cache-first.
-// These files contain session logic. Serving a stale cached version after
-// a bug-fix deploy is what caused the mobile reopen loop. Any file in this
-// list is fetched fresh on every load; cache is only used when offline.
-// ---------------------------------------------------------------------------
+// PATCH v1.4: NETWORK_FIRST_PATTERNS expanded to cover all critical runtime files.
+// Any file in this list is fetched fresh on every load; cache is only used when offline.
+// This is the primary mechanism ensuring deployed fixes reach users immediately.
 const NETWORK_FIRST_PATTERNS = [
+  // Auth / session — existing
   /\/js\/api\.auth\.js/i,
   /\/js\/app\.core\.session\.js/i,
   /\/js\/app\.core\.bootstrap\.js/i,
   /\/js\/auth\.session\.manager\.js/i,
   /\/js\/authStorage\.js/i,
   /\/js\/app\.ui\.auth\.js/i,
+
+  // ✅ NEW: Realtime socket — was served stale from cache, causing WebSocket failures
+  /\/js\/app\.realtime\.socket\.js/i,
+  /\/app\.realtime\.socket\.js/i,
+
+  // ✅ NEW: Runtime authority — was catching raw Event object from stale socket file
+  /\/js\/app\.runtime\.authority\.js/i,
+  /\/app\.runtime\.authority\.js/i,
+
+  // ✅ NEW: Core app JS files that are actively patched
+  /\/js\/api\.core\.js/i,
+  /\/api_core\.js/i,
+  /\/api\.core\.js/i,
+
+  // ✅ NEW: Calls module — stale version caused connection timeout + call UI blank
+  /\/calls-core\.js/i,
+  /\/calls-ui\.js/i,
+  /\/callSession\.manager\.js/i,
+  /\/callRetry\.engine\.js/i,
+
+  // ✅ NEW: Messages module
+  /\/messages-core\.js/i,
+  /\/messages-ui\.js/i,
+
+  // ✅ NEW: Safety layer (handles localStorage, used by token reading)
+  /\/kynecta\.safety\.layer\.js/i,
 ];
 
 function isNetworkFirst(url) {
@@ -406,10 +431,12 @@ async function handleApiRequest(request) {
 //      Pre-cache failures are non-fatal (logged + continued via allSettled).
 // ---------------------------------------------------------------------------
 self.addEventListener('install', function(event) {
-  console.log('[SW] Installing v' + SW_VERSION);
+  console.log('[SW] Installing v' + SW_VERSION + ' (network-first for all critical JS)');
 
-  // FIX: call skipWaiting() immediately so activation is not blocked by
-  //      slow or failing asset fetches during install.
+  // ✅ CRITICAL: skipWaiting() IMMEDIATELY — the new SW takes control without
+  // waiting for all existing tabs to close. This is the ONLY reliable way to
+  // push JS fixes to users who have the app open. Combined with clients.claim()
+  // in activate, this guarantees the new SW controls all tabs within seconds.
   self.skipWaiting();
 
   event.waitUntil(
@@ -457,20 +484,38 @@ self.addEventListener('activate', function(event) {
         );
       })
       .then(function() {
+        // ✅ CRITICAL: claim() makes this SW control ALL open tabs immediately,
+        // not just new ones. Without this the old SW keeps serving existing tabs.
         return self.clients.claim();
       })
       .then(function() {
-        console.log('[SW] All clients claimed');
-        return self.clients.matchAll();
+        console.log('[SW] All clients claimed — sending reload signal');
+        return self.clients.matchAll({ includeUncontrolled: true, type: 'window' });
       })
       .then(function(clients) {
+        // Invalidate stale log suppression set
+        loggedCacheHits.clear();
+
         clients.forEach(function(client) {
+          // ✅ CRITICAL: Tell every open tab to reload so it picks up the fresh
+          // network-first JS files. Without this reload the page JS running in
+          // memory is still the old version even after the SW updates.
           client.postMessage({
             type: 'SW_ACTIVATED',
             version: SW_VERSION,
             timestamp: Date.now()
           });
+          client.postMessage({
+            type: 'SW_UPDATE_AVAILABLE',
+            version: SW_VERSION,
+            timestamp: Date.now()
+          });
+          // Pages listen for SW_ACTIVATED and call window.location.reload() themselves.
+          // client.navigate() is NOT used here — it throws TypeError for non-window
+          // clients (workers, iframes without allow-top-navigation) and is unreliable.
+          // The postMessage above is the correct cross-browser reload trigger.
         });
+        console.log('[SW] v' + SW_VERSION + ' activated — cache wiped, ' + clients.length + ' clients notified & reloading');
       })
   );
 });
@@ -582,6 +627,26 @@ self.addEventListener('message', function(event) {
     case 'CLEAR_LOGS':
       loggedCacheHits.clear();
       console.log('[SW] Logs cleared');
+      break;
+
+    // ✅ NEW: Force the waiting SW to take control immediately — used after deploy
+    case 'FORCE_UPDATE':
+      self.skipWaiting();
+      break;
+
+    // ✅ NEW: Invalidate specific URLs so they are re-fetched on next request
+    case 'INVALIDATE_URLS':
+      if (Array.isArray(data.urls)) {
+        event.waitUntil(
+          caches.open(CACHE_NAME).then(function(cache) {
+            return Promise.all(data.urls.map(function(u) {
+              return cache.delete(u).then(function(deleted) {
+                if (deleted) console.log('[SW] Invalidated: ' + u);
+              });
+            }));
+          })
+        );
+      }
       break;
   }
 });

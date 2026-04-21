@@ -1085,6 +1085,134 @@
         .shadow-lg { box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1); }
     </style>
     <link rel="stylesheet" href="/css/vendor/font-awesome.min.css">
+    <!-- ✅ GLOBAL DARK THEME SYSTEM -->
+    <link rel="stylesheet" href="theme.colors.css">
+    <style>
+        /* ── PARENT SHELL: Dark theme overrides ───────────────── */
+        :root {
+            --app-primary-gradient: linear-gradient(135deg, #2563eb 0%, #1d4ed8 62%, #06b6d4 100%);
+            --app-primary-color: #2563eb;
+            --app-primary-dark: #1d4ed8;
+            --app-primary-light: #1e3a8a;
+            --app-secondary-surface: #0f172a;
+            --app-secondary-muted: #374151;
+            --app-accent-color: #8b5cf6;
+            --app-accent-soft: #1e293b;
+            --app-text-color: #e5e7eb;
+            --app-text-secondary: #9ca3af;
+        }
+
+        /* Override loading screen to dark */
+        #loadingScreen {
+            background: #0f172a !important;
+        }
+        #loadingScreen h2 {
+            color: #e5e7eb !important;
+        }
+        #loadingScreen p {
+            color: #9ca3af !important;
+        }
+
+        /* Override global header to dark */
+        #globalHeader {
+            background:
+                linear-gradient(135deg, rgba(15,23,42,0.98), rgba(30,41,59,0.97)),
+                linear-gradient(90deg, rgba(17,24,39,0.2), rgba(14,165,233,0.06)) !important;
+            border-bottom: 1px solid rgba(255,255,255,0.08) !important;
+        }
+
+        .header-module-title {
+            color: #e5e7eb !important;
+        }
+
+        .header-module-subtitle {
+            color: #9ca3af !important;
+        }
+
+        .header-action-btn {
+            background: rgba(255,255,255,0.08) !important;
+            border: 1px solid rgba(255,255,255,0.12) !important;
+            color: #e5e7eb !important;
+        }
+
+        .header-action-btn:hover {
+            background: rgba(255,255,255,0.15) !important;
+            color: #ffffff !important;
+        }
+
+        .profile-trigger {
+            background: rgba(30,41,59,0.8) !important;
+            border-color: rgba(139,92,246,0.4) !important;
+        }
+
+        .profile-trigger:hover {
+            background: rgba(30,41,59,0.95) !important;
+        }
+
+        /* Profile modal dark */
+        .profile-card {
+            background: #1e293b !important;
+            color: #e5e7eb !important;
+        }
+
+        .profile-username {
+            color: #e5e7eb !important;
+        }
+
+        .profile-bio {
+            color: #9ca3af !important;
+        }
+
+        .settings-link-btn {
+            background: #374151 !important;
+            color: #e5e7eb !important;
+        }
+
+        /* Profile edit sheet dark */
+        .profile-edit-sheet {
+            background: #1e293b !important;
+        }
+
+        .profile-edit-header {
+            background: #1e293b !important;
+            border-color: #374151 !important;
+        }
+
+        .profile-edit-header h3 {
+            color: #e5e7eb !important;
+        }
+
+        .profile-edit-close {
+            background: #374151 !important;
+            color: #9ca3af !important;
+        }
+
+        .profile-edit-avatar-hint {
+            color: #9ca3af !important;
+        }
+
+        .profile-edit-field label {
+            color: #9ca3af !important;
+        }
+
+        .profile-edit-field input,
+        .profile-edit-field textarea {
+            background: #0f172a !important;
+            color: #e5e7eb !important;
+            border-color: #374151 !important;
+        }
+
+        .profile-edit-field input:focus,
+        .profile-edit-field textarea:focus {
+            border-color: #2563eb !important;
+            background: #0f172a !important;
+        }
+
+        /* Iframe containers dark bg */
+        .iframe-container {
+            background: #0f172a !important;
+        }
+    </style>
 </head>
 <body>
 
@@ -1935,19 +2063,19 @@
                 const doc = iframe.contentDocument || iframe.contentWindow.document;
                 if (!doc || !doc.body) return;
                 const shellVars = {
-                    '--primary-color': '#2563eb',
-                    '--primary-dark': '#1d4ed8',
-                    '--primary-light': '#dbeafe',
-                    '--secondary-color': '#f8fafc',
-                    '--background-color': '#f1f5f9',
-                    '--surface-color': '#ffffff',
-                    '--card-background': '#ffffff',
-                    '--border-color': '#e5e7eb',
-                    '--text-primary': '#0f172a',
-                    '--text-secondary': '#64748b',
+                    '--primary-color': '#22c55e',
+                    '--primary-dark': '#16a34a',
+                    '--primary-light': '#166534',
+                    '--secondary-color': '#1e293b',
+                    '--background-color': '#0f172a',
+                    '--surface-color': '#1e293b',
+                    '--card-background': '#1e293b',
+                    '--border-color': '#374151',
+                    '--text-primary': '#e5e7eb',
+                    '--text-secondary': '#9ca3af',
                     '--accent-color': '#8b5cf6',
-                    '--accent-soft': '#cffafe',
-                    '--header-gradient': 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 62%, #06b6d4 100%)'
+                    '--accent-soft': '#1e293b',
+                    '--header-gradient': 'linear-gradient(135deg, #0f172a 0%, #1e293b 62%, #0f172a 100%)'
                 };
                 doc.body.setAttribute('data-parent-shell', 'true');
                 doc.body.setAttribute('data-parent-module', page || iframe.dataset.module || '');
@@ -1959,7 +2087,73 @@
                     doc.documentElement?.style?.setProperty(key, value);
                     doc.body?.style?.setProperty(key, value);
                 });
+
+                // Inject global dark theme into this iframe
+                injectDarkThemeIntoIframe(iframe);
             } catch (_error) {}
+        }
+
+        // ======================================================================
+        // DARK THEME INJECTION INTO IFRAMES
+        // Injects theme.colors.css + a <style> block into every child iframe
+        // so ALL modules render consistently in dark mode.
+        // ======================================================================
+        function injectDarkThemeIntoIframe(iframe) {
+            try {
+                if (!iframe || !iframe.contentDocument) return;
+                const doc = iframe.contentDocument;
+                if (!doc || !doc.head) return;
+
+                // Avoid double-injection
+                if (doc.getElementById('kyn-dark-theme-link')) return;
+
+                // 1) Inject theme.colors.css link
+                const link = doc.createElement('link');
+                link.id = 'kyn-dark-theme-link';
+                link.rel = 'stylesheet';
+                link.href = 'theme.colors.css';
+                doc.head.insertBefore(link, doc.head.firstChild);
+
+                // 2) Inject override <style> for hard-coded light values
+                const style = doc.createElement('style');
+                style.id = 'kyn-dark-theme-inline';
+                style.textContent = `
+                    html, body {
+                        background: #0f172a !important;
+                        color: #e5e7eb !important;
+                    }
+                    .app-container, .main-content, .content-area, .page-wrapper {
+                        background: #0f172a !important;
+                    }
+                    :root {
+                        --bg-color: #0f172a !important;
+                        --text-primary: #e5e7eb !important;
+                        --text-secondary: #9ca3af !important;
+                        --border-color: #374151 !important;
+                        --secondary-color: #1e293b !important;
+                        --kynecta-light: #0f172a !important;
+                        --kynecta-dark: #e5e7eb !important;
+                        --kynecta-border: #374151 !important;
+                        --offline-overlay: rgba(15,23,42,0.97) !important;
+                    }
+                    input, textarea, select {
+                        background: #1e293b !important;
+                        color: #e5e7eb !important;
+                        border-color: #374151 !important;
+                    }
+                    input::placeholder, textarea::placeholder {
+                        color: #9ca3af !important;
+                    }
+                `;
+                doc.head.insertBefore(style, doc.head.firstChild);
+
+                // 3) Apply data-theme="dark"
+                doc.documentElement.setAttribute('data-theme', 'dark');
+                if (doc.body) doc.body.setAttribute('data-theme', 'dark');
+
+            } catch (err) {
+                // Cross-origin iframes throw — safe to ignore
+            }
         }
 
         function logProcessStatus(processKey, isSuccess, detail) {
@@ -2128,7 +2322,10 @@
 
             // Iframe load handlers
             document.querySelectorAll('.content-iframe').forEach((iframe) => {
-                iframe.addEventListener('load', () => applyParentShellToIframe(iframe, iframe.dataset.module || 'messages'));
+                iframe.addEventListener('load', () => {
+                    applyParentShellToIframe(iframe, iframe.dataset.module || 'messages');
+                    injectDarkThemeIntoIframe(iframe);
+                });
                 applyParentShellToIframe(iframe, iframe.dataset.module || 'messages');
             });
 
@@ -2497,11 +2694,11 @@
                 '/friends': '/friends',
                 '/friends/requests/incoming': '/friends/incoming',
                 '/friends/requests/sent': '/friends/sent',
-                '/friends/contacts/synced': '/friends/synced',
+                '/friends/contacts/synced': '/friends/contacts/synced',
                 '/friends/pinned': '/friends/pinned',
                 '/friends/muted': '/friends/muted',
                 '/friends/groups/user': '/groups/user',
-                '/friends/requests/send': '/friends/send',
+                '/friends/requests/send': '/friends/requests/send',
                 '/friends/incoming': '/friends/incoming',
                 '/friends/search': '/friends/search',
                 '/friends/users/all': '/friends/users/all',
@@ -2534,9 +2731,57 @@
                 '/api/status/scheduled': '/status/scheduled',
                 '/status/scheduled': '/status/scheduled',
                 '/api/auth/me': '/auth/me',
-                '/calls': '/calls/history',
-                '/calls/': '/calls/history'
+                '/calls/history': '/calls/history'
             };
+
+            function shouldPreferDirectApi(endpoint, method) {
+                const normalizedMethod = String(method || 'GET').toUpperCase();
+                if (normalizedMethod !== 'GET') return true;
+                return ['/groups', '/status', '/calls', '/tools', '/marketplace']
+                    .some(prefix => endpoint === prefix || endpoint.startsWith(prefix + '/'));
+            }
+
+            function shouldRetryDirectApi(endpoint, responsePayload) {
+                if (!responsePayload || responsePayload.success !== false) return false;
+                const errorText = String(responsePayload.error || responsePayload.message || '').toLowerCase();
+                return (
+                    responsePayload.statusCode === 0 ||
+                    responsePayload.statusCode === 408 ||
+                    responsePayload.statusCode === 504 ||
+                    errorText.includes('timeout') ||
+                    errorText.includes('network') ||
+                    errorText.includes('fetch') ||
+                    shouldPreferDirectApi(endpoint, 'GET')
+                );
+            }
+
+            async function directApiRequest(endpoint, method, body, params, token) {
+                const baseUrl = window.__getApiBase ? window.__getApiBase() : 'http://localhost:4000/api';
+                let url = baseUrl + endpoint;
+                if (method === 'GET' && params && typeof params === 'object') {
+                    const queryString = new URLSearchParams(params).toString();
+                    if (queryString) url += '?' + queryString;
+                }
+
+                const headers = { 'Accept': 'application/json' };
+                if (body && !(body instanceof FormData)) headers['Content-Type'] = 'application/json';
+                if (token) headers['Authorization'] = `Bearer ${token}`;
+
+                const fetchOptions = { method, headers, credentials: 'include' };
+                if (body && method !== 'GET') {
+                    fetchOptions.body = body instanceof FormData ? body : JSON.stringify(body);
+                }
+
+                const response = await fetch(url, fetchOptions);
+                const contentType = response.headers.get('content-type') || '';
+                let responseData;
+                if (contentType.includes('application/json')) responseData = await response.json();
+                else responseData = { message: await response.text() || 'Request completed' };
+
+                return response.ok
+                    ? { success: true, data: responseData, statusCode: response.status }
+                    : { success: false, error: responseData?.message || responseData?.error || `HTTP ${response.status}`, statusCode: response.status, data: responseData };
+            }
 
             function getSessionData() {
                 const auth = window.AuthStorage?.getAuth?.() || null;
@@ -2954,6 +3199,13 @@
 
                 const data = event.data || {};
                 if (!data || typeof data !== 'object') return;
+                if (data.type === 'SW_UPDATE_AVAILABLE' || data.type === 'SW_ACTIVATED') {
+                    if (!window.__swReloadPending) {
+                        window.__swReloadPending = true;
+                        setTimeout(() => window.location.reload(), 500);
+                    }
+                    return;
+                }
                 if (data.type) {
                     emitGlobalAppEvent('MODULE_MESSAGE', {
                         type: data.type,
@@ -3090,7 +3342,7 @@
                 // ==================================================================
                 // CALL ACCEPT HANDLER - POST /calls/:id/answer
                 // ==================================================================
-                if (data.type === 'CALL_ACCEPT') {
+                if (data.type === 'CALL_ACCEPT' || data.type === 'call:accept') {
                     const callId = data.payload?.callId;
                     const baseUrl = window.__getApiBase();
                     const token = localStorage.getItem('authToken') || localStorage.getItem('token') || cachedToken;
@@ -3122,7 +3374,7 @@
                 // ==================================================================
                 // CALL REJECT HANDLER - POST /calls/:id/reject
                 // ==================================================================
-                if (data.type === 'CALL_REJECT') {
+                if (data.type === 'CALL_REJECT' || data.type === 'call:reject') {
                     const callId = data.payload?.callId;
                     const baseUrl = window.__getApiBase();
                     const token = localStorage.getItem('authToken') || localStorage.getItem('token') || cachedToken;
@@ -3501,7 +3753,8 @@
                             return;
                         }
                         let responsePayload;
-                        if (window.api?.request?.request) {
+                        const preferDirectApi = shouldPreferDirectApi(endpoint, method);
+                        if (!preferDirectApi && window.api?.request?.request) {
                             const apiResult = await window.api.request.request(method, endpoint, {
                                 data: body,
                                 params,
@@ -3518,25 +3771,9 @@
                                 fallback: !!apiResult?.fallback,
                                 cached: !!apiResult?.cached
                             };
-                        } else {
-                            const baseUrl = window.__getApiBase ? window.__getApiBase() : 'http://localhost:4000/api';
-                            let url = baseUrl + endpoint;
-                            if (method === 'GET' && params && typeof params === 'object') {
-                                const queryString = new URLSearchParams(params).toString();
-                                if (queryString) url += '?' + queryString;
-                            }
-                            const headers = { 'Content-Type': 'application/json', 'Accept': 'application/json' };
-                            if (token) headers['Authorization'] = `Bearer ${token}`;
-                            const fetchOptions = { method: method, headers: headers, credentials: 'include' };
-                            if (body && (method === 'POST' || method === 'PUT' || method === 'PATCH')) fetchOptions.body = JSON.stringify(body);
-                            const response = await fetch(url, fetchOptions);
-                            let responseData;
-                            const contentType = response.headers.get('content-type');
-                            if (contentType && contentType.includes('application/json')) responseData = await response.json();
-                            else responseData = { message: await response.text() || 'Request completed' };
-                            responsePayload = response.ok
-                                ? { success: true, data: responseData, statusCode: response.status }
-                                : { success: false, error: responseData?.message || responseData?.error || `HTTP ${response.status}`, statusCode: response.status, data: responseData };
+                        }
+                        if (preferDirectApi || shouldRetryDirectApi(endpoint, responsePayload)) {
+                            responsePayload = await directApiRequest(endpoint, method, body, params, token);
                         }
                         if (event.source && event.source.postMessage) event.source.postMessage({ type: 'API_RESPONSE', requestId: requestId, payload: responsePayload, timestamp: new Date().toISOString() }, '*');
                     } catch (error) {
@@ -3643,7 +3880,7 @@
                     if (userId) await refreshCallHistoryForUser(userId);
                 }
 
-                if (data.type === 'CALL_INITIATE') {
+                if (data.type === 'CALL_INITIATE' || data.type === 'call:initiate') {
                     const localCallId = data.payload?.callId;
                     const callType = data.payload?.callType || data.payload?.type || 'audio';
                     const calleeId = data.payload?.calleeId;
@@ -3913,6 +4150,19 @@
 
         // DOMContentLoaded handlers
         document.addEventListener('DOMContentLoaded', function() {
+            if ('serviceWorker' in navigator && !window.__chatSwListenerBound) {
+                window.__chatSwListenerBound = true;
+                navigator.serviceWorker.addEventListener('message', function(evt) {
+                    if (!evt.data) return;
+                    if (evt.data.type === 'SW_ACTIVATED' || evt.data.type === 'SW_UPDATE_AVAILABLE') {
+                        if (!window.__swReloadPending) {
+                            window.__swReloadPending = true;
+                            setTimeout(() => window.location.reload(), 500);
+                        }
+                    }
+                });
+            }
+
             updateHeaderContext(window.__currentPage || 'messages');
             updateHeaderActions(window.__currentPage || 'messages');
             loadUserProfileFromStorage();

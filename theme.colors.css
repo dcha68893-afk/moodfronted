@@ -1,639 +1,784 @@
-/* ================================================================
-   GLOBAL COLOR THEME SYSTEM — ALL MODULES
-   ================================================================
-   COLOR ROLES:
-   • Primary   = Communication (GREEN)  — chat bubbles, online, call buttons, group
-   • Secondary = Structure/Navigation (BLUE) — headers, active tabs, nav
-   • Accent    = Marketplace (PURPLE/ORANGE) — buy buttons, tags, marketplace
-   • Status    = Stories/Updates (gradient) — story rings, profile rings
-   • Friend    = Social/Contact (WHITE/GRAY) — friend cards, contacts UI
-   ================================================================ */
+/* ============================================================
+   KYNECTA — GLOBAL DARK THEME SYSTEM
+   theme.colors.css · v1.1 (safe visibility fix)
+   ============================================================
+   Single source of truth for ALL modules.
+   Imported by chat.html and injected into every iframe.
+   DO NOT override these in module-level CSS without
+   using a more-specific selector.
+   ============================================================ */
 
-:root {
-  /* ── PRIMARY: Communication — Green ── */
-  --color-primary: #22c55e;
-  --color-primary-dark: #16a34a;
-  --color-primary-light: rgba(34, 197, 94, 0.12);
-  --color-primary-mid: rgba(34, 197, 94, 0.25);
+/* ── 1. CSS Custom Properties (Dark Palette) ─────────────── */
+:root,
+html[data-theme="dark"],
+body[data-theme="dark"] {
 
-  /* ── SECONDARY: Structure & Navigation — Blue ── */
-  --color-secondary: #3b82f6;
-  --color-secondary-dark: #1d4ed8;
-  --color-secondary-light: rgba(59, 130, 246, 0.12);
-  --color-secondary-mid: rgba(59, 130, 246, 0.25);
+  /* Global backgrounds */
+  --kyn-bg-root:          #0f172a;
+  --kyn-bg-chat:          #020617;
+  --kyn-bg-panel:         #1e293b;
+  --kyn-bg-card:          #1e293b;
+  --kyn-bg-input:         #1e293b;
+  --kyn-bg-sidebar:       #0f172a;
+  --kyn-bg-header:        #0f172a;
+  --kyn-bg-modal:         #1e293b;
+  --kyn-bg-overlay:       rgba(0, 0, 0, 0.65);
+  --kyn-bg-hover:         rgba(255, 255, 255, 0.06);
+  --kyn-bg-active:        rgba(255, 255, 255, 0.10);
 
-  /* ── ACCENT: Marketplace — Purple & Orange ── */
-  --color-accent-purple: #8b5cf6;
-  --color-accent-purple-dark: #6d28d9;
-  --color-accent-orange: #f97316;
-  --color-accent-orange-dark: #c2410c;
-  --color-accent-light: rgba(139, 92, 246, 0.12);
-  --marketplace-gradient: linear-gradient(135deg, #8b5cf6 0%, #f97316 100%);
-  --marketplace-gradient-soft: linear-gradient(135deg, rgba(139,92,246,0.15) 0%, rgba(249,115,22,0.15) 100%);
+  /* Text */
+  --kyn-text-primary:     #e5e7eb;
+  --kyn-text-secondary:   #9ca3af;
+  --kyn-text-muted:       #6b7280;
+  --kyn-text-inverse:     #0f172a;
+  --kyn-text-placeholder: #9ca3af;
 
-  /* ── STATUS: Stories — Yellow → Pink → Purple ── */
-  --story-ring: linear-gradient(45deg, #facc15, #ec4899, #8b5cf6);
-  --story-ring-alt: linear-gradient(135deg, #fbbf24 0%, #f472b6 50%, #a78bfa 100%);
-  --viewed-story-ring: #d1d5db;
+  /* Borders */
+  --kyn-border:           #374151;
+  --kyn-border-light:     rgba(255,255,255,0.08);
+  --kyn-border-strong:    #4b5563;
 
-  /* ── FRIEND: Social — White/Gray ── */
-  --color-friend-bg: #f9fafb;
-  --color-friend-card: #ffffff;
-  --color-friend-border: #e5e7eb;
-  --color-friend-muted: #9ca3af;
+  /* Accents */
+  --kyn-accent-primary:   #22c55e;
+  --kyn-accent-secondary: #2563eb;
+  --kyn-accent-danger:    #ef4444;
+  --kyn-accent-warning:   #f59e0b;
+  --kyn-accent-info:      #38bdf8;
+  --kyn-accent-purple:    #8b5cf6;
 
-  /* ── HEADER GRADIENTS per module ── */
-  --header-chat:    linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
-  --header-calls:   linear-gradient(135deg, #22c55e 0%, #16a34a 100%);
-  --header-groups:  linear-gradient(135deg, #22c55e 0%, #059669 100%);
-  --header-friends: linear-gradient(135deg, #f9fafb 0%, #e5e7eb 100%);
-  --header-status:  linear-gradient(135deg, #facc15 0%, #ec4899 60%, #8b5cf6 100%);
-  --header-marketplace: linear-gradient(135deg, #8b5cf6 0%, #f97316 100%);
-  --header-settings: linear-gradient(135deg, #3b82f6 0%, #6366f1 100%);
+  /* Chat bubbles */
+  --kyn-bubble-sent:      #005c4b;
+  --kyn-bubble-sent-text: #e5e7eb;
+  --kyn-bubble-recv:      #1e293b;
+  --kyn-bubble-recv-text: #e5e7eb;
 
-  /* ── CALL BUTTONS (green, per spec) ── */
-  --call-accept-bg: #22c55e;
-  --call-accept-hover: #16a34a;
-  --call-end-bg: #ef4444;
-  --call-video-bg: #22c55e;
+  /* Scrollbar */
+  --kyn-scrollbar-track:  #1e293b;
+  --kyn-scrollbar-thumb:  #374151;
 
-  /* ── ONLINE INDICATOR (green) ── */
-  --online-color: #22c55e;
-  --away-color: #f59e0b;
-  --offline-color: #9ca3af;
+  /* Elevation */
+  --kyn-shadow-sm:        0 2px 8px rgba(0,0,0,0.4);
+  --kyn-shadow-md:        0 8px 24px rgba(0,0,0,0.5);
+  --kyn-shadow-lg:        0 16px 48px rgba(0,0,0,0.6);
 
-  /* ── CHAT BUBBLES (green sent, gray received) ── */
-  --bubble-sent-bg: #22c55e;
-  --bubble-sent-text: #ffffff;
-  --bubble-received-bg: #f3f4f6;
-  --bubble-received-text: #111827;
-
-  /* ── ACTIVE TABS & NAV (blue) ── */
-  --tab-active-color: #3b82f6;
-  --tab-active-border: #3b82f6;
-  --nav-active-bg: rgba(59, 130, 246, 0.1);
-
-  /* ── GLOBAL SHADOWS & RADIUS ── */
-  --shadow-sm: 0 1px 4px rgba(0,0,0,0.08);
-  --shadow-md: 0 4px 12px rgba(0,0,0,0.12);
-  --shadow-lg: 0 10px 30px rgba(0,0,0,0.16);
+  /* Gradients */
+  --kyn-gradient-primary: linear-gradient(135deg, #2563eb 0%, #1d4ed8 62%, #06b6d4 100%);
+  --kyn-gradient-sidebar: linear-gradient(180deg, #0f172a 0%, #1e293b 100%);
+  --kyn-gradient-header:  linear-gradient(135deg, rgba(15,23,42,0.97), rgba(30,41,59,0.97));
 }
 
-/* ================================================================
-   MODULE HEADER BARS — BLUE for navigation, GREEN for communication
-   ================================================================ */
+/* ── 2. Base Reset (Dark) ─────────────────────────────────── */
+html, body {
+  background: var(--kyn-bg-root) !important;
+  color:      var(--kyn-text-primary) !important;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
 
-/* Chat / Messages header → BLUE (navigation) */
-.sidebar-header,
+/* ── 3. Typography ────────────────────────────────────────── */
+h1, h2, h3, h4, h5, h6 {
+  color: var(--kyn-text-primary) !important;
+}
+
+p, span, div, li, td, th, label, small {
+  color: inherit;
+}
+
+a {
+  color: var(--kyn-accent-secondary);
+}
+
+a:hover {
+  color: var(--kyn-accent-primary);
+}
+
+/* ── 4. Panels, Cards & Containers ───────────────────────── */
+.panel,
+.card,
+.sidebar,
+.app-sidebar,
+.desktop-sidebar,
+.left-panel,
+.right-panel,
+.chat-sidebar,
+.contacts-panel,
+.settings-panel,
+[class*="panel"],
+[class*="sidebar"],
+[class*="card"] {
+  background: var(--kyn-bg-panel) !important;
+  border-color: var(--kyn-border) !important;
+  color: var(--kyn-text-primary) !important;
+}
+
+/* ── 5. Headers & Toolbars ────────────────────────────────── */
+header,
+.header,
+.top-bar,
+.toolbar,
+.app-header,
 .chat-header,
-.new-chat-header,
-.new-call-header {
-  background: var(--header-chat) !important;
+.module-header,
+[class*="header"],
+[class*="topbar"],
+[class*="top-bar"] {
+  background: var(--kyn-bg-header) !important;
+  border-color: var(--kyn-border) !important;
+  color: var(--kyn-text-primary) !important;
 }
 
-/* Calls sidebar header → GREEN (communication) */
-.sidebar-header.calls-header,
-body[data-module="calls"] .sidebar-header {
-  background: var(--header-calls) !important;
+/* ── 6. Inputs & Forms ────────────────────────────────────── */
+input,
+textarea,
+select {
+  background: var(--kyn-bg-input) !important;
+  color: var(--kyn-text-primary) !important;
+  border: 1px solid var(--kyn-border) !important;
+  outline: none;
 }
 
-/* Groups sidebar header → GREEN (communication) */
-body[data-module="groups"] .sidebar-header,
-.create-group-header {
-  background: var(--header-groups) !important;
+input:focus,
+textarea:focus,
+select:focus {
+  border-color: var(--kyn-accent-secondary) !important;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.18) !important;
 }
 
-/* Status sidebar header → story gradient */
-body[data-module="status"] .sidebar-header,
-.create-status-header {
-  background: var(--header-status) !important;
+input::placeholder,
+textarea::placeholder {
+  color: var(--kyn-text-placeholder) !important;
+  opacity: 1 !important;
 }
 
-/* Marketplace / Tools header → purple-orange accent */
-body[data-module="marketplace"] .sidebar-header,
-.create-listing-header,
-body[data-module="marketplace"] .sidebar-header {
-  background: var(--header-marketplace) !important;
+input[type="search"]::placeholder {
+  color: var(--kyn-text-muted) !important;
 }
 
-/* Settings header → blue (structure) */
-.settings-header,
-body[data-module="settings"] .sidebar-header {
-  background: var(--header-settings) !important;
+/* Search inputs */
+.search-input,
+[class*="search"] input,
+[type="search"] {
+  background: var(--kyn-bg-panel) !important;
+  color: var(--kyn-text-primary) !important;
+  border-color: var(--kyn-border) !important;
 }
 
-/* Friends header → white/gray (friend role) */
-body[data-module="friends"] .sidebar-header {
-  background: var(--header-friends) !important;
-  color: #374151 !important;
+/* ── 7. Buttons ───────────────────────────────────────────── */
+button {
+  color: var(--kyn-text-primary);
 }
 
-body[data-module="friends"] .sidebar-header h2 {
-  color: #374151 !important;
+/* Primary action buttons */
+.btn-primary,
+.primary-btn,
+[class*="btn-primary"],
+[class*="primary-btn"] {
+  background: var(--kyn-accent-primary) !important;
+  color: #ffffff !important;
+  border: none !important;
 }
 
-body[data-module="friends"] .add-friend-btn {
-  background-color: rgba(0, 0, 0, 0.08) !important;
-  color: #374151 !important;
-  border-color: rgba(0,0,0,0.15) !important;
-}
-
-/* ================================================================
-   ACTIVE TABS — BLUE (secondary/navigation role)
-   ================================================================ */
-
-.category-btn.active,
-.category-tab.active,
-.panel-tab.active,
-.new-call-tab.active,
-.create-group-tab.active,
-.create-listing-tab.active,
-.create-status-tab.active,
-.add-friend-tab.active,
-.admin-management-tab.active {
-  color: var(--color-secondary) !important;
-  border-bottom-color: var(--color-secondary) !important;
-}
-
-.category-btn .badge,
-.category-tab .badge {
-  background-color: var(--color-secondary) !important;
-}
-
-/* Settings active menu item → blue */
-.menu-item.active {
-  border-left-color: var(--color-secondary) !important;
-}
-
-.menu-item.active .menu-icon {
-  color: var(--color-secondary) !important;
-}
-
-.menu-item.active .menu-badge {
-  background-color: var(--color-secondary) !important;
-}
-
-/* ================================================================
-   CHAT BUBBLES — GREEN (primary/communication)
-   ================================================================ */
-
-.message-bubble.sent,
-.message.sent .message-bubble,
-.chat-message.sent {
-  background-color: var(--bubble-sent-bg) !important;
-  color: var(--bubble-sent-text) !important;
-}
-
-.message-bubble.received,
-.message.received .message-bubble,
-.chat-message.received {
-  background-color: var(--bubble-received-bg) !important;
-  color: var(--bubble-received-text) !important;
-}
-
-/* Group chat inline messages */
-.message.sent {
-  background-color: var(--bubble-sent-bg) !important;
-  color: var(--bubble-sent-text) !important;
-}
-
-/* ================================================================
-   ONLINE / OFFLINE INDICATORS — GREEN
-   ================================================================ */
-
-.friend-status.online,
-.chat-status.online,
-.status-indicator.online,
-.participant-status.active,
-.user-status .status-indicator,
-.my-status-indicator:not(.viewed) {
-  background-color: var(--online-color) !important;
-}
-
-.friend-status.away {
-  background-color: var(--away-color) !important;
-}
-
-/* ================================================================
-   CALL BUTTONS — GREEN (primary/communication)
-   ================================================================ */
-
-/* Accept / audio call / video call buttons */
-.control-btn:not(.danger),
-.incoming-call-actions .call-action-btn:not(.danger),
-.call-control-btn.primary,
-.quick-action-icon {
-  color: var(--color-primary) !important;
-}
-
-/* The green accept button */
-.control-btn.active,
-.call-accept-btn {
-  background-color: var(--call-accept-bg) !important;
-}
-
-/* ================================================================
-   GROUP INDICATORS / AVATARS — GREEN tint
-   ================================================================ */
-
-.group-action-btn.chat,
-.friend-action-btn.chat {
-  color: var(--color-primary) !important;
-}
-
-.group-action-btn.chat:hover:not(:disabled),
-.friend-action-btn.chat:hover:not(:disabled) {
-  background-color: var(--color-primary-light) !important;
-}
-
-/* Group type badge - public groups get green */
-.group-type-badge.public {
-  background-color: var(--color-primary) !important;
-}
-
-/* ================================================================
-   PRIMARY COLOR OVERRIDES → GREEN
-   (replaces all legacy --primary-color: #0084ff uses)
-   ================================================================ */
-
-/* Inputs focus ring */
-.search-input:focus,
-.text-input:focus,
-.notes-textarea:focus,
-.message-input:focus,
-.chat-input:focus,
-.setting-input:focus,
-.setting-textarea:focus,
-.textarea-input:focus,
-.private-notes-textarea:focus {
-  border-color: var(--color-primary) !important;
-}
-
-/* Toggle switches → green */
-input:checked + .toggle-slider {
-  background-color: var(--color-primary) !important;
-}
-
-/* Unread badge in messages list */
-.chat-item-unread {
-  background-color: var(--color-primary) !important;
-}
-
-/* Send button → green */
-.send-button,
-.send-reply-btn,
-.chat-input-btn.send {
-  background-color: var(--color-primary) !important;
-}
-
-.send-button:hover:not(:disabled),
-.send-reply-btn:hover {
-  background-color: var(--color-primary-dark) !important;
-}
-
-/* Loading spinners → green */
-.loading-spinner {
-  border-top-color: var(--color-primary) !important;
-  border-color: var(--color-primary-light) !important;
-  border-top-color: var(--color-primary) !important;
-}
-
-/* Jump to latest button */
-.jump-to-latest {
-  background-color: var(--color-primary) !important;
-}
-
-/* Audio progress */
-.audio-progress,
-.audio-play-btn {
-  background-color: var(--color-primary) !important;
-}
-
-/* Poll selected */
-.poll-option.selected {
-  border-color: var(--color-primary) !important;
-  background-color: var(--color-primary-light) !important;
-}
-
-.poll-bar {
-  background-color: var(--color-primary) !important;
-}
-
-/* Thread count badge */
-.thread-count {
-  background-color: var(--color-primary) !important;
-}
-
-/* Reply border */
-.reply-wrapper {
-  border-left-color: var(--color-primary) !important;
-}
-
-/* Note item border */
-.note-item {
-  border-left-color: var(--color-primary) !important;
-}
-
-/* Selected contact */
-.contact-item.selected {
-  border-color: var(--color-primary) !important;
-}
-
-/* Leaderboard rank */
-.leaderboard-rank {
-  color: var(--color-primary) !important;
-}
-
-/* Analytics card value */
-.analytics-card-value {
-  color: var(--color-primary) !important;
-}
-
-/* ================================================================
-   SECONDARY (BLUE) — Structural & Navigation elements
-   ================================================================ */
-
-/* Primary action buttons (non-call, structural actions) */
-.action-btn.primary,
-.my-listing-action-btn.primary,
-.admin-action-btn.primary,
-.friend-request-btn.accept ~ .action-btn,
-.offline-dismiss-btn,
-.camera-btn:not(.secondary):not(.danger) {
-  background-color: var(--color-secondary) !important;
+.btn-primary:hover,
+.primary-btn:hover {
+  background: #16a34a !important;
   color: #ffffff !important;
 }
 
-.action-btn.primary:hover,
-.admin-action-btn.primary:hover {
-  background-color: var(--color-secondary-dark) !important;
+/* Secondary action buttons */
+.btn-secondary,
+.secondary-btn {
+  background: var(--kyn-bg-panel) !important;
+  color: var(--kyn-text-primary) !important;
+  border: 1px solid var(--kyn-border) !important;
 }
 
-/* Settings save/primary button */
-.setting-button.primary,
-.content-actions .action-btn.primary {
-  background-color: var(--color-secondary) !important;
-  border-color: var(--color-secondary) !important;
-}
-
-.setting-button.primary:hover {
-  background-color: var(--color-secondary-dark) !important;
-}
-
-/* File icon, attachment icon */
-.file-icon,
-.file-download,
-.attachment-icon {
-  color: var(--color-secondary) !important;
-}
-
-/* Chat action buttons (phone icon, video icon in header) */
-.chat-action-btn,
-.call-action-btn,
-.friend-action-btn.call {
-  color: var(--color-secondary) !important;
-}
-
-.friend-action-btn.call:hover:not(:disabled) {
-  background-color: var(--color-secondary-light) !important;
-}
-
-/* ================================================================
-   MARKETPLACE / ACCENT — Purple & Orange
-   ================================================================ */
-
-/* Buy buttons */
-.action-btn.primary[data-action="buy"],
-.listing-price,
-.saved-item-price,
-.listing-detail-price {
-  background-color: var(--color-accent-purple) !important;
+/* Danger buttons */
+.btn-danger,
+.danger-btn,
+[class*="btn-danger"] {
+  background: var(--kyn-accent-danger) !important;
   color: #ffffff !important;
 }
 
-.listing-price,
-.saved-item-price,
-.listing-detail-price {
-  background-color: var(--color-accent-purple) !important;
+/* Icon buttons */
+.icon-btn,
+.action-btn,
+[class*="icon-btn"],
+[class*="action-btn"] {
+  color: var(--kyn-text-secondary) !important;
+  background: transparent;
 }
 
-/* Marketplace category active tab */
-.marketplace-category-btn.active {
-  color: var(--color-accent-purple) !important;
-  border-bottom-color: var(--color-accent-purple) !important;
+.icon-btn:hover,
+.action-btn:hover,
+[class*="icon-btn"]:hover,
+[class*="action-btn"]:hover {
+  color: var(--kyn-text-primary) !important;
+  background: var(--kyn-bg-hover) !important;
 }
 
-/* Spotlight section accent */
-.spotlight-header {
-  color: var(--color-accent-orange) !important;
+/* ── 8. Icons ─────────────────────────────────────────────── */
+/*
+  FIX: Removed `svg { fill: currentColor }` from the global rule.
+  Applying fill globally to svg broke FontAwesome SVG icons whose
+  internal <path> elements rely on their own fill attributes.
+  Instead, color inheritance is handled via `color: inherit` only,
+  which is safe for icon-font (i.fa*) icons.
+*/
+i,
+.fa,
+.fas,
+.far,
+.fab,
+.fal,
+.fad {
+  color: inherit;
+  opacity: 0.9;
 }
 
-/* Service tags */
-.availability-free {
-  background: linear-gradient(45deg, var(--color-primary), #10b981) !important;
+/* Icon buttons — ensure visibility */
+button i,
+a i,
+.nav-icon i,
+.action-icon i,
+[class*="icon"] i {
+  color: inherit !important;
 }
 
-.availability-busy {
-  background: linear-gradient(45deg, var(--color-accent-orange), #ef4444) !important;
+/* ── 9. Lists & Contacts ──────────────────────────────────── */
+.list-item,
+.contact-item,
+.chat-item,
+.friend-item,
+.call-item,
+[class*="list-item"],
+[class*="contact-item"],
+[class*="chat-item"] {
+  background: transparent !important;
+  color: var(--kyn-text-primary) !important;
+  border-color: var(--kyn-border) !important;
 }
 
-/* Trust indicators in marketplace */
-.trust-responsive {
-  background-color: var(--color-secondary-light) !important;
-  color: var(--color-secondary) !important;
-  border-color: rgba(59, 130, 246, 0.2) !important;
+.list-item:hover,
+.contact-item:hover,
+.chat-item:hover,
+.friend-item:hover,
+.call-item:hover {
+  background: var(--kyn-bg-hover) !important;
 }
 
-/* ================================================================
-   STATUS / STORIES — Yellow → Pink → Purple gradient rings
-   ================================================================ */
-
-/* Story ring on all avatars */
-.my-status-avatar-ring:not(.viewed),
-.status-ring:not(.viewed) {
-  background: var(--story-ring) !important;
+.list-item.active,
+.contact-item.active,
+.chat-item.active,
+[class*="list-item"].active,
+[class*="chat-item"].active {
+  background: var(--kyn-bg-active) !important;
 }
 
-.my-status-avatar-ring.viewed,
-.status-ring.viewed {
-  background: var(--viewed-story-ring) !important;
+/* Secondary text within items */
+.list-item .subtitle,
+.list-item .meta,
+.list-item small,
+.contact-item .subtitle,
+.chat-item .last-message,
+.chat-item .timestamp,
+[class*="subtitle"],
+[class*="last-message"],
+[class*="timestamp"] {
+  color: var(--kyn-text-secondary) !important;
 }
 
-/* Status tags */
-.status-tag.mood {
-  background-color: rgba(250, 204, 21, 0.12) !important;
-  color: #ca8a04 !important;
+/* ── 10. Modals & Overlays ────────────────────────────────── */
+.modal,
+.dialog,
+.popup,
+.sheet,
+.bottom-sheet,
+[class*="modal"],
+[class*="dialog"],
+[class*="popup"] {
+  background: var(--kyn-bg-modal) !important;
+  color: var(--kyn-text-primary) !important;
+  border-color: var(--kyn-border) !important;
 }
 
-.status-tag.intent {
-  background-color: rgba(139, 92, 246, 0.12) !important;
-  color: var(--color-accent-purple) !important;
+.modal-overlay,
+.modal-backdrop,
+.overlay,
+[class*="overlay"],
+[class*="backdrop"] {
+  background: var(--kyn-bg-overlay) !important;
 }
 
-/* Create status header */
-.create-status-header {
-  background: var(--story-ring-alt) !important;
+.modal-header,
+.dialog-header,
+.sheet-header,
+[class*="modal-header"],
+[class*="sheet-header"] {
+  background: var(--kyn-bg-panel) !important;
+  border-color: var(--kyn-border) !important;
+  color: var(--kyn-text-primary) !important;
 }
 
-/* ================================================================
-   FRIEND MODULE — White/Gray palette
-   ================================================================ */
-
-/* Friend list background */
-body[data-module="friends"] .friend-item {
-  background-color: var(--color-friend-card) !important;
-  border-color: var(--color-friend-border);
+/* ── 11. Scrollbars ───────────────────────────────────────── */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
 }
 
-body[data-module="friends"] .friend-item:hover {
-  background-color: #f3f4f6 !important;
+::-webkit-scrollbar-track {
+  background: var(--kyn-scrollbar-track);
 }
 
-/* Mutual friends count badge */
-.mutual-friends,
-.mutual-friends-count {
-  background-color: #f3f4f6 !important;
-  color: #374151 !important;
+::-webkit-scrollbar-thumb {
+  background: var(--kyn-scrollbar-thumb);
+  border-radius: 3px;
 }
 
-.mutual-friends:hover,
-.mutual-friends-count:hover {
-  background-color: #e5e7eb !important;
+::-webkit-scrollbar-thumb:hover {
+  background: var(--kyn-border-strong);
 }
 
-/* Friend category badges keep their original colors */
-.friend-category-badge.acquaintance { background-color: #8e8e93 !important; }
-.friend-category-badge.friend       { background-color: var(--color-primary) !important; }
-.friend-category-badge.close-friend { background-color: var(--color-secondary) !important; }
-.friend-category-badge.family       { background-color: #f43f5e !important; }
-.friend-category-badge.business     { background-color: var(--color-accent-orange) !important; }
-
-/* Friend action buttons */
-.friend-action-btn {
-  color: var(--color-secondary) !important;
+/* ── 12. Dividers & Separators ────────────────────────────── */
+hr,
+.divider,
+.separator,
+[class*="divider"],
+[class*="separator"] {
+  border-color: var(--kyn-border) !important;
+  background-color: var(--kyn-border) !important;
 }
 
-.friend-action-btn.success,
-.friend-action-btn.chat {
-  color: var(--color-primary) !important;
+/* ── 13. Badges & Tags ────────────────────────────────────── */
+.badge,
+.tag,
+.chip,
+.pill,
+[class*="badge"],
+[class*="tag"],
+[class*="chip"] {
+  background: var(--kyn-bg-active) !important;
+  color: var(--kyn-text-primary) !important;
 }
 
-/* ================================================================
-   DARK MODE OVERRIDES
-   ================================================================ */
+.badge-success  { background: var(--kyn-accent-primary)   !important; color: #fff !important; }
+.badge-danger   { background: var(--kyn-accent-danger)    !important; color: #fff !important; }
+.badge-info     { background: var(--kyn-accent-secondary) !important; color: #fff !important; }
+.badge-warning  { background: var(--kyn-accent-warning)   !important; color: #fff !important; }
 
-[data-theme="dark"] {
-  --bubble-sent-bg: #16a34a;
-  --bubble-received-bg: #374151;
-  --bubble-received-text: #f9fafb;
-  --color-friend-bg: #1f2937;
-  --color-friend-card: #111827;
-  --color-friend-border: #374151;
+/* ── 14. Dropdowns & Menus ────────────────────────────────── */
+.dropdown,
+.dropdown-menu,
+.context-menu,
+.popup-menu,
+[class*="dropdown"],
+[class*="context-menu"],
+[class*="popup-menu"] {
+  background: var(--kyn-bg-panel) !important;
+  border: 1px solid var(--kyn-border) !important;
+  color: var(--kyn-text-primary) !important;
+  box-shadow: var(--kyn-shadow-md) !important;
 }
 
-[data-theme="dark"] .message-bubble.sent,
-[data-theme="dark"] .message.sent .message-bubble {
-  background-color: #16a34a !important;
+.dropdown-item,
+.menu-item,
+[class*="dropdown-item"],
+[class*="menu-item"] {
+  color: var(--kyn-text-primary) !important;
+  background: transparent !important;
 }
 
-[data-theme="dark"] .message-bubble.received,
-[data-theme="dark"] .message.received .message-bubble {
-  background-color: #374151 !important;
-  color: #f9fafb !important;
+.dropdown-item:hover,
+.menu-item:hover {
+  background: var(--kyn-bg-hover) !important;
 }
 
-/* ================================================================
-   MOBILE VIEW — ensure consistent colors on small screens
-   ================================================================ */
-
-@media (max-width: 768px) {
-  /* Mobile header keeps module-specific gradient */
-  .sidebar-header {
-    /* inherits gradient from above */
-    flex-shrink: 0;
-  }
-
-  /* Active tab indicator stays blue on mobile */
-  .category-btn.active,
-  .category-tab.active {
-    color: var(--color-secondary) !important;
-    border-bottom-color: var(--color-secondary) !important;
-  }
-
-  /* Chat bubbles stay green on mobile */
-  .message-bubble.sent,
-  .message.sent .message-bubble {
-    background-color: var(--bubble-sent-bg) !important;
-    color: var(--bubble-sent-text) !important;
-  }
-
-  /* Story rings stay gradient on mobile */
-  .my-status-avatar-ring:not(.viewed),
-  .status-ring:not(.viewed) {
-    background: var(--story-ring) !important;
-  }
-
-  /* Online dots stay green */
-  .friend-status.online,
-  .chat-status.online {
-    background-color: var(--online-color) !important;
-  }
-
-  /* Call buttons stay green */
-  .quick-action-icon {
-    color: var(--color-primary) !important;
-  }
+/* ── 15. Tables ───────────────────────────────────────────── */
+table {
+  border-color: var(--kyn-border) !important;
 }
 
-@media (max-width: 480px) {
-  /* Even on very small screens, color roles are preserved */
-  .send-button {
-    background-color: var(--color-primary) !important;
-  }
+th {
+  background: var(--kyn-bg-panel) !important;
+  color: var(--kyn-text-secondary) !important;
+  border-color: var(--kyn-border) !important;
 }
 
-/* ================================================================
-   OVERRIDES FOR LEGACY --primary-color VARIABLE REFERENCES
-   These ensure any inline or JS-set styles using old blue primary
-   are overridden for communication elements
-   ================================================================ */
-
-/* Legacy variable bridge — module will still reference --primary-color
-   but for communication elements we inject our green */
-.message-bubble.sent { background-color: var(--bubble-sent-bg) !important; }
-.chat-input-btn.send  { background-color: var(--color-primary) !important; }
-.quick-action-icon    { color: var(--color-primary) !important; }
-.friend-status.online { background-color: var(--online-color) !important; }
-.chat-status.online   { background-color: var(--online-color) !important; }
-
-/* Group member count badge → green */
-.member-count {
-  color: var(--color-primary) !important;
-  background-color: var(--color-primary-light) !important;
+td {
+  color: var(--kyn-text-primary) !important;
+  border-color: var(--kyn-border) !important;
 }
 
-/* Reaction active state */
-.reaction.active {
-  background-color: var(--color-primary) !important;
+tr:hover td {
+  background: var(--kyn-bg-hover) !important;
 }
 
-/* Format btn active */
-.format-btn.active {
-  background-color: var(--color-secondary) !important;
+/* ── 16. Calls Module ─────────────────────────────────────── */
+.call-screen,
+.video-screen,
+.call-container,
+.video-container,
+[class*="call-screen"],
+[class*="video-screen"] {
+  background: var(--kyn-bg-chat) !important;
+  color: var(--kyn-text-primary) !important;
 }
 
-/* Status action buttons */
-.status-action-btn {
-  color: var(--color-primary) !important;
+.call-controls,
+[class*="call-controls"] {
+  background: rgba(15, 23, 42, 0.85) !important;
+  backdrop-filter: blur(12px);
 }
 
-/* Group action buttons */
-.group-action-btn {
-  color: var(--color-primary) !important;
+/* ── 17. Settings Module ──────────────────────────────────── */
+.settings-section,
+.settings-group,
+.settings-row,
+[class*="settings-section"],
+[class*="settings-group"],
+[class*="settings-row"] {
+  background: var(--kyn-bg-panel) !important;
+  border-color: var(--kyn-border) !important;
+  color: var(--kyn-text-primary) !important;
 }
 
-/* Input focus consistent */
-input:focus + .toggle-slider,
-.search-input:focus {
-  border-color: var(--color-primary) !important;
+/* Settings label */
+.settings-label,
+.setting-label,
+[class*="settings-label"] {
+  color: var(--kyn-text-primary) !important;
+}
+
+.settings-description,
+.setting-description,
+[class*="settings-desc"] {
+  color: var(--kyn-text-secondary) !important;
+}
+
+/* Toggles */
+.toggle-off,
+.switch[aria-checked="false"],
+input[type="checkbox"]:not(:checked) + .toggle {
+  background: var(--kyn-border) !important;
+}
+
+.toggle-on,
+.switch[aria-checked="true"],
+input[type="checkbox"]:checked + .toggle {
+  background: var(--kyn-accent-primary) !important;
+}
+
+/* ── 18. Status / Stories Module ──────────────────────────── */
+.status-item,
+.story-item,
+[class*="status-item"],
+[class*="story-item"] {
+  background: var(--kyn-bg-panel) !important;
+  color: var(--kyn-text-primary) !important;
+}
+
+/* ── 19. Friends Module ───────────────────────────────────── */
+.friend-card,
+.user-card,
+.profile-card-small,
+[class*="friend-card"],
+[class*="user-card"] {
+  background: var(--kyn-bg-panel) !important;
+  border-color: var(--kyn-border) !important;
+  color: var(--kyn-text-primary) !important;
+}
+
+/* ── 20. Groups Module ────────────────────────────────────── */
+.group-card,
+.group-item,
+[class*="group-card"],
+[class*="group-item"] {
+  background: var(--kyn-bg-panel) !important;
+  border-color: var(--kyn-border) !important;
+  color: var(--kyn-text-primary) !important;
+}
+
+/* ── 21. Tools / Marketplace Module ──────────────────────── */
+.tool-card,
+.listing-card,
+.marketplace-item,
+[class*="tool-card"],
+[class*="listing-card"] {
+  background: var(--kyn-bg-panel) !important;
+  border-color: var(--kyn-border) !important;
+  color: var(--kyn-text-primary) !important;
+}
+
+/* ── 22. Empty States & Placeholders ─────────────────────── */
+.empty-state,
+.no-results,
+.placeholder-text,
+[class*="empty-state"],
+[class*="no-results"] {
+  color: var(--kyn-text-muted) !important;
+}
+
+/* ── 23. Loading Indicators ───────────────────────────────── */
+.skeleton,
+.loading-placeholder,
+[class*="skeleton"] {
+  background: linear-gradient(
+    90deg,
+    var(--kyn-bg-panel) 25%,
+    var(--kyn-border) 50%,
+    var(--kyn-bg-panel) 75%
+  ) !important;
+  background-size: 200% 100% !important;
+  animation: kynSkeletonShimmer 1.4s ease infinite !important;
+}
+
+@keyframes kynSkeletonShimmer {
+  0%   { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+/* ── 24. Notifications ────────────────────────────────────── */
+.notification,
+.toast,
+.alert,
+.snackbar,
+[class*="notification"],
+[class*="toast"],
+[class*="alert"] {
+  background: var(--kyn-bg-panel) !important;
+  color: var(--kyn-text-primary) !important;
+  border-left: 3px solid var(--kyn-accent-primary) !important;
+  box-shadow: var(--kyn-shadow-md) !important;
+}
+
+/* ── 25. Avatars / Profile Images ─────────────────────────── */
+.avatar,
+.profile-pic,
+.user-avatar,
+[class*="avatar"],
+[class*="profile-pic"] {
+  background: var(--kyn-bg-active) !important;
+}
+
+/* ── 26. Override any white/light backgrounds left behind ─── */
+/* Use a weaker specificity so module-specific themed elements
+   (e.g. chat bubble colours) still win */
+[style*="background: white"],
+[style*="background:#fff"],
+[style*="background: #fff"],
+[style*="background-color: white"],
+[style*="background-color:#fff"],
+[style*="background-color: #fff"],
+[style*="background-color: #ffffff"],
+[style*="background-color:#ffffff"] {
+  background: var(--kyn-bg-panel) !important;
+}
+
+[style*="color: black"],
+[style*="color:#000"],
+[style*="color: #000"],
+[style*="color: #111"],
+[style*="color:#111"],
+[style*="color: #1a1a1a"] {
+  color: var(--kyn-text-primary) !important;
+}
+
+/* ── 27. Module variable bridge (backwards-compat) ──────── */
+/* Map Kynecta vars used in module CSS to global dark values */
+:root {
+  --primary-color:      var(--kyn-accent-primary);
+  --secondary-color:    var(--kyn-bg-panel);
+  --danger-color:       var(--kyn-accent-danger);
+  --success-color:      var(--kyn-accent-primary);
+  --warning-color:      var(--kyn-accent-warning);
+  --info-color:         var(--kyn-accent-info);
+  --text-primary:       var(--kyn-text-primary);
+  --text-secondary:     var(--kyn-text-secondary);
+  --bg-color:           var(--kyn-bg-root);
+  --border-color:       var(--kyn-border);
+  --shadow:             var(--kyn-shadow-sm);
+  --shadow-lg:          var(--kyn-shadow-lg);
+
+  /* calls.css overrides */
+  --kynecta-primary:    var(--kyn-accent-purple);
+  --kynecta-secondary:  var(--kyn-accent-primary);
+  --kynecta-dark:       var(--kyn-text-primary);
+  --kynecta-light:      var(--kyn-bg-root);
+  --kynecta-border:     var(--kyn-border);
+  --kynecta-info:       var(--kyn-accent-secondary);
+  --kynecta-danger:     var(--kyn-accent-danger);
+}
+
+/* ════════════════════════════════════════════════════════════
+   ── 28. VISIBILITY FIXES — v1.1 (NON-DESTRUCTIVE PATCHES) ──
+   Only targets elements confirmed to have text-on-background
+   collisions. No layout, no icon structure, no flex/grid
+   properties are touched.
+   ════════════════════════════════════════════════════════════ */
+
+/*
+  FIX A — Loading screen inline text colours
+  Problem: <h2 style="color:#374151"> and <p style="color:#6b7280">
+  are dark text on a now-dark (#0f172a) loading screen background.
+  The inline style overrides external class rules, so we must be
+  explicit about the #loadingScreen scope.
+*/
+#loadingScreen {
+  background: var(--kyn-bg-root) !important;
+}
+#loadingScreen h2 {
+  color: var(--kyn-text-primary) !important;
+}
+#loadingScreen p {
+  color: var(--kyn-text-secondary) !important;
+}
+
+/*
+  FIX B — Profile card white background
+  Problem: .profile-card has `background: white` in base CSS.
+  The [class*="card"] rule above catches it, but adding an
+  explicit rule prevents any specificity race.
+*/
+.profile-card {
+  background: var(--kyn-bg-panel) !important;
+  color: var(--kyn-text-primary) !important;
+}
+
+.profile-username {
+  color: var(--kyn-text-primary) !important;
+}
+
+.profile-bio {
+  color: var(--kyn-text-secondary) !important;
+}
+
+/*
+  FIX C — Profile edit sheet and header white backgrounds
+  Problem: .profile-edit-sheet { background: #fff } and
+  .profile-edit-header { background: #fff } in base CSS.
+  .profile-edit-header h3 { color: #0f172a } — dark on white.
+*/
+.profile-edit-sheet {
+  background: var(--kyn-bg-panel) !important;
+  color: var(--kyn-text-primary) !important;
+}
+
+.profile-edit-header {
+  background: var(--kyn-bg-panel) !important;
+  border-color: var(--kyn-border) !important;
+}
+
+.profile-edit-header h3 {
+  color: var(--kyn-text-primary) !important;
+}
+
+.profile-edit-close {
+  background: var(--kyn-border) !important;
+  color: var(--kyn-text-secondary) !important;
+}
+
+.profile-edit-avatar-hint {
+  color: var(--kyn-text-secondary) !important;
+}
+
+.profile-edit-field label {
+  color: var(--kyn-text-secondary) !important;
+}
+
+.profile-edit-field input,
+.profile-edit-field textarea {
+  background: var(--kyn-bg-root) !important;
+  color: var(--kyn-text-primary) !important;
+  border-color: var(--kyn-border) !important;
+}
+
+.profile-edit-field input:focus,
+.profile-edit-field textarea:focus {
+  border-color: var(--kyn-accent-secondary) !important;
+  background: var(--kyn-bg-root) !important;
+}
+
+/*
+  FIX D — Avatar fallback background
+  Problem: .avatar-large { background: #f3f4f6 } — light grey
+  fallback is visible in dark cards when image fails to load.
+*/
+.avatar-large {
+  background: var(--kyn-bg-active) !important;
+}
+
+/*
+  FIX E — iframe container flash
+  Problem: .iframe-container { background: white } causes a
+  white flash before iframe content paints on dark layout.
+*/
+.iframe-container {
+  background: var(--kyn-bg-root) !important;
+}
+
+/*
+  FIX F — Call banner generic buttons
+  Problem: .call-banner-actions button { background: white }
+  with button text inheriting var(--kyn-text-primary) = #e5e7eb
+  → near-invisible light grey text on white.
+  Only override the plain (non-accept/non-decline) buttons.
+  The .accept-call and .decline-call variants already have
+  explicit background/color and must NOT be changed.
+*/
+.call-banner-actions button:not(.accept-call):not(.decline-call) {
+  background: var(--kyn-bg-panel) !important;
+  color: var(--kyn-text-primary) !important;
+  border: 1px solid var(--kyn-border) !important;
+}
+
+/*
+  FIX G — Profile name in header
+  Problem: .profile-name-sm { color: #1f2937 } (dark) against
+  the now-dark header background → invisible.
+*/
+.profile-name-sm {
+  color: var(--kyn-text-primary) !important;
+}
+
+/*
+  FIX H — Header module title / subtitle
+  Problem: .header-module-title { color: #0f172a } and
+  .header-module-subtitle { color: #64748b } both set in base
+  CSS against a light header that is now dark.
+*/
+.header-module-title {
+  color: var(--kyn-text-primary) !important;
+}
+
+.header-module-subtitle {
+  color: var(--kyn-text-secondary) !important;
+}
+
+/*
+  FIX I — Header action buttons
+  Problem: .header-action-btn { background: rgba(255,255,255,0.70);
+  color: #0f172a } → dark text on a semi-transparent white button
+  sitting in a dark header. Contrast is acceptable on light bg but
+  broken on dark bg.
+*/
+.header-action-btn {
+  background: rgba(255, 255, 255, 0.08) !important;
+  border-color: rgba(255, 255, 255, 0.12) !important;
+  color: var(--kyn-text-primary) !important;
+}
+
+.header-action-btn:hover {
+  background: rgba(255, 255, 255, 0.15) !important;
+  color: #ffffff !important;
+}
+
+/*
+  FIX J — Settings link button in profile modal
+  Problem: .settings-link-btn { background: #1f2937; color: white }
+  This is actually fine on dark theme but the [class*="card"] rule
+  previously reset it to panel colour. Restore explicit contrast.
+*/
+.settings-link-btn {
+  background: var(--kyn-border) !important;
+  color: var(--kyn-text-primary) !important;
 }

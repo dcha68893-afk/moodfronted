@@ -40,40 +40,119 @@
     <title>Friends | Knecta Chat</title>
 
     <!-- ===== STYLESHEETS ===== -->
+    <!-- Global dark theme — must load BEFORE friend.css so variables are defined -->
+    <link rel="stylesheet" href="/css/theme_colors.css">
     <link rel="stylesheet" href="friend.css">
     <link rel="stylesheet" href="/css/vendor/font-awesome.min.css">
     <link rel="stylesheet" href="/css/suppress-webgl.css">
 
+    <!-- ===== API RESPONSE NORMALIZER =====
+         Patches window.postMessage relay so authorizedRequest always receives
+         a shape it recognises, even when the backend returns a wrapped envelope.
+         Format variants handled:
+           { data: [...] }            → unwrap .data
+           { result: [...] }          → unwrap .result
+           { payload: { data: [...] }} → unwrap .payload.data
+           bare array                 → pass through unchanged
+         This is a SHIM ONLY — it does not alter auth logic or request flow.
+    ===== -->
+    <script>
+    (function () {
+      'use strict';
+
+      /**
+       * Normalise an API response payload so FriendCore always sees
+       * { success: true, data: [...] } regardless of backend envelope shape.
+       */
+      function normaliseApiPayload(payload) {
+        if (!payload || typeof payload !== 'object') return payload;
+
+        // Already the expected shape?
+        if (payload.success !== undefined && payload.data !== undefined) return payload;
+
+        // Wrapped in { payload: { ... } }
+        if (payload.payload && typeof payload.payload === 'object') {
+          payload = payload.payload;
+        }
+
+        // Common envelope keys
+        var inner = payload.data || payload.result || payload.items ||
+                    payload.friends || payload.users || payload.requests;
+
+        if (inner !== undefined) {
+          return { success: true, data: Array.isArray(inner) ? inner : [inner] };
+        }
+
+        // Bare array
+        if (Array.isArray(payload)) {
+          return { success: true, data: payload };
+        }
+
+        // Unknown shape — return as-is so the real error surfaces
+        return payload;
+      }
+
+      // Intercept postMessage to patch API response messages before FriendCore
+      // processes them (api.messages.js relays them via postMessage).
+      var _origAddEventListener = window.addEventListener.bind(window);
+      window.addEventListener = function (type, handler, options) {
+        if (type !== 'message') {
+          return _origAddEventListener(type, handler, options);
+        }
+
+        var wrappedHandler = function (event) {
+          try {
+            var data = event.data;
+            // Only touch messages that look like API relay envelopes
+            if (data && typeof data === 'object' &&
+                data.type === 'API_RESPONSE' && data.payload) {
+              data = Object.assign({}, data, {
+                payload: normaliseApiPayload(data.payload)
+              });
+              // Re-create a patched MessageEvent-like object
+              event = new MessageEvent('message', {
+                data: data,
+                origin: event.origin,
+                source: event.source
+              });
+            }
+          } catch (e) {
+            // Never break the app — silently ignore patching errors
+          }
+          return handler.call(this, event);
+        };
+
+        return _origAddEventListener(type, wrappedHandler, options);
+      };
+
+      console.log('[friend.html] API response normalizer shim active');
+    })();
+    </script>
+
     <style>
         /* ========== BASE STYLES ========== */
         :root {
-            --primary-color: #0084ff;
-            --primary-dark: #0066cc;
-            --success-color: #28a745;
-            --warning-color: #ffc107;
-            --danger-color: #dc3545;
-            --text-color: #333;
-            --text-secondary: #666;
-            --border-color: #e0e0e0;
-            --surface-color: #fff;
-            --hover-color: #f5f5f5;
+            --primary-color:   var(--kyn-accent-primary,   #22c55e);
+            --primary-dark:    #16a34a;
+            --success-color:   var(--kyn-accent-primary,   #22c55e);
+            --warning-color:   var(--kyn-accent-warning,   #f59e0b);
+            --danger-color:    var(--kyn-accent-danger,    #ef4444);
+            --text-color:      var(--kyn-text-primary,     #e5e7eb);
+            --text-secondary:  var(--kyn-text-secondary,   #9ca3af);
+            --border-color:    var(--kyn-border,           #374151);
+            --surface-color:   var(--kyn-bg-panel,         #1e293b);
+            --hover-color:     var(--kyn-bg-hover,         rgba(255,255,255,0.06));
             --category-acquaintance: #6c757d;
-            --category-friend: #28a745;
-            --category-close-friend: #dc3545;
-            --category-family: #fd7e14;
-            --category-business: #007bff;
-        }
-
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
+            --category-friend: #22c55e;
+            --category-close-friend: #ef4444;
+            --category-family: #f59e0b;
+            --category-business: #2563eb;
         }
 
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
-            background-color: #f0f2f5;
-            color: var(--text-color);
+            background-color: var(--kyn-bg-root, #0f172a);
+            color: var(--kyn-text-primary, #e5e7eb);
             line-height: 1.5;
             overflow-x: hidden;
         }

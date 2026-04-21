@@ -54,11 +54,19 @@
         } catch(e) {}
     }
 
+    function _normalizeEndpoint(endpoint) {
+        if (!endpoint || typeof endpoint !== 'string') return endpoint;
+        if (endpoint.startsWith('/api/marketplace/')) {
+            return endpoint.replace('/api/marketplace/', '/api/tools/marketplace/');
+        }
+        return endpoint;
+    }
+
     async function _doFetch(endpoint, options = {}) {
         if (typeof _authorizedFetch !== 'function') {
             throw new Error('authorizedFetch not injected — cannot sync');
         }
-        return _authorizedFetch(endpoint, options);
+        return _authorizedFetch(_normalizeEndpoint(endpoint), options);
     }
 
     function _enqueue(type, payload) {
@@ -121,14 +129,10 @@
                 });
                 break;
             case 'tool_installed':
-                await _doFetch('/api/tools/installed', {
-                    method: 'POST',
-                    body: JSON.stringify({ toolId: item.payload.id, version: item.payload.version }),
-                    headers: { 'Content-Type': 'application/json' }
-                });
+                _log('Skipping unsupported server sync item:', item.type);
                 break;
             case 'tool_removed':
-                await _doFetch(`/api/tools/installed/${item.payload.id}`, { method: 'DELETE' });
+                _log('Skipping unsupported server sync item:', item.type);
                 break;
             default:
                 _log('Unknown sync item type:', item.type);
