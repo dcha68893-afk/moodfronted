@@ -8,11 +8,13 @@
 
 'use strict';
 
-// ---------------------------------------------------------------------------
-// VERSION - single source of truth; bump this on every deploy
-// ---------------------------------------------------------------------------
-const SW_VERSION = '13.0.0';
-const CACHE_NAME = 'moodchat-static-v13-offline';
+// PATCH v1.3: Version bumped to 14.0.0 — forces full cache replacement on every
+// installed PWA. When the phone opens the app, the SW detects the version mismatch,
+// deletes the entire v13 cache (which held the buggy auth JS files), and fetches
+// fresh copies from the server. This is the only reliable way to push JS fixes
+// to installed mobile PWAs without requiring manual browser data clearing.
+const SW_VERSION = '14.0.0';
+const CACHE_NAME = 'moodchat-static-v14-offline'; // differs from v13 → triggers full wipe
 const CACHE_MAX_AGE = 7 * 24 * 60 * 60 * 1000; // 7 days in ms
 
 // ---------------------------------------------------------------------------
@@ -90,7 +92,24 @@ const CORE_STATIC_ASSETS = [
 ];
 
 // ---------------------------------------------------------------------------
-// PATTERNS
+// PATCH v1.3: AUTH JS FILES — always network-first, never cache-first.
+// These files contain session logic. Serving a stale cached version after
+// a bug-fix deploy is what caused the mobile reopen loop. Any file in this
+// list is fetched fresh on every load; cache is only used when offline.
+// ---------------------------------------------------------------------------
+const NETWORK_FIRST_PATTERNS = [
+  /\/js\/api\.auth\.js/i,
+  /\/js\/app\.core\.session\.js/i,
+  /\/js\/app\.core\.bootstrap\.js/i,
+  /\/js\/auth\.session\.manager\.js/i,
+  /\/js\/authStorage\.js/i,
+  /\/js\/app\.ui\.auth\.js/i,
+];
+
+function isNetworkFirst(url) {
+  return NETWORK_FIRST_PATTERNS.some(function(p) { return p.test(url); });
+}
+
 // ---------------------------------------------------------------------------
 
 // FIX: /login and /register removed from BYPASS_PATTERNS.
@@ -276,6 +295,39 @@ async function handleNavigation(request) {
 }
 
 // ---------------------------------------------------------------------------
+// NETWORK-FIRST HANDLER — for auth/session JS files
+// PATCH v1.3: Always fetches fresh from network; only falls back to cache
+// when offline. This guarantees that bug-fix deploys are picked up
+// immediately by installed PWAs instead of waiting for 7-day cache expiry.
+// ---------------------------------------------------------------------------
+async function handleNetworkFirst(request) {
+  var cache = await caches.open(CACHE_NAME);
+  try {
+    var networkRes = await fetch(request, { cache: 'no-store' });
+    if (networkRes.ok) {
+      // Update the cache so offline fallback is always the latest version
+      cache.put(request, networkRes.clone()).catch(function() {});
+      return networkRes;
+    }
+    // Non-ok (e.g. 500 from server) — fall back to cache
+    var cached = await cache.match(request);
+    if (cached) return cached;
+    return networkRes;
+  } catch (e) {
+    // Offline — serve whatever is cached
+    var cached = await cache.match(request);
+    if (cached) {
+      console.log('[SW] Offline network-first fallback: ' + request.url);
+      return cached;
+    }
+    return new Response('Auth module unavailable offline', {
+      status: 503,
+      headers: { 'Content-Type': 'text/plain' }
+    });
+  }
+}
+
+// ---------------------------------------------------------------------------
 // STATIC ASSET HANDLER
 // Cache-first for fonts (permanent). Cache-first with staleness check for rest.
 // ---------------------------------------------------------------------------
@@ -450,7 +502,15 @@ self.addEventListener('fetch', function(event) {
     return;
   }
 
-  // Route 3: Local static assets (JS, CSS, fonts, images, icons)
+  // Route 3a: Auth/session JS files — network-first so bug-fix deploys
+  // reach installed PWAs immediately without waiting 7 days for cache expiry.
+  // Falls back to cache only when genuinely offline.
+  if (isLocalRequest(url) && isNetworkFirst(url)) {
+    event.respondWith(handleNetworkFirst(request));
+    return;
+  }
+
+  // Route 3b: Local static assets (JS, CSS, fonts, images, icons)
   if (isLocalRequest(url) && isStaticAsset(url)) {
     event.respondWith(handleStaticAsset(request));
     return;
