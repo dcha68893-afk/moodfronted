@@ -531,29 +531,6 @@
             pendingRequests.set(requestId, {
                 resolve,
                 reject,
-                timestamp,
-                type: normalizedEndpoint,
-                timeout: timeoutId
-            });
-            
-            const message = {
-                id: generateMessageId(),
-                type: 'API_REQUEST',
-                source: MODULE_NAME,
-                target: 'parent',
-                requestId: requestId,
-                payload: {
-                    endpoint: normalizedEndpoint,
-                    method: method.toUpperCase(),
-                    body: data || null,
-                    params: params || null
-                },
-                timestamp: timestamp
-            };
-            
-            console.log(`[${MODULE_NAME}] 📤 Sending API_REQUEST: ${method} ${normalizedEndpoint} (${requestId})`);
-            
-            try {
                 if (!window.parent || window.parent === window) {
                     throw new Error('No parent window');
                 }

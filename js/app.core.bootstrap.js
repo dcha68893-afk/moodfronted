@@ -60,36 +60,100 @@
 
 
   // ============================================================================
-  // OFFLINE-FIRST: initializeAppFromLocal()
+  // BOOT STATE LOCK - PREVENT MULTIPLE INITIALIZATIONS
+  // ============================================================================
+  
+  let __BOOT_LOCKED__ = false;
+  let __BOOT_COMPLETED__ = false;
+  let __BOOT_SIGNATURE__ = null;
+  
+  function acquireBootLock() {
+    if (__BOOT_LOCKED__) {
+      console.warn('[Bootstrap] ⚠️ Boot already in progress, skipping duplicate initialization');
+      return false;
+    }
+    
+    const signature = `${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    if (__BOOT_SIGNATURE__ === signature) {
+      console.warn('[Bootstrap] ⚠️ Duplicate boot signature detected');
+      return false;
+    }
+    
+    __BOOT_LOCKED__ = true;
+    __BOOT_SIGNATURE__ = signature;
+    console.log('[Bootstrap] 🔒 Boot lock acquired:', signature);
+    return true;
+  }
+  
+  function releaseBootLock() {
+    __BOOT_LOCKED__ = false;
+    console.log('[Bootstrap] 🔓 Boot lock released');
+  }
+  
+  function markBootCompleted(reason = 'unknown') {
+    if (__BOOT_COMPLETED__) {
+      console.log('[Bootstrap] ℹ️ Boot already completed:', reason);
+      return true;
+    }
+    
+    __BOOT_COMPLETED__ = true;
+    window.__APP_BOOTSTRAP_COMPLETE__ = true;
+    
+    console.log('[Bootstrap] ✅ Boot completed:', reason);
+    
+    // Fire completion event
+    try {
+      window.dispatchEvent(new CustomEvent('moodchat-bootstrap-complete', {
+        detail: { timestamp: Date.now(), reason: reason }
+      }));
+    } catch (e) {}
+    
+    return true;
+  }
+
+  // ============================================================================
+  // OFFLINE-FIRST: initializeAppFromLocal() - NON-BLOCKING VERSION
   // ============================================================================
   // Called at startup to hydrate app state from localStorage WITHOUT waiting
   // for any API response. This is the WhatsApp-style local-first boot.
+  // CRITICAL: NEVER blocks UI, NEVER waits for network
   // ============================================================================
 
   window.initializeAppFromLocal = function() {
+    // CRITICAL: Prevent multiple initializations
+    if (!acquireBootLock()) {
+      return false;
+    }
+    
     try {
-      console.log('[Bootstrap] ⚡ initializeAppFromLocal() — hydrating from localStorage');
+      console.log('[Bootstrap] ⚡ initializeAppFromLocal() — NON-BLOCKING hydration from localStorage');
 
-      // 1. Restore auth session
-      if (window.Session && typeof window.Session.autoLogin === 'function') {
-        window.Session.autoLogin();
-      } else {
-        // Fallback: manually hydrate if Session module not ready
-        try {
-          const rawAuth = localStorage.getItem('kynecta_auth');
-          if (rawAuth) {
-            const auth = JSON.parse(rawAuth);
-            if (auth && auth.token) {
-              if (!window.Session) window.Session = {};
-              window.Session._localToken = auth.token;
-              window.Session._localUser  = auth.user;
-              console.log('[Bootstrap] ✅ Fallback auth hydration from localStorage');
-            }
+      // STEP 1: Instant auth session restoration (NO VALIDATION YET)
+      let sessionRestored = false;
+      try {
+        const rawAuth = localStorage.getItem('kynecta_auth');
+        if (rawAuth) {
+          const auth = JSON.parse(rawAuth);
+          if (auth && auth.token) {
+            // Set global auth state immediately for UI rendering
+            if (!window.Session) window.Session = {};
+            window.Session._localToken = auth.token;
+            window.Session._localUser = auth.user;
+            window.Session._hydrated = true;
+            
+            // Also set legacy locations for compatibility
+            window.currentUser = auth.user;
+            window.__AUTH_TEMP_TOKEN__ = auth.token;
+            
+            sessionRestored = true;
+            console.log('[Bootstrap] ✅ Instant auth hydration from localStorage (UI can render now)');
           }
-        } catch(e) {}
+        }
+      } catch(e) {
+        console.warn('[Bootstrap] ⚠️ Auth hydration failed:', e.message);
       }
 
-      // 2. Hydrate store from localStorage keys
+      // STEP 2: Instant store hydration (NO VALIDATION)
       if (window.KynectaStore) {
         const storeKeys = ['messages', 'friends', 'groups', 'settings', 'status'];
         storeKeys.forEach(key => {
@@ -98,26 +162,110 @@
             if (raw) {
               const parsed = JSON.parse(raw);
               window.KynectaStore.set(key, parsed);
-              console.log('[Bootstrap] ✅ Hydrated store.' + key + ' from localStorage');
+              console.log('[Bootstrap] ✅ Instant store hydration:', key);
             }
           } catch(e) {}
         });
       }
 
-      // 3. Mark bootstrap ready immediately — do NOT wait for API
-      window.__APP_BOOTSTRAP_COMPLETE__ = true;
+      // STEP 3: Mark bootstrap ready IMMEDIATELY - UI can now render
+      markBootCompleted('local_hydration_complete');
+      
+      // STEP 4: Set boot context ready
       if (window.AppBootContext && typeof window.AppBootContext.setReady === 'function') {
         window.AppBootContext.setReady('config');
       }
 
-      console.log('[Bootstrap] ✅ initializeAppFromLocal() complete');
+      // STEP 5: Schedule background validation (NON-BLOCKING)
+      setTimeout(() => {
+        if (sessionRestored) {
+          console.log('[Bootstrap] 🔄 Starting background auth validation...');
+          validateSessionInBackground();
+        }
+      }, 100);
+
+      console.log('[Bootstrap] ✅ initializeAppFromLocal() complete - UI ready, validation in background');
       return true;
     } catch(error) {
       console.error('[Bootstrap] ❌ initializeAppFromLocal() failed:', error.message);
-      window.__APP_BOOTSTRAP_COMPLETE__ = true; // Still proceed
+      // Still mark completed to prevent blocking
+      markBootCompleted('error_but_proceed');
       return false;
+    } finally {
+      releaseBootLock();
     }
   };
+  
+  // ============================================================================
+  // BACKGROUND VALIDATION - NON-BLOCKING AUTH CHECK
+  // ============================================================================
+  
+  function validateSessionInBackground() {
+    try {
+      // Don't validate if we don't have a temp token
+      if (!window.__AUTH_TEMP_TOKEN__) {
+        console.log('[Bootstrap] ℹ️ No token to validate in background');
+        return;
+      }
+      
+      // Use existing auth validation if available
+      if (window.api && window.api.auth && typeof window.api.auth.validateToken === 'function') {
+        window.api.auth.validateToken()
+          .then(result => {
+            if (result && result.valid) {
+              console.log('[Bootstrap] ✅ Background validation successful');
+              // Clean up temp token
+              delete window.__AUTH_TEMP_TOKEN__;
+            } else {
+              console.warn('[Bootstrap] ⚠️ Background validation failed - session may be invalid');
+              handleInvalidSession();
+            }
+          })
+          .catch(error => {
+            console.warn('[Bootstrap] ⚠️ Background validation error:', error.message);
+            // Don't fail the app, just continue with local session
+          });
+      } else {
+        console.log('[Bootstrap] ℹ️ Auth validation not available yet, will retry later');
+        // Retry validation later when auth is ready
+        setTimeout(validateSessionInBackground, 2000);
+      }
+    } catch (error) {
+      console.warn('[Bootstrap] ⚠️ Background validation setup failed:', error.message);
+    }
+  }
+  
+  function handleInvalidSession() {
+    try {
+      console.log('[Bootstrap] 🔄 Handling invalid session...');
+      
+      // Clear invalid session data
+      if (window.AuthStorage && typeof window.AuthStorage.clearAuth === 'function') {
+        window.AuthStorage.clearAuth();
+      } else {
+        localStorage.removeItem('kynecta_auth');
+      }
+      
+      // Clear temporary state
+      delete window.__AUTH_TEMP_TOKEN__;
+      if (window.Session) {
+        delete window.Session._localToken;
+        delete window.Session._localUser;
+        delete window.Session._hydrated;
+      }
+      window.currentUser = null;
+      
+      // Fire session invalid event
+      try {
+        window.dispatchEvent(new CustomEvent('moodchat-session-invalid', {
+          detail: { timestamp: Date.now(), reason: 'background_validation_failed' }
+        }));
+      } catch (e) {}
+      
+    } catch (error) {
+      console.error('[Bootstrap] ❌ Error handling invalid session:', error.message);
+    }
+  }
 
   // ── Network-aware sync trigger ─────────────────────────────────────────────
   // When we come back online, trigger full background sync
@@ -6450,34 +6598,38 @@ window.initializeEnhancedApp = function () {
         
         // If we're on chat.html but not logged in, redirect to login
         if (window.location.pathname.includes('chat.html') && !isLoggedIn && !hasValidStorage) {
-            console.log("[BOOT] On chat.html without cached auth - rendering shell and deferring auth resolution");
+            console.log('[BOOT] Redirecting to login page');
+            window.location.href = 'index.html';
+            return;
         }
         
-        ensureBackwardCompatibility();
-        
-        return HARDENED_BOOTSTRAP_CONTROLLER.bootstrap();
+        // Continue with normal bootstrap
+        console.log('[BOOT] Auth check complete, proceeding with bootstrap');
     };
     
-    return checkAuthAndInitialize();
+    checkAuthAndInitialize();
 };
 
-  if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", () => {
-      console.log("📄 DOM ready, starting enhanced app bootstrap");
-      window.initializeEnhancedApp().catch((error) => {
-        console.error("❌ Auto-start failed:", error);
-        BOOTSTRAP_STATE_MACHINE.transitionTo(BOOTSTRAP_CONSTANTS.STATES.DEGRADED, "auto_start_failed");
-        NavigationController.unlock("auto_start_failed");
-      });
-    });
-  } else {
-    console.log("📄 DOM already ready, starting enhanced app bootstrap");
-    window.initializeEnhancedApp().catch((error) => {
-      console.error("❌ Auto-start failed:", error);
-      BOOTSTRAP_STATE_MACHINE.transitionTo(BOOTSTRAP_CONSTANTS.STATES.DEGRADED, "auto_start_failed");
-      NavigationController.unlock("auto_start_failed");
-    });
-  }
+// CRITICAL: Prevent multiple bootstrap calls
+if (!window.__BOOTSTRAP_INITED__) {
+    window.__BOOTSTRAP_INITED__ = true;
+    
+    (function immediateBootstrap() {
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', () => {
+                console.log('DOM ready, starting enhanced app bootstrap');
+                window.initializeEnhancedApp().catch((error) => {
+                    console.error('Auto-start failed:', error);
+                });
+            });
+        } else {
+            console.log('DOM already ready, starting enhanced app bootstrap immediately');
+            window.initializeEnhancedApp().catch((error) => {
+                console.error('Auto-start failed:', error);
+            });
+        }
+    })();
+}
 
   // ============================================================================
   // EXPOSED UTILITIES - COMPLETE PRESERVATION

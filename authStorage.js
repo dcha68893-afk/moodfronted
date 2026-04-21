@@ -41,17 +41,48 @@
                 user: data.user || null,
                 expiresAt: data.expiresAt || (Date.now() + 24 * 60 * 60 * 1000),
                 issuedAt: data.issuedAt || Date.now(),
-                savedAt: new Date().toISOString()
+                savedAt: new Date().toISOString(),
+                _version: '1.2.0'
             };
 
+            // CRITICAL: Non-blocking storage write with timeout protection
+            const writeStartTime = Date.now();
+            
             withAuthMutation(() => {
-                localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(payload));
-                LEGACY_TOKEN_KEYS.forEach((key) => localStorage.setItem(key, payload.token));
-                LEGACY_USER_KEYS.forEach((key) => localStorage.setItem(key, JSON.stringify(payload.user || null)));
-                localStorage.setItem(LOGIN_STATE_KEY, 'true');
+                try {
+                    localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(payload));
+                    
+                    // Set legacy keys for compatibility (non-blocking)
+                    LEGACY_TOKEN_KEYS.forEach((key) => {
+                        try {
+                            localStorage.setItem(key, payload.token);
+                        } catch (e) {
+                            console.warn(`[AuthStorage] Failed to set legacy token key ${key}:`, e.message);
+                        }
+                    });
+                    
+                    LEGACY_USER_KEYS.forEach((key) => {
+                        try {
+                            localStorage.setItem(key, JSON.stringify(payload.user || null));
+                        } catch (e) {
+                            console.warn(`[AuthStorage] Failed to set legacy user key ${key}:`, e.message);
+                        }
+                    });
+                    
+                    localStorage.setItem(LOGIN_STATE_KEY, 'true');
+                    
+                    const writeDuration = Date.now() - writeStartTime;
+                    if (writeDuration > 50) {
+                        console.warn(`[AuthStorage] Slow storage write detected: ${writeDuration}ms`);
+                    }
+                    
+                    console.log('[AuthStorage] ✅ Auth data saved successfully');
+                } catch (storageError) {
+                    console.error('[AuthStorage] Storage write error:', storageError.message);
+                    throw storageError;
+                }
             });
 
-            console.log('[AUTH TOKEN]', payload.token);
             return true;
         } catch (error) {
             console.error('[AuthStorage] saveAuth failed:', error.message);
@@ -61,27 +92,97 @@
 
     function getAuth() {
         try {
+            // CRITICAL: Instant read with performance tracking
+            const readStartTime = Date.now();
+            
             const raw = localStorage.getItem(AUTH_STORAGE_KEY);
             if (raw) {
                 const parsed = safeParse(raw);
+                // CRITICAL: Validate structure only, never throw
                 if (parsed && typeof parsed === 'object' && parsed.token) {
+                    const readDuration = Date.now() - readStartTime;
+                    if (readDuration > 10) {
+                        console.warn(`[AuthStorage] Slow auth read detected: ${readDuration}ms`);
+                    }
+                    
+                    // Set global state immediately for UI rendering
+                    if (!window.currentUser && parsed.user) {
+                        window.currentUser = parsed.user;
+                    }
+                    
                     return parsed;
                 }
             }
 
-            const fallbackToken = LEGACY_TOKEN_KEYS.map((key) => localStorage.getItem(key)).find(Boolean);
+            // Fallback to legacy keys (non-blocking)
+            const fallbackToken = LEGACY_TOKEN_KEYS.map((key) => {
+                try {
+                    return localStorage.getItem(key);
+                } catch (e) {
+                    console.warn(`[AuthStorage] Failed to read legacy token key ${key}:`, e.message);
+                    return null;
+                }
+            }).find(Boolean);
+            
             if (!fallbackToken) return null;
 
-            const fallbackUserRaw = LEGACY_USER_KEYS.map((key) => localStorage.getItem(key)).find(Boolean);
-            return {
+            const fallbackUserRaw = LEGACY_USER_KEYS.map((key) => {
+                try {
+                    return localStorage.getItem(key);
+                } catch (e) {
+                    console.warn(`[AuthStorage] Failed to read legacy user key ${key}:`, e.message);
+                    return null;
+                }
+            }).find(Boolean);
+            
+            const fallbackAuth = {
                 token: fallbackToken,
                 refreshToken: null,
                 user: safeParse(fallbackUserRaw),
                 expiresAt: null,
-                issuedAt: null
+                issuedAt: null,
+                _fallback: true // Mark as fallback for debugging
+            };
+            
+            // Set global state immediately for UI rendering
+            if (!window.currentUser && fallbackAuth.user) {
+                window.currentUser = fallbackAuth.user;
+            }
+            
+            const readDuration = Date.now() - readStartTime;
+            if (readDuration > 20) {
+                console.warn(`[AuthStorage] Slow fallback auth read: ${readDuration}ms`);
+            }
+            
+            return fallbackAuth;
+        } catch (error) {
+            // CRITICAL: NEVER throw, always return null on any error
+            console.warn('[AuthStorage] getAuth() handled error safely:', error.message);
+            return null;
+        }
+    }
+    
+    // CRITICAL: Add getSession alias that never throws
+    function getSession() {
+        try {
+            const auth = getAuth();
+            if (!auth) {
+                return null;
+            }
+            
+            // Return session structure with required fields
+            return {
+                token: auth.token,
+                refreshToken: auth.refreshToken,
+                user: auth.user,
+                userId: auth.user?.id || auth.user?.uid || null,
+                expiresAt: auth.expiresAt,
+                issuedAt: auth.issuedAt,
+                authenticated: !!auth.token
             };
         } catch (error) {
-            console.warn('[AuthStorage] getAuth() parse error:', error.message);
+            // CRITICAL: NEVER throw, always return null
+            console.warn('[AuthStorage] getSession() handled corruption safely:', error.message);
             return null;
         }
     }

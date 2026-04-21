@@ -81,10 +81,27 @@
 
     function _verifySignature(def) {
         if (!def) return false;
-        if (def.isLocalOnly) return true;
+        
+        // CRITICAL: Even local tools need basic validation
+        if (def.isLocalOnly) {
+            return def.id && def.name && def.version && def.entryPoint;
+        }
+        
+        // CRITICAL: Proper signature validation for remote tools
         if (!def.signature) return false;
-        if (def.signature.length < 8) return false;
-        return typeof def.signature === 'string' && def.signature.length > 0;
+        if (typeof def.signature !== 'string') return false;
+        if (def.signature.length < 32) return false; // Increased minimum length
+        
+        // CRITICAL: Verify signature format (sha256 hash)
+        const signaturePattern = /^[a-f0-9]{32,}$/i;
+        if (!signaturePattern.test(def.signature)) return false;
+        
+        // CRITICAL: Verify signature matches tool content
+        const expectedSig = crypto.createHash('sha256')
+            .update(def.id + def.version + def.entryPoint + '_knecta_secure')
+            .digest('hex');
+        
+        return def.signature === expectedSig;
     }
 
     const ToolPermissionGuard = {

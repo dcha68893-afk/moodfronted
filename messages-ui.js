@@ -5812,12 +5812,9 @@ Type: ${message.type || 'text'}`;
         }
         if (section === 'advanced') {
             if (key === 'reduceMotion') { document.body.classList.toggle('reduce-motion', !!value); document.documentElement.setAttribute('data-reduce-motion', value ? 'true' : 'false'); }
-            if (key === 'performanceMode') document.documentElement.setAttribute('data-performance-mode', value ? 'true' : 'false');
-        }
-        if (section === 'mood' && key === 'currentMood') document.documentElement.setAttribute('data-mood', value);
     }
 
-    // Listen for custom events dispatched by core's applySettingToMessagesModule
+    // Legacy event listeners for backwards compatibility
     window.addEventListener('settingChanged', function(e) {
         try { var d = e.detail; applyUISettingChange(d.section, d.key, d.value); } catch(err) {}
     });

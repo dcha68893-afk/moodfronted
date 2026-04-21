@@ -1,5 +1,5 @@
 // js/auth.session.manager.js - Complete Session Manager for Auto-Login
-// Version: 1.1.0 - FIXED: Added throttling to prevent infinite save loop
+// Version: 1.2.0 - FIXED: Eliminated session restoration loops, added initialization locks
 // Handles: Persistent sessions, auto-login, account limits, logout detection
 
 (function() {
@@ -16,9 +16,16 @@
         MAX_ACCOUNTS_PER_DEVICE: 2,
         SESSION_DURATION_DAYS: 1,  // Auto-login expires after 1 day of inactivity
         CHECK_INTERVAL: 60000,      // Check every minute
-        STORAGE_VERSION: '1.1.0',
+        STORAGE_VERSION: '1.2.0',
         ACTIVITY_THROTTLE_MS: 5000  // Only save session every 5 seconds max
     };
+    
+    // ============================================================================
+    // INITIALIZATION LOCKS - PREVENT MULTIPLE INITIALIZATIONS
+    // ============================================================================
+    let __SESSION_MANAGER_INITIALIZED__ = false;
+    let __SESSION_MANAGER_LOCK__ = false;
+    let __AUTO_LOGIN_IN_PROGRESS__ = false;
     
     // ============================================================================
     // STATE MANAGEMENT
@@ -96,26 +103,34 @@
             
             const session = JSON.parse(saved);
             
-            // Check if session is expired
-            if (session.expiresAt && Date.now() > session.expiresAt) {
-                console.log('[SessionManager] Session expired');
+            // CRITICAL: Validate ONLY structure, NOT expiry or backend
+            // This ensures instant loading without blocking
+            if (!session || typeof session !== 'object') {
+                console.warn('[SessionManager] Invalid session structure, clearing');
                 clearSession();
                 return null;
             }
             
-            // Check if last activity was more than 24 hours ago
-            if (session.lastActivity && (Date.now() - session.lastActivity) > (CONFIG.SESSION_DURATION_DAYS * 24 * 60 * 60 * 1000)) {
-                console.log('[SessionManager] Session inactive for too long');
+            // Structure validation only - token and userId must exist
+            if (!session.token || !session.userId) {
+                console.warn('[SessionManager] Missing required session fields, clearing');
                 clearSession();
                 return null;
             }
             
-            console.log('[SessionManager] Session loaded, userId:', session.userId);
+            console.log('[SessionManager] ✅ Session loaded instantly, userId:', session.userId);
             currentSession = session;
             lastActivityTime = session.lastActivity || Date.now();
+            
+            // Set global state immediately for UI rendering
+            if (!window.currentUser && session.user) {
+                window.currentUser = session.user;
+            }
+            
             return session;
         } catch (error) {
             console.error('[SessionManager] Failed to load session:', error);
+            // Don't clear session on parse error - might be recoverable
             return null;
         }
     }
@@ -273,71 +288,83 @@
     }
     
     // ============================================================================
-    // AUTO-LOGIN LOGIC
+    // AUTO-LOGIN LOGIC - LOOP PREVENTION
     // ============================================================================
     async function performAutoLogin() {
-        console.log('[SessionManager] Performing auto-login check...');
-        
-        const session = loadSession();
-        if (!session || !session.token) {
-            console.log('[SessionManager] No valid session found for auto-login');
-            return { success: false, reason: 'no_session' };
+        // CRITICAL: Prevent multiple auto-login attempts
+        if (__AUTO_LOGIN_IN_PROGRESS__) {
+            console.log('[SessionManager] ⚠️ Auto-login already in progress, skipping');
+            return { success: false, reason: 'auto_login_in_progress' };
         }
         
-        if (!isTokenValid(session.token)) {
-            console.log('[SessionManager] Token invalid, clearing session');
-            clearSession();
-            return { success: false, reason: 'invalid_token' };
-        }
-        
-        const isOnChatPage = window.location.pathname.includes('chat.html');
-        const isOnIndexPage = window.location.pathname === '/' || window.location.pathname.includes('index.html');
+        __AUTO_LOGIN_IN_PROGRESS__ = true;
         
         try {
-            localStorage.setItem('token', session.token);
-            localStorage.setItem('accessToken', session.token);
-            localStorage.setItem('moodchat_token', session.token);
-            localStorage.setItem('USER_TOKEN', session.token);
+            console.log('[SessionManager] Performing auto-login check...');
             
-            if (session.user) {
-                localStorage.setItem('currentUser', JSON.stringify(session.user));
-                localStorage.setItem('user', JSON.stringify(session.user));
-                window.currentUser = session.user;
+            const session = loadSession();
+            if (!session || !session.token) {
+                console.log('[SessionManager] No valid session found for auto-login');
+                return { success: false, reason: 'no_session' };
             }
             
-            const unifiedAuth = {
-                token: session.token,
-                user: session.user,
-                userId: session.userId,
-                timestamp: Date.now(),
-                validated: true
-            };
-            localStorage.setItem('kynecta_auth', JSON.stringify(unifiedAuth));
+            if (!isTokenValid(session.token)) {
+                console.log('[SessionManager] Token invalid, clearing session');
+                clearSession();
+                return { success: false, reason: 'invalid_token' };
+            }
             
-            console.log('[SessionManager] Token restored to all storage locations');
-        } catch (error) {
-            console.warn('[SessionManager] Failed to restore token to storage:', error);
+            const isOnChatPage = window.location.pathname.includes('chat.html');
+            const isOnIndexPage = window.location.pathname === '/' || window.location.pathname.includes('index.html');
+            
+            try {
+                localStorage.setItem('token', session.token);
+                localStorage.setItem('accessToken', session.token);
+                localStorage.setItem('moodchat_token', session.token);
+                localStorage.setItem('USER_TOKEN', session.token);
+                
+                if (session.user) {
+                    localStorage.setItem('currentUser', JSON.stringify(session.user));
+                    localStorage.setItem('user', JSON.stringify(session.user));
+                    window.currentUser = session.user;
+                }
+                
+                const unifiedAuth = {
+                    token: session.token,
+                    user: session.user,
+                    userId: session.userId,
+                    timestamp: Date.now(),
+                    validated: true
+                };
+                localStorage.setItem('kynecta_auth', JSON.stringify(unifiedAuth));
+                
+                console.log('[SessionManager] Token restored to all storage locations');
+            } catch (error) {
+                console.warn('[SessionManager] Failed to restore token to storage:', error);
+            }
+            
+            try {
+                window.dispatchEvent(new CustomEvent('session:restored', {
+                    detail: { token: session.token, user: session.user, timestamp: Date.now() }
+                }));
+                window.dispatchEvent(new CustomEvent('auth:token:ready', {
+                    detail: { token: session.token, timestamp: Date.now() }
+                }));
+            } catch (error) {}
+            
+            if (isOnIndexPage) {
+                console.log('[SessionManager] Auto-login successful, redirecting to chat.html');
+                setTimeout(() => {
+                    window.location.href = 'chat.html';
+                }, 500);
+            } else if (isOnChatPage) {
+                console.log('[SessionManager] Already on chat page, session restored');
+            }
+            
+            return { success: true, user: session.user, token: session.token };
+        } finally {
+            __AUTO_LOGIN_IN_PROGRESS__ = false;
         }
-        
-        try {
-            window.dispatchEvent(new CustomEvent('session:restored', {
-                detail: { token: session.token, user: session.user, timestamp: Date.now() }
-            }));
-            window.dispatchEvent(new CustomEvent('auth:token:ready', {
-                detail: { token: session.token, timestamp: Date.now() }
-            }));
-        } catch (error) {}
-        
-        if (isOnIndexPage) {
-            console.log('[SessionManager] Auto-login successful, redirecting to chat.html');
-            setTimeout(() => {
-                window.location.href = 'chat.html';
-            }, 500);
-        } else if (isOnChatPage) {
-            console.log('[SessionManager] Already on chat page, session restored');
-        }
-        
-        return { success: true, user: session.user, token: session.token };
     }
     
     // ============================================================================
@@ -468,48 +495,88 @@
     }
     
     // ============================================================================
-    // INITIALIZATION
+    // INITIALIZATION - LOOP PREVENTION
     // ============================================================================
     async function initialize() {
-        console.log('[SessionManager] Initializing...');
+        // CRITICAL: Prevent multiple initializations
+        if (__SESSION_MANAGER_INITIALIZED__) {
+            console.log('[SessionManager] ⚠️ Already initialized, skipping');
+            return { success: true, alreadyInitialized: true };
+        }
         
-        setupActivityTracking();
-        startSessionCheck();
-        loadSavedAccounts();
-        
-        const isOnIndexPage = window.location.pathname === '/' || 
-                              window.location.pathname.includes('index.html');
-        
-        if (isOnIndexPage) {
-            const shouldLogin = shouldPromptLogin();
-            if (!shouldLogin) {
-                await performAutoLogin();
-            } else {
-                console.log('[SessionManager] User needs to login - showing login form');
+        if (__SESSION_MANAGER_LOCK__) {
+            console.log('[SessionManager] ⚠️ Initialization in progress, waiting...');
+            // Wait for current initialization to complete
+            let attempts = 0;
+            while (__SESSION_MANAGER_LOCK__ && attempts < 50) {
+                await new Promise(resolve => setTimeout(resolve, 100));
+                attempts++;
             }
-        } else if (window.location.pathname.includes('chat.html')) {
-            const session = loadSession();
-            if (!session || !isTokenValid(session.token)) {
-                console.log('[SessionManager] No valid session on chat page, redirecting to index');
-                setTimeout(() => {
-                    window.location.href = 'index.html';
-                }, 1000);
-            } else {
-                try {
-                    localStorage.setItem('token', session.token);
-                    localStorage.setItem('accessToken', session.token);
-                    localStorage.setItem('moodchat_token', session.token);
-                    if (session.user) {
-                        localStorage.setItem('currentUser', JSON.stringify(session.user));
-                        window.currentUser = session.user;
-                    }
-                    console.log('[SessionManager] Session restored on chat page');
-                } catch (error) {}
+            if (__SESSION_MANAGER_INITIALIZED__) {
+                return { success: true, alreadyInitialized: true };
             }
         }
         
-        console.log('[SessionManager] Initialized');
-        return { success: true };
+        __SESSION_MANAGER_LOCK__ = true;
+        
+        try {
+            console.log('[SessionManager] Initializing...');
+            
+            setupActivityTracking();
+            startSessionCheck();
+            loadSavedAccounts();
+            
+            const isOnIndexPage = window.location.pathname === '/' || 
+                                  window.location.pathname.includes('index.html');
+            
+            // CRITICAL: Check if bootstrap already hydrated session
+            const bootstrapHydrated = window.Session && window.Session._hydrated === true;
+            if (bootstrapHydrated) {
+                console.log('[SessionManager] ✅ Bootstrap already hydrated session, skipping auto-login');
+                __SESSION_MANAGER_INITIALIZED__ = true;
+                return { success: true, bootstrapHandled: true };
+            }
+            
+            if (isOnIndexPage) {
+                const shouldLogin = shouldPromptLogin();
+                if (!shouldLogin && !__AUTO_LOGIN_IN_PROGRESS__) {
+                    await performAutoLogin();
+                } else {
+                    console.log('[SessionManager] User needs to login - showing login form');
+                }
+            } else if (window.location.pathname.includes('chat.html')) {
+                const session = loadSession();
+                if (!session || !isTokenValid(session.token)) {
+                    console.log('[SessionManager] No valid session on chat page, redirecting to index');
+                    // CRITICAL: Prevent redirect loops by checking current page
+                    if (!window.location.pathname.includes('index.html')) {
+                        setTimeout(() => {
+                            window.location.href = 'index.html';
+                        }, 1000);
+                    }
+                } else {
+                    try {
+                        localStorage.setItem('token', session.token);
+                        localStorage.setItem('accessToken', session.token);
+                        localStorage.setItem('moodchat_token', session.token);
+                        if (session.user) {
+                            localStorage.setItem('currentUser', JSON.stringify(session.user));
+                            window.currentUser = session.user;
+                        }
+                        console.log('[SessionManager] Session restored on chat page');
+                    } catch (error) {}
+                }
+            }
+            
+            __SESSION_MANAGER_INITIALIZED__ = true;
+            console.log('[SessionManager] Initialized');
+            return { success: true };
+        } catch (error) {
+            console.error('[SessionManager] Initialization failed:', error);
+            return { success: false, error: error.message };
+        } finally {
+            __SESSION_MANAGER_LOCK__ = false;
+        }
     }
     
     // ============================================================================

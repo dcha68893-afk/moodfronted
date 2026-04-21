@@ -452,21 +452,28 @@ const SettingsState = {
     },
     
     async update(section, key, value) {
-        // STEP 1: Apply locally and broadcast to all modules IMMEDIATELY.
-        // This works offline and requires NO auth — UI must always feel instant.
-        if (!this.data[section]) this.data[section] = {};
-        this.data[section][key] = value;
-        this._saveToCache();
-        this._applySettingGlobally(section, key, value);
-        this._notify('optimistic-update', { section, key, value });
-
-        // STEP 1b: Push into AppSettings (single source of truth).
-        // Uses equality check internally so no infinite loop.
+        // STEP 1: Update AppSettings FIRST (single source of truth)
+        // This triggers all module subscriptions instantly
         if (window.AppSettings) {
             window.AppSettings.set(section + '.' + key, value);
         }
 
-        // STEP 2: Persist to backend when possible
+        // STEP 2: Update local state for backwards compatibility
+        if (!this.data[section]) this.data[section] = {};
+        this.data[section][key] = value;
+        this._saveToCache();
+
+        // STEP 3: Emit unified event for any remaining legacy listeners
+        window.dispatchEvent(new CustomEvent('appSettingsChanged', {
+            detail: { 
+                settings: window.AppSettings?.getAll() || this.data,
+                path: section + '.' + key,
+                value: value,
+                timestamp: Date.now()
+            }
+        }));
+
+        // STEP 4: Persist to backend when possible (non-blocking)
         if (!isAuthenticated || currentState !== LifecycleState.ACTIVE) {
             if (!OfflineQueue.isOnline()) {
                 OfflineQueue.enqueue(section, key, value);

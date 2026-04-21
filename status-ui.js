@@ -6404,7 +6404,58 @@ UILogger.info('StatusUI', 'Resilient UI controller initialized successfully v8.2
         }
     });
 
-    // Also listen for native CustomEvents fired by status-core's handler
+    // UNIFIED SETTINGS SUBSCRIPTION - Single source of truth
+    // Subscribe to AppSettings for all settings changes
+    if (window.AppSettings) {
+        window.AppSettings.subscribe(function(settings, path, value) {
+            try {
+                if (path && path !== '*') {
+                    // Single setting changed
+                    const parts = path.split('.');
+                    const section = parts[0];
+                    const key = parts.slice(1).join('.');
+                    applyOneSettingToUI(section, key, value);
+                } else {
+                    // Full settings object changed
+                    if (settings) {
+                        Object.entries(settings).forEach(([sec, secVal]) => {
+                            if (secVal && typeof secVal === 'object')
+                                Object.entries(secVal).forEach(([k, v]) => applyOneSettingToUI(sec, k, v));
+                        });
+                    }
+                }
+            } catch(err) {
+                console.warn('[StatusUI] Settings subscription error:', err);
+            }
+        });
+    } else {
+        // Fallback: Wait for AppSettings to be ready
+        window.addEventListener('appSettingsReady', function() {
+            if (window.AppSettings) {
+                window.AppSettings.subscribe(function(settings, path, value) {
+                    try {
+                        if (path && path !== '*') {
+                            const parts = path.split('.');
+                            const section = parts[0];
+                            const key = parts.slice(1).join('.');
+                            applyOneSettingToUI(section, key, value);
+                        } else {
+                            if (settings) {
+                                Object.entries(settings).forEach(([sec, secVal]) => {
+                                    if (secVal && typeof secVal === 'object')
+                                        Object.entries(secVal).forEach(([k, v]) => applyOneSettingToUI(sec, k, v));
+                                });
+                            }
+                        }
+                    } catch(err) {
+                        console.warn('[StatusUI] Settings subscription error:', err);
+                    }
+                });
+            }
+        }, { once: true });
+    }
+
+    // Legacy event listeners for backwards compatibility
     window.addEventListener('settingChanged', function(e) {
         const { section, key, value } = e.detail || {};
         if (section && key !== undefined) applyOneSettingToUI(section, key, value);

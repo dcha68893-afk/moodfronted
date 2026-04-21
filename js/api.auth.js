@@ -2141,9 +2141,9 @@
         
         try {
             const unifiedAuth = _loadPersistedAuthData();
-            const refreshTokenValue = unifiedAuth?.refreshToken || _safeStorageGet(CONFIG.REFRESH_TOKEN_KEY);
+            const refreshToken = unifiedAuth?.refreshToken || _safeStorageGet(CONFIG.REFRESH_TOKEN_KEY);
             
-            if (!refreshTokenValue) {
+            if (!refreshToken) {
                 throw new Error('No refresh token available');
             }
             
@@ -2157,27 +2157,16 @@
             const response = await _safeApiCall(
                 apiRequest.post.bind(apiRequest),
                 endpoint,
-                { refreshToken: refreshTokenValue },
-                { skipAuth: true, retryCount: 0 }
+                { refreshToken },
+                { skipAuth: true }
             );
             
-            if (response.success && response.data?.accessToken) {
+            if (response.success && response.data) {
+                const newToken = response.data.accessToken || response.data.token;
                 const expiresIn = response.data.expiresIn || CONFIG.DEFAULT_TOKEN_EXPIRY;
                 
-                // Update unified storage
-                const user = unifiedAuth?.user || null;
-                _persistAuthData(response.data.accessToken, user, response.data.refreshToken, expiresIn);
-                setUserToken(response.data.accessToken, expiresIn);
-                
-                if (response.data.refreshToken) {
-                    _safeStorageSet(CONFIG.REFRESH_TOKEN_KEY, response.data.refreshToken);
-                }
-                
-                _moduleState.lastTokenRefresh = Date.now();
-                _moduleState.refreshAttempts = 0;
-                
                 _emitEvent('session-refreshed', {
-                    newToken: response.data.accessToken,
+                    newToken: newToken,
                     expiresIn: expiresIn
                 });
                 
@@ -3431,56 +3420,39 @@ try {
                     error: 'Authentication system not ready',
                     code: 'SYSTEM_NOT_READY',
                     message: 'Please try again in a moment'
-                };
-            }
             
-            // Try unified storage first
             const unifiedAuth = _loadPersistedAuthData();
-            let token = unifiedAuth?.token || getUserToken();
-            
-            if (!token) {
-                return {
-                    success: false,
-                    error: 'No stored token found',
-                    code: 'NO_TOKEN',
-                    message: 'No saved session found'
-                };
+            if (!unifiedAuth || !unifiedAuth.token) {
+                console.log(' [AUTH] No stored auth data found for auto-login');
+                return { success: false, error: 'No stored authentication data' };
             }
             
-            // Check expiry if available
-            if (unifiedAuth?.expiresIn && unifiedAuth?.timestamp) {
+            // CRITICAL: Check if token is expired locally first
+            if (unifiedAuth.expiresIn && unifiedAuth.timestamp) {
                 const expiryTime = unifiedAuth.timestamp + unifiedAuth.expiresIn;
                 if (Date.now() > expiryTime) {
-                    console.log('⚠️ [AUTH] Stored token expired');
-                    clearUserToken();
+                    console.log(' [AUTH] Stored token has expired locally');
                     _clearPersistedAuthData();
-                    return {
-                        success: false,
-                        error: 'Token expired',
-                        code: 'TOKEN_EXPIRED',
-                        message: 'Your session has expired'
-                    };
-                }
-            } else {
-                const expiry = _safeStorageGet(CONFIG.TOKEN_EXPIRY_KEY);
-                if (expiry && Date.now() > parseInt(expiry, 10)) {
-                    clearUserToken();
-                    return {
-                        success: false,
-                        error: 'Token expired',
-                        code: 'TOKEN_EXPIRED',
-                        message: 'Your session has expired'
-                    };
+                    return { success: false, error: 'Token expired locally' };
                 }
             }
             
-            const isValid = await validateSession();
-            if (!isValid) {
+            // Set token immediately for UI rendering
+            setUserToken(unifiedAuth.token, unifiedAuth.expiresIn);
+            
+            // Validate token with server (non-blocking)
+            const validation = await _validateTokenWithServer(unifiedAuth.token);
+            if (validation.valid) {
+                console.log(' [AUTH] Auto-login successful');
+                return { 
+                    success: true, 
+                    user: validation.user,
+                    token: unifiedAuth.token 
+                };
+            } else {
+                console.log(' [AUTH] Auto-login failed - invalid token');
                 clearUserToken();
-                _clearPersistedAuthData();
-                return {
-                    success: false,
-                    error: 'Session validation failed',
+                return { success: false, error: 'Invalid token' };
                     code: 'SESSION_INVALID',
                     message: 'Your session is no longer valid'
                 };
@@ -3857,6 +3829,9 @@ try {
             // Session utilities
             waitForReady,
             waitFor,
+            
+            // Token validation (non-blocking)
+            validateToken,
             
             // Event system
             on: _addEventListener,

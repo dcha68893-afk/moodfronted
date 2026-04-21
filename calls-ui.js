@@ -7657,11 +7657,39 @@ setupFriendsListListener();
                         applyCallUISetting(sec, k, v);
                     });
                 }
-            });
-        }
-    });
+            } catch(err) {
+                console.warn('[CallsUI] Settings subscription error:', err);
+            }
+        });
+    } else {
+        // Fallback: Wait for AppSettings to be ready
+        window.addEventListener('appSettingsReady', function() {
+            if (window.AppSettings) {
+                window.AppSettings.subscribe(function(settings, path, value) {
+                    try {
+                        if (path && path !== '*') {
+                            const parts = path.split('.');
+                            const section = parts[0];
+                            const key = parts.slice(1).join('.');
+                            applyCallUISetting(section, key, value);
+                        } else {
+                            Object.entries(settings).forEach(function([sec, secVal]) {
+                                if (secVal && typeof secVal === 'object') {
+                                    Object.entries(secVal).forEach(function([k, v]) {
+                                        applyCallUISetting(sec, k, v);
+                                    });
+                                }
+                            });
+                        }
+                    } catch(err) {
+                        console.warn('[CallsUI] Settings subscription error:', err);
+                    }
+                });
+            }
+        }, { once: true });
+    }
 
-    // Also listen for the CustomEvent version dispatched by applySettingToCallsModule
+    // Legacy event listeners for backwards compatibility
     window.addEventListener('settingChanged', function(e) {
         const { section, key, value } = e.detail || {};
         if (section && key !== undefined) applyCallUISetting(section, key, value);

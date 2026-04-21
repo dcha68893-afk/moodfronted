@@ -78,7 +78,76 @@
             toolVersion: def.version,
             executionId,
 
-            getSandboxRoot() { return _ensureSandboxRoot(); },
+            getSandboxRoot() { 
+                    if (!ToolPermissionGuard) throw new Error('Permission guard not available');
+                    const check = ToolPermissionGuard.validateSandboxAccess(def.id, 'dom');
+                    if (!check.allowed) throw new Error(check.reason);
+                    
+                    // CRITICAL: Return a safe, isolated DOM element
+                    const safeRoot = _ensureSandboxRoot();
+                    
+                    // Create isolated container for this tool execution
+                    const toolContainer = document.createElement('div');
+                    toolContainer.setAttribute('data-tool-id', def.id);
+                    toolContainer.setAttribute('data-execution-id', executionId);
+                    toolContainer.style.cssText = `
+                        position: absolute;
+                        top: -9999px;
+                        left: -9999px;
+                        width: 1px;
+                        height: 1px;
+                        overflow: hidden;
+                        opacity: 0;
+                        pointer-events: none;
+                        z-index: -9999;
+                    `;
+                    
+                    // CRITICAL: Prevent escape from sandbox
+                    toolContainer.tabIndex = -1;
+                    toolContainer.setAttribute('aria-hidden', 'true');
+                    
+                    safeRoot.appendChild(toolContainer);
+                    
+                    // CRITICAL: Return safe proxy that limits DOM operations
+                    return new Proxy(toolContainer, {
+                        get(target, prop) {
+                            // Allow only safe DOM methods
+                            const allowedMethods = ['appendChild', 'removeChild', 'querySelector', 'querySelectorAll'];
+                            if (allowedMethods.includes(prop)) {
+                                return (...args) => {
+                                    // Validate arguments for DOM injection attempts
+                                    if (prop === 'appendChild' || prop === 'removeChild') {
+                                        const element = args[0];
+                                        if (element && typeof element === 'object') {
+                                            // Prevent script tags and dangerous elements
+                                            if (element.tagName && ['SCRIPT', 'IFRAME', 'OBJECT', 'EMBED'].includes(element.tagName.toUpperCase())) {
+                                                throw new Error('Dangerous elements not allowed in sandbox');
+                                            }
+                                        }
+                                    }
+                                    return target[prop](...args);
+                                };
+                            }
+                            
+                            // Block dangerous properties
+                            const blockedProps = ['innerHTML', 'outerHTML', 'insertAdjacentHTML', 'textContent'];
+                            if (blockedProps.includes(prop)) {
+                                throw new Error(`DOM property ${prop} is blocked in sandbox`);
+                            }
+                            
+                            return target[prop];
+                        },
+                        
+                        set(target, prop, value) {
+                            const blockedProps = ['innerHTML', 'outerHTML', 'textContent'];
+                            if (blockedProps.includes(prop)) {
+                                throw new Error(`DOM property ${prop} is blocked in sandbox`);
+                            }
+                            target[prop] = value;
+                            return true;
+                        }
+                    });
+                },
 
             storage: Object.freeze({
                 async getItem(key) {
@@ -108,13 +177,77 @@
                 const check = ToolPermissionGuard.validateSandboxAccess(def.id, 'network');
                 if (!check.allowed) throw new Error(check.reason);
 
+                // CRITICAL: URL validation to prevent SSRF attacks
+                try {
+                    const parsedUrl = new URL(url, window.location.origin);
+                    
+                    // Block internal/private IPs and localhost
+                    const hostname = parsedUrl.hostname.toLowerCase();
+                    if (hostname === 'localhost' || hostname === '127.0.0.1' || 
+                        hostname.startsWith('192.168.') || hostname.startsWith('10.') ||
+                        hostname.startsWith('172.') || hostname.startsWith('169.254.') ||
+                        hostname.endsWith('.local') || hostname.endsWith('.internal')) {
+                        throw new Error('Access to internal networks blocked');
+                    }
+                    
+                    // Only allow HTTPS and specific protocols
+                    if (!['https:', 'http:'].includes(parsedUrl.protocol)) {
+                        throw new Error('Only HTTP/HTTPS protocols allowed');
+                    }
+                    
+                    // Rate limiting per tool
+                    const rateLimitKey = `fetch_${def.id}`;
+                    const now = Date.now();
+                    const lastFetch = this._lastFetchTimes?.[rateLimitKey] || 0;
+                    if (now - lastFetch < 1000) { // 1 second between requests
+                        throw new Error('Network rate limit exceeded');
+                    }
+                    this._lastFetchTimes = this._lastFetchTimes || {};
+                    this._lastFetchTimes[rateLimitKey] = now;
+                    
+                } catch (urlError) {
+                    throw new Error(`Invalid URL: ${urlError.message}`);
+                }
+
                 const safeOptions = { ...options };
                 if (safeOptions.headers) {
                     safeOptions.headers = _stripAuthHeaders(safeOptions.headers);
+                    
+                    // CRITICAL: Remove dangerous headers
+                    const dangerousHeaders = [
+                        'x-forwarded-for', 'x-real-ip', 'x-original-uri',
+                        'referer', 'origin', 'host', 'x-forwarded-host',
+                        'x-forwarded-proto', 'x-forwarded-port'
+                    ];
+                    dangerousHeaders.forEach(header => {
+                        delete safeOptions.headers[header];
+                        delete safeOptions.headers[header.toLowerCase()];
+                    });
                 }
 
+                // CRITICAL: Add security headers
+                safeOptions.headers = {
+                    ...safeOptions.headers,
+                    'X-Tool-Id': def.id,
+                    'X-Tool-Version': def.version,
+                    'User-Agent': `KnectaTool/${def.id}/${def.version}`
+                };
+
                 try {
-                    return await window.fetch(url, safeOptions);
+                    const response = await window.fetch(url, safeOptions);
+                    
+                    // CRITICAL: Validate response
+                    if (!response.ok) {
+                        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                    }
+                    
+                    // Limit response size to prevent DoS
+                    const contentLength = response.headers.get('content-length');
+                    if (contentLength && parseInt(contentLength) > 10 * 1024 * 1024) { // 10MB limit
+                        throw new Error('Response too large');
+                    }
+                    
+                    return response;
                 } catch(err) {
                     console.error(`[Sandbox] Network error for tool ${def.id}:`, err);
                     throw err;

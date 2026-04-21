@@ -206,39 +206,154 @@
       const parsed = JSON.parse(stored);
       if (!parsed || typeof parsed !== 'object') return null;
       
-      // Build session object for validation
-      const sessionToValidate = {
-        token: parsed.token,
-        refreshToken: parsed.refreshToken || null,
-        userId: normalizeSessionUserId(parsed.userId || parsed.id || parsed.user?.id || parsed.user?.uid),
-        expiresAt: resolveSessionExpiry(parsed.expiresAt, parsed.token),
-        issuedAt: normalizeSessionTimestamp(parsed.issuedAt) || Date.now()
-      };
-      
-      const validation = validateSession(sessionToValidate);
-      if (!validation.isValid) {
-        // ── OFFLINE-FIRST: Expired sessions still load the app ──────────────
-        // validation.expired = true means the token timestamp passed, but the
-        // session data is otherwise well-formed. We return it anyway and let
-        // background server validation decide whether to log the user out.
-        // Only truly malformed / structurally invalid sessions are discarded.
-        if (!validation.expired) {
-          console.warn('[Session] loadSessionFromStorage: discarding malformed session —', validation.reason);
-          return null;
-        }
-        console.log('[Session] loadSessionFromStorage: session expired locally — returning for background validation');
-      }
-      
-      return {
+      // CRITICAL: INSTANT RESTORATION - Load session immediately without validation
+      // This ensures UI can render instantly. Validation happens in background.
+      const sessionData = {
         token: parsed.token,
         refreshToken: parsed.refreshToken || null,
         user: parsed.user,
-        userId: sessionToValidate.userId,
-        expiresAt: sessionToValidate.expiresAt,
-        issuedAt: sessionToValidate.issuedAt
+        userId: normalizeSessionUserId(parsed.userId || parsed.id || parsed.user?.id || parsed.user?.uid),
+        expiresAt: resolveSessionExpiry(parsed.expiresAt, parsed.token),
+        issuedAt: normalizeSessionTimestamp(parsed.issuedAt) || Date.now(),
+        _instantRestored: true, // Mark as instantly restored
+        _needsValidation: true // Mark for background validation
       };
+      
+      // Set global state immediately for UI rendering
+      if (sessionData.token && sessionData.user) {
+        if (!window.Session) window.Session = {};
+        window.Session._localToken = sessionData.token;
+        window.Session._localUser = sessionData.user;
+        window.Session._hydrated = true;
+        window.currentUser = sessionData.user;
+        
+        console.log('[Session] INSTANT session restoration complete - UI can render now');
+      }
+      
+      // Schedule background validation (non-blocking)
+      setTimeout(() => {
+        validateSessionInBackground(sessionData);
+      }, 50);
+      
+      return sessionData;
     } catch (error) {
+      console.warn('[Session] loadSessionFromStorage error:', error.message);
       return null;
+    }
+  }
+  
+  // ============================================================================
+  // BACKGROUND SESSION VALIDATION - NON-BLOCKING
+  // ============================================================================
+  function validateSessionInBackground(sessionData) {
+    if (!sessionData || !sessionData._needsValidation) {
+      return;
+    }
+    
+    try {
+      console.log('[Session] Starting background session validation...');
+      
+      // CRITICAL: Wait for UI to be visible before validation
+      const waitForUI = () => {
+        return new Promise((resolve) => {
+          if (document.visibilityState === 'visible' && document.readyState === 'complete') {
+            resolve();
+          } else {
+            const checkUI = () => {
+              if (document.visibilityState === 'visible' && document.readyState === 'complete') {
+                resolve();
+              } else {
+                setTimeout(checkUI, 100);
+              }
+            };
+            checkUI();
+          }
+        });
+      };
+      
+      // Wait for UI to be ready before validation
+      waitForUI().then(() => {
+        // Build session object for validation
+        const sessionToValidate = {
+          token: sessionData.token,
+          refreshToken: sessionData.refreshToken || null,
+          userId: sessionData.userId,
+          expiresAt: sessionData.expiresAt,
+          issuedAt: sessionData.issuedAt
+        };
+        
+        const validation = validateSession(sessionToValidate);
+        
+        if (!validation.isValid) {
+          if (!validation.expired) {
+            console.warn('[Session] Background validation: malformed session —', validation.reason);
+            // CRITICAL: Logout AFTER UI is visible, not before
+            setTimeout(() => {
+              handleInvalidSession('malformed_session');
+            }, 100);
+          } else {
+            console.warn('[Session] Background validation: session expired');
+            // CRITICAL: Logout AFTER UI is visible, not before
+            setTimeout(() => {
+              handleInvalidSession('expired_session');
+            }, 100);
+          }
+        } else {
+          console.log('[Session] Background validation: session is valid');
+          // Clear validation flags
+          if (window.Session) {
+            window.Session._needsValidation = false;
+            window.Session._validated = true;
+          }
+          
+          // Fire validation success event
+          try {
+            window.dispatchEvent(new CustomEvent('moodchat-session-validated', {
+              detail: { 
+                session: sessionData, 
+                timestamp: Date.now(),
+                source: 'background_validation'
+              }
+            }));
+          } catch (e) {}
+        }
+      });
+    } catch (error) {
+      console.error('[Session] Background validation error:', error.message);
+    }
+  }
+  
+  function handleInvalidSession(reason) {
+    try {
+      console.log('[Session] Handling invalid session:', reason);
+      
+      // Clear invalid session data
+      clearCentralSession();
+      clearSessionStorage();
+      
+      // Clear temporary state
+      if (window.Session) {
+        delete window.Session._localToken;
+        delete window.Session._localUser;
+        delete window.Session._hydrated;
+        delete window.Session._needsValidation;
+        delete window.Session._validated;
+      }
+      window.currentUser = null;
+      
+      // Fire session invalid event
+      try {
+        window.dispatchEvent(new CustomEvent('moodchat-session-invalid', {
+          detail: { 
+            timestamp: Date.now(), 
+            reason: reason,
+            source: 'background_validation'
+          }
+        }));
+      } catch (e) {}
+      
+    } catch (error) {
+      console.error('[Session] Error handling invalid session:', error.message);
     }
   }
   

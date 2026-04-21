@@ -155,15 +155,19 @@ let unsavedChanges = false;          // Mutable local variable - FIXED
 })();
 
 // =============================================
-// GLOBAL HELPER FOR SETTING UPDATES - FIXED
+// GLOBAL HELPER FOR SETTING UPDATES - UNIFIED
 // =============================================
 window.__updateSetting = async (section, key, value) => {
     try {
-        // Push into AppSettings FIRST — instant, offline-safe, propagates to all modules
+        // Update AppSettings FIRST (single source of truth)
+        // This automatically propagates to all subscribed modules
         if (window.AppSettings) {
             window.AppSettings.set(section + '.' + key, value);
         }
+        
+        // Update SettingsState for backwards compatibility
         await SettingsState.update(section, key, value);
+        
         unsavedChanges = true;
         window.updateSaveButton();
         showNotification(`${key} updated`, 'success');

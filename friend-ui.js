@@ -5951,7 +5951,76 @@ function initializeUI() {
         }
     });
 
-    // ── Settings sync: apply per-key changes dispatched by friend-core ──────
+    // ──// UNIFIED SETTINGS SUBSCRIPTION - Single source of truth
+    // Subscribe to AppSettings for all settings changes
+    if (window.AppSettings) {
+        window.AppSettings.subscribe(function(settings, path, value) {
+            try {
+                if (path && path !== '*') {
+                    // Single setting changed
+                    const parts = path.split('.');
+                    const section = parts[0];
+                    const key = parts.slice(1).join('.');
+                    if (typeof applySettingToFriendModule === 'function') {
+                        applySettingToFriendModule(section, key, value);
+                        if (section === 'appearance' && key === 'theme') {
+                            // Force a repaint so the theme CSS variables take effect immediately
+                            document.documentElement.style.display = 'none';
+                            void document.documentElement.offsetHeight;
+                            document.documentElement.style.display = '';
+                        }
+                    }
+                } else {
+                    // Full settings object changed
+                    if (settings && typeof settings === 'object' && typeof applySettingToFriendModule === 'function') {
+                        Object.entries(settings).forEach(([sec, secVal]) => {
+                            if (secVal && typeof secVal === 'object') {
+                                Object.entries(secVal).forEach(([k, v]) => applySettingToFriendModule(sec, k, v));
+                            }
+                        });
+                    }
+                }
+            } catch(err) {
+                console.warn('[FriendUI] Settings subscription error:', err);
+            }
+        });
+    } else {
+        // Fallback: Wait for AppSettings to be ready
+        window.addEventListener('appSettingsReady', function() {
+            if (window.AppSettings) {
+                window.AppSettings.subscribe(function(settings, path, value) {
+                    try {
+                        if (path && path !== '*') {
+                            const parts = path.split('.');
+                            const section = parts[0];
+                            const key = parts.slice(1).join('.');
+                            if (typeof applySettingToFriendModule === 'function') {
+                                applySettingToFriendModule(section, key, value);
+                                if (section === 'appearance' && key === 'theme') {
+                                    // Force a repaint so the theme CSS variables take effect immediately
+                                    document.documentElement.style.display = 'none';
+                                    void document.documentElement.offsetHeight;
+                                    document.documentElement.style.display = '';
+                                }
+                            }
+                        } else {
+                            if (settings && typeof settings === 'object' && typeof applySettingToFriendModule === 'function') {
+                                Object.entries(settings).forEach(([sec, secVal]) => {
+                                    if (secVal && typeof secVal === 'object') {
+                                        Object.entries(secVal).forEach(([k, v]) => applySettingToFriendModule(sec, k, v));
+                                    }
+                                });
+                            }
+                        }
+                    } catch(err) {
+                        console.warn('[FriendUI] Settings subscription error:', err);
+                    }
+                });
+            }
+        }, { once: true });
+    }
+
+    // Legacy event listeners for backwards compatibility
     window.addEventListener('settingChanged', function(e) {
         const { section, key, value } = e.detail || {};
         if (section && key !== undefined && typeof applySettingToFriendModule === 'function') {

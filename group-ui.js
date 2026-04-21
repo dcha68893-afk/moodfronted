@@ -4697,6 +4697,48 @@ if (typeof document !== 'undefined') {
             }
         });
     }
+    // UNIFIED SETTINGS SUBSCRIPTION - Single source of truth
+    // Subscribe to AppSettings for all settings changes
+    if (window.AppSettings) {
+        window.AppSettings.subscribe(function(settings, path, value) {
+            try {
+                if (path && path !== '*') {
+                    // Single setting changed
+                    const parts = path.split('.');
+                    const section = parts[0];
+                    const key = parts.slice(1).join('.');
+                    applyUISettingChange(section, key, value);
+                } else {
+                    // Full settings object changed
+                    applyAll(settings);
+                }
+            } catch(err) {
+                console.warn('[GroupUI] Settings subscription error:', err);
+            }
+        });
+    } else {
+        // Fallback: Wait for AppSettings to be ready
+        window.addEventListener('appSettingsReady', function() {
+            if (window.AppSettings) {
+                window.AppSettings.subscribe(function(settings, path, value) {
+                    try {
+                        if (path && path !== '*') {
+                            const parts = path.split('.');
+                            const section = parts[0];
+                            const key = parts.slice(1).join('.');
+                            applyUISettingChange(section, key, value);
+                        } else {
+                            applyAll(settings);
+                        }
+                    } catch(err) {
+                        console.warn('[GroupUI] Settings subscription error:', err);
+                    }
+                });
+            }
+        }, { once: true });
+    }
+
+    // Legacy event listeners for backwards compatibility
     window.addEventListener("settingChanged", function(e) { try { var d = e.detail; applyUISettingChange(d.section, d.key, d.value); } catch(err) {} });
     window.addEventListener("settingsUpdated", function(e) { try { applyAll(e.detail && e.detail.settings); } catch(err) {} });
     window.addEventListener("message", function(e) {
