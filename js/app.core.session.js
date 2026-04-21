@@ -465,7 +465,29 @@
       sessionInitialized = false;
       sessionInitializationSignature = null;
       
-      clearSessionStorage();
+      clearSessionStorage(); // removes kynecta_auth
+
+      // PATCH v1.3: Also clear ALL parallel keys that other modules write.
+      // Without this, AUTH_STATE and SessionManager keys survived clearCentralSession,
+      // causing userLoggedIn() to return true on the next boot despite no valid session.
+      const PARALLEL_KEYS = [
+        'kynecta_session', 'accessToken', 'refreshToken',
+        'moodchat_token', 'USER_TOKEN', 'token',
+        'moodchat_accessToken', 'moodchat_refreshToken', 'moodchat_user',
+        'moodchat_tokenExpiry', 'moodchat_issuedAt', 'moodchat_validated',
+        'moodchat_validationTimestamp', 'auth_token', 'auth_user',
+        'currentUser', 'user', 'REFRESH_TOKEN', 'TOKEN_EXPIRY',
+        'isLoggedIn', 'kynecta_token'
+      ];
+      PARALLEL_KEYS.forEach(k => { try { localStorage.removeItem(k); } catch(_) {} });
+
+      // Clear global flags
+      window.__SESSION__       = null;
+      window.__IS_LOGGED_IN__  = false;
+      window.__SESSION_READY__ = false;
+      window.currentUser       = null;
+      window.__userToken       = null;
+      window.__accessToken     = null;
       
       return true;
     } finally {
@@ -1448,6 +1470,17 @@
             this._validated = false;
             this._validationTimestamp = null;
             this._issuedAt = null;
+
+            // PATCH v1.3: Wipe AUTH_STATE's own parallel localStorage keys.
+            // These keys (moodchat_accessToken, moodchat_user etc.) survived logout
+            // and were read back on reopen, creating a ghost session that conflicted
+            // with the main kynecta_auth state and caused the reopen loop.
+            const prefix = this._storageKeyPrefix || 'moodchat_';
+            ['accessToken','refreshToken','user','tokenExpiry','issuedAt','validated','validationTimestamp']
+                .forEach(k => { try { localStorage.removeItem(prefix + k); } catch(_) {} });
+            // Also clear the accessToken shadow key that AUTH_STATE writes without prefix
+            try { localStorage.removeItem('accessToken'); } catch(_) {}
+            try { localStorage.removeItem('refreshToken'); } catch(_) {}
           },
           
           hasToken: function() {
@@ -1469,15 +1502,11 @@
           isAuthenticated: function() {
             if (!this._token) return false;
             if (!this._user) return false;
-            if (!this._validated) return false;
-            
-            if (this._tokenExpiry) {
-              const now = new Date();
-              if (now > this._tokenExpiry) {
-                return false;
-              }
-            }
-            
+            // PATCH v1.3: Removed !this._validated check.
+            // A freshly-restored session from localStorage is not yet server-validated,
+            // but it IS authenticated for UI purposes. Requiring _validated=true here
+            // caused loadAppContent().validateSession() to fail on reopen → 5s wait → showAuthUI → loop.
+            // Server validation happens asynchronously in the background.
             return true;
           },
           

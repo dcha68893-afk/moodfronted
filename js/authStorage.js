@@ -138,7 +138,33 @@
         return getAuth()?.user || null;
     }
 
-    // PATCH v1.2: Synchronous session getter — avoids depending on SessionManager being loaded first.
+    // PATCH v1.3: Strict session validator — single source of truth for what constitutes
+    // a usable session. Used by auth_session_manager on every boot to detect corruption
+    // before it reaches the UI layer. Does NOT check expiry — server enforces that.
+    function isValidSession(session) {
+        if (!session || typeof session !== 'object') return false;
+        if (!session.token || typeof session.token !== 'string' || session.token.length < 10) return false;
+        if (!session.user || typeof session.user !== 'object') return false;
+        return true;
+    }
+
+    // PATCH v1.3: setSession / clearSession — canonical aliases that guarantee
+    // all callers use a single write path.
+    function setSession(session) {
+        return saveAuth(session);
+    }
+
+    function clearSession() {
+        return clearAuth();
+    }
+
+    // PATCH v1.3: getSession — returns the full auth object or null
+    function getSession() {
+        const auth = getAuth();
+        return isValidSession(auth) ? auth : null;
+    }
+
+    // PATCH v1.3: Synchronous session getter — avoids depending on SessionManager being loaded first.
     function getSessionSync() {
         try {
             const raw = localStorage.getItem(AUTH_STORAGE_KEY);
@@ -150,7 +176,11 @@
         return null;
     }
 
-    const AuthStorage = { saveAuth, getAuth, clearAuth, hasValidAuth, updateAuthTokens, getToken, getUser, getSessionSync };
+    const AuthStorage = {
+        saveAuth, getAuth, clearAuth, hasValidAuth, updateAuthTokens, getToken, getUser,
+        // v1.3 additions
+        isValidSession, setSession, clearSession, getSession, getSessionSync
+    };
 
     window.AuthStorage = AuthStorage;
     window.api = window.api || {};

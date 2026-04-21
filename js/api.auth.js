@@ -427,7 +427,7 @@
         REFRESH_TOKEN_KEY: 'REFRESH_TOKEN',
         TOKEN_EXPIRY_KEY: 'TOKEN_EXPIRY',
         AUTH_STATE_KEY: 'AUTH_STATE',
-        DEFAULT_TOKEN_EXPIRY: 3600000,
+        DEFAULT_TOKEN_EXPIRY: 30 * 24 * 60 * 60 * 1000, // PATCH v1.3: 30 days — matches authStorage. Was 1 hour → caused kynecta_auth to be wiped after 60 min → loop.
         TOKEN_REFRESH_BUFFER: 60000,
         VALIDATION_CACHE_TIME: 30000,
         MAX_REFRESH_ATTEMPTS: 3,
@@ -678,15 +678,12 @@
                 return null;
             }
             
-            // Check expiry if present
-            if (authData.expiresIn && authData.timestamp) {
-                const expiryTime = authData.timestamp + authData.expiresIn;
-                if (Date.now() > expiryTime) {
-                    console.log('🔍 [AUTH] Persisted auth data expired, clearing');
-                    _clearPersistedAuthData();
-                    return null;
-                }
-            }
+            // PATCH v1.3: Client-side expiry check REMOVED.
+            // Previously: if (Date.now() > timestamp + expiresIn) → clear session.
+            // This wiped kynecta_auth silently after 1 hour while other keys
+            // (kynecta_session, moodchat_accessToken) survived, creating a corrupted
+            // partial state that caused the reopen loop on every device.
+            // Server enforces expiry via 401. Background validator handles that case.
             
             console.log('✅ [AUTH] Loaded persisted auth data');
             return authData;
@@ -2123,6 +2120,35 @@
         
         try {
             const result = await apiRequestFunc(endpoint, payload, options);
+
+            // PATCH v1.3: Global 401 interceptor — the only correct place to force-logout.
+            // When the server rejects our token, we must atomically clear ALL session
+            // state and redirect. Without this, the app loop: kynecta_auth still present
+            // → userLoggedIn()=true → loadApp → no valid session → showAuthUI → loop.
+            if (result && result.status === 401 && !endpoint.includes('/login') && !endpoint.includes('/register')) {
+                console.warn('[API-AUTH] 401 received — clearing session and redirecting to login');
+                try {
+                    if (window.AuthStorage && typeof window.AuthStorage.clearAuth === 'function') {
+                        window.AuthStorage.clearAuth();
+                    } else {
+                        localStorage.removeItem('kynecta_auth');
+                    }
+                    // Clear ALL parallel session keys so no stale state survives
+                    ['kynecta_session','accessToken','moodchat_token','USER_TOKEN','token',
+                     'moodchat_accessToken','moodchat_user','moodchat_tokenExpiry',
+                     'auth_token','auth_user','currentUser','user','REFRESH_TOKEN','TOKEN_EXPIRY']
+                        .forEach(k => { try { localStorage.removeItem(k); } catch(_) {} });
+                    window.__SESSION__ = null;
+                    window.__IS_LOGGED_IN__ = false;
+                    window.__SESSION_READY__ = false;
+                    window.currentUser = null;
+                } catch(e) {}
+                // Redirect only if not already on login page
+                if (!window.location.pathname.includes('index') && window.location.pathname !== '/') {
+                    window.location.href = '/index.html';
+                }
+            }
+
             delete _moduleState.apiCallFailures[`${endpoint}:suppressed`];
             return result;
         } catch (error) {

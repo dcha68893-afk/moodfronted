@@ -317,28 +317,32 @@
             const isOnChatPage = window.location.pathname.includes('chat.html');
             const isOnIndexPage = window.location.pathname === '/' || window.location.pathname.includes('index.html');
             
+            // PATCH v1.3: Only write kynecta_auth if we have BOTH token AND user.
+            // Writing a token-only session here was the source of corrupted state:
+            // userLoggedIn() would return true (token present) but centralSession.user
+            // would be null, causing the 5-second wait loop then showAuthUI() redirect.
+            if (!session.user) {
+                console.warn('[SessionManager] performAutoLogin: session has no user — skipping storage write to prevent corruption');
+                return { success: false, reason: 'no_user_in_session' };
+            }
+
             try {
-                localStorage.setItem('token', session.token);
-                localStorage.setItem('accessToken', session.token);
-                localStorage.setItem('moodchat_token', session.token);
-                localStorage.setItem('USER_TOKEN', session.token);
-                
-                if (session.user) {
-                    localStorage.setItem('currentUser', JSON.stringify(session.user));
-                    localStorage.setItem('user', JSON.stringify(session.user));
-                    window.currentUser = session.user;
-                }
-                
+                // Write canonical key with BOTH token and user
                 const unifiedAuth = {
                     token: session.token,
                     user: session.user,
-                    userId: session.userId,
-                    timestamp: Date.now(),
-                    validated: true
+                    userId: session.userId || session.user?.id || session.user?.uid || null,
+                    expiresAt: Date.now() + (30 * 24 * 60 * 60 * 1000), // 30 days
+                    issuedAt: Date.now(),
+                    savedAt: new Date().toISOString()
                 };
-                localStorage.setItem('kynecta_auth', JSON.stringify(unifiedAuth));
-                
-                console.log('[SessionManager] Token restored to all storage locations');
+                if (window.AuthStorage && typeof window.AuthStorage.saveAuth === 'function') {
+                    window.AuthStorage.saveAuth(unifiedAuth);
+                } else {
+                    localStorage.setItem('kynecta_auth', JSON.stringify(unifiedAuth));
+                }
+                window.currentUser = session.user;
+                console.log('[SessionManager] Session written via performAutoLogin (token + user present)');
             } catch (error) {
                 console.warn('[SessionManager] Failed to restore token to storage:', error);
             }
@@ -352,8 +356,6 @@
                 }));
             } catch (error) {}
             
-            // CRITICAL FIX: Don't auto-redirect to chat.html - let user stay where they are
-            // This prevents redirect loops and flicker after login
             if (isOnIndexPage) {
                 console.log('[SessionManager] Auto-login successful, staying on current page to prevent redirect loop');
             } else if (isOnChatPage) {
@@ -539,67 +541,77 @@
             // CRITICAL: Check if bootstrap already hydrated session
             const bootstrapHydrated = window.Session && window.Session._hydrated === true;
             if (bootstrapHydrated) {
-                console.log('[SessionManager] ð Bootstrap already hydrated session, skipping auto-login');
+                console.log('[SessionManager] Bootstrap already hydrated session, skipping auto-login');
                 return { success: true, bootstrapHandled: true };
             }
-            
-            // CRITICAL FIX v1.2: Use kynecta_auth as primary key — matches authStorage.js canonical key.
-            // Previous code read auth_token/auth_user which are NEVER written by authStorage,
-            // so session was NEVER found here, causing __SESSION_READY__ = false on every reopen.
-            let token = null;
-            let user = null;
+
+            // PATCH v1.3: STRICT SESSION RESTORE — never trust a partial session.
+            // Read kynecta_auth (canonical key) and validate with isValidSession().
+            // isValidSession requires BOTH token (string) AND user (object).
+            // A token-only or user-only session is CORRUPTED and must be auto-cleared.
+            // This is the fix for: "requires manual browser data clearing" on mobile.
+            let rawSession = null;
             try {
-                const rawAuth = localStorage.getItem('kynecta_auth');
-                if (rawAuth) {
-                    const auth = JSON.parse(rawAuth);
-                    token = auth && auth.token ? auth.token : null;
-                    user  = auth && auth.user  ? auth.user  : null;
-                }
-            } catch(_) {}
-            // Fallback to legacy keys if primary not found
-            if (!token) {
-                token = localStorage.getItem('auth_token') ||
-                        localStorage.getItem('accessToken') ||
-                        localStorage.getItem('USER_TOKEN') ||
-                        localStorage.getItem('kynecta_token') || null;
-                if (token) {
-                    try { user = JSON.parse(localStorage.getItem('auth_user') || localStorage.getItem('currentUser') || 'null'); } catch(_) {}
-                }
+                const raw = localStorage.getItem('kynecta_auth');
+                rawSession = raw ? JSON.parse(raw) : null;
+            } catch(_) { rawSession = null; }
+
+            // Use AuthStorage.isValidSession if available, else inline check
+            const isValid = (window.AuthStorage && typeof window.AuthStorage.isValidSession === 'function')
+                ? window.AuthStorage.isValidSession(rawSession)
+                : !!(rawSession && rawSession.token && typeof rawSession.token === 'string'
+                     && rawSession.token.length >= 10 && rawSession.user && typeof rawSession.user === 'object');
+
+            if (!isValid) {
+                // AUTO-CLEAR all session state — no manual browser clearing needed on mobile
+                console.warn('[SessionManager] ⚠️ Corrupted/incomplete session detected — auto-clearing all keys');
+                const ALL_SESSION_KEYS = [
+                    'kynecta_auth', 'kynecta_session',
+                    'accessToken', 'moodchat_token', 'USER_TOKEN', 'token',
+                    'auth_token', 'auth_user', 'currentUser', 'user',
+                    'moodchat_accessToken', 'moodchat_refreshToken', 'moodchat_user',
+                    'moodchat_tokenExpiry', 'moodchat_issuedAt', 'moodchat_validated',
+                    'REFRESH_TOKEN', 'TOKEN_EXPIRY', 'isLoggedIn', 'kynecta_token'
+                ];
+                ALL_SESSION_KEYS.forEach(k => { try { localStorage.removeItem(k); } catch(_) {} });
+
+                window.__SESSION__       = null;
+                window.__IS_LOGGED_IN__  = false;
+                window.__SESSION_READY__ = false;
+                window.currentUser       = null;
+                window.__userToken       = null;
+                window.__accessToken     = null;
+
+                console.log('[SessionManager] ✅ All session keys cleared — app will show login');
+                return { success: true, sessionCleared: true };
             }
-            
-            // CRITICAL FIX: Set global session ready flag immediately
-            window.__SESSION_READY__ = !!(token && user);
-            
-            if (token) {
-                console.log('[SessionManager] ✅ Session found via kynecta_auth, restoring immediately');
-                
-                // PATCH v1.2: Set ALL global state flags immediately — this is the single
-                // handshake point so bootstrap, Session, and api.auth all agree.
-                window.__SESSION__ = { token, user };
-                window.__IS_LOGGED_IN__ = true;
-                window.__SESSION_READY__ = true;
-                window.currentUser = user;
-                window.__userToken = token;
-                window.__accessToken = token;
-                
-                // Update currentSession state
-                currentSession = {
-                    userId: user?.id,
-                    token: token,
-                    user: user,
-                    lastActivity: Date.now()
-                };
-                
-                // Fire session restored event AND session:ready (bootstrap listens for both)
-                try {
-                    window.dispatchEvent(new CustomEvent('session:restored', {
-                        detail: { token: token, user: user, timestamp: Date.now() }
-                    }));
-                    window.dispatchEvent(new Event('session:ready'));
-                } catch (e) {}
-                
-                return { success: true, sessionRestored: true };
-            }
+
+            // Valid session — set all global flags atomically
+            const session = rawSession;
+            window.__SESSION__       = session;
+            window.__IS_LOGGED_IN__  = true;
+            window.__SESSION_READY__ = true;
+            window.currentUser       = session.user;
+            window.__userToken       = session.token;
+            window.__accessToken     = session.token;
+
+            currentSession = {
+                userId: session.user?.id || session.user?.uid || null,
+                token:  session.token,
+                user:   session.user,
+                lastActivity: Date.now()
+            };
+
+            console.log('[SessionManager] ✅ Valid session restored for user:', session.user?.id || session.user?.email);
+
+            try {
+                window.dispatchEvent(new CustomEvent('session:restored', {
+                    detail: { token: session.token, user: session.user, timestamp: Date.now() }
+                }));
+                window.dispatchEvent(new Event('session:ready'));
+            } catch(e) {}
+
+            return { success: true, sessionRestored: true };
             
             if (isOnIndexPage) {
                 const shouldLogin = shouldPromptLogin();
