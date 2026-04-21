@@ -14,7 +14,7 @@
         SESSION_KEY: 'kynecta_session',
         ACCOUNTS_KEY: 'kynecta_saved_accounts',
         MAX_ACCOUNTS_PER_DEVICE: 2,
-        SESSION_DURATION_DAYS: 1,  // Auto-login expires after 1 day of inactivity
+        SESSION_DURATION_DAYS: 30, // PATCH v1.2: Match authStorage 30-day default (was 1 day — caused reopen loop)
         CHECK_INTERVAL: 60000,      // Check every minute
         STORAGE_VERSION: '1.2.0',
         ACTIVITY_THROTTLE_MS: 5000  // Only save session every 5 seconds max
@@ -497,6 +497,14 @@
     // INITIALIZATION - LOOP PREVENTION
     // ============================================================================
     async function initialize() {
+        // PATCH v1.2: Single global boot guard — prevents any re-entry from
+        // DOMContentLoaded firing on back-navigation or hot-module-reload.
+        if (window.__APP_BOOTED__) {
+            console.log('[SessionManager] ⚠️ __APP_BOOTED__ already set, skipping init');
+            return { success: true, alreadyBooted: true };
+        }
+        window.__APP_BOOTED__ = true;
+
         // CRITICAL: Prevent multiple initializations
         if (__SESSION_MANAGER_INITIALIZED__) {
             console.log('[SessionManager] ⚠️ Already initialized, skipping');
@@ -535,17 +543,41 @@
                 return { success: true, bootstrapHandled: true };
             }
             
-            // CRITICAL: Try immediate session restoration using exact keys specified
-            const token = localStorage.getItem("auth_token");
-            const user = token ? JSON.parse(localStorage.getItem("auth_user") || "null") : null;
+            // CRITICAL FIX v1.2: Use kynecta_auth as primary key — matches authStorage.js canonical key.
+            // Previous code read auth_token/auth_user which are NEVER written by authStorage,
+            // so session was NEVER found here, causing __SESSION_READY__ = false on every reopen.
+            let token = null;
+            let user = null;
+            try {
+                const rawAuth = localStorage.getItem('kynecta_auth');
+                if (rawAuth) {
+                    const auth = JSON.parse(rawAuth);
+                    token = auth && auth.token ? auth.token : null;
+                    user  = auth && auth.user  ? auth.user  : null;
+                }
+            } catch(_) {}
+            // Fallback to legacy keys if primary not found
+            if (!token) {
+                token = localStorage.getItem('auth_token') ||
+                        localStorage.getItem('accessToken') ||
+                        localStorage.getItem('USER_TOKEN') ||
+                        localStorage.getItem('kynecta_token') || null;
+                if (token) {
+                    try { user = JSON.parse(localStorage.getItem('auth_user') || localStorage.getItem('currentUser') || 'null'); } catch(_) {}
+                }
+            }
             
             // CRITICAL FIX: Set global session ready flag immediately
             window.__SESSION_READY__ = !!(token && user);
             
-            if (token && user) {
-                console.log('[SessionManager] ð Session found via auth_token/auth_user keys, restoring immediately');
+            if (token) {
+                console.log('[SessionManager] ✅ Session found via kynecta_auth, restoring immediately');
                 
-                // Set global state immediately
+                // PATCH v1.2: Set ALL global state flags immediately — this is the single
+                // handshake point so bootstrap, Session, and api.auth all agree.
+                window.__SESSION__ = { token, user };
+                window.__IS_LOGGED_IN__ = true;
+                window.__SESSION_READY__ = true;
                 window.currentUser = user;
                 window.__userToken = token;
                 window.__accessToken = token;
@@ -558,11 +590,12 @@
                     lastActivity: Date.now()
                 };
                 
-                // Fire session restored event
+                // Fire session restored event AND session:ready (bootstrap listens for both)
                 try {
                     window.dispatchEvent(new CustomEvent('session:restored', {
                         detail: { token: token, user: user, timestamp: Date.now() }
                     }));
+                    window.dispatchEvent(new Event('session:ready'));
                 } catch (e) {}
                 
                 return { success: true, sessionRestored: true };

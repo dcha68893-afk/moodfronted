@@ -3711,16 +3711,22 @@ try {
     
     /**
      * PUBLIC: Check if user is authenticated
+     * PATCH v1.2: Always returns a Promise — never undefined.catch crash.
      */
     async function isAuthenticated() {
-        const token = getUserToken();
-        if (!token) return false;
-        
-        if (!_isOnline()) {
-            return true;
+        try {
+            const token = getUserToken();
+            if (!token) return false;
+            if (!_isOnline()) return true; // offline → trust local session
+            const result = validateSession();
+            // validateSession may return bool or Promise — normalise both
+            if (result && typeof result.then === 'function') {
+                return result;
+            }
+            return Promise.resolve(!!result);
+        } catch(e) {
+            return Promise.resolve(false);
         }
-        
-        return validateSession();
     }
     
     /**
@@ -3941,6 +3947,19 @@ try {
             getCurrentUser,
             getUser,
             refreshSession,
+            // PATCH v1.2: Explicit contract aliases — getSession and refreshToken must exist
+            // on window.api.auth so any caller can depend on them without checking.
+            getSession: function() {
+                try {
+                    if (window.Session && typeof window.Session.getSession === 'function') {
+                        return window.Session.getSession();
+                    }
+                    const raw = localStorage.getItem('kynecta_auth');
+                    if (raw) { const a = JSON.parse(raw); if (a && a.token) return a; }
+                    return null;
+                } catch(e) { return null; }
+            },
+            refreshToken: refreshSession,
             isAuthenticated,
             getAuthState,
             

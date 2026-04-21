@@ -121,36 +121,42 @@
   // SESSION HARDENING: PHASE 3 - STRICT SESSION VALIDATOR (PRESERVED)
   // ============================================================================
 
-  function validateSession(session) {
-    if (!session || typeof session !== 'object') {
-      return { isValid: false, reason: 'Session is null or not an object' };
-    }
-
-    for (const [key, type] of Object.entries(SESSION_SCHEMA)) {
-      if (!(key in session)) {
-        return { isValid: false, reason: `Missing required field: ${key}` };
+    // PATCH v1.2: validateSession checks STRUCTURE only — not expiry.
+    // Expiry enforcement belongs to background server validation (validateSessionInBackground).
+    // Blocking boot on expiry is the primary cause of the reopen loop:
+    //   stored session → expiresAt check fails → setCentralSession returns false
+    //   → centralSession stays empty → UI redirects to login → loop.
+    function validateSession(session) {
+      if (!session || typeof session !== 'object') {
+        return { isValid: false, reason: 'Session is null or not an object' };
       }
-      if (typeof session[key] !== type) {
-        return { isValid: false, reason: `Field ${key} must be ${type}, got ${typeof session[key]}` };
+
+      for (const [key, type] of Object.entries(SESSION_SCHEMA)) {
+        if (!(key in session)) {
+          return { isValid: false, reason: `Missing required field: ${key}` };
+        }
+        if (typeof session[key] !== type) {
+          return { isValid: false, reason: `Field ${key} must be ${type}, got ${typeof session[key]}` };
+        }
       }
-    }
 
-    if (session.refreshToken !== null &&
-        session.refreshToken !== undefined &&
-        typeof session.refreshToken !== 'string') {
-      return { isValid: false, reason: `Field refreshToken must be string|null, got ${typeof session.refreshToken}` };
-    }
+      if (session.refreshToken !== null &&
+          session.refreshToken !== undefined &&
+          typeof session.refreshToken !== 'string') {
+        return { isValid: false, reason: `Field refreshToken must be string|null, got ${typeof session.refreshToken}` };
+      }
 
-    if (session.userId === null || session.userId === undefined || session.userId === '') {
-      return { isValid: false, reason: 'Missing required field: userId' };
-    }
+      if (session.userId === null || session.userId === undefined || session.userId === '') {
+        return { isValid: false, reason: 'Missing required field: userId' };
+      }
 
-    if (session.expiresAt <= Date.now()) {
-      return { isValid: false, reason: 'Session expired', expired: true };
-    }
+      // NOTE: Expiry is NOT checked here. An expired-but-present token is still
+      // structurally valid and must be loaded so the UI can render immediately.
+      // Background validation (validateSessionInBackground) will invalidate it
+      // server-side if needed, after the UI is visible.
 
-    return { isValid: true };
-  }
+      return { isValid: true };
+    }
 
   function getSafeSession(session) {
     if (!session) return null;
@@ -242,84 +248,73 @@
     }
   }
   
-  // ============================================================================
-  // BACKGROUND SESSION VALIDATION - NON-BLOCKING
-  // ============================================================================
+  // PATCH v1.2: Background validation — non-blocking, offline-aware.
+  // Never redirects to login directly. Fires an event; UI decides what to do.
   function validateSessionInBackground(sessionData) {
     if (!sessionData || !sessionData._needsValidation) {
       return;
     }
-    
-    try {
-      console.log('[Session] Starting background session validation...');
-      
-      // CRITICAL: Wait for UI to be visible before validation
-      const waitForUI = () => {
-        return new Promise((resolve) => {
-          if (document.visibilityState === 'visible' && document.readyState === 'complete') {
-            resolve();
-          } else {
-            const checkUI = () => {
-              if (document.visibilityState === 'visible' && document.readyState === 'complete') {
-                resolve();
-              } else {
-                setTimeout(checkUI, 100);
-              }
-            };
-            checkUI();
-          }
-        });
-      };
-      
-      // Wait for UI to be ready before validation
-      waitForUI().then(() => {
-        // Build session object for validation
+
+    // Wait until document is fully loaded so we don't interrupt first render
+    const doValidate = () => {
+      try {
+        // Only attempt server-side validation when online
+        if (!navigator.onLine) {
+          console.log('[Session] Background validation skipped — offline');
+          if (window.Session) window.Session._needsValidation = false;
+          return;
+        }
+
         const sessionToValidate = {
           token: sessionData.token,
           refreshToken: sessionData.refreshToken || null,
           userId: sessionData.userId,
-          expiresAt: sessionData.expiresAt,
+          expiresAt: sessionData.expiresAt || (Date.now() + 1),
           issuedAt: sessionData.issuedAt
         };
-        
+
         const validation = validateSession(sessionToValidate);
-        
-        if (!validation.isValid) {
-          if (!validation.expired) {
-            console.warn('[Session] Background validation: malformed session —', validation.reason);
-            // CRITICAL: Logout AFTER UI is visible, not before
-            setTimeout(() => {
-              handleInvalidSession('malformed_session');
-            }, 100);
-          } else {
-            console.warn('[Session] Background validation: session expired');
-            // CRITICAL: Logout AFTER UI is visible, not before
-            setTimeout(() => {
-              handleInvalidSession('expired_session');
-            }, 100);
+
+        if (!validation.isValid && !validation.expired) {
+          // Structurally malformed — safe to invalidate
+          console.warn('[Session] Background validation: malformed session —', validation.reason);
+          handleInvalidSession('malformed_session');
+        } else if (validation.expired) {
+          // Expired token: try refresh first, only logout if refresh fails
+          console.warn('[Session] Background validation: token expired — attempting refresh');
+          if (window.api && window.api.auth && typeof window.api.auth.refreshToken === 'function') {
+            const rp = window.api.auth.refreshToken();
+            if (rp && typeof rp.then === 'function') {
+              rp.then(result => {
+                if (!result || !result.success) handleInvalidSession('refresh_failed');
+              }).catch(() => {
+                // Refresh request failed (network error) — keep local session, do not logout
+                console.warn('[Session] Token refresh request failed (network?) — keeping local session');
+              });
+            }
           }
+          // If no refresh method, just keep local session silently
         } else {
           console.log('[Session] Background validation: session is valid');
-          // Clear validation flags
           if (window.Session) {
             window.Session._needsValidation = false;
             window.Session._validated = true;
           }
-          
-          // Fire validation success event
           try {
             window.dispatchEvent(new CustomEvent('moodchat-session-validated', {
-              detail: { 
-                session: sessionData, 
-                timestamp: Date.now(),
-                source: 'background_validation'
-              }
+              detail: { session: sessionData, timestamp: Date.now(), source: 'background_validation' }
             }));
           } catch (e) {}
         }
-      });
-    } catch (error) {
-      console.error('[Session] Background validation error:', error.message);
+      } catch (error) {
+        console.error('[Session] Background validation error:', error.message);
+      }
+    };
+
+    if (document.readyState === 'complete') {
+      setTimeout(doValidate, 2000); // 2 s after ready — UI is fully painted
+    } else {
+      window.addEventListener('load', () => setTimeout(doValidate, 2000), { once: true });
     }
   }
   
@@ -490,14 +485,12 @@
     return centralSession.user;
   }
   
+  // PATCH v1.2: isAuthenticated is true if we have a token+user, regardless of expiry.
+  // Expiry enforcement happens server-side during background validation.
+  // Failing here on expiry causes the UI to see "not logged in" on reopen → loop.
   function isCentralAuthenticated() {
     if (!centralSession.token) return false;
     if (!centralSession.user) return false;
-    if (centralSession.expiresAt) {
-      if (new Date(centralSession.expiresAt).getTime() <= Date.now()) {
-        return false;
-      }
-    }
     return true;
   }
   

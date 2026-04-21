@@ -10,14 +10,11 @@
     const LEGACY_TOKEN_KEYS = ['authToken', 'accessToken', 'token', 'moodchat_token', 'USER_TOKEN', 'kynecta_token'];
     const LEGACY_USER_KEYS = ['currentUser', 'user', 'moodchat_user'];
 
+    // PATCH v1.2: Mutation guard is a no-op — we always allow auth mutations.
+    // The original conditional guard silently dropped saves in certain boot orders,
+    // which caused the session to never persist after auto-login, producing the reopen loop.
     function withAuthMutation(fn) {
-        const previous = window.__allowAuthStorageMutation__;
-        window.__allowAuthStorageMutation__ = true;
-        try {
-            return fn();
-        } finally {
-            window.__allowAuthStorageMutation__ = previous === true;
-        }
+        return fn();
     }
 
     function safeParse(raw, fallback = null) {
@@ -141,7 +138,19 @@
         return getAuth()?.user || null;
     }
 
-    const AuthStorage = { saveAuth, getAuth, clearAuth, hasValidAuth, updateAuthTokens, getToken, getUser };
+    // PATCH v1.2: Synchronous session getter — avoids depending on SessionManager being loaded first.
+    function getSessionSync() {
+        try {
+            const raw = localStorage.getItem(AUTH_STORAGE_KEY);
+            if (raw) {
+                const auth = JSON.parse(raw);
+                if (auth && auth.token) return auth;
+            }
+        } catch (_) {}
+        return null;
+    }
+
+    const AuthStorage = { saveAuth, getAuth, clearAuth, hasValidAuth, updateAuthTokens, getToken, getUser, getSessionSync };
 
     window.AuthStorage = AuthStorage;
     window.api = window.api || {};
