@@ -65,7 +65,7 @@
     }
 
     function getApiOrigin() {
-        return detectLocalEnvironment() ? 'http://localhost:4000' : 'https://moodchat-fy56.onrender.com';
+        return detectLocalEnvironment() ? 'http://localhost:3000' : 'https://moodchat-fy56.onrender.com';
     }
 
     function getApiBase() {

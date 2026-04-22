@@ -41,31 +41,44 @@ class StatusAPI {
     }
 
     getAuthHeaders() {
-        // FIX: moodchat_token is the primary key used by this app (confirmed by logs).
-        // Also check parent window session since status.html runs as an iframe and the
-        // token may not be in the iframe's own localStorage at all.
-        const token =
-            // 1. Check parent window session (iframe context)
-            (window.parent && window.parent !== window ? (
-                (() => {
-                    try {
-                        return window.parent.__kynToken ||
-                               (window.parent.__PARENT_SESSION__ && window.parent.__PARENT_SESSION__.token) ||
-                               null;
-                    } catch (_) { return null; }
-                })()
-            ) : null) ||
-            // 2. In-memory cache set by status-core.js
-            window.__kynToken ||
-            (window.__PARENT_SESSION__ && window.__PARENT_SESSION__.token) ||
-            // 3. localStorage — check all known key names, moodchat_token first
-            localStorage.getItem('moodchat_token') ||
-            localStorage.getItem('authToken') ||
-            localStorage.getItem('token') ||
-            localStorage.getItem('accessToken') ||
-            localStorage.getItem('kynecta_token') ||
-            null;
-        return token ? { 'Authorization': `Bearer ${token}` } : {};
+        // FIX: Use centralized authStorage for consistent token access
+        try {
+            // Try to get session from authStorage first (most reliable)
+            if (typeof window.getAuthSession === 'function') {
+                const session = window.getAuthSession();
+                if (session && session.token) {
+                    return { 'Authorization': `Bearer ${session.token}` };
+                }
+            }
+            
+            // Check parent window session (iframe context)
+            const token = 
+                (window.parent && window.parent !== window ? (
+                    (() => {
+                        try {
+                            return window.parent.__kynToken ||
+                                   (window.parent.__PARENT_SESSION__ && window.parent.__PARENT_SESSION__.token) ||
+                                   (window.parent.getAuthSession && window.parent.getAuthSession())?.token ||
+                                   null;
+                        } catch (_) { return null; }
+                    })()
+                ) : null) ||
+                // In-memory cache set by status-core.js
+                window.__kynToken ||
+                (window.__PARENT_SESSION__ && window.__PARENT_SESSION__.token) ||
+                // localStorage — check all known key names, moodchat_token first
+                localStorage.getItem('moodchat_token') ||
+                localStorage.getItem('authToken') ||
+                localStorage.getItem('token') ||
+                localStorage.getItem('accessToken') ||
+                localStorage.getItem('kynecta_token') ||
+                null;
+            
+            return token ? { 'Authorization': `Bearer ${token}` } : {};
+        } catch (error) {
+            console.error('[StatusAPI] getAuthHeaders error:', error);
+            return {};
+        }
     }
 
     // ── FIX: centralised fetch-with-timeout ───────────────────────────────────

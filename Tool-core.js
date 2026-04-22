@@ -3771,7 +3771,22 @@ function authorizedFetch(url, options = {}) {
     return new Promise((resolve, reject) => {
         const normalizedUrl = normalizeToolsEndpoint(url);
         const requestUrl = resolveToolsApiUrl(normalizedUrl);
-        const token = sessionClient.getToken ? sessionClient.getToken() : null;
+        
+        // Use centralized auth for consistent token access
+        let token = null;
+        
+        // Try authStorage first (most reliable)
+        if (typeof window.getAuthSession === 'function') {
+            const authSession = window.getAuthSession();
+            if (authSession && authSession.token) {
+                token = authSession.token;
+            }
+        }
+        
+        // Fallback to sessionClient
+        if (!token && sessionClient.getToken) {
+            token = sessionClient.getToken();
+        }
         if (!token) {
             const error = new Error('No authentication token');
             error.code = 'NO_TOKEN';

@@ -825,8 +825,8 @@
                 hostname.startsWith('10.') ||
                 /^172\.(1[6-9]|2\d|3[0-1])\./.test(hostname)
             ) {
-                console.log('[AUTH] Base URL from localhost detection: http://localhost:4000');
-                return 'http://localhost:4000';
+                console.log('[AUTH] Base URL from localhost detection: http://localhost:3000');
+                return 'http://localhost:3000';
             }
             
             // Priority 5: Production default
@@ -834,7 +834,7 @@
             return 'https://moodchat-fy56.onrender.com';
         } catch (error) {
             console.error('[AUTH] Error getting base URL:', error);
-            return typeof window.__getApiOrigin === 'function' ? window.__getApiOrigin() : 'http://localhost:4000';
+            return typeof window.__getApiOrigin === 'function' ? window.__getApiOrigin() : 'http://localhost:3000';
         }
     }
     

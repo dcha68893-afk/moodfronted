@@ -86,19 +86,17 @@
     }
 
     function getBackendBaseUrl() {
-        // ✅ window.__kynAPI.baseUrl is set by api.core.js to "http://localhost:4000/api" (local)
+        //  window.__kynAPI.baseUrl is set by api.core.js to "http://localhost:3000/api" (local)
         // or "https://moodchat-fy56.onrender.com/api" (production). Strip /api suffix.
         if (window.__kynAPI && window.__kynAPI.baseUrl) {
             return window.__kynAPI.baseUrl.replace(/\/api\/?$/, '');
         }
-        if (window.__API_BASE_URL__)
-            return window.__API_BASE_URL__.replace(/\/api\/?$/, '');
         if (window.Environment && window.Environment.backendUrl)
             return window.Environment.backendUrl.replace(/\/api\/?$/, '');
-        // ✅ Production fallback — detect from hostname
+        //  Production fallback  detect from hostname
         if (!detectLocalEnvironment())
             return 'https://moodchat-fy56.onrender.com';
-        return 'http://localhost:4000';
+        return 'http://localhost:3000';
     }
 
     function getWebSocketUrl() {

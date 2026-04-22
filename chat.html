@@ -1412,7 +1412,7 @@
             return /^172\.(1[6-9]|2\d|3[0-1])\./.test(host);
         };
         window.__getApiOrigin = window.__getApiOrigin || function() {
-            return window.__isLocalEnvironment() ? 'http://localhost:4000' : 'https://moodchat-fy56.onrender.com';
+            return window.__isLocalEnvironment() ? 'http://localhost:3000' : 'https://moodchat-fy56.onrender.com';
         };
         window.__getApiBase = window.__getApiBase || function() {
             return `${window.__getApiOrigin()}/api`;
@@ -2756,7 +2756,7 @@
             }
 
             async function directApiRequest(endpoint, method, body, params, token) {
-                const baseUrl = window.__getApiBase ? window.__getApiBase() : 'http://localhost:4000/api';
+                const baseUrl = window.__getApiBase ? window.__getApiBase() : 'http://localhost:3000/api';
                 let url = baseUrl + endpoint;
                 if (method === 'GET' && params && typeof params === 'object') {
                     const queryString = new URLSearchParams(params).toString();
@@ -3091,7 +3091,7 @@
                 }
                 try {
                     console.log('[Parent] Refreshing call history for user:', userId);
-                    const baseUrl = window.__getApiBase ? window.__getApiBase() : 'http://localhost:4000/api';
+                    const baseUrl = window.__getApiBase ? window.__getApiBase() : 'http://localhost:3000/api';
 
                     if (callsIframe && callsIframe.contentWindow && navigator.onLine) {
                         callsIframe.contentWindow.postMessage({
@@ -3672,7 +3672,7 @@
                         try { if (replySource && replySource.postMessage) replySource.postMessage({ type: 'FILE_UPLOAD_RESULT', requestId, ...payload }, '*'); } catch(e) {}
                     };
                     try {
-                        const baseUrl = window.__getApiBase ? window.__getApiBase() : 'http://localhost:4000/api';
+                        const baseUrl = window.__getApiBase ? window.__getApiBase() : 'http://localhost:3000/api';
                         let token = localStorage.getItem('authToken') || localStorage.getItem('token') || localStorage.getItem('moodchat_token') || localStorage.getItem('accessToken');
                         const [meta, b64] = base64Data.split(',');
                         const mime = (meta.match(/:(.*?);/) || [])[1] || fileType || 'application/octet-stream';

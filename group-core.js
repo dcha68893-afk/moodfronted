@@ -5510,11 +5510,24 @@ async function showFriendSelection() {
 
         // FIXED: Actually fetch friends from the real API
         try {
-            const token = (session && session.token) ||
+            let token = null;
+            
+            // Try authStorage first (most reliable)
+            if (typeof window.getAuthSession === 'function') {
+                const authSession = window.getAuthSession();
+                if (authSession && authSession.token) {
+                    token = authSession.token;
+                }
+            }
+            
+            // Fallback to session and localStorage
+            if (!token) {
+                token = (session && session.token) ||
                           localStorage.getItem('authToken') ||
                           localStorage.getItem('token') ||
                           localStorage.getItem('auth_token') ||
                           sessionStorage.getItem('auth_token');
+            }
             if (token) {
                 const rawBase =
                     window.__API_CORE?.getBaseUrl?.() ||
