@@ -1,5 +1,5 @@
 /**
- * app.realtime.socket.js  — HARDENED v2.2.0
+ * app.realtime.socket.js  — HARDENED v2.3.0
  * FIX PATCH v2.2.0 (2026-04-21):
  *  - CRITICAL: Implement proper Socket.IO EIO=4 polling handshake before WebSocket upgrade.
  *    Raw WS to Socket.IO without a sid is rejected immediately by every standard server.
@@ -162,7 +162,8 @@
                 const k = localStorage.key(i);
                 const v = localStorage.getItem(k);
                 if (v && jwtPattern.test(v.trim())) {
-                    console.log('[Realtime] 🔑 Token found via JWT scan, key:', k);
+                    // NOISE FIX v2.3: debug-only — no need to log on every reconnect
+                    if (SOCKET_CONFIG.debug) console.log('[Realtime] 🔑 Token found via JWT scan, key:', k);
                     return v.trim();
                 }
             }
@@ -446,7 +447,10 @@
             let sid = null;
             try {
                 const pollUrl = `${base}/socket.io/?EIO=4&transport=polling${tokenQS}`;
-                console.log('[Realtime] 🤝 Polling handshake:', pollUrl.replace(/token=[^&]+/, 'token=***'));
+                // NOISE FIX v2.3: Only log polling URL on first-ever connect
+                if (!this._hasEverConnected) {
+                    console.log('[Realtime] 🤝 Polling handshake:', pollUrl.replace(/token=[^&]+/, 'token=***'));
+                }
 
                 const ctrl    = new AbortController();
                 const pollTO  = setTimeout(() => ctrl.abort(), 8000);
@@ -465,7 +469,10 @@
                         const data = JSON.parse(text.slice(jsonStart));
                         sid = data.sid || null;
                         if (data.pingInterval) this._socketIoPingInterval = data.pingInterval;
-                        console.log('[Realtime] ✅ Got sid:', sid ? sid.substring(0, 8) + '...' : 'none');
+                        // NOISE FIX v2.3: only log sid on first connect
+                        if (!this._hasEverConnected && sid) {
+                            console.log('[Realtime] ✅ Got sid:', sid.substring(0, 8) + '...');
+                        }
                     }
                 } else {
                     console.warn('[Realtime] Polling handshake non-ok:', resp.status, '— trying direct WS');
@@ -482,7 +489,10 @@
                 if (sid)                  wsUrl += `&sid=${encodeURIComponent(sid)}`;
                 if (this._sessionToken)   wsUrl += `&token=${encodeURIComponent(this._sessionToken)}`;
 
-                console.log('[Realtime] 🔌 Opening WebSocket', wsUrl.replace(/token=[^&]+/, 'token=***'));
+                // NOISE FIX v2.3: suppress the repeated "Opening WebSocket" line on reconnects
+                if (!this._hasEverConnected) {
+                    console.log('[Realtime] 🔌 Opening WebSocket', wsUrl.replace(/token=[^&]+/, 'token=***'));
+                }
 
                 this._socket           = new WebSocket(wsUrl);
                 this._socket.onopen    = this._onOpen.bind(this);
@@ -513,9 +523,17 @@
             this._reconnectAttempts = 0;
             this._manualDisconnect  = false;
 
-            console.log('[Realtime] ✅ WebSocket OPEN', this._socket && this._socket.url
-                ? this._socket.url.replace(/token=[^&]+/, 'token=***').replace(/sid=[^&]+/, 'sid=***')
-                : this._url);
+            // NOISE FIX v2.3: Only log the full URL on the very first connect.
+            // On reconnects just log a short status line — the URL never changes
+            // and printing it on every reconnect was the main source of console spam.
+            if (!this._hasEverConnected) {
+                this._hasEverConnected = true;
+                console.log('[Realtime] ✅ WebSocket OPEN', this._socket && this._socket.url
+                    ? this._socket.url.replace(/token=[^&]+/, 'token=***').replace(/sid=[^&]+/, 'sid=***')
+                    : this._url);
+            } else {
+                console.log('[Realtime] ✅ WebSocket OPEN (reconnected)');
+            }
 
             const isSocketIO = true; // we always connect to /socket.io/ now
             this._state = CONNECTION_STATE.CONNECTING;
@@ -627,7 +645,10 @@
                     }
 
                     if (code === '40') {
-                        console.log('[Realtime] ✅ Namespace connected — authenticating');
+                        // NOISE FIX v2.3: only log namespace connect once
+                        if (!this._hasEverConnected) {
+                            console.log('[Realtime] ✅ Namespace connected — authenticating');
+                        }
                         this._state = CONNECTION_STATE.CONNECTED;
                         this._emitStateChange();
                         this._startHeartbeat();
@@ -916,7 +937,11 @@
                 this._sendRaw({ type: 'join_user_room', userId: numericId });
                 this._sendRaw({ type: 'join', room: 'user:' + numericId });
                 this._sendRaw({ type: 'join', room: 'user_' + numericId });
-                console.log('[Realtime] ✅ Joined user rooms uid=' + numericId);
+                // NOISE FIX v2.3: only log on first join
+                if (!this._hasJoinedUserRoom) {
+                    this._hasJoinedUserRoom = true;
+                    console.log('[Realtime] ✅ Joined user rooms uid=' + numericId);
+                }
                 this._resolvedUserId = numericId;
             } catch (err) {
                 console.warn('[Realtime] _joinUserRoom error:', err.message);
@@ -980,7 +1005,8 @@
                 if (this._registeredSocketListeners.has(eventType)) continue;
                 this._registeredSocketListeners.add(eventType);
                 this.on(eventType, (payload) => {
-                    console.log(`[Realtime] 📞 call event [${eventType}]`, payload);
+                    // NOISE FIX v2.3: debug-only per-event log
+                    if (SOCKET_CONFIG.debug) console.log(`[Realtime] 📞 call event [${eventType}]`, payload);
                     window.dispatchEvent(new CustomEvent(`kyn:${eventType}`, { detail: payload }));
                     document.dispatchEvent(new CustomEvent(eventType, { detail: payload }));
                     if (window.KynectaEventBus) {
@@ -991,13 +1017,12 @@
             }
 
             // ✅ FIX: Status events — forward socket events to the statusIframe and DOM.
-            // Previously this entire block was missing, meaning status:created from the backend
-            // never reached the status iframe for real-time UI updates.
             for (const eventType of STATUS_EVENTS) {
                 if (this._registeredSocketListeners.has(eventType)) continue;
                 this._registeredSocketListeners.add(eventType);
                 this.on(eventType, (payload) => {
-                    console.log(`[Realtime] 📢 status event [${eventType}]`, payload);
+                    // NOISE FIX v2.3: debug-only per-event log
+                    if (SOCKET_CONFIG.debug) console.log(`[Realtime] 📢 status event [${eventType}]`, payload);
                     // 1. Forward to statusIframe via postMessage
                     const statusIframe = document.getElementById('statusIframe');
                     if (statusIframe && statusIframe.contentWindow) {
@@ -1020,7 +1045,11 @@
             }
 
             if (registered > 0) {
-                console.log(`[Realtime] Registered ${registered} message, group & call bridge listener(s).`);
+                // NOISE FIX v2.3: only log first-time registration, not every reconnect
+                if (!this._bridgeListenersLogged) {
+                    this._bridgeListenersLogged = true;
+                    console.log(`[Realtime] Registered ${registered} message, group & call bridge listener(s).`);
+                }
             }
         }
 
@@ -1029,7 +1058,10 @@
             const chatId = String(data.chatId || data.conversationId || '');
             if (!chatId) return;
 
-            console.log('[Realtime] 📨 incoming message for chat', chatId);
+            // NOISE FIX v2.3: only log incoming messages in debug mode
+            if (SOCKET_CONFIG.debug) {
+                console.log('[Realtime] 📨 incoming message for chat', chatId);
+            }
 
             // 1. MessagesCore
             const core = window.MessagesCore || window.messagesCore;
@@ -1089,7 +1121,13 @@
                 cm.syncMissedMessages().catch(() => {});
             }
 
-            console.log('[Realtime] 🔄 Sync triggered after (re)connect.');
+            // NOISE FIX v2.3: Only log sync trigger once per 10s to prevent
+            // spam when the socket rapidly reconnects (e.g. during token expiry)
+            const now = Date.now();
+            if (!this._lastSyncLogAt || now - this._lastSyncLogAt > 10000) {
+                this._lastSyncLogAt = now;
+                console.log('[Realtime] 🔄 Sync triggered after (re)connect.');
+            }
         }
 
         // ── PRIVATE: RECONNECT ───────────────────────────────────────────────
@@ -1110,6 +1148,13 @@
             this._reconnectTimer = setTimeout(() => {
                 this._reconnectAttempts++;
                 this._stats.reconnections++;
+
+                // NOISE FIX v2.3: log reconnect attempt at most once per 15s
+                const now = Date.now();
+                if (!this._lastReconnectLogAt || now - this._lastReconnectLogAt > 15000) {
+                    this._lastReconnectLogAt = now;
+                    console.log(`[Realtime] Reconnect attempt #${this._reconnectAttempts}`);
+                }
 
                 // ✅ FIX: Re-acquire token on every reconnect attempt.
                 // The token may have arrived in localStorage AFTER the first failed attempt
@@ -1296,7 +1341,7 @@
                     this._state !== CONNECTION_STATE.AUTHENTICATED &&
                     !this._manualDisconnect &&
                     navigator.onLine) {
-                    console.log('[Realtime] Tab focused — attempting reconnect.');
+                    // NOISE FIX v2.3: no log here — fires too frequently
                     this._reconnectAttempts = 0;
                     this.handleReconnect({ reason: 'visibility' });
                 }
@@ -1584,5 +1629,5 @@
     // Expose safeConnect globally so RuntimeAuthority can use it
     realtimeManager.safeConnect = safeConnect;
 
-    console.log('[Realtime] ✅ Ready (hardened v2.2.0) — Socket.IO polling handshake enabled');
+    console.log('[Realtime] ✅ Ready (hardened v2.3.0) — noise-reduced, token-refresh aware');
 })();

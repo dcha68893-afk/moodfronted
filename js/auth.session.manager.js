@@ -1,6 +1,6 @@
 // js/auth.session.manager.js - Complete Session Manager for Auto-Login
-// Version: 1.2.0 - FIXED: Eliminated session restoration loops, added initialization locks
-// Handles: Persistent sessions, auto-login, account limits, logout detection
+// Version: 1.3.0 - FIXED: Token expiry now triggers refresh instead of immediate session clear
+// Handles: Persistent sessions, auto-login, account limits, logout detection, token refresh
 
 (function() {
     'use strict';
@@ -308,10 +308,25 @@
                 return { success: false, reason: 'no_session' };
             }
             
+            // FIX v1.3: If token is expired, try a silent refresh BEFORE clearing.
+            // Previously this called clearSession() immediately, which meant the user
+            // would have to log in manually every time their JWT expired (even overnight).
             if (!isTokenValid(session.token)) {
-                console.log('[SessionManager] Token invalid, clearing session');
-                clearSession();
-                return { success: false, reason: 'invalid_token' };
+                console.log('[SessionManager] Token expired on auto-login — attempting silent refresh');
+                const refreshed = await _attemptTokenRefresh(session);
+                if (!refreshed) {
+                    console.log('[SessionManager] Refresh failed — clearing session');
+                    clearSession();
+                    return { success: false, reason: 'invalid_token' };
+                }
+                // Reload session so the rest of this function uses the new token
+                const refreshedSession = loadSession();
+                if (!refreshedSession) {
+                    return { success: false, reason: 'refresh_session_missing' };
+                }
+                // Re-assign so the code below picks up the fresh token
+                Object.assign(session, refreshedSession);
+                console.log('[SessionManager] ✅ Token refreshed during auto-login');
             }
             
             const isOnChatPage = window.location.pathname.includes('chat.html');
@@ -469,29 +484,170 @@
     }
     
     // ============================================================================
+    // TOKEN REFRESH HELPER - attempts silent refresh before giving up
+    // ============================================================================
+    let _refreshInProgress = false;
+
+    async function _attemptTokenRefresh(session) {
+        // Prevent concurrent refresh calls
+        if (_refreshInProgress) {
+            console.log('[SessionManager] Refresh already in progress, skipping duplicate');
+            return false;
+        }
+        _refreshInProgress = true;
+
+        try {
+            // Path 1: delegate to api_auth.js refreshToken() if available
+            if (window.api && window.api.auth && typeof window.api.auth.refreshToken === 'function') {
+                console.log('[SessionManager] Delegating token refresh to api.auth.refreshToken()');
+                const result = await window.api.auth.refreshToken();
+                if (result && result.success !== false) {
+                    console.log('[SessionManager] ✅ Token refreshed via api.auth');
+                    return true;
+                }
+            }
+
+            // Path 2: call /auth/refresh directly
+            const storedRefresh = session.refreshToken
+                || localStorage.getItem('REFRESH_TOKEN')
+                || localStorage.getItem('refreshToken')
+                || (() => {
+                    try {
+                        const raw = localStorage.getItem('kynecta_auth');
+                        return raw ? JSON.parse(raw).refreshToken : null;
+                    } catch (_) { return null; }
+                })();
+
+            if (!storedRefresh) {
+                console.warn('[SessionManager] No refresh token found — cannot refresh');
+                return false;
+            }
+
+            // Resolve backend base URL the same way api_auth.js does
+            const baseUrl = (window.API && window.API.baseUrl)
+                || (window._API_CONFIG && window._API_CONFIG.baseUrl)
+                || 'https://moodchat-fy56.onrender.com/api';
+
+            console.log('[SessionManager] Calling /auth/refresh directly');
+            const response = await fetch(`${baseUrl}/auth/refresh`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ refreshToken: storedRefresh })
+            });
+
+            if (!response.ok) {
+                console.warn('[SessionManager] Refresh endpoint returned', response.status);
+                return false;
+            }
+
+            const data = await response.json();
+            const newToken = data.token || data.accessToken;
+            if (!data.success || !newToken) {
+                console.warn('[SessionManager] Refresh response missing token');
+                return false;
+            }
+
+            const newRefresh = data.refreshToken || storedRefresh;
+
+            // Persist new tokens into every storage location the app reads
+            const updatedSession = {
+                ...session,
+                token: newToken,
+                refreshToken: newRefresh,
+                lastActivity: Date.now()
+            };
+            currentSession = updatedSession;
+            lastSaveTime = 0;
+            performSaveSession();
+
+            if (window.AuthStorage && typeof window.AuthStorage.saveAuth === 'function') {
+                window.AuthStorage.saveAuth({
+                    token: newToken,
+                    refreshToken: newRefresh,
+                    user: session.user,
+                    expiresAt: Date.now() + (24 * 60 * 60 * 1000)
+                });
+            } else {
+                try {
+                    const existing = JSON.parse(localStorage.getItem('kynecta_auth') || '{}');
+                    localStorage.setItem('kynecta_auth', JSON.stringify({
+                        ...existing,
+                        token: newToken,
+                        refreshToken: newRefresh,
+                        issuedAt: Date.now(),
+                        expiresAt: Date.now() + (24 * 60 * 60 * 1000)
+                    }));
+                } catch (_) {}
+            }
+
+            // Keep legacy keys in sync
+            ['authToken', 'accessToken', 'token', 'moodchat_token', 'USER_TOKEN', 'kynecta_token']
+                .forEach(k => { try { localStorage.setItem(k, newToken); } catch (_) {} });
+            if (newRefresh !== storedRefresh) {
+                ['REFRESH_TOKEN', 'refreshToken']
+                    .forEach(k => { try { localStorage.setItem(k, newRefresh); } catch (_) {} });
+            }
+
+            // Update global token references read by api_core.js and iframes
+            window.__userToken   = newToken;
+            window.__accessToken = newToken;
+            if (window.__SESSION__) window.__SESSION__.token = newToken;
+
+            // Broadcast so api_auth.js and iframes pick up the new token immediately
+            try {
+                window.dispatchEvent(new CustomEvent('auth:token:refreshed', {
+                    detail: { token: newToken, timestamp: Date.now() }
+                }));
+                window.dispatchEvent(new CustomEvent('session:restored', {
+                    detail: { token: newToken, user: session.user, timestamp: Date.now() }
+                }));
+            } catch (_) {}
+
+            console.log('[SessionManager] ✅ Token refreshed successfully via direct fetch');
+            return true;
+
+        } catch (err) {
+            console.error('[SessionManager] _attemptTokenRefresh error:', err.message);
+            return false;
+        } finally {
+            _refreshInProgress = false;
+        }
+    }
+
+    // ============================================================================
     // PERIODIC SESSION CHECK
     // ============================================================================
     function startSessionCheck() {
         if (sessionCheckInterval) {
             clearInterval(sessionCheckInterval);
         }
-        
-        sessionCheckInterval = setInterval(() => {
+
+        // FIX v1.3: Use async interval callback so we can await the refresh attempt
+        // before deciding to clear the session. Previously this immediately called
+        // clearSession() on expiry with no refresh attempt, which nuked the session
+        // and caused all subsequent API calls to fail with 401 "Token expired".
+        sessionCheckInterval = setInterval(async () => {
             const session = loadSession();
             if (session && session.token) {
                 if (!isTokenValid(session.token)) {
-                    console.log('[SessionManager] Token expired during periodic check');
-                    clearSession();
-                    
-                    try {
-                        window.dispatchEvent(new CustomEvent('session:expired', {
-                            detail: { timestamp: Date.now() }
-                        }));
-                    } catch (error) {}
+                    console.log('[SessionManager] Token expired during periodic check — attempting refresh');
+
+                    const refreshed = await _attemptTokenRefresh(session);
+                    if (!refreshed) {
+                        console.log('[SessionManager] Refresh failed — clearing session');
+                        clearSession();
+                        try {
+                            window.dispatchEvent(new CustomEvent('session:expired', {
+                                detail: { timestamp: Date.now() }
+                            }));
+                        } catch (error) {}
+                    } else {
+                        console.log('[SessionManager] ✅ Session silently refreshed during periodic check');
+                    }
                 }
             }
         }, CONFIG.CHECK_INTERVAL);
-        
+
         console.log('[SessionManager] Session check started');
     }
     
