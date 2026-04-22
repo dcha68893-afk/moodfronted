@@ -41,7 +41,7 @@
 
     <!-- ===== STYLESHEETS ===== -->
     <!-- Global dark theme — must load BEFORE friend.css so variables are defined -->
-    <link rel="stylesheet" href="/css/theme_colors.css">
+    <link rel="stylesheet" href="theme.colors.css">
     <link rel="stylesheet" href="friend.css">
     <link rel="stylesheet" href="/css/vendor/font-awesome.min.css">
     <link rel="stylesheet" href="/css/suppress-webgl.css">
@@ -92,6 +92,61 @@
         return payload;
       }
 
+      /**
+       * When the parent sends API_RESPONSE with payload:undefined, the actual
+       * data lives at the top level of the message object (message.friends,
+       * message.data, message.users, etc.).  Lift those into a proper payload.
+       */
+      function liftTopLevelFields(msg) {
+        // If there's already a usable payload, normalise it and return early.
+        if (msg.payload && typeof msg.payload === 'object') {
+          return Object.assign({}, msg, { payload: normaliseApiPayload(msg.payload) });
+        }
+
+        // Build a synthetic payload from top-level fields the parent may use.
+        var DATA_KEYS = [
+          'data', 'result', 'items',
+          'friends', 'users', 'requests',
+          'pinned', 'muted', 'contacts',
+          'groups', 'nearby', 'sent'
+        ];
+
+        var syntheticPayload = null;
+        for (var i = 0; i < DATA_KEYS.length; i++) {
+          var k = DATA_KEYS[i];
+          if (msg[k] !== undefined) {
+            syntheticPayload = { success: true };
+            syntheticPayload[k] = msg[k];
+            // Also populate .data so FriendCore's generic branch fires
+            if (k !== 'data') syntheticPayload.data = msg[k];
+            break;
+          }
+        }
+
+        // Bare array at top level (rare but possible)
+        if (!syntheticPayload && Array.isArray(msg.data)) {
+          syntheticPayload = { success: true, data: msg.data };
+        }
+
+        // success/error flags without a data array (e.g. action confirmations)
+        if (!syntheticPayload) {
+          if (msg.success === true || msg.success === false || msg.error) {
+            syntheticPayload = {
+              success: msg.success !== false && !msg.error,
+              error: msg.error || undefined,
+              statusCode: msg.statusCode || (msg.success === false ? 500 : 200)
+            };
+          }
+        }
+
+        if (syntheticPayload) {
+          return Object.assign({}, msg, { payload: syntheticPayload });
+        }
+
+        // Nothing found — pass through unchanged so the real error surfaces
+        return msg;
+      }
+
       // Intercept postMessage to patch API response messages before FriendCore
       // processes them (api.messages.js relays them via postMessage).
       var _origAddEventListener = window.addEventListener.bind(window);
@@ -103,18 +158,16 @@
         var wrappedHandler = function (event) {
           try {
             var data = event.data;
-            // Only touch messages that look like API relay envelopes
-            if (data && typeof data === 'object' &&
-                data.type === 'API_RESPONSE' && data.payload) {
-              data = Object.assign({}, data, {
-                payload: normaliseApiPayload(data.payload)
-              });
-              // Re-create a patched MessageEvent-like object
-              event = new MessageEvent('message', {
-                data: data,
-                origin: event.origin,
-                source: event.source
-              });
+            // Handle ALL API_RESPONSE messages — even those with payload:undefined
+            if (data && typeof data === 'object' && data.type === 'API_RESPONSE') {
+              var patched = liftTopLevelFields(data);
+              if (patched !== data) {
+                event = new MessageEvent('message', {
+                  data: patched,
+                  origin: event.origin,
+                  source: event.source
+                });
+              }
             }
           } catch (e) {
             // Never break the app — silently ignore patching errors

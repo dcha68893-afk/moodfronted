@@ -5330,11 +5330,18 @@ export async function handleUnauthorized() {
 }
 
 export async function safeApiCall(method, endpoint, data = null) {
-    try {
-        return await secureApiCall(method, endpoint, data);
-    } catch {
-        return null;
+    // FIX: Do NOT swallow errors. Callers must handle failures explicitly so
+    // the UI never shows false-success when the backend was never reached.
+    console.log('[TOOLS FLOW] Step 2: API request sent', { method, endpoint });
+    const response = await secureApiCall(method, endpoint, data);
+    console.log('[TOOLS FLOW] Step 3: API response received', response);
+    if (response === null || response === undefined) {
+        throw new Error('No response from server — token missing or module not active');
     }
+    if (response.success === false) {
+        throw new Error(response.message || 'Server returned failure');
+    }
+    return response;
 }
 
 export function getCentralToken() {
@@ -6182,155 +6189,225 @@ export function formatFileSize(bytes) {
 }
 
 export async function createServiceListing(title, description, options = {}) {
+    console.log('[TOOLS FLOW] Step 1: UI triggered — createServiceListing', { title });
+
+    if (!hasValidUser()) {
+        console.error('[TOOLS FLOW] createServiceListing: user not authenticated');
+        showNotification('Please log in to create a listing.', 'error');
+        return null;
+    }
+    if (!isActive()) {
+        console.error('[TOOLS FLOW] createServiceListing: module not active');
+        showNotification('Module not ready. Please try again.', 'error');
+        return null;
+    }
+
+    const user = sessionClient.getUser ? sessionClient.getUser() : window.currentUser || null;
+    const userId = user?.id;
+    const userObj = { id: userId, displayName: user?.displayName || user?.name || 'User', photoURL: user?.photoURL || '' };
+
+    const fakeId = 'listing_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+
+    const optimistic = {
+        id: fakeId,
+        _isOptimistic: true,
+        userId,
+        sellerId: userId,
+        user: userObj,
+        type: LISTING_TYPES.SERVICE,
+        title,
+        description,
+        price: options.price ? parseFloat(options.price) : 0,
+        category: 'services',
+        availability: options.availability || AVAILABILITY.FREE,
+        visibility: options.visibility || TRUST_CIRCLES.FRIENDS,
+        moodContext: options.moodContext,
+        template: options.template,
+        allowedGroups: options.allowedGroups,
+        allowedUsers: options.allowedUsers,
+        expiresAt: options.expiresAt || new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+        privateNotes: options.privateNotes,
+        teamNotes: options.teamNotes,
+        available: true,
+        savedBy: [],
+        views: 0,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+    };
+
+    // Snapshot for rollback
+    const prevAll = allListings.slice();
+    const prevMy  = myListings.slice();
+
+    // Optimistic UI update
+    myListings.unshift(optimistic);
+    allListings.unshift(optimistic);
+    window.allListings = allListings;
+    window.myListings  = myListings;
+    safeStorage.set(LOCAL_STORAGE_KEYS.MY_LISTINGS,  myListings);
+    safeStorage.set(LOCAL_STORAGE_KEYS.ALL_LISTINGS, allListings);
+    window.dispatchEvent(new CustomEvent('marketplace:data-updated', { detail: { listings: allListings } }));
+
+    // Backend call — safeApiCall now throws on failure (no silent null)
     try {
-        if (!hasValidUser()) throw new Error('User not authenticated');
-        if (!isActive()) throw new Error('Module not active');
-        
-        const user = sessionClient.getUser ? sessionClient.getUser() : window.currentUser || null;
-        const userId = user?.id;
-        const userObj = user || { displayName: 'User' };
-        
-        const listingId = 'listing_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
-        
-        const listing = {
-            id: listingId,
-            userId: userId,
-            sellerId: userId,
-            user: userObj,
-            type: LISTING_TYPES.SERVICE,
-            title: title,
-            description: description,
-            price: options.price ? parseFloat(options.price) : 0,
-            availability: options.availability || AVAILABILITY.FREE,
-            visibility: options.visibility || TRUST_CIRCLES.FRIENDS,
-            moodContext: options.moodContext,
-            template: options.template,
-            allowedGroups: options.allowedGroups,
-            allowedUsers: options.allowedUsers,
-            expiresAt: options.expiresAt || new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
-            privateNotes: options.privateNotes,
-            teamNotes: options.teamNotes,
-            available: true,
-            savedBy: [],
-            views: 0,
-            createdAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString()
-        };
-        
-        // Add to local state immediately (optimistic update)
-        myListings.unshift(listing);
-        allListings.unshift(listing);
-        window.allListings = allListings;
-        window.myListings = myListings;
-        safeStorage.set(LOCAL_STORAGE_KEYS.MY_LISTINGS, myListings);
-        safeStorage.set(LOCAL_STORAGE_KEYS.ALL_LISTINGS, allListings);
-        
-        // Fire event to update UI immediately
-        window.dispatchEvent(new CustomEvent('marketplace:data-updated', { detail: { listings: allListings } }));
-        
-        // Send to backend
-        try {
-            const response = await safeApiCall('POST', '/api/marketplace/listings', {
-                title: listing.title,
-                description: listing.description,
-                price: listing.price,
-                category: 'services',
-                type: 'service',
-                images: [],
-                available: true
-            });
-            if (response && response.data?.listing) {
-                listing.id = response.data.listing.id || listingId;
-            }
-        } catch (e) {
-            queueForSync(listing, 'listing');
+        const response = await safeApiCall('POST', '/api/marketplace/listings', {
+            title: optimistic.title,
+            description: optimistic.description,
+            price: optimistic.price,
+            category: 'services',
+            type: 'service',
+            images: [],
+            available: true
+        });
+
+        const confirmed = response?.data?.listing;
+        if (!confirmed || !confirmed.id) {
+            throw new Error('Backend did not return a valid listing — DB write may have failed');
         }
-        
+
+        // Replace fake entry with the real DB-confirmed listing
+        const committed = { ...optimistic, ...confirmed, id: confirmed.id, user: userObj, _isOptimistic: false };
+        allListings = allListings.map(l => l.id === fakeId ? committed : l);
+        myListings  = myListings.map(l =>  l.id === fakeId ? committed : l);
+        window.allListings = allListings;
+        window.myListings  = myListings;
+        safeStorage.set(LOCAL_STORAGE_KEYS.MY_LISTINGS,  myListings);
+        safeStorage.set(LOCAL_STORAGE_KEYS.ALL_LISTINGS, allListings);
+        window.dispatchEvent(new CustomEvent('marketplace:data-updated', { detail: { listings: allListings } }));
+
+        // Broadcast to other tabs
+        try { const ch = new BroadcastChannel('marketplace_sync'); ch.postMessage({ type: 'LISTING_CREATED', listing: committed }); ch.close(); } catch (_) {}
+
+        console.log('[TOOLS FLOW] Step 4: UI updated — listing committed to DB', { id: committed.id });
         updateListingStreak();
         updateTrustStats('listingCreated');
-        
-        return listing;
+        return committed;
+
     } catch (err) {
-        console.error('[createServiceListing]', err);
+        // Rollback optimistic update — do NOT leave ghost listing in UI or cache
+        console.error('[TOOLS FLOW] createServiceListing failed — rolling back', err.message);
+        allListings = prevAll;
+        myListings  = prevMy;
+        window.allListings = allListings;
+        window.myListings  = myListings;
+        safeStorage.set(LOCAL_STORAGE_KEYS.MY_LISTINGS,  prevMy);
+        safeStorage.set(LOCAL_STORAGE_KEYS.ALL_LISTINGS, prevAll);
+        window.dispatchEvent(new CustomEvent('marketplace:data-updated', { detail: { listings: allListings } }));
+        showNotification('Failed to create listing: ' + (err.message || 'Unknown error'), 'error');
         return null;
     }
 }
 
 export async function createDigitalListing(title, description, fileData, options = {}) {
+    console.log('[TOOLS FLOW] Step 1: UI triggered — createDigitalListing', { title });
+
+    if (!hasValidUser()) {
+        console.error('[TOOLS FLOW] createDigitalListing: user not authenticated');
+        showNotification('Please log in to create a listing.', 'error');
+        return null;
+    }
+    if (!isActive()) {
+        console.error('[TOOLS FLOW] createDigitalListing: module not active');
+        showNotification('Module not ready. Please try again.', 'error');
+        return null;
+    }
+
+    const user = sessionClient.getUser ? sessionClient.getUser() : window.currentUser || null;
+    const userId = user?.id;
+    const userObj = { id: userId, displayName: user?.displayName || user?.name || 'User', photoURL: user?.photoURL || '' };
+
+    const fakeId = 'listing_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+
+    const optimistic = {
+        id: fakeId,
+        _isOptimistic: true,
+        userId,
+        sellerId: userId,
+        user: userObj,
+        type: LISTING_TYPES.DIGITAL,
+        title,
+        description,
+        price: options.price ? parseFloat(options.price) : 0,
+        category: 'digital',
+        mediaUrl: fileData?.url || '',
+        fileUrl: fileData?.url || '',
+        fileName: fileData?.name || (fileData instanceof File ? fileData.name : ''),
+        fileSize: fileData?.size || (fileData instanceof File ? fileData.size : 0),
+        fileType: fileData?.type || (fileData instanceof File ? fileData.type : ''),
+        visibility: options.visibility || TRUST_CIRCLES.FRIENDS,
+        moodContext: options.moodContext,
+        template: options.template,
+        allowedGroups: options.allowedGroups,
+        allowedUsers: options.allowedUsers,
+        expiresAt: options.expiresAt || new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+        privateNotes: options.privateNotes,
+        teamNotes: options.teamNotes,
+        available: true,
+        savedBy: [],
+        views: 0,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+    };
+
+    // Snapshot for rollback
+    const prevAll = allListings.slice();
+    const prevMy  = myListings.slice();
+
+    // Optimistic UI update
+    myListings.unshift(optimistic);
+    allListings.unshift(optimistic);
+    window.allListings = allListings;
+    window.myListings  = myListings;
+    safeStorage.set(LOCAL_STORAGE_KEYS.MY_LISTINGS,  myListings);
+    safeStorage.set(LOCAL_STORAGE_KEYS.ALL_LISTINGS, allListings);
+    window.dispatchEvent(new CustomEvent('marketplace:data-updated', { detail: { listings: allListings } }));
+
+    // Backend call — safeApiCall now throws on failure
     try {
-        if (!hasValidUser()) throw new Error('User not authenticated');
-        if (!isActive()) throw new Error('Module not active');
-        
-        const user = sessionClient.getUser ? sessionClient.getUser() : window.currentUser || null;
-        const userId = user?.id;
-        const userObj = user || { displayName: 'User' };
-        
-        const listingId = 'listing_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
-        
-        const listing = {
-            id: listingId,
-            userId: userId,
-            sellerId: userId,
-            user: userObj,
-            type: LISTING_TYPES.DIGITAL,
-            title: title,
-            description: description,
-            price: options.price ? parseFloat(options.price) : 0,
-            mediaUrl: fileData?.url || '',
-            fileUrl: fileData?.url || '',
-            fileName: fileData?.name || (fileData instanceof File ? fileData.name : ''),
-            fileSize: fileData?.size || (fileData instanceof File ? fileData.size : 0),
-            fileType: fileData?.type || (fileData instanceof File ? fileData.type : ''),
-            visibility: options.visibility || TRUST_CIRCLES.FRIENDS,
-            moodContext: options.moodContext,
-            template: options.template,
-            allowedGroups: options.allowedGroups,
-            allowedUsers: options.allowedUsers,
-            expiresAt: options.expiresAt || new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
-            privateNotes: options.privateNotes,
-            teamNotes: options.teamNotes,
-            available: true,
-            savedBy: [],
-            views: 0,
-            createdAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString()
-        };
-        
-        // Add to local state immediately (optimistic update)
-        myListings.unshift(listing);
-        allListings.unshift(listing);
-        window.allListings = allListings;
-        window.myListings = myListings;
-        safeStorage.set(LOCAL_STORAGE_KEYS.MY_LISTINGS, myListings);
-        safeStorage.set(LOCAL_STORAGE_KEYS.ALL_LISTINGS, allListings);
-        
-        // Fire event to update UI immediately
-        window.dispatchEvent(new CustomEvent('marketplace:data-updated', { detail: { listings: allListings } }));
-        
-        // Send to backend
-        try {
-            const response = await safeApiCall('POST', '/api/marketplace/listings', {
-                title: listing.title,
-                description: listing.description,
-                price: listing.price,
-                category: 'digital',
-                type: 'digital',
-                images: [],
-                available: true
-            });
-            if (response && response.data?.listing) {
-                listing.id = response.data.listing.id || listingId;
-            }
-        } catch (e) {
-            queueForSync(listing, 'listing');
+        const response = await safeApiCall('POST', '/api/marketplace/listings', {
+            title: optimistic.title,
+            description: optimistic.description,
+            price: optimistic.price,
+            category: 'digital',
+            type: 'digital',
+            images: [],
+            available: true
+        });
+
+        const confirmed = response?.data?.listing;
+        if (!confirmed || !confirmed.id) {
+            throw new Error('Backend did not return a valid listing — DB write may have failed');
         }
-        
+
+        // Replace fake entry with real DB-confirmed listing
+        const committed = { ...optimistic, ...confirmed, id: confirmed.id, user: userObj, _isOptimistic: false };
+        allListings = allListings.map(l => l.id === fakeId ? committed : l);
+        myListings  = myListings.map(l =>  l.id === fakeId ? committed : l);
+        window.allListings = allListings;
+        window.myListings  = myListings;
+        safeStorage.set(LOCAL_STORAGE_KEYS.MY_LISTINGS,  myListings);
+        safeStorage.set(LOCAL_STORAGE_KEYS.ALL_LISTINGS, allListings);
+        window.dispatchEvent(new CustomEvent('marketplace:data-updated', { detail: { listings: allListings } }));
+
+        // Broadcast to other tabs
+        try { const ch = new BroadcastChannel('marketplace_sync'); ch.postMessage({ type: 'LISTING_CREATED', listing: committed }); ch.close(); } catch (_) {}
+
+        console.log('[TOOLS FLOW] Step 4: UI updated — digital listing committed to DB', { id: committed.id });
         updateListingStreak();
         updateTrustStats('listingCreated');
-        
-        return listing;
+        return committed;
+
     } catch (err) {
-        console.error('[createDigitalListing]', err);
+        // Rollback
+        console.error('[TOOLS FLOW] createDigitalListing failed — rolling back', err.message);
+        allListings = prevAll;
+        myListings  = prevMy;
+        window.allListings = allListings;
+        window.myListings  = myListings;
+        safeStorage.set(LOCAL_STORAGE_KEYS.MY_LISTINGS,  prevMy);
+        safeStorage.set(LOCAL_STORAGE_KEYS.ALL_LISTINGS, prevAll);
+        window.dispatchEvent(new CustomEvent('marketplace:data-updated', { detail: { listings: allListings } }));
+        showNotification('Failed to create listing: ' + (err.message || 'Unknown error'), 'error');
         return null;
     }
 }

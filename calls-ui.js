@@ -4441,6 +4441,8 @@ handleContactItemClick: function(e) {
                             window.callCore.answerCall(callId).then(result => {
                                 if (result && result.success) {
                                     UIEventHandlers.handleCallAccepted && UIEventHandlers.handleCallAccepted({ callId });
+                                    // ── CRITICAL FIX: Show active-call screen for receiver ──
+                                    _showReceiverCallScreen(callId);
                                 } else {
                                     console.warn('[Calls UI] answerCall failed from overlay', result);
                                 }
@@ -6263,46 +6265,49 @@ acceptIncomingCallGeneric: async function(asVideo) {
     
     if (elements.incomingCallModal) {
         elements.incomingCallModal.classList.remove('active');
-        UIState.activeModals.delete('incomingCallModal');
+        UIState.activeModals && UIState.activeModals.delete('incomingCallModal');
     }
     
     showNotification(`Accepting ${callType} call from ${callerName}...`, 'info');
-    
-    // FIX: Use sendAction with CALL_ACCEPT
-    if (coreInstance && coreInstance.sendAction) {
+
+    // ── CRITICAL FIX: Use answerCall (not sendAction CALL_ACCEPT) so the WebRTC
+    // peer connection is set up BEFORE we signal acceptance to the backend.
+    // sendAction('CALL_ACCEPT') skips the local media + RTCPeerConnection setup.
+    let accepted = false;
+    if (coreInstance && coreInstance.answerCall) {
         try {
-            const result = await coreInstance.sendAction('CALL_ACCEPT', {
-                callId: callId,
-                timestamp: Date.now()
-            });
-            
+            const result = await coreInstance.answerCall(callId);
             if (result && result.success) {
+                accepted = true;
                 showNotification(`Call accepted with ${callerName}`, 'success');
             } else {
                 showNotification(result?.error || 'Failed to accept call', 'error');
-                // Mark as missed if accept failed
-                if (coreInstance.sendAction) {
-                    coreInstance.sendAction('CALL_REJECT', {
-                        callId: callId,
-                        reason: 'failed_to_accept',
-                        timestamp: Date.now()
-                    }).catch(() => {});
-                }
             }
         } catch (error) {
             console.error('[Calls UI] Accept call error:', error);
             showNotification('Failed to accept call', 'error');
         }
-    } else if (coreInstance && coreInstance.answerCall) {
-        const result = await coreInstance.answerCall(callId);
-        if (result && result.success) {
-            showNotification(`Call accepted with ${callerName}`, 'success');
-        } else {
-            showNotification(result?.error || 'Failed to accept call', 'error');
-        }
+    } else if (coreInstance && coreInstance.sendAction) {
+        // Fallback path (no answerCall available)
+        try {
+            const result = await coreInstance.sendAction('CALL_ACCEPT', {
+                callId: callId,
+                timestamp: Date.now()
+            });
+            if (result && result.success) {
+                accepted = true;
+            }
+        } catch (e) {}
     } else {
         showNotification('Call system not ready', 'error');
         this.declineIncomingCall();
+        return;
+    }
+
+    if (accepted) {
+        // ── CRITICAL FIX: Show the active-call screen for the receiver ──
+        // Without this the receiver sees a blank screen after accepting.
+        _showReceiverCallScreen(callId, callerName, callType);
     }
 },
 
@@ -7267,6 +7272,63 @@ declineIncomingCall: async function() {
         return null;
     }
 }
+
+    /**
+     * _showReceiverCallScreen
+     * Shows the active-call container for the RECEIVER after they accept.
+     * Without this the receiver has no visible call UI after accepting.
+     */
+    function _showReceiverCallScreen(callId, callerName, callType) {
+        console.log('[Calls UI] ✅ Showing receiver active-call screen', { callId, callerName, callType });
+
+        // Update local UI state
+        UIState.activeCallId  = callId  || UIState.activeCallId;
+        UIState.callActive    = true;
+        UIState.callState     = 'in-call';
+        UIState.callType      = callType || UIState.callType || 'voice';
+        UIState.callStartTime = UIState.callStartTime || Date.now();
+        UIState.currentView   = 'call';
+
+        // Hide incoming modal
+        if (elements.incomingCallModal) {
+            elements.incomingCallModal.classList.remove('active');
+            elements.incomingCallModal.style.display = 'none';
+            UIState.activeModals && UIState.activeModals.delete('incomingCallModal');
+        }
+
+        // Show active call container
+        if (elements.callContainer) {
+            elements.callContainer.classList.add('active');
+        }
+
+        // Hide sidebar
+        if (elements.sidebar) elements.sidebar.style.display = 'none';
+
+        // Tell parent frame to hide sidebar icons
+        try {
+            if (window.parent && window.parent !== window) {
+                window.parent.postMessage({ type: 'HIDE_SIDEBAR_ICONS', module: 'calls' }, '*');
+            }
+        } catch (_) {}
+
+        // Update call status text
+        if (elements.callStatusText) elements.callStatusText.textContent = 'Connecting...';
+        if (elements.callDuration)   elements.callDuration.textContent   = '--:--';
+
+        // Show caller name
+        const nameToShow = callerName ||
+            (UIState.callParticipants && UIState.callParticipants[0] && UIState.callParticipants[0].name) ||
+            'Caller';
+        if (elements.callWithName) elements.callWithName.textContent = nameToShow;
+
+        // Show correct call-type icon
+        const icon = UIState.callType === 'video' ? 'fa-video' : 'fa-phone';
+        if (elements.callTypeIcon) elements.callTypeIcon.innerHTML = `<i class="fas ${icon}"></i>`;
+
+        // Start the call timer once peer connection fires call_connected
+        // (handleCallAccepted will also trigger it when the WS event arrives)
+        UIEventHandlers.startCallTimer && UIEventHandlers.startCallTimer();
+    }
 
     function showNotification(message, type = 'success') {
         const notificationArea = elements.notificationArea || document.body;

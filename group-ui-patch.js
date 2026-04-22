@@ -900,7 +900,136 @@
         try { patchAdminManagementModal();     } catch (e) { console.warn('[patch] adminModal:', e); }
         try { patchOpenAdminManagement();      } catch (e) { console.warn('[patch] openAdminMgmt:', e); }
         try { patchCategoryTabs();             } catch (e) { console.warn('[patch] categoryTabs:', e); }
+        // Wire GroupCore real-time events → UI (retry until GroupCore exists)
+        wireGroupCoreEvents();
         console.log('[GroupUIPatch v4.0.0] ✅ All patches applied');
+    }
+
+    /* ─── GroupCore real-time event → UI wiring ─────────────────────────────
+     *
+     * These bindings are the missing link between GroupCore's in-memory event
+     * emitter and the actual DOM.  Without them:
+     *   • A newly created group is never rendered until the page reloads.
+     *   • Incoming real-time messages never appear in the open chat.
+     *   • Group list counts stay stale after any server-side change.
+     */
+    let _gcEventsBound = false;
+
+    function wireGroupCoreEvents() {
+        if (_gcEventsBound) return;
+        const GC = window.GroupCore;
+        if (!GC || typeof GC.on !== 'function') {
+            // GroupCore not ready yet — retry
+            setTimeout(wireGroupCoreEvents, 300);
+            return;
+        }
+        _gcEventsBound = true;
+
+        // ── groups:list-updated → re-render counts + active section ────────
+        GC.on('groups:list-updated', function (data) {
+            console.log('[GROUP FLOW] groups:list-updated →', data?.groups?.length, 'groups');
+            try { if (typeof updateGroupCounts   === 'function') updateGroupCounts();   } catch (_) {}
+            try { if (typeof updateCurrentSection === 'function') updateCurrentSection(); } catch (_) {}
+        });
+
+        // ── groups:loaded → same as above (cache/IDB load) ─────────────────
+        GC.on('groups:loaded', function (data) {
+            console.log('[GROUP FLOW] groups:loaded —', data?.groups?.length || 0, 'groups from', data?.source || 'cache');
+            try { if (typeof updateGroupCounts   === 'function') updateGroupCounts();   } catch (_) {}
+            try { if (typeof updateCurrentSection === 'function') updateCurrentSection(); } catch (_) {}
+        });
+
+        // ── group:created → prepend to My Groups + All Groups lists ────────
+        GC.on('group:created', function (newGroup) {
+            if (!newGroup?.id) return;
+            console.log('[GROUP FLOW] group:created UI update →', newGroup.name);
+            try { if (typeof updateGroupCounts   === 'function') updateGroupCounts();   } catch (_) {}
+            try { if (typeof updateCurrentSection === 'function') updateCurrentSection(); } catch (_) {}
+
+            // Optimistically prepend the card to visible lists
+            ['myGroupsList', 'allGroupsList'].forEach(listId => {
+                const list = document.getElementById(listId);
+                if (!list) return;
+                if (list.querySelector(`[data-group-id="${newGroup.id}"]`)) return; // already there
+                const type = listId === 'myGroupsList' ? 'my_group' : 'group';
+                try {
+                    if (typeof addGroupItem === 'function') {
+                        addGroupItem(newGroup, list, type);
+                        const card = list.querySelector(`[data-group-id="${newGroup.id}"]`);
+                        if (card) list.insertBefore(card, list.firstChild);
+                    }
+                } catch (_) {}
+            });
+
+            try {
+                if (typeof showNotification === 'function') {
+                    showNotification(`Group "${newGroup.name}" created!`, 'success');
+                }
+            } catch (_) {}
+        });
+
+        // ── group:message-received → render in open chat or bump badge ──────
+        GC.on('group:message-received', function (data) {
+            const { groupId, message } = data || {};
+            if (!groupId || !message) return;
+            console.log('[GROUP FLOW] group:message-received → groupId', groupId);
+            try {
+                const isOpen = typeof currentChatGroup !== 'undefined' && currentChatGroup?.id === groupId;
+                if (isOpen) {
+                    if (typeof addMessageToChat === 'function') addMessageToChat(message, true);
+                } else {
+                    // Increment unread badge in the group list card
+                    const card = document.querySelector(`[data-group-id="${groupId}"]`);
+                    const badge = card?.querySelector('.group-unread-badge');
+                    if (badge) {
+                        const n = (parseInt(badge.textContent || '0') || 0) + 1;
+                        badge.textContent = n;
+                        badge.style.display = '';
+                    }
+                    if (typeof incrementGroupUnreadCount === 'function') incrementGroupUnreadCount(groupId);
+                }
+            } catch (_) {}
+        });
+
+        // ── group:message-sent → confirm the optimistic message in chat ─────
+        GC.on('group:message-sent', function (data) {
+            const { message } = data || {};
+            if (!message?.id || String(message.id).startsWith('temp_')) return;
+            console.log('[GROUP FLOW] group:message-sent confirmed →', message.id);
+            try {
+                const tempEl = document.querySelector('[data-message-id^="temp_"]');
+                if (tempEl) {
+                    tempEl.dataset.messageId = message.id;
+                    tempEl.classList.remove('sending');
+                }
+            } catch (_) {}
+        });
+
+        // ── group:updated → refresh open chat header / details panel ────────
+        GC.on('group:updated', function (updatedGroup) {
+            if (!updatedGroup?.id) return;
+            try {
+                const isOpenChat = typeof currentChatGroup !== 'undefined'
+                                && currentChatGroup?.id === updatedGroup.id;
+                if (isOpenChat) {
+                    if (typeof updateChatHeaderUniqueFeatures === 'function') updateChatHeaderUniqueFeatures(updatedGroup);
+                    if (typeof checkPostingRules === 'function') checkPostingRules(updatedGroup);
+                }
+                if (typeof updateCurrentSection === 'function') updateCurrentSection();
+            } catch (_) {}
+        });
+
+        // ── group:deleted → remove card, close panel if open ────────────────
+        GC.on('group:deleted', function (data) {
+            const groupId = data?.groupId;
+            if (!groupId) return;
+            try {
+                document.querySelectorAll(`[data-group-id="${groupId}"]`).forEach(el => el.remove());
+                if (typeof updateGroupCounts === 'function') updateGroupCounts();
+            } catch (_) {}
+        });
+
+        console.log('[GROUP FLOW] GroupCore UI event listeners bound ✅');
     }
 
     if (document.readyState === 'loading') {

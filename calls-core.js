@@ -3247,12 +3247,42 @@ if (message.type === 'SETTING_CHANGED' || message.type === 'SETTINGS_UPDATED') {
             };
             
             this._peerConnection.ontrack = (event) => {
-                const stream = event.streams[0];
+                const stream = event.streams[0] || new MediaStream([event.track]);
                 if (stream) {
                     this._remoteStreams.set(stream.id, stream);
                     callsState.remoteStreams.set(stream.id, stream);
                     callsState.remoteStream = stream;
-                    
+
+                    // ── CRITICAL FIX: Attach remote stream to an audio element ──
+                    // Without this step there is NO sound on either side.
+                    try {
+                        let remoteAudio = document.getElementById('remoteAudio');
+                        if (!remoteAudio) {
+                            remoteAudio = document.createElement('audio');
+                            remoteAudio.id      = 'remoteAudio';
+                            remoteAudio.autoplay = true;
+                            remoteAudio.setAttribute('playsinline', '');
+                            remoteAudio.style.display = 'none';
+                            document.body.appendChild(remoteAudio);
+                            console.log('[CallsCore] Created <audio id="remoteAudio">');
+                        }
+                        remoteAudio.srcObject = stream;
+                        remoteAudio.play().catch(function(playErr) {
+                            // Autoplay blocked — retry on next user gesture
+                            console.warn('[CallsCore] Remote audio autoplay blocked, retrying', playErr.message);
+                            const retryPlay = function() {
+                                remoteAudio.play().catch(function() {});
+                                document.removeEventListener('click',      retryPlay);
+                                document.removeEventListener('touchstart', retryPlay);
+                            };
+                            document.addEventListener('click',      retryPlay, { once: true });
+                            document.addEventListener('touchstart', retryPlay, { once: true });
+                        });
+                        console.log('[CallsCore] ✅ AUDIO STREAM ATTACHED — remoteAudio.srcObject set');
+                    } catch (audioErr) {
+                        logError(MODULE, 'Failed to attach remote audio', audioErr);
+                    }
+
                     logSuccess(MODULE, 'Remote stream added');
                     this._notifyListeners('remote_stream_added', { stream, track: event.track });
                     notifyListeners('remote_stream_added', { stream });
@@ -7130,6 +7160,36 @@ _escapeHtml: function(text) {
         
         callsState.callState = 'connecting';
         notifyListeners('call_accepted', callData);
+
+        // ── CRITICAL FIX: Start WebRTC negotiation ──────────────────────────
+        // The caller must create and send an SDP offer immediately after the
+        // receiver accepts. Without this, WebRTC never connects → no audio.
+        // Only the CALLER side creates the offer (not the receiver).
+        const isCaller = callData &&
+            (callData.callerId === (callsState.session && callsState.session.userId) ||
+             callsState.callState === 'connecting');
+
+        if (WebRTCManager._peerConnection && callsState.callActive) {
+            console.log('[CallsCore] ✅ CALL ACCEPTED — creating SDP offer for WebRTC');
+            WebRTCManager.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: false })
+                .then(function(offer) {
+                    const callId = callsState.serverCallId || callsState.activeCallId || (callData && callData.callId);
+                    safeSend('SIGNAL_OFFER', {
+                        callId: callId,
+                        offer:  offer,
+                        timestamp: Date.now()
+                    }, false);
+                    console.log('[CallsCore] ✅ OFFER SENT to remote peer');
+                })
+                .catch(function(e) {
+                    logError(MODULE, 'createOffer failed after call_accepted', e);
+                });
+        } else {
+            logWarn(MODULE, 'handleCallAccepted: no peer connection — offer NOT sent', {
+                hasPeerConn: !!WebRTCManager._peerConnection,
+                callActive:  callsState.callActive
+            });
+        }
     }
     
     function handleCallStarted(callData) {
@@ -7272,29 +7332,49 @@ function handleCallFailed(callData) {
     async function handleSignalOffer(payload) {
     logCall(MODULE, 'handleSignalOffer', { callId: payload.callId });
     
-    if (!callsState.callActive && callsState.callState !== 'initiating') {
-        logWarn(MODULE, 'Signal offer received but no active call');
+    if (!callsState.callActive && callsState.callState !== 'initiating' &&
+        callsState.callState !== 'incoming' && callsState.callState !== 'connecting' &&
+        callsState.callState !== 'in-call') {
+        logWarn(MODULE, 'Signal offer received but no active call — state:', callsState.callState);
         return;
     }
     
     if (!WebRTCManager._peerConnection) {
-        logWarn(MODULE, 'No peer connection for signal offer');
-        return;
+        // Receiver may not have set up PC yet if acceptCall hasn't finished
+        logWarn(MODULE, 'No peer connection for signal offer — attempting to create one');
+        try {
+            const constraints = { audio: true, video: callsState.callType === 'video' };
+            const streamResult = await MediaManager.getLocalStream(constraints);
+            if (streamResult.success) {
+                WebRTCManager.createPeerConnection();
+                WebRTCManager.addStream(streamResult.stream);
+                WebRTCManager.setCurrentCallId(callsState.activeCallId);
+                console.log('[CallsCore] ✅ Peer connection created for incoming offer');
+            } else {
+                logError(MODULE, 'Could not get local stream for offer handling');
+                return;
+            }
+        } catch (e) {
+            logError(MODULE, 'Failed to create peer connection for offer', e);
+            return;
+        }
     }
     
     try {
         await WebRTCManager.setRemoteDescription(payload.offer);
+        console.log('[CallsCore] Remote description (offer) set');
+
         const answer = await WebRTCManager.createAnswer();
         
         // FIXED: Send as direct message type, not as ACTION
         safeSend('SIGNAL_ANSWER', {
-            callId: payload.callId,
+            callId: payload.callId || callsState.activeCallId,
             answer: answer,
             timestamp: Date.now()
         }, false);
         
         DiagnosticsAgent.record('signaling_send');
-        logCall(MODULE, 'Signal answer sent', { callId: payload.callId });
+        console.log('[CallsCore] ✅ ANSWER SENT to remote peer');
         
     } catch (error) {
         logError(MODULE, 'Failed to handle signal offer', error);
@@ -7303,7 +7383,8 @@ function handleCallFailed(callData) {
     async function handleSignalAnswer(payload) {
         logCall(MODULE, 'handleSignalAnswer', { callId: payload.callId });
         
-        if (!callsState.callActive && callsState.callState !== 'initiating') {
+        if (!callsState.callActive && callsState.callState !== 'initiating' &&
+            callsState.callState !== 'connecting') {
             logWarn(MODULE, 'Signal answer received but no active call');
             return;
         }
@@ -7316,7 +7397,16 @@ function handleCallFailed(callData) {
         try {
             await WebRTCManager.setRemoteDescription(payload.answer);
             DiagnosticsAgent.record('signaling_recv');
-            logCall(MODULE, 'Signal answer processed', { callId: payload.callId });
+            console.log('[CallsCore] ✅ ANSWER RECEIVED — remote description set');
+
+            // Flush any ICE candidates that arrived before the answer was set
+            if (callsState.iceCandidates && callsState.iceCandidates.length > 0) {
+                console.log('[CallsCore] Flushing', callsState.iceCandidates.length, 'queued ICE candidates');
+                const queued = callsState.iceCandidates.splice(0);
+                for (const candidate of queued) {
+                    try { await WebRTCManager.addIceCandidate(candidate); } catch (_) {}
+                }
+            }
         } catch (error) {
             logError(MODULE, 'Failed to handle signal answer', error);
         }
@@ -7325,27 +7415,26 @@ function handleCallFailed(callData) {
     async function handleIceCandidate(payload) {
     logCall(MODULE, 'handleIceCandidate', { callId: payload.callId });
     
-    if (!callsState.callActive && callsState.callState !== 'initiating') {
-        logWarn(MODULE, 'ICE candidate received but no active call');
+    if (!callsState.callActive && callsState.callState !== 'initiating' &&
+        callsState.callState !== 'connecting' && callsState.callState !== 'in-call') {
+        logWarn(MODULE, 'ICE candidate received but no active call — ignoring');
         return;
     }
     
     if (!WebRTCManager._peerConnection) {
-        logWarn(MODULE, 'No peer connection for ICE candidate');
+        logWarn(MODULE, 'No peer connection for ICE candidate — queueing');
+        // Queue the candidate if remote description not yet set
+        callsState.iceCandidates.push(payload.candidate);
         return;
     }
     
     try {
         await WebRTCManager.addIceCandidate(payload.candidate);
         DiagnosticsAgent.record('signaling_recv');
-        
-        // FIXED: Forward ICE candidate to parent as direct message type
-        safeSend('ICE_CANDIDATE', {
-            callId: payload.callId,
-            candidate: payload.candidate,
-            timestamp: Date.now()
-        }, false);
-        
+        console.log('[CallsCore] ✅ ICE CANDIDATE applied from remote peer');
+        // NOTE: Do NOT re-forward received ICE candidates — that causes a loop.
+        // Outbound ICE candidates are sent in WebRTCManager._setupPeerConnectionListeners
+        // via the onicecandidate callback.
     } catch (error) {
         logError(MODULE, 'Failed to add ICE candidate', error);
     }

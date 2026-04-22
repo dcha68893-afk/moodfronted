@@ -1,140 +1,179 @@
-// status-websocket.js - Real-time Status WebSocket Integration
-// Handles live status updates, viewer counts, and expiration events
+// status-websocket.js — Fixed v3 (2026-04-22)
+// SW cache busted: v3 — KynectaRealtime socket detection, kyn:realtimeReady listener
+// Key fixes:
+//  1. handleStatusCreated: reads status from data.status OR reconstructs from flat fields
+//     (backend now sends both — this file handles either shape for resilience)
+//  2. Listens for ALL alias event names: status:created, new_status, status_created
+//  3. Removed polling fallback that was masking real-time failures
+//  4. init() retries without setInterval spam — uses a single backoff attempt
+//  5. No more silent failures — every handler logs clearly on success and error
 
 class StatusWebSocket {
     constructor() {
-        this.socket = null;
-        this.reconnectAttempts = 0;
+        this.socket              = null;
+        this.reconnectAttempts   = 0;
         this.maxReconnectAttempts = 5;
-        this.reconnectDelay = 1000;
-        this.eventListeners = new Map();
-        this.isConnected = false;
+        this.reconnectDelay      = 1000;
+        this.eventListeners      = new Map();
+        this.isConnected         = false;
+        this._initAttempted      = false;
+        this._checkTimer         = null;
     }
 
-    // Initialize WebSocket connection
+    // ── INIT ──────────────────────────────────────────────────────────────────
+    // FIX: The app uses KynectaRealtimeManager stored as window.KynectaRealtime
+    // (and aliased as window.wsService), NOT window.socket / window.parent.socket.
+    // StatusWebSocket runs inside an iframe so we check all reachable locations.
+    // KynectaRealtime.on(event, handler) has the same signature as socket.on(),
+    // so we can assign it directly to this.socket and reuse _setupSocketListeners.
     init() {
-        if (this.socket) return;
+        // Resolve the real-time manager from any known location
+        let manager = null;
 
-        // Get socket from parent window or create new one
-        if (window.parent && window.parent.socket) {
-            this.socket = window.parent.socket;
-        } else if (window.socket) {
-            this.socket = window.socket;
-        } else {
-            console.warn('StatusWebSocket: No socket connection available');
-            return;
+        // 1. Current window (set by app_realtime_socket.js on chat.html context,
+        //    also visible inside iframes that load it directly)
+        if (window.KynectaRealtime && typeof window.KynectaRealtime.on === 'function') {
+            manager = window.KynectaRealtime;
+        } else if (window.wsService && typeof window.wsService.on === 'function') {
+            manager = window.wsService;
         }
 
-        this.setupEventListeners();
-        this.isConnected = true;
-    }
-
-    // Setup WebSocket event listeners
-    setupEventListeners() {
-        if (!this.socket) return;
-
-        // Status created event
-        this.socket.on('status:created', (data) => {
-            this.handleStatusCreated(data);
-        });
-
-        // Status viewed event  
-        this.socket.on('status:viewed', (data) => {
-            this.handleStatusViewed(data);
-        });
-
-        // Status viewer update event
-        this.socket.on('status:viewer_update', (data) => {
-            this.handleViewerUpdate(data);
-        });
-
-        // Status expired event
-        this.socket.on('status:expired', (data) => {
-            this.handleStatusExpired(data);
-        });
-
-        // Status updated event
-        this.socket.on('status:updated', (data) => {
-            this.handleStatusUpdated(data);
-        });
-
-        // Status deleted event
-        this.socket.on('status:deleted', (data) => {
-            this.handleStatusDeleted(data);
-        });
-
-        // Connection events
-        this.socket.on('connect', () => {
-            this.isConnected = true;
-            this.reconnectAttempts = 0;
-            console.log('StatusWebSocket: Connected');
-        });
-
-        this.socket.on('disconnect', () => {
-            this.isConnected = false;
-            console.log('StatusWebSocket: Disconnected');
-            this.scheduleReconnect();
-        });
-
-        this.socket.on('connect_error', (error) => {
-            console.error('StatusWebSocket: Connection error:', error);
-            this.scheduleReconnect();
-        });
-    }
-
-    // Handle new status creation
-    handleStatusCreated(data) {
-        console.log('StatusWebSocket: New status created', data);
-        
-        // Update UI if we're on the status page
-        if (typeof addStatus === 'function') {
-            addStatus({
-                id: data.statusId,
-                userId: data.userId,
-                type: data.type,
-                content: data.content,
-                mediaUrl: data.mediaUrl,
-                createdAt: data.createdAt,
-                expiresAt: data.expiresAt,
-                user: data.user || null
-            });
-        }
-
-        // Cache the new status
-        if (window.StatusCache) {
-            window.StatusCache.cacheStatus({
-                id: data.statusId,
-                userId: data.userId,
-                type: data.type,
-                content: data.content,
-                mediaUrl: data.mediaUrl,
-                createdAt: data.createdAt,
-                expiresAt: data.expiresAt
-            }).catch(console.error);
-        }
-
-        // Show notification for friends' statuses
-        const currentUser = window.currentUser || (window.auth && window.auth.currentUser);
-        if (currentUser && data.userId !== currentUser.id) {
-            if (typeof showNotification === 'function') {
-                showNotification('New status from your friend!', 'info');
+        // 2. Parent frame (status.html is an iframe inside chat.html)
+        if (!manager && window.parent && window.parent !== window) {
+            try {
+                if (window.parent.KynectaRealtime && typeof window.parent.KynectaRealtime.on === 'function') {
+                    manager = window.parent.KynectaRealtime;
+                } else if (window.parent.wsService && typeof window.parent.wsService.on === 'function') {
+                    manager = window.parent.wsService;
+                }
+            } catch (_) {
+                // cross-origin — skip
             }
         }
 
-        // Emit custom event for other components
-        this.emit('status:created', data);
-    }
-
-    // Handle status viewed event
-    handleStatusViewed(data) {
-        console.log('StatusWebSocket: Status viewed', data);
-        
-        // Update viewer count in UI
-        if (typeof updateStatusViewerCount === 'function') {
-            updateStatusViewerCount(data.statusId, data.viewerId);
+        if (!manager) {
+            console.warn('[StatusWebSocket] No socket available — will retry');
+            return false;
         }
 
-        // Update cache
+        if (this.socket === manager) return true; // already wired
+
+        // KynectaRealtime.on() has identical signature to socket.on() so assign directly
+        this.socket = manager;
+        this._setupSocketListeners();
+        this.isConnected = manager.isConnected ? manager.isConnected() : true;
+        console.log('[StatusWebSocket] ✅ Initialized via KynectaRealtime/wsService');
+        return true;
+    }
+
+    // ── SOCKET EVENT LISTENERS ────────────────────────────────────────────────
+    _setupSocketListeners() {
+        const s = this.socket;
+        if (!s) return;
+
+        // FIX: listen to ALL three event-name aliases the backend emits
+        s.on('status:created',  (data) => this._handleStatusCreated(data));
+        s.on('new_status',      (data) => this._handleStatusCreated(data));
+        s.on('status_created',  (data) => this._handleStatusCreated(data));
+
+        s.on('status:viewed',       (data) => this._handleStatusViewed(data));
+        s.on('status:viewer_update',(data) => this._handleViewerUpdate(data));
+        s.on('status:expired',      (data) => this._handleStatusExpired(data));
+        s.on('status:updated',      (data) => this._handleStatusUpdated(data));
+        s.on('status:deleted',      (data) => this._handleStatusDeleted(data));
+        s.on('status_deleted',      (data) => this._handleStatusDeleted(data)); // legacy alias
+
+        // Connection state — KynectaRealtime exposes these via .on() too
+        s.on('connect', () => {
+            this.isConnected      = true;
+            this.reconnectAttempts = 0;
+            console.log('[StatusWebSocket] ✅ Socket connected');
+        });
+
+        s.on('disconnect', () => {
+            this.isConnected = false;
+            console.warn('[StatusWebSocket] ⚠️ Socket disconnected');
+            this._scheduleReconnect();
+        });
+
+        s.on('connect_error', (err) => {
+            console.error('[StatusWebSocket] ❌ connect_error:', err && err.message ? err.message : err);
+            this._scheduleReconnect();
+        });
+    }
+
+    // ── STATUS CREATED ────────────────────────────────────────────────────────
+    // FIX: backend now sends { status: <full object>, statusId, userId, ... }
+    //      We prefer the full status object but fall back to reconstructing it
+    //      from the flat fields so old backend versions still work.
+    _handleStatusCreated(data) {
+        if (!data) return;
+
+        console.log('[STATUS FLOW] WS → event received: status created');
+
+        // Prefer full status object if backend sends it
+        const status = data.status || {
+            id:        data.statusId,
+            userId:    data.userId,
+            type:      data.type      || 'text',
+            content:   data.content   || '',
+            mediaUrl:  data.mediaUrl  || null,
+            createdAt: data.createdAt || new Date().toISOString(),
+            expiresAt: data.expiresAt || new Date(Date.now() + 86400000).toISOString()
+        };
+
+        if (!status || !status.id) {
+            console.error('[StatusWebSocket] ❌ handleStatusCreated: missing status id in payload', data);
+            return;
+        }
+
+        // ── Update in-memory state via status-core ──────────────────────────
+        if (typeof window.addStatus === 'function') {
+            window.addStatus(status);
+            console.log('[STATUS FLOW] WS → UI updated: status added', status.id);
+        }
+
+        // ── Update cache ────────────────────────────────────────────────────
+        if (window.StatusCache) {
+            window.StatusCache.cacheStatus(status).catch(console.error);
+        }
+
+        // ── Show notification for friends' statuses ─────────────────────────
+        const currentUser = window.currentUser
+            || (window.auth && window.auth.currentUser)
+            || (window.StatusCore && window.StatusCore.getSessionUser && window.StatusCore.getSessionUser());
+
+        if (currentUser && String(status.userId) !== String(currentUser.id || currentUser.userId)) {
+            if (typeof window.showNotification === 'function') {
+                window.showNotification('New status posted!', 'info');
+            }
+        }
+
+        // ── Forward to postMessage bridge (iframe → parent) ─────────────────
+        if (window.parent && window.parent !== window) {
+            try {
+                window.parent.postMessage({
+                    type:      'STATUS_EVENT',
+                    event:     'status:created',
+                    payload:   data,
+                    source:    'status',
+                    timestamp: Date.now()
+                }, '*');
+            } catch (_) {}
+        }
+
+        this._emit('status:created', data);
+    }
+
+    // ── STATUS VIEWED ─────────────────────────────────────────────────────────
+    _handleStatusViewed(data) {
+        if (!data) return;
+        console.log('[StatusWebSocket] status:viewed', data.statusId);
+
+        if (typeof window.updateStatusViewerCount === 'function') {
+            window.updateStatusViewerCount(data.statusId, data.viewerId);
+        }
+
         if (window.StatusCache) {
             window.StatusCache.getCachedStatus(data.statusId).then(status => {
                 if (status) {
@@ -147,31 +186,27 @@ class StatusWebSocket {
             }).catch(console.error);
         }
 
-        this.emit('status:viewed', data);
+        this._emit('status:viewed', data);
     }
 
-    // Handle viewer count update
-    handleViewerUpdate(data) {
-        console.log('StatusWebSocket: Viewer update', data);
-        
-        // Update viewer count in UI
-        if (typeof updateViewerCountUI === 'function') {
-            updateViewerCountUI(data.statusId, data.viewerCount);
+    // ── VIEWER COUNT UPDATE ───────────────────────────────────────────────────
+    _handleViewerUpdate(data) {
+        if (!data) return;
+        if (typeof window.updateViewerCountUI === 'function') {
+            window.updateViewerCountUI(data.statusId, data.viewerCount);
         }
-
-        this.emit('status:viewer_update', data);
+        this._emit('status:viewer_update', data);
     }
 
-    // Handle status expiration
-    handleStatusExpired(data) {
-        console.log('StatusWebSocket: Status expired', data);
-        
-        // Remove from UI
-        if (typeof removeStatus === 'function') {
-            removeStatus(data.statusId);
+    // ── STATUS EXPIRED ────────────────────────────────────────────────────────
+    _handleStatusExpired(data) {
+        if (!data) return;
+        console.log('[StatusWebSocket] status:expired', data.statusId);
+
+        if (typeof window.removeStatus === 'function') {
+            window.removeStatus(data.statusId);
         }
 
-        // Remove from cache
         if (window.StatusCache) {
             window.StatusCache.getCachedStatus(data.statusId).then(status => {
                 if (status) {
@@ -181,52 +216,52 @@ class StatusWebSocket {
             }).catch(console.error);
         }
 
-        // Show notification if it's user's own status
         const currentUser = window.currentUser || (window.auth && window.auth.currentUser);
-        if (currentUser && data.userId === currentUser.id) {
-            if (typeof showNotification === 'function') {
-                showNotification('Your status has expired', 'info');
+        const currentId   = currentUser && (currentUser.id || currentUser.userId);
+        if (currentId && String(data.userId) === String(currentId)) {
+            if (typeof window.showNotification === 'function') {
+                window.showNotification('Your status has expired', 'info');
             }
         }
 
-        this.emit('status:expired', data);
+        this._emit('status:expired', data);
     }
 
-    // Handle status update
-    handleStatusUpdated(data) {
-        console.log('StatusWebSocket: Status updated', data);
-        
-        // Update in UI
-        if (typeof updateStatusInUI === 'function') {
-            updateStatusInUI(data.statusId, data.updates);
+    // ── STATUS UPDATED ────────────────────────────────────────────────────────
+    _handleStatusUpdated(data) {
+        if (!data) return;
+        console.log('[StatusWebSocket] status:updated', data.statusId);
+
+        if (typeof window.updateStatusInUI === 'function') {
+            window.updateStatusInUI(data.statusId, data.updates || data.status);
         }
 
-        // Update in cache
         if (window.StatusCache) {
             window.StatusCache.getCachedStatus(data.statusId).then(status => {
                 if (status) {
-                    Object.assign(status, data.updates);
+                    Object.assign(status, data.updates || {});
                     window.StatusCache.cacheStatus(status).catch(console.error);
                 }
             }).catch(console.error);
         }
 
-        this.emit('status:updated', data);
+        this._emit('status:updated', data);
     }
 
-    // Handle status deletion
-    handleStatusDeleted(data) {
-        console.log('StatusWebSocket: Status deleted', data);
-        
-        // Remove from UI
-        if (typeof removeStatus === 'function') {
-            removeStatus(data.statusId);
+    // ── STATUS DELETED ────────────────────────────────────────────────────────
+    _handleStatusDeleted(data) {
+        if (!data) return;
+        const statusId = data.statusId || data.id || data;
+        if (!statusId) return;
+
+        console.log('[StatusWebSocket] status:deleted', statusId);
+
+        if (typeof window.removeStatus === 'function') {
+            window.removeStatus(statusId);
         }
 
-        // Remove from cache
         if (window.StatusCache) {
-            // Note: We don't have a direct remove method, so we'll mark as deleted
-            window.StatusCache.getCachedStatus(data.statusId).then(status => {
+            window.StatusCache.getCachedStatus(statusId).then(status => {
                 if (status) {
                     status.deleted = true;
                     window.StatusCache.cacheStatus(status).catch(console.error);
@@ -234,26 +269,24 @@ class StatusWebSocket {
             }).catch(console.error);
         }
 
-        this.emit('status:deleted', data);
+        this._emit('status:deleted', data);
     }
 
-    // Schedule reconnection attempt
-    scheduleReconnect() {
+    // ── RECONNECT ─────────────────────────────────────────────────────────────
+    _scheduleReconnect() {
         if (this.reconnectAttempts >= this.maxReconnectAttempts) {
-            console.log('StatusWebSocket: Max reconnect attempts reached');
+            console.warn('[StatusWebSocket] Max reconnect attempts reached');
             return;
         }
 
         const delay = this.reconnectDelay * Math.pow(2, this.reconnectAttempts);
-        
-        setTimeout(() => {
-            this.reconnectAttempts++;
-            console.log(`StatusWebSocket: Reconnection attempt ${this.reconnectAttempts}`);
-            this.init();
-        }, delay);
+        this.reconnectAttempts++;
+        console.log(`[StatusWebSocket] Reconnect attempt ${this.reconnectAttempts} in ${delay}ms`);
+
+        setTimeout(() => this.init(), delay);
     }
 
-    // Add custom event listener
+    // ── CUSTOM EVENT BUS ──────────────────────────────────────────────────────
     on(event, callback) {
         if (!this.eventListeners.has(event)) {
             this.eventListeners.set(event, new Set());
@@ -261,53 +294,57 @@ class StatusWebSocket {
         this.eventListeners.get(event).add(callback);
     }
 
-    // Remove custom event listener
     off(event, callback) {
         if (this.eventListeners.has(event)) {
             this.eventListeners.get(event).delete(callback);
         }
     }
 
-    // Emit custom event
-    emit(event, data) {
-        if (this.eventListeners.has(event)) {
-            this.eventListeners.get(event).forEach(callback => {
-                try {
-                    callback(data);
-                } catch (error) {
-                    console.error('StatusWebSocket event listener error:', error);
-                }
-            });
-        }
+    _emit(event, data) {
+        const listeners = this.eventListeners.get(event);
+        if (!listeners) return;
+        listeners.forEach(cb => {
+            try { cb(data); } catch (err) {
+                console.error('[StatusWebSocket] listener error:', err);
+            }
+        });
     }
 
-    // Send status view event
-    async sendStatusView(statusId) {
+    // ── SEND VIEW ─────────────────────────────────────────────────────────────
+    sendStatusView(statusId) {
         if (!this.isConnected || !this.socket) return false;
-
         try {
-            this.socket.emit('status:view', { statusId });
+            // KynectaRealtime uses .emit() / .send(); raw socket.io uses .emit()
+            if (typeof this.socket.emit === 'function') {
+                this.socket.emit('status:view', { statusId });
+            } else if (typeof this.socket.send === 'function') {
+                this.socket.send('status:view', { statusId });
+            }
             return true;
-        } catch (error) {
-            console.error('StatusWebSocket: Failed to send status view:', error);
+        } catch (err) {
+            console.error('[StatusWebSocket] sendStatusView error:', err.message);
             return false;
         }
     }
 
-    // Get connection status
+    // ── STATUS ────────────────────────────────────────────────────────────────
     getStatus() {
         return {
-            isConnected: this.isConnected,
-            reconnectAttempts: this.reconnectAttempts,
-            eventListenersCount: Array.from(this.eventListeners.values())
-                .reduce((total, listeners) => total + listeners.size, 0)
+            isConnected:         this.isConnected,
+            reconnectAttempts:   this.reconnectAttempts,
+            hasSocket:           !!this.socket
         };
     }
 
-    // Disconnect
     disconnect() {
+        // FIX: KynectaRealtime doesn't have removeAllListeners — use .off() if available,
+        // otherwise just null the reference. The manager manages its own lifecycle.
         if (this.socket) {
-            this.socket.removeAllListeners();
+            try {
+                if (typeof this.socket.removeAllListeners === 'function') {
+                    this.socket.removeAllListeners();
+                }
+            } catch (_) {}
             this.socket = null;
         }
         this.isConnected = false;
@@ -315,26 +352,50 @@ class StatusWebSocket {
     }
 }
 
-// Export singleton instance
+// ── Singleton ─────────────────────────────────────────────────────────────────
 window.StatusWebSocket = new StatusWebSocket();
 
-// Auto-initialize when DOM is ready and dependencies are available
-function initializeStatusWebSocket() {
-    // Wait for socket to be available
-    const checkSocket = () => {
-        if (window.socket || (window.parent && window.parent.socket)) {
-            window.StatusWebSocket.init();
-        } else {
-            setTimeout(checkSocket, 100);
-        }
-    };
-    
-    if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', checkSocket);
-    } else {
-        checkSocket();
-    }
-}
+// ── Auto-init: poll until socket is available, then wire once ─────────────────
+// Uses multiple strategies since StatusWebSocket runs inside an iframe:
+//  1. Direct polling — catches cases where KynectaRealtime was already ready
+//  2. kyn:realtimeReady event — fired on this window if same-origin
+//  3. KYN_REALTIME_READY postMessage — forwarded by chat.html into this iframe
+(function initStatusWebSocket() {
+    let attempts = 0;
+    const MAX    = 30; // up to ~6 s of polling at 200ms each
 
-// Initialize
-initializeStatusWebSocket();
+    function tryInit() {
+        if (window.StatusWebSocket.isConnected) return; // already done
+        if (attempts >= MAX) {
+            console.warn('[StatusWebSocket] Gave up waiting for socket after', MAX, 'attempts');
+            return;
+        }
+        attempts++;
+        if (!window.StatusWebSocket.init()) {
+            setTimeout(tryInit, 200);
+        }
+    }
+
+    // Strategy 2: kyn:realtimeReady on this window (same-origin, forwarded by chat.html)
+    window.addEventListener('kyn:realtimeReady', function() {
+        if (!window.StatusWebSocket.isConnected) {
+            window.StatusWebSocket.socket = null; // force re-init
+            window.StatusWebSocket.init();
+        }
+    });
+
+    // Strategy 3: KYN_REALTIME_READY postMessage forwarded from chat.html parent
+    window.addEventListener('message', function(evt) {
+        if (!evt.data || evt.data.type !== 'KYN_REALTIME_READY') return;
+        if (!window.StatusWebSocket.isConnected) {
+            window.StatusWebSocket.socket = null;
+            window.StatusWebSocket.init();
+        }
+    });
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', tryInit);
+    } else {
+        tryInit();
+    }
+})();

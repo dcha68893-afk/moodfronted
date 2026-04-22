@@ -2778,9 +2778,22 @@
                 if (contentType.includes('application/json')) responseData = await response.json();
                 else responseData = { message: await response.text() || 'Request completed' };
 
-                return response.ok
-                    ? { success: true, data: responseData, statusCode: response.status }
-                    : { success: false, error: responseData?.message || responseData?.error || `HTTP ${response.status}`, statusCode: response.status, data: responseData };
+                if (!response.ok) {
+                    return { success: false, error: responseData?.message || responseData?.error || `HTTP ${response.status}`, statusCode: response.status, data: responseData };
+                }
+
+                // FIX: Unwrap backend envelope { success, data: {...} } so friend-core receives a flat
+                // { success, data: { friends:[...] } } instead of a double-nested payload which causes data:null.
+                if (responseData && typeof responseData === 'object' && 'success' in responseData) {
+                    return {
+                        success: responseData.success !== false,
+                        data: responseData.data ?? responseData,
+                        error: responseData.error || responseData.message || null,
+                        statusCode: response.status
+                    };
+                }
+
+                return { success: true, data: responseData, statusCode: response.status };
             }
 
             function getSessionData() {
@@ -3755,7 +3768,9 @@
                         let responsePayload;
                         const preferDirectApi = shouldPreferDirectApi(endpoint, method);
                         if (!preferDirectApi && window.api?.request?.request) {
-                            const apiResult = await window.api.request.request(method, endpoint, {
+                            // FIX: correct arg order — coreFetch signature is (url, options), not (method, url, options)
+                            const apiResult = await window.api.request.request(endpoint, {
+                                method,
                                 data: body,
                                 params,
                                 token,
@@ -3772,7 +3787,11 @@
                                 cached: !!apiResult?.cached
                             };
                         }
-                        if (preferDirectApi || shouldRetryDirectApi(endpoint, responsePayload)) {
+                        // FIX: when window.api.request.request is unavailable responsePayload stays
+                        // undefined — shouldRetryDirectApi returns false for undefined, so
+                        // directApiRequest was never called and postMessage fired with payload:undefined.
+                        // Guard with responsePayload === undefined so we always fall through to the direct fetch.
+                        if (preferDirectApi || responsePayload === undefined || shouldRetryDirectApi(endpoint, responsePayload)) {
                             responsePayload = await directApiRequest(endpoint, method, body, params, token);
                         }
                         if (event.source && event.source.postMessage) event.source.postMessage({ type: 'API_RESPONSE', requestId: requestId, payload: responsePayload, timestamp: new Date().toISOString() }, '*');
@@ -4120,6 +4139,18 @@
             window.addEventListener('kyn:realtimeReady', function() {
                 _wsCallListenersBound = false; // allow re-bind with the real service
                 _bindWsCallListeners();
+
+                // FIX: status iframe has an isolated window — it cannot receive events
+                // fired on the parent window. Forward the ready signal both ways:
+                // 1. dispatchEvent directly into the iframe's window (same-origin)
+                // 2. postMessage as a cross-origin fallback that status-websocket.js listens for
+                const statusIframe = document.getElementById('statusIframe');
+                if (statusIframe && statusIframe.contentWindow) {
+                    try {
+                        statusIframe.contentWindow.dispatchEvent(new CustomEvent('kyn:realtimeReady', { detail: { forwarded: true } }));
+                    } catch(_) {}
+                    statusIframe.contentWindow.postMessage({ type: 'KYN_REALTIME_READY', source: 'parent', timestamp: Date.now() }, '*');
+                }
             }, { once: true });
 
             // Calls iframe load handler

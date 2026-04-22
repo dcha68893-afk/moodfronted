@@ -911,6 +911,57 @@ const UIPipeline = {
             window.addEventListener('marketplace:spotlight-updated', function(e) {
                 if (UIPipeline) UIPipeline.renderSpotlightFromData();
             });
+
+            // FIX: Cross-session sync — listen for listings created in other tabs
+            if (!window._broadcastChannelAttached) {
+                window._broadcastChannelAttached = true;
+                try {
+                    const _syncChannel = new BroadcastChannel('marketplace_sync');
+                    _syncChannel.addEventListener('message', function(e) {
+                        const msg = e.data;
+                        if (!msg) return;
+                        if (msg.type === 'LISTING_CREATED' && msg.listing && msg.listing.id) {
+                            const alreadyPresent = (window.allListings || []).some(function(l) { return l.id === msg.listing.id; });
+                            if (!alreadyPresent) {
+                                allListings = [msg.listing].concat(window.allListings || []);
+                                window.allListings = allListings;
+                                console.log('[TOOLS FLOW] Step 4: UI updated from cross-tab broadcast', { id: msg.listing.id });
+                                window.dispatchEvent(new CustomEvent('marketplace:data-updated', {
+                                    detail: { listings: allListings, source: 'broadcast' }
+                                }));
+                            }
+                        }
+                        if (msg.type === 'LISTING_DELETED' && msg.listingId) {
+                            allListings = (window.allListings || []).filter(function(l) { return l.id !== msg.listingId; });
+                            window.allListings = allListings;
+                            window.dispatchEvent(new CustomEvent('marketplace:data-updated', {
+                                detail: { listings: allListings, source: 'broadcast' }
+                            }));
+                        }
+                    });
+                } catch (_) { /* BroadcastChannel not supported — skip */ }
+            }
+
+            // FIX: Strip ghost listings (optimistic entries with fake IDs) from cache on startup
+            (function _cleanGhosts() {
+                const FAKE = /^listing_\d+_[a-z0-9]+$/;
+                function strip(arr) {
+                    if (!Array.isArray(arr)) return arr;
+                    return arr.filter(function(l) { return !(l._isOptimistic && FAKE.test(l.id)); });
+                }
+                window.allListings = strip(window.allListings);
+                window.myListings  = strip(window.myListings);
+                try {
+                    ['allListings', 'myListings'].forEach(function(k) {
+                        var raw = localStorage.getItem(k);
+                        if (!raw) return;
+                        try {
+                            var parsed = JSON.parse(raw);
+                            if (Array.isArray(parsed)) localStorage.setItem(k, JSON.stringify(strip(parsed)));
+                        } catch (_) {}
+                    });
+                } catch (_) {}
+            })();
         }
 
         // Immediately kick off background data load without waiting for auth
@@ -2966,6 +3017,8 @@ async function publishListingFromModal() {
             showNotification('Please fill in title and description', 'error');
             return;
         }
+
+        console.log('[TOOLS FLOW] Step 1: UI triggered — service listing form submitted');
         
         const listing = await createServiceListing(title, description, {
             price: price,
@@ -2975,12 +3028,14 @@ async function publishListingFromModal() {
             template: UIState.selectedTemplate
         });
         
-        if (listing) {
+        // FIX: only celebrate when backend confirmed (listing exists AND is not an optimistic ghost)
+        if (listing && !listing._isOptimistic) {
             showNotification('Listing published successfully!', 'success');
             hideCreateListingModal();
             UIPipeline.liveUpdate();
-        } else {
-            showNotification('Failed to publish listing', 'error');
+            console.log('[TOOLS FLOW] Step 4: UI updated after service listing created', { id: listing.id });
+        } else if (!listing) {
+            // Error notification already shown by createServiceListing — do not double-notify
         }
         return;
     }
@@ -3008,12 +3063,14 @@ async function publishListingFromModal() {
             template: UIState.selectedTemplate
         });
         
-        if (listing) {
+        // FIX: only celebrate when backend confirmed the listing
+        if (listing && !listing._isOptimistic) {
             showNotification('Digital item published successfully!', 'success');
             hideCreateListingModal();
             UIPipeline.liveUpdate();
-        } else {
-            showNotification('Failed to publish digital item', 'error');
+            console.log('[TOOLS FLOW] Step 4: UI updated after digital listing created', { id: listing.id });
+        } else if (!listing) {
+            // Error notification already shown by createDigitalListing — do not double-notify
         }
         return;
     }

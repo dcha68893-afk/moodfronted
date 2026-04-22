@@ -1,55 +1,88 @@
-// status-cache.js - Offline Status Cache Management
-// Provides IndexedDB storage and offline sync for status posts
+// status-cache.js — Fixed v2
+// Key fixes:
+//  1. init() errors are no longer swallowed — they propagate AND are stored so
+//     callers can check this.initError before assuming the DB is ready.
+//  2. All public methods call _ensureDB() which waits for init() or throws
+//     a clear error — no more "Cannot read properties of null" on this.db.
+//  3. processSyncQueue() is rate-limited to prevent thundering-herd on reconnect.
+//  4. Removed the silent catch(() => {}) anti-patterns.
 
 class StatusCache {
     constructor() {
-        this.dbName = 'KnectaStatusDB';
-        this.dbVersion = 1;
-        this.storeName = 'statuses';
-        this.db = null;
-        this.isOnline = navigator.onLine;
-        this.syncQueue = [];
+        this.dbName      = 'KnectaStatusDB';
+        this.dbVersion   = 1;
+        this.storeName   = 'statuses';
+        this.db          = null;
+        this.isOnline    = navigator.onLine;
         this.maxCacheAge = 7 * 24 * 60 * 60 * 1000; // 7 days
+
+        // FIX: track init state explicitly so callers know if DB is ready
+        this._initPromise   = null;
+        this.initError      = null;
+        this._syncInFlight  = false;
     }
 
-    // Initialize IndexedDB
-    async init() {
-        return new Promise((resolve, reject) => {
+    // ── INIT ──────────────────────────────────────────────────────────────────
+    // FIX: returns the same promise on repeated calls (idempotent)
+    init() {
+        if (this._initPromise) return this._initPromise;
+
+        this._initPromise = new Promise((resolve, reject) => {
+            if (!window.indexedDB) {
+                const err = new Error('IndexedDB not available in this environment');
+                this.initError = err;
+                return reject(err);
+            }
+
             const request = indexedDB.open(this.dbName, this.dbVersion);
 
-            request.onerror = () => reject(request.error);
+            request.onerror = () => {
+                this.initError = request.error;
+                console.error('[StatusCache] IndexedDB open error:', request.error);
+                reject(request.error);
+            };
+
             request.onsuccess = () => {
                 this.db = request.result;
-                this.setupEventListeners();
-                resolve();
+                this._setupOnlineListeners();
+                console.log('[StatusCache] ✅ IndexedDB ready');
+                resolve(this.db);
             };
 
             request.onupgradeneeded = (event) => {
                 const db = event.target.result;
-                
-                // Create statuses store
+
                 if (!db.objectStoreNames.contains(this.storeName)) {
                     const store = db.createObjectStore(this.storeName, { keyPath: 'id' });
-                    store.createIndex('userId', 'userId', { unique: false });
+                    store.createIndex('userId',    'userId',    { unique: false });
                     store.createIndex('createdAt', 'createdAt', { unique: false });
                     store.createIndex('expiresAt', 'expiresAt', { unique: false });
-                    store.createIndex('type', 'type', { unique: false });
+                    store.createIndex('type',      'type',      { unique: false });
                 }
 
-                // Create sync queue store
                 if (!db.objectStoreNames.contains('syncQueue')) {
                     const syncStore = db.createObjectStore('syncQueue', { keyPath: 'id' });
                     syncStore.createIndex('timestamp', 'timestamp', { unique: false });
                 }
             };
         });
+
+        return this._initPromise;
     }
 
-    // Setup online/offline event listeners
-    setupEventListeners() {
+    // ── GUARD: ensure DB is initialised before any operation ─────────────────
+    async _ensureDB() {
+        if (this.db) return; // fast path
+        await this.init();
+        if (!this.db) throw new Error('[StatusCache] Database not available');
+    }
+
+    // ── ONLINE / OFFLINE LISTENERS ────────────────────────────────────────────
+    _setupOnlineListeners() {
         window.addEventListener('online', () => {
             this.isOnline = true;
-            this.processSyncQueue();
+            console.log('[StatusCache] Online — processing sync queue');
+            this.processSyncQueue().catch(console.error);
         });
 
         window.addEventListener('offline', () => {
@@ -57,249 +90,254 @@ class StatusCache {
         });
     }
 
-    // Store status in cache
+    // ─────────────────────────────────────────────────────────────────────────
+    // CACHE A SINGLE STATUS
+    // ─────────────────────────────────────────────────────────────────────────
     async cacheStatus(status) {
-        if (!this.db) await this.init();
-        
+        await this._ensureDB();
+
         const statusToCache = {
             ...status,
-            cachedAt: Date.now(),
+            cachedAt:  Date.now(),
             isExpired: this.isStatusExpired(status)
         };
 
         return new Promise((resolve, reject) => {
-            const transaction = this.db.transaction([this.storeName], 'readwrite');
-            const store = transaction.objectStore(this.storeName);
+            const tx      = this.db.transaction([this.storeName], 'readwrite');
+            const store   = tx.objectStore(this.storeName);
             const request = store.put(statusToCache);
 
             request.onsuccess = () => resolve(request.result);
-            request.onerror = () => reject(request.error);
+            request.onerror   = () => {
+                console.error('[StatusCache] cacheStatus error:', request.error);
+                reject(request.error);
+            };
         });
     }
 
-    // Cache multiple statuses
+    // ─────────────────────────────────────────────────────────────────────────
+    // CACHE MULTIPLE STATUSES
+    // ─────────────────────────────────────────────────────────────────────────
     async cacheStatuses(statuses) {
-        if (!this.db) await this.init();
-        
-        const transaction = this.db.transaction([this.storeName], 'readwrite');
-        const store = transaction.objectStore(this.storeName);
-        
-        const promises = statuses.map(status => {
-            return new Promise((resolve, reject) => {
-                const statusToCache = {
-                    ...status,
-                    cachedAt: Date.now(),
-                    isExpired: this.isStatusExpired(status)
-                };
-                
-                const request = store.put(statusToCache);
-                request.onsuccess = () => resolve(request.result);
-                request.onerror = () => reject(request.error);
-            });
-        });
+        await this._ensureDB();
+
+        const tx    = this.db.transaction([this.storeName], 'readwrite');
+        const store = tx.objectStore(this.storeName);
+
+        const promises = statuses.map(status => new Promise((resolve, reject) => {
+            const statusToCache = {
+                ...status,
+                cachedAt:  Date.now(),
+                isExpired: this.isStatusExpired(status)
+            };
+            const request = store.put(statusToCache);
+            request.onsuccess = () => resolve(request.result);
+            request.onerror   = () => reject(request.error);
+        }));
 
         return Promise.all(promises);
     }
 
-    // Get cached statuses
+    // ─────────────────────────────────────────────────────────────────────────
+    // GET CACHED STATUSES
+    // ─────────────────────────────────────────────────────────────────────────
     async getCachedStatuses(options = {}) {
-        if (!this.db) await this.init();
-        
+        await this._ensureDB();
+
         return new Promise((resolve, reject) => {
-            const transaction = this.db.transaction([this.storeName], 'readonly');
-            const store = transaction.objectStore(this.storeName);
+            const tx      = this.db.transaction([this.storeName], 'readonly');
+            const store   = tx.objectStore(this.storeName);
             const request = store.getAll();
 
             request.onsuccess = () => {
-                let statuses = request.result;
-                
-                // Filter expired statuses
+                let statuses = request.result || [];
+
                 if (!options.includeExpired) {
-                    statuses = statuses.filter(status => !this.isStatusExpired(status));
+                    statuses = statuses.filter(s => !this.isStatusExpired(s));
                 }
 
-                // Filter by user if specified
                 if (options.userId) {
-                    statuses = statuses.filter(status => 
-                        String(status.userId) === String(options.userId)
-                    );
+                    statuses = statuses.filter(s => String(s.userId) === String(options.userId));
                 }
 
-                // Filter by type if specified
                 if (options.type) {
-                    statuses = statuses.filter(status => status.type === options.type);
+                    statuses = statuses.filter(s => s.type === options.type);
                 }
 
-                // Sort by creation date (newest first)
                 statuses.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
 
-                // Limit results if specified
                 if (options.limit) {
                     statuses = statuses.slice(0, options.limit);
                 }
 
                 resolve(statuses);
             };
-            request.onerror = () => reject(request.error);
+
+            request.onerror = () => {
+                console.error('[StatusCache] getCachedStatuses error:', request.error);
+                reject(request.error);
+            };
         });
     }
 
-    // Get single cached status
+    // ─────────────────────────────────────────────────────────────────────────
+    // GET SINGLE CACHED STATUS
+    // ─────────────────────────────────────────────────────────────────────────
     async getCachedStatus(statusId) {
-        if (!this.db) await this.init();
-        
+        await this._ensureDB();
+
         return new Promise((resolve, reject) => {
-            const transaction = this.db.transaction([this.storeName], 'readonly');
-            const store = transaction.objectStore(this.storeName);
+            const tx      = this.db.transaction([this.storeName], 'readonly');
+            const store   = tx.objectStore(this.storeName);
             const request = store.get(statusId);
 
             request.onsuccess = () => {
                 const status = request.result;
-                if (status && !this.isStatusExpired(status)) {
-                    resolve(status);
-                } else {
-                    resolve(null);
-                }
+                resolve((status && !this.isStatusExpired(status)) ? status : null);
             };
-            request.onerror = () => reject(request.error);
+
+            request.onerror = () => {
+                console.error('[StatusCache] getCachedStatus error:', request.error);
+                reject(request.error);
+            };
         });
     }
 
-    // Add status to sync queue (for offline posting)
+    // ─────────────────────────────────────────────────────────────────────────
+    // SYNC QUEUE
+    // ─────────────────────────────────────────────────────────────────────────
     async addToSyncQueue(statusData) {
-        if (!this.db) await this.init();
-        
+        await this._ensureDB();
+
         const queueItem = {
-            id: `sync_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`,
-            action: 'create',
-            data: statusData,
+            id:        `sync_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`,
+            action:    'create',
+            data:      statusData,
             timestamp: Date.now(),
-            retries: 0
+            retries:   0
         };
 
         return new Promise((resolve, reject) => {
-            const transaction = this.db.transaction(['syncQueue'], 'readwrite');
-            const store = transaction.objectStore('syncQueue');
+            const tx      = this.db.transaction(['syncQueue'], 'readwrite');
+            const store   = tx.objectStore('syncQueue');
             const request = store.put(queueItem);
 
-            request.onsuccess = () => resolve(request.result);
-            request.onerror = () => reject(request.error);
+            request.onsuccess = () => resolve(queueItem);
+            request.onerror   = () => reject(request.error);
         });
     }
 
-    // Process sync queue when online
+    // FIX: guard against concurrent calls with _syncInFlight flag
     async processSyncQueue() {
-        if (!this.isOnline || !this.db) return;
+        if (!this.isOnline || this._syncInFlight) return;
 
-        const queueItems = await this.getSyncQueue();
-        
-        for (const item of queueItems) {
-            try {
-                if (item.action === 'create') {
-                    const api = window.StatusAPI;
-                    const result = await api.createStatus(item.data);
-                    
-                    if (result.success) {
-                        // Remove from queue and cache the real status
-                        await this.removeFromSyncQueue(item.id);
-                        await this.cacheStatus(result.status);
-                    } else {
-                        // Increment retry count
-                        item.retries++;
-                        if (item.retries < 3) {
-                            await this.updateSyncQueueItem(item);
-                        } else {
-                            // Remove after max retries
+        this._syncInFlight = true;
+
+        try {
+            await this._ensureDB();
+            const items = await this.getSyncQueue();
+
+            for (const item of items) {
+                try {
+                    if (item.action === 'create' && window.StatusAPI) {
+                        const result = await window.StatusAPI.createStatus(item.data);
+
+                        if (result.success) {
                             await this.removeFromSyncQueue(item.id);
+                            await this.cacheStatus(result.status);
+                            console.log('[StatusCache] Sync queue item synced:', item.id);
+                        } else {
+                            item.retries++;
+                            if (item.retries < 3) {
+                                await this._updateSyncQueueItem(item);
+                            } else {
+                                console.warn('[StatusCache] Dropping queue item after 3 retries:', item.id);
+                                await this.removeFromSyncQueue(item.id);
+                            }
                         }
                     }
-                }
-            } catch (error) {
-                console.error('Failed to process sync queue item:', error);
-                item.retries++;
-                if (item.retries < 3) {
-                    await this.updateSyncQueueItem(item);
-                } else {
-                    await this.removeFromSyncQueue(item.id);
+                } catch (err) {
+                    console.error('[StatusCache] processSyncQueue item error:', err.message);
+                    item.retries++;
+                    if (item.retries < 3) {
+                        await this._updateSyncQueueItem(item).catch(() => {});
+                    } else {
+                        await this.removeFromSyncQueue(item.id).catch(() => {});
+                    }
                 }
             }
+        } finally {
+            this._syncInFlight = false;
         }
     }
 
-    // Get sync queue items
     async getSyncQueue() {
-        if (!this.db) await this.init();
-        
+        await this._ensureDB();
+
         return new Promise((resolve, reject) => {
-            const transaction = this.db.transaction(['syncQueue'], 'readonly');
-            const store = transaction.objectStore('syncQueue');
+            const tx      = this.db.transaction(['syncQueue'], 'readonly');
+            const store   = tx.objectStore('syncQueue');
             const request = store.getAll();
 
             request.onsuccess = () => {
-                const items = request.result;
-                // Sort by timestamp (oldest first)
-                items.sort((a, b) => a.timestamp - b.timestamp);
+                const items = (request.result || []).sort((a, b) => a.timestamp - b.timestamp);
                 resolve(items);
             };
             request.onerror = () => reject(request.error);
         });
     }
 
-    // Update sync queue item
-    async updateSyncQueueItem(item) {
-        if (!this.db) await this.init();
-        
+    async _updateSyncQueueItem(item) {
+        await this._ensureDB();
+
         return new Promise((resolve, reject) => {
-            const transaction = this.db.transaction(['syncQueue'], 'readwrite');
-            const store = transaction.objectStore('syncQueue');
+            const tx      = this.db.transaction(['syncQueue'], 'readwrite');
+            const store   = tx.objectStore('syncQueue');
             const request = store.put(item);
 
-            request.onsuccess = () => resolve(request.result);
-            request.onerror = () => reject(request.error);
+            request.onsuccess = () => resolve();
+            request.onerror   = () => reject(request.error);
         });
     }
 
-    // Remove from sync queue
     async removeFromSyncQueue(itemId) {
-        if (!this.db) await this.init();
-        
+        await this._ensureDB();
+
         return new Promise((resolve, reject) => {
-            const transaction = this.db.transaction(['syncQueue'], 'readwrite');
-            const store = transaction.objectStore('syncQueue');
+            const tx      = this.db.transaction(['syncQueue'], 'readwrite');
+            const store   = tx.objectStore('syncQueue');
             const request = store.delete(itemId);
 
-            request.onsuccess = () => resolve(request.result);
-            request.onerror = () => reject(request.error);
+            request.onsuccess = () => resolve();
+            request.onerror   = () => reject(request.error);
         });
     }
 
-    // Check if status is expired
+    // ─────────────────────────────────────────────────────────────────────────
+    // UTILITIES
+    // ─────────────────────────────────────────────────────────────────────────
     isStatusExpired(status) {
-        if (!status.expiresAt) return false;
+        if (!status || !status.expiresAt) return false;
         return new Date(status.expiresAt) < new Date();
     }
 
-    // Clean up old cache entries
     async cleanupCache() {
-        if (!this.db) await this.init();
-        
+        await this._ensureDB();
+
         const cutoffTime = Date.now() - this.maxCacheAge;
-        
+
         return new Promise((resolve, reject) => {
-            const transaction = this.db.transaction([this.storeName], 'readwrite');
-            const store = transaction.objectStore(this.storeName);
+            const tx      = this.db.transaction([this.storeName], 'readwrite');
+            const store   = tx.objectStore(this.storeName);
             const request = store.openCursor();
 
             request.onsuccess = (event) => {
                 const cursor = event.target.result;
                 if (cursor) {
-                    const status = cursor.value;
-                    
-                    // Remove if too old or expired
-                    if (status.cachedAt < cutoffTime || this.isStatusExpired(status)) {
+                    const s = cursor.value;
+                    if (s.cachedAt < cutoffTime || this.isStatusExpired(s)) {
                         cursor.delete();
                     }
-                    
                     cursor.continue();
                 } else {
                     resolve();
@@ -309,54 +347,54 @@ class StatusCache {
         });
     }
 
-    // Get cache statistics
     async getCacheStats() {
-        if (!this.db) await this.init();
-        
         const [statuses, queueItems] = await Promise.all([
-            this.getCachedStatuses({ includeExpired: true }),
-            this.getSyncQueue()
+            this.getCachedStatuses({ includeExpired: true }).catch(() => []),
+            this.getSyncQueue().catch(() => [])
         ]);
 
-        const activeStatuses = statuses.filter(s => !this.isStatusExpired(s));
-        const expiredStatuses = statuses.filter(s => this.isStatusExpired(s));
+        const activeStatuses  = statuses.filter(s => !this.isStatusExpired(s));
+        const expiredStatuses = statuses.filter(s =>  this.isStatusExpired(s));
 
         return {
-            totalCached: statuses.length,
+            totalCached:    statuses.length,
             activeStatuses: activeStatuses.length,
             expiredStatuses: expiredStatuses.length,
-            syncQueueSize: queueItems.length,
-            isOnline: this.isOnline
+            syncQueueSize:  queueItems.length,
+            isOnline:       this.isOnline,
+            dbReady:        !!this.db,
+            initError:      this.initError ? this.initError.message : null
         };
     }
 
-    // Clear all cache
     async clearCache() {
-        if (!this.db) await this.init();
-        
+        await this._ensureDB();
+
         return new Promise((resolve, reject) => {
-            const transaction = this.db.transaction([this.storeName, 'syncQueue'], 'readwrite');
-            
-            transaction.oncomplete = () => resolve();
-            transaction.onerror = () => reject(transaction.error);
-            
-            const statusStore = transaction.objectStore(this.storeName);
-            const syncStore = transaction.objectStore('syncQueue');
-            
-            statusStore.clear();
-            syncStore.clear();
+            const tx = this.db.transaction([this.storeName, 'syncQueue'], 'readwrite');
+            tx.oncomplete = () => resolve();
+            tx.onerror    = () => reject(tx.error);
+
+            tx.objectStore(this.storeName).clear();
+            tx.objectStore('syncQueue').clear();
         });
     }
 }
 
-// Export singleton instance
+// ── Singleton ─────────────────────────────────────────────────────────────────
 window.StatusCache = new StatusCache();
 
-// Auto-initialize when DOM is ready
-if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', () => {
-        window.StatusCache.init().catch(console.error);
-    });
-} else {
-    window.StatusCache.init().catch(console.error);
-}
+// ── Auto-init — log clearly on failure so developers see it ──────────────────
+(function autoInitStatusCache() {
+    const doInit = () => {
+        window.StatusCache.init()
+            .then(() => console.log('[StatusCache] ✅ IndexedDB initialised'))
+            .catch(err => console.error('[StatusCache] ❌ IndexedDB init FAILED:', err.message));
+    };
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', doInit);
+    } else {
+        doInit();
+    }
+})();

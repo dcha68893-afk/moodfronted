@@ -559,6 +559,7 @@
                     this._registerMessageBridgeListeners();
                     // FIX: trigger sync after every (re)authentication
                     this._triggerSync();
+                    this._joinUserRoom(null);
                 }, 300);
                 return;
             }
@@ -578,6 +579,7 @@
                     this._processQueue();
                     this._registerMessageBridgeListeners();
                     this._triggerSync();
+                    this._joinUserRoom(null);
                 })
                 .catch((err) => {
                     this._stats.errors++;
@@ -711,6 +713,7 @@
                     this._startHeartbeat();
                     this._registerMessageBridgeListeners();
                     this._triggerSync();
+                    this._joinUserRoom(message.payload);
                     return;
                 }
                 
@@ -725,6 +728,7 @@
                     this._startHeartbeat();
                     this._registerMessageBridgeListeners();
                     this._triggerSync();
+                    this._joinUserRoom(message.payload);
                     return;
                 }
 
@@ -874,6 +878,61 @@
         // Uses _registeredSocketListeners to prevent duplicate bindings on
         // reconnect (which would cause duplicate message renders).
 
+
+        // =====================================================================
+        // FIX: Emit join frames after auth so the server knows which user room
+        // this socket belongs to. Without this, sendToUser() misses the socket
+        // after reconnects because the raw WS client mapping goes stale.
+        // =====================================================================
+        _joinUserRoom(authPayload) {
+            try {
+                var uid = authPayload && (authPayload.userId || authPayload.id);
+                if (!uid) {
+                    try {
+                        uid = (window.__PARENT_SESSION__ && window.__PARENT_SESSION__.userId)
+                            || (window.__kyn_session__ && window.__kyn_session__.userId)
+                            || (function() {
+                                var keys = ['moodchat_user', 'kynecta_user', 'user', 'kyn_user'];
+                                for (var i = 0; i < keys.length; i++) {
+                                    try {
+                                        var raw = localStorage.getItem(keys[i]);
+                                        if (raw) {
+                                            var parsed = JSON.parse(raw);
+                                            var id = parsed && (parsed.id || parsed.userId);
+                                            if (id) return id;
+                                        }
+                                    } catch (_) {}
+                                }
+                                return null;
+                            })();
+                    } catch (_) {}
+                }
+                if (!uid) {
+                    console.warn('[Realtime] _joinUserRoom: cannot resolve userId — skipped');
+                    return;
+                }
+                var numericId = parseInt(uid, 10);
+                if (!numericId) return;
+                this._sendRaw({ type: 'join_user_room', userId: numericId });
+                this._sendRaw({ type: 'join', room: 'user:' + numericId });
+                this._sendRaw({ type: 'join', room: 'user_' + numericId });
+                console.log('[Realtime] ✅ Joined user rooms uid=' + numericId);
+                this._resolvedUserId = numericId;
+            } catch (err) {
+                console.warn('[Realtime] _joinUserRoom error:', err.message);
+            }
+        }
+
+        // FIX: Send a raw JSON frame bypassing the authenticated-queue guard.
+        // Used for join frames that must fire immediately after auth.
+        _sendRaw(obj) {
+            try {
+                if (this._socket && this._socket.readyState === WebSocket.OPEN) {
+                    this._socket.send(JSON.stringify(obj));
+                }
+            } catch (_) {}
+        }
+
         _registerMessageBridgeListeners() {
             const MESSAGE_EVENTS = ['message:new', 'new_message', 'chat:message', 'MESSAGE_RECEIVED'];
             const GROUP_EVENTS = ['group:message', 'group:membership_change', 'group:updated', 'group:localSync'];
@@ -887,6 +946,16 @@
                 'webrtc:signal', 'webrtc_signal',
                 'call:ice', 'call_ice',
                 'call:offer', 'call:answer',
+            ];
+            // ✅ FIX: Status events were completely missing from the bridge.
+            // The backend emits these after every statusController.createStatus() call.
+            // Without this block the status iframe never receives real-time updates.
+            const STATUS_EVENTS = [
+                'status:created', 'new_status', 'status_created',
+                'status:updated', 'status_updated',
+                'status:deleted', 'status_deleted',
+                'status:expired',
+                'status:viewed',  'status:viewer_update'
             ];
             let registered = 0;
 
@@ -914,6 +983,35 @@
                     console.log(`[Realtime] 📞 call event [${eventType}]`, payload);
                     window.dispatchEvent(new CustomEvent(`kyn:${eventType}`, { detail: payload }));
                     document.dispatchEvent(new CustomEvent(eventType, { detail: payload }));
+                    if (window.KynectaEventBus) {
+                        window.KynectaEventBus.emit(`REALTIME_${eventType}`, payload, { async: true });
+                    }
+                });
+                registered++;
+            }
+
+            // ✅ FIX: Status events — forward socket events to the statusIframe and DOM.
+            // Previously this entire block was missing, meaning status:created from the backend
+            // never reached the status iframe for real-time UI updates.
+            for (const eventType of STATUS_EVENTS) {
+                if (this._registeredSocketListeners.has(eventType)) continue;
+                this._registeredSocketListeners.add(eventType);
+                this.on(eventType, (payload) => {
+                    console.log(`[Realtime] 📢 status event [${eventType}]`, payload);
+                    // 1. Forward to statusIframe via postMessage
+                    const statusIframe = document.getElementById('statusIframe');
+                    if (statusIframe && statusIframe.contentWindow) {
+                        statusIframe.contentWindow.postMessage({
+                            type: eventType,
+                            payload: payload,
+                            source: 'ws-bridge',
+                            timestamp: Date.now()
+                        }, '*');
+                    }
+                    // 2. DOM event so any page-level listeners fire
+                    window.dispatchEvent(new CustomEvent(`kyn:${eventType}`, { detail: payload }));
+                    document.dispatchEvent(new CustomEvent(eventType, { detail: payload }));
+                    // 3. EventBus for other modules
                     if (window.KynectaEventBus) {
                         window.KynectaEventBus.emit(`REALTIME_${eventType}`, payload, { async: true });
                     }

@@ -618,7 +618,12 @@ try {
                     result = result.friends;
                 } else if (result && result.chats !== undefined && Array.isArray(result.chats)) {
                     result = result.chats;
-                } else if (result && result.messages !== undefined && Array.isArray(result.messages)) {
+                } else if (result && result.messages !== undefined && Array.isArray(result.messages)
+                           && !result.message) {
+                    // ✅ FIX: Only unwrap .messages array when there is no .message (single sent
+                    // message object). A POST /messages response has { message:{...}, chatId } —
+                    // unwrapping .messages here would destroy the sent-message reference and make
+                    // realMessage undefined in MessageHandler, causing fake-sent / no status update.
                     result = result.messages;
                 }
 
@@ -5502,9 +5507,20 @@ try {
             const data = payload || {};
 
             if (normalizedType === 'new_message' || normalizedType === 'message:new' || normalizedType === 'newmessage') {
-                const message = data.payload || data.data || data;
-                const chatId = message.chatId || message.conversationId;
-                if (!message || !message.id || !chatId) return;
+                // ✅ FIX: data may be the raw payload (from wsService.on) or a wrapper
+                // { payload:{...}, source:'ws-bridge' } (from postMessage bridge).
+                // Unwrap one level if needed, then fall back to data itself.
+                const message = (data && data.payload && (data.payload.id || data.payload.chatId))
+                    ? data.payload
+                    : (data && data.data && (data.data.id || data.data.chatId))
+                        ? data.data
+                        : data;
+                const chatId = String(
+                    (message && (message.chatId || message.conversationId)) || ''
+                );
+                // ✅ FIX: Don't gate on message.id — server might not echo id back immediately.
+                // Gate only on chatId so we never silently drop a valid incoming message.
+                if (!message || !chatId) return;
 
                 let normalizedMessage = {
                     id: String(message.id),

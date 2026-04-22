@@ -1,16 +1,37 @@
-// group-core_patch.js — v3.0.0
+// group-core_patch.js — v4.0.0
 // ============================================================
 // FIXES IN v3.0.0:
 //   FIX 1: createGroupOnline timeout → offline-first optimistic create
-//          Group appears instantly in UI, queued for backend sync
-//   FIX 2: Members tab fully wired — loads friends, search, chips,
-//          badge count, selectedFriends kept in sync
-//   FIX 3: apiRequest bridge multi-strategy so Queue+Sync always work
+//   FIX 2: Members tab fully wired
+//   FIX 3: apiRequest bridge multi-strategy
 //   FIX 4: socket group:localSync handler for all action types
 //   FIX 5: IDB hydration after fast LS bootstrap
 //   FIX 6: Queue success remaps tempId → serverId
 //   FIX 7: Import paths use underscore naming
 //   FIX 8: startBackgroundSync guarded, setSessionReady debounced
+//
+// NEW IN v4.0.0:
+//   FIX 9:  WebSocket → groupIframe postMessage bridge.
+//           chat.html only bridged direct-message socket events to the
+//           messages iframe.  Group socket events (group:message,
+//           group:created, group:localSync, group:member:*) were never
+//           forwarded to the group iframe.  Now installed automatically
+//           by listening on window.wsService from inside the iframe.
+//
+//  FIX 10:  createGroup response shape.  Backend returns
+//           { data: { group: {...} } } but the original _origCreate call
+//           chain read res.data directly as the group (undefined).
+//           Patch now reads res.data?.group || res.data correctly.
+//
+//  FIX 11:  sendGroupMessage response shape.  Same issue — backend
+//           returns { data: { message: {...} } }.  GroupCore.sendGroupMessage
+//           was reading response.data directly.  Patched below.
+//
+//  FIX 12:  requestGroupList now uses pre-partitioned server arrays
+//           (myGroups / adminGroups / joinedGroups) instead of
+//           recomputing them from scratch and losing role flags.
+//
+//  FIX 13:  handleSessionUpdate const-reassignment bug patched.
 // ============================================================
 
 import LocalGroupStore                          from './localStore_groups.js';
@@ -103,11 +124,18 @@ async function applyPatch() {
         // Fire backend in background — never blocks UI
         if (navigator.onLine && _origCreate) {
             _origCreate(groupData).then(async (res) => {
-                if (res?.success && res.data?.group) {
-                    await _remapGroupId(GC, localGroup.id, res.data.group);
-                    if (pickerIds.length) _inviteMembers(res.data.group.id, pickerIds, uid);
+                // FIX 10: backend returns { data: { group } }, not { data: group }
+                const serverGroup = res?.data?.group || (res?.data && !res.data._localSync ? res.data : null);
+                if (res?.success && serverGroup?.id) {
+                    console.log('[GROUP FLOW] Group created successfully on backend:', serverGroup.id);
+                    await _remapGroupId(GC, localGroup.id, serverGroup);
+                    if (pickerIds.length) _inviteMembers(serverGroup.id, pickerIds, uid);
+                } else {
+                    console.warn('[GROUP FLOW] Backend group create failed or returned no group — stays queued');
                 }
-            }).catch(() => { /* stays queued */ });
+            }).catch((err) => {
+                console.warn('[GROUP FLOW] Backend group create error, stays queued:', err?.message);
+            });
         } else if (pickerIds.length) {
             for (const mid of pickerIds) {
                 GroupQueueManager.enqueue(QUEUE_ACTIONS.ADD_MEMBER, localGroup.id, mid, { role: 'member' }).catch(() => {});
@@ -198,7 +226,23 @@ async function applyPatch() {
     window.GroupQueueManager = GroupQueueManager;
     window.GroupSyncEngine = GroupSyncEngine;
 
-    console.log('[patch] v3.0.0 applied');
+    // FIX 9: Install WebSocket → groupIframe postMessage bridge
+    // chat.html's ws-bridge only forwards direct-message socket events
+    // to the messages iframe.  Group socket events were never forwarded
+    // to the groupIframe.  We install a supplemental bridge here from
+    // inside the group iframe using window.parent.wsService.
+    _installGroupWsBridge(GC);
+
+    // FIX 11: Patch sendGroupMessage to read response.data.message
+    _patchSendGroupMessage(GC);
+
+    // FIX 12: Patch requestGroupList to use server-pre-partitioned arrays
+    _patchRequestGroupList(GC);
+
+    // FIX 13: Patch handleSessionUpdate const-reassignment
+    _patchSessionUpdateHandler();
+
+    console.log('[patch] v4.0.0 applied');
 }
 
 // =============================================================================
@@ -556,6 +600,284 @@ function _waitForActiveAndSync(GC) {
 }
 
 try { if (typeof apiRequest === 'function') window.__groupCoreApiRequest = apiRequest; } catch (_) {}
+
+// =============================================================================
+// FIX 9: WebSocket → groupIframe postMessage bridge
+// =============================================================================
+// The group module runs inside an iframe.  chat.html's wsService bridge
+// only forwards chat:message events to messagesIframe.  Group socket
+// events (group:message, group:created, group:localSync, group:member:*)
+// are never forwarded here.  This installs a bridge by reading
+// window.parent.wsService (same origin) from inside the iframe.
+let _wsBridgeBound = false;
+
+function _installGroupWsBridge(GC) {
+    if (_wsBridgeBound) return;
+
+    function postToSelf(type, payload) {
+        // postMessage to ourselves (same window) so group-core.js
+        // MessageRouter.handle() processes it via the existing listener
+        window.postMessage({
+            type,
+            payload,
+            source:    'ws-group-bridge',
+            id:        `bridge_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+            requestId: `bridge_${Date.now()}`,
+            timestamp: Date.now(),
+            target:    'groups',
+            module:    'parent'
+        }, '*');
+    }
+
+    function tryBind() {
+        // Access wsService from parent window (same origin)
+        const ws = window.parent?.wsService || window.wsService || null;
+        if (!ws || typeof ws.on !== 'function') return false;
+
+        // group:message → render in open chat or increment badge
+        ws.on('group:message', data => {
+            console.log('[GROUP FLOW] WebSocket received group:message →', data?.groupId);
+            const groupId = data?.groupId || data?.group_id;
+            const message = data?.message || data;
+            if (!groupId || !message) return;
+            // Update GroupCore directly (fastest path)
+            const GC2 = window.GroupCore;
+            if (GC2) {
+                GC2.addGroupMessage(groupId, message);
+                GC2.emit('group:message-received', { groupId, message });
+            }
+            postToSelf('GROUP_MESSAGE', { groupId, message });
+            postToSelf('NEW_MESSAGE',   { groupId, message });
+        });
+        ws.on('group_message', data => ws.emit?.('group:message', data));
+
+        // group:created → add to lists for all members
+        ws.on('group:created', data => {
+            console.log('[GROUP FLOW] WebSocket received group:created →', data?.group?.id || data?.id);
+            const group = data?.group || data;
+            if (!group?.id) return;
+            postToSelf('GROUP_CREATED', { group });
+        });
+        ws.on('group_created', data => ws.emit?.('group:created', data));
+
+        // group:localSync → all action types (create/update/delete/member_*)
+        ws.on('group:localSync', data => {
+            console.log('[GROUP FLOW] WebSocket group:localSync →', data?.action);
+            const { action, group, groupId, member, userId } = data || {};
+            switch (action) {
+                case 'create':
+                case 'upsert':
+                    if (group?.id) postToSelf('GROUP_CREATED',  { group }); break;
+                case 'update':
+                    if (group?.id) postToSelf('GROUP_UPDATED',  { group }); break;
+                case 'delete':
+                    postToSelf('GROUP_DELETED', { groupId: groupId || group?.id }); break;
+                case 'member_add':
+                    postToSelf('GROUP_MEMBER_ADDED',   { groupId, member }); break;
+                case 'member_remove':
+                case 'member_leave':
+                    postToSelf('GROUP_MEMBER_REMOVED', { groupId, userId }); break;
+                case 'message':
+                    if (data?.message) {
+                        const GC2 = window.GroupCore;
+                        if (GC2) {
+                            GC2.addGroupMessage(groupId, data.message);
+                            GC2.emit('group:message-received', { groupId, message: data.message });
+                        }
+                        postToSelf('GROUP_MESSAGE', { groupId, message: data.message });
+                    }
+                    break;
+                default: break;
+            }
+        });
+
+        // member events
+        ws.on('group:member:added',   d => postToSelf('GROUP_MEMBER_ADDED',   d));
+        ws.on('group:member:removed', d => postToSelf('GROUP_MEMBER_REMOVED', d));
+        ws.on('group:member:left',    d => postToSelf('GROUP_MEMBER_LEFT',    d));
+        ws.on('group:typing',         d => postToSelf('GROUP_TYPING',         d));
+
+        _wsBridgeBound = true;
+        console.log('[patch] WebSocket → groupIframe bridge installed ✅');
+        return true;
+    }
+
+    if (!tryBind()) {
+        // wsService may load after this patch runs — retry for up to 10 s
+        let attempts = 0;
+        const poll = setInterval(() => {
+            if (tryBind() || ++attempts > 20) clearInterval(poll);
+        }, 500);
+
+        // Also listen for the parent's realtimeReady event
+        window.parent?.addEventListener?.('kyn:realtimeReady', () => {
+            _wsBridgeBound = false;
+            tryBind();
+        });
+    }
+}
+
+// =============================================================================
+// FIX 11: Patch sendGroupMessage — read response.data.message correctly
+// =============================================================================
+function _patchSendGroupMessage(GC) {
+    const _orig = GC.sendGroupMessage?.bind(GC);
+    if (!_orig) return;
+
+    GC.sendGroupMessage = async function (groupId, content, topic = null, anonymous = false) {
+        if (!groupId || !content?.trim()) return { success: false, error: 'Missing groupId or content' };
+        console.log('[GROUP FLOW] Sending group message to', groupId, '...');
+
+        try {
+            const res = await _orig.call(this, groupId, content, topic, anonymous);
+
+            // _orig already calls apiRequest → parent pipeline.
+            // If it succeeded with data, it already called addGroupMessage.
+            // We just need to make sure we read the right field.
+            if (res?.success) {
+                console.log('[GROUP FLOW] Message sent and confirmed:', res.data?.id || res.data?.message?.id);
+            } else {
+                console.error('[GROUP FLOW] Message send failed:', res?.error || 'unknown');
+            }
+            return res;
+        } catch (err) {
+            console.error('[GROUP FLOW] sendGroupMessage error:', err.message);
+            return { success: false, error: err.message };
+        }
+    };
+
+    // Also patch the apiRequest result normalisation inside GroupCore.
+    // GroupCore.sendGroupMessage() does:
+    //   response.data  ← but backend returns { data: { message: {...} } }
+    // We patch GroupCore's internal method to normalise the response shape.
+    const _origGCMethod = window.GroupCore?.sendGroupMessage;
+    if (_origGCMethod && window.GroupCore) {
+        const GCref = window.GroupCore;
+        const __orig = GCref.sendGroupMessage.bind(GCref);
+        GCref.sendGroupMessage = async function (groupId, content, topic, anonymous) {
+            // Call via apiRequest directly to intercept the raw response
+            try {
+                const apiRequestFn = typeof apiRequest === 'function' ? apiRequest : _apiBridge;
+                const response = await apiRequestFn(`/groups/${groupId}/messages`, 'POST', {
+                    groupId, content, topic, anonymous
+                });
+                // Normalise: backend may return data.message or data directly
+                const messageData = response?.data?.message
+                                 || (response?.data && !response.data.message ? response.data : null);
+
+                if (response?.success && messageData) {
+                    console.log('[GROUP FLOW] Message saved by backend, id:', messageData.id);
+                    this.addGroupMessage(groupId, messageData);
+                    this.emit('group:message-sent', { groupId, message: messageData });
+                    return { success: true, data: messageData };
+                }
+                console.error('[GROUP FLOW] Message API failed:', response?.error);
+                return { success: false, error: response?.error || 'Failed to send message' };
+            } catch (err) {
+                console.error('[GROUP FLOW] Message API error:', err.message);
+                return { success: false, error: err.message };
+            }
+        };
+    }
+}
+
+// =============================================================================
+// FIX 12: Patch requestGroupList — use server-pre-partitioned arrays
+// =============================================================================
+function _patchRequestGroupList(GC) {
+    GC.requestGroupList = async function () {
+        // Guard: must be ACTIVE
+        if (typeof LifecycleState !== 'undefined' && !LifecycleState.isActive()) {
+            return { success: false, reason: 'not_active' };
+        }
+
+        // Load from IDB cache first (offline-first)
+        await this.loadGroupsFromCache().catch(() => {});
+
+        console.log('[GROUP FLOW] Fetching group list from backend...');
+
+        try {
+            const apiRequestFn = typeof apiRequest === 'function' ? apiRequest : _apiBridge;
+            const response = await apiRequestFn('/groups/user', 'GET');
+
+            if (response?.success && response.data) {
+                const d = response.data;
+                const serverGroups  = _safeArr(d.groups);
+                const serverMy      = _safeArr(d.myGroups);
+                const serverJoined  = _safeArr(d.joinedGroups);
+                const serverAdmin   = _safeArr(d.adminGroups);
+                const uid           = String(this.currentUser?.id || this.currentUser?.uid || '');
+
+                if (serverGroups.length > 0) {
+                    this.groups       = serverGroups;
+                    // Use server-partitioned arrays when provided; fall back to
+                    // recomputing only if server didn't send them
+                    this.myGroups     = serverMy.length    ? serverMy    : serverGroups.filter(g => g.isCreator || String(g.createdBy) === uid);
+                    this.adminGroups  = serverAdmin.length ? serverAdmin : serverGroups.filter(g => g.isAdmin || g.isCreator);
+                    this.joinedGroups = serverJoined.length? serverJoined: serverGroups.filter(g => !g.isCreator && !g.isAdmin);
+                } else {
+                    this.groups = this.myGroups = this.joinedGroups = this.adminGroups = [];
+                    console.log('[GROUP FLOW] Server returned empty group list');
+                }
+
+                await this.saveGroups();
+                this.emit('groups:list-updated', {
+                    groups: this.groups, myGroups: this.myGroups,
+                    joinedGroups: this.joinedGroups, adminGroups: this.adminGroups,
+                    fromServer: true
+                });
+                console.log('[GROUP FLOW] Group list synced:', this.groups.length, 'groups');
+                return { success: true, fromServer: true, data: this.getGroupsData() };
+            }
+
+            console.warn('[GROUP FLOW] Group list fetch failed — using cache');
+            return { success: true, fromCache: true, data: this.getGroupsData() };
+
+        } catch (err) {
+            console.warn('[GROUP FLOW] Group list error, using cache:', err.message);
+            return { success: true, fromCache: true, data: this.getGroupsData() };
+        }
+    };
+}
+
+function _safeArr(v) {
+    if (Array.isArray(v)) return v;
+    if (v == null) return [];
+    if (typeof v === 'object' && Array.isArray(v.data)) return v.data;
+    return [];
+}
+
+// =============================================================================
+// FIX 13: Patch handleSessionUpdate — fix const-reassignment bug
+// =============================================================================
+function _patchSessionUpdateHandler() {
+    if (!window.MessageRouter) return;
+    window.MessageRouter.handleSessionUpdate = function (message) {
+        const rawUpdate = message.payload;
+        if (!rawUpdate) return;
+
+        // Use a local let — do NOT reassign the parameter (strict-mode bug)
+        let updateData = { ...rawUpdate };
+
+        const rawId = updateData.user?.id ?? updateData.userId;
+        const numId = typeof rawId === 'string' ? Number(rawId) : rawId;
+        if (Number.isFinite(numId)) {
+            updateData = {
+                ...updateData,
+                userId: numId,
+                user: updateData.user
+                    ? { ...updateData.user, id: numId, userId: numId }
+                    : { id: numId, userId: numId }
+            };
+        }
+
+        if (updateData.token && typeof updateData.token !== 'string') return;
+
+        if (typeof applySession === 'function' && (updateData.token || updateData.user)) {
+            applySession(updateData);
+        }
+    };
+}
 
 boot();
 

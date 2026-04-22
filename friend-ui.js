@@ -1156,13 +1156,34 @@ export const RenderPipeline = {
         // Always update counts on these events - no lifecycle guard needed
         window.addEventListener('updateFriendCounts', () => updateFriendCounts());
 
+        // FIX: Listen for CONTACTS_UPDATE dispatched by friend-core after loadFriendsFromBackend.
+        // This keeps the count badges and the contacts section in sync without requiring ACTIVE state.
+        window.addEventListener('CONTACTS_UPDATE', (event) => {
+            updateFriendCounts();
+            const contacts = event.detail?.contacts;
+            if (Array.isArray(contacts) && contacts.length > 0) {
+                // Patch window.contacts so renderContacts() has live data
+                window.contacts = contacts;
+                if (UIState.activeSection === 'contactsSection') renderContacts();
+                if (UIState.activeSection === 'allFriendsSection') renderAllFriendsList();
+            }
+        });
+
         window.addEventListener('friendsUpdated', (event) => {
             updateFriendCounts();
-            const fromCache = event.detail?.instant || event.detail?.cached || event.detail?.offline;
-            // FIX: When data comes from cache/offline, force-render immediately
-            // without waiting for isUIActive() — the render functions already
-            // have their own data-presence checks.
-            if (fromCache || canRenderCached()) {
+            const fromCache      = event.detail?.instant || event.detail?.cached || event.detail?.offline;
+            const isRealtime     = event.detail?.realtime === true;
+            const isPresence     = event.detail?.presenceUpdate === true;
+
+            // Presence-only updates: just re-render the status dots in the active list
+            if (isPresence) {
+                const { userId, online } = event.detail || {};
+                if (userId) updateFriendPresence(userId, online, null);
+                return;
+            }
+
+            // FIX: When data comes from cache/offline or real-time WS, render immediately
+            if (fromCache || isRealtime || canRenderCached()) {
                 // Zero-delay: render synchronously in next microtask
                 this.queueRender('friends', debounce(() => {
                     if (UIState.activeSection === 'friendsSection') renderFriends();
@@ -1177,6 +1198,7 @@ export const RenderPipeline = {
             }
         });
 
+
         // Catch any data load completion events and update counts
         window.addEventListener('requestsUpdated', () => updateFriendCounts());
         window.addEventListener('sentRequestsUpdated', () => updateFriendCounts());
@@ -1186,19 +1208,23 @@ export const RenderPipeline = {
 
         
         window.addEventListener('requestsUpdated', (event) => {
-            // Always update counts; render if we have data or are active
+            // Always update counts; render if we have data, are active, or event is real-time
             updateFriendCounts();
             const hasRequests = (window.friendRequests?.length || friendRequests?.length || 0) > 0;
-            if (!isUIActive() && !hasRequests) return;
-            
+            const isRealtime  = event.detail?.realtime === true;
+            if (!isUIActive() && !hasRequests && !isRealtime) return;
+
             this.queueRender('requests', debounce(() => {
                 if (UIState.activeSection === 'requestsSection') {
                     renderFriendRequests();
                     renderSentRequests();
+                } else if (isRealtime) {
+                    // Badge count already updated; also flash the requests tab badge
+                    updateFriendCounts();
                 }
-            }, 300));
+            }, isRealtime ? 0 : 300));
         });
-        
+
         // FIXED: sentRequestsUpdated listener - also update counts
         window.addEventListener('sentRequestsUpdated', () => {
             updateFriendCounts();

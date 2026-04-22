@@ -342,8 +342,12 @@ function genReqId() {
 // =============================================
 const pendingRequests = new Map(); // requestId -> { resolve, reject, timeout, timestamp, type }
 const TIMING = {
-    REQUEST_TIMEOUT: 60000,   // 60s — give backend time to respond on slow mobile connections
-    CLEANUP_INTERVAL: 60000
+    // FIX: 60 s was too long — requests silently hung for a full minute before
+    // the cleanup interval even ran. 20 s gives slow connections enough time
+    // while still surfacing failures quickly. The cleanup now runs every 10 s
+    // so timed-out requests are rejected promptly instead of stacking up.
+    REQUEST_TIMEOUT: 20000,   // 20 s (was 60 s)
+    CLEANUP_INTERVAL: 10000   // 10 s (was 60 s)
 };
 
 function cleanupPendingRequests() {
@@ -685,8 +689,79 @@ function assertActive(actionName) {
     return true;
 }
 
+// =============================================
+// WIRE EXTERNAL STATUS MODULES
+// FIX: StatusAPI / StatusCache / StatusWebSocket were never initialized from
+// within status-core so they stayed === false / undefined in diagnostics and
+// real-time socket events were never registered.
+// Called from onModuleActive() so wiring happens the instant the lifecycle
+// transitions to ACTIVE — before any background data loads.
+// =============================================
+let _statusModulesWired = false;
+
+function wireStatusWebSocket() {
+    // FIX: Don't guard with _statusModulesWired at the top level —
+    // the socket may not have been available on the first call (race with
+    // app_realtime_socket.js). We always attempt to re-wire StatusWebSocket.
+
+    // 1. Wire StatusWebSocket — registers all socket.on listeners
+    if (window.StatusWebSocket && typeof window.StatusWebSocket.init === 'function') {
+        if (!window.StatusWebSocket.isConnected) {
+            const wired = window.StatusWebSocket.init();
+            logStatus('SUCCESS', `StatusWebSocket wired: ${wired}`);
+        } else {
+            logStatus('SUCCESS', 'StatusWebSocket already connected');
+        }
+    } else {
+        // Script may not be loaded yet — retry after a short delay
+        if (!_statusModulesWired) {
+            setTimeout(() => {
+                if (window.StatusWebSocket && typeof window.StatusWebSocket.init === 'function') {
+                    window.StatusWebSocket.init();
+                    logStatus('SUCCESS', 'StatusWebSocket wired (delayed)');
+                } else {
+                    logStatus('WARNING', 'StatusWebSocket not available — real-time events may be missing');
+                }
+            }, 800);
+        }
+    }
+
+    // Only run one-time setup once
+    if (_statusModulesWired) return;
+    _statusModulesWired = true;
+
+    // 2. Ensure StatusCache IndexedDB is open
+    if (window.StatusCache && typeof window.StatusCache.init === 'function') {
+        window.StatusCache.init()
+            .then(() => logStatus('SUCCESS', 'StatusCache ready'))
+            .catch(err => logStatus('WARNING', `StatusCache init failed: ${err.message}`));
+    } else {
+        logStatus('WARNING', 'StatusCache not found — offline caching disabled');
+    }
+
+    // 3. Confirm StatusAPI is present
+    if (window.StatusAPI) {
+        logStatus('SUCCESS', 'StatusAPI ready');
+    } else {
+        logStatus('WARNING', 'StatusAPI not found — status-api.js may not be loaded');
+    }
+
+    // 4. Re-wire when KynectaRealtimeManager authenticates (fires after ACTIVE on cold start)
+    window.addEventListener('kyn:realtimeReady', function() {
+        if (window.StatusWebSocket && !window.StatusWebSocket.isConnected) {
+            window.StatusWebSocket.socket = null; // force re-init
+            window.StatusWebSocket.init();
+            logStatus('SUCCESS', 'StatusWebSocket re-wired after kyn:realtimeReady');
+        }
+    });
+}
+
 function onModuleActive() {
     logStatus('LIFECYCLE', 'Module ACTIVE - safe zone entered');
+
+    // FIX: Wire StatusWebSocket / StatusAPI / StatusCache immediately on ACTIVE
+    // so real-time events are registered before any background data loads.
+    wireStatusWebSocket();
     
     // Only request session if we have a valid one already or need to get one
     if (isSessionReady() && __isValidSession({ token: _sessionToken, userId: _sessionUser?.id || _sessionUser?.userId })) {
@@ -1577,10 +1652,26 @@ function handleRealtimeStatusEvent(eventName, data) {
                     statuses.unshift(status);
                     SafeStorage.setJSON(LOCAL_STORAGE_KEYS.STATUSES, statuses);
                     StatusDB.put(status).catch(() => {});
+                    // FIX: also write to StatusCache IndexedDB so offline reads are consistent
+                    if (window.StatusCache && typeof window.StatusCache.cacheStatus === 'function') {
+                        window.StatusCache.cacheStatus(status).catch(() => {});
+                    }
                     // Notify UI layer
                     if (typeof notifyStatusObservers === 'function') notifyStatusObservers();
                     if (typeof renderStatusListInstantlyUI === 'function') {
                         renderStatusListInstantlyUI();
+                    }
+                    // FIX: send postMessage to parent iframe bridge so sibling modules update
+                    if (window.parent && window.parent !== window) {
+                        try {
+                            window.parent.postMessage({
+                                type: 'STATUS_EVENT',
+                                event: 'status:created',
+                                payload: { status, statusId: status.id, userId: status.userId },
+                                source: MODULE_NAME,
+                                timestamp: Date.now()
+                            }, '*');
+                        } catch (_) {}
                     }
                     logStatus('SUCCESS', `Realtime: new status ${status.id} added`);
                 }
@@ -3388,10 +3479,11 @@ const _parentReadyPromise = new Promise((resolve, reject) => {
 // PARENT MESSAGE HANDLER - PROTOCOL-COMPLIANT
 // =============================================
 function handleParentMessage(event) {
-    // Process message asynchronously to avoid blocking
-    setTimeout(() => {
-        try {
-            const msg = event.data;
+    // FIX: removed wrapping setTimeout — it deferred every API_RESPONSE by one
+    // macrotask, causing visible UI lag and making API calls feel slow.
+    // postMessage handlers are already invoked asynchronously by the browser.
+    try {
+        const msg = event.data;
 
             if (!msg || typeof msg !== 'object') return;
 
@@ -3613,7 +3705,6 @@ if (msg.type === 'AUTH_READY') {
         } catch (error) {
             debugError('Error handling parent message:', error);
         }
-    }, 0);
 }
 
 // =============================================

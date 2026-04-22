@@ -309,7 +309,20 @@ const PollingManager = {
             pollingRetryCounts.incomingRequests = 0;
             
             if (response.success && (response.data?.requests || response.data)) {
-                const requestsData = response.data?.requests || response.data || [];
+                // FIX: extract requests array from any backend response shape
+                let requestsData = [];
+                const _d = response.data;
+                if (Array.isArray(_d?.requests)) {
+                    requestsData = _d.requests;
+                } else if (Array.isArray(_d?.data?.requests)) {
+                    requestsData = _d.data.requests;
+                } else if (Array.isArray(_d)) {
+                    requestsData = _d;
+                } else if (_d && typeof _d === 'object') {
+                    for (const v of Object.values(_d)) {
+                        if (Array.isArray(v) && v.length > 0) { requestsData = v; break; }
+                    }
+                }
                 
                 // Deduplicate requests
                 const uniqueRequests = this._deduplicateRequests(requestsData);
@@ -1098,7 +1111,38 @@ async function authorizedRequest(endpoint, options = {}) {
                 resolved = true;
                 clearTimeout(timeoutId);
                 
-                const payload = message.payload || {};
+                // The parent sometimes puts data at the top level of the message
+                // rather than inside message.payload.  Lift top-level fields first.
+                const TOP_LEVEL_KEYS = [
+                    'data', 'result', 'items',
+                    'friends', 'users', 'requests',
+                    'pinned', 'muted', 'contacts',
+                    'groups', 'nearby', 'sent'
+                ];
+
+                let rawPayload = message.payload;
+
+                // If payload is missing/empty, try building it from top-level keys
+                if (!rawPayload || typeof rawPayload !== 'object' || Object.keys(rawPayload).length === 0) {
+                    for (const k of TOP_LEVEL_KEYS) {
+                        if (message[k] !== undefined) {
+                            rawPayload = { success: true, [k]: message[k], data: message[k] };
+                            break;
+                        }
+                    }
+                    // Bare success/error flags with no data array
+                    if (!rawPayload) {
+                        if (message.success === true || message.success === false || message.error) {
+                            rawPayload = {
+                                success: message.success !== false && !message.error,
+                                error: message.error,
+                                statusCode: message.statusCode
+                            };
+                        }
+                    }
+                }
+
+                const payload = rawPayload || {};
                 
                 // Normalise: treat any truthy statusCode < 400 or presence of known data
                 // fields as success, even if payload.success is missing/undefined.
@@ -1820,6 +1864,80 @@ const ParentCommunicationManager = {
                 return;
             }
             
+            // ── Real-time friend events forwarded from the WS bridge in chat.html ──
+            if (message.type === 'FRIEND_REQUEST_RECEIVED') {
+                const payload   = message.payload || {};
+                const requestId = payload.id || payload.requestId;
+                const senderId  = payload.requesterId || payload.senderId || payload.from;
+                if (requestId && !FriendCacheManager.getRequest(requestId)) {
+                    const newRequest = {
+                        id:             requestId,
+                        senderId:       senderId,
+                        receiverId:     __session.user?.id,
+                        status:         'pending',
+                        senderName:     payload.senderName     || payload.user?.displayName || 'Someone',
+                        senderUsername: payload.senderUsername || payload.user?.username    || '',
+                        senderAvatar:   payload.senderAvatar   || payload.user?.avatar     || '',
+                        user:           payload.user || null,
+                        createdAt:      payload.createdAt || new Date().toISOString(),
+                        timestamp:      Date.now(),
+                    };
+                    FriendCacheManager.setRequest(newRequest);
+                    FriendCacheManager.syncToGlobals();
+                    FriendCacheManager.persist();
+                    window.dispatchEvent(new CustomEvent('requestsUpdated', {
+                        detail: { requests: FriendCacheManager.getAllRequests(), realtime: true }
+                    }));
+                    showNotification?.(`New friend request from ${newRequest.senderName}`, 'info');
+                }
+                return;
+            }
+
+            if (message.type === 'FRIEND_REQUEST_ACCEPTED') {
+                // Someone accepted OUR request — reload friends list
+                Promise.allSettled([loadFriendsFromBackend(), loadSentRequestsFromBackend()])
+                    .then(() => window.dispatchEvent(new CustomEvent('friendsUpdated', { detail: { realtime: true } })));
+                showNotification?.('Your friend request was accepted!', 'success');
+                return;
+            }
+
+            if (message.type === 'FRIEND_REQUEST_REJECTED') {
+                const rId = message.payload?.requestId || message.payload?.id;
+                if (rId) FriendCacheManager.removeRequest(rId);
+                FriendCacheManager.syncToGlobals();
+                FriendCacheManager.persist();
+                loadSentRequestsFromBackend().catch(() => {});
+                return;
+            }
+
+            if (message.type === 'FRIEND_REMOVED') {
+                const fId = message.payload?.friendId || message.payload?.userId;
+                if (fId) {
+                    FriendCacheManager.removeFriend(String(fId));
+                    FriendCacheManager.syncToGlobals();
+                    FriendCacheManager.persist();
+                    window.dispatchEvent(new CustomEvent('friendsUpdated', { detail: { realtime: true } }));
+                }
+                return;
+            }
+
+            if (message.type === 'FRIEND_ONLINE' || message.type === 'FRIEND_OFFLINE') {
+                const uid    = message.payload?.userId || message.payload?.id;
+                const online = message.type === 'FRIEND_ONLINE';
+                if (uid) {
+                    const f = FriendCacheManager.getFriend(String(uid));
+                    if (f) {
+                        FriendCacheManager.setFriend({ ...f, online, status: online ? 'online' : 'offline' });
+                        FriendCacheManager.syncToGlobals();
+                        window.dispatchEvent(new CustomEvent('friendsUpdated', {
+                            detail: { presenceUpdate: true, userId: uid, online }
+                        }));
+                    }
+                }
+                return;
+            }
+            // ── END real-time friend event handlers ────────────────────────────
+
             if (message.type === 'API_RESPONSE' && message.requestId) {
                 this._handleApiResponse(message);
                 return;
@@ -2569,10 +2687,21 @@ const FriendCacheManager = {
     
     _loadFromStorage() {
         try {
-            // FIX Bug#1: read both the canonical key AND the legacy raw 'friends' key
-            let friendsData = SafeStorage.getObject(LOCAL_STORAGE_KEYS.FRIENDS);
+            // FIX: Read from ALL known cache key variants written by different modules.
+            // services.friend.js writes 'kynecta_friends_cache_v8'; messages module writes
+            // the same key.  Previously only 'knecta_friends_cache' was read, causing 0 friends on reload.
+            let friendsData = SafeStorage.getObject(LOCAL_STORAGE_KEYS.FRIENDS); // 'knecta_friends_cache'
             if (!friendsData || !Array.isArray(friendsData) || friendsData.length === 0) {
-                try { friendsData = JSON.parse(localStorage.getItem('friends') || 'null'); } catch (_) {}
+                const raw = localStorage.getItem('kynecta_friends_cache_v8')
+                         || localStorage.getItem('knecta_friends_cache_v8')
+                         || localStorage.getItem('kynecta_friends_cache')
+                         || localStorage.getItem('friends');
+                if (raw) {
+                    try {
+                        const parsed = JSON.parse(raw);
+                        friendsData = parsed?.friends || (Array.isArray(parsed) ? parsed : []);
+                    } catch (_) {}
+                }
             }
             if (friendsData && Array.isArray(friendsData)) {
                 friendsData.forEach(f => {
@@ -6565,8 +6694,12 @@ function loadCachedDataInstantly() {
         }
 
         // Load friends data from localStorage cache
-        const cachedFriends = SafeStorage.getItem('knecta_friends_cache_v8') || 
-                              SafeStorage.getItem('friends') || 
+        // NOTE: messages module saves as 'kynecta_friends_cache_v8' (with y),
+        //       while our own key is 'knecta_friends_cache_v8' — try both.
+        const cachedFriends = SafeStorage.getItem('knecta_friends_cache_v8') ||
+                              SafeStorage.getItem('kynecta_friends_cache_v8') ||
+                              SafeStorage.getItem('friends') ||
+                              localStorage.getItem('kynecta_friends_cache_v8') ||
                               localStorage.getItem('knecta_friends_cache_v8');
         if (cachedFriends) {
             try {
@@ -6816,12 +6949,22 @@ async function loadFriendsFromBackend() {
 
             if (validFriends.length > 0) {
                 FriendCacheManager.setFriends(validFriends);
-                SafeStorage.setObject(LOCAL_STORAGE_KEYS.FRIENDS, validFriends); // FIX: unified key
-                console.log('[LOCAL SAVE]', 'friends');
+                SafeStorage.setObject(LOCAL_STORAGE_KEYS.FRIENDS, validFriends);
+                // Keep ALL key variants in sync so every module finds fresh data
+                try { localStorage.setItem('kynecta_friends_cache_v8', JSON.stringify(validFriends)); } catch(_) {}
+                console.log('[LOCAL SAVE] friends_list', validFriends.length, 'items');
                 console.log(`✅ loadFriendsFromBackend: Loaded ${validFriends.length} friends`);
             } else {
-                console.log('ℹ️ loadFriendsFromBackend: No friends yet (normal for new users)');
-                FriendCacheManager.setFriends([]);
+                // SAFETY: Never wipe a populated cache with an empty server response.
+                // This prevents the "0 friends" flash caused by race conditions or
+                // a momentarily wrong endpoint returning an empty array.
+                const existing = FriendCacheManager.getAllFriends();
+                if (existing.length === 0) {
+                    FriendCacheManager.setFriends([]);
+                    console.log('ℹ️ loadFriendsFromBackend: No friends yet (normal for new users)');
+                } else {
+                    console.log(`ℹ️ loadFriendsFromBackend: Server returned 0 — keeping ${existing.length} cached friends`);
+                }
             }
             
             FriendCacheManager.syncToGlobals();
@@ -6836,7 +6979,12 @@ async function loadFriendsFromBackend() {
             }));
 
             // Notify parent with full friends list (single send — parent listens for FRIENDS_DATA)
-            window.parent.postMessage({ type: 'FRIENDS_DATA', friends: validFriends }, '*');
+            window.parent.postMessage({ type: 'FRIENDS_DATA', friends: validFriends, source: 'friend-core', timestamp: Date.now() }, '*');
+
+            // Dispatch CONTACTS_UPDATE locally so friend-ui.js counters stay accurate
+            window.dispatchEvent(new CustomEvent('CONTACTS_UPDATE', {
+                detail: { contacts: validFriends, count: validFriends.length, timestamp: Date.now() }
+            }));
             
             clearFriendsLoading();
             return { success: true, count: validFriends.length };
