@@ -3777,8 +3777,8 @@ async function secureApiCall(endpoint, options = {}) {
         }
         
         const response = await API_WRAPPER.request(endpoint, {
-            timeout: 10000,
-            retry: 1,
+            timeout: 45000,
+            retry: 2,
             ...options
         });
         
@@ -5739,10 +5739,32 @@ const createGroupOnline = async function(groupData) {
             participationModes: groupData.participationModes || {}
         };
         
-        const response = await GroupCore.createGroup(groupDataToSave);
+        // FIXED: Add timeout and retry logic for group creation
+        let response = null;
+        let retryCount = 0;
+        const maxRetries = 3;
+        
+        while (retryCount < maxRetries && (!response || !response.success)) {
+            try {
+                response = await GroupCore.createGroup(groupDataToSave);
+                if (response && response.success) break;
+                
+                retryCount++;
+                if (retryCount < maxRetries) {
+                    console.log(`[GROUP CREATE] Retry ${retryCount}/${maxRetries} for group: ${groupData.name}`);
+                    await new Promise(resolve => setTimeout(resolve, 1000 * retryCount));
+                }
+            } catch (error) {
+                console.warn(`[GROUP CREATE] Attempt ${retryCount + 1} failed:`, error.message);
+                retryCount++;
+                if (retryCount < maxRetries) {
+                    await new Promise(resolve => setTimeout(resolve, 1000 * retryCount));
+                }
+            }
+        }
         
         if (!response || !response.success) {
-            throw new Error(response?.error || 'Failed to create group');
+            throw new Error(response?.error || `Failed to create group after ${maxRetries} attempts`);
         }
         
         const newGroup = response.data;

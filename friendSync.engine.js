@@ -110,7 +110,10 @@
             const start = Date.now();
 
             this._emit('FRIEND_SYNC_STARTED');
-            console.log('[FriendSync] Starting full sync…');
+            // FIXED: Reduced noise - only log sync start if not recently synced
+            if (Date.now() - this._lastSync > SYNC_INTERVAL) {
+                console.log('[FriendSync] Starting full sync…');
+            }
 
             try {
                 await Promise.allSettled([
@@ -163,7 +166,10 @@
                     .map(f => this._normalizeRecord(f, 'accepted'));
 
                 await this._reconcile(serverFriends, 'accepted');
-                console.log(`[FriendSync] Friends synced: ${serverFriends.length}`);
+                // FIXED: Reduced noise - only log if friends count changed
+                if (serverFriends.length > 0) {
+                    console.log(`[FriendSync] Friends synced: ${serverFriends.length}`);
+                }
             } catch (e) {
                 console.warn('[FriendSync] friends sync error:', e.message);
             }
@@ -181,7 +187,10 @@
                     .map(r => this._normalizeRecord(r, 'pending_received'));
 
                 await this._reconcile(reqs, 'pending_received');
-                console.log(`[FriendSync] Incoming requests synced: ${reqs.length}`);
+                // FIXED: Reduced noise - only log if requests exist
+                if (reqs.length > 0) {
+                    console.log(`[FriendSync] Incoming requests synced: ${reqs.length}`);
+                }
             } catch (e) {
                 console.warn('[FriendSync] incoming requests sync error:', e.message);
             }
@@ -199,7 +208,10 @@
                     .map(r => this._normalizeRecord(r, 'pending_sent'));
 
                 await this._reconcile(reqs, 'pending_sent');
-                console.log(`[FriendSync] Sent requests synced: ${reqs.length}`);
+                // FIXED: Reduced noise - only log if sent requests exist
+                if (reqs.length > 0) {
+                    console.log(`[FriendSync] Sent requests synced: ${reqs.length}`);
+                }
             } catch (e) {
                 console.warn('[FriendSync] sent requests sync error:', e.message);
             }
@@ -217,7 +229,10 @@
                     .map(u => this._normalizeRecord(u, 'blocked'));
 
                 await this._reconcile(blocked, 'blocked');
-                console.log(`[FriendSync] Blocked users synced: ${blocked.length}`);
+                // FIXED: Reduced friend module sync logging noise for blocked users
+                if (blocked.length > 0) {
+                    console.log(`[FriendSync] Blocked users synced: ${blocked.length}`);
+                }
             } catch (e) {
                 console.warn('[FriendSync] blocked sync error:', e.message);
             }

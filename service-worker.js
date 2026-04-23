@@ -1,21 +1,19 @@
 // service-worker.js
-// Version: 13.0.0 - OFFLINE-FIRST + NAVIGATION CACHE FIX
+// Version: 17.0.0 - RELOAD LOOP FIX + OFFLINE-FIRST PRESERVED
 // Strategy:
 //   Navigation (HTML pages) -> Network-first, cache fallback, inline shell
 //   Static assets (JS/CSS/fonts/images) -> Cache-first, network fallback
 //   API / auth requests -> Always bypass to network (never cached)
 //   /login + /register HTML pages -> Navigation handler (NOT bypassed)
+//   FIXED: No forced reloads - updates happen in background
 
 'use strict';
 
-// PATCH v1.4: Version bumped to 15.0.0 — forces full cache replacement.
-// Every file listed in NETWORK_FIRST_PATTERNS is now fetched fresh on every
-// page load so code fixes reach the browser without manual cache clearing.
-// Critically, app.realtime.socket.js and calls-core.js are now network-first
-// because stale cached versions of these files caused the WebSocket / call
-// failures diagnosed in the console logs.
-const SW_VERSION = '16.0.0';
-const CACHE_NAME = 'moodchat-static-v16-offline'; // differs from v14 → triggers full wipe
+// FIXED: Version bumped to 17.0.0 — reload loop elimination
+// Network-first patterns preserved for critical JS files to ensure updates reach users
+// WITHOUT forcing page reloads - updates happen naturally on next navigation
+const SW_VERSION = '17.0.0';
+const CACHE_NAME = 'moodchat-static-v17-stable'; // New cache name for clean update
 const CACHE_MAX_AGE = 7 * 24 * 60 * 60 * 1000; // 7 days in ms
 
 // ---------------------------------------------------------------------------
@@ -465,11 +463,11 @@ self.addEventListener('install', function(event) {
 });
 
 // ---------------------------------------------------------------------------
-// ACTIVATE - remove old caches and claim all open tabs
-// FIX: version string now references SW_VERSION constant everywhere.
+// ACTIVATE - remove old caches and claim clients (SAFE VERSION - NO RELOADS)
+// FIXED: Removed all client reload logic that caused infinite loops
 // ---------------------------------------------------------------------------
 self.addEventListener('activate', function(event) {
-  console.log('[SW] Activating v' + SW_VERSION);
+  console.log('[SW] Activating v' + SW_VERSION + ' (safe mode - no forced reloads)');
 
   event.waitUntil(
     caches.keys()
@@ -484,38 +482,14 @@ self.addEventListener('activate', function(event) {
         );
       })
       .then(function() {
-        // ✅ CRITICAL: claim() makes this SW control ALL open tabs immediately,
-        // not just new ones. Without this the old SW keeps serving existing tabs.
+        // ✅ SAFE: claim() makes this SW control all open tabs
+        // WITHOUT forcing them to reload
         return self.clients.claim();
       })
       .then(function() {
-        console.log('[SW] All clients claimed — sending reload signal');
-        return self.clients.matchAll({ includeUncontrolled: true, type: 'window' });
-      })
-      .then(function(clients) {
-        // Invalidate stale log suppression set
+        // ✅ FIXED: Clear stale log entries WITHOUT notifying clients
         loggedCacheHits.clear();
-
-        clients.forEach(function(client) {
-          // ✅ CRITICAL: Tell every open tab to reload so it picks up the fresh
-          // network-first JS files. Without this reload the page JS running in
-          // memory is still the old version even after the SW updates.
-          client.postMessage({
-            type: 'SW_ACTIVATED',
-            version: SW_VERSION,
-            timestamp: Date.now()
-          });
-          client.postMessage({
-            type: 'SW_UPDATE_AVAILABLE',
-            version: SW_VERSION,
-            timestamp: Date.now()
-          });
-          // Pages listen for SW_ACTIVATED and call window.location.reload() themselves.
-          // client.navigate() is NOT used here — it throws TypeError for non-window
-          // clients (workers, iframes without allow-top-navigation) and is unreliable.
-          // The postMessage above is the correct cross-browser reload trigger.
-        });
-        console.log('[SW] v' + SW_VERSION + ' activated — cache wiped, ' + clients.length + ' clients notified & reloading');
+        console.log('[SW] v' + SW_VERSION + ' activated safely - cache cleaned, no reloads forced');
       })
   );
 });
@@ -629,9 +603,16 @@ self.addEventListener('message', function(event) {
       console.log('[SW] Logs cleared');
       break;
 
-    // ✅ NEW: Force the waiting SW to take control immediately — used after deploy
-    case 'FORCE_UPDATE':
-      self.skipWaiting();
+    // ✅ SAFE: Update notification only - no forced reloads
+    case 'UPDATE_AVAILABLE':
+      if (event.ports && event.ports[0]) {
+        event.ports[0].postMessage({
+          type: 'UPDATE_AVAILABLE_SAFE',
+          version: SW_VERSION,
+          timestamp: Date.now(),
+          message: 'Update available - will apply on next navigation'
+        });
+      }
       break;
 
     // ✅ NEW: Invalidate specific URLs so they are re-fetched on next request

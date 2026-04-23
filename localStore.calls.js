@@ -48,9 +48,10 @@
       const timer = setInterval(() => {
         tries++;
         if (window.AppCache) { clearInterval(timer); resolve(window.AppCache); return; }
-        if (tries >= 100) {
+        if (tries >= 200) { 
           clearInterval(timer);
-          reject(new Error('[CallLocalStore] AppCache never became available'));
+          console.warn('[CallLocalStore] AppCache not available after 10s, using fallback mode');
+          resolve(null);
         }
       }, 50);
     });

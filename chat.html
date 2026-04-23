@@ -3107,10 +3107,30 @@
                     let response = await fetch(`${baseUrl}/calls/history?limit=50`, {
                         headers: { 'Authorization': `Bearer ${cachedToken}` }
                     });
+                    
+                    // Handle 404 fallback
                     if (!response.ok && response.status === 404) {
                         response = await fetch(`${baseUrl}/calls?limit=50&page=1`, {
                             headers: { 'Authorization': `Bearer ${cachedToken}` }
                         });
+                    }
+                    
+                    // Handle 429 rate limiting with exponential backoff
+                    if (!response.ok && response.status === 429) {
+                        console.warn('[Parent] Rate limited (429), retrying with backoff...');
+                        await new Promise(resolve => setTimeout(resolve, 2000)); // 2s delay
+                        response = await fetch(`${baseUrl}/calls/history?limit=50`, {
+                            headers: { 'Authorization': `Bearer ${cachedToken}` }
+                        });
+                        
+                        // Second retry with longer delay if still rate limited
+                        if (!response.ok && response.status === 429) {
+                            console.warn('[Parent] Still rate limited, retrying with longer backoff...');
+                            await new Promise(resolve => setTimeout(resolve, 5000)); // 5s delay
+                            response = await fetch(`${baseUrl}/calls/history?limit=50`, {
+                                headers: { 'Authorization': `Bearer ${cachedToken}` }
+                            });
+                        }
                     }
 
                     if (response.ok) {
@@ -3803,11 +3823,16 @@
                 // MODULE SWITCHING
                 if (data.type === 'SWITCH_MODULE' && data.module !== 'calls') {
                     navigateToPage(data.module);
-                    if (data.payload?.returnFromCall) {
-                        if (data.module === 'messages' && data.payload?.openChatWith) {
+                    
+                    // ✅ FIXED: Handle chat opening for messages module from friends/calls
+                    if (data.module === 'messages' && data.payload) {
+                        const payload = data.payload;
+                        
+                        if (payload.returnFromCall && payload.openChatWith) {
+                            // Return from call - open specific chat
                             const _callChatPayload = {
-                                userId: data.payload.openChatWith,
-                                userName: data.payload.openChatWithName || 'User',
+                                userId: payload.openChatWith,
+                                userName: payload.openChatWithName || 'User',
                                 returnFromCall: true,
                                 timestamp: Date.now()
                             };
@@ -3829,10 +3854,39 @@
                                 }
                             };
                             setTimeout(_postRFC, 400);
-                        } else if (data.module === 'friends') {
-                            const friendsIframe = document.getElementById('friendsIframe');
-                            if (friendsIframe && friendsIframe.contentWindow) setTimeout(() => friendsIframe.contentWindow.postMessage({ type: 'RETURN_FROM_CALL', payload: { returnFromCall: true, timestamp: Date.now() }, source: 'parent-frame' }, '*'), 300);
+                        } else if (payload.userId || payload.userName) {
+                            // ✅ FIXED: Regular navigation from friends/calls - open chat with user
+                            const chatPayload = {
+                                userId: payload.userId,
+                                userName: payload.userName || 'User',
+                                findExisting: true, // Continue existing chat if available
+                                timestamp: Date.now(),
+                                source: payload.source || 'parent-frame'
+                            };
+                            
+                            sessionStorage.setItem('pending_chat', JSON.stringify(chatPayload));
+                            if (window.innerWidth <= 768) document.body.classList.add('chat-panel-active');
+                            
+                            // Retry until iframe ACKs
+                            let _chatAttempts = 0;
+                            const _postChatOpen = () => {
+                                const msgIframe = document.getElementById('messagesIframe');
+                                if (msgIframe && msgIframe.contentWindow) {
+                                    msgIframe.contentWindow.postMessage({
+                                        type: 'OPEN_CHAT_WITH_USER',
+                                        payload: chatPayload,
+                                        source: 'parent-frame'
+                                    }, '*');
+                                }
+                                if (_chatAttempts++ < 12) {
+                                    setTimeout(() => { if (sessionStorage.getItem('pending_chat')) _postChatOpen(); }, 600);
+                                }
+                            };
+                            setTimeout(_postChatOpen, 400);
                         }
+                    } else if (data.module === 'friends' && data.payload?.returnFromCall) {
+                        const friendsIframe = document.getElementById('friendsIframe');
+                        if (friendsIframe && friendsIframe.contentWindow) setTimeout(() => friendsIframe.contentWindow.postMessage({ type: 'RETURN_FROM_CALL', payload: { returnFromCall: true, timestamp: Date.now() }, source: 'parent-frame' }, '*'), 300);
                     }
                 }
 

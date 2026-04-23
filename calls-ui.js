@@ -1905,6 +1905,12 @@ async function initiateCallWithPendingUser() {
                 
                 newCallModal: '#newCallModal',
                 closeNewCallModal: '#closeNewCallModal',
+                callingOverlay: '#callingOverlay',
+                callingName: '#callingName',
+                callingStatus: '#callingStatus',
+                callingType: '#callingType',
+                callingAvatar: '#callingAvatar',
+                cancelCallBtn: '#cancelCallBtn',
                 incomingCallModal: '#incomingCallModal',
                 incomingCallName: '#incomingCallName',
                 incomingCallType: '#incomingCallType',
@@ -4023,7 +4029,45 @@ handleContactItemClick: function(e) {
             }
             
             UIState.currentView = 'call';
-            
+
+            // ── CALLING OVERLAY: show dialing screen ─────────────────────────
+            (function _showCallingOverlay() {
+                if (!elements.callingOverlay) return;
+                const participant = (UIState.callParticipants && UIState.callParticipants[0]) || {};
+                const name = participant.name || participantNames || 'Calling...';
+                const isVideo = UIState.callType === 'video';
+
+                if (elements.callingName) elements.callingName.textContent = name;
+                if (elements.callingType) elements.callingType.textContent = isVideo ? 'Video Call' : 'Voice Call';
+                if (elements.callingStatus) {
+                    elements.callingStatus.textContent = UIState.callReceiverOnline ? 'Ringing...' : 'Calling...';
+                }
+
+                // Set avatar: photo or initials
+                if (elements.callingAvatar) {
+                    if (participant.avatar || participant.photo) {
+                        elements.callingAvatar.innerHTML = `<img src="${SecuritySanitizer ? SecuritySanitizer.sanitizeString(participant.avatar || participant.photo) : (participant.avatar || participant.photo)}" alt="${name}" onerror="this.parentNode.innerHTML='${name.charAt(0).toUpperCase()}'">`;
+                    } else {
+                        elements.callingAvatar.textContent = name.charAt(0).toUpperCase();
+                    }
+                }
+
+                elements.callingOverlay.classList.add('active');
+
+                // Wire cancel button
+                if (elements.cancelCallBtn && !elements.cancelCallBtn._callingWired) {
+                    elements.cancelCallBtn._callingWired = true;
+                    elements.cancelCallBtn.addEventListener('click', function() {
+                        if (window.callCore && window.callCore.endCall) {
+                            window.callCore.endCall();
+                        } else if (window.coreInstance && window.coreInstance.endCall) {
+                            window.coreInstance.endCall();
+                        }
+                        UIEventHandlers.handleCallEnded && UIEventHandlers.handleCallEnded({ reason: 'cancelled', status: 'cancelled' });
+                    });
+                }
+            })();
+
             // Timer will start in handleCallAccepted (when receiver picks up)
             // Show placeholder until then
             if (elements.callDuration) elements.callDuration.textContent = '--:--';
@@ -4113,6 +4157,8 @@ handleContactItemClick: function(e) {
 
         // Called when the remote party answers the call — THIS is when the timer starts.
         handleCallAccepted: function(callData) {
+            // Hide calling overlay — other side picked up
+            if (elements.callingOverlay) elements.callingOverlay.classList.remove('active');
             UIState.callStartTime = Date.now();
             UIState.callState = 'in-call';
             if (elements.callStatusText) {
@@ -4198,6 +4244,8 @@ handleContactItemClick: function(e) {
                 elements.incomingCallModal.classList.remove('active');
                 UIState.activeModals && UIState.activeModals.delete('incomingCallModal');
             }
+            // Hide calling overlay (outgoing dialing screen)
+            if (elements.callingOverlay) elements.callingOverlay.classList.remove('active');
             
             if (UIState.callDurationInterval) {
                 clearInterval(UIState.callDurationInterval);
@@ -5507,6 +5555,8 @@ handleContactItemClick: function(e) {
             const userId = contact.id || contact.userId || contact;
             const userName = contact.name || contact.displayName || contact.username || 'User';
             
+            console.log(`[Calls UI] Starting ${callType} call with ${userName} (${userId})`);
+            
             // Close modal first
             UIEventHandlers.closeNewCallModal();
             
@@ -5524,10 +5574,12 @@ handleContactItemClick: function(e) {
                     if (result && result.success) {
                         showNotification(`${callType} call started`, 'success');
                     } else {
+                        console.error('[Calls UI] Call failed:', result);
                         showNotification(result?.error || 'Failed to start call', 'error');
                     }
                 }).catch(error => {
-                    showNotification('Failed to start call: ' + (error.message || 'Unknown error'), 'error');
+                    console.error('[Calls UI] Call error:', error);
+                    showNotification('Failed to start call', 'error');
                 });
             } else {
                 showNotification('Call system not ready. Please try again.', 'error');

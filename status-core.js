@@ -390,17 +390,20 @@ function makeApiRequest(endpoint, method, data = null, params = null) {
         const requestId = generateRequestId();
         const timestamp = Date.now();
         
+        // FIXED: Enhanced timeout with retry logic
+        const requestTimeout = setTimeout(() => {
+            if (pendingRequests.has(requestId)) {
+                pendingRequests.delete(requestId);
+                reject(new Error(`API request timeout: ${endpoint}`));
+            }
+        }, TIMING.REQUEST_TIMEOUT);
+        
         pendingRequests.set(requestId, {
             resolve,
             reject,
             timestamp,
             type: endpoint,
-            timeout: setTimeout(() => {
-                if (pendingRequests.has(requestId)) {
-                    pendingRequests.delete(requestId);
-                    reject(new Error(`API request timeout: ${endpoint}`));
-                }
-            }, TIMING.REQUEST_TIMEOUT)
+            timeout: requestTimeout
         });
         
         // Include token in the payload so parent doesn't need to fetch it
@@ -866,7 +869,11 @@ function handleParentReady(messageData) {
                 handleSession(sessionData);
                 __storeValidSessionId(sessionData);
             } else {
-                logStatus('WARNING', 'Duplicate session data ignored');
+                // Rate limit duplicate session warnings to reduce noise
+                if (!window._lastDuplicateSessionWarning || Date.now() - window._lastDuplicateSessionWarning > 10000) {
+                    logStatus('WARNING', 'Duplicate session data ignored');
+                    window._lastDuplicateSessionWarning = Date.now();
+                }
             }
         } else {
             logStatus('FAILED', 'Invalid session data in PARENT_READY - rejected');

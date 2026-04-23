@@ -4061,7 +4061,7 @@ _clearStaleCallState: function() {
     // Also check for calls that have been in 'initiating' state for too long
     if (callsState.callState === 'initiating' && callsState.callStartTime) {
         const callDuration = Date.now() - callsState.callStartTime;
-        if (callDuration > 30000) { // 30 second timeout for initiating state
+        if (callDuration > 60000) { // 60 second timeout for initiating state
             logWarn(MODULE, 'Cleaning up stale initiating call', {
                 callId: callsState.activeCallId,
                 duration: callDuration
@@ -6757,63 +6757,8 @@ _escapeHtml: function(text) {
                 duration: duration + 'ms'
             });
             
-            return { 
-                success: true, 
-                degraded: this._pipelineDegraded,
-                duration,
-                stages: this._stageResults
-            };
-        },
-        
-        _executeStageWithRetry: async function(stage) {
-            this._stageAttempts[stage] = 1;
-            
-            try {
-                let result;
-                
-                switch (stage) {
-                    case 'preflight':
-                        result = await this._runPreflight();
-                        break;
-                    case 'dependencyCheck':
-                        result = await this._runDependencyCheck();
-                        break;
-                    case 'parentDetection':
-                        result = await this._runParentDetection();
-                        break;
-                    case 'handshake':
-                        result = await this._runHandshake();
-                        break;
-                    case 'sessionSync':
-                        result = await this._runSessionSync();
-                        break;
-                    case 'serviceInit':
-                        result = await this._runServiceInit();
-                        break;
-                    case 'ready':
-                        result = { success: true, ready: true };
-                        break;
-                    default:
-                        result = { success: false, error: 'Unknown stage' };
-                }
-                
-                if (result.success) {
-                    return { success: true, attempt: 1, result };
-                }
-                
-                return { success: false, attempt: 1, error: result.error || 'Stage failed' };
-                
-            } catch (error) {
-                logError(MODULE, `Stage ${stage} error`, error);
-                return { success: false, attempt: 1, error: error.message };
-            }
-        },
-        
-        _runPreflight: async function() {
-            if (document.readyState === 'loading') {
-                await new Promise(resolve => {
-                    document.addEventListener('DOMContentLoaded', resolve, { once: true });
-                });
+            return { success: true, degraded: this._pipelineDegraded, duration };
+            });
             }
             
             const capabilities = {
@@ -7320,7 +7265,153 @@ function handleCallFailed(callData) {
         resetCallState();
         notifyListeners('call_timeout', callData);
     }
+
+// Real-time message handlers for instant messaging and status updates
+function _handleRealtimeMessage(messageData) {
+    console.log('[CallsCore] Received real-time message:', messageData);
     
+    // Forward to message system if available
+    if (window.MessagesCore && window.MessagesCore.addMessage) {
+        window.MessagesCore.addMessage(messageData);
+    }
+    
+    // Show notification if not in chat
+    if (document.hidden || !window.location.href.includes('chat.html')) {
+        if (window.showNotification) {
+            window.showNotification(`New message from ${messageData.senderName}: ${messageData.text}`, 'message');
+        }
+    }
+}
+
+function _handleUserStatus(statusData) {
+    console.log('[CallsCore] User status update:', statusData);
+    
+    // Update online status indicators
+    updateOnlineStatusIndicators(statusData.userId, statusData.status === 'online');
+    
+    // Update call UI if user is in current call
+    if (callsState.activeCallId && callsState.participants) {
+        const participant = callsState.participants.find(p => p.id === statusData.userId);
+        if (participant) {
+            participant.online = statusData.status === 'online';
+            updateCallUI();
+        }
+    }
+    
+    // Dispatch event for other components
+    window.dispatchEvent(new CustomEvent('user_online_status', {
+        detail: { userId: statusData.userId, isOnline: statusData.status === 'online' }
+    }));
+}
+
+function _handleCallStatus(callData) {
+    console.log('[CallsCore] Call status update:', callData);
+    
+    switch (callData.type) {
+        case 'call_initiated':
+            handleCallInitiated(callData);
+            break;
+        case 'call_accepted':
+            handleCallAccepted(callData);
+            break;
+        case 'call_started':
+            handleCallStarted(callData);
+            break;
+        case 'call_connected':
+            handleCallConnected(callData);
+            break;
+        case 'call_rejected':
+            handleCallRejected(callData);
+            break;
+        case 'call_ended':
+            handleCallEnded(callData);
+            break;
+        case 'incoming_call':
+            handleIncomingCall(callData);
+            break;
+        default:
+            console.log('[CallsCore] Unknown call status:', callData.type);
+    }
+}
+
+function _handleOnlineUsers(usersData) {
+    console.log('[CallsCore] Online users update:', usersData);
+    
+    if (usersData.users && Array.isArray(usersData.users)) {
+        usersData.users.forEach(user => {
+            _handleUserStatus({
+                type: 'user_status',
+                userId: user.id,
+                status: 'online',
+                lastSeen: user.lastSeen
+            });
+        });
+    }
+}
+
+function _handleTyping(typingData) {
+    console.log('[CallsCore] Typing indicator:', typingData);
+    
+    // Update typing indicators in chat
+    if (window.MessagesCore && window.MessagesCore.showTyping) {
+        window.MessagesCore.showTyping(typingData.userId, typingData.isTyping);
+    }
+}
+
+function _handleAuthSuccess(authData) {
+    console.log('[CallsCore] Authentication successful:', authData);
+    
+    // Update connection status
+    if (window.KynectaRealtime) {
+        window.KynectaRealtime._authenticated = true;
+        window.KynectaRealtime._state = 'authenticated';
+    }
+}
+
+function _handleAuthError(authData) {
+    console.error('[CallsCore] Authentication failed:', authData);
+    
+    // Show error notification
+    if (window.showNotification) {
+        window.showNotification('Authentication failed. Please log in again.', 'error');
+    }
+}
+
+function updateOnlineStatusIndicators(userId, isOnline) {
+    // Update all online/offline indicators for this user
+    const indicators = document.querySelectorAll(`[data-user-id="${userId}"] .online-status, [data-user-id="${userId}"] .status-indicator`);
+    
+    indicators.forEach(indicator => {
+        if (isOnline) {
+            indicator.classList.add('online');
+            indicator.classList.remove('offline');
+            indicator.title = 'Online';
+        } else {
+            indicator.classList.add('offline');
+            indicator.classList.remove('online');
+            indicator.title = 'Offline';
+        }
+    });
+}
+
+function updateCallUI() {
+    // Update call UI with current participant status
+    if (window.callsUI && window.callsUI.updateCallUI) {
+        window.callsUI.updateCallUI();
+    }
+}
+
+// Expose handlers globally for WebSocket integration
+window.CallHandlers = {
+    _handleRealtimeMessage,
+    _handleUserStatus,
+    _handleCallStatus,
+    _handleOnlineUsers,
+    _handleTyping,
+    _handleAuthSuccess,
+    _handleAuthError
+};
+
     function handleCallBusy(callData) {
         logCall(MODULE, 'handleCallBusy', callData);
         

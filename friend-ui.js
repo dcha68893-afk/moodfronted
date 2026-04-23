@@ -2951,6 +2951,14 @@ function renderAllUsersFromCache() {
 
 // Refresh from API in background
 async function refreshAllUsersFromAPI() {
+    // Rate limiting: don't refresh if already refreshed within last 5 seconds
+    const now = Date.now();
+    if (window._lastUsersRefresh && now - window._lastUsersRefresh < 5000) {
+        console.log('[All Users] Refresh throttled - last refresh was < 5s ago');
+        return;
+    }
+    window._lastUsersRefresh = now;
+    
     console.log('[All Users] Refreshing from API...');
     try {
         if (typeof fetchAllUsersFromBackend === 'function') {

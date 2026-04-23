@@ -2968,70 +2968,9 @@ function handleBulkUpload(e) {
         processBulkUpload(file);
         showNotification('Bulk upload started', 'info');
     }
-}
-
-// FIX C: publishListingFromModal - async/await, handle all tabs
 // Expose on window for emergency handler fallback
 window._publishListingFromModal = function() { publishListingFromModal(); };
 async function publishListingFromModal() {
-    const activeTab = UIState.createListingActiveTab;
-    
-    // Handle premium tab - delegate to premium publish function
-    if (activeTab === 'premium') {
-        publishPremiumListingFromModal();
-        return;
-    }
-    
-    // Handle templates, circles, options tabs - they configure settings, use service/digital data
-    if (['templates', 'circles', 'options'].includes(activeTab)) {
-        // These tabs configure settings; publish uses current service/digital form data
-        const fallbackTab = DOM.serviceTitle?.value ? 'service' : 'digital';
-        UIState.createListingActiveTab = fallbackTab;
-        publishListingFromModal();
-        return;
-    }
-    
-    // Handle bulk tab - process bulk upload
-    if (activeTab === 'bulk') {
-        if (DOM.bulkUploadInput && DOM.bulkUploadInput.files && DOM.bulkUploadInput.files[0]) {
-            if (processBulkUpload) {
-                processBulkUpload(DOM.bulkUploadInput.files[0]);
-                showNotification('Bulk upload started!', 'success');
-                hideCreateListingModal();
-            } else {
-                showNotification('Bulk upload is not available', 'error');
-            }
-        } else {
-            showNotification('Please select a CSV or JSON file to upload', 'error');
-        }
-        return;
-    }
-    
-    // Handle service tab
-    if (activeTab === 'service') {
-        const title = DOM.serviceTitle?.value;
-        const description = DOM.serviceDescription?.value;
-        const price = DOM.servicePrice?.value;
-        
-        if (!title || !description) {
-            showNotification('Please fill in title and description', 'error');
-            return;
-        }
-
-        console.log('[TOOLS FLOW] Step 1: UI triggered — service listing form submitted');
-        
-        const listing = await createServiceListing(title, description, {
-            price: price,
-            availability: UIState.selectedAvailability,
-            visibility: UIState.selectedTrustCircle,
-            moodContext: UIState.selectedMoodContext,
-            template: UIState.selectedTemplate
-        });
-        
-        // FIX: only celebrate when backend confirmed (listing exists AND is not an optimistic ghost)
-        if (listing && !listing._isOptimistic) {
-            showNotification('Listing published successfully!', 'success');
-            hideCreateListingModal();
             UIPipeline.liveUpdate();
             console.log('[TOOLS FLOW] Step 4: UI updated after service listing created', { id: listing.id });
         } else if (!listing) {

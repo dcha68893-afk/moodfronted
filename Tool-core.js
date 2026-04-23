@@ -4046,12 +4046,19 @@ function forceBindAllUIEvents() {
     // ── Publish / Save Draft buttons ─────────────────────────────────────
     var publishBtn = document.getElementById('publishListingBtn');
     if (publishBtn) {
-        publishBtn.onclick = function(e) {
+        publishBtn.onclick = async function(e) {
             e.preventDefault();
-            if (typeof window.publishListingFromModal === 'function') {
-                window.publishListingFromModal();
-            } else {
-                window.dispatchEvent(new CustomEvent('marketplace:publish-listing'));
+            try {
+                if (typeof window.publishListingFromModal === 'function') {
+                    await window.publishListingFromModal();
+                } else {
+                    window.dispatchEvent(new CustomEvent('marketplace:publish-listing'));
+                }
+            } catch (error) {
+                console.error('[Tools] Publish button error:', error);
+                if (typeof showNotification === 'function') {
+                    showNotification('Failed to publish listing', 'error');
+                }
             }
         };
     }
@@ -6265,6 +6272,7 @@ export async function createServiceListing(title, description, options = {}) {
 
     // Backend call — safeApiCall now throws on failure (no silent null)
     try {
+        console.log('[TOOLS FLOW] Step 2: API request sending');
         const response = await safeApiCall('POST', '/api/marketplace/listings', {
             title: optimistic.title,
             description: optimistic.description,
@@ -6275,6 +6283,7 @@ export async function createServiceListing(title, description, options = {}) {
             available: true
         });
 
+        console.log('[TOOLS FLOW] Step 3: API response received, status:', response?.success);
         const confirmed = response?.data?.listing;
         if (!confirmed || !confirmed.id) {
             throw new Error('Backend did not return a valid listing — DB write may have failed');

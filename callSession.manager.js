@@ -262,15 +262,65 @@
         }
 
         async _createLocalHistory(data) {
-            const store = this._historyRef || window.KynectaCallLocalStore;
-            if (!store) return;
+            // Try multiple storage options with fallbacks
+            let store = this._historyRef || window.KynectaCallLocalStore || window.AppCache || window.KynectaCache;
+            
+            if (!store) {
+                // Try to wait for store to become available (increased timeout)
+                let attempts = 0;
+                const maxAttempts = 50; // Increased from 10 to 50
+                while (!store && attempts < maxAttempts) {
+                    await new Promise(resolve => setTimeout(resolve, 100));
+                    store = window.KynectaCallLocalStore || window.AppCache || window.KynectaCache;
+                    attempts++;
+                }
+                
+                if (!store) {
+                    console.warn('[CallSession] No storage available, using localStorage fallback');
+                    // Fallback to localStorage
+                    try {
+                        const callKey = `call_${data.id}_${Date.now()}`;
+                        localStorage.setItem(callKey, JSON.stringify({
+                            ...data,
+                            savedAt: Date.now(),
+                            storageType: 'localStorage_fallback'
+                        }));
+                        console.log('[CallSession] Call saved to localStorage fallback');
+                        return;
+                    } catch (e) {
+                        console.error('[CallSession] All storage options failed', e.message);
+                        return;
+                    }
+                }
+                this._historyRef = store;
+            }
+            
             try {
-                const record = await store.createCall(data);
-                if (this._session) {
-                    this._session.localHistoryId = record.id;
+                // Try different save methods based on store type
+                if (store.createCall) {
+                    const record = await store.createCall(data);
+                    if (this._session) {
+                        this._session.localHistoryId = record.id;
+                    }
+                } else if (store.save) {
+                    await store.save(data);
+                    console.log('[CallSession] Call saved using generic save method');
+                } else {
+                    throw new Error('No compatible save method found');
                 }
             } catch (e) {
-                console.warn('[CallSession] Failed to create local history', e.message);
+                console.warn('[CallSession] Failed to create local history, trying localStorage fallback', e.message);
+                // Final fallback to localStorage
+                try {
+                    const callKey = `call_${data.id}_${Date.now()}`;
+                    localStorage.setItem(callKey, JSON.stringify({
+                        ...data,
+                        savedAt: Date.now(),
+                        storageType: 'localStorage_error_fallback'
+                    }));
+                } catch (fallbackError) {
+                    console.error('[CallSession] Even localStorage failed', fallbackError.message);
+                }
             }
         }
 

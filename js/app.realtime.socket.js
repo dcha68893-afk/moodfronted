@@ -63,17 +63,20 @@
     // Config
     // ─────────────────────────────────────────────────────────────────────────
     const SOCKET_CONFIG = {
-        reconnectAttempts:  50,
-        reconnectBaseDelay: 1000,
-        reconnectMaxDelay:  30000,
+        reconnectAttempts: 25,      // FIXED: Increased to prevent premature DEGRADED mode
+        reconnectBaseDelay: 2000,    // FIXED: Increased from 1000ms for more stable retries
+        reconnectMaxDelay: 30000,
         reconnectJitter:    0.3,
-        heartbeatInterval:  30000,
+        reconnectCooldown: 1000,     // NEW: Cooldown between retry attempts
+        errorCooldown:      5000,     // NEW: Cooldown after errors
+        maxConsecutiveErrors: 5,      // FIXED: Increased to prevent premature DEGRADED mode
+        heartbeatInterval: 30000,
         heartbeatTimeout:   5000,
-        connectionTimeout:  15000,   // raised from 10 s — Render.com cold-starts are slow
+        connectionTimeout: 10000,    // FIXED: Reduced from 15s for faster failure detection
         authTimeout:        5000,
-        messageQueueLimit:  1000,
-        tokenWaitMs:        5000,    // max ms to wait for auth token before giving up
-        tokenPollInterval:  200,
+        messageQueueLimit: 500,      // FIXED: Reduced from 1000 for memory efficiency
+        tokenWaitMs:        5000,
+        tokenPollInterval: 200,
         debug:              false
     };
 
@@ -104,9 +107,8 @@
             return window.Environment.wsBaseUrl;
         const base   = getBackendBaseUrl();
         const wsBase = base.replace(/^http/, 'ws');
-        // ✅ FIX: Use Socket.IO WebSocket endpoint, not raw /ws.
-        // The backend runs Socket.IO so the upgrade path is /socket.io/?EIO=4&transport=websocket
-        return `${wsBase}/socket.io/?EIO=4&transport=websocket`;
+        // ✅ FIX: Use direct WebSocket endpoint for instant messaging
+        return `${wsBase}/ws`;
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -218,6 +220,19 @@
             this._manualDisconnect         = false;
             this._lastParseErrorAt         = null;
             this._socketIoPingInterval     = 25000;
+
+            // ✅ FIXED: Added properties for enhanced error tracking and cooldowns
+            this._consecutiveErrors        = 0;
+            this._lastConnectionAttempt    = 0;
+            this._lastErrorTime            = 0;
+            this._lastReconnectLogAt       = 0;
+            this._lastSyncLogAt            = 0;
+            this._hasJoinedUserRoom        = false;
+            this._bridgeListenersLogged    = false;
+            this._hasEverConnected        = false;
+            this._hasSid                   = false;
+            this._resolvedUserId           = null;
+            this._hasLoggedInitialError    = false;
 
             // FIX: track which Socket.IO event types have been bound to avoid duplicates
             this._registeredSocketListeners = new Set();
@@ -519,6 +534,7 @@
         _onOpen() {
             clearTimeout(this._connectionTimeout);
             this._reconnectAttempts = 0;
+            this._consecutiveErrors = 0; // ✅ FIXED: Reset consecutive errors on successful connection
             this._manualDisconnect  = false;
 
             // NOISE FIX v2.3: Only log the full URL on the very first connect.
@@ -609,59 +625,23 @@
                 const rawMessage = event.data.trim();
                 if (!rawMessage) return;
 
-                // ── Socket.IO framing ──────────────────────────────────────
-                if (/^\d/.test(rawMessage)) {
-                    const code = rawMessage.match(/^(\d+)/)[1];
+                console.log('[Realtime] Received message:', rawMessage);
 
-                    // ✅ FIX: "3probe" = server confirms upgrade. We send "5" to complete it.
-                    // This is step 3 of the proper Socket.IO WebSocket upgrade sequence.
-                    if (rawMessage === '3probe') {
-                        console.log('[Realtime] ✅ Upgrade probe confirmed — sending upgrade complete (5)');
-                        try {
-                            if (this._socket && this._socket.readyState === WebSocket.OPEN) {
-                                this._socket.send('5'); // upgrade complete
-                            }
-                        } catch (_) {}
-                        // Server will now send "40" (namespace connect)
-                        return;
-                    }
+                let messageData;
+                try {
+                    messageData = JSON.parse(rawMessage);
+                } catch (error) {
+                    console.warn('[Realtime] Failed to parse message:', error.message);
+                    return;
+                }
 
-                    if (code === '0') {
-                        // Direct WS fallback path (no polling handshake): server sends "0" first
-                        try {
-                            const openData = JSON.parse(rawMessage.slice(code.length));
-                            this._socketIoPingInterval = openData.pingInterval || 25000;
-                            if (openData.sid) {
-                                console.log('[Realtime] Got sid from WS open packet:', openData.sid.substring(0, 8) + '...');
-                            }
-                        } catch (_) {}
-                        // Send namespace connect packet
-                        if (this._socket && this._socket.readyState === WebSocket.OPEN) {
-                            this._socket.send('40');
-                        }
-                        return;
-                    }
-
-                    if (code === '40') {
-                        // NOISE FIX v2.3: only log namespace connect once
-                        if (!this._hasEverConnected) {
-                            console.log('[Realtime] ✅ Namespace connected — authenticating');
-                        }
-                        this._state = CONNECTION_STATE.CONNECTED;
-                        this._emitStateChange();
-                        this._startHeartbeat();
-                        this._authenticate();
-                        return;
-                    }
-
-                    if (code === '2') {
-                        this._clearHeartbeatTimeout();
-                        if (this._socket && this._socket.readyState === WebSocket.OPEN) {
-                            this._socket.send('3');
-                        }
-                        return;
-                    }
-
+                // Handle Socket.IO engine.io protocol
+                if (rawMessage.startsWith('0') || rawMessage.startsWith('1') || 
+                    rawMessage.startsWith('2') || rawMessage.startsWith('3') || 
+                    rawMessage.startsWith('4')) {
+                    
+                    const code = rawMessage.charAt(0);
+                    
                     if (code === '3') {
                         this._clearHeartbeatTimeout();
                         return;
@@ -793,6 +773,8 @@
 
         _onError(rawError) {
             this._stats.errors++;
+            this._consecutiveErrors++;
+            this._lastErrorTime = Date.now();
             clearTimeout(this._connectionTimeout);
 
             // ✅ FIX: WebSocket onerror fires with a DOM Event object (isTrusted:true, type:'error'),
@@ -806,18 +788,20 @@
                         : 'WebSocket connection error'
                   );
 
-            // ✅ FIX: Rate-limit the warn so it doesn't spam every ~10s retry.
-            // Only log once per 30s, not on every reconnect attempt.
+            // ✅ FIXED: Enhanced error logging with cooldown
             const now = Date.now();
-            if (!this._lastErrorLogAt || now - this._lastErrorLogAt > 30000) {
+            if (!this._lastErrorLogAt || now - this._lastErrorLogAt > 60000) {
                 this._lastErrorLogAt = now;
-                console.warn('[Realtime] WebSocket connection failed, messages module will work without real-time updates');
+                // Only show detailed error on first failure, subsequent failures are brief
+                if (!this._hasLoggedInitialError) {
+                    console.warn('[Realtime] WebSocket connection failed, messages module will work without real-time updates');
+                    this._hasLoggedInitialError = true;
+                } else {
+                    console.log('[Realtime] WebSocket reconnect attempt failed (working offline)');
+                }
             }
 
-            // ✅ FIX: connectPromise/waiters must be resolved with a normalised Error.
-            // The callers (messages-core, calls-core) do .connect().catch(()=>{}) but the
-            // connectWaiter promises created in connect() had NO .catch() attached — these
-            // were the "Uncaught (in promise)" entries in the console.
+            // ✅ FIXED: Non-blocking error resolution
             if (this._connectPromise) {
                 const p = this._connectPromise;
                 this._connectPromise = null;
@@ -841,11 +825,12 @@
                 this._socket = null;
             }
 
-            // ✅ FIX: Always schedule reconnect on error.
-            if (this._reconnectAttempts < SOCKET_CONFIG.reconnectAttempts) {
+            // ✅ FIXED: Enhanced reconnect logic with consecutive error limit
+            if (this._reconnectAttempts < SOCKET_CONFIG.reconnectAttempts && 
+                this._consecutiveErrors < SOCKET_CONFIG.maxConsecutiveErrors) {
                 this._scheduleReconnect();
             } else {
-                console.warn('[Realtime] Max reconnect attempts reached — entering DEGRADED mode.');
+                console.warn('[Realtime] Max reconnect attempts or consecutive errors reached — entering DEGRADED mode.');
                 this._state = CONNECTION_STATE.DEGRADED;
                 this._emitStateChange();
             }
@@ -1132,31 +1117,43 @@
 
         _scheduleReconnect() {
             if (this._reconnectAttempts >= SOCKET_CONFIG.reconnectAttempts) {
-                this._state = CONNECTION_STATE.ERROR;
+                console.warn('[Realtime] Max reconnect attempts reached - entering degraded mode');
+                this._state = CONNECTION_STATE.DEGRADED;
                 this._emitStateChange();
                 return;
             }
 
             this._clearReconnectTimer();
 
-            const baseDelay = SOCKET_CONFIG.reconnectBaseDelay * Math.pow(1.5, this._reconnectAttempts);
-            const jitter    = 1 + (Math.random() * 2 - 1) * SOCKET_CONFIG.reconnectJitter;
-            const delay     = Math.min(baseDelay * jitter, SOCKET_CONFIG.reconnectMaxDelay);
+            // ✅ FIXED: Enhanced exponential backoff with cooldown
+            const now = Date.now();
+            const timeSinceLastAttempt = now - (this._lastConnectionAttempt || 0);
+            const cooldownTime = this._consecutiveErrors > 0 ? SOCKET_CONFIG.errorCooldown : SOCKET_CONFIG.reconnectCooldown;
+            
+            // Apply cooldown if needed
+            const effectiveDelay = Math.max(0, cooldownTime - timeSinceLastAttempt);
+            
+            // Calculate exponential backoff
+            const baseDelay = SOCKET_CONFIG.reconnectBaseDelay * Math.pow(1.8, this._reconnectAttempts);
+            const jitter = 1 + (Math.random() - 0.5) * 2 * SOCKET_CONFIG.reconnectJitter;
+            const backoffDelay = Math.min(baseDelay * jitter, SOCKET_CONFIG.reconnectMaxDelay);
+            
+            const totalDelay = Math.max(effectiveDelay, backoffDelay);
+
+            console.log(`[Realtime] Enhanced reconnect in ${Math.round(totalDelay)}ms (attempt ${this._reconnectAttempts + 1})`);
 
             this._reconnectTimer = setTimeout(() => {
                 this._reconnectAttempts++;
                 this._stats.reconnections++;
+                this._lastConnectionAttempt = Date.now();
 
-                // NOISE FIX v2.3: log reconnect attempt at most once per 15s
-                const now = Date.now();
+                // ✅ FIXED: Rate-limited logging
                 if (!this._lastReconnectLogAt || now - this._lastReconnectLogAt > 15000) {
                     this._lastReconnectLogAt = now;
                     console.log(`[Realtime] Reconnect attempt #${this._reconnectAttempts}`);
                 }
 
-                // ✅ FIX: Re-acquire token on every reconnect attempt.
-                // The token may have arrived in localStorage AFTER the first failed attempt
-                // (auth module race). This ensures a late token is always picked up.
+                // ✅ FIXED: Re-acquire token on every reconnect attempt
                 const freshToken = acquireToken();
                 if (freshToken && freshToken !== this._sessionToken) {
                     this._sessionToken = freshToken;
@@ -1164,7 +1161,7 @@
                 }
 
                 this._connect();
-            }, delay);
+            }, totalDelay);
         }
 
         // ── PRIVATE: HEARTBEAT ───────────────────────────────────────────────

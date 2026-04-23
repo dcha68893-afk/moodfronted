@@ -4897,15 +4897,17 @@ Type: ${message.type || 'text'}`;
             const targetUserId = payload.userId || payload.recipientId;
             const targetUserName = payload.userName || payload.recipientName || 'User';
             const targetAvatar = payload.userAvatar || payload.recipientAvatar || null;
+            const findExisting = payload.findExisting || false;
+            const returnFromCall = payload.returnFromCall || false;
 
-            console.log('[MessageUI] Received OPEN_CHAT_WITH_USER postMessage:', { targetUserId, targetUserName });
+            console.log('[MessageUI] Received OPEN_CHAT_WITH_USER postMessage:', { targetUserId, targetUserName, findExisting, returnFromCall });
 
             if (!targetUserId) {
                 console.error('[MessageUI] OPEN_CHAT_WITH_USER: No userId in payload');
                 return;
             }
 
-            openChatWithUserInUI(targetUserId, targetUserName, targetAvatar);
+            openChatWithUserInUI(targetUserId, targetUserName, targetAvatar, { findExisting, returnFromCall });
         });
         
         // FIX: Do NOT auto-open chat from sessionStorage on init.
@@ -4916,8 +4918,9 @@ Type: ${message.type || 'text'}`;
         // which is called only after the lifecycle reaches ACTIVE and the user action is confirmed.
     }
 
-    function openChatWithUserInUI(userId, userName, userAvatar) {
-        console.log('[MessageUI] Opening chat with user:', { userId, userName, userAvatar });
+    function openChatWithUserInUI(userId, userName, userAvatar, options = {}) {
+        const { findExisting = false, returnFromCall = false } = options;
+        console.log('[MessageUI] Opening chat with user:', { userId, userName, userAvatar, findExisting, returnFromCall });
         
         const numericUserId = parseInt(userId);
         const core = getMessagesCore();
@@ -4991,7 +4994,20 @@ Type: ${message.type || 'text'}`;
 
         if (core && typeof core.openConversation === 'function') {
             console.log('[MessageUI] Using core.openConversation');
-            core.openConversation(numericUserId);
+            
+            // ✅ FIXED: Check for existing conversation if findExisting is true
+            if (findExisting && typeof core.findExistingConversation === 'function') {
+                const existingConv = core.findExistingConversation(numericUserId);
+                if (existingConv) {
+                    console.log('[MessageUI] Found existing conversation:', existingConv.id);
+                    core.openConversation(existingConv.id);
+                } else {
+                    console.log('[MessageUI] No existing conversation found, creating new one');
+                    core.openConversation(numericUserId);
+                }
+            } else {
+                core.openConversation(numericUserId);
+            }
             
             setTimeout(() => {
                 const _nameEl2 = document.getElementById('chatFriendName');

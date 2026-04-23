@@ -858,6 +858,19 @@
             localStorage.setItem('app_settings', JSON.stringify(this.data));
         },
         set(key, value) {
+            // Validate key and value to prevent undefined logging
+            if (key === undefined || key === null || key === 'undefined') {
+                console.warn('[SETTINGS] Invalid key provided to set:', key);
+                return;
+            }
+            if (value === undefined && key !== undefined) {
+                console.warn('[SETTINGS] Setting undefined value for key:', key);
+                // Don't store undefined values, delete instead
+                delete this.data[key];
+                this.save();
+                this.notify(key, undefined);
+                return;
+            }
             this.data[key] = value;
             this.save();
             console.log('[SETTINGS UPDATED]', key, value);

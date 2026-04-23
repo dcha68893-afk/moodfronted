@@ -2894,3 +2894,115 @@ input:focus + .toggle-slider,
 .video-container.remote-video-container {
   position: relative;
 }
+/* ═══════════════════════════════════════════════════════════
+   CALLING OVERLAY  (outgoing / dialing screen)
+═══════════════════════════════════════════════════════════ */
+.calling-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 10000;
+    background: linear-gradient(160deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+}
+.calling-overlay.active {
+    display: flex;
+}
+
+.calling-container {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+    padding: 40px 32px;
+    text-align: center;
+}
+
+/* Pulsing ring animation */
+.calling-pulse-ring {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 160px;
+    height: 160px;
+    border-radius: 50%;
+    border: 3px solid rgba(255,255,255,0.15);
+    animation: callingPulse 1.8s ease-out infinite;
+    pointer-events: none;
+}
+.calling-pulse-ring::before,
+.calling-pulse-ring::after {
+    content: '';
+    position: absolute;
+    inset: -20px;
+    border-radius: 50%;
+    border: 2px solid rgba(255,255,255,0.08);
+    animation: callingPulse 1.8s ease-out infinite;
+}
+.calling-pulse-ring::after {
+    inset: -40px;
+    animation-delay: 0.4s;
+}
+@keyframes callingPulse {
+    0%   { transform: scale(0.95); opacity: 0.8; }
+    70%  { transform: scale(1.15); opacity: 0.15; }
+    100% { transform: scale(1.3);  opacity: 0; }
+}
+
+.calling-avatar {
+    position: relative;
+    width: 100px;
+    height: 100px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, var(--accent-color, #0084ff), #7b2ff7);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 38px;
+    font-weight: 700;
+    color: #fff;
+    border: 3px solid rgba(255,255,255,0.2);
+    overflow: hidden;
+    flex-shrink: 0;
+    z-index: 1;
+}
+.calling-avatar img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    border-radius: 50%;
+}
+
+.calling-name {
+    font-size: 26px;
+    font-weight: 600;
+    color: #fff;
+    margin: 8px 0 0;
+    z-index: 1;
+}
+
+.calling-status {
+    font-size: 15px;
+    color: rgba(255,255,255,0.65);
+    margin: 0;
+    z-index: 1;
+    letter-spacing: 0.3px;
+}
+
+.calling-type {
+    font-size: 13px;
+    color: rgba(255,255,255,0.4);
+    margin: 0;
+    z-index: 1;
+}
+
+.calling-actions {
+    margin-top: 36px;
+    display: flex;
+    justify-content: center;
+    z-index: 1;
+}

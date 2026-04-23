@@ -2496,6 +2496,22 @@ window.__CALLS_IFRAME__ = {
         </div>
     </div>
     
+    <!-- Calling Overlay (Outgoing Call) -->
+    <div class="calling-overlay" id="callingOverlay">
+        <div class="calling-container">
+            <div class="calling-pulse-ring"></div>
+            <div class="calling-avatar" id="callingAvatar"></div>
+            <h3 class="calling-name" id="callingName">Calling...</h3>
+            <p class="calling-status" id="callingStatus">Ringing...</p>
+            <p class="calling-type" id="callingType">Voice Call</p>
+            <div class="calling-actions">
+                <button class="control-btn danger" id="cancelCallBtn" style="width:72px;height:72px;font-size:28px;" title="Cancel Call">
+                    <i class="fas fa-phone-slash"></i>
+                </button>
+            </div>
+        </div>
+    </div>
+
     <!-- New Call Modal -->
     <div class="new-call-modal" id="newCallModal">
         <div class="new-call-container">
@@ -3118,10 +3134,9 @@ window.__CALLS_IFRAME__ = {
     <script src="/js/vendor/chart.min.js"></script>
     <script src="/js/vendor/pickr.min.js"></script>
     <script src="/js/vendor/marked.min.js"></script>
-
     <script src="localStore.calls.js"></script>
-<script src="callSession.manager.js"></script>
-<script src="callRetry.engine.js"></script>
+    <script src="callSession.manager.js"></script>
+    <script src="callRetry.engine.js"></script>
     <script src="/js/app.stability.bridge.js"></script>
     <!-- Application modules (ES6 modules) - loaded in correct order -->
     <script type="module" src="calls-core.js"></script>

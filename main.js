@@ -346,10 +346,11 @@ class PWAManager {
     // CRITICAL FIX: Enhanced real-time online/offline detection
     this.setupEnhancedNetworkListeners();
 
-    // Controller change - reload page
+    // Controller change - SAFE: no forced reload
     navigator.serviceWorker?.addEventListener('controllerchange', () => {
-      console.log('kynecta: Controller changed - reloading page');
-      this.showReloadNotification();
+      console.log('kynecta: Controller changed - new SW active (no reload)');
+      // FIXED: Removed automatic reload to prevent infinite loops
+      // Updates will apply naturally on next navigation
     });
 
     // Before install prompt
@@ -502,6 +503,17 @@ class PWAManager {
         this.handleStatusUpdate(data);
         break;
       
+      // ✅ SAFE: Handle update notifications without forcing reload
+      case 'UPDATE_AVAILABLE_SAFE':
+        console.log('kynecta: Update available - will apply on next navigation');
+        this.showUpdateAvailableNotification(data);
+        break;
+      
+      // ❌ DANGEROUS: Removed SW_ACTIVATED handling that caused reload loops
+      // case 'SW_ACTIVATED':
+      //   window.location.reload(); // REMOVED - caused infinite loops
+      //   break;
+      
       default:
         console.log('kynecta: Unknown message type:', data.type);
     }
@@ -584,24 +596,24 @@ class PWAManager {
     return null;
   }
 
-  // Update notification
+  // Safe update notification - NO forced reloads
   showUpdateNotification() {
-    // Create a stylish update notification
+    // Create a non-intrusive update notification
     if (this.isUpdateAvailable && !document.querySelector('.update-notification')) {
       const notification = document.createElement('div');
       notification.className = 'update-notification fixed top-4 right-4 bg-blue-600 text-white p-4 rounded-lg shadow-lg z-50 max-w-sm';
       notification.innerHTML = `
         <div class="flex items-center justify-between">
           <div class="flex items-center">
-            <span class="text-lg mr-2">🔄</span>
+            <span class="text-lg mr-2">✨</span>
             <div>
               <p class="font-semibold">Update Available</p>
-              <p class="text-sm opacity-90">New features are ready!</p>
+              <p class="text-sm opacity-90">Updates will apply automatically</p>
             </div>
           </div>
-          <button onclick="this.closest('.update-notification').remove(); window.pwaManager.reloadForUpdate()" 
+          <button onclick="this.closest('.update-notification').remove()" 
                   class="ml-4 bg-white text-blue-600 px-3 py-1 rounded text-sm font-semibold hover:bg-blue-50">
-            Reload
+            Dismiss
           </button>
         </div>
       `;
@@ -614,6 +626,13 @@ class PWAManager {
         }
       }, 10000);
     }
+  }
+
+  // Safe update available notification from service worker
+  showUpdateAvailableNotification(data) {
+    console.log('kynecta: Update available notification:', data);
+    // Show subtle notification without forcing reload
+    this.showUpdateNotification();
   }
 
   // Reload notification
@@ -703,17 +722,9 @@ class PWAManager {
            document.referrer.includes('android-app://');
   }
 
-  // Force update reload
-  reloadForUpdate() {
-    if (this.isUpdateAvailable) {
-      // Tell service worker to skip waiting and reload
-      if (navigator.serviceWorker?.controller) {
-        navigator.serviceWorker.controller.postMessage({ type: 'SKIP_WAITING' });
-      } else {
-        window.location.reload();
-      }
-    }
-  }
+  // ✅ SAFE: Update applied naturally - no forced reload needed
+  // reloadForUpdate() method removed to prevent infinite loops
+  // Updates now apply automatically on next navigation
 
   // Online/offline handlers
   handleOnline() {
