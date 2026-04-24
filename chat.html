@@ -452,6 +452,32 @@
             display: none;
         }
 
+        /* ── CALL SCREEN: full screen on ALL screen sizes ── */
+        /* When a call is active the calls iframe must cover  */
+        /* the entire viewport — header, sidebar, nav bar     */
+        /* must all be hidden behind the call panel.          */
+        body.call-screen-active #callsContent {
+            top: 0 !important;
+            bottom: 0 !important;
+            left: 0 !important;
+            right: 0 !important;
+            z-index: 10000 !important;
+            background: transparent !important;
+        }
+        body.call-screen-active #globalHeader {
+            opacity: 0 !important;
+            pointer-events: none !important;
+            visibility: hidden !important;
+        }
+        body.call-screen-active #permanentSidebar {
+            z-index: 0 !important;
+            opacity: 0 !important;
+            pointer-events: none !important;
+        }
+        body.call-screen-active .mobile-nav-bar {
+            z-index: 0 !important;
+        }
+
         .content-iframe {
             width: 100%;
             height: 100%;
@@ -1010,18 +1036,32 @@
                 /* Leave room for the 76px bottom nav + safe area */
                 bottom: 76px;
             }
-            body.chat-panel-active .iframe-container,
-            body.call-screen-active .iframe-container {
+            body.chat-panel-active .iframe-container {
                 bottom: 0;
             }
+
+            /* ── CALL SCREEN: calls iframe goes TRULY full screen ── */
+            /* position:fixed inside iframe = fixed to iframe viewport  */
+            /* We must expand the iframe to cover the full screen so    */
+            /* the calling panel fills edge-to-edge, name + buttons     */
+            /* are not clipped behind header or nav bar.                */
+            body.call-screen-active #callsContent {
+                top: 0 !important;
+                bottom: 0 !important;
+                left: 0 !important;
+                right: 0 !important;
+                z-index: 10000 !important;
+            }
+
             #globalHeader {
                 left: 0;
                 padding: 0 14px;
             }
             body.chat-panel-active #globalHeader,
             body.call-screen-active #globalHeader {
-                opacity: 0.3;
-                pointer-events: none;
+                opacity: 0 !important;
+                pointer-events: none !important;
+                visibility: hidden !important;
             }
             .header-module-subtitle {
                 display: none;
@@ -2144,6 +2184,54 @@
                     input::placeholder, textarea::placeholder {
                         color: #9ca3af !important;
                     }
+
+                    /* ── CALLING PANEL: never let dark theme override these ── */
+                    .calling-overlay,
+                    .incoming-call-modal {
+                        background: linear-gradient(160deg,
+                            #0d1b2a 0%, #1a2744 35%,
+                            #112240 65%, #0a1628 100%) !important;
+                        color: #ffffff !important;
+                    }
+                    .calling-name,
+                    .incoming-call-name {
+                        color: #ffffff !important;
+                    }
+                    .calling-status,
+                    .calling-type,
+                    .calling-encryption,
+                    .calling-ctrl-label {
+                        color: rgba(255,255,255,0.90) !important;
+                    }
+                    .calling-ctrl-btn {
+                        background: #ffffff !important;
+                        color: #111111 !important;
+                    }
+                    .calling-ctrl-btn i,
+                    .calling-ctrl-btn .fas,
+                    .calling-ctrl-btn .far {
+                        color: #111111 !important;
+                    }
+                    .calling-end-btn {
+                        background: #e11d1d !important;
+                        color: #ffffff !important;
+                    }
+                    .calling-end-btn i { color: #ffffff !important; }
+                    .calling-accept-btn {
+                        background: #16a34a !important;
+                        color: #ffffff !important;
+                    }
+                    .calling-accept-btn i { color: #ffffff !important; }
+                    .calling-video-btn {
+                        background: #1d4ed8 !important;
+                        color: #ffffff !important;
+                    }
+                    .calling-video-btn i { color: #ffffff !important; }
+                    .calling-top-btn {
+                        background: #ffffff !important;
+                        color: #111111 !important;
+                    }
+                    .calling-top-btn i { color: #111111 !important; }
                 `;
                 doc.head.insertBefore(style, doc.head.firstChild);
 

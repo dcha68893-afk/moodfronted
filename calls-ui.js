@@ -184,52 +184,153 @@ const GlobalCallHistory = {
         showNotificationInCalls(`Starting ${callType} call with ${userName}...`, 'info');
         
         const callId = `call_${Date.now()}_${userId}`;
-        
-        const callContainer = document.getElementById('callContainer');
+
+        // ── HELPER: tear down the calling screen on failure ──────────────────
+        function _abortCallerScreen(msg) {
+            const co = document.getElementById('callingOverlay');
+            const cc = document.getElementById('callContainer');
+            const sb = document.getElementById('sidebar');
+            if (co) co.classList.remove('active');
+            if (cc) cc.classList.remove('active');
+            if (sb) sb.style.display = 'flex';
+            showNotificationInCalls(msg || 'Failed to start call', 'error');
+            if (window.callCore && window.callCore.forceResetCallState) window.callCore.forceResetCallState();
+        }
+
+        // ── STEP 1: Use new 3-state overlay system ────────────
+        // NEVER hide sidebar or main content - always use overlay
         const sidebar = document.getElementById('sidebar');
-        if (callContainer) callContainer.classList.add('active');
-        if (sidebar) sidebar.style.display = 'none';
-        
+        if (sidebar) sidebar.style.display = 'flex'; // Always keep sidebar visible
+
+        // ── STEP 2: Populate call header ─────────────────────────────────────
         const callHeaderEndBtn = document.getElementById('callHeaderEndBtn');
-        if (callHeaderEndBtn) callHeaderEndBtn.style.display = 'flex';
+        if (callHeaderEndBtn) {
+            callHeaderEndBtn.style.display = 'flex';
+            if (!callHeaderEndBtn._wired) {
+                callHeaderEndBtn._wired = true;
+                callHeaderEndBtn.addEventListener('click', function() {
+                    if (window.callCore && window.callCore.endCall) window.callCore.endCall();
+                    _abortCallerScreen('Call ended');
+                });
+            }
+        }
         const callTypeIconEl = document.getElementById('callTypeIcon');
         if (callTypeIconEl) callTypeIconEl.innerHTML = callType === 'video' ? '<i class="fas fa-video"></i>' : '<i class="fas fa-phone"></i>';
-
         const callWithName = document.getElementById('callWithName');
         if (callWithName) callWithName.textContent = userName;
         const callStatusText = document.getElementById('callStatusText');
-        if (callStatusText) callStatusText.textContent = 'Initiating call...';
+        if (callStatusText) callStatusText.textContent = 'Calling...';
+
+        // ── STEP 3: Use new 3-state overlay system ──
+        (function _useNewOverlaySystem() {
+            // Initialize CallOverlay manager if available
+            if (window.CallOverlayManager && window.CallOverlayManager.initialize) {
+                window.CallOverlayManager.initialize();
+            }
+
+            // Prepare call data for overlay
+            const callInfo = {
+                userName: userName || 'User',
+                userId: userId,
+                callType: callType,
+                status: 'Calling...',
+                userAvatar: null
+            };
+
+            // Try to get user avatar from contacts
+            const contacts = (window.callsUI && window.callsUI.getContacts && window.callsUI.getContacts()) || [];
+            const contact = contacts.find(c => String(c.id) === String(userId) || c.username === userId);
+            const photoUrl = contact && (contact.avatar || contact.photo || contact.profilePhoto);
+            
+            if (photoUrl) {
+                const initial = (userName || 'U').charAt(0).toUpperCase();
+                callInfo.userAvatar = `<img src="${photoUrl}" alt="${userName}" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">`;
+            } else {
+                callInfo.userAvatar = `<i class="fas fa-user"></i>`;
+            }
+
+            // Start with CALLING state (floating panel)
+            if (window.CallOverlayManager) {
+                window.CallOverlayManager.startCall(callInfo);
+            }
+
+            // ── STEP 4: Now fire actual network call (async, overlay already visible) ──
+            async function _initiateNetworkCall() {
+                if (window.callCore && window.callCore.initiateCall) {
+                    const result = await window.callCore.initiateCall(callType, [parseInt(userId)]);
+                    if (result && result.success) {
+                        showNotificationInCalls(`${callType === 'video' ? 'Video call' : 'Voice call'} started with ${userName}`, 'success');
+                        // Update overlay status to "Ringing..."
+                        if (window.CallOverlayManager) {
+                            window.CallOverlayManager.setState(window.CallOverlayManager.isCalling() ? 'calling' : 'calling', {
+                                ...callInfo,
+                                status: 'Ringing...'
+                            });
+                        }
+                    } else {
+                        console.error('[Calls UI] Call initiation failed:', result);
+                        if (window.CallOverlayManager) {
+                            window.CallOverlayManager.endCall();
+                        }
+                        showNotificationInCalls(result?.error || result?.reason || 'Failed to start call', 'error');
+                    }
+                } else if (window.callCore && window.callCore.startCall) {
+                    const result = await window.callCore.startCall(parseInt(userId), callType);
+                    if (result && result.success) {
+                        showNotificationInCalls(`${callType === 'video' ? 'Video call' : 'Voice call'} started with ${userName}`, 'success');
+                        // Update overlay status to "Ringing..."
+                        if (window.CallOverlayManager) {
+                            window.CallOverlayManager.setState(window.CallOverlayManager.isCalling() ? 'calling' : 'calling', {
+                                ...callInfo,
+                                status: 'Ringing...'
+                            });
+                        }
+                    } else {
+                        console.error('[Calls UI] startCall failed:', result);
+                        if (window.CallOverlayManager) {
+                            window.CallOverlayManager.endCall();
+                        }
+                        showNotificationInCalls(result?.error || result?.reason || 'Failed to start call', 'error');
+                    }
+                } else {
+                    console.error('[Calls UI] No call initiation method available');
+                    if (window.CallOverlayManager) {
+                        window.CallOverlayManager.endCall();
+                    }
+                    showNotificationInCalls('Call system not ready', 'error');
+                }
+            }
+
+            // Initiate network call after a short delay to ensure overlay is visible
+            setTimeout(_initiateNetworkCall, 100);
+        })();
         
+        // ── STEP 4: Now fire the actual network call (async, overlay already visible) ──
         if (window.callCore && window.callCore.initiateCall) {
             const result = await window.callCore.initiateCall(callType, [parseInt(userId)]);
             if (result && result.success) {
                 showNotificationInCalls(`${callType === 'video' ? 'Video call' : 'Voice call'} started with ${userName}`, 'success');
-                if (callStatusText) {
-                    callStatusText.textContent = 'Connecting...';
-                }
+                if (callStatusText) callStatusText.textContent = 'Ringing...';
+                const callingStatus = document.getElementById('callingStatus');
+                if (callingStatus) callingStatus.textContent = 'Ringing...';
             } else {
                 console.error('[Calls UI] Call initiation failed:', result);
-                showNotificationInCalls(result?.error || result?.reason || 'Failed to start call', 'error');
-                if (callContainer) callContainer.classList.remove('active');
-                if (sidebar) sidebar.style.display = 'flex';
-                if (window.callCore && window.callCore.forceResetCallState) window.callCore.forceResetCallState();
+                _abortCallerScreen(result?.error || result?.reason || 'Failed to start call');
             }
         } else if (window.callCore && window.callCore.startCall) {
             const result = await window.callCore.startCall(parseInt(userId), callType);
             if (result && result.success) {
                 showNotificationInCalls(`${callType === 'video' ? 'Video call' : 'Voice call'} started with ${userName}`, 'success');
+                if (callStatusText) callStatusText.textContent = 'Ringing...';
+                const callingStatus = document.getElementById('callingStatus');
+                if (callingStatus) callingStatus.textContent = 'Ringing...';
             } else {
                 console.error('[Calls UI] startCall failed:', result);
-                showNotificationInCalls(result?.error || result?.reason || 'Failed to start call', 'error');
-                if (callContainer) callContainer.classList.remove('active');
-                if (sidebar) sidebar.style.display = 'flex';
-                if (window.callCore && window.callCore.forceResetCallState) window.callCore.forceResetCallState();
+                _abortCallerScreen(result?.error || result?.reason || 'Failed to start call');
             }
         } else {
             console.error('[Calls UI] No call initiation method available');
-            showNotificationInCalls('Call system not ready', 'error');
-            if (callContainer) callContainer.classList.remove('active');
-            if (sidebar) sidebar.style.display = 'flex';
+            _abortCallerScreen('Call system not ready');
         }
     }
 
@@ -1792,9 +1893,9 @@ async function initiateCallWithPendingUser() {
         showNotification(`Failed to start call: ${error.message}`, 'error');
         clearPendingCall();
         
-        // Reset call UI
-        if (elements.callContainer) {
-            elements.callContainer.classList.remove('active');
+        // Reset call UI - use new overlay system
+        if (window.CallOverlayManager) {
+            window.CallOverlayManager.endCall();
         }
         if (elements.sidebar) {
             elements.sidebar.style.display = 'flex';
@@ -1911,6 +2012,12 @@ async function initiateCallWithPendingUser() {
                 callingType: '#callingType',
                 callingAvatar: '#callingAvatar',
                 cancelCallBtn: '#cancelCallBtn',
+                callingCollapseBtn: '#callingCollapseBtn',
+                callingAddBtn: '#callingAddBtn',
+                callingMuteBtn: '#callingMuteBtn',
+                callingSpeakerBtn: '#callingSpeakerBtn',
+                callingVideoToggleBtn: '#callingVideoToggleBtn',
+                callingMoreBtn: '#callingMoreBtn',
                 incomingCallModal: '#incomingCallModal',
                 incomingCallName: '#incomingCallName',
                 incomingCallType: '#incomingCallType',
@@ -3839,6 +3946,28 @@ handleContactItemClick: function(e) {
         },
         
         handleIncomingCall: function(callData) {
+            // ✅ FIX: Re-cache elements if incomingCallModal not yet resolved
+            if (!elements.incomingCallModal) {
+                if (typeof cacheElements === 'function') cacheElements();
+            }
+            if (!elements.incomingCallModal) {
+                // Last resort: query directly
+                elements.incomingCallModal    = document.getElementById('incomingCallModal');
+                elements.incomingCallName     = document.getElementById('incomingCallName');
+                elements.incomingCallType     = document.getElementById('incomingCallType');
+                elements.incomingCallAvatar   = document.getElementById('incomingCallAvatar');
+                elements.incomingCallMood     = document.getElementById('incomingCallMood');
+                elements.incomingCallIntention= document.getElementById('incomingCallIntention');
+                elements.declineTimer         = document.getElementById('declineTimer');
+                elements.declineCallBtn       = document.getElementById('declineCallBtn');
+                elements.acceptCallBtn        = document.getElementById('acceptCallBtn');
+                elements.acceptVideoCallBtn   = document.getElementById('acceptVideoCallBtn');
+            }
+            if (!elements.incomingCallModal) {
+                console.error('[Calls UI] incomingCallModal not found in DOM — cannot show incoming call');
+                return;
+            }
+
             // ── DEDUP: ignore if same call already ringing ───────────────────
             const incomingId = callData.callId || callData.id || null;
             if (window._currentIncomingCallId && window._currentIncomingCallId === incomingId) {
@@ -3929,7 +4058,13 @@ handleContactItemClick: function(e) {
                 }
                 if (elements.incomingCallAvatar) {
                     const initials = (callData.callerName || 'C').charAt(0).toUpperCase();
-                    elements.incomingCallAvatar.textContent = initials;
+                    // Use profile photo if available, else show initials
+                    const photoUrl = callData.callerAvatar || callData.callerPhoto || callData.callerProfilePhoto;
+                    if (photoUrl) {
+                        elements.incomingCallAvatar.innerHTML = `<img src="${photoUrl}" alt="${callData.callerName || 'Caller'}" onerror="this.parentNode.innerHTML='${initials}'">`;
+                    } else {
+                        elements.incomingCallAvatar.textContent = initials;
+                    }
                 }
                 if (elements.incomingCallMood) {
                     elements.incomingCallMood.dataset.mood = callData.callerMood || 'neutral';
@@ -3998,12 +4133,9 @@ handleContactItemClick: function(e) {
             // Track whether receiver is online so we can show correct status text
             UIState.callReceiverOnline = callData.receiverOnline !== false; // default true unless told otherwise
             
-            if (elements.callContainer) {
-                elements.callContainer.classList.add('active');
-            }
-            if (elements.sidebar) {
-                elements.sidebar.style.display = 'none';
-            }
+            // NEVER hide sidebar or main content - always use overlay
+            const sidebar = document.getElementById('sidebar');
+            if (sidebar) sidebar.style.display = 'flex'; // Always keep sidebar visible
             
             // Hide sidebar icons in parent frame
             if (window.parent && window.parent !== window) {
@@ -4020,13 +4152,9 @@ handleContactItemClick: function(e) {
             }
             
             const icon = UIState.callType === 'video' ? 'fa-video' : 'fa-phone';
-            if (elements.callTypeIcon) {
-                elements.callTypeIcon.innerHTML = `<i class="fas ${icon}"></i>`;
-            }
+            if (elements.callTypeIcon) elements.callTypeIcon.innerHTML = `<i class="fas ${icon}"></i>`;
             
-            if (elements.focusModeBtn) {
-                elements.focusModeBtn.style.display = 'block';
-            }
+            if (elements.focusModeBtn) elements.focusModeBtn.style.display = 'block';
             
             UIState.currentView = 'call';
 
@@ -4052,7 +4180,16 @@ handleContactItemClick: function(e) {
                     }
                 }
 
-                elements.callingOverlay.classList.add('active');
+                // Use new overlay system instead
+                if (window.CallOverlayManager && window.CallOverlayManager.startCall) {
+                    window.CallOverlayManager.startCall({
+                        userName: 'Active Call',
+                        userId: 'active',
+                        callType: callType,
+                        status: 'In Call',
+                        userAvatar: null
+                    });
+                }
 
                 // Wire cancel button
                 if (elements.cancelCallBtn && !elements.cancelCallBtn._callingWired) {
@@ -4066,15 +4203,114 @@ handleContactItemClick: function(e) {
                         UIEventHandlers.handleCallEnded && UIEventHandlers.handleCallEnded({ reason: 'cancelled', status: 'cancelled' });
                     });
                 }
+
+                // Wire collapse button — ONLY minimise if call is truly not active yet
+                // (i.e., still ringing). Once connected, collapse shows pip but keeps active.
+                if (elements.callingCollapseBtn && !elements.callingCollapseBtn._wired) {
+                    elements.callingCollapseBtn._wired = true;
+                    elements.callingCollapseBtn.addEventListener('click', function() {
+                        // Only allow collapse/hide if call has connected to call-container view
+                        // During outgoing ringing, do NOT hide the overlay — it must stay visible
+                        const isRinging = UIState.callState === 'initiating' || UIState.callState === 'ringing' || UIState.callState === 'calling';
+                        if (!isRinging) {
+                            elements.callingOverlay.classList.remove('active');
+                            if (elements.sidebar) elements.sidebar.style.display = 'flex';
+                        }
+                        // If ringing, just update icon to signal intent but stay visible
+                    });
+                }
+
+                // Wire mute button in calling overlay
+                if (elements.callingMuteBtn && !elements.callingMuteBtn._wired) {
+                    elements.callingMuteBtn._wired = true;
+                    elements.callingMuteBtn.addEventListener('click', function() {
+                        UIState.isMuted = !UIState.isMuted;
+                        const icon = this.querySelector('i');
+                        if (icon) icon.className = UIState.isMuted ? 'fas fa-microphone-slash' : 'fas fa-microphone';
+                        this.classList.toggle('is-muted', UIState.isMuted);
+                        this.style.background = '';  // let CSS class handle it
+                        if (window.callCore && window.callCore.toggleMute) window.callCore.toggleMute();
+                    });
+                }
+
+                // Wire speaker button in calling overlay
+                if (elements.callingSpeakerBtn && !elements.callingSpeakerBtn._wired) {
+                    elements.callingSpeakerBtn._wired = true;
+                    elements.callingSpeakerBtn.addEventListener('click', function() {
+                        UIState.isSpeakerOn = !UIState.isSpeakerOn;
+                        const icon = this.querySelector('i');
+                        if (icon) icon.className = UIState.isSpeakerOn ? 'fas fa-volume-up' : 'fas fa-volume-mute';
+                        this.classList.toggle('is-speaker-off', !UIState.isSpeakerOn);
+                        this.style.background = '';  // let CSS class handle it
+                    });
+                }
+
+                // Wire video toggle in calling overlay
+                if (elements.callingVideoToggleBtn && !elements.callingVideoToggleBtn._wired) {
+                    elements.callingVideoToggleBtn._wired = true;
+                    elements.callingVideoToggleBtn.addEventListener('click', function() {
+                        UIState.isVideoOff = !UIState.isVideoOff;
+                        const icon = this.querySelector('i');
+                        if (icon) icon.className = UIState.isVideoOff ? 'fas fa-video-slash' : 'fas fa-video';
+                        this.classList.toggle('is-video-off', UIState.isVideoOff);
+                        this.style.background = '';  // let CSS class handle it
+                        if (window.callCore && window.callCore.toggleVideo) window.callCore.toggleVideo();
+                    });
+                }
             })();
 
             // Timer will start in handleCallAccepted (when receiver picks up)
             // Show placeholder until then
             if (elements.callDuration) elements.callDuration.textContent = '--:--';
-            
-            // If receiver is offline, play ringtone for caller and set 2-minute auto-dismiss
+
+            // ── 2-MINUTE outgoing-call ring timer (applies regardless of online status) ──
+            // The callingOverlay must stay visible for the full 120 s unless:
+            //   (a) receiver accepts → handleCallAccepted hides it
+            //   (b) receiver declines → handleCallEnded hides it
+            //   (c) caller manually ends → cancelCallBtn hides it
+            //   (d) 120 s timeout fires → auto-dismiss below
+            (function _startOutgoingRingTimer() {
+                // Clear any pre-existing outgoing timer
+                if (window._outgoingRingTimer) {
+                    clearInterval(window._outgoingRingTimer);
+                    window._outgoingRingTimer = null;
+                }
+                let timeLeft = 120;
+                window._outgoingRingTimer = setInterval(() => {
+                    timeLeft--;
+                    // Update callingStatus label while ringing
+                    if (elements.callingStatus) {
+                        const statusLabel = UIState.callReceiverOnline ? 'Ringing...' : 'Calling...';
+                        elements.callingStatus.textContent = `${statusLabel} (${timeLeft}s)`;
+                    }
+                    if (timeLeft <= 0) {
+                        clearInterval(window._outgoingRingTimer);
+                        window._outgoingRingTimer = null;
+                        // Only auto-dismiss if call is still in ringing/initiating state
+                        const stillRinging = UIState.callState === 'initiating'
+                            || UIState.callState === 'ringing'
+                            || UIState.callState === 'calling'
+                            || UIState.callState === 'idle'; // never answered
+                        if (stillRinging) {
+                            // Stop ringtone
+                            if (window._callerRingtone) {
+                                try { window._callerRingtone.pause(); window._callerRingtone.currentTime = 0; } catch(e) {}
+                                window._callerRingtone = null;
+                            }
+                            // Dismiss calling overlay
+                            if (elements.callingOverlay) elements.callingOverlay.classList.remove('active');
+                            // Trigger call-ended cleanup
+                            UIEventHandlers.handleCallEnded({ reason: 'timeout', status: 'missed' });
+                            showNotification('Call ended — no answer after 2 minutes', 'info');
+                        }
+                    }
+                }, 1000);
+                // Store on callContainer so cleanup in handleCallEnded can find it
+                if (elements.callContainer) elements.callContainer.dataset.offlineTimer = window._outgoingRingTimer;
+            })();
+
+            // If receiver is offline, also play ringtone for caller
             if (!UIState.callReceiverOnline) {
-                // Play ringtone for caller
                 (function _playCallerRingtone() {
                     try {
                         if (window._callerRingtone) {
@@ -4091,10 +4327,7 @@ handleContactItemClick: function(e) {
                             ring.volume = 0.6;
                             const playPromise = ring.play();
                             if (playPromise && typeof playPromise.catch === 'function') {
-                                playPromise.catch(() => {
-                                    // Autoplay blocked - try Web Audio beep
-                                    _tryWebAudioBeep();
-                                });
+                                playPromise.catch(() => { _tryWebAudioBeep(); });
                             }
                             window._callerRingtone = ring;
                         } catch(e) {
@@ -4123,29 +4356,6 @@ handleContactItemClick: function(e) {
                         }
                     } catch(e) { /* silent fail */ }
                 })();
-                
-                // Set 2-minute auto-dismiss timer for offline calls
-                let timeLeft = 120;
-                const offlineTimer = setInterval(() => {
-                    timeLeft--;
-                    if (elements.callStatusText) {
-                        elements.callStatusText.textContent = `Calling... (${timeLeft}s)`;
-                    }
-                    if (timeLeft <= 0) {
-                        clearInterval(offlineTimer);
-                        // Stop ringtone
-                        if (window._callerRingtone) {
-                            try { window._callerRingtone.pause(); window._callerRingtone.currentTime = 0; } catch(e) {}
-                            window._callerRingtone = null;
-                        }
-                        // Auto-end the call
-                        this.handleCallEnded({ reason: 'timeout', status: 'missed' });
-                        showNotification('Call ended - user did not answer', 'info');
-                    }
-                }, 1000);
-                
-                // Store timer reference for cleanup
-                elements.callContainer.dataset.offlineTimer = offlineTimer;
             }
         },
         
@@ -4203,6 +4413,15 @@ handleContactItemClick: function(e) {
                 // Prune old records
                 store.prune().catch(() => {});
             })();
+
+            // ── Capture navigation target BEFORE clearing state ───────────────
+            const returnTo = window.__callOriginReturnTo
+                || window.__pendingCallReturnTo
+                || 'calls';
+            const chatUserId = window.__callOriginChatUserId
+                || window.__pendingCallChatUserId
+                || null;
+
             // Reset state FIRST
             UIState.activeCallId = null;
             UIState.callActive = false;
@@ -4211,6 +4430,7 @@ handleContactItemClick: function(e) {
             UIState.callStartTime = null;
             UIState.callType = null;
             window._currentIncomingCallId = null;
+
             // Stop any playing ringtone immediately
             if (window._incomingRingtone) {
                 try { window._incomingRingtone.pause(); window._incomingRingtone.currentTime = 0; } catch(e) {}
@@ -4221,108 +4441,115 @@ handleContactItemClick: function(e) {
                 try { window._callerRingtone.pause(); window._callerRingtone.currentTime = 0; } catch(e) {}
                 window._callerRingtone = null;
             }
-            // Clear offline timer
+            // Clear offline ring timer
             if (elements.callContainer && elements.callContainer.dataset.offlineTimer) {
                 const offlineTimer = parseInt(elements.callContainer.dataset.offlineTimer);
                 if (offlineTimer) clearInterval(offlineTimer);
                 elements.callContainer.dataset.offlineTimer = '';
             }
+            // Clear outgoing ring timer (2-minute ringing guard)
+            if (window._outgoingRingTimer) {
+                clearInterval(window._outgoingRingTimer);
+                window._outgoingRingTimer = null;
+            }
+            if (window._incomingCallTimer) {
+                clearInterval(window._incomingCallTimer);
+                window._incomingCallTimer = null;
+            }
+            if (elements.incomingCallModal && elements.incomingCallModal.dataset.timer) {
+                clearInterval(parseInt(elements.incomingCallModal.dataset.timer));
+                elements.incomingCallModal.dataset.timer = '';
+            }
             // Clear dedup locks so next call can proceed immediately
             if (window.__uiCallDispatchLock) window.__uiCallDispatchLock = { ts: 0, userId: null };
-            if (window.__earlyCallLock) window.__earlyCallLock = { ts: 0, userId: null };
-            // Clear call source context label
-            const _srcCtx = document.getElementById('callSourceCtx');
-            if (_srcCtx) _srcCtx.style.display = 'none';
 
-            if (elements.callContainer) {
-                elements.callContainer.classList.remove('active');
-            }
-            if (elements.sidebar) {
-                elements.sidebar.style.display = 'flex';
-            }
-            if (elements.incomingCallModal) {
-                elements.incomingCallModal.classList.remove('active');
-                UIState.activeModals && UIState.activeModals.delete('incomingCallModal');
-            }
-            // Hide calling overlay (outgoing dialing screen)
-            if (elements.callingOverlay) elements.callingOverlay.classList.remove('active');
-            
+            // ── Stop duration timer ──────────────────────────────────────────
             if (UIState.callDurationInterval) {
                 clearInterval(UIState.callDurationInterval);
                 UIState.callDurationInterval = null;
             }
-            // Reset duration display — shows '--:--' until next call is answered
             if (elements.callDuration) elements.callDuration.textContent = '--:--';
-            
-            // Stop local stream tracks
+
+            // ── Stop media streams ───────────────────────────────────────────
             if (UIState.localStream) {
                 UIState.localStream.getTracks().forEach(t => t.stop());
                 UIState.localStream = null;
             }
-            // Cleanup any detached audio elements from audio-only calls
             document.querySelectorAll('audio[id^="remoteAudio_"]').forEach(a => { a.srcObject = null; a.remove(); });
             UIState.remoteStreams.clear();
-            
+
             if (elements.videoGrid) {
                 elements.videoGrid.innerHTML = '';
                 if (elements.offlineCallPlaceholder) {
                     elements.offlineCallPlaceholder.style.display = 'flex';
                 }
             }
-            
-            if (elements.focusModeBtn) {
-                elements.focusModeBtn.style.display = 'none';
-            }
-            
-            if (UIState.currentFocusMode) {
-                UIEventHandlers.disableFocusMode();
-            }
-            
+
             UIState.currentView = 'sidebar';
-            
-            // Restore sidebar icons to parent
-            if (window.parent && window.parent !== window) {
-                window.parent.postMessage({ type: 'SHOW_SIDEBAR_ICONS', module: 'calls' }, '*');
-            }
 
-            // ── Navigate back to the correct screen based on call origin ──────
-            const returnTo = window.__pendingCallReturnTo || 'calls';
-            const chatUserId = window.__pendingCallChatUserId || null;
-
-            // Clear pending vars (origin backup is preserved for the full endCall path)
+            // ── Clear navigation state variables ────────────────────────────
             window.__pendingCallReturnTo = null;
             window.__pendingCallChatUserId = null;
-            // NOTE: __callOriginReturnTo / __callOriginChatUserId intentionally NOT
-            // cleared here so the full endCall() function can still read them.
+            window.__callOriginReturnTo = null;
+            window.__callOriginChatUserId = null;
 
+            // ── Restore sidebar icons to parent shell ────────────────────────
             if (window.parent && window.parent !== window) {
-                if (returnTo === 'messages' && chatUserId) {
-                    // Return to messages module AND open the specific chat
-                    window.parent.postMessage({
-                        type: 'SWITCH_MODULE',
-                        module: 'messages',
-                        payload: { returnFromCall: true, openChatWith: chatUserId },
-                        timestamp: Date.now()
-                    }, '*');
-                } else if (returnTo === 'friends') {
-                    // Return to friends/contacts page
-                    window.parent.postMessage({
-                        type: 'SWITCH_MODULE',
-                        module: 'friends',
-                        payload: { returnFromCall: true },
-                        timestamp: Date.now()
-                    }, '*');
-                }
-                // If returnTo === 'calls' we stay here — no SWITCH_MODULE needed
+                window.parent.postMessage({ type: 'SHOW_SIDEBAR_ICONS', module: 'calls' }, '*');
+                window.parent.postMessage({ type: 'CALL_ENDED_RETURN', timestamp: Date.now() }, '*');
             }
-            // ──────────────────────────────────────────────────────────────────
 
-            // Refresh call history
-            setTimeout(() => UIEventHandlers.refreshCallHistoryAfterCall && UIEventHandlers.refreshCallHistoryAfterCall(), 800);
-
+            // ── Navigate back to origin module (with short delay for animation) ──
             setTimeout(() => {
-                UIEventHandlers.showPrivateNotesModal();
-            }, 500);
+                if (window.parent && window.parent !== window) {
+                    if (returnTo === 'messages' && chatUserId) {
+                        // Return to messages module AND re-open the specific chat
+                        window.parent.postMessage({
+                            type: 'SWITCH_MODULE',
+                            module: 'messages',
+                            payload: { returnFromCall: true, openChatWith: chatUserId },
+                            timestamp: Date.now()
+                        }, '*');
+                    } else if (returnTo === 'friends') {
+                        // Return to friends/contacts page
+                        window.parent.postMessage({
+                            type: 'SWITCH_MODULE',
+                            module: 'friends',
+                            payload: { returnFromCall: true },
+                            timestamp: Date.now()
+                        }, '*');
+                    } else if (returnTo && returnTo !== 'calls') {
+                        // Return to any other named module
+                        window.parent.postMessage({
+                            type: 'SWITCH_MODULE',
+                            module: returnTo,
+                            payload: { returnFromCall: true },
+                            timestamp: Date.now()
+                        }, '*');
+                    }
+                    // If returnTo === 'calls', stay on this screen — no SWITCH_MODULE needed
+                }
+
+                // NEVER hide sidebar or main content - always use overlay
+                const sidebar = document.getElementById('sidebar');
+                if (sidebar) sidebar.style.display = 'flex'; // Always keep sidebar visible
+                
+                // Use new overlay system instead
+                if (window.CallOverlayManager && window.CallOverlayManager.endCall) {
+                    window.CallOverlayManager.endCall();
+                }
+                UIState.currentView = 'sidebar';
+            }, 350); // 350ms — enough for overlay fade but snappy UX
+
+            // ── Refresh call history ─────────────────────────────────────────
+            setTimeout(() => {
+                UIEventHandlers.refreshCallHistoryAfterCall && UIEventHandlers.refreshCallHistoryAfterCall();
+            }, 800);
+
+            // ── Show post-call notes modal (after navigation settles) ────────
+            setTimeout(() => {
+                UIEventHandlers.showPrivateNotesModal && UIEventHandlers.showPrivateNotesModal();
+            }, 700);
         },
         
         handleRemoteStreamAdded: function(payload) {
@@ -5384,16 +5611,28 @@ handleContactItemClick: function(e) {
         // Show the calls sidebar (list view) — called when returning to calls after a call ends
         showCallsSidebar: function() {
             UIState.currentView = 'sidebar';
-            if (elements.sidebar) elements.sidebar.style.display = 'flex';
-            if (elements.callContainer) elements.callContainer.classList.remove('active');
+            // NEVER hide sidebar or main content - always use overlay
+            const sidebar = document.getElementById('sidebar');
+            if (sidebar) sidebar.style.display = 'flex'; // Always keep sidebar visible
+            
+            // Use new overlay system instead
+            if (window.CallOverlayManager && window.CallOverlayManager.endCall) {
+                window.CallOverlayManager.endCall();
+            }
             if (elements.focusModeBtn) elements.focusModeBtn.style.display = 'none';
         },
 
         // Reset all call-related UI back to idle state
         resetCallUI: function() {
             UIState.currentView = 'sidebar';
-            if (elements.sidebar) elements.sidebar.style.display = 'flex';
-            if (elements.callContainer) elements.callContainer.classList.remove('active');
+            // NEVER hide sidebar or main content - always use overlay
+            const sidebar = document.getElementById('sidebar');
+            if (sidebar) sidebar.style.display = 'flex'; // Always keep sidebar visible
+            
+            // Use new overlay system instead
+            if (window.CallOverlayManager && window.CallOverlayManager.endCall) {
+                window.CallOverlayManager.endCall();
+            }
             if (elements.callStatusText) elements.callStatusText.textContent = '';
             if (elements.callTimer) elements.callTimer.textContent = '0:00';
             // Clear dedup locks
@@ -5631,17 +5870,20 @@ handleContactItemClick: function(e) {
         },
         
         showCallUI: function() {
-            if (elements.sidebar) elements.sidebar.style.display = 'none';
-            if (elements.callContainer) elements.callContainer.classList.add('active');
+            // NEVER hide sidebar or main content - always use overlay
+            const sidebar = document.getElementById('sidebar');
+            if (sidebar) sidebar.style.display = 'flex'; // Always keep sidebar visible
             
-            const participantNames = UIState.callParticipants?.map(p => p.name).join(', ') || 'Call';
-            if (elements.callWithName) elements.callWithName.textContent = SecuritySanitizer.sanitizeString(participantNames);
-            if (elements.callStatusText) elements.callStatusText.textContent = 'Connecting...';
-            
-            const icon = UIState.callType === 'video' ? 'fa-video' : 'fa-phone';
-            if (elements.callTypeIcon) elements.callTypeIcon.innerHTML = `<i class="fas ${icon}"></i>`;
-            
-            if (elements.focusModeBtn) elements.focusModeBtn.style.display = 'block';
+            // Use new overlay system instead
+            if (window.CallOverlayManager && window.CallOverlayManager.startCall) {
+                window.CallOverlayManager.startCall({
+                        userName: 'Active Call',
+                        userId: 'active',
+                        callType: 'voice',
+                        status: 'In Call',
+                        userAvatar: null
+                    });
+                }
             
             UIState.currentView = 'call';
         },
@@ -5931,7 +6173,16 @@ handleContactItemClick: function(e) {
                             payload: { returnFromCall: true },
                             timestamp: Date.now()
                         }, '*');
+                    } else if (returnTo && returnTo !== 'calls') {
+                        // Any other origin module — navigate back to it
+                        window.parent.postMessage({
+                            type: 'SWITCH_MODULE',
+                            module: returnTo,
+                            payload: { returnFromCall: true },
+                            timestamp: Date.now()
+                        }, '*');
                     }
+                    // returnTo === 'calls' → stay here, no SWITCH_MODULE needed
                 }
                 
                 // Also force UI update locally
@@ -5939,7 +6190,7 @@ handleContactItemClick: function(e) {
                 if (elements.callContainer) elements.callContainer.classList.remove('active');
                 UIState.currentView = 'sidebar';
                 
-            }, 800);
+            }, 350);
         },
 
 refreshCallHistoryAfterCall: async function() {
@@ -7348,13 +7599,20 @@ declineIncomingCall: async function() {
             UIState.activeModals && UIState.activeModals.delete('incomingCallModal');
         }
 
-        // Show active call container
-        if (elements.callContainer) {
-            elements.callContainer.classList.add('active');
+        // NEVER hide sidebar or main content - always use overlay
+        const sidebar = document.getElementById('sidebar');
+        if (sidebar) sidebar.style.display = 'flex'; // Always keep sidebar visible
+        
+        // Use new overlay system instead
+        if (window.CallOverlayManager && window.CallOverlayManager.startCall) {
+            window.CallOverlayManager.startCall({
+                userName: 'Active Call',
+                userId: 'active',
+                callType: 'voice',
+                status: 'In Call',
+                userAvatar: null
+            });
         }
-
-        // Hide sidebar
-        if (elements.sidebar) elements.sidebar.style.display = 'none';
 
         // Tell parent frame to hide sidebar icons
         try {
@@ -8165,4 +8423,600 @@ if (detectExistingCore()) {
         }
     });
 }
+})();
+// ══════════════════════════════════════════════════════════════════════════════
+// ██  CallOverlayManager — 3-state floating overlay system                   ██
+// ██  States: "idle" | "calling" | "in-call"                                 ██
+// ██  NEVER hides sidebar. NEVER replaces main content.                      ██
+// ██  Always renders as a floating panel on top of existing layout.          ██
+// ══════════════════════════════════════════════════════════════════════════════
+(function() {
+    'use strict';
+
+    // ── Internal state ──────────────────────────────────────────────────────
+    let _state     = 'idle';         // "idle" | "calling" | "in-call"
+    let _callInfo  = null;           // { userName, userId, callType, status, userAvatar }
+    let _minimized = false;
+    let _expanded  = false;
+    let _durationTimer = null;
+    let _durationSecs  = 0;
+    let _initialized   = false;
+
+    // ── Overlay element references (resolved lazily) ─────────────────────
+    function _el(id) { return document.getElementById(id); }
+
+    // ── Theme detection ───────────────────────────────────────────────────
+    function _isDark() {
+        return document.documentElement.classList.contains('dark') ||
+               document.body.classList.contains('dark-mode') ||
+               document.body.classList.contains('theme-dark') ||
+               document.documentElement.getAttribute('data-theme') === 'dark' ||
+               window.matchMedia('(prefers-color-scheme: dark)').matches;
+    }
+
+    // ── Ensure sidebar & main content ALWAYS remain visible ──────────────
+    function _enforceLayoutIntegrity() {
+        const sidebar = _el('sidebar') || document.querySelector('.sidebar');
+        const appContainer = _el('appContainer') || document.querySelector('.app-container');
+
+        if (sidebar) {
+            sidebar.style.removeProperty('display');
+            sidebar.style.removeProperty('visibility');
+            sidebar.style.removeProperty('opacity');
+            sidebar.style.display = 'flex';
+        }
+        if (appContainer) {
+            appContainer.style.display      = 'flex';
+            appContainer.style.visibility   = 'visible';
+            appContainer.style.opacity      = '1';
+            appContainer.style.pointerEvents = 'auto';
+        }
+
+        // Also ensure call-container never pushes out the sidebar
+        const callContainer = _el('callContainer') || document.querySelector('.call-container');
+        if (callContainer) {
+            // call-container should not activate as a layout replacement
+            callContainer.classList.remove('active');
+            callContainer.style.display = 'none';
+        }
+    }
+
+    // ── Build minimized bar HTML ─────────────────────────────────────────
+    function _buildMinimizedBar(info) {
+        const name = _sanitizeText(info.userName || 'User');
+        const status = _sanitizeText(info.status || 'Calling...');
+        const isInCall = _state === 'in-call';
+        return `
+            <div id="comMinimizedBar" style="
+                display:flex; align-items:center; justify-content:space-between;
+                padding:12px 14px; cursor:pointer;
+                background:rgba(0,0,0,0.35);
+            " title="Click to expand">
+                <div style="display:flex;align-items:center;gap:10px;">
+                    <div style="
+                        width:36px;height:36px;border-radius:50%;
+                        background:linear-gradient(135deg,#1a7fe0,#7b2ff7);
+                        display:flex;align-items:center;justify-content:center;
+                        font-size:14px;font-weight:700;color:#fff;
+                        flex-shrink:0; overflow:hidden;
+                    ">${info.userAvatar || _initial(name)}</div>
+                    <div>
+                        <div style="color:#fff;font-weight:600;font-size:14px;line-height:1.2;">${name}</div>
+                        <div style="color:rgba(255,255,255,0.70);font-size:11px;">${isInCall ? '<span id="comMiniDuration">--:--</span>' : status}</div>
+                    </div>
+                </div>
+                <div style="display:flex;gap:8px;align-items:center;">
+                    ${isInCall ? `
+                    <button id="comMiniMuteBtn" title="Mute" style="
+                        width:32px;height:32px;border-radius:50%;border:none;
+                        background:rgba(255,255,255,0.15);color:#fff;
+                        font-size:13px;cursor:pointer;display:flex;align-items:center;justify-content:center;
+                    "><i class="fas fa-microphone"></i></button>
+                    ` : ''}
+                    <button id="comExpandBtn" title="Expand" style="
+                        width:32px;height:32px;border-radius:50%;border:none;
+                        background:rgba(255,255,255,0.15);color:#fff;
+                        font-size:13px;cursor:pointer;display:flex;align-items:center;justify-content:center;
+                    "><i class="fas fa-expand-alt"></i></button>
+                    <button id="comEndBtn" title="End Call" style="
+                        width:32px;height:32px;border-radius:50%;border:none;
+                        background:#e11d1d;color:#fff;
+                        font-size:13px;cursor:pointer;display:flex;align-items:center;justify-content:center;
+                        box-shadow:0 2px 8px rgba(225,29,29,0.5);
+                    "><i class="fas fa-phone-slash"></i></button>
+                </div>
+            </div>`;
+    }
+
+    // ── Sanitize user-generated text (no XSS) ────────────────────────────
+    function _sanitizeText(str) {
+        const d = document.createElement('div');
+        d.textContent = String(str || '');
+        return d.innerHTML;
+    }
+
+    function _initial(name) {
+        return _sanitizeText((name || 'U').charAt(0).toUpperCase());
+    }
+
+    // ── Format duration MM:SS ─────────────────────────────────────────────
+    function _formatDuration(secs) {
+        const m = Math.floor(secs / 60);
+        const s = secs % 60;
+        return `${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+    }
+
+    // ── Start duration counter ────────────────────────────────────────────
+    function _startDurationTimer() {
+        _stopDurationTimer();
+        _durationSecs = 0;
+        _durationTimer = setInterval(() => {
+            _durationSecs++;
+            const fmt = _formatDuration(_durationSecs);
+            // Update both full panel and mini bar duration
+            const full = document.getElementById('comCallDuration');
+            const mini = document.getElementById('comMiniDuration');
+            if (full) full.textContent = fmt;
+            if (mini) mini.textContent = fmt;
+        }, 1000);
+    }
+
+    function _stopDurationTimer() {
+        if (_durationTimer) { clearInterval(_durationTimer); _durationTimer = null; }
+        _durationSecs = 0;
+    }
+
+    // ── Dismiss animation + hide ─────────────────────────────────────────
+    function _dismissOverlay(overlayEl, cb) {
+        if (!overlayEl) { if (cb) cb(); return; }
+        overlayEl.classList.add('dismissing');
+        overlayEl.classList.remove('active');
+        setTimeout(() => {
+            overlayEl.classList.remove('dismissing');
+            overlayEl.style.display = 'none';
+            if (cb) cb();
+        }, 240);
+    }
+
+    // ── Wire up the callingCollapseBtn (minimize) ─────────────────────────
+    function _wireNativeCollapseBtn() {
+        const btn = _el('callingCollapseBtn');
+        if (btn && !btn._comWired) {
+            btn._comWired = true;
+            btn.addEventListener('click', function(e) {
+                e.stopPropagation();
+                CallOverlayManager.minimize();
+            });
+        }
+    }
+
+    // ── Wire up the cancelCallBtn / declineCallBtn ────────────────────────
+    function _wireNativeEndBtns() {
+        const cancelBtn  = _el('cancelCallBtn');
+        const declineBtn = _el('declineCallBtn');
+        const acceptBtn  = _el('acceptCallBtn');
+        const acceptVidBtn = _el('acceptVideoCallBtn');
+
+        if (cancelBtn && !cancelBtn._comWired) {
+            cancelBtn._comWired = true;
+            cancelBtn.addEventListener('click', function() {
+                CallOverlayManager.endCall();
+            });
+        }
+        if (declineBtn && !declineBtn._comWired) {
+            declineBtn._comWired = true;
+            declineBtn.addEventListener('click', function() {
+                CallOverlayManager.endCall();
+            });
+        }
+        if (acceptBtn && !acceptBtn._comWired) {
+            acceptBtn._comWired = true;
+            acceptBtn.addEventListener('click', function() {
+                // transition to in-call
+                if (_callInfo) {
+                    CallOverlayManager.setState('in-call', { ..._callInfo, status: 'Connected' });
+                }
+                _dismissOverlay(_el('incomingCallModal'));
+            });
+        }
+        if (acceptVidBtn && !acceptVidBtn._comWired) {
+            acceptVidBtn._comWired = true;
+            acceptVidBtn.addEventListener('click', function() {
+                if (_callInfo) {
+                    CallOverlayManager.setState('in-call', { ..._callInfo, callType: 'video', status: 'Connected' });
+                }
+                _dismissOverlay(_el('incomingCallModal'));
+            });
+        }
+    }
+
+    // ── Wire in-call control buttons ─────────────────────────────────────
+    function _wireInCallControls() {
+        const muteBtn    = _el('callingMuteBtn');
+        const speakerBtn = _el('callingSpeakerBtn');
+        const videoBtn   = _el('callingVideoToggleBtn');
+
+        if (muteBtn && !muteBtn._comWired) {
+            muteBtn._comWired = true;
+            muteBtn.addEventListener('click', function() {
+                const isMuted = this.classList.toggle('ctrl-active');
+                const icon = this.querySelector('i');
+                if (icon) icon.className = isMuted ? 'fas fa-microphone' : 'fas fa-microphone-slash';
+                if (window.callCore && window.callCore.toggleMute) window.callCore.toggleMute();
+            });
+        }
+        if (speakerBtn && !speakerBtn._comWired) {
+            speakerBtn._comWired = true;
+            speakerBtn.addEventListener('click', function() {
+                const isOn = this.classList.toggle('ctrl-active');
+                const icon = this.querySelector('i');
+                if (icon) icon.className = isOn ? 'fas fa-volume-mute' : 'fas fa-volume-up';
+                if (window.callCore && window.callCore.toggleSpeaker) window.callCore.toggleSpeaker();
+            });
+        }
+        if (videoBtn && !videoBtn._comWired) {
+            videoBtn._comWired = true;
+            videoBtn.addEventListener('click', function() {
+                const isOff = this.classList.toggle('ctrl-active');
+                const icon = this.querySelector('i');
+                if (icon) icon.className = isOff ? 'fas fa-video-slash' : 'fas fa-video';
+                if (window.callCore && window.callCore.toggleVideo) window.callCore.toggleVideo();
+            });
+        }
+    }
+
+    // ══════════════════════════════════════════════════════════════════════
+    // PUBLIC API
+    // ══════════════════════════════════════════════════════════════════════
+    const CallOverlayManager = {
+
+        // ── Initialize (idempotent) ────────────────────────────────────────
+        initialize() {
+            if (_initialized) return;
+            _initialized = true;
+            _enforceLayoutIntegrity();
+            _wireNativeCollapseBtn();
+            _wireNativeEndBtns();
+            _wireInCallControls();
+            console.log('[CallOverlayManager] Initialized. State: idle');
+        },
+
+        // ── Get current state ──────────────────────────────────────────────
+        getState()   { return _state; },
+        isCalling()  { return _state === 'calling'; },
+        isInCall()   { return _state === 'in-call'; },
+        isIdle()     { return _state === 'idle'; },
+
+        // ── Transition to a new state ──────────────────────────────────────
+        setState(newState, callInfo) {
+            _enforceLayoutIntegrity(); // Always enforce before any state change
+
+            if (newState === 'idle') {
+                this.endCall();
+                return;
+            }
+
+            _state    = newState;
+            _callInfo = callInfo || _callInfo || {};
+            _minimized = false;
+            _expanded  = false;
+
+            const overlay = _el('callingOverlay');
+            const incomingModal = _el('incomingCallModal');
+
+            if (newState === 'calling') {
+                // Populate callingOverlay with user info
+                if (overlay) {
+                    // Update name
+                    const nameEl = _el('callingName');
+                    if (nameEl) nameEl.textContent = _callInfo.userName || 'User';
+
+                    // Update status
+                    const statusEl = _el('callingStatus');
+                    if (statusEl) statusEl.textContent = _callInfo.status || 'Calling…';
+
+                    // Update type
+                    const typeEl = _el('callingType');
+                    if (typeEl) typeEl.textContent = _callInfo.callType === 'video' ? 'Video Call' : 'Voice Call';
+
+                    // Update avatar
+                    const avatarEl = _el('callingAvatar');
+                    if (avatarEl) {
+                        avatarEl.innerHTML = _callInfo.userAvatar ||
+                            `<span style="font-size:28px;font-weight:700;color:#fff;">${_initial(_callInfo.userName)}</span>`;
+                    }
+
+                    // Remove expanded/minimized classes
+                    overlay.classList.remove('call-expanded', 'call-minimized');
+
+                    // Show overlay
+                    overlay.style.display = 'flex';
+                    requestAnimationFrame(() => { overlay.classList.add('active'); });
+                }
+
+                // Ensure incoming modal is hidden
+                if (incomingModal) {
+                    incomingModal.classList.remove('active');
+                    incomingModal.style.display = 'none';
+                }
+
+                _wireNativeCollapseBtn();
+                _wireNativeEndBtns();
+                _enforceLayoutIntegrity();
+
+            } else if (newState === 'in-call') {
+                // Close calling overlay, show expanded in-call panel
+                if (incomingModal) {
+                    _dismissOverlay(incomingModal);
+                }
+
+                if (overlay) {
+                    const nameEl   = _el('callingName');
+                    const statusEl = _el('callingStatus');
+                    const typeEl   = _el('callingType');
+                    const avatarEl = _el('callingAvatar');
+
+                    if (nameEl)   nameEl.textContent   = _callInfo.userName || 'User';
+                    if (statusEl) statusEl.textContent  = _callInfo.status   || 'Connected';
+                    if (typeEl)   typeEl.textContent    = _callInfo.callType === 'video' ? 'Video Call' : 'Voice Call';
+                    if (avatarEl) {
+                        avatarEl.innerHTML = _callInfo.userAvatar ||
+                            `<span style="font-size:28px;font-weight:700;color:#fff;">${_initial(_callInfo.userName)}</span>`;
+                    }
+
+                    overlay.classList.add('call-expanded');
+                    overlay.classList.remove('call-minimized');
+                    overlay.style.display = 'flex';
+                    requestAnimationFrame(() => { overlay.classList.add('active'); });
+                }
+
+                _startDurationTimer();
+                _wireInCallControls();
+                _enforceLayoutIntegrity();
+            }
+        },
+
+        // ── Start a new call (CALLING state) ──────────────────────────────
+        startCall(callInfo) {
+            this.initialize();
+            this.setState('calling', callInfo);
+        },
+
+        // ── Answer call (transition to IN-CALL) ───────────────────────────
+        answerCall(callInfo) {
+            this.initialize();
+            this.setState('in-call', callInfo || _callInfo);
+        },
+
+        // ── Show incoming call panel ───────────────────────────────────────
+        showIncoming(callInfo) {
+            this.initialize();
+            _callInfo = callInfo || {};
+            _state    = 'calling'; // incoming is still "calling" state logically
+
+            const modal = _el('incomingCallModal');
+            if (modal) {
+                const nameEl   = _el('incomingCallName');
+                const avatarEl = _el('incomingCallAvatar');
+                const typeEl   = _el('incomingCallType');
+
+                if (nameEl)   nameEl.textContent   = _callInfo.userName || 'Incoming Call';
+                if (typeEl)   typeEl.textContent    = _callInfo.callType === 'video' ? 'Video Call' : 'Voice Call';
+                if (avatarEl) {
+                    avatarEl.innerHTML = _callInfo.userAvatar ||
+                        `<span style="font-size:28px;font-weight:700;color:#fff;">${_initial(_callInfo.userName)}</span>`;
+                }
+
+                modal.style.display = 'flex';
+                requestAnimationFrame(() => { modal.classList.add('active'); });
+            }
+
+            _wireNativeEndBtns();
+            _enforceLayoutIntegrity();
+        },
+
+        // ── Minimize to compact bar ────────────────────────────────────────
+        minimize() {
+            if (_state === 'idle') return;
+            _minimized = true;
+
+            const overlay = _el('callingOverlay');
+            if (overlay) {
+                overlay.classList.add('call-minimized');
+                overlay.classList.remove('call-expanded');
+
+                // Wire the minimized bar click to expand
+                setTimeout(() => {
+                    const bar = document.getElementById('comMinimizedBar');
+                    if (bar && !bar._wired) {
+                        bar._wired = true;
+                        bar.addEventListener('click', (e) => {
+                            if (!e.target.closest('button')) {
+                                CallOverlayManager.expand();
+                            }
+                        });
+                    }
+                    const expandBtn = document.getElementById('comExpandBtn');
+                    if (expandBtn && !expandBtn._wired) {
+                        expandBtn._wired = true;
+                        expandBtn.addEventListener('click', (e) => {
+                            e.stopPropagation();
+                            CallOverlayManager.expand();
+                        });
+                    }
+                    const endBtn = document.getElementById('comEndBtn');
+                    if (endBtn && !endBtn._wired) {
+                        endBtn._wired = true;
+                        endBtn.addEventListener('click', (e) => {
+                            e.stopPropagation();
+                            CallOverlayManager.endCall();
+                        });
+                    }
+                }, 50);
+            }
+        },
+
+        // ── Expand from minimized ─────────────────────────────────────────
+        expand() {
+            _minimized = false;
+            const overlay = _el('callingOverlay');
+            if (overlay) {
+                overlay.classList.remove('call-minimized');
+                if (_state === 'in-call') overlay.classList.add('call-expanded');
+            }
+        },
+
+        // ── End call — return to IDLE ──────────────────────────────────────
+        endCall() {
+            _stopDurationTimer();
+
+            const overlay      = _el('callingOverlay');
+            const incomingModal = _el('incomingCallModal');
+
+            if (overlay)       _dismissOverlay(overlay);
+            if (incomingModal) _dismissOverlay(incomingModal);
+
+            _state     = 'idle';
+            _callInfo  = null;
+            _minimized = false;
+            _expanded  = false;
+
+            _enforceLayoutIntegrity();
+
+            // Notify core
+            if (window.callCore && window.callCore.endCall) {
+                try { window.callCore.endCall(); } catch(e) {}
+            }
+
+            console.log('[CallOverlayManager] Call ended. State: idle');
+        },
+
+        // ── Update status text in current state ────────────────────────────
+        updateStatus(statusText) {
+            if (!_callInfo) return;
+            _callInfo.status = statusText;
+            const statusEl = _el('callingStatus');
+            if (statusEl) statusEl.textContent = statusText;
+        }
+    };
+
+    // ── Register globally ────────────────────────────────────────────────
+    window.CallOverlayManager = CallOverlayManager;
+
+    // ── Auto-initialize on DOM ready ─────────────────────────────────────
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', () => CallOverlayManager.initialize());
+    } else {
+        CallOverlayManager.initialize();
+    }
+
+    // ── Listen for call state events from callCore ───────────────────────
+    window.addEventListener('message', function(event) {
+        if (!event.data) return;
+        const { type, payload } = event.data;
+
+        switch (type) {
+            case 'CALL_CONNECTED':
+            case 'CALL_ANSWERED':
+            case 'call:connected':
+                CallOverlayManager.setState('in-call', {
+                    ...(_callInfo || {}),
+                    ...(payload || {}),
+                    status: 'Connected'
+                });
+                break;
+
+            case 'CALL_ENDED':
+            case 'call:ended':
+            case 'CALL_REJECTED':
+            case 'call:rejected':
+                CallOverlayManager.endCall();
+                break;
+
+            case 'CALL_RINGING':
+            case 'call:ringing':
+                CallOverlayManager.updateStatus('Ringing...');
+                break;
+
+            case 'CALL_INCOMING':
+            case 'call:incoming': {
+                const info = payload || {};
+                CallOverlayManager.showIncoming({
+                    userName:   info.callerName || info.userName || 'Incoming Call',
+                    userId:     info.callerId   || info.userId,
+                    callType:   info.callType   || info.type || 'voice',
+                    status:     'Incoming call'
+                });
+                break;
+            }
+        }
+    });
+
+    // ── Listen for custom DOM events ─────────────────────────────────────
+    window.addEventListener('callCore:stateChange', function(e) {
+        const detail = e.detail || {};
+        const state  = detail.state || detail.callState || '';
+        if (state === 'idle' || state === 'ended') {
+            CallOverlayManager.endCall();
+        } else if (state === 'connected' || state === 'active' || state === 'in_call') {
+            CallOverlayManager.setState('in-call', _callInfo);
+        }
+    });
+
+    console.log('[CallOverlayManager] Module loaded. Global: window.CallOverlayManager ✓');
+})();
+// ==================== CALL-CONTAINER DARK-SCREEN GUARD ====================
+// The old layout used #callContainer (dark background) as the in-call view.
+// The new system uses the floating callingOverlay / incomingCallModal panels.
+// This guard permanently suppresses #callContainer so it can NEVER produce
+// the dark screen that replaced the sidebar+content when a call started.
+(function installCallContainerGuard() {
+    'use strict';
+
+    function suppressCallContainer() {
+        var cc = document.getElementById('callContainer');
+        if (!cc) return;
+        cc.classList.remove('active');
+        cc.style.setProperty('display', 'none', 'important');
+    }
+
+    if (document.readyState !== 'loading') {
+        suppressCallContainer();
+    } else {
+        document.addEventListener('DOMContentLoaded', suppressCallContainer);
+    }
+
+    var observer = new MutationObserver(function(mutations) {
+        mutations.forEach(function(m) {
+            if (m.type === 'attributes' && m.target.id === 'callContainer') {
+                if (m.attributeName === 'class' && m.target.classList.contains('active')) {
+                    m.target.classList.remove('active');
+                    m.target.style.setProperty('display', 'none', 'important');
+                }
+                if (m.attributeName === 'style') {
+                    var d = m.target.style.display;
+                    if (d && d !== 'none') {
+                        m.target.style.setProperty('display', 'none', 'important');
+                    }
+                }
+            }
+        });
+    });
+
+    function startObserver() {
+        var cc = document.getElementById('callContainer');
+        if (cc) {
+            observer.observe(cc, { attributes: true, attributeFilter: ['class', 'style'] });
+        } else {
+            setTimeout(startObserver, 300);
+        }
+    }
+
+    if (document.readyState !== 'loading') {
+        startObserver();
+    } else {
+        document.addEventListener('DOMContentLoaded', startObserver);
+    }
+
+    console.log('[calls-ui] callContainer dark-screen guard installed.');
 })();

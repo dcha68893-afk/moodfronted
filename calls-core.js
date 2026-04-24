@@ -6758,9 +6758,9 @@ _escapeHtml: function(text) {
             });
             
             return { success: true, degraded: this._pipelineDegraded, duration };
-            });
-            }
-            
+        },
+        
+        _runPreflight: async function() {
             const capabilities = {
                 postMessage: typeof window.postMessage === 'function',
                 addEventListener: typeof window.addEventListener === 'function',

@@ -489,6 +489,7 @@ self.addEventListener('activate', function(event) {
       .then(function() {
         // ✅ FIXED: Clear stale log entries WITHOUT notifying clients
         loggedCacheHits.clear();
+        // ✅ FIXED: Don't notify clients of activation to prevent reload loops
         console.log('[SW] v' + SW_VERSION + ' activated safely - cache cleaned, no reloads forced');
       })
   );
