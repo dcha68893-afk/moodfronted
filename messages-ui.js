@@ -2872,17 +2872,139 @@
             }
             
             if (data.type === 'INCOMING_CALL') {
-                const { callerId, callerName, callType } = data.payload || {};
-                console.log(`[CallHandler] Incoming ${callType} call from ${callerName || callerId}`);
-                UIRenderer.showNotification(`Incoming ${callType} call from ${callerName || 'Someone'}...`, 'info');
+                console.log('[CallHandler] 📞 Incoming call postMessage', data.payload);
+                _showIncomingCallModal(data.payload || {});
             }
         });
-        
+
         window.addEventListener('incomingCall', (event) => {
-            const { callerId, callerName, callType } = event.detail || {};
-            console.log(`[CallHandler] Incoming call via event:`, event.detail);
-            UIRenderer.showNotification(`Incoming ${callType} call from ${callerName || callerId}`, 'info');
+            console.log('[CallHandler] 📞 Incoming call window event', event.detail);
+            _showIncomingCallModal(event.detail || {});
         });
+
+        // Also handle kyn: prefixed call events from app_realtime_socket.js
+        window.addEventListener('kyn:call:incoming', (e) => _showIncomingCallModal(e.detail || {}));
+        window.addEventListener('kyn:incoming_call',  (e) => _showIncomingCallModal(e.detail || {}));
+        document.addEventListener('call:incoming',    (e) => _showIncomingCallModal(e.detail || {}));
+        document.addEventListener('incoming_call',    (e) => _showIncomingCallModal(e.detail || {}));
+    }
+
+    // ✅ FIX 6: Full-screen incoming call modal with Accept / Reject.
+    // Replaces the previous toast-only implementation which gave the receiver
+    // no way to interact with the call.
+    function _showIncomingCallModal(callData) {
+        // Deduplicate — don't stack modals
+        const existing = document.getElementById('kyn-incoming-call-overlay');
+        if (existing) return;
+
+        const { callerId, callerName, callType = 'voice', callId, roomId } = callData;
+        const displayName = callerName || 'Someone';
+        const isVideo = String(callType).toLowerCase().includes('video');
+        const icon = isVideo ? '📹' : '📞';
+
+        console.log(`[CallModal] 📞 Showing incoming ${callType} call modal from ${displayName}`);
+
+        const overlay = document.createElement('div');
+        overlay.id = 'kyn-incoming-call-overlay';
+        overlay.style.cssText = [
+            'position:fixed', 'inset:0', 'z-index:99999',
+            'display:flex', 'align-items:center', 'justify-content:center',
+            'background:rgba(0,0,0,0.72)', 'backdrop-filter:blur(4px)',
+            'animation:kynCallFadeIn 0.25s ease'
+        ].join(';');
+
+        overlay.innerHTML = `
+            <style>
+                @keyframes kynCallFadeIn { from { opacity:0; transform:scale(0.92); } to { opacity:1; transform:scale(1); } }
+                @keyframes kynCallPulse  { 0%,100% { box-shadow:0 0 0 0 rgba(74,222,128,0.5); } 60% { box-shadow:0 0 0 18px rgba(74,222,128,0); } }
+                #kyn-incoming-call-overlay .kyn-call-box {
+                    background:#1a1a2e; color:#fff; border-radius:24px; padding:40px 32px 32px;
+                    text-align:center; min-width:300px; max-width:360px; width:90vw;
+                    box-shadow:0 24px 80px rgba(0,0,0,0.6);
+                }
+                #kyn-incoming-call-overlay .kyn-call-avatar {
+                    width:84px; height:84px; border-radius:50%; background:linear-gradient(135deg,#667eea,#764ba2);
+                    display:flex; align-items:center; justify-content:center;
+                    font-size:36px; margin:0 auto 16px; border:3px solid rgba(255,255,255,0.15);
+                }
+                #kyn-incoming-call-overlay .kyn-call-label { font-size:13px; color:#a0a0b0; margin-bottom:6px; letter-spacing:0.5px; }
+                #kyn-incoming-call-overlay .kyn-call-name  { font-size:24px; font-weight:700; margin-bottom:4px; }
+                #kyn-incoming-call-overlay .kyn-call-type  { font-size:14px; color:#94a3b8; margin-bottom:32px; }
+                #kyn-incoming-call-overlay .kyn-call-btns  { display:flex; justify-content:center; gap:32px; }
+                #kyn-incoming-call-overlay .kyn-btn-reject {
+                    width:64px; height:64px; border-radius:50%; border:none; cursor:pointer;
+                    background:#ef4444; font-size:28px; display:flex; align-items:center;
+                    justify-content:center; transition:transform 0.15s,background 0.15s;
+                }
+                #kyn-incoming-call-overlay .kyn-btn-reject:hover { background:#dc2626; transform:scale(1.08); }
+                #kyn-incoming-call-overlay .kyn-btn-accept {
+                    width:64px; height:64px; border-radius:50%; border:none; cursor:pointer;
+                    background:#22c55e; font-size:28px; display:flex; align-items:center;
+                    justify-content:center; animation:kynCallPulse 1.5s infinite; transition:transform 0.15s;
+                }
+                #kyn-incoming-call-overlay .kyn-btn-accept:hover { background:#16a34a; transform:scale(1.08); }
+                #kyn-incoming-call-overlay .kyn-call-timer { font-size:12px; color:#64748b; margin-top:20px; }
+            </style>
+            <div class="kyn-call-box">
+                <div class="kyn-call-avatar">${icon}</div>
+                <div class="kyn-call-label">INCOMING ${isVideo ? 'VIDEO' : 'VOICE'} CALL</div>
+                <div class="kyn-call-name">${displayName}</div>
+                <div class="kyn-call-type">${isVideo ? 'Video Call' : 'Voice Call'}</div>
+                <div class="kyn-call-btns">
+                    <button class="kyn-btn-reject" title="Decline">📵</button>
+                    <button class="kyn-btn-accept" title="Accept">📞</button>
+                </div>
+                <div class="kyn-call-timer" id="kynCallCountdown">Ringing... 30s</div>
+            </div>`;
+
+        document.body.appendChild(overlay);
+
+        // Countdown timer — auto-reject after 30s
+        let secondsLeft = 30;
+        const countdown = overlay.querySelector('#kynCallCountdown');
+        const timerInterval = setInterval(() => {
+            secondsLeft--;
+            if (countdown) countdown.textContent = `Ringing... ${secondsLeft}s`;
+            if (secondsLeft <= 0) { clearInterval(timerInterval); _dismissCallModal('timeout'); }
+        }, 1000);
+
+        function _dismissCallModal(reason) {
+            clearInterval(timerInterval);
+            const el = document.getElementById('kyn-incoming-call-overlay');
+            if (el) el.remove();
+            console.log(`[CallModal] Dismissed: ${reason}`);
+        }
+
+        overlay.querySelector('.kyn-btn-reject').addEventListener('click', () => {
+            _dismissCallModal('rejected');
+            console.log('[CallModal] 📵 User REJECTED call from', displayName);
+            // Notify parent/calls iframe
+            try { window.parent.postMessage({ type: 'CALL_REJECTED', payload: { callerId, callId, roomId }, source: 'messages-ui' }, '*'); } catch(_) {}
+            window.dispatchEvent(new CustomEvent('callRejectedByUser', { detail: { callerId, callId, callType } }));
+            // Notify backend via KynectaRealtime
+            if (window.KynectaRealtime?.emit) {
+                window.KynectaRealtime.emit('call:reject', { callId, roomId, callerId }).catch(() => {});
+            }
+        });
+
+        overlay.querySelector('.kyn-btn-accept').addEventListener('click', () => {
+            _dismissCallModal('accepted');
+            console.log('[CallModal] ✅ User ACCEPTED call from', displayName);
+            // Notify parent/calls iframe
+            try { window.parent.postMessage({ type: 'CALL_ACCEPTED', payload: { callerId, callId, roomId, callType }, source: 'messages-ui' }, '*'); } catch(_) {}
+            window.dispatchEvent(new CustomEvent('callAcceptedByUser', { detail: { callerId, callId, callType, roomId } }));
+            // Notify backend via KynectaRealtime
+            if (window.KynectaRealtime?.emit) {
+                window.KynectaRealtime.emit('call:accept', { callId, roomId, callerId }).catch(() => {});
+            }
+        });
+
+        // Dismiss if a call:ended / call:cancelled arrives while modal is open
+        const _dismissOnEnd = () => _dismissCallModal('remote-end');
+        window.addEventListener('kyn:call:ended',     _dismissOnEnd, { once: true });
+        window.addEventListener('kyn:call:cancelled', _dismissOnEnd, { once: true });
+        window.addEventListener('kyn:call_ended',     _dismissOnEnd, { once: true });
+        window.addEventListener('kyn:call_cancelled', _dismissOnEnd, { once: true });
     }
 
     // Call quality monitoring

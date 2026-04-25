@@ -34,7 +34,6 @@
     const _auditLog = [];
     const MAX_AUDIT = 500;
     const RATE_LIMIT = 60;
-    const RATE_WINDOW = 60000;
     const _rateLimits = new Map();
     const _blocked = new Set();
 

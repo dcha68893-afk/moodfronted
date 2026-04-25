@@ -2909,6 +2909,13 @@ try {
             }
             
             EventBus.emit('message:status', { messageId, status, message });
+            // ✅ FIX 5: Fire DOM event so messages-ui.js messageStatusUpdated listener
+            // can patch the tick icon without a full re-render.
+            try {
+                window.dispatchEvent(new CustomEvent('messageStatusUpdated', {
+                    detail: { messageId: String(messageId), status, serverId: details.serverId || null, localId: details.localId || null }
+                }));
+            } catch (_e) {}
             return true;
         },
         
@@ -5522,9 +5529,16 @@ try {
                 // Gate only on chatId so we never silently drop a valid incoming message.
                 if (!message || !chatId) return;
 
+                // ✅ FIX 4: Guard against String(undefined) = "undefined" poisoning the local store.
+                const _safeId = message.id != null ? String(message.id) : null;
+                const _safeLocalId = message.localId != null ? String(message.localId) : null;
+                // Reject messages with no usable id to prevent corrupt dedup state
+                if (!_safeId && !_safeLocalId && !message.content) return;
+
                 let normalizedMessage = {
-                    id: String(message.id),
-                    serverId: String(message.id),
+                    id:       _safeId || _safeLocalId || ('tmp_' + Date.now()),
+                    serverId: _safeId || null,
+                    localId:  _safeLocalId || null,
                     content: message.content || message.text || '',
                     type: message.type || 'text',
                     senderId: message.senderId || message.sender?.id,
@@ -5555,35 +5569,42 @@ try {
             }
 
             if (normalizedType === 'message_sent' || normalizedType === 'message:sent') {
-                const messageId = data.localId || data.messageId || data.serverId || data.id;
+                // ✅ FIX 9: Unwrap postMessage bridge wrapper { type, payload, source }
+                const d = (data.payload && (data.payload.localId || data.payload.messageId)) ? data.payload : data;
+                const messageId = d.localId || d.messageId || d.serverId || d.id;
+                console.log('[messages-core] ✅ message:sent received localId=', d.localId, 'serverId=', d.serverId || d.messageId);
                 if (messageId && ChatManager.updateMessageStatus) {
                     ChatManager.updateMessageStatus(messageId, 'sent', {
-                        localId: data.localId || null,
-                        serverId: data.serverId || data.messageId || data.id || null
+                        localId:  d.localId  || null,
+                        serverId: d.serverId || d.messageId || d.id || null
                     });
                 }
                 return;
             }
 
             if (normalizedType === 'message_delivered' || normalizedType === 'message:delivered') {
-                const messageId = data.localId || data.messageId || data.serverId || data.id;
+                // ✅ FIX 9: Unwrap postMessage bridge wrapper
+                const d = (data.payload && (data.payload.localId || data.payload.messageId)) ? data.payload : data;
+                const messageId = d.localId || d.messageId || d.serverId || d.id;
                 if (messageId && ChatManager.updateMessageStatus) {
                     ChatManager.updateMessageStatus(messageId, 'delivered', {
-                        deliveredAt: data.deliveredAt || data.timestamp || Date.now(),
-                        localId: data.localId || null,
-                        serverId: data.serverId || data.messageId || data.id || null
+                        deliveredAt: d.deliveredAt || d.timestamp || Date.now(),
+                        localId:  d.localId  || null,
+                        serverId: d.serverId || d.messageId || d.id || null
                     });
                 }
                 return;
             }
 
             if (normalizedType === 'message_read' || normalizedType === 'message:read') {
-                const messageId = data.localId || data.messageId || data.serverId || data.id;
+                // ✅ FIX 9: Unwrap postMessage bridge wrapper
+                const d = (data.payload && (data.payload.localId || data.payload.messageId)) ? data.payload : data;
+                const messageId = d.localId || d.messageId || d.serverId || d.id;
                 if (messageId && ChatManager.updateMessageStatus) {
                     ChatManager.updateMessageStatus(messageId, 'read', {
-                        readAt: data.readAt || data.timestamp || Date.now(),
-                        localId: data.localId || null,
-                        serverId: data.serverId || data.messageId || data.id || null
+                        readAt:   d.readAt   || d.timestamp || Date.now(),
+                        localId:  d.localId  || null,
+                        serverId: d.serverId || d.messageId || d.id || null
                     });
                 }
                 return;
@@ -5650,6 +5671,24 @@ try {
             if (evt.detail) handleRealtimePayload('message:new', evt.detail);
         });
     }   // end setupRealtimeMessageListener
+
+    // ✅ FIX 3: Expose direct entry points for app_realtime_socket.js.
+    // That file checks core._handleIncomingRealtimeMessage, core.receiveMessage, core.onNewMessage
+    // in sequence. Without this, all three are missing and it falls through to the slower
+    // document.dispatchEvent() path which is same-document only and misses cross-frame scenarios.
+    function _exposeRealtimeEntryPoints() {
+        const mc = window.MessagesCore || window.messagesCore;
+        if (!mc) return;
+        // We need handleRealtimePayload — it's defined inside setupRealtimeMessageListener.
+        // Re-bind via the document event path as the canonical public method.
+        mc._handleIncomingRealtimeMessage = function(data) {
+            document.dispatchEvent(new CustomEvent('message:new', { detail: data }));
+        };
+        mc.receiveMessage  = mc._handleIncomingRealtimeMessage;
+        mc.onNewMessage    = mc._handleIncomingRealtimeMessage;
+        console.log('[messages-core] ✅ _handleIncomingRealtimeMessage, receiveMessage, onNewMessage exposed');
+    }
+    _exposeRealtimeEntryPoints();
 
     function startRealtimeSync() {
         setupRealtimeMessageListener();

@@ -1645,6 +1645,52 @@ const UIBridge = {
         document.addEventListener('statusUpdate', (e) => {
             this.handleCoreEvent('statusUpdate', e.detail);
         });
+
+        // ── FIX: Receiver-side realtime listeners ─────────────────────────────
+        // status-core.js dispatches these DOM events via wireStatusWebSocket()
+        // when a friend's status arrives via socket. Without these listeners the
+        // receiver's UI list never updates — even though the data is in memory.
+        const _realtimeStatusHandler = (evt) => {
+            const payload = evt.detail || {};
+            const incomingStatus = payload.status || payload;
+            const statusId = incomingStatus.id || payload.statusId;
+
+            // Skip if this is an echo of a status the sender already confirmed
+            if (statusId && window._confirmedStatusIds && window._confirmedStatusIds.has(String(statusId))) {
+                console.log(`[status-ui] ℹ️ Skipping socket echo for already-confirmed id=${statusId}`);
+                return;
+            }
+
+            console.log(`[status-ui] 📥 STATUS RECEIVED via DOM event: ${evt.type} id=${statusId}`);
+
+            // Re-render the list immediately
+            renderStatusListInstantlyUI();
+            updateMyStatusPreviewUI();
+
+            // Show toast notification so user knows something arrived
+            // Only show for OTHER users' statuses, not an echo of own post
+            const myId = currentUser?.id || currentUser?.userId;
+            const posterId = incomingStatus.userId || payload.userId;
+            if (posterId && myId && String(posterId) !== String(myId)) {
+                const name = incomingStatus.user?.displayName
+                    || incomingStatus.user?.username
+                    || incomingStatus.user?.firstName
+                    || 'A friend';
+                showNotification(`📸 ${name} posted a new status`, 'info');
+                console.log(`[status-ui] ✅ STATUS RENDERED on receiver UI id=${statusId} from user=${posterId}`);
+            }
+        };
+
+        // Listen to both raw event names and kyn: prefixed variants dispatched by bridge
+        ['new_status', 'status:created', 'status_created'].forEach(evtName => {
+            document.addEventListener(evtName, _realtimeStatusHandler);
+            window.addEventListener(`kyn:${evtName}`, _realtimeStatusHandler);
+        });
+        // Also react to the statusStateChanged event so any notifyStatusObservers() call re-renders
+        document.addEventListener('statusStateChanged', () => {
+            renderStatusListInstantlyUI();
+            updateMyStatusPreviewUI();
+        });
         document.addEventListener('coreData', (e) => {
             this.handleCoreEvent('coreData', e.detail);
         });
@@ -2449,8 +2495,10 @@ const InitialRender = {
                     e.stopPropagation();
                     if (!ensureUIActive('viewStatus')) return;
                     const statusId = item.dataset.statusId;
-                    const status = statuses.find(s => s.id === statusId);
+                    // FIX: status.id may be a number from server; dataset is always string
+                    const status = statuses.find(s => String(s.id) === String(statusId));
                     if (status) showStatusViewer(status);
+                    else console.warn('[status-ui] status not found for id:', statusId, 'total:', statuses.length);
                 };
                 viewBtn.addEventListener('click', item._viewHandler);
             }
@@ -2474,7 +2522,7 @@ const InitialRender = {
                     e.stopPropagation();
                     if (!ensureUIActive('muteUser')) return;
                     const action = muteBtn.dataset.action;
-                    const status = statuses.find(s => s.id === item.dataset.statusId);
+                    const status = statuses.find(s => String(s.id) === String(item.dataset.statusId));
                     if (status) handleStatusAction(action, status, muteBtn);
                 };
                 muteBtn.addEventListener('click', item._muteHandler);
@@ -2483,8 +2531,10 @@ const InitialRender = {
             item._itemClickHandler = (e) => {
                 if (!e.target.closest('.status-actions') && ensureUIActive('viewStatus')) {
                     const statusId = item.dataset.statusId;
-                    const status = statuses.find(s => s.id === statusId);
+                    // FIX: String() coercion so number IDs from server match dataset strings
+                    const status = statuses.find(s => String(s.id) === String(statusId));
                     if (status) showStatusViewer(status);
+                    else console.warn('[status-ui] item click: status not found id:', statusId);
                 }
             };
             item.addEventListener('click', item._itemClickHandler);
@@ -2596,7 +2646,7 @@ renderMoodChart() {
         if (!sanitized) return null;
         const item = document.createElement('div');
         item.className = 'status-item';
-        item.dataset.statusId = sanitized.id;
+        item.dataset.statusId = String(sanitized.id);
         item.dataset.userId = sanitized.userId || '';
         const user = sanitized.user || { displayName: 'Unknown User' };
         const initials = user.displayName
@@ -4754,10 +4804,17 @@ async function handlePostStatus() {
         }
         
         if (response && (response.success || response.queued)) {
-            const optimisticStatus = response.status || {
+            // ── SENDER CONFIRMATION ────────────────────────────────────────────
+            // Use the real status object returned by the server (has correct id,
+            // timestamps, etc.). Only fall back to a local placeholder if truly
+            // offline (queued path). The placeholder id is prefixed so that when
+            // the real status arrives via socket it can replace it without a duplicate.
+            const realStatus = response.status;
+            const optimisticStatus = realStatus || {
                 id: response.id || `local_status_${Date.now()}`,
                 type: statusData.type,
                 text: statusData.text || '',
+                content: statusData.content || statusData.text || '',
                 caption: statusData.caption || '',
                 question: statusData.question || '',
                 options: statusData.options || [],
@@ -4767,15 +4824,39 @@ async function handlePostStatus() {
                 queued: !!response.queued,
                 visibility: 'friends'
             };
-            showNotification('Status posted successfully', 'success');
+
+            console.log(`[status-ui] 📤 STATUS POSTED id=${optimisticStatus.id} — updating sender UI`);
+
+            showNotification('Status posted successfully! ✓', 'success');
             const modal = UIElements.createStatusModal;
             if (modal) modal.classList.remove('active');
+
+            // ── Replace any previous optimistic placeholder with confirmed status ─
+            // This prevents duplicates when the socket event also fires on the
+            // sender's own screen (sender is in their own friend room via ws).
+            statuses = statuses.filter(s => !String(s.id).startsWith('local_status_'));
+            myStatuses = myStatuses.filter(s => !String(s.id).startsWith('local_status_'));
+
             statuses = [optimisticStatus].concat(Array.isArray(statuses) ? statuses : []);
             myStatuses = [optimisticStatus].concat(Array.isArray(myStatuses) ? myStatuses : []);
+
+            // Mark this id as already-seen so handleRealtimeStatusEvent skips it
+            // when the socket echo arrives (avoids duplicate on sender screen).
+            if (optimisticStatus.id && !String(optimisticStatus.id).startsWith('local_status_')) {
+                if (window._confirmedStatusIds) {
+                    window._confirmedStatusIds.add(String(optimisticStatus.id));
+                } else {
+                    window._confirmedStatusIds = new Set([String(optimisticStatus.id)]);
+                }
+            }
+
             try {
                 localStorage.setItem(LOCAL_STORAGE_KEYS.STATUSES, JSON.stringify(statuses));
                 localStorage.setItem(LOCAL_STORAGE_KEYS.MY_STATUSES, JSON.stringify(myStatuses));
             } catch (_error) {}
+
+            console.log(`[status-ui] ✅ STATUS RENDERED on sender UI id=${optimisticStatus.id}`);
+
             renderStatusListInstantlyUI();
             updateMyStatusPreviewUI();
             updateCurrentSectionUI();
@@ -5851,7 +5932,26 @@ function clearAllFilters() {
 function renderStatusListInstantlyUI() {
     const container = UIElements.allStatusList;
     if (!container) return;
-    if (!statuses || statuses.length === 0) {
+
+    // ── FIX: Prefer statusState.statuses (updated by status-core on every
+    //    notifyStatusObservers call) over the local `statuses` variable which
+    //    may lag behind when a receiver's screen refreshes from a socket event.
+    const core = getCore();
+    let liveStatuses = (core && core.getStatuses && core.getStatuses())
+        || (typeof statusState !== 'undefined' && statusState.statuses)
+        || statuses
+        || [];
+
+    // ── FIX: Normalise all IDs to strings so that dataset.statusId comparisons
+    //    always work — server returns numbers, dataset is always a string.
+    liveStatuses = liveStatuses.map(s => ({ ...s, id: String(s.id) }));
+
+    // Keep the module-level statuses array in sync with normalised IDs too
+    if (statuses && statuses.length > 0) {
+        statuses = statuses.map(s => ({ ...s, id: String(s.id) }));
+    }
+
+    if (!liveStatuses || liveStatuses.length === 0) {
         container.innerHTML = `
             <div class="empty-state">
                 <i class="fas fa-comment-dots"></i>
@@ -5867,7 +5967,7 @@ function renderStatusListInstantlyUI() {
         return;
     }
     const fragment = document.createDocumentFragment();
-    const filtered = InitialRender.filterStatuses(statuses);
+    const filtered = InitialRender.filterStatuses(liveStatuses);
     filtered.slice(0, 10).forEach(status => {
         const element = InitialRender.createStatusElement(status);
         if (element) fragment.appendChild(element);

@@ -1810,40 +1810,39 @@
     <!-- API.js must load BEFORE status.js -->
 
     <!-- New Status System Components -->
-    <!-- Dynamic loaders: if a file is missing or returns non-JS, we skip it gracefully -->
-    <script>
-      (function() {
-        var scripts = ['/js/status-api.js', '/js/status-cache.js', '/js/status-websocket.js'];
-        scripts.forEach(function(src) {
-          var el = document.createElement('script');
-          el.src = src;
-          el.onerror = function() {
-            console.warn('[Status] Optional script not available (skipped):', src);
-          };
-          document.head.appendChild(el);
-        });
-      })();
-    </script>
-    
+    <!-- FIX: Load status-api, status-cache, status-websocket as regular (non-module)
+         scripts with defer so they execute after the DOM but BEFORE the module scripts
+         which depend on window.StatusAPI / window.StatusCache / window.StatusWebSocket.
+         Previously these were appended dynamically at runtime, causing a race where
+         the module scripts ran first and found all three globals undefined. -->
+    <script src="/js/status-api.js" defer onerror="console.warn('[Status] status-api.js not found')"></script>
+    <script src="/js/status-cache.js" defer onerror="console.warn('[Status] status-cache.js not found')"></script>
+    <script src="/js/status-websocket.js" defer onerror="console.warn('[Status] status-websocket.js not found')"></script>
+
     <script type="module" src="status-core.js"></script>
     <script type="module" src="status-ui.js"></script>
     <script>
         // =============================================
         // DEBUGGING: Verify Status System Components
+        // FIX: Run AFTER DOMContentLoaded so dynamic scripts have had a chance to
+        //      execute. Previously this ran synchronously and always showed false
+        //      because the scripts were only being injected at that exact moment.
         // =============================================
-        console.log('[STATUS DEBUG] Checking component loading...');
-        console.log('[STATUS DEBUG] StatusAPI available:', !!window.StatusAPI);
-        console.log('[STATUS DEBUG] StatusCache available:', !!window.StatusCache);
-        console.log('[STATUS DEBUG] StatusWebSocket available:', !!window.StatusWebSocket);
-        
-        // Initialize status system components if available
-        if (window.StatusCache) {
-            window.StatusCache.init().catch(console.error);
-        }
-        
-        if (window.StatusWebSocket) {
-            window.StatusWebSocket.init();
-        }
+        window.addEventListener('DOMContentLoaded', function() {
+            setTimeout(function() {
+                console.log('[STATUS DEBUG] Checking component loading...');
+                console.log('[STATUS DEBUG] StatusAPI available:', !!window.StatusAPI);
+                console.log('[STATUS DEBUG] StatusCache available:', !!window.StatusCache);
+                console.log('[STATUS DEBUG] StatusWebSocket available:', !!window.StatusWebSocket);
+
+                if (window.StatusCache) {
+                    window.StatusCache.init().catch(console.error);
+                }
+                if (window.StatusWebSocket) {
+                    window.StatusWebSocket.init();
+                }
+            }, 300); // 300 ms: enough for defer scripts to execute
+        });
         
         // =============================================
         // ENHANCED INITIALIZATION WITH RESILIENCE

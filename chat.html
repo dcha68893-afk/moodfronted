@@ -1882,8 +1882,34 @@
             
             window.showIncomingCallBanner = (callData) => {
                 pendingIncomingCall = callData;
-                document.getElementById('callerName').innerText = callData.callerName || callData.fromUserName || 'Someone';
+                const nameEl = document.getElementById('callerName');
+                if (nameEl) nameEl.innerText = callData.callerName || callData.fromUserName || 'Someone';
                 banner.style.display = 'flex';
+
+                // ── FIX 1: Navigate to calls page so the iframe becomes visible ──
+                if (window.__currentPage !== 'calls') {
+                    window.__lastActivePage = window.__currentPage || 'messages';
+                    navigateToPage('calls');
+                }
+
+                // ── FIX 2: Apply fullscreen on parent so iframe covers viewport ──
+                document.body.classList.add('call-screen-active');
+                window.__activeCallInProgress = true;
+
+                // ── FIX 3: Delay CALL_INCOMING postMessage by 350ms so the iframe
+                //    has time to become visible and its DOM is ready to activate
+                //    the incomingCallModal. Without this delay the postMessage
+                //    arrives while the iframe is still hidden (display:none) and
+                //    the modal activation is missed.
+                setTimeout(() => {
+                    const callsIframe = document.getElementById('callsIframe');
+                    if (callsIframe && callsIframe.contentWindow) {
+                        callsIframe.contentWindow.postMessage(
+                            { type: 'CALL_INCOMING', payload: callData, source: 'banner-bridge' }, '*'
+                        );
+                    }
+                }, 350);
+
                 // Auto-hide after 30 seconds if not answered
                 setTimeout(() => {
                     if (pendingIncomingCall === callData) hideBanner();
@@ -3426,16 +3452,21 @@
                 // ==================================================================
                 // CALL INCOMING HANDLER - Show on ALL pages (including calls page)
                 // ==================================================================
-                if (data.type === 'call:incoming' || (data.type === 'CALL_INCOMING' && data.payload)) {
-                    const callData = data.payload || data;
-                    // Show banner on ALL pages (not just non-calls pages)
+                if (data.type === 'call:incoming' || data.type === 'CALL_INCOMING' ||
+                    data.type === 'incoming_call' || data.type === 'call_incoming') {
+                    const raw = data.payload || data;
+                    // ── Normalise payload ───────────────────────────────────────
+                    const callData = {
+                        ...raw,
+                        callerName:   raw.callerName   || (raw.caller && raw.caller.username) || raw.fromUserName || 'Unknown',
+                        callerAvatar: raw.callerAvatar || (raw.caller && raw.caller.avatar)   || null,
+                        callType:     raw.callType     || raw.type || 'voice',
+                    };
+                    console.log('[Parent] 📞 CALL_INCOMING postMessage — callerName:', callData.callerName);
+                    // Delegate entirely to showIncomingCallBanner which handles
+                    // navigation, fullscreen, delayed iframe postMessage, and banner
                     if (window.showIncomingCallBanner) {
                         window.showIncomingCallBanner(callData);
-                    }
-                    // Also dispatch to calls iframe
-                    const callsIframe = document.getElementById('callsIframe');
-                    if (callsIframe && callsIframe.contentWindow) {
-                        callsIframe.contentWindow.postMessage({ type: 'CALL_INCOMING', payload: callData, source: data.source || 'parent' }, '*');
                     }
                     return;
                 }
@@ -3707,6 +3738,8 @@
 
                 if (data.type === 'SETTINGS_GLOBAL_UPDATE') {
                     const { section, key, value } = data;
+                    // ── FIX: Skip if section or key are undefined/null ──────────
+                    if (!section || !key) return;
                     if (window.SettingsStore) {
                         window.SettingsStore.set(`${section}.${key}`, value);
                     }
@@ -4137,9 +4170,16 @@
                 _wsCallListenersBound = true;
 
                 function _fwdIncoming(callData) {
-                    if (window.showIncomingCallBanner) window.showIncomingCallBanner(callData);
-                    const f = document.getElementById('callsIframe');
-                    if (f && f.contentWindow) f.contentWindow.postMessage({ type: 'CALL_INCOMING', payload: callData, source: 'ws-bridge' }, '*');
+                    // ── FIX: Normalise payload ──────────────────────────────────
+                    const payload = {
+                        ...callData,
+                        callerName:   callData.callerName   || (callData.caller && callData.caller.username) || callData.fromUserName || 'Unknown',
+                        callerAvatar: callData.callerAvatar || (callData.caller && callData.caller.avatar)   || null,
+                        callType:     callData.callType     || callData.type || 'voice',
+                    };
+                    console.log('[Parent] 📞 _fwdIncoming → callerName:', payload.callerName);
+                    // Banner handles navigation + fullscreen + delayed iframe postMessage
+                    if (window.showIncomingCallBanner) window.showIncomingCallBanner(payload);
                 }
                 function _fwdAccepted(callData) {
                     hideGlobalBanner();
@@ -4260,7 +4300,18 @@
                     }
                 }
 
+                // ✅ FIX 8: Forward message:sent so sender's optimistic tick updates
+                function _fwdMessageSent(payload) {
+                    const msgIframe = document.getElementById('messagesIframe');
+                    if (msgIframe && msgIframe.contentWindow) {
+                        msgIframe.contentWindow.postMessage({ type: 'message:sent',     payload: payload, source: 'ws-bridge' }, '*');
+                        msgIframe.contentWindow.postMessage({ type: 'message_sent',     payload: payload, source: 'ws-bridge' }, '*');
+                    }
+                }
+
                 // All naming conventions the backend might use
+                window.wsService.on('message:sent',       _fwdMessageSent);      // ✅ FIX 8
+                window.wsService.on('message_sent',       _fwdMessageSent);      // ✅ FIX 8
                 window.wsService.on('message:new',        _fwdNewMessage);
                 window.wsService.on('new_message',        _fwdNewMessage);
                 window.wsService.on('newMessage',         _fwdNewMessage);
@@ -4272,20 +4323,98 @@
                 window.wsService.on('user:online',        _fwdPresence);
                 window.wsService.on('user:offline',       d => _fwdPresence({ ...d, online: false }));
                 window.wsService.on('presence:update',    _fwdPresence);
+
+                // ── GROUP REAL-TIME BRIDGE ────────────────────────────────────
+                // Forward all group WebSocket events from wsService into groupIframe
+                // via postMessage. The group module runs inside an iframe — parent-window
+                // CustomEvents are NOT received there. postMessage is the only
+                // reliable delivery path for receiver-side real-time updates.
+                function _fwdToGroupIframe(type, payload) {
+                    const gf = document.getElementById('groupIframe');
+                    if (gf && gf.contentWindow) {
+                        gf.contentWindow.postMessage({
+                            type, payload, source: 'ws-group-bridge', timestamp: Date.now()
+                        }, '*');
+                    }
+                }
+
+                function _fwdGroupCreated(data) {
+                    console.log('[GROUP FLOW] RECEIVED: group:created id=',
+                        data && data.group ? data.group.id : (data && data.id));
+                    _fwdToGroupIframe('GROUP_CREATED',   data);
+                    _fwdToGroupIframe('group:created',   data);
+                    _fwdToGroupIframe('group:localSync', {
+                        action:  'create',
+                        group:   (data && data.group) || data,
+                        groupId: (data && data.group && data.group.id) || (data && data.id)
+                    });
+                    console.log('[GROUP FLOW] RENDERED: group:created → groupIframe');
+                }
+
+                function _fwdGroupMessage(data) {
+                    console.log('[GROUP FLOW] RECEIVED: group:message groupId=', data && data.groupId);
+                    _fwdToGroupIframe('GROUP_MESSAGE',   data);
+                    _fwdToGroupIframe('group:message',   data);
+                    _fwdToGroupIframe('group:localSync', {
+                        action:  'message',
+                        groupId: data && data.groupId,
+                        message: (data && data.message) || data
+                    });
+                    console.log('[GROUP FLOW] RENDERED: group:message → groupIframe');
+                }
+
+                function _fwdGroupLocalSync(data) {
+                    _fwdToGroupIframe('group:localSync', data);
+                    if (!data) return;
+                    if (data.action === 'create' || data.action === 'upsert')
+                        _fwdToGroupIframe('GROUP_CREATED', { group: data.group });
+                    else if (data.action === 'message')
+                        _fwdToGroupIframe('GROUP_MESSAGE', { groupId: data.groupId, message: data.message });
+                    else if (data.action === 'member_add')
+                        _fwdToGroupIframe('GROUP_MEMBER_ADDED', data);
+                    else if (data.action === 'member_remove' || data.action === 'member_leave')
+                        _fwdToGroupIframe('GROUP_MEMBER_REMOVED', data);
+                }
+
+                // All naming conventions the backend might use
+                window.wsService.on('group:created',             _fwdGroupCreated);
+                window.wsService.on('group_created',             _fwdGroupCreated);
+                window.wsService.on('group:message',             _fwdGroupMessage);
+                window.wsService.on('group_message',             _fwdGroupMessage);
+                window.wsService.on('group:localSync',           _fwdGroupLocalSync);
+                window.wsService.on('group:updated',             function(d) {
+                    _fwdToGroupIframe('group:localSync', { action: 'update', group: (d && d.group) || d, groupId: d && (d.id || (d.group && d.group.id)) });
+                });
+                window.wsService.on('group:membership_change',   function(d) { _fwdToGroupIframe('GROUP_MEMBER_ADDED',   d); });
+                window.wsService.on('group:member:added',        function(d) { _fwdToGroupIframe('GROUP_MEMBER_ADDED',   d); });
+                window.wsService.on('group:member:removed',      function(d) { _fwdToGroupIframe('GROUP_MEMBER_REMOVED', d); });
+                window.wsService.on('group:member:left',         function(d) { _fwdToGroupIframe('GROUP_MEMBER_LEFT',    d); });
+                window.wsService.on('group:member:joined',       function(d) { _fwdToGroupIframe('GROUP_MEMBER_ADDED',   d); });
+                window.wsService.on('group:joined',              _fwdGroupCreated);
+                window.wsService.on('group_joined',              _fwdGroupCreated);
+                window.wsService.on('group:invitation:received', function(d) { _fwdToGroupIframe('GROUP_INVITE_RECEIVED', d); });
+                window.wsService.on('group:typing',              function(d) { _fwdToGroupIframe('GROUP_TYPING',          d); });
+                console.log('[GROUP BRIDGE] Group WebSocket -> groupIframe bridge active');
             }
 
             // Bind now if wsService is already real
             _bindWsCallListeners();
 
-            // Also re-bind when KynectaRealtime finishes initialising (may be after this code runs)
+            // ✅ FIX 2a: Retry loop — handles race where wsService isn’t real yet when this script runs.
+            (function _retryBindLoop() {
+                if (_wsCallListenersBound) return;
+                _bindWsCallListeners();
+                if (!_wsCallListenersBound) setTimeout(_retryBindLoop, 250);
+            })();
+
+            // ✅ FIX 2b: Re-bind on EVERY kyn:realtimeReady (not just once).
+            // This covers Socket.IO reconnects — after a reconnect the event fires again
+            // and listeners must be re-registered on the new socket.
             window.addEventListener('kyn:realtimeReady', function() {
                 _wsCallListenersBound = false; // allow re-bind with the real service
                 _bindWsCallListeners();
 
-                // FIX: status iframe has an isolated window — it cannot receive events
-                // fired on the parent window. Forward the ready signal both ways:
-                // 1. dispatchEvent directly into the iframe's window (same-origin)
-                // 2. postMessage as a cross-origin fallback that status-websocket.js listens for
+                // Forward ready signal into status iframe (same-origin + postMessage fallback)
                 const statusIframe = document.getElementById('statusIframe');
                 if (statusIframe && statusIframe.contentWindow) {
                     try {
@@ -4293,7 +4422,7 @@
                     } catch(_) {}
                     statusIframe.contentWindow.postMessage({ type: 'KYN_REALTIME_READY', source: 'parent', timestamp: Date.now() }, '*');
                 }
-            }, { once: true });
+            }); // ✅ { once: true } REMOVED — must fire on every reconnect
 
             // Calls iframe load handler
             const callsIframe = document.getElementById('callsIframe');
@@ -4341,6 +4470,115 @@
             loadUserProfileFromStorage();
             setupProfileModal();
             setupGlobalCallBanner();
+
+            // ================================================================
+            // GLOBAL KYN:* REALTIME BRIDGE
+            // Listens to window CustomEvents from app_realtime_socket.js and
+            // forwards them to the correct iframes. This works even when
+            // wsService.on() is unbound or WS is in DEGRADED mode.
+            // ================================================================
+            (function _installKynBridge() {
+                function _post(iframeId, type, payload) {
+                    const f = document.getElementById(iframeId);
+                    if (f && f.contentWindow) f.contentWindow.postMessage({ type, payload, source: 'kyn-global-bridge' }, '*');
+                }
+                function _normCall(d) {
+                    return {
+                        ...d,
+                        callerName:   d.callerName   || (d.caller && d.caller.username) || d.fromUserName || 'Unknown',
+                        callerAvatar: d.callerAvatar || (d.caller && d.caller.avatar)   || null,
+                        callType:     d.callType     || d.type || 'voice',
+                    };
+                }
+
+                // Incoming call — delegate to showIncomingCallBanner (handles all)
+                ['kyn:call:incoming', 'kyn:incoming_call', 'kyn:call_incoming'].forEach(evt => {
+                    window.addEventListener(evt, (e) => {
+                        const payload = _normCall(e.detail || {});
+                        console.log('[Parent] 📞 kyn-bridge:', evt, '→ callerName:', payload.callerName);
+                        if (window.showIncomingCallBanner) window.showIncomingCallBanner(payload);
+                    });
+                });
+
+                // Call state → calls iframe
+                [
+                    ['kyn:call:accepted',    'CALL_ACCEPTED'],  ['kyn:call_accepted',    'CALL_ACCEPTED'],
+                    ['kyn:call_answered',    'CALL_ACCEPTED'],
+                    ['kyn:call:rejected',    'CALL_REJECTED'],  ['kyn:call_rejected',    'CALL_REJECTED'],
+                    ['kyn:call:ended',       'CALL_ENDED'],     ['kyn:call_ended',       'CALL_ENDED'],
+                    ['kyn:call_force_ended', 'CALL_FORCE_ENDED'],
+                    ['kyn:call:cancelled',   'CALL_CANCELLED'], ['kyn:call_cancelled',   'CALL_CANCELLED'],
+                    ['kyn:call:initiated',   'CALL_INITIATED'], ['kyn:call_initiated',   'CALL_INITIATED'],
+                    ['kyn:call:missed',      'CALL_MISSED'],    ['kyn:call_missed',      'CALL_MISSED'],
+                ].forEach(([evt, type]) => {
+                    window.addEventListener(evt, (e) => _post('callsIframe', type, e.detail || {}));
+                });
+
+                // WebRTC signals → calls iframe
+                [
+                    ['kyn:call:offer',         'SIGNAL_OFFER'],  ['kyn:call_offer',         'SIGNAL_OFFER'],
+                    ['kyn:call:answer',        'SIGNAL_ANSWER'], ['kyn:call_answer',        'SIGNAL_ANSWER'],
+                    ['kyn:webrtc:signal',      'WEBRTC_SIGNAL'], ['kyn:webrtc_signal',      'WEBRTC_SIGNAL'],
+                    ['kyn:call:ice',           'ICE_CANDIDATE'], ['kyn:call_ice',           'ICE_CANDIDATE'],
+                    ['kyn:call_ice_candidate', 'ICE_CANDIDATE'],
+                ].forEach(([evt, type]) => {
+                    window.addEventListener(evt, (e) => _post('callsIframe', type, e.detail || {}));
+                });
+
+                // Messages → messages iframe
+                ['kyn:message:received', 'kyn:message:new', 'kyn:new_message'].forEach(evt => {
+                    window.addEventListener(evt, (e) => {
+                        const p = e.detail || {};
+                        _post('messagesIframe', 'message:new', p);
+                        if (p.chatId) _post('messagesIframe', 'CONVERSATION_UPDATED', { chatId: p.chatId, lastMessage: p.content, lastMessageAt: p.createdAt || Date.now() });
+                    });
+                });
+                ['kyn:message:delivered', 'kyn:message_delivered'].forEach(evt => {
+                    window.addEventListener(evt, (e) => _post('messagesIframe', 'message:delivered', e.detail || {}));
+                });
+                ['kyn:message:read', 'kyn:message_read'].forEach(evt => {
+                    window.addEventListener(evt, (e) => _post('messagesIframe', 'message:read', e.detail || {}));
+                });
+
+                // Status → status iframe
+                ['kyn:status:created','kyn:new_status','kyn:status_created',
+                 'kyn:status:updated','kyn:status_updated',
+                 'kyn:status:deleted','kyn:status_deleted',
+                 'kyn:status:viewed', 'kyn:status:viewer_update'].forEach(evt => {
+                    window.addEventListener(evt, (e) => {
+                        _post('statusIframe', 'STATUS_UPDATE', e.detail || {});
+                        _post('statusIframe', evt.replace('kyn:', ''), e.detail || {});
+                    });
+                });
+
+                // Groups → group iframe
+                ['kyn:group:message','kyn:group:membership_change','kyn:group:updated',
+                 'kyn:group:localSync','kyn:group:created','kyn:group:deleted'].forEach(evt => {
+                    window.addEventListener(evt, (e) => {
+                        const f = document.getElementById('groupIframe');
+                        if (f && f.contentWindow) f.contentWindow.postMessage({ type: evt.replace('kyn:', ''), payload: e.detail || {}, source: 'kyn-global-bridge' }, '*');
+                    });
+                });
+
+                // Friends → friends iframe
+                ['kyn:friend:request','kyn:friend_request','kyn:friend:accepted',
+                 'kyn:friend_accepted','kyn:friend:removed','kyn:friend_removed'].forEach(evt => {
+                    window.addEventListener(evt, (e) => {
+                        const f = document.getElementById('friendsIframe');
+                        if (f && f.contentWindow) f.contentWindow.postMessage({ type: evt.replace('kyn:', ''), payload: e.detail || {}, source: 'kyn-global-bridge' }, '*');
+                    });
+                });
+
+                // Presence → messages + friends + calls
+                ['kyn:user:online','kyn:user:offline','kyn:presence:update','kyn:PRESENCE_UPDATE'].forEach(evt => {
+                    window.addEventListener(evt, (e) => {
+                        const type = evt.includes('online') ? 'FRIEND_ONLINE' : evt.includes('offline') ? 'FRIEND_OFFLINE' : 'PRESENCE_UPDATE';
+                        ['messagesIframe','friendsIframe','callsIframe'].forEach(id => _post(id, type, e.detail || {}));
+                    });
+                });
+
+                console.log('[Parent] ✅ Global kyn:* realtime bridge installed');
+            })();
             
             const pendingChat = sessionStorage.getItem('pending_chat');
             if (pendingChat) {

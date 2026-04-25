@@ -1784,6 +1784,128 @@
 
     <!-- ========== MODIFIED: Script without debug panel, with protocol monitoring ========== -->
     <script>
+    // ── EARLY REALTIME BRIDGE — runs before module scripts ───────────────────
+    // Handles ws-group-bridge postMessages forwarded by chat.html.
+    // Events are buffered and replayed once GroupCore is ready.
+    (function _groupEarlyBridge() {
+        var _buffer = [];
+        var _flushed = false;
+
+        function _flushBuffer() {
+            if (_flushed) return;
+            _flushed = true;
+            _buffer.forEach(function(msg) { _processGroupMsg(msg); });
+            _buffer = [];
+        }
+
+        function _processGroupMsg(msg) {
+            var type    = msg.type;
+            var payload = msg.payload;
+            if (!type || !payload) return;
+
+            console.log('[GROUP FLOW] RECEIVED:', type, payload.groupId || (payload.group && payload.group.id) || '');
+
+            // 1. Forward to MessageRouter in group-core.js (primary handler)
+            if (window.MessageRouter && typeof window.MessageRouter.handle === 'function') {
+                try { window.MessageRouter.handle({ type: type, payload: payload }); } catch (_) {}
+            }
+
+            // 2. Direct GroupCore data update + emit
+            var GC = window.GroupCore;
+            if (GC) {
+                var grp, gid, uid2, message;
+                if (type === 'GROUP_CREATED' || type === 'group:created') {
+                    grp = payload.group || payload;
+                    if (grp && grp.id) {
+                        if (!GC.groups) GC.groups = [];
+                        if (!GC.groups.some(function(g) { return String(g.id) === String(grp.id); })) {
+                            GC.groups.push(grp);
+                            uid2 = String(GC.currentUser && (GC.currentUser.id || GC.currentUser.uid) || '');
+                            if (String(grp.createdBy) === uid2) {
+                                GC.myGroups    = GC.myGroups    || []; GC.myGroups.push(grp);
+                                GC.adminGroups = GC.adminGroups || []; GC.adminGroups.push(grp);
+                            } else {
+                                GC.joinedGroups = GC.joinedGroups || []; GC.joinedGroups.push(grp);
+                            }
+                            GC.saveGroups && GC.saveGroups();
+                            GC.emit && GC.emit('group:created', grp);
+                            console.log('[GROUP FLOW] RENDERED: group:created applied to GroupCore, id=', grp.id);
+                        }
+                    }
+                } else if (type === 'GROUP_MESSAGE' || type === 'group:message') {
+                    gid     = payload.groupId || payload.group_id;
+                    message = payload.message || payload;
+                    if (gid && message) {
+                        GC.addGroupMessage && GC.addGroupMessage(gid, message);
+                        GC.emit && GC.emit('group:message-received', { groupId: gid, message: message });
+                        console.log('[GROUP FLOW] RENDERED: group message delivered, groupId=', gid);
+                    }
+                } else if (type === 'group:localSync') {
+                    var action = payload.action;
+                    if ((action === 'create' || action === 'upsert') && payload.group) {
+                        grp = payload.group;
+                        if (!GC.groups) GC.groups = [];
+                        if (!GC.groups.some(function(g) { return String(g.id) === String(grp.id); })) {
+                            GC.groups.push(grp); GC.saveGroups && GC.saveGroups();
+                            GC.emit && GC.emit('group:created', grp);
+                        }
+                    } else if (action === 'message' && payload.groupId && payload.message) {
+                        GC.addGroupMessage && GC.addGroupMessage(payload.groupId, payload.message);
+                        GC.emit && GC.emit('group:message-received', { groupId: payload.groupId, message: payload.message });
+                    } else if (action === 'member_add') {
+                        GC.emit && GC.emit('group:member-added', payload);
+                    } else if (action === 'member_remove' || action === 'member_leave') {
+                        GC.emit && GC.emit('group:member-removed', payload);
+                    }
+                } else if (type === 'GROUP_MEMBER_ADDED') {
+                    GC.emit && GC.emit('group:member-added', payload);
+                } else if (type === 'GROUP_MEMBER_REMOVED' || type === 'GROUP_MEMBER_LEFT') {
+                    GC.emit && GC.emit('group:member-removed', payload);
+                } else if (type === 'GROUP_INVITE_RECEIVED') {
+                    GC.groupInvites = GC.groupInvites || []; GC.groupInvites.push(payload);
+                    GC.saveGroups && GC.saveGroups();
+                    GC.emit && GC.emit('group:invites-updated', GC.groupInvites);
+                }
+            }
+
+            // 3. DOM custom event fallback
+            try { document.dispatchEvent(new CustomEvent(type, { detail: payload })); } catch (_) {}
+        }
+
+        var _HANDLED_TYPES = [
+            'GROUP_CREATED', 'group:created', 'group_created',
+            'GROUP_MESSAGE', 'group:message', 'group_message',
+            'group:localSync',
+            'GROUP_MEMBER_ADDED', 'GROUP_MEMBER_REMOVED', 'GROUP_MEMBER_LEFT',
+            'GROUP_INVITE_RECEIVED', 'GROUP_TYPING',
+            'group:member:added', 'group:member:removed', 'group:member:left',
+            'group:invitation:received', 'group:typing', 'group:updated'
+        ];
+
+        window.addEventListener('message', function _groupBridgeHandler(evt) {
+            try {
+                var d = evt.data;
+                if (!d || typeof d !== 'object' || d.source !== 'ws-group-bridge') return;
+                if (_HANDLED_TYPES.indexOf(d.type) === -1) return;
+
+                var ready = window.GroupCore && typeof window.GroupCore.emit === 'function';
+                if (!ready || !_flushed) {
+                    _buffer.push(d);
+                    if (ready) _flushBuffer();
+                } else {
+                    _processGroupMsg(d);
+                }
+            } catch (_err) {}
+        });
+
+        document.addEventListener('groupsCoreReady', _flushBuffer);
+        document.addEventListener('coreDataUpdated',  _flushBuffer);
+        setTimeout(_flushBuffer, 3000); // safety net
+
+        console.log('[GROUP.HTML BRIDGE] Early realtime bridge installed');
+    })();
+    </script>
+    <script>
         (function() {
             // Retry button handler
             const retryBtn = document.getElementById('retryNowBtn');

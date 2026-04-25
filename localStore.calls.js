@@ -43,14 +43,46 @@
   /* ── Wait for AppCache to be available ──────────────────────────────────── */
   function getCache() {
     if (window.AppCache) return Promise.resolve(window.AppCache);
+    
+    // Check if we're on a calls page before polling
+    const isCallsPage = () => {
+      try {
+        // Check if we're in the calls iframe or parent calls page
+        return window.location.pathname.includes('calls') || 
+               (window.parent && window.parent.location && window.parent.location.pathname.includes('calls')) ||
+               (window.__currentPage === 'calls') ||
+               (document.body && document.body.classList.contains('calls-page'));
+      } catch(e) {
+        return false;
+      }
+    };
+    
+    // If not on calls page, don't poll for AppCache
+    if (!isCallsPage()) {
+      console.log('[CallLocalStore] Not on calls page, skipping AppCache polling');
+      return Promise.resolve(null);
+    }
+    
     return new Promise((resolve, reject) => {
       let tries = 0;
       const timer = setInterval(() => {
         tries++;
+        
+        // Stop polling if we navigated away from calls page
+        if (!isCallsPage()) {
+          clearInterval(timer);
+          console.log('[CallLocalStore] Navigated away from calls page, stopping AppCache polling');
+          resolve(null);
+          return;
+        }
+        
         if (window.AppCache) { clearInterval(timer); resolve(window.AppCache); return; }
         if (tries >= 200) { 
           clearInterval(timer);
-          console.warn('[CallLocalStore] AppCache not available after 10s, using fallback mode');
+          // Only show warning if we're still on calls page
+          if (isCallsPage()) {
+            console.warn('[CallLocalStore] AppCache not available after 10s, using fallback mode');
+          }
           resolve(null);
         }
       }, 50);

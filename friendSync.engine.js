@@ -18,6 +18,7 @@
     const SYNC_INTERVAL      = 60_000;   // Full sync every 60 s
     const SYNC_DEBOUNCE      = 400;      // Debounce rapid consecutive calls
     const REQUEST_TIMEOUT_MS = 15_000;
+    const MAX_BACKOFF_MS     = 300_000;  // Max 5 minutes backoff
 
     // ── FriendSyncEngine ───────────────────────────────────────────────────
 
@@ -27,6 +28,9 @@
             this._lastSync      = 0;
             this._syncTimer     = null;
             this._debounceTimer = null;
+            this._backoffTimer  = null;
+            this._consecutiveFailures = 0;
+            this._currentBackoff = 0;
             this._stats = {
                 totalSyncs:   0,
                 successful:   0,
@@ -136,6 +140,14 @@
                 this._lastSync            = Date.now();
                 this._stats.successful++;
                 this._stats.lastDuration  = Date.now() - start;
+                
+                // Reset backoff on success
+                this._consecutiveFailures = 0;
+                this._currentBackoff = 0;
+                if (this._backoffTimer) {
+                    clearTimeout(this._backoffTimer);
+                    this._backoffTimer = null;
+                }
 
                 this._emit('FRIEND_SYNC_COMPLETED', { duration: this._stats.lastDuration });
                 if (window.KynectaStore) window.KynectaStore.set('sync.lastSync', this._lastSync);
@@ -145,8 +157,28 @@
 
             } catch (error) {
                 this._stats.failed++;
-                console.error('[FriendSync] Sync failed:', error);
+                this._consecutiveFailures++;
+                
+                // Calculate exponential backoff
+                this._currentBackoff = Math.min(
+                    REQUEST_TIMEOUT_MS * Math.pow(2, this._consecutiveFailures - 1),
+                    MAX_BACKOFF_MS
+                );
+                
+                // Only show error for first few failures to reduce noise
+                if (this._consecutiveFailures <= 3) {
+                    console.error('[FriendSync] Sync failed:', error);
+                } else if (this._consecutiveFailures === 4) {
+                    console.warn('[FriendSync] Multiple failures detected, enabling backoff - will retry silently');
+                }
+                
                 this._emit('FRIEND_SYNC_FAILED', { error: error.message });
+                
+                // Schedule retry with backoff if it's a timeout/network error
+                if (error.message.includes('timeout') || error.message.includes('network') || error.message.includes('fetch')) {
+                    this._scheduleRetry();
+                }
+                
                 return { success: false, error: error.message };
             } finally {
                 this._syncing = false;
@@ -741,6 +773,20 @@
                 window.KynectaEventBus.on?.('FRIEND_REMOVED', () => this.syncType('friends'));
             }
             window.addEventListener('kyn:friendsSynced', () => {}); // no-op sentinel
+        }
+
+        // ── Backoff retry mechanism ────────────────────────────────────────
+        _scheduleRetry() {
+            if (this._backoffTimer) {
+                clearTimeout(this._backoffTimer);
+            }
+            
+            this._backoffTimer = setTimeout(async () => {
+                // Only retry if we're still offline and haven't succeeded in the meantime
+                if (this._consecutiveFailures > 0 && !navigator.onLine) {
+                    await this._runSync();
+                }
+            }, this._currentBackoff);
         }
     }
 

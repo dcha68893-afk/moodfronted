@@ -127,10 +127,21 @@ class StatusWebSocket {
             return;
         }
 
+        // ── Skip echo on sender's own screen ─────────────────────────────────
+        // statusController emits to every friend's room — which includes the
+        // sender if they're also in their own room. status-ui marks confirmed
+        // IDs so we don't double-render here.
+        if (window._confirmedStatusIds && window._confirmedStatusIds.has(String(status.id))) {
+            console.log(`[StatusWebSocket] ℹ️ Skipping echo for already-confirmed status id=${status.id}`);
+            return;
+        }
+
+        console.log(`[StatusWebSocket] 📥 STATUS RECEIVED id=${status.id} userId=${status.userId}`);
+
         // ── Update in-memory state via status-core ──────────────────────────
         if (typeof window.addStatus === 'function') {
             window.addStatus(status);
-            console.log('[STATUS FLOW] WS → UI updated: status added', status.id);
+            console.log(`[STATUS FLOW] WS → UI updated: status added id=${status.id}`);
         }
 
         // ── Update cache ────────────────────────────────────────────────────
@@ -145,8 +156,10 @@ class StatusWebSocket {
 
         if (currentUser && String(status.userId) !== String(currentUser.id || currentUser.userId)) {
             if (typeof window.showNotification === 'function') {
-                window.showNotification('New status posted!', 'info');
+                const name = status.user?.displayName || status.user?.username || 'A friend';
+                window.showNotification(`📸 ${name} posted a new status`, 'info');
             }
+            console.log(`[StatusWebSocket] ✅ STATUS RENDERED on receiver screen id=${status.id}`);
         }
 
         // ── Forward to postMessage bridge (iframe → parent) ─────────────────

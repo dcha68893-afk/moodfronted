@@ -261,7 +261,7 @@ function generateId() {
 }
 
 function generateRequestId() {
-    return `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    return `${MODULE_NAME}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 }
 
 // =============================================
@@ -407,7 +407,7 @@ function safeSend(type, payload = {}) {
 // =============================================
 // API REQUEST FUNCTION - STRICT PARENT PIPELINE
 // =============================================
-function apiRequest(endpoint, method = 'GET', body = null, timeoutMs = 45000) {
+function apiRequest(endpoint, method = 'GET', body = null, timeoutMs = 10000) {
     return new Promise((resolve, reject) => {
         // STRICT: Only allow in ACTIVE state
         if (!LifecycleState.ensureActive()) {
@@ -432,8 +432,9 @@ function apiRequest(endpoint, method = 'GET', body = null, timeoutMs = 45000) {
         // Set up timeout
         const timeoutId = setTimeout(() => {
             if (pendingRequests.has(requestId)) {
+                console.warn(`[${MODULE_NAME}] API request timeout: ${method} ${normalizedEndpoint} (ID: ${requestId})`);
                 pendingRequests.delete(requestId);
-                reject(new Error(`API request timeout: ${method} ${normalizedEndpoint}`));
+                reject(new Error(`Request timeout: ${method} ${normalizedEndpoint}`));
             }
         }, timeoutMs);
         
@@ -3000,6 +3001,110 @@ GroupCore.init();
 // =============================================
 if (typeof window !== 'undefined' && !window.__GROUPS_MESSAGE_LISTENER_SET__) {
     window.__GROUPS_MESSAGE_LISTENER_SET__ = true;
+    
+    // ✅ ENHANCED: Setup WebSocket event listeners for real-time member sync
+    function setupGroupRealtimeListeners() {
+        // Bind to WebSocket service if available
+        if (window.wsService?.on) {
+            ['group:member_added', 'group:member_removed', 'group:member_role_changed', 
+             'group:member_joined', 'group:member_left'].forEach(eventName => {
+                window.wsService.on(eventName, (payload) => {
+                    handleGroupMemberEvent(eventName, payload);
+                });
+            });
+        }
+        
+        // Bind to KynectaRealtime singleton if available
+        if (window.KynectaRealtime?.on) {
+            ['group:member_added', 'group:member_removed', 'group:member_role_changed',
+             'group:member_joined', 'group:member_left'].forEach(eventName => {
+                window.KynectaRealtime.on(eventName, (payload) => {
+                    handleGroupMemberEvent(eventName, payload);
+                });
+            });
+        }
+        
+        // Bridge from DOM CustomEvents
+        window.addEventListener('group:member_added', (evt) => {
+            if (evt.detail) handleGroupMemberEvent('group:member_added', evt.detail);
+        });
+        
+        window.addEventListener('group:member_removed', (evt) => {
+            if (evt.detail) handleGroupMemberEvent('group:member_removed', evt.detail);
+        });
+        
+        window.addEventListener('group:member_role_changed', (evt) => {
+            if (evt.detail) handleGroupMemberEvent('group:member_role_changed', evt.detail);
+        });
+    }
+    
+    // ✅ ENHANCED: Handle real-time group member events
+    function handleGroupMemberEvent(eventName, data) {
+        console.log(`[GroupsCore] 📋 GROUP MEMBER EVENT:`, { eventName, data });
+        
+        try {
+            const { groupId, memberId, role, userId, member } = data || {};
+            
+            if (!groupId || !memberId) {
+                console.warn('[GroupsCore] Invalid member event data:', data);
+                return;
+            }
+            
+            // Update local group data
+            const groupIndex = groups.findIndex(g => g.id === groupId);
+            if (groupIndex === -1) return;
+            
+            const group = groups[groupIndex];
+            if (!group) return;
+            
+            switch (eventName) {
+                case 'group:member_added':
+                case 'group:member_joined':
+                    if (member && !group.members.find(m => m.id === member.id)) {
+                        group.members.push(member);
+                    }
+                    console.log(`[GroupsCore] ✅ Member added to group ${groupId}:`, member);
+                    break;
+                    
+                case 'group:member_removed':
+                case 'group:member_left':
+                    group.members = group.members.filter(m => m.id !== memberId);
+                    console.log(`[GroupsCore] ✅ Member removed from group ${groupId}:`, memberId);
+                    break;
+                    
+                case 'group:member_role_changed':
+                    const memberToUpdate = group.members.find(m => m.id === memberId);
+                    if (memberToUpdate && role) {
+                        memberToUpdate.role = role;
+                    }
+                    console.log(`[GroupsCore] ✅ Member role changed in group ${groupId}:`, { memberId, role });
+                    break;
+            }
+            
+            // Emit events for UI updates
+            window.dispatchEvent(new CustomEvent('group:updated', {
+                detail: { group, eventName, member, groupId }
+            }));
+            
+            // Emit to EventBus for cross-module sync
+            if (window.EventBus?.emit) {
+                window.EventBus.emit('group:member_updated', {
+                    group, eventName, member, groupId
+                });
+            }
+            
+            // Update UI if this group is currently active
+            if (currentChatGroup && currentChatGroup.id === groupId) {
+                renderGroupMembers();
+            }
+            
+        } catch (error) {
+            console.error('[GroupsCore] Failed to handle member event:', error);
+        }
+    }
+    
+    // Initialize real-time listeners
+    setupGroupRealtimeListeners();
     
     window.addEventListener('message', (event) => {
         try {

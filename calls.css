@@ -27,6 +27,15 @@
             --sad-color: #6495ED;
             --angry-color: #FF4500;
             --tired-color: #9370DB;
+            --overlay-bg-primary: linear-gradient(160deg, #0d1b2a 0%, #1a2744 50%, #0a1628 100%);
+            --overlay-bg-secondary: #242526;
+            --overlay-bg-elevated: #3a3b3c;
+            --overlay-text-primary: #ffffff;
+            --overlay-text-secondary: rgba(255,255,255,0.7);
+            --overlay-accent-color: #0084ff;
+            --overlay-border-color: rgba(255,255,255,0.1);
+            --overlay-error-color: #ff3b30;
+            --overlay-success-color: #16a34a;
         }
         
         body {
@@ -2768,6 +2777,17 @@ body[data-module="friends"] .friend-item:hover {
   --color-friend-bg: #1f2937;
   --color-friend-card: #111827;
   --color-friend-border: #374151;
+  
+  /* Overlay dark mode overrides */
+  --overlay-bg-primary: linear-gradient(160deg, #0d1b2a 0%, #1a2744 50%, #0a1628 100%);
+  --overlay-bg-secondary: #242526;
+  --overlay-bg-elevated: #3a3b3c;
+  --overlay-text-primary: #e4e6eb;
+  --overlay-text-secondary: #b0b3b8;
+  --overlay-accent-color: #2d88ff;
+  --overlay-border-color: rgba(255,255,255,0.08);
+  --overlay-error-color: #ff3b30;
+  --overlay-success-color: #16a34a;
 }
 
 [data-theme="dark"] .message-bubble.sent,
@@ -2895,20 +2915,75 @@ input:focus + .toggle-slider,
   position: relative;
 }
 /* ═══════════════════════════════════════════════════════════
-   CALLING OVERLAY  (outgoing / dialing screen)
+   3-STATE CALL OVERLAY SYSTEM
+   IDLE -> CALLING -> IN-CALL
 ═══════════════════════════════════════════════════════════ */
+
+/* ── Main Call Overlay Container ────────────────────────────────── */
+.call-overlay {
+    position: fixed;
+    bottom: 24px;
+    right: 24px;
+    width: 320px;
+    height: auto;
+    max-height: 520px;
+    z-index: 9999;
+    pointer-events: none;
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity 0.3s ease, visibility 0.3s ease, transform 0.3s ease;
+    border-radius: 16px;
+    overflow: hidden;
+    transform: translateY(20px) scale(0.95);
+    background: var(--overlay-bg-primary, linear-gradient(160deg, #0d1b2a 0%, #1a2744 50%, #0a1628 100%));
+    box-shadow: 0 20px 60px rgba(0,0,0,0.4), 0 0 0 1px var(--overlay-border-color, rgba(255,255,255,0.1));
+}
+
+.call-overlay[data-state="idle"] {
+    display: none;
+}
+
+.call-overlay[data-state="calling"] {
+    pointer-events: auto;
+    opacity: 1;
+    visibility: visible;
+    transform: translateY(0) scale(1);
+}
+
+.call-overlay[data-state="in-call"] {
+    pointer-events: auto;
+    opacity: 1;
+    visibility: visible;
+    transform: translateY(0) scale(1);
+    width: min(90vw, 480px);
+    height: min(80vh, 600px);
+}
+
+/* ── Legacy calling-overlay (deprecated, kept for compatibility) ── */
 .calling-overlay {
     position: fixed;
-    inset: 0;
+    bottom: 24px;
+    right: 24px;
+    width: 320px;
+    height: auto;
+    max-height: 520px;
     z-index: 10000;
-    background: linear-gradient(160deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+    background: var(--overlay-bg-primary, linear-gradient(160deg, #0d1b2a 0%, #1a2744 50%, #0a1628 100%));
     display: none;
     align-items: center;
     justify-content: center;
     flex-direction: column;
+    border-radius: 16px;
+    overflow: hidden;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.4), 0 0 0 1px var(--overlay-border-color, rgba(255,255,255,0.1));
+    transform: translateY(20px) scale(0.95);
+    opacity: 0;
+    transition: opacity 0.3s ease, transform 0.3s ease;
 }
 .calling-overlay.active {
     display: flex;
+    opacity: 1;
+    transform: translateY(0) scale(1);
 }
 
 .calling-container {
@@ -3005,4 +3080,431 @@ input:focus + .toggle-slider,
     display: flex;
     justify-content: center;
     z-index: 1;
+}
+/* Screen transition styles - CRITICAL FIX */
+#idleScreen,
+#callingScreen,
+#inCallScreen {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: var(--video-bg, #1a1a1a);
+    z-index: 10;
+}
+
+#idleScreen {
+    display: block;
+}
+
+#callingScreen {
+    display: none;
+}
+
+#inCallScreen {
+    display: none;
+}
+
+#idleScreen.active {
+    display: block;
+}
+
+#callingScreen.active {
+    display: flex;
+    flex-direction: column;
+}
+
+#inCallScreen.active {
+    display: flex;
+    flex-direction: column;
+}
+
+/* Calling screen content styles */
+.calling-content {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    text-align: center;
+    color: white;
+    padding: 20px;
+}
+
+.calling-header h2 {
+    font-size: 28px;
+    margin-bottom: 40px;
+    animation: pulse 1.5s infinite;
+}
+
+.calling-user {
+    margin-bottom: 40px;
+}
+
+.calling-avatar {
+    width: 120px;
+    height: 120px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin: 0 auto 20px;
+    font-size: 48px;
+    overflow: hidden;
+}
+
+.calling-avatar img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.calling-info {
+    text-align: center;
+}
+
+.calling-name {
+    font-size: 24px;
+    font-weight: 600;
+    margin-bottom: 8px;
+}
+
+.calling-status {
+    font-size: 14px;
+    opacity: 0.8;
+    margin-bottom: 8px;
+}
+
+.calling-type {
+    font-size: 12px;
+    opacity: 0.6;
+}
+
+.calling-animation {
+    position: relative;
+    width: 120px;
+    height: 120px;
+    margin: 20px auto;
+}
+
+.pulse-ring {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    border-radius: 50%;
+    border: 2px solid rgba(255, 255, 255, 0.3);
+    animation: ringPulse 2s infinite;
+}
+
+.pulse-ring.delay-1 {
+    animation-delay: 0.5s;
+}
+
+.pulse-ring.delay-2 {
+    animation-delay: 1s;
+}
+
+@keyframes ringPulse {
+    0% {
+        transform: scale(0.9);
+        opacity: 1;
+    }
+    100% {
+        transform: scale(1.5);
+        opacity: 0;
+    }
+}
+
+.calling-actions {
+    margin-top: 40px;
+}
+
+.calling-action-btn {
+    width: 72px;
+    height: 72px;
+    border-radius: 50%;
+    border: none;
+    background: #ff3b30;
+    color: white;
+    font-size: 28px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: transform 0.2s, background 0.2s;
+}
+
+.calling-action-btn:hover {
+    transform: scale(1.05);
+    background: #ff1a1a;
+}
+
+/* In-call screen styles */
+.in-call-header {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    padding: 15px 20px;
+    background: linear-gradient(to bottom, rgba(0,0,0,0.7), transparent);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    z-index: 20;
+}
+
+.in-call-user-info {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.in-call-type-icon {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    background: rgba(255,255,255,0.2);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.in-call-name {
+    font-weight: 600;
+    font-size: 16px;
+    color: white;
+}
+
+.in-call-status {
+    font-size: 12px;
+    opacity: 0.8;
+    color: white;
+}
+
+.in-call-timer {
+    font-size: 18px;
+    font-weight: 600;
+    color: white;
+    background: rgba(0,0,0,0.5);
+    padding: 6px 12px;
+    border-radius: 20px;
+}
+
+.in-call-video-grid {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 80px 20px 100px;
+}
+
+.video-placeholder {
+    text-align: center;
+    color: white;
+    opacity: 0.7;
+}
+
+.video-placeholder i {
+    font-size: 64px;
+    margin-bottom: 16px;
+}
+
+.in-call-controls {
+    position: absolute;
+    bottom: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    gap: 16px;
+    padding: 12px 24px;
+    background: rgba(0,0,0,0.8);
+    border-radius: 50px;
+    backdrop-filter: blur(10px);
+    z-index: 20;
+}
+
+.in-call-control-btn {
+    width: 56px;
+    height: 56px;
+    border-radius: 50%;
+    border: none;
+    background: rgba(255,255,255,0.2);
+    color: white;
+    cursor: pointer;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    font-size: 20px;
+    transition: all 0.2s;
+}
+
+.in-call-control-btn .control-label {
+    font-size: 10px;
+}
+
+.in-call-control-btn:hover {
+    background: rgba(255,255,255,0.3);
+    transform: scale(1.05);
+}
+
+.in-call-control-btn.danger {
+    background: #ff3b30;
+}
+
+.in-call-control-btn.danger:hover {
+    background: #ff1a1a;
+}
+
+.in-call-control-btn.active {
+    background: #22c55e;
+}
+/* Ensure proper screen positioning */
+#idleScreen,
+#callingScreen,
+#inCallScreen {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    min-height: 500px;
+    background: var(--video-bg, #1a1a1a);
+}
+
+#idleScreen { display: block; }
+#callingScreen { display: none; }
+#inCallScreen { display: none; }
+
+#idleScreen.active { display: block; }
+#callingScreen.active { display: flex; flex-direction: column; }
+#inCallScreen.active { display: flex; flex-direction: column; }
+
+/* Ensure sidebar never gets hidden */
+.sidebar {
+    display: flex !important;
+}
+/* Ensure calling screen is always on top */
+#callingScreen {
+    position: fixed !important;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    z-index: 9999 !important;
+    background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%) !important;
+    display: none;
+}
+
+#callingScreen.active {
+    display: flex !important;
+}
+
+#idleScreen {
+    position: relative;
+    width: 100%;
+    height: 100%;
+}
+
+/* Ensure sidebar never covers the calling screen */
+.sidebar {
+    z-index: 1;
+}
+
+#callingScreen {
+    z-index: 10000 !important;
+}
+/* Force calling screen to be visible and on top */
+#callingScreen {
+    position: fixed !important;
+    top: 0 !important;
+    left: 0 !important;
+    width: 100% !important;
+    height: 100% !important;
+    z-index: 99999 !important;
+    background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%) !important;
+    display: none !important;
+}
+
+#callingScreen.active {
+    display: flex !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+}
+
+#idleScreen {
+    position: relative;
+    width: 100%;
+    height: 100%;
+}
+
+/* Ensure sidebar stays visible but behind calling screen */
+.sidebar {
+    z-index: 1 !important;
+}
+
+/* Hide call container completely */
+.call-container {
+    display: none !important;
+}
+/* FORCE call container and screens to be visible */
+.call-container {
+    display: block !important;
+    position: relative !important;
+    width: 100% !important;
+    height: 100% !important;
+    flex: 1 !important;
+}
+
+/* Make all screens absolute positioned inside the container */
+.call-screen {
+    position: absolute !important;
+    top: 0 !important;
+    left: 0 !important;
+    width: 100% !important;
+    height: 100% !important;
+}
+
+/* Idle screen visible by default */
+#idleScreen {
+    display: block !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+}
+
+/* Calling screen hidden by default */
+#callingScreen {
+    display: none !important;
+}
+
+/* In-call screen hidden by default */
+#inCallScreen {
+    display: none !important;
+}
+
+/* When active, show the respective screen */
+#callingScreen.active {
+    display: flex !important;
+    flex-direction: column !important;
+    z-index: 100 !important;
+}
+
+#inCallScreen.active {
+    display: flex !important;
+    flex-direction: column !important;
+    z-index: 100 !important;
+}
+
+/* Ensure idle screen is hidden when other screens are active */
+#idleScreen.active {
+    display: block !important;
+}
+
+/* When calling screen is active, hide idle screen */
+#callingScreen.active ~ #idleScreen,
+#callingScreen.active + #idleScreen {
+    display: none !important;
 }

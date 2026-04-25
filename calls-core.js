@@ -2264,8 +2264,13 @@ function applySession(sessionData) {
 }
                 
                 // ==================== CALL SIGNALING HANDLERS (REAL) ====================
-                if (message.type === MESSAGE_TYPES.CALL_INCOMING) {
-                    handleIncomingCall(message.payload || message.data);
+                // ── FIX: accept all naming variants from banner-bridge, ws-bridge, and direct WS ──
+                if (message.type === MESSAGE_TYPES.CALL_INCOMING ||
+                    message.type === 'CALL_INCOMING' ||
+                    message.type === 'incoming_call' ||
+                    message.type === 'call_incoming') {
+                    console.log('[CallsCore] 📞 CALL_INCOMING message received, routing to handleIncomingCall');
+                    handleIncomingCall(message.payload || message.data || message);
                     return;
                 }
                 
@@ -4561,18 +4566,29 @@ endCall: async function(callId, options = {}) {
 },
 
         handleIncomingCall: function(callData) {
-            logCall(MODULE, 'Incoming call received', callData);
-            
-            if (!parentReady) {
-                logWarn(MODULE, 'Incoming call ignored - parent not ready');
+            logCall(MODULE, 'Incoming call received (Governor)', callData);
+
+            // ── FIX: Do NOT block on parentReady or assertActive here.
+            // This method is called from notifyListeners which may fire before
+            // the lifecycle is fully ACTIVE (e.g. after SW reload). Blocking
+            // here is the second silent drop-point for incoming calls.
+            const blockedStates = [LifecycleState.BOOT, LifecycleState.INITIALIZING];
+            if (blockedStates.includes(currentState)) {
+                logWarn(MODULE, `Governor.handleIncomingCall: blocked (${currentState})`);
                 return;
             }
-            
-            if (!assertActive('handleIncomingCall')) {
-                logWarn(MODULE, 'Incoming call ignored - not ACTIVE');
-                return;
+            // Auto-promote if session available
+            if (currentState !== LifecycleState.ACTIVE) {
+                const sess = (this._session && this._session.authenticated) ? this._session : callsState.session;
+                if (sess && sess.authenticated) {
+                    logWarn(MODULE, 'Governor.handleIncomingCall: auto-promoting to ACTIVE');
+                    currentState = LifecycleState.ACTIVE;
+                } else {
+                    logWarn(MODULE, 'Governor.handleIncomingCall: no session — dropping');
+                    return;
+                }
             }
-            
+
             // CRITICAL: Check for valid session using fallback
             const activeSession = (this._session && this._session.authenticated) ? this._session : callsState.session;
             if (!activeSession || !__isValidSession(activeSession) || activeSession.expiresAt <= Date.now()) {
@@ -6923,15 +6939,34 @@ _escapeHtml: function(text) {
     
     function handleIncomingCall(callData) {
         logCall(MODULE, 'handleIncomingCall', callData);
-        
-        if (!parentReady) {
-            logWarn(MODULE, 'Incoming call ignored - parent not ready');
+        console.log('[CallsCore] 📞 RECEIVED incoming call event:', JSON.stringify({
+            callId: callData && (callData.callId || callData.id),
+            callerName: callData && callData.callerName,
+            callType: callData && (callData.callType || callData.type),
+            state: currentState
+        }));
+
+        // ── FIX: NEVER block incoming calls on parentReady or assertActive.
+        // Service worker reloads and delayed handshakes reset lifecycle state.
+        // Only hard-block if the module has not started initialising at all.
+        const blockedStates = [LifecycleState.BOOT, LifecycleState.INITIALIZING];
+        if (blockedStates.includes(currentState)) {
+            logWarn(MODULE, `Incoming call ignored — module not yet initialised (state: ${currentState})`);
             return;
         }
-        
-        if (!assertActive('handleIncomingCall')) {
-            logWarn(MODULE, 'Incoming call ignored - not ACTIVE');
-            return;
+
+        // Auto-promote: if we have a valid session but lifecycle is still
+        // WAIT_PARENT (e.g. after a SW reload), force-promote to ACTIVE so
+        // the incoming call is not silently dropped.
+        if (currentState !== LifecycleState.ACTIVE) {
+            const sess = callsState.session || (CallsStateGovernor && CallsStateGovernor._session);
+            if (sess && sess.authenticated) {
+                logWarn(MODULE, `Auto-promoting ${currentState} → ACTIVE to handle incoming call`);
+                currentState = LifecycleState.ACTIVE;
+            } else {
+                logWarn(MODULE, `Cannot auto-promote — no valid session (state: ${currentState}). Incoming call dropped.`);
+                return;
+            }
         }
 
         // ── DEDUP: ignore duplicate incoming events for the same call ────────
@@ -8187,8 +8222,13 @@ _closeCallUI: function() {
                 }
                 
                 // ==================== CALL SIGNALING HANDLERS ====================
-                if (msg.type === MESSAGE_TYPES.CALL_INCOMING) {
-                    handleIncomingCall(msg.payload || msg.data);
+                // ── FIX: accept all naming variants ──
+                if (msg.type === MESSAGE_TYPES.CALL_INCOMING ||
+                    msg.type === 'CALL_INCOMING' ||
+                    msg.type === 'incoming_call' ||
+                    msg.type === 'call_incoming') {
+                    console.log('[CallsCore] 📞 CALL_INCOMING (msg router) received, routing to handleIncomingCall');
+                    handleIncomingCall(msg.payload || msg.data || msg);
                     return;
                 }
                 

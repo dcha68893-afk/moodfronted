@@ -534,6 +534,19 @@ async function _remapGroupId(GC, tempId, serverGroup) {
     GC.saveGroups();
     await LocalGroupStore.deleteGroupLocal(tempId).catch(() => {});
     await LocalGroupStore.saveGroupLocal({ ...serverGroup, serverId: serverGroup.id, isLocalOnly: false, syncState: 'synced' });
+
+    // ── Join the confirmed group's socket room ────────────────────────────
+    // Tell the server to subscribe this client to group:${serverGroup.id}.
+    // This ensures the creator receives their own group's future messages.
+    try {
+        const wsRef = window.KynectaRealtime || window.wsService?._realtime;
+        const rawSend = wsRef?._sendRaw?.bind(wsRef) || wsRef?.sendRaw?.bind(wsRef);
+        if (rawSend) {
+            rawSend({ type: 'join', room: `group:${serverGroup.id}` });
+            rawSend({ type: 'join_group_rooms', groupIds: [serverGroup.id] });
+            console.log('[GROUP FLOW] Joined WS room for confirmed group', serverGroup.id);
+        }
+    } catch (_) {}
 }
 
 async function _inviteMembers(groupId, memberIds, myUserId) {
@@ -715,6 +728,89 @@ function _installGroupWsBridge(GC) {
             tryBind();
         });
     }
+
+    // ── FALLBACK BRIDGE: listen to CustomEvents forwarded by chat.html ──────────
+    // chat.html and app_realtime_socket.js dispatch CustomEvents on the parent
+    // window (kyn:group:message, kyn:group:created …).  The iframe can't receive
+    // those directly, BUT the parent also sends postMessage frames with
+    // source:'ws-group-bridge'.  We handle those here so the group module works
+    // even when window.parent.wsService is inaccessible (cross-origin fallback).
+    window.addEventListener('message', function _groupBridgePostMsg(evt) {
+        try {
+            const d = evt.data;
+            if (!d || d.source !== 'ws-group-bridge') return;
+            const type    = d.type;
+            const payload = d.payload;
+            if (!type || !payload) return;
+
+            const GC = window.GroupCore;
+
+            if (type === 'group:created' || type === 'GROUP_CREATED') {
+                const group = payload.group || payload;
+                if (!group || !group.id) return;
+                console.log('[GROUP BRIDGE] postMessage group:created → group', group.id);
+                if (GC && !GC.groups?.some(g => String(g.id) === String(group.id))) {
+                    GC.groups = GC.groups || [];
+                    GC.groups.push(group);
+                    const uid = String(GC.currentUser?.id || GC.currentUser?.uid || '');
+                    if (String(group.createdBy) === uid) {
+                        GC.myGroups    = GC.myGroups    || []; GC.myGroups.push(group);
+                        GC.adminGroups = GC.adminGroups || []; GC.adminGroups.push(group);
+                    } else {
+                        GC.joinedGroups = GC.joinedGroups || []; GC.joinedGroups.push(group);
+                    }
+                    GC.saveGroups?.();
+                    GC.emit?.('group:created', group);
+                    console.log('[GROUP BRIDGE] Group added to local lists:', group.name);
+                }
+            }
+
+            else if (type === 'group:message' || type === 'GROUP_MESSAGE') {
+                const groupId = payload.groupId || payload.group_id;
+                const message = payload.message || payload;
+                if (!groupId || !message) return;
+                console.log('[GROUP BRIDGE] postMessage group:message → group', groupId);
+                if (GC) {
+                    GC.addGroupMessage?.(groupId, message);
+                    GC.emit?.('group:message-received', { groupId, message });
+                }
+            }
+
+            else if (type === 'group:localSync') {
+                const { action, group, groupId, member, userId: uid2 } = payload;
+                console.log('[GROUP BRIDGE] postMessage group:localSync →', action);
+                if (GC) {
+                    if ((action === 'create' || action === 'upsert') && group?.id) {
+                        if (!GC.groups?.some(g => String(g.id) === String(group.id))) {
+                            GC.groups = GC.groups || []; GC.groups.push(group);
+                            GC.saveGroups?.();
+                            GC.emit?.('group:created', group);
+                        }
+                    } else if (action === 'message' && groupId && payload.message) {
+                        GC.addGroupMessage?.(groupId, payload.message);
+                        GC.emit?.('group:message-received', { groupId, message: payload.message });
+                    } else if (action === 'member_add' && member) {
+                        GC.emit?.('group:member-added', { groupId: member.groupId, member });
+                    } else if ((action === 'member_remove' || action === 'member_leave') && groupId) {
+                        GC.emit?.('group:member-removed', { groupId, userId: uid2 });
+                    }
+                }
+            }
+
+            else if (type === 'GROUP_MEMBER_ADDED' || type === 'group:member:added') {
+                if (GC) GC.emit?.('group:member-added', payload);
+            }
+            else if (type === 'GROUP_MEMBER_REMOVED' || type === 'group:member:removed' || type === 'GROUP_MEMBER_LEFT') {
+                if (GC) GC.emit?.('group:member-removed', payload);
+            }
+            else if (type === 'GROUP_INVITE_RECEIVED' || type === 'group:invitation:received') {
+                if (GC) { GC.groupInvites = GC.groupInvites || []; GC.groupInvites.push(payload); GC.saveGroups?.(); GC.emit?.('group:invites-updated', GC.groupInvites); }
+            }
+        } catch (_e) {
+            // Silent — bridge events must never break the app
+        }
+    });
+    console.log('[patch] Window postMessage group bridge installed ✅');
 }
 
 // =============================================================================
@@ -826,6 +922,22 @@ function _patchRequestGroupList(GC) {
                     joinedGroups: this.joinedGroups, adminGroups: this.adminGroups,
                     fromServer: true
                 });
+
+                // ── Request server to join group socket rooms ────────────────
+                // After loading groups, tell the server (via WS) to join us into
+                // every group:${id} room so we receive real-time group messages.
+                try {
+                    const wsRef = window.KynectaRealtime || window.wsService?._realtime;
+                    const rawSend = wsRef?._sendRaw?.bind(wsRef) || wsRef?.sendRaw?.bind(wsRef);
+                    if (rawSend && this.groups.length) {
+                        const groupIds = this.groups.map(g => g.id).filter(Boolean);
+                        rawSend({ type: 'join_group_rooms', groupIds });
+                        // Also join individual rooms as fallback
+                        groupIds.forEach(gid => rawSend({ type: 'join', room: `group:${gid}` }));
+                        console.log('[GROUP FLOW] Requested WS join for', groupIds.length, 'group room(s)');
+                    }
+                } catch (_wsErr) {}
+
                 console.log('[GROUP FLOW] Group list synced:', this.groups.length, 'groups');
                 return { success: true, fromServer: true, data: this.getGroupsData() };
             }

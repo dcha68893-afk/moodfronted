@@ -3002,122 +3002,284 @@ window.__CALLS_IFRAME__ = {
             </div>
         </div>
         
-        <!-- Call Container -->
+        <!-- Call Container - Internal Screen System -->
         <div class="call-container" id="callContainer">
-            <!-- Structured Call Header Bar -->
-            <div id="callHeaderBar" style="
-                display: flex;
-                align-items: center;
-                justify-content: space-between;
-                padding: 12px 20px;
-                background: rgba(0,0,0,0.85);
-                border-bottom: 1px solid rgba(255,255,255,0.1);
-                z-index: 50;
-                flex-shrink: 0;
-                min-height: 60px;
-            ">
-                <div style="display:flex;align-items:center;gap:12px;">
-                    <div id="callTypeIcon" style="
-                        width:38px;height:38px;border-radius:50%;
-                        background:rgba(255,255,255,0.15);
-                        display:flex;align-items:center;justify-content:center;
-                        color:white;font-size:16px;
-                    "><i class="fas fa-phone"></i></div>
-                    <div>
-                        <div id="callWithName" style="color:white;font-weight:600;font-size:16px;line-height:1.2;">Ready to call</div>
-                        <div id="callStatusText" style="color:rgba(255,255,255,0.65);font-size:12px;">Select a contact to start</div>
-                        <div id="callSourceCtx" style="color:rgba(255,255,255,0.40);font-size:10px;margin-top:1px;display:none;"></div>
+            
+            <!-- ==================== IDLE SCREEN ==================== -->
+            <div class="call-screen" id="idleScreen" data-screen="idle">
+                <div class="idle-content">
+                    <div class="welcome-section">
+                        <h2 class="welcome-title">Ready to Connect</h2>
+                        <p class="welcome-subtitle">Start a voice or video call with anyone</p>
+                    </div>
+                    
+                    <div class="quick-call-actions">
+                        <button class="quick-call-card" id="quickVoiceBtn">
+                            <div class="quick-call-icon">
+                                <i class="fas fa-phone"></i>
+                            </div>
+                            <div class="quick-call-info">
+                                <h3>Voice Call</h3>
+                                <p>Clear audio conversation</p>
+                            </div>
+                        </button>
+                        
+                        <button class="quick-call-card" id="quickVideoBtn">
+                            <div class="quick-call-icon video">
+                                <i class="fas fa-video"></i>
+                            </div>
+                            <div class="quick-call-info">
+                                <h3>Video Call</h3>
+                                <p>Face-to-face conversation</p>
+                            </div>
+                        </button>
+                        
+                        <button class="quick-call-card premium-feature" id="quickGroupBtn">
+                            <div class="quick-call-icon group">
+                                <span class="premium-badge-small">PRO</span>
+                                <i class="fas fa-users"></i>
+                            </div>
+                            <div class="quick-call-info">
+                                <h3>Group Call</h3>
+                                <p>Connect with multiple people</p>
+                            </div>
+                        </button>
+                    </div>
+                    
+                    <div class="recent-calls-preview">
+                        <h3>Recent Calls</h3>
+                        <div class="recent-calls-list" id="recentCallsList">
+                            <!-- Recent calls will be loaded here -->
+                            <div class="no-recent-calls">
+                                <i class="fas fa-phone-slash"></i>
+                                <p>No recent calls</p>
+                            </div>
+                        </div>
                     </div>
                 </div>
-                <div id="callDuration" style="
-                    color:white;font-size:15px;font-weight:600;
-                    background:rgba(255,255,255,0.12);
-                    padding:5px 14px;border-radius:20px;
-                ">--:--</div>
-                <div style="display:flex;gap:8px;align-items:center;">
-                    <button id="focusModeBtn" class="control-btn" title="Focus Mode" style="display:none;width:36px;height:36px;font-size:15px;">
-                        <i class="fas fa-eye"></i>
+            </div>
+            
+            <!-- ==================== CALLING SCREEN ==================== -->
+            <div class="call-screen" id="callingScreen" data-screen="calling" style="display: none;">
+                <div class="calling-content">
+                    <div class="calling-header">
+                        <h2>Calling...</h2>
+                    </div>
+                    
+                    <div class="calling-user">
+                        <div class="calling-avatar" id="callingAvatar">
+                            <i class="fas fa-user"></i>
+                        </div>
+                        <div class="calling-info">
+                            <div class="calling-name" id="callingName">User</div>
+                            <div class="calling-status" id="callingStatus">Ringing...</div>
+                            <div class="calling-type" id="callingType">Voice Call</div>
+                        </div>
+                    </div>
+                    
+                    <div class="calling-animation">
+                        <div class="pulse-ring"></div>
+                        <div class="pulse-ring delay-1"></div>
+                        <div class="pulse-ring delay-2"></div>
+                    </div>
+                    
+                    <div class="calling-actions">
+                        <button class="calling-action-btn cancel" id="callingCancelBtn">
+                            <i class="fas fa-phone-slash"></i>
+                            <span>Cancel Call</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- ==================== IN-CALL SCREEN ==================== -->
+            <div class="call-screen" id="inCallScreen" data-screen="in-call" style="display: none;">
+                <!-- In-Call Header Bar -->
+                <div class="in-call-header" id="callHeaderBar">
+                    <div class="in-call-user-info">
+                        <div class="in-call-type-icon" id="callTypeIcon">
+                            <i class="fas fa-phone"></i>
+                        </div>
+                        <div class="in-call-details">
+                            <div class="in-call-name" id="callWithName">User</div>
+                            <div class="in-call-status" id="callStatusText">Connected</div>
+                            <div class="in-call-context" id="callSourceCtx" style="display: none;"></div>
+                        </div>
+                    </div>
+                    <div class="in-call-timer" id="callDuration">--:--</div>
+                    <div class="in-call-header-controls">
+                        <button class="in-call-header-btn" id="focusModeBtn" title="Focus Mode" style="display: none;">
+                            <i class="fas fa-eye"></i>
+                        </button>
+                        <button class="in-call-header-btn danger" id="callHeaderEndBtn" title="End Call" style="display: none;">
+                            <i class="fas fa-phone-slash"></i>
+                        </button>
+                    </div>
+                    <div class="in-call-indicators">
+                        <div class="in-call-mood-indicator" id="callMoodIndicator" style="display: none;"></div>
+                        <div class="in-call-intention-indicator" id="callIntentionIndicator" style="display: none;"></div>
+                    </div>
+                </div>
+                
+                <!-- Video Grid -->
+                <div class="in-call-video-grid" id="videoGrid">
+                    <div class="video-placeholder">
+                        <i class="fas fa-video"></i>
+                        <p>Video will appear here</p>
+                    </div>
+                </div>
+                
+                <!-- Reactions Container -->
+                <div class="in-call-reactions" id="reactionsContainer" style="display: none;">
+                    <div class="reaction-btn" data-reaction="👍">👍</div>
+                    <div class="reaction-btn" data-reaction="👏">👏</div>
+                    <div class="reaction-btn" data-reaction="😂">😂</div>
+                    <div class="reaction-btn" data-reaction="❤️">❤️</div>
+                    <div class="reaction-btn" data-reaction="🔥">🔥</div>
+                </div>
+                
+                <!-- Call Controls -->
+                <div class="in-call-controls" id="callControls">
+                    <button class="in-call-control-btn" id="muteBtn" title="Mute">
+                        <i class="fas fa-microphone"></i>
+                        <span class="control-label">Mute</span>
                     </button>
-                    <button id="callHeaderEndBtn" class="control-btn danger" title="End Call" style="width:36px;height:36px;font-size:15px;display:none;">
+                    <button class="in-call-control-btn" id="videoBtn" title="Turn Video Off">
+                        <i class="fas fa-video"></i>
+                        <span class="control-label">Video</span>
+                    </button>
+                    <button class="in-call-control-btn premium-feature" id="screenShareBtn" title="Share Screen">
+                        <span class="premium-badge-small">PRO</span>
+                        <i class="fas fa-desktop"></i>
+                        <span class="control-label">Share</span>
+                    </button>
+                    <button class="in-call-control-btn" id="speakerBtn" title="Speaker">
+                        <i class="fas fa-volume-up"></i>
+                        <span class="control-label">Speaker</span>
+                    </button>
+                    <button class="in-call-control-btn" id="moodBtn" title="Set Mood">
+                        <i class="fas fa-smile"></i>
+                        <span class="control-label">Mood</span>
+                    </button>
+                    <button class="in-call-control-btn" id="intentionBtn" title="Set Intention">
+                        <i class="fas fa-bullseye"></i>
+                        <span class="control-label">Focus</span>
+                    </button>
+                    <button class="in-call-control-btn danger" id="endCallBtn" title="End Call">
                         <i class="fas fa-phone-slash"></i>
+                        <span class="control-label">End</span>
                     </button>
                 </div>
-                <div id="callMoodIndicator" style="display:none;"></div>
-                <div id="callIntentionIndicator" style="display:none;"></div>
-            </div>
-
-            <!-- Legacy call-header hidden, kept for JS compat -->
-            <div class="call-header" id="callHeader" style="display:none;"></div>
-            
-            <!-- Video Grid -->
-            <div class="video-grid" id="videoGrid" style="padding-top:10px;">
-                <!-- Video containers will be added dynamically -->
-                <div class="offline-call-placeholder" id="offlineCallPlaceholder" style="display: flex;">
-                    <i class="fas fa-phone"></i>
-                    <h3>Ready to connect</h3>
-                    <p>Start a call by selecting a contact and choosing voice or video</p>
+                
+                <!-- Picture in Picture -->
+                <div class="in-call-pip" id="pipContainer">
+                    <video class="pip-video" id="pipVideo" autoplay playsinline></video>
+                    <div class="pip-controls">
+                        <button class="pip-close-btn" id="pipCloseBtn">
+                            <i class="fas fa-times"></i>
+                        </button>
+                    </div>
                 </div>
             </div>
             
-            <!-- Reactions Container -->
-            <div class="reactions-container" id="reactionsContainer" style="display: none;">
-                <div class="reaction-btn" data-reaction="👍">
-                    👍
-                </div>
-                <div class="reaction-btn" data-reaction="👏">
-                    👏
-                </div>
-                <div class="reaction-btn" data-reaction="😂">
-                    😂
-                </div>
-                <div class="reaction-btn" data-reaction="❤️">
-                    ❤️
-                </div>
-                <div class="reaction-btn" data-reaction="🔥">
-                    🔥
-                </div>
-            </div>
-            
-            <!-- Call Controls -->
-            <div class="call-controls" id="callControls">
-                <button class="control-btn" id="muteBtn" title="Mute">
-                    <i class="fas fa-microphone"></i>
-                </button>
-                <button class="control-btn" id="videoBtn" title="Turn Video Off">
-                    <i class="fas fa-video"></i>
-                </button>
-                <button class="control-btn premium-feature" id="screenShareBtn" title="Share Screen">
-                    <span class="premium-badge-small">PRO</span>
-                    <i class="fas fa-desktop"></i>
-                </button>
-                <button class="control-btn" id="speakerBtn" title="Speaker">
-                    <i class="fas fa-volume-up"></i>
-                </button>
-                <button class="control-btn" id="moodBtn" title="Set Mood">
-                    <i class="fas fa-smile"></i>
-                </button>
-                <button class="control-btn" id="intentionBtn" title="Set Intention">
-                    <i class="fas fa-bullseye"></i>
-                </button>
-                <button class="control-btn danger" id="endCallBtn" title="End Call">
-                    <i class="fas fa-phone-slash"></i>
-                </button>
-            </div>
-            
-            <!-- Picture in Picture -->
-            <div class="pip-container" id="pipContainer">
-                <video class="pip-video" id="pipVideo" autoplay playsinline></video>
-                <div class="pip-controls">
-                    <button class="video-action-btn" id="pipCloseBtn">
-                        <i class="fas fa-times"></i>
-                    </button>
-                </div>
-            </div>
         </div>
     </div>
     
     <!-- Notification Area -->
     <div class="notification-area" id="notificationArea"></div>
+    
+    <!-- ==================== 3-STATE CALL OVERLAY SYSTEM ==================== -->
+    <!-- IDLE -> CALLING -> IN-CALL -->
+    <div class="call-overlay" id="callOverlay" data-state="idle">
+        
+        <!-- CALLING STATE: Small floating panel -->
+        <div class="call-overlay-floating" id="callFloatingPanel">
+            <div class="floating-content">
+                <div class="floating-user">
+                    <div class="floating-avatar" id="floatingAvatar">
+                        <i class="fas fa-user"></i>
+                    </div>
+                    <div class="floating-info">
+                        <div class="floating-name" id="floatingName">User</div>
+                        <div class="floating-status" id="floatingStatus">Calling...</div>
+                    </div>
+                </div>
+                <button class="floating-cancel" id="floatingCancelBtn" title="Cancel Call">
+                    <i class="fas fa-phone-slash"></i>
+                </button>
+            </div>
+        </div>
+        
+        <!-- IN-CALL STATE: Expanded call panel -->
+        <div class="call-overlay-expanded" id="callExpandedPanel">
+            <!-- Expanded Header -->
+            <div class="expanded-header">
+                <div class="expanded-user-info">
+                    <div class="expanded-avatar" id="expandedAvatar">
+                        <i class="fas fa-user"></i>
+                    </div>
+                    <div class="expanded-details">
+                        <div class="expanded-name" id="expandedName">User</div>
+                        <div class="expanded-timer" id="expandedTimer">00:00</div>
+                    </div>
+                </div>
+                <div class="expanded-controls">
+                    <button class="expanded-minimize" id="expandedMinimizeBtn" title="Minimize">
+                        <i class="fas fa-minus"></i>
+                    </button>
+                    <button class="expanded-end" id="expandedEndBtn" title="End Call">
+                        <i class="fas fa-phone-slash"></i>
+                    </button>
+                </div>
+            </div>
+            
+            <!-- Expanded Main Controls -->
+            <div class="expanded-main-controls">
+                <button class="expanded-control-btn" id="expandedMuteBtn" title="Mute/Unmute">
+                    <i class="fas fa-microphone"></i>
+                    <span class="control-label">Mute</span>
+                </button>
+                <button class="expanded-control-btn" id="expandedVideoBtn" title="Video On/Off">
+                    <i class="fas fa-video"></i>
+                    <span class="control-label">Video</span>
+                </button>
+                <button class="expanded-control-btn premium-feature" id="expandedScreenShareBtn" title="Share Screen">
+                    <span class="premium-badge-small">PRO</span>
+                    <i class="fas fa-desktop"></i>
+                    <span class="control-label">Share</span>
+                </button>
+                <button class="expanded-control-btn" id="expandedSpeakerBtn" title="Speaker">
+                    <i class="fas fa-volume-up"></i>
+                    <span class="control-label">Speaker</span>
+                </button>
+                <button class="expanded-control-btn" id="expandedChatBtn" title="Chat">
+                    <i class="fas fa-comment"></i>
+                    <span class="control-label">Chat</span>
+                </button>
+                <button class="expanded-control-btn" id="expandedReactionsBtn" title="Reactions">
+                    <i class="fas fa-heart"></i>
+                    <span class="control-label">React</span>
+                </button>
+                <button class="expanded-control-btn" id="expandedMoodBtn" title="Set Mood">
+                    <i class="fas fa-smile"></i>
+                    <span class="control-label">Mood</span>
+                </button>
+                <button class="expanded-control-btn" id="expandedIntentionBtn" title="Set Intention">
+                    <i class="fas fa-bullseye"></i>
+                    <span class="control-label">Focus</span>
+                </button>
+            </div>
+            
+            <!-- Expanded Video Area -->
+            <div class="expanded-video-area" id="expandedVideoArea">
+                <div class="video-placeholder">
+                    <i class="fas fa-video"></i>
+                    <p>Video will appear here</p>
+                </div>
+            </div>
+        </div>
+        
+    </div>
     
     <!-- ==================== CRITICAL: Scripts loaded in correct order ==================== -->
     <!-- Vendor libraries (regular scripts, not modules) -->
@@ -3137,6 +3299,7 @@ window.__CALLS_IFRAME__ = {
     <script src="localStore.calls.js"></script>
     <script src="callSession.manager.js"></script>
     <script src="callRetry.engine.js"></script>
+    <script src="callOverlay.manager.js"></script>
     <script src="/js/app.stability.bridge.js"></script>
     <!-- Application modules (ES6 modules) - loaded in correct order -->
     <script type="module" src="calls-core.js"></script>
@@ -3531,9 +3694,24 @@ window.__CALLS_IFRAME__ = {
             }
         });
 
-        // ✅ FIX: Detect controller change (SW took over) and reload
+        // ── FIX: Only reload on SW update when NO call is active.
+        // Reloading mid-call destroys the WebRTC peer connection and clears
+        // all in-memory state — causing the "call disappears" / no-audio bug.
         navigator.serviceWorker.addEventListener('controllerchange', function() {
-            console.log('[calls.html] SW controller changed — reloading');
+            const callActive = window.__callActive ||
+                (window.KynectaCallSession && window.KynectaCallSession.isActive) ||
+                (window.UIState && window.UIState.callActive) ||
+                (window.callCore && window.callCore.isCallActive && window.callCore.isCallActive());
+            if (callActive) {
+                console.log('[calls.html] SW controller changed — call active, reload deferred until call ends');
+                // Defer reload until call ends
+                window.addEventListener('callEnded', function onEnd() {
+                    window.removeEventListener('callEnded', onEnd);
+                    window.location.reload();
+                }, { once: true });
+                return;
+            }
+            console.log('[calls.html] SW controller changed — reloading (no active call)');
             window.location.reload();
         });
     })();

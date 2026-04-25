@@ -757,6 +757,28 @@ function wireStatusWebSocket() {
             logStatus('SUCCESS', 'StatusWebSocket re-wired after kyn:realtimeReady');
         }
     });
+
+    // ── FIX 5: DOM event listeners ────────────────────────────────────────────
+    // app_realtime_socket.js dispatches both window and document CustomEvents
+    // (e.g. document.dispatchEvent(new CustomEvent('new_status', {detail: payload})))
+    // for every socket event it receives. Register listeners here so that
+    // handleRealtimeStatusEvent fires even when the socket bridge postMessage
+    // path doesn't find the iframe, OR when status.html is in standalone mode.
+    const _domStatusEvents = [
+        'new_status', 'status:created', 'status_created',
+        'status:updated', 'status_updated',
+        'status:deleted', 'status_deleted'
+    ];
+    const _domStatusHandler = function(evt) {
+        const payload = evt.detail || {};
+        handleRealtimeStatusEvent(evt.type, payload);
+    };
+    _domStatusEvents.forEach(evtName => {
+        // window catches kyn: prefixed events; document catches raw name events
+        document.addEventListener(evtName, _domStatusHandler);
+        window.addEventListener(`kyn:${evtName}`, _domStatusHandler);
+    });
+    logStatus('INFO', 'DOM status event listeners registered');
 }
 
 function onModuleActive() {
@@ -1296,10 +1318,17 @@ function notifyStatusObservers() {
             observer(statusState);
         } catch (e) {}
     });
-    
-    window.dispatchEvent(new CustomEvent('statusStateChanged', {
-        detail: { state: statusState }
-    }));
+
+    // ── FIX: Dispatch on BOTH targets so every listener fires ────────────────
+    // UIBridge in status-ui.js listens on document for 'statusUpdate'.
+    // Other listeners (e.g. LiveUpdateEngine) use window 'statusStateChanged'.
+    // Previously only window was notified — document listeners were silently skipped,
+    // so the receiver-side UI never re-rendered after handleRealtimeStatusEvent ran.
+    const detail = { state: statusState, statuses: statusState.statuses || statuses };
+
+    document.dispatchEvent(new CustomEvent('statusUpdate', { detail }));
+    document.dispatchEvent(new CustomEvent('statusStateChanged', { detail }));
+    window.dispatchEvent(new CustomEvent('statusStateChanged', { detail }));
 }
 
 function updateStatusState(updates) {
@@ -1577,29 +1606,28 @@ async function markStatusViewed(statusId) {
     if (!ensureActive('markStatusViewed')) {
         return { success: false, error: 'Module not active' };
     }
-    
+
     if (!statusId) {
         return { success: false, error: 'Status ID required' };
     }
-    
+
+    // Always mark locally first — viewer must open regardless of network state
+    markStatusViewedLocally(statusId);
+
     try {
-        // console.log(`[${MODULE_NAME}] 📤 Marking status as viewed: ${statusId}`);
-        
-        // Correct RESTful endpoint: POST /api/status/:statusId/view
+        // POST /api/status/:statusId/view — fire-and-forget; don't block the viewer
         const response = await makeApiRequest(`/api/status/${statusId}/view`, 'POST', {});
-        
-        // console.log(`[${MODULE_NAME}] 📥 Status marked as viewed:`, response);
-        
         if (response && response.success !== false) {
-            markStatusViewedLocally(statusId);
             logStatus('VIEW', `Status viewed: ${statusId}`);
-            return { success: true };
-        } else {
-            throw new Error('Failed to mark as viewed');
         }
+        return { success: true };
     } catch (error) {
-        console.error(`[${MODULE_NAME}] Failed to mark status as viewed:`, error);
-        logStatus('FAILED', `Mark viewed: ${error.message}`);
+        // Timeout/offline is expected in dev — silence the error, local mark already done
+        if (error.message && error.message.includes('timeout')) {
+            // silently swallow — viewer is already open and local state is marked
+        } else {
+            console.warn(`[${MODULE_NAME}] markStatusViewed network error (non-blocking):`, error.message);
+        }
         return { success: false, error: error.message };
     }
 }
@@ -1642,6 +1670,8 @@ async function deleteStatus(statusId) {
 // =============================================
 function handleRealtimeStatusEvent(eventName, data) {
     try {
+        // ── Proof log — this MUST appear in the console when User B receives a status
+        console.log(`[status] 📥 STATUS RECEIVED: ${eventName}`, data);
         logStatus('SUCCESS', `Realtime event: ${eventName}`);
 
         switch (eventName) {
@@ -1649,17 +1679,29 @@ function handleRealtimeStatusEvent(eventName, data) {
             case 'status:created':
             case 'status_created': {
                 const status = data?.status || data;
-                if (!status || !status.id) break;
+                if (!status || !status.id) {
+                    console.warn('[status] ⚠️ handleRealtimeStatusEvent: no status.id in payload', data);
+                    break;
+                }
                 // Ensure expiry
                 if (!status.expiresAt) {
                     status.expiresAt = new Date(Date.now() + 86400000).toISOString();
                 }
-                // Skip if already in local list
-                if (!statuses.find(s => s.id === status.id)) {
+                // FIX: normalise id to string to match how dataset.statusId works in UI
+                status.id = String(status.id);
+
+                // Skip if already in list (check both module-level statuses and statusState)
+                const alreadyInStatuses = statuses.find(s => String(s.id) === status.id);
+                const alreadyInState = statusState.statuses && statusState.statuses.find(s => String(s.id) === status.id);
+
+                if (!alreadyInStatuses && !alreadyInState) {
+                    // Update BOTH the module-level array and the statusState object
                     statuses.unshift(status);
+                    if (statusState.statuses) {
+                        statusState.statuses.unshift(status);
+                    }
                     SafeStorage.setJSON(LOCAL_STORAGE_KEYS.STATUSES, statuses);
                     StatusDB.put(status).catch(() => {});
-                    // FIX: also write to StatusCache IndexedDB so offline reads are consistent
                     if (window.StatusCache && typeof window.StatusCache.cacheStatus === 'function') {
                         window.StatusCache.cacheStatus(status).catch(() => {});
                     }
@@ -1668,7 +1710,6 @@ function handleRealtimeStatusEvent(eventName, data) {
                     if (typeof renderStatusListInstantlyUI === 'function') {
                         renderStatusListInstantlyUI();
                     }
-                    // FIX: send postMessage to parent iframe bridge so sibling modules update
                     if (window.parent && window.parent !== window) {
                         try {
                             window.parent.postMessage({
@@ -1680,7 +1721,10 @@ function handleRealtimeStatusEvent(eventName, data) {
                             }, '*');
                         } catch (_) {}
                     }
+                    console.log(`[status] ✅ STATUS ADDED TO UI id=${status.id} userId=${status.userId}`);
                     logStatus('SUCCESS', `Realtime: new status ${status.id} added`);
+                } else {
+                    console.log(`[status] ℹ️ Status ${status.id} already in list — skipping duplicate`);
                 }
                 break;
             }
@@ -7821,8 +7865,11 @@ async function loadStatusesInBackground() {
     }
     
     try {
-        // Use secureApiCall which now uses parent proxy
-        const response = await secureApiCall('/api/status');
+        // ── FIX: was /api/status (public, unauthenticated route — only returns
+        //         isPublic:true records and ignores the current user entirely).
+        //         Must use /api/status/friends which is authenticated and returns
+        //         only accepted-friend statuses for the logged-in user.
+        const response = await secureApiCall('/api/status/friends');
         const list = response?.statuses || response?.data?.statuses || [];
         if (list && list.length >= 0) {
             statuses = list;

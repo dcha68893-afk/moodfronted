@@ -55,6 +55,7 @@ export function createCallService({ state, webSocketService }) {
       callType: call.callType,
       status: call.status,
       callerName: call.callerName || null,
+      callerAvatar: call.callerAvatar || null,
       calleeId: receiverId,
       timestamp: Date.now(),
     };
@@ -102,6 +103,7 @@ export function createCallService({ state, webSocketService }) {
       status: "ringing",
       callerId,
       callerName: caller.displayName || caller.username || caller.email || `User ${callerId}`,
+      callerAvatar: caller.avatar || null,
       participantIds,
       createdAt: isoNow(),
       updatedAt: isoNow(),

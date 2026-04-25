@@ -80,6 +80,348 @@ const UIState = {
     pendingCallUser: null
 };
 
+// ==================== FORCE CALLING SCREEN FOR ALL CALLS ====================
+// This ensures the calling screen shows regardless of where the call originates from
+
+// Override the callCore's startCall method to show the calling screen
+(function patchCallCoreStartCall() {
+    console.log('[PATCH] Installing calling screen patch...');
+    
+    // Wait for callCore to be available
+    const checkInterval = setInterval(() => {
+        if (window.callCore && window.callCore.startCall) {
+            clearInterval(checkInterval);
+            console.log('[PATCH] callCore found, patching startCall method');
+            
+            // Store original startCall
+            const originalStartCall = window.callCore.startCall;
+            
+            // Override startCall to show calling screen immediately
+            window.callCore.startCall = async function(userId, callType) {
+                console.log('[PATCH] Intercepted startCall:', { userId, callType });
+                
+                // Get user info
+                let userName = 'User';
+                const contacts = window.__cachedCallContacts || [];
+                const contact = contacts.find(c => String(c.id) === String(userId) || String(c.userId) === String(userId));
+                if (contact) {
+                    userName = contact.displayName || contact.username || contact.name || 'User';
+                }
+                
+                // Get avatar
+                let userAvatar = null;
+                const photoUrl = contact && (contact.avatar || contact.photo || contact.profilePhoto);
+                if (photoUrl) {
+                    userAvatar = `<img src="${photoUrl}" alt="${userName}" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">`;
+                } else {
+                    userAvatar = `<i class="fas fa-user"></i>`;
+                }
+                
+                // SHOW CALLING SCREEN IMMEDIATELY
+                console.log('[PATCH] Showing calling screen for:', userName);
+                showCallingScreenViaPatch({
+                    userName: userName,
+                    userId: userId,
+                    callType: callType === 'video' ? 'video' : 'voice',
+                    status: 'Calling...',
+                    userAvatar: userAvatar
+                });
+                
+                // Call original method
+                return originalStartCall.call(window.callCore, userId, callType);
+            };
+            
+            console.log('[PATCH] startCall method patched successfully');
+        }
+    }, 100);
+    
+    // Also patch initiateCall
+    setTimeout(() => {
+        if (window.callCore && window.callCore.initiateCall) {
+            const originalInitiateCall = window.callCore.initiateCall;
+            window.callCore.initiateCall = async function(callType, participants) {
+                console.log('[PATCH] Intercepted initiateCall:', { callType, participants });
+                
+                // Get user info
+                const userId = participants?.[0];
+                let userName = 'User';
+                const contacts = window.__cachedCallContacts || [];
+                const contact = contacts.find(c => String(c.id) === String(userId) || String(c.userId) === String(userId));
+                if (contact) {
+                    userName = contact.displayName || contact.username || contact.name || 'User';
+                }
+                
+                // Get avatar
+                let userAvatar = null;
+                const photoUrl = contact && (contact.avatar || contact.photo || contact.profilePhoto);
+                if (photoUrl) {
+                    userAvatar = `<img src="${photoUrl}" alt="${userName}" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">`;
+                } else {
+                    userAvatar = `<i class="fas fa-user"></i>`;
+                }
+                
+                // SHOW CALLING SCREEN IMMEDIATELY
+                console.log('[PATCH] Showing calling screen for:', userName);
+                showCallingScreenViaPatch({
+                    userName: userName,
+                    userId: userId,
+                    callType: callType === 'video' ? 'video' : 'voice',
+                    status: 'Calling...',
+                    userAvatar: userAvatar
+                });
+                
+                return originalInitiateCall.call(window.callCore, callType, participants);
+            };
+            console.log('[PATCH] initiateCall method patched successfully');
+        }
+    }, 100);
+})();
+
+// Helper function to show calling screen
+function showCallingScreenViaPatch(callInfo) {
+    console.log('[PATCH] showCallingScreenViaPatch called with:', callInfo);
+    
+    // Get all screen elements
+    const idleScreen = document.getElementById('idleScreen');
+    const callingScreen = document.getElementById('callingScreen');
+    const inCallScreen = document.getElementById('inCallScreen');
+    const sidebar = document.getElementById('sidebar');
+    
+    // Force hide idle screen
+    if (idleScreen) {
+        idleScreen.style.display = 'none';
+        idleScreen.classList.remove('active');
+    }
+    
+    // Hide in-call screen
+    if (inCallScreen) {
+        inCallScreen.style.display = 'none';
+        inCallScreen.classList.remove('active');
+    }
+    
+    // Show calling screen
+    if (callingScreen) {
+        callingScreen.style.display = 'flex';
+        callingScreen.classList.add('active');
+        
+        // Update content
+        const callingAvatar = document.getElementById('callingAvatar');
+        const callingName = document.getElementById('callingName');
+        const callingStatus = document.getElementById('callingStatus');
+        const callingType = document.getElementById('callingType');
+        const callingCancelBtn = document.getElementById('callingCancelBtn');
+        
+        if (callingAvatar) {
+            callingAvatar.innerHTML = callInfo.userAvatar || '<i class="fas fa-user"></i>';
+        }
+        
+        if (callingName) {
+            callingName.textContent = callInfo.userName || 'User';
+        }
+        
+        if (callingStatus) {
+            callingStatus.textContent = callInfo.status || 'Calling...';
+        }
+        
+        if (callingType) {
+            callingType.textContent = callInfo.callType === 'video' ? 'Video Call' : 'Voice Call';
+        }
+        
+        // Wire cancel button
+        if (callingCancelBtn && !callingCancelBtn._patchedWired) {
+            callingCancelBtn._patchedWired = true;
+            callingCancelBtn.onclick = function() {
+                if (window.callCore && window.callCore.endCall) {
+                    window.callCore.endCall();
+                }
+                // Hide calling screen
+                if (callingScreen) {
+                    callingScreen.style.display = 'none';
+                    callingScreen.classList.remove('active');
+                }
+                if (idleScreen) {
+                    idleScreen.style.display = 'block';
+                    idleScreen.classList.add('active');
+                }
+                // ── FIX: Restore parent layout ──────────────────────────────
+                window.__callActive = false;
+                if (window.parent && window.parent !== window) {
+                    window.parent.postMessage({ type: 'CALL_SCREEN_ACTIVE', payload: { active: false } }, '*');
+                }
+            };
+        }
+        
+        console.log('[PATCH] Calling screen is now VISIBLE');
+
+        // ── FIX: Tell parent to expand calls iframe to full viewport ──────────
+        // chat.html listens for CALL_SCREEN_ACTIVE and applies
+        // body.call-screen-active which makes #callsContent cover 100vw/100vh
+        if (window.parent && window.parent !== window) {
+            window.parent.postMessage({ type: 'CALL_SCREEN_ACTIVE', payload: { active: true } }, '*');
+        }
+        window.__callActive = true;
+    } else {
+        console.error('[PATCH] callingScreen element not found!');
+    }
+    
+    // Keep sidebar visible
+    if (sidebar) {
+        sidebar.style.display = 'flex';
+    }
+}
+// ==================== CRITICAL FIX: FORCE CALLING SCREEN VISIBILITY ====================
+// This ensures the calling screen appears and STAYS visible for 2 minutes
+(function forceCallingScreenVisibility() {
+    console.log('[FORCE] Installing calling screen force visibility patch');
+    
+    // Override the core's call state change handler to keep calling screen visible
+    const originalHandleCoreEvent = window.CoreIntegration ? window.CoreIntegration.handleCoreEvent : null;
+    
+    // Create a mutation observer to ensure calling screen stays visible
+    let callingScreenObserver = null;
+    
+    function ensureCallingScreenVisible() {
+        const callingScreen = document.getElementById('callingScreen');
+        const idleScreen = document.getElementById('idleScreen');
+        
+        if (!callingScreen) return;
+        
+        // If we're in a call (activeCallId exists), calling screen MUST be visible
+        if (window.UIState && window.UIState.activeCallId) {
+            if (callingScreen.style.display !== 'flex' || !callingScreen.classList.contains('active')) {
+                console.log('[FORCE] Re-showing calling screen - it was hidden but call active');
+                if (idleScreen) {
+                    idleScreen.style.display = 'none';
+                    idleScreen.classList.remove('active');
+                }
+                callingScreen.style.display = 'flex';
+                callingScreen.classList.add('active');
+            }
+        }
+    }
+    
+    // Check every 500ms to ensure calling screen stays visible during call
+    setInterval(() => {
+        ensureCallingScreenVisible();
+    }, 500);
+    
+    // Also patch the showIdleScreen function to prevent it from hiding calling screen during active call
+    const originalShowIdleScreen = window.showIdleScreen;
+    if (originalShowIdleScreen) {
+        window.showIdleScreen = function() {
+            // Don't hide calling screen if we have an active call
+            if (window.UIState && window.UIState.activeCallId) {
+                console.log('[FORCE] Blocked showIdleScreen during active call');
+                return;
+            }
+            return originalShowIdleScreen.apply(this, arguments);
+        };
+    }
+    
+    console.log('[FORCE] Calling screen force visibility patch installed');
+})();
+
+// ==================== FORCE CALLING SCREEN ON ANY CALL INITIATION ====================
+(function patchAllCallMethods() {
+    console.log('[PATCH] Installing comprehensive call method patches');
+    
+    // Helper to get contact info
+    function getContactInfo(userId) {
+        const contacts = window.__cachedCallContacts || [];
+        const contact = contacts.find(c => String(c.id) === String(userId) || String(c.userId) === String(userId));
+        if (contact) {
+            return {
+                name: contact.displayName || contact.username || contact.name || 'User',
+                avatar: contact.avatar || contact.photo || contact.profilePhoto
+            };
+        }
+        return { name: 'User', avatar: null };
+    }
+    
+    // Helper to show calling screen
+    function forceShowCallingScreen(userId, userName, callType) {
+        console.log('[PATCH] forceShowCallingScreen called for:', userId, userName);
+        
+        const idleScreen = document.getElementById('idleScreen');
+        const callingScreen = document.getElementById('callingScreen');
+        const inCallScreen = document.getElementById('inCallScreen');
+        
+        // Hide all other screens
+        if (idleScreen) {
+            idleScreen.style.display = 'none';
+            idleScreen.classList.remove('active');
+        }
+        if (inCallScreen) {
+            inCallScreen.style.display = 'none';
+            inCallScreen.classList.remove('active');
+        }
+        
+        // Get avatar
+        let userAvatar = null;
+        const contact = getContactInfo(userId);
+        if (contact.avatar) {
+            userAvatar = `<img src="${contact.avatar}" alt="${userName}" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">`;
+        } else {
+            userAvatar = '<i class="fas fa-user"></i>';
+        }
+        
+        // Show calling screen
+        if (callingScreen) {
+            callingScreen.style.display = 'flex';
+            callingScreen.classList.add('active');
+            
+            // Update content
+            const callingAvatar = document.getElementById('callingAvatar');
+            const callingNameEl = document.getElementById('callingName');
+            const callingStatusEl = document.getElementById('callingStatus');
+            const callingTypeEl = document.getElementById('callingType');
+            
+            if (callingAvatar) callingAvatar.innerHTML = userAvatar;
+            if (callingNameEl) callingNameEl.textContent = userName || 'User';
+            if (callingStatusEl) callingStatusEl.textContent = 'Calling...';
+            if (callingTypeEl) callingTypeEl.textContent = callType === 'video' ? 'Video Call' : 'Voice Call';
+            
+            console.log('[PATCH] Calling screen forcefully shown');
+        } else {
+            console.error('[PATCH] Calling screen element not found!');
+        }
+    }
+    
+    // Patch window.callCore.startCall
+    const checkCore = setInterval(() => {
+        if (window.callCore) {
+            clearInterval(checkCore);
+            console.log('[PATCH] Found callCore, patching methods');
+            
+            // Store originals
+            const originalStartCall = window.callCore.startCall;
+            const originalInitiateCall = window.callCore.initiateCall;
+            
+            // Patch startCall
+            window.callCore.startCall = async function(userId, callType) {
+                console.log('[PATCH] startCall intercepted:', userId, callType);
+                const contact = getContactInfo(userId);
+                forceShowCallingScreen(userId, contact.name, callType);
+                return originalStartCall.call(this, userId, callType);
+            };
+            
+            // Patch initiateCall
+            window.callCore.initiateCall = async function(callType, participants) {
+                console.log('[PATCH] initiateCall intercepted:', callType, participants);
+                const userId = participants?.[0];
+                if (userId) {
+                    const contact = getContactInfo(userId);
+                    forceShowCallingScreen(userId, contact.name, callType);
+                }
+                return originalInitiateCall.call(this, callType, participants);
+            };
+            
+            console.log('[PATCH] callCore methods patched successfully');
+        }
+    }, 100);
+    
+})();
+
 // ==================== GLOBAL CALL HISTORY UPDATES ====================
 const GlobalCallHistory = {
     emitUpdate: function(eventType, data = {}) {
@@ -148,191 +490,191 @@ const GlobalCallHistory = {
     let listenerEstablished = false;
 
     async function startCallWithUser(userId, userName, callType) {
-        console.log('[Calls UI] Starting call with:', { userId, userName, callType });
-        
-        pendingOpenCall = null;
-        window.__pendingCallData = null;
-        
-        if (!userId) {
-            console.error('[Calls UI] Cannot start call: No userId');
-            showNotificationInCalls('Cannot start call: Missing user information', 'error');
+    console.log('[Calls UI] ========== STARTING CALL ==========');
+    console.log('[Calls UI] startCallWithUser called with:', { userId, userName, callType });
+    
+    if (!userId) {
+        console.error('[Calls UI] Cannot start call: No userId');
+        showNotificationInCalls('Cannot start call: Missing user information', 'error');
+        return;
+    }
+    
+    // Force reset any stale call state
+    if (window.callCore && window.callCore.forceResetCallState) {
+        console.log('[Calls UI] Force resetting call state');
+        window.callCore.forceResetCallState();
+        await new Promise(resolve => setTimeout(resolve, 300));
+    }
+    
+    // Check if already in a call
+    if (window.callCore && window.callCore.isInCall && window.callCore.isInCall()) {
+        console.log('[Calls UI] Already in a call');
+        showNotificationInCalls('You are already in a call', 'warning');
+        return;
+    }
+    
+    // ========== STEP 1: SHOW CALLING SCREEN IMMEDIATELY ==========
+    console.log('[Calls UI] Showing calling screen IMMEDIATELY');
+    
+    // Get avatar if available
+    let userAvatar = null;
+    const contacts = window.__cachedCallContacts || [];
+    const contact = contacts.find(c => String(c.id) === String(userId) || String(c.userId) === String(userId));
+    const photoUrl = contact && (contact.avatar || contact.photo || contact.profilePhoto);
+    
+    if (photoUrl) {
+        userAvatar = `<img src="${photoUrl}" alt="${userName}" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">`;
+    } else {
+        userAvatar = `<i class="fas fa-user"></i>`;
+    }
+    
+    // Create call info object
+    const callInfo = {
+        userName: userName || 'User',
+        userId: userId,
+        callType: callType || 'voice',
+        status: 'Calling...',
+        userAvatar: userAvatar
+    };
+    
+    // SHOW THE CALLING SCREEN
+    showCallingScreen(callInfo);
+    
+    // Small delay to ensure screen renders
+    await new Promise(resolve => setTimeout(resolve, 50));
+    
+    // ========== STEP 2: Check permissions ==========
+    try {
+        const hasPermissions = await requestMediaPermissions(callType);
+        if (!hasPermissions) {
+            console.log('[Calls UI] Permission denied');
+            showNotificationInCalls('Microphone access is required for calls', 'error');
+            showIdleScreen();
             return;
         }
+        console.log('[Calls UI] Permissions granted');
+    } catch (permError) {
+        console.error('[Calls UI] Permission error:', permError);
+        showNotificationInCalls('Cannot access microphone. Please check permissions.', 'error');
+        showIdleScreen();
+        return;
+    }
+    
+    // ========== STEP 3: Update status to ringing ==========
+    const statusEl = document.getElementById('callingStatus');
+    if (statusEl) {
+        statusEl.textContent = 'Ringing...';
+    }
+    
+    showNotificationInCalls(`Calling ${userName}...`, 'info');
+    
+    // ========== STEP 4: Start 2-minute timer ==========
+    let callActive = false;
+    let timeLeft = 120; // 2 minutes
+    let ringTimer = null;
+    
+    const startRingTimer = () => {
+        if (ringTimer) clearInterval(ringTimer);
         
-        if (window.callCore && window.callCore.forceResetCallState) {
-            window.callCore.forceResetCallState();
-            await new Promise(resolve => setTimeout(resolve, 300));
-        }
-        
-        if (window.callCore && window.callCore.isInCall && window.callCore.isInCall()) {
-            showNotificationInCalls('You are already in a call', 'warning');
-            return;
-        }
-        
-        try {
-            const hasPermissions = await requestMediaPermissions(callType);
-            if (!hasPermissions) {
-                showNotificationInCalls('Microphone access is required for calls. Please grant permission and try again.', 'error');
-                return;
-            }
-        } catch (permError) {
-            console.error('[Calls UI] Permission error:', permError);
-            showNotificationInCalls('Cannot access microphone. Please check your browser permissions.', 'error');
-            return;
-        }
-        
-        showNotificationInCalls(`Starting ${callType} call with ${userName}...`, 'info');
-        
-        const callId = `call_${Date.now()}_${userId}`;
-
-        // ── HELPER: tear down the calling screen on failure ──────────────────
-        function _abortCallerScreen(msg) {
-            const co = document.getElementById('callingOverlay');
-            const cc = document.getElementById('callContainer');
-            const sb = document.getElementById('sidebar');
-            if (co) co.classList.remove('active');
-            if (cc) cc.classList.remove('active');
-            if (sb) sb.style.display = 'flex';
-            showNotificationInCalls(msg || 'Failed to start call', 'error');
-            if (window.callCore && window.callCore.forceResetCallState) window.callCore.forceResetCallState();
-        }
-
-        // ── STEP 1: Use new 3-state overlay system ────────────
-        // NEVER hide sidebar or main content - always use overlay
-        const sidebar = document.getElementById('sidebar');
-        if (sidebar) sidebar.style.display = 'flex'; // Always keep sidebar visible
-
-        // ── STEP 2: Populate call header ─────────────────────────────────────
-        const callHeaderEndBtn = document.getElementById('callHeaderEndBtn');
-        if (callHeaderEndBtn) {
-            callHeaderEndBtn.style.display = 'flex';
-            if (!callHeaderEndBtn._wired) {
-                callHeaderEndBtn._wired = true;
-                callHeaderEndBtn.addEventListener('click', function() {
-                    if (window.callCore && window.callCore.endCall) window.callCore.endCall();
-                    _abortCallerScreen('Call ended');
-                });
-            }
-        }
-        const callTypeIconEl = document.getElementById('callTypeIcon');
-        if (callTypeIconEl) callTypeIconEl.innerHTML = callType === 'video' ? '<i class="fas fa-video"></i>' : '<i class="fas fa-phone"></i>';
-        const callWithName = document.getElementById('callWithName');
-        if (callWithName) callWithName.textContent = userName;
-        const callStatusText = document.getElementById('callStatusText');
-        if (callStatusText) callStatusText.textContent = 'Calling...';
-
-        // ── STEP 3: Use new 3-state overlay system ──
-        (function _useNewOverlaySystem() {
-            // Initialize CallOverlay manager if available
-            if (window.CallOverlayManager && window.CallOverlayManager.initialize) {
-                window.CallOverlayManager.initialize();
-            }
-
-            // Prepare call data for overlay
-            const callInfo = {
-                userName: userName || 'User',
-                userId: userId,
-                callType: callType,
-                status: 'Calling...',
-                userAvatar: null
-            };
-
-            // Try to get user avatar from contacts
-            const contacts = (window.callsUI && window.callsUI.getContacts && window.callsUI.getContacts()) || [];
-            const contact = contacts.find(c => String(c.id) === String(userId) || c.username === userId);
-            const photoUrl = contact && (contact.avatar || contact.photo || contact.profilePhoto);
+        ringTimer = setInterval(() => {
+            if (callActive) return;
             
-            if (photoUrl) {
-                const initial = (userName || 'U').charAt(0).toUpperCase();
-                callInfo.userAvatar = `<img src="${photoUrl}" alt="${userName}" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">`;
-            } else {
-                callInfo.userAvatar = `<i class="fas fa-user"></i>`;
+            timeLeft--;
+            const mins = Math.floor(timeLeft / 60);
+            const secs = timeLeft % 60;
+            
+            if (statusEl && !callActive) {
+                statusEl.textContent = `Ringing... (${mins}:${String(secs).padStart(2, '0')})`;
             }
-
-            // Start with CALLING state (floating panel)
-            if (window.CallOverlayManager) {
-                window.CallOverlayManager.startCall(callInfo);
-            }
-
-            // ── STEP 4: Now fire actual network call (async, overlay already visible) ──
-            async function _initiateNetworkCall() {
-                if (window.callCore && window.callCore.initiateCall) {
-                    const result = await window.callCore.initiateCall(callType, [parseInt(userId)]);
-                    if (result && result.success) {
-                        showNotificationInCalls(`${callType === 'video' ? 'Video call' : 'Voice call'} started with ${userName}`, 'success');
-                        // Update overlay status to "Ringing..."
-                        if (window.CallOverlayManager) {
-                            window.CallOverlayManager.setState(window.CallOverlayManager.isCalling() ? 'calling' : 'calling', {
-                                ...callInfo,
-                                status: 'Ringing...'
-                            });
-                        }
-                    } else {
-                        console.error('[Calls UI] Call initiation failed:', result);
-                        if (window.CallOverlayManager) {
-                            window.CallOverlayManager.endCall();
-                        }
-                        showNotificationInCalls(result?.error || result?.reason || 'Failed to start call', 'error');
+            
+            if (timeLeft <= 0) {
+                if (ringTimer) clearInterval(ringTimer);
+                ringTimer = null;
+                if (!callActive) {
+                    console.log('[Calls UI] Call timed out after 2 minutes');
+                    if (window.callCore && window.callCore.endCall) {
+                        window.callCore.endCall();
                     }
-                } else if (window.callCore && window.callCore.startCall) {
-                    const result = await window.callCore.startCall(parseInt(userId), callType);
-                    if (result && result.success) {
-                        showNotificationInCalls(`${callType === 'video' ? 'Video call' : 'Voice call'} started with ${userName}`, 'success');
-                        // Update overlay status to "Ringing..."
-                        if (window.CallOverlayManager) {
-                            window.CallOverlayManager.setState(window.CallOverlayManager.isCalling() ? 'calling' : 'calling', {
-                                ...callInfo,
-                                status: 'Ringing...'
-                            });
-                        }
-                    } else {
-                        console.error('[Calls UI] startCall failed:', result);
-                        if (window.CallOverlayManager) {
-                            window.CallOverlayManager.endCall();
-                        }
-                        showNotificationInCalls(result?.error || result?.reason || 'Failed to start call', 'error');
-                    }
-                } else {
-                    console.error('[Calls UI] No call initiation method available');
-                    if (window.CallOverlayManager) {
-                        window.CallOverlayManager.endCall();
-                    }
-                    showNotificationInCalls('Call system not ready', 'error');
+                    showIdleScreen();
+                    showNotificationInCalls('Call ended - no answer after 2 minutes', 'info');
                 }
             }
-
-            // Initiate network call after a short delay to ensure overlay is visible
-            setTimeout(_initiateNetworkCall, 100);
-        })();
+        }, 1000);
+    };
+    
+    startRingTimer();
+    
+    // Store timer for cleanup
+    window._currentCallTimer = ringTimer;
+    
+    // ========== STEP 5: Initiate the actual call ==========
+    try {
+        let result = null;
         
-        // ── STEP 4: Now fire the actual network call (async, overlay already visible) ──
-        if (window.callCore && window.callCore.initiateCall) {
-            const result = await window.callCore.initiateCall(callType, [parseInt(userId)]);
-            if (result && result.success) {
-                showNotificationInCalls(`${callType === 'video' ? 'Video call' : 'Voice call'} started with ${userName}`, 'success');
-                if (callStatusText) callStatusText.textContent = 'Ringing...';
-                const callingStatus = document.getElementById('callingStatus');
-                if (callingStatus) callingStatus.textContent = 'Ringing...';
-            } else {
-                console.error('[Calls UI] Call initiation failed:', result);
-                _abortCallerScreen(result?.error || result?.reason || 'Failed to start call');
-            }
-        } else if (window.callCore && window.callCore.startCall) {
-            const result = await window.callCore.startCall(parseInt(userId), callType);
-            if (result && result.success) {
-                showNotificationInCalls(`${callType === 'video' ? 'Video call' : 'Voice call'} started with ${userName}`, 'success');
-                if (callStatusText) callStatusText.textContent = 'Ringing...';
-                const callingStatus = document.getElementById('callingStatus');
-                if (callingStatus) callingStatus.textContent = 'Ringing...';
-            } else {
-                console.error('[Calls UI] startCall failed:', result);
-                _abortCallerScreen(result?.error || result?.reason || 'Failed to start call');
-            }
+        if (window.callCore && window.callCore.startCall) {
+            console.log('[Calls UI] Using callCore.startCall');
+            result = await window.callCore.startCall(parseInt(userId), callType);
+        } else if (window.callCore && window.callCore.initiateCall) {
+            console.log('[Calls UI] Using callCore.initiateCall');
+            result = await window.callCore.initiateCall(callType, [parseInt(userId)]);
         } else {
-            console.error('[Calls UI] No call initiation method available');
-            _abortCallerScreen('Call system not ready');
+            throw new Error('No call initiation method available');
         }
+        
+        console.log('[Calls UI] Call initiation result:', result);
+        
+        if (result && result.success) {
+            console.log('[Calls UI] Call initiated successfully');
+            // Keep calling screen, just update status
+            if (statusEl && statusEl.textContent.includes('Ringing')) {
+                // Already showing ringing
+            }
+        } else if (result && result.reason === 'call_active') {
+            // Stale state - reset and retry once
+            console.log('[Calls UI] Stale call state detected, resetting...');
+            if (window.callCore && window.callCore.forceResetCallState) {
+                window.callCore.forceResetCallState();
+                await new Promise(resolve => setTimeout(resolve, 500));
+            }
+            // Retry
+            if (window.callCore && window.callCore.startCall) {
+                result = await window.callCore.startCall(parseInt(userId), callType);
+            } else if (window.callCore && window.callCore.initiateCall) {
+                result = await window.callCore.initiateCall(callType, [parseInt(userId)]);
+            }
+            if (result && result.success) {
+                console.log('[Calls UI] Retry successful');
+            } else {
+                throw new Error(result?.error || 'Call failed after reset');
+            }
+        } else if (result && result.reason === 'offline') {
+            // Receiver offline - keep calling screen active!
+            console.log('[Calls UI] Receiver is offline - keeping calling screen');
+            if (statusEl) {
+                statusEl.textContent = 'User is offline - waiting...';
+            }
+            showNotificationInCalls(`${userName} is offline. Call will ring for 2 minutes.`, 'info');
+        } else {
+            throw new Error(result?.error || result?.reason || 'Failed to start call');
+        }
+        
+        // Store call info
+        UIState.activeCallId = result?.callId || `call_${Date.now()}`;
+        UIState.callType = callType;
+        UIState.callActive = true;
+        UIState.callState = 'calling';
+        
+    } catch (error) {
+        console.error('[Calls UI] Call initiation error:', error);
+        showNotificationInCalls(`Call failed: ${error.message}`, 'error');
+        
+        // Wait a moment then go back to idle
+        setTimeout(() => {
+            if (ringTimer) clearInterval(ringTimer);
+            showIdleScreen();
+        }, 2000);
     }
+}
 
     async function requestMediaPermissions(callType) {
         try {
@@ -351,7 +693,313 @@ const GlobalCallHistory = {
             return false;
         }
     }
+
+    function showCallingScreen(callInfo) {
+    console.log('[Calls UI] ========== SHOWING CALLING SCREEN ==========');
+    console.log('[Calls UI] callInfo:', callInfo);
     
+    // Get all screen elements
+    const idleScreen = document.getElementById('idleScreen');
+    const callingScreen = document.getElementById('callingScreen');
+    const inCallScreen = document.getElementById('inCallScreen');
+    const sidebar = document.getElementById('sidebar');
+    const callContainer = document.getElementById('callContainer');
+    
+    // CRITICAL: Force hide idle screen
+    if (idleScreen) {
+        idleScreen.style.display = 'none';
+        idleScreen.classList.remove('active');
+        console.log('[Calls UI] Idle screen hidden');
+    }
+    
+    // Hide in-call screen if visible
+    if (inCallScreen) {
+        inCallScreen.style.display = 'none';
+        inCallScreen.classList.remove('active');
+    }
+    
+    // Hide call container if visible
+    if (callContainer) {
+        callContainer.classList.remove('active');
+        callContainer.style.display = 'none';
+    }
+    
+    // Show calling screen
+    if (callingScreen) {
+        callingScreen.style.display = 'flex';
+        callingScreen.classList.add('active');
+        console.log('[Calls UI] Calling screen is now VISIBLE');
+        
+        // Update calling screen content
+        const callingAvatar = document.getElementById('callingAvatar');
+        const callingName = document.getElementById('callingName');
+        const callingStatus = document.getElementById('callingStatus');
+        const callingType = document.getElementById('callingType');
+        const callingCancelBtn = document.getElementById('callingCancelBtn');
+        
+        if (callingAvatar) {
+            if (callInfo.userAvatar) {
+                callingAvatar.innerHTML = callInfo.userAvatar;
+            } else {
+                callingAvatar.innerHTML = '<i class="fas fa-user"></i>';
+            }
+        }
+        
+        if (callingName) {
+            callingName.textContent = callInfo.userName || 'User';
+        }
+        
+        if (callingStatus) {
+            callingStatus.textContent = callInfo.status || 'Calling...';
+        }
+        
+        if (callingType) {
+            callingType.textContent = callInfo.callType === 'video' ? 'Video Call' : 'Voice Call';
+        }
+        
+        // Wire cancel button (only once)
+        if (callingCancelBtn && !callingCancelBtn._wired) {
+            callingCancelBtn._wired = true;
+            callingCancelBtn.onclick = function() {
+                console.log('[Calls UI] Cancel button clicked');
+                if (window._currentCallTimer) {
+                    clearInterval(window._currentCallTimer);
+                    window._currentCallTimer = null;
+                }
+                if (window.callCore && window.callCore.endCall) {
+                    window.callCore.endCall();
+                }
+                showIdleScreen();
+                showNotificationInCalls('Call cancelled', 'info');
+            };
+        }
+    } else {
+        console.error('[Calls UI] callingScreen element NOT FOUND in DOM!');
+    }
+    
+    // Keep sidebar visible always
+    if (sidebar) {
+        sidebar.style.display = 'flex';
+    }
+    
+    console.log('[Calls UI] Calling screen setup complete');
+}
+
+function showIdleScreen() {
+    console.log('[Calls UI] ========== SHOWING IDLE SCREEN ==========');
+    
+    const idleScreen = document.getElementById('idleScreen');
+    const callingScreen = document.getElementById('callingScreen');
+    const inCallScreen = document.getElementById('inCallScreen');
+    const sidebar = document.getElementById('sidebar');
+    
+    // Stop any active timers
+    if (window._currentCallTimer) {
+        clearInterval(window._currentCallTimer);
+        window._currentCallTimer = null;
+    }
+    
+    // Hide calling screen
+    if (callingScreen) {
+        callingScreen.style.display = 'none';
+        callingScreen.classList.remove('active');
+        console.log('[Calls UI] Calling screen hidden');
+        
+        // Reset calling status text
+        const statusEl = document.getElementById('callingStatus');
+        if (statusEl) {
+            statusEl.textContent = 'Calling...';
+        }
+    }
+    
+    // Hide in-call screen
+    if (inCallScreen) {
+        inCallScreen.style.display = 'none';
+        inCallScreen.classList.remove('active');
+    }
+    
+    // Show idle screen
+    if (idleScreen) {
+        idleScreen.style.display = 'block';
+        idleScreen.classList.add('active');
+        console.log('[Calls UI] Idle screen is now VISIBLE');
+    } else {
+        console.error('[Calls UI] idleScreen element NOT FOUND!');
+    }
+    
+    // Keep sidebar visible
+    if (sidebar) {
+        sidebar.style.display = 'flex';
+    }
+    
+    // Reset call state
+    UIState.callActive = false;
+    UIState.callState = 'idle';
+    UIState.activeCallId = null;
+    
+    console.log('[Calls UI] Idle screen setup complete');
+}
+
+function transitionToInCall(callInfo) {
+    console.log('[Calls UI] Transitioning to in-call screen');
+    
+    // Stop ring timer
+    if (window._callRingTimer) {
+        clearInterval(window._callRingTimer);
+        window._callRingTimer = null;
+    }
+    
+    const callingScreen = document.getElementById('callingScreen');
+    const inCallScreen = document.getElementById('inCallScreen');
+    
+    // Hide calling screen
+    if (callingScreen) {
+        callingScreen.style.display = 'none';
+        callingScreen.classList.remove('active');
+    }
+    
+    // Show in-call screen
+    if (inCallScreen) {
+        inCallScreen.style.display = 'flex';
+        inCallScreen.classList.add('active');
+        // ── FIX: keep parent in fullscreen mode for in-call ──────────────────
+        window.__callActive = true;
+        if (window.parent && window.parent !== window) {
+            window.parent.postMessage({ type: 'CALL_SCREEN_ACTIVE', payload: { active: true } }, '*');
+        }
+        
+        // Update in-call content
+        const callWithName = document.getElementById('callWithName');
+        const callStatusText = document.getElementById('callStatusText');
+        const callTypeIcon = document.getElementById('callTypeIcon');
+        const callDuration = document.getElementById('callDuration');
+        const endCallBtn = document.getElementById('endCallBtn');
+        const callHeaderEndBtn = document.getElementById('callHeaderEndBtn');
+        
+        if (callWithName) {
+            callWithName.textContent = callInfo.userName || 'User';
+        }
+        
+        if (callStatusText) {
+            callStatusText.textContent = 'Connected';
+        }
+        
+        if (callTypeIcon) {
+            const icon = callTypeIcon.querySelector('i');
+            if (icon) {
+                icon.className = callInfo.callType === 'video' ? 'fas fa-video' : 'fas fa-phone';
+            }
+        }
+        
+        if (callDuration) {
+            callDuration.textContent = '00:00';
+        }
+        
+        // Start call timer
+        let seconds = 0;
+        const timerInterval = setInterval(() => {
+            if (!UIState.callActive) {
+                clearInterval(timerInterval);
+                return;
+            }
+            seconds++;
+            const mins = Math.floor(seconds / 60);
+            const secs = seconds % 60;
+            if (callDuration) {
+                callDuration.textContent = `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+            }
+        }, 1000);
+        
+        // Wire end call buttons
+        const endCallHandler = function() {
+            clearInterval(timerInterval);
+            if (window.callCore && window.callCore.endCall) {
+                window.callCore.endCall();
+            }
+            showIdleScreen();
+        };
+        
+        if (endCallBtn && !endCallBtn._wired) {
+            endCallBtn._wired = true;
+            endCallBtn.onclick = endCallHandler;
+        }
+        
+        if (callHeaderEndBtn && !callHeaderEndBtn._wired) {
+            callHeaderEndBtn._wired = true;
+            callHeaderEndBtn.onclick = endCallHandler;
+            callHeaderEndBtn.style.display = 'flex';
+        }
+        
+        UIState.callActive = true;
+        UIState.callState = 'connected';
+        
+        console.log('[Calls UI] ✅ In-call screen is now ACTIVE');
+    }
+}
+
+function showInCallScreen(callInfo) {
+    console.log('[Calls UI] Showing in-call screen with:', callInfo);
+    
+    const idleScreen = document.getElementById('idleScreen');
+    const callingScreen = document.getElementById('callingScreen');
+    const inCallScreen = document.getElementById('inCallScreen');
+    
+    // Hide idle screen
+    if (idleScreen) {
+        idleScreen.style.display = 'none';
+        idleScreen.classList.remove('active');
+    }
+    
+    // Hide calling screen
+    if (callingScreen) {
+        callingScreen.style.display = 'none';
+        callingScreen.classList.remove('active');
+    }
+    
+    // Show in-call screen
+    if (inCallScreen) {
+        inCallScreen.style.display = 'flex';
+        inCallScreen.classList.add('active');
+        
+        // Update in-call screen content
+        const callWithName = document.getElementById('callWithName');
+        const callStatusText = document.getElementById('callStatusText');
+        const callTypeIcon = document.getElementById('callTypeIcon');
+        const callHeaderEndBtn = document.getElementById('callHeaderEndBtn');
+        
+        if (callWithName) {
+            callWithName.textContent = callInfo.userName || 'User';
+        }
+        
+        if (callStatusText) {
+            callStatusText.textContent = 'Connected';
+        }
+        
+        if (callTypeIcon) {
+            const icon = callTypeIcon.querySelector('i');
+            if (icon) {
+                icon.className = callInfo.callType === 'video' ? 'fas fa-video' : 'fas fa-phone';
+            }
+        }
+        
+        // Wire end call button
+        if (callHeaderEndBtn && !callHeaderEndBtn._wired) {
+            callHeaderEndBtn._wired = true;
+            callHeaderEndBtn.onclick = function() {
+                if (window.callCore && window.callCore.endCall) {
+                    window.callCore.endCall();
+                }
+                showIdleScreen();
+            };
+            callHeaderEndBtn.style.display = 'flex';
+        }
+        
+        console.log('[Calls UI] In-call screen is now ACTIVE');
+    } else {
+        console.error('[Calls UI] inCallScreen element not found!');
+    }
+}
+
     function showNotificationInCalls(message, type = 'info') {
         const notificationArea = document.getElementById('notificationArea') || document.getElementById('call-notification-container') || document.body;
         const notification = document.createElement('div');
@@ -3425,9 +4073,27 @@ handleContactItemClick: function(e) {
                 case 'incoming_call':
                     this.handleIncomingCall(data);
                     break;
-                case 'call_initiated':
-                    this.handleCallInitiated(data);
-                    break;
+
+                    case 'call_initiated':
+case 'CALL_INITIATED':
+    // Call initiated - keep calling screen visible
+    console.log('[Calls UI] Call initiated, keeping calling screen');
+    UIState.activeCallId = callData.callId;
+    UIState.callParticipants = callData.participants || [];
+    UIState.callType = callData.callType;
+    UIState.callActive = true;
+    UIState.callState = 'calling';
+    
+    // Update calling screen status
+    const statusEl = document.getElementById('callingStatus');
+    if (statusEl) {
+        if (callData.receiverOnline === false) {
+            statusEl.textContent = 'User is offline - waiting...';
+        } else {
+            statusEl.textContent = 'Ringing...';
+        }
+    }
+    break;
                 case 'call_initiation_failed':
                     // Offline fix: When receiver is offline, show call UI for 2 minutes instead of ending
                     if (data && data.offline) {
@@ -4180,9 +4846,9 @@ handleContactItemClick: function(e) {
                     }
                 }
 
-                // Use new overlay system instead
-                if (window.CallOverlayManager && window.CallOverlayManager.startCall) {
-                    window.CallOverlayManager.startCall({
+                // Use new internal screen system instead
+                if (window.CallScreenManager && window.CallScreenManager.startCall) {
+                    window.CallScreenManager.startCall({
                         userName: 'Active Call',
                         userId: 'active',
                         callType: callType,
@@ -4360,41 +5026,31 @@ handleContactItemClick: function(e) {
         },
         
         handleCallStarted: function(callData) {
-            if (elements.callStatusText) {
-                elements.callStatusText.textContent = 'Starting...';
-            }
-        },
-
-        // Called when the remote party answers the call — THIS is when the timer starts.
-        handleCallAccepted: function(callData) {
-            // Hide calling overlay — other side picked up
-            if (elements.callingOverlay) elements.callingOverlay.classList.remove('active');
-            UIState.callStartTime = Date.now();
-            UIState.callState = 'in-call';
-            if (elements.callStatusText) {
-                elements.callStatusText.textContent = 'In call';
-            }
-            if (elements.callDuration) {
-                elements.callDuration.textContent = '00:00';
-            }
-            UIEventHandlers.startCallTimer();
-        },
-        
-        handleCallConnected: function(callData) {
             // ── LOCAL-FIRST: mark as connected ───────────────────────────────
-            (function _saveConnectedLocally() {
-                const store = window.KynectaCallLocalStore;
-                if (!store) return;
-                const id = callData.callId || UIState.activeCallId;
-                if (!id) return;
-                store.updateStatus(id, 'connected').catch(() => {});
-            })();
+            const store = window.KynectaCallLocalStore;
+            if (!store) return;
+            const id = callData.callId || UIState.activeCallId;
+            if (!id) return;
+            store.updateStatus(id, 'connected').catch(() => {});
             if (elements.callStatusText) {
                 elements.callStatusText.textContent = 'In call';
             }
         },
         
         handleCallEnded: function(callData) {
+            // ── FIX: Immediately restore parent layout + reset to idle screen ──
+            window.__callActive = false;
+            if (window.parent && window.parent !== window) {
+                window.parent.postMessage({ type: 'CALL_SCREEN_ACTIVE', payload: { active: false } }, '*');
+            }
+            // Reset screens inside iframe to idle
+            const callingScreen = document.getElementById('callingScreen');
+            const inCallScreen  = document.getElementById('inCallScreen');
+            const idleScreen    = document.getElementById('idleScreen');
+            if (callingScreen) { callingScreen.style.display = 'none'; callingScreen.classList.remove('active'); }
+            if (inCallScreen)  { inCallScreen.style.display  = 'none'; inCallScreen.classList.remove('active'); }
+            if (idleScreen)    { idleScreen.style.display    = 'block'; idleScreen.classList.add('active'); }
+
             // ── LOCAL-FIRST: finalize call record ─────────────────────────────
             (function _saveEndedLocally() {
                 const store = window.KynectaCallLocalStore;
@@ -4534,10 +5190,8 @@ handleContactItemClick: function(e) {
                 const sidebar = document.getElementById('sidebar');
                 if (sidebar) sidebar.style.display = 'flex'; // Always keep sidebar visible
                 
-                // Use new overlay system instead
-                if (window.CallOverlayManager && window.CallOverlayManager.endCall) {
-                    window.CallOverlayManager.endCall();
-                }
+                // Show idle screen
+                showIdleScreen();
                 UIState.currentView = 'sidebar';
             }, 350); // 350ms — enough for overlay fade but snappy UX
 
@@ -4701,10 +5355,18 @@ handleContactItemClick: function(e) {
                     case 'UNAUTHORIZED':
                         this.handleAuthError();
                         break;
-                    case 'CALL_ACCEPTED':
-                        // Remote party answered — start the real timer now
-                        UIEventHandlers.handleCallAccepted && UIEventHandlers.handleCallAccepted(data.payload || {});
-                        break;
+                        case 'call_accepted':
+case 'CALL_ACCEPTED':
+    // Receiver answered - transition to in-call screen
+    console.log('[Calls UI] Call accepted, transitioning to in-call');
+    UIState.callStartTime = Date.now();
+    UIState.callActive = true;
+    UIState.callState = 'connected';
+    transitionToInCall({
+        userName: UIState.callParticipants?.[0]?.name || 'User',
+        callType: UIState.callType || 'voice'
+    });
+    break;
                     case 'CALL_INCOMING':
                         UIEventHandlers.handleIncomingCall && UIEventHandlers.handleIncomingCall(data.payload || {});
                         break;
@@ -5874,9 +6536,9 @@ handleContactItemClick: function(e) {
             const sidebar = document.getElementById('sidebar');
             if (sidebar) sidebar.style.display = 'flex'; // Always keep sidebar visible
             
-            // Use new overlay system instead
-            if (window.CallOverlayManager && window.CallOverlayManager.startCall) {
-                window.CallOverlayManager.startCall({
+            // Use new internal screen system instead
+            if (window.CallScreenManager && window.CallScreenManager.startCall) {
+                window.CallScreenManager.startCall({
                         userName: 'Active Call',
                         userId: 'active',
                         callType: 'voice',
@@ -7603,9 +8265,9 @@ declineIncomingCall: async function() {
         const sidebar = document.getElementById('sidebar');
         if (sidebar) sidebar.style.display = 'flex'; // Always keep sidebar visible
         
-        // Use new overlay system instead
-        if (window.CallOverlayManager && window.CallOverlayManager.startCall) {
-            window.CallOverlayManager.startCall({
+        // Use new internal screen system instead
+        if (window.CallScreenManager && window.CallScreenManager.startCall) {
+            window.CallScreenManager.startCall({
                 userName: 'Active Call',
                 userId: 'active',
                 callType: 'voice',

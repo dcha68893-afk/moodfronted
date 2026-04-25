@@ -1819,20 +1819,133 @@ export function registerMessageHandlers() {
     window.addEventListener('message', (event) => {
         try {
             if (!event.data || typeof event.data !== 'object') return;
-            
+
+            // ── ORIGIN CHECK (FIX: allow production domain + null for iframes) ──
             const allowedOrigins = [
                 window.location.origin,
                 'http://localhost:5500',
-                'http://localhost:4000'
+                'http://localhost:4000',
+                'http://localhost:3000',
+                'https://moodfronted.onrender.com',
+                'https://moodchat-fy56.onrender.com'
             ];
-            
-            if (!allowedOrigins.includes(event.origin) && event.origin !== 'null') {
+            if (!allowedOrigins.includes(event.origin) && event.origin !== 'null' && event.origin !== '') {
                 return;
             }
-            
+
             const message = event.data;
-            
-            // Handle UI-specific messages
+
+            // ── REALTIME GROUP EVENTS (ws-group-bridge from chat.html / app_realtime_socket.js) ──
+            // These arrive from the parent frame's WebSocket bridge. They MUST be
+            // handled here to update the UI in real-time for the RECEIVER side.
+
+            // ── GROUP CREATED (receiver sees new group instantly) ───────────
+            if (message.type === 'GROUP_CREATED' || message.type === 'group:created') {
+                const grp = (message.payload && message.payload.group) || message.payload;
+                if (grp && grp.id) {
+                    console.log('[GroupUI] REALTIME group:created → group', grp.id, grp.name);
+                    // Add to GroupCore if available
+                    if (window.GroupCore) {
+                        const GC = window.GroupCore;
+                        if (!GC.groups || !GC.groups.some(g => String(g.id) === String(grp.id))) {
+                            GC.groups = GC.groups || [];
+                            GC.groups.push(grp);
+                            const uid = String(GC.currentUser?.id || GC.currentUser?.uid || '');
+                            if (String(grp.createdBy) === uid) {
+                                GC.myGroups    = GC.myGroups    || []; GC.myGroups.push(grp);
+                                GC.adminGroups = GC.adminGroups || []; GC.adminGroups.push(grp);
+                            } else {
+                                GC.joinedGroups = GC.joinedGroups || []; GC.joinedGroups.push(grp);
+                            }
+                            GC.saveGroups && GC.saveGroups();
+                            GC.emit && GC.emit('group:created', grp);
+                        }
+                    }
+                    // RE-RENDER the groups list so the new group appears immediately
+                    if (typeof renderGroupsListSecure === 'function') renderGroupsListSecure();
+                    else if (typeof window.renderGroupsListSecure === 'function') window.renderGroupsListSecure();
+                    // Show notification to receiver
+                    const isMe = window.GroupCore && String(grp.createdBy) === String(window.GroupCore.currentUser?.id);
+                    if (!isMe && typeof showNotification === 'function') {
+                        showNotification(`You've been added to group: ${grp.name}`, 'info');
+                    }
+                }
+                return;
+            }
+
+            // ── GROUP MESSAGE (receiver sees new message instantly) ──────────
+            if (message.type === 'GROUP_MESSAGE' || message.type === 'group:message') {
+                const p = message.payload || {};
+                const gid = p.groupId || p.group_id;
+                const msg = p.message || p;
+                if (!gid || !msg) return;
+                console.log('[GroupUI] REALTIME group:message → group', gid);
+                // Update GroupCore in-memory store
+                if (window.GroupCore && typeof window.GroupCore.addGroupMessage === 'function') {
+                    window.GroupCore.addGroupMessage(gid, msg);
+                }
+                // If this chat is currently open, append message to UI
+                if (typeof currentChatGroup !== 'undefined' && currentChatGroup && String(currentChatGroup.id) === String(gid)) {
+                    if (typeof addMessageToChat === 'function') {
+                        addMessageToChat(msg, true);
+                    }
+                } else {
+                    // Increment badge for groups list item
+                    if (typeof incrementGroupUnreadCount === 'function') {
+                        incrementGroupUnreadCount(gid);
+                    }
+                    // Refresh list to show latest message preview
+                    if (typeof renderGroupsListSecure === 'function') renderGroupsListSecure();
+                    else if (typeof window.renderGroupsListSecure === 'function') window.renderGroupsListSecure();
+                }
+                return;
+            }
+
+            // ── GROUP LOCALYNC (covers create/update/delete/member changes) ─
+            if (message.type === 'group:localSync') {
+                const d = message.payload || {};
+                console.log('[GroupUI] REALTIME group:localSync →', d.action);
+                if (d.action === 'create' || d.action === 'upsert') {
+                    // Re-render to show new group
+                    if (typeof renderGroupsListSecure === 'function') renderGroupsListSecure();
+                    else if (typeof window.renderGroupsListSecure === 'function') window.renderGroupsListSecure();
+                } else if (d.action === 'message') {
+                    // Already handled above if GROUP_MESSAGE also fires, but handle standalone case
+                    if (typeof currentChatGroup !== 'undefined' && currentChatGroup && String(currentChatGroup.id) === String(d.groupId)) {
+                        if (d.message && typeof addMessageToChat === 'function') addMessageToChat(d.message, true);
+                    } else if (typeof incrementGroupUnreadCount === 'function' && d.groupId) {
+                        incrementGroupUnreadCount(d.groupId);
+                    }
+                } else if (d.action === 'update' || d.action === 'delete' || d.action === 'member_add' || d.action === 'member_remove' || d.action === 'member_leave') {
+                    if (typeof renderGroupsListSecure === 'function') renderGroupsListSecure();
+                    else if (typeof window.renderGroupsListSecure === 'function') window.renderGroupsListSecure();
+                }
+                return;
+            }
+
+            // ── GROUP MEMBER CHANGES ──────────────────────────────────────────
+            if (message.type === 'GROUP_MEMBER_ADDED' || message.type === 'GROUP_MEMBER_REMOVED' || message.type === 'GROUP_MEMBER_LEFT') {
+                console.log('[GroupUI] REALTIME', message.type);
+                if (typeof renderGroupsListSecure === 'function') renderGroupsListSecure();
+                return;
+            }
+
+            // ── GROUP INVITE RECEIVED ─────────────────────────────────────────
+            if (message.type === 'GROUP_INVITE_RECEIVED' || message.type === 'group:invitation:received') {
+                console.log('[GroupUI] REALTIME group invitation received');
+                if (typeof renderGroupInvitesSecure === 'function') renderGroupInvitesSecure();
+                if (typeof showNotification === 'function') showNotification('You have a new group invitation!', 'info');
+                return;
+            }
+
+            // ── TYPING INDICATOR ─────────────────────────────────────────────
+            if (message.type === 'GROUP_TYPING' || message.type === 'group:typing') {
+                const p = message.payload || {};
+                if (typeof showTypingIndicator === 'function') showTypingIndicator(p.groupId, p.userId, p.userName);
+                return;
+            }
+
+            // ── Handle UI-specific messages (existing handlers) ──────────────
             if (message.type === 'UI_UPDATE') {
                 handleUIUpdate(message.payload);
             } else if (message.type === 'UI_REFRESH') {
@@ -1840,7 +1953,9 @@ export function registerMessageHandlers() {
             } else if (message.type === 'UI_THEME') {
                 handleUITheme(message.payload);
             }
-        } catch (error) {}
+        } catch (error) {
+            console.warn('[GroupUI] postMessage handler error:', error.message);
+        }
     });
     
     window._uiMessageHandlersRegistered = true;
@@ -4198,6 +4313,88 @@ export function registerUICoreEvents() {
         window.KynectaRealtime.on('group:invitation:accepted', refreshInvites);
         window.KynectaRealtime.on('group:member:joined', refreshInvites);
     }
+
+    // ── GROUPCORE EVENT → UI BRIDGE ──────────────────────────────────────────
+    // GroupCore fires internal events after data is updated.
+    // We bind here to trigger immediate UI re-renders on BOTH sender and receiver.
+    if (!window.__groupUiCoreEventsBound && window.GroupCore && typeof window.GroupCore.on === 'function') {
+        window.__groupUiCoreEventsBound = true;
+        const GC = window.GroupCore;
+
+        // group:created — new group appeared (sender's optimistic OR receiver's realtime)
+        GC.on('group:created', (grp) => {
+            console.log('[GroupUI] GroupCore group:created → re-rendering', grp?.name);
+            if (typeof renderGroupsListSecure === 'function') {
+                try { renderGroupsListSecure(); } catch(_) {}
+            }
+        });
+
+        // groups:list-updated — after full sync from server
+        GC.on('groups:list-updated', () => {
+            if (typeof renderGroupsListSecure === 'function') {
+                try { renderGroupsListSecure(); } catch(_) {}
+            }
+        });
+
+        // group:message-received — message arrived for a group the user is in
+        GC.on('group:message-received', ({ groupId, message }) => {
+            if (typeof currentChatGroup !== 'undefined' && currentChatGroup && String(currentChatGroup.id) === String(groupId)) {
+                // Chat is open — append inline
+                if (typeof addMessageToChat === 'function') {
+                    try { addMessageToChat(message, true); } catch(_) {}
+                }
+            } else {
+                // Chat not open — increment badge + refresh sidebar
+                if (typeof incrementGroupUnreadCount === 'function') {
+                    try { incrementGroupUnreadCount(groupId); } catch(_) {}
+                }
+                if (typeof renderGroupsListSecure === 'function') {
+                    try { renderGroupsListSecure(); } catch(_) {}
+                }
+            }
+        });
+
+        // group:updated — group settings/name changed
+        GC.on('group:updated', () => {
+            if (typeof renderGroupsListSecure === 'function') {
+                try { renderGroupsListSecure(); } catch(_) {}
+            }
+        });
+
+        // group:member-added / group:member-removed
+        GC.on('group:member-added', () => {
+            if (typeof renderGroupsListSecure === 'function') {
+                try { renderGroupsListSecure(); } catch(_) {}
+            }
+        });
+        GC.on('group:member-removed', () => {
+            if (typeof renderGroupsListSecure === 'function') {
+                try { renderGroupsListSecure(); } catch(_) {}
+            }
+        });
+
+        // group:invites-updated — invitation accepted/received
+        GC.on('group:invites-updated', () => {
+            if (typeof renderGroupInvitesSecure === 'function') {
+                try { renderGroupInvitesSecure(); } catch(_) {}
+            }
+        });
+
+        console.log('[GroupUI] ✅ GroupCore → UI event bridge installed');
+    } else if (!window.__groupUiCoreEventsBound) {
+        // GroupCore may not be ready yet — wait up to 5s
+        let attempts = 0;
+        const waitForGC = setInterval(() => {
+            if (++attempts > 25) { clearInterval(waitForGC); return; }
+            if (window.GroupCore && typeof window.GroupCore.on === 'function' && !window.__groupUiCoreEventsBound) {
+                clearInterval(waitForGC);
+                // Re-trigger initUIEvents which will bind GroupCore listeners
+                window.__groupUiCoreEventsBound = false;
+                // Dispatch synthetic event to re-trigger binding
+                document.dispatchEvent(new CustomEvent('groupsCoreReady', { detail: { sessionValid: true } }));
+            }
+        }, 200);
+    }
 }
 
 // =============================================
@@ -4810,18 +5007,25 @@ document.addEventListener('click', function(e) {
  * Async group creation function
  */
 async function createGroupAsync(buttonElement) {
+    // ── SENDER UI: Show creating state immediately ────────────────────────
+    if (buttonElement) {
+        buttonElement.disabled    = true;
+        buttonElement.textContent = 'Creating…';
+        buttonElement.classList && buttonElement.classList.add('btn-loading');
+    }
+    console.log('[GROUP FLOW] SENT: createGroupAsync started');
+
     try {
         const groupData = typeof collectGroupFormData === 'function' ? collectGroupFormData() : {};
-        
+
         // Include selected friends from members tab with invitation method tracking
         if (window._cgSelectedMembers && window._cgSelectedMembers.size > 0) {
             const selectedMemberIds = [...window._cgSelectedMembers];
             const invitationMethods = window._cgInvitationMethods || new Map();
-            
-            // Separate direct additions from invitations
-            const directAdditions = [];
+
+            const directAdditions  = [];
             const pendingInvitations = [];
-            
+
             selectedMemberIds.forEach(friendId => {
                 const method = invitationMethods.get(friendId);
                 if (method?.canAddDirectly) {
@@ -4830,48 +5034,63 @@ async function createGroupAsync(buttonElement) {
                     pendingInvitations.push(friendId);
                 }
             });
-            
-            // Add direct members to group data
+
             groupData.memberIds = directAdditions;
-            
-            // Store pending invitations for post-creation
-            window.__pendingGroupInvites = pendingInvitations;
-            window.__pendingInvitationMethods = new Map();
+            window.__pendingGroupInvites        = pendingInvitations;
+            window.__pendingInvitationMethods   = new Map();
             pendingInvitations.forEach(friendId => {
                 window.__pendingInvitationMethods.set(friendId, 'invite');
             });
-            
+
             console.log(`[GroupUI] Creating group with ${directAdditions.length} direct members and ${pendingInvitations.length} pending invitations`);
         }
-        
-        // Create the group
+
+        // ── SENT: call backend ────────────────────────────────────────────
+        let createdGroup = null;
         if (typeof createGroupOnline === 'function') {
-            await createGroupOnline(groupData);
+            const result = await createGroupOnline(groupData);
+            // Normalise result shape
+            createdGroup = result?.group || result?.data?.group || result?.data || null;
+            console.log('[GROUP FLOW] EMITTED: createGroupOnline resolved', createdGroup?.id || '(no id)');
+        } else if (window.GroupCore && typeof window.GroupCore.createGroup === 'function') {
+            const result = await window.GroupCore.createGroup(groupData);
+            createdGroup = result?.data?.group || result?.data || null;
+            console.log('[GROUP FLOW] EMITTED: GroupCore.createGroup resolved', createdGroup?.id || '(no id)');
         }
-        
+
         // Reset selection
         window._cgSelectedMembers = new Set();
-        
+
         // Close modal
         const modal = document.querySelector('#createGroupModal');
-        if (modal) { 
-            modal.classList.remove('active'); 
-            modal.style.display = 'none'; 
+        if (modal) {
+            modal.classList.remove('active');
+            modal.style.display = 'none';
         }
-        
+
+        // ── SENDER CONFIRMATION: render updated list ──────────────────────
+        if (typeof renderGroupsListSecure === 'function') {
+            try { renderGroupsListSecure(); } catch (_) {}
+        }
+
+        // ── RENDERED: show success notification ──────────────────────────
         if (typeof showNotification === 'function') {
             showNotification('Group created successfully!', 'success');
         }
-        
+        console.log('[GROUP FLOW] RENDERED: Group list refreshed after creation');
+
     } catch (e) {
         console.error('[GroupUI] Create group error:', e);
+        // ── SENDER: show error state ──────────────────────────────────────
         if (typeof showNotification === 'function') {
             showNotification('Failed to create group: ' + (e.message || 'Unknown error'), 'error');
         }
     } finally {
-        // Reset button state
-        buttonElement.disabled = false;
-        buttonElement.textContent = 'Create Group';
+        // ── SENDER: restore button ────────────────────────────────────────
+        if (buttonElement) {
+            buttonElement.disabled    = false;
+            buttonElement.textContent = 'Create Group';
+            buttonElement.classList && buttonElement.classList.remove('btn-loading');
+        }
     }
 }
-

@@ -833,6 +833,21 @@
                 console.warn('[Realtime] Max reconnect attempts or consecutive errors reached — entering DEGRADED mode.');
                 this._state = CONNECTION_STATE.DEGRADED;
                 this._emitStateChange();
+                // ── FIX: Auto-recover from DEGRADED after 30 s ───────────────
+                // Render.com free tier cold-starts can cause 4+ consecutive WS
+                // failures. Without recovery, calls/messages/status are lost
+                // permanently for the session. Reset counters and retry.
+                if (!this._degradedRecoveryTimer) {
+                    this._degradedRecoveryTimer = setTimeout(() => {
+                        this._degradedRecoveryTimer = null;
+                        if (this._state === CONNECTION_STATE.DEGRADED) {
+                            console.log('[Realtime] 🔄 Auto-recovering from DEGRADED — reconnecting...');
+                            this._reconnectAttempts = 0;
+                            this._consecutiveErrors = 0;
+                            this._connect();
+                        }
+                    }, 30000);
+                }
             }
         }
 
@@ -943,7 +958,21 @@
 
         _registerMessageBridgeListeners() {
             const MESSAGE_EVENTS = ['message:new', 'new_message', 'chat:message', 'MESSAGE_RECEIVED'];
-            const GROUP_EVENTS = ['group:message', 'group:membership_change', 'group:updated', 'group:localSync'];
+            const GROUP_EVENTS = [
+                'group:message',          'group_message',
+                'group:membership_change','group:updated',
+                'group:localSync',
+                // All group lifecycle events
+                'group:created',          'group_created',
+                'group:joined',           'group_joined',
+                'group:participants-added','group:participant-removed',
+                'group:removed',          'group:left',
+                'group:member:added',     'group:member:removed',
+                'group:member:left',      'group:member:joined',
+                'group:invitation:received',
+                'group:typing',
+                'chat:created',           'chat_created'
+            ];
             // ✅ FIX: Register call signal events so calls-core / calls-ui receive them via the singleton
             const CALL_EVENTS = [
                 'call:incoming', 'incoming_call',
@@ -1079,10 +1108,121 @@
 
         _handleGroupEvent(eventType, data) {
             if (!data) return;
+
+            // 1. DOM CustomEvents — picked up by kyn-global-bridge in chat.html
             window.dispatchEvent(new CustomEvent(`kyn:${eventType}`, { detail: data }));
             document.dispatchEvent(new CustomEvent(eventType, { detail: data }));
             if (window.KynectaEventBus) {
                 window.KynectaEventBus.emit(`REALTIME_${eventType}`, data, { async: true });
+            }
+
+            // 2. CRITICAL: postMessage directly to groupIframe.
+            //    group-ui.js and group-core.js run inside the groupIframe. They cannot
+            //    receive CustomEvents fired on the parent window — postMessage is the
+            //    ONLY reliable delivery path for receiver-side real-time updates.
+            try {
+                const groupIframe = document.getElementById('groupIframe');
+                if (groupIframe && groupIframe.contentWindow) {
+                    // Send raw event first (group-core-patch.js window.addEventListener picks this up)
+                    groupIframe.contentWindow.postMessage({
+                        type:      eventType,
+                        payload:   data,
+                        source:    'ws-group-bridge',
+                        timestamp: Date.now()
+                    }, '*');
+
+                    // Send normalised uppercase aliases that group-core.js MessageRouter switch handles
+                    if (eventType === 'group:created' || eventType === 'group_created') {
+                        groupIframe.contentWindow.postMessage({
+                            type: 'GROUP_CREATED',
+                            payload: { group: data.group || data },
+                            source: 'ws-group-bridge', timestamp: Date.now()
+                        }, '*');
+                        groupIframe.contentWindow.postMessage({
+                            type: 'group:localSync',
+                            payload: { action: 'create', group: data.group || data, groupId: (data.group && data.group.id) || data.id },
+                            source: 'ws-group-bridge', timestamp: Date.now()
+                        }, '*');
+                        console.log('[GROUP FLOW] EMITTED: GROUP_CREATED → groupIframe id=', (data.group && data.group.id) || data.id);
+                    } else if (eventType === 'group:message' || eventType === 'group_message') {
+                        groupIframe.contentWindow.postMessage({
+                            type: 'GROUP_MESSAGE',
+                            payload: data,
+                            source: 'ws-group-bridge', timestamp: Date.now()
+                        }, '*');
+                        groupIframe.contentWindow.postMessage({
+                            type: 'group:localSync',
+                            payload: { action: 'message', groupId: data.groupId, message: data.message || data },
+                            source: 'ws-group-bridge', timestamp: Date.now()
+                        }, '*');
+                        console.log('[GROUP FLOW] EMITTED: GROUP_MESSAGE → groupIframe groupId=', data.groupId);
+                    } else if (eventType === 'group:localSync') {
+                        const action = data.action;
+                        if (action === 'create' || action === 'upsert') {
+                            groupIframe.contentWindow.postMessage({ type: 'GROUP_CREATED', payload: { group: data.group }, source: 'ws-group-bridge', timestamp: Date.now() }, '*');
+                        } else if (action === 'message') {
+                            groupIframe.contentWindow.postMessage({ type: 'GROUP_MESSAGE', payload: { groupId: data.groupId, message: data.message }, source: 'ws-group-bridge', timestamp: Date.now() }, '*');
+                        } else if (action === 'member_add') {
+                            groupIframe.contentWindow.postMessage({ type: 'GROUP_MEMBER_ADDED', payload: data, source: 'ws-group-bridge', timestamp: Date.now() }, '*');
+                        } else if (action === 'member_remove' || action === 'member_leave') {
+                            groupIframe.contentWindow.postMessage({ type: 'GROUP_MEMBER_REMOVED', payload: data, source: 'ws-group-bridge', timestamp: Date.now() }, '*');
+                        }
+                    } else if (eventType === 'group:membership_change' || eventType === 'group:joined' || eventType === 'group_joined') {
+                        groupIframe.contentWindow.postMessage({ type: 'GROUP_MEMBER_ADDED', payload: data, source: 'ws-group-bridge', timestamp: Date.now() }, '*');
+                    } else if (eventType === 'group:left' || eventType === 'group:removed' || eventType === 'group:participant-removed') {
+                        groupIframe.contentWindow.postMessage({ type: 'GROUP_MEMBER_REMOVED', payload: data, source: 'ws-group-bridge', timestamp: Date.now() }, '*');
+                    } else if (eventType === 'group:updated') {
+                        groupIframe.contentWindow.postMessage({
+                            type: 'group:localSync',
+                            payload: { action: 'update', group: data.group || data, groupId: data.id || (data.group && data.group.id) },
+                            source: 'ws-group-bridge', timestamp: Date.now()
+                        }, '*');
+                    }
+                }
+            } catch (_bridgeErr) {
+                // Cross-origin guard — silent fail
+            }
+
+            // 3. FIX 11: On group/chat creation events, immediately add to ChatManager
+            //    so the messages sidebar updates without requiring a manual refresh.
+            const isCreationEvent = eventType === 'group:created' || eventType === 'group_created'
+                || eventType === 'group:joined' || eventType === 'group_joined'
+                || eventType === 'chat:created' || eventType === 'chat_created';
+
+            if (isCreationEvent) {
+                const chatObj = data.chat || data.group || data;
+                const chatManager = window.ChatManager;
+                if (chatManager && chatObj && (chatObj.id || chatObj.chatId)) {
+                    const normChat = {
+                        ...chatObj,
+                        id: String(chatObj.id || chatObj.chatId),
+                        chatId: String(chatObj.id || chatObj.chatId),
+                        updatedAt: chatObj.updatedAt || Date.now(),
+                        lastMessageAt: chatObj.lastMessageAt || chatObj.updatedAt || Date.now()
+                    };
+                    if (typeof chatManager.addConversation === 'function') {
+                        chatManager.addConversation(normChat);
+                    } else if (chatManager._conversations && chatManager._conversationsMap) {
+                        if (!chatManager._conversationsMap.has(normChat.id)) {
+                            chatManager._conversations.unshift(normChat);
+                            chatManager._conversationsMap.set(normChat.id, normChat);
+                            if (typeof chatManager._notifySubscribers === 'function') {
+                                chatManager._notifySubscribers();
+                            }
+                        }
+                    }
+                    try {
+                        window.dispatchEvent(new CustomEvent('renderChatsList', {
+                            detail: {
+                                conversations: chatManager._conversations || [],
+                                currentChat: chatManager._activeConversation || null,
+                                currentCategory: chatManager.getCurrentCategory?.() || 'all',
+                                messageDrafts: {}
+                            }
+                        }));
+                    } catch (_) {}
+                    console.log(`[GROUP FLOW] RENDERED: group/chat added to sidebar id=${normChat.id} event=${eventType}`);
+                }
             }
         }
 
