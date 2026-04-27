@@ -843,7 +843,11 @@
                     this._degradedRecoveryTimer = setTimeout(() => {
                         this._degradedRecoveryTimer = null;
                         if (this._state === CONNECTION_STATE.DEGRADED) {
-                            console.log('[Realtime] 🔄 Auto-recovering from DEGRADED — reconnecting...');
+                            // Rate limit auto-recovery messages
+                            if (!this._lastAutoRecoveryLogAt || Date.now() - this._lastAutoRecoveryLogAt > 12000) {
+                                this._lastAutoRecoveryLogAt = Date.now();
+                                console.log('[Realtime] 🔄 Auto-recovering from DEGRADED — reconnecting...');
+                            }
                             this._reconnectAttempts = 0;
                             this._consecutiveErrors = 0;
                             this._connect();
@@ -1283,7 +1287,11 @@
             
             const totalDelay = Math.max(effectiveDelay, backoffDelay);
 
-            console.log(`[Realtime] Enhanced reconnect in ${Math.round(totalDelay)}ms (attempt ${this._reconnectAttempts + 1})`);
+            // Rate limit reconnect messages to reduce console noise
+            if (!this._lastEnhancedReconnectLogAt || now - this._lastEnhancedReconnectLogAt > 10000) {
+                this._lastEnhancedReconnectLogAt = now;
+                console.log(`[Realtime] Enhanced reconnect in ${Math.round(totalDelay)}ms (attempt ${this._reconnectAttempts + 1})`);
+            }
 
             this._reconnectTimer = setTimeout(() => {
                 this._reconnectAttempts++;
@@ -1547,7 +1555,11 @@
         try {
             const wsUrl = getRawWebSocketUrl(this._sessionToken);
             this._url = wsUrl;
-            console.log('[Realtime] Opening raw WebSocket', wsUrl.replace(/token=[^&]+/, 'token=***'));
+            // Rate limit WebSocket opening messages
+            if (!this._lastWebSocketOpenLogAt || Date.now() - this._lastWebSocketOpenLogAt > 8000) {
+                this._lastWebSocketOpenLogAt = Date.now();
+                console.log('[Realtime] Opening raw WebSocket', wsUrl.replace(/token=[^&]+/, 'token=***'));
+            }
 
             this._socket = new WebSocket(wsUrl);
             this._socket.onopen = this._onOpen.bind(this);

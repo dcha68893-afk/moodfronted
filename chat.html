@@ -2586,9 +2586,6 @@
         });
     </script>
     
-    <!-- 🔇 CONSOLE NOISE FILTER - Must be first -->
-    <script src="js/console-noise-filter.js"></script>
-    
     <!-- ✅ SAFETY LAYER — Must be first (patch v1) -->
     <script src="js/kynecta.safety.layer.js"></script>
     <script>
@@ -3657,9 +3654,7 @@
 
                 if (data.type === 'SWITCH_MODULE' && data.module === 'calls') {
                     const p = data.payload || {};
-                    // CRITICAL FIX: Preserve the original returnTo from payload
-                    const returnTo = p.returnTo || (window.__currentPage && window.__currentPage !== 'calls') ? window.__currentPage : (window.__lastActivePage || 'messages');
-                    __dispatchCallToIframe(p.userId, p.userName || 'User', p.callType || 'voice', returnTo, p.chatUserId || p.userId, data.source || 'messages-module');
+                    __dispatchCallToIframe(p.userId, p.userName || 'User', p.callType || 'voice', p.returnTo || 'messages', p.chatUserId || p.userId, 'messages-module');
                     return;
                 }
 
@@ -3688,7 +3683,7 @@
                                 setTimeout(() => {
                                     msgIframe.contentWindow.postMessage({
                                         type: 'OPEN_CHAT_WITH_USER',
-                                        payload: { userId: ctx.chatUserId, userName: ctx.userName, returnFromCall: true, timestamp: Date.now() },
+                                        payload: { userId: ctx.chatUserId, userName: ctx.userName || 'User', returnFromCall: true, timestamp: Date.now() },
                                         source: 'parent-frame'
                                     }, '*');
                                     if (window.innerWidth <= 768) document.body.classList.add('chat-panel-active');

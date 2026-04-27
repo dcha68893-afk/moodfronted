@@ -116,7 +116,11 @@
 
         request.onsuccess = () => {
           this._db = request.result;
-          console.log("[CACHE] DB initialized");
+          // Rate limit DB initialized messages
+          if (!window._lastDBInitializedLogAt || Date.now() - window._lastDBInitializedLogAt > 5000) {
+            window._lastDBInitializedLogAt = Date.now();
+            console.log("[CACHE] DB initialized");
+          }
           this._bootstrapFromLocalSources().finally(() => resolve(this._db));
         };
 
@@ -718,5 +722,9 @@
   try {
     window.dispatchEvent(new CustomEvent('kyn:cacheReady', { detail: { cache } }));
   } catch (_) {}
-  console.log('[AppCache] ✅ Cache ready, kyn:cacheReady dispatched');
+  // Rate limit cache ready messages
+  if (!window._lastCacheReadyLogAt || Date.now() - window._lastCacheReadyLogAt > 5000) {
+    window._lastCacheReadyLogAt = Date.now();
+    console.log('[AppCache] ✅ Cache ready, kyn:cacheReady dispatched');
+  }
 })();

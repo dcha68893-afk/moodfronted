@@ -203,7 +203,11 @@
                     console.log(`[FriendSync] Friends synced: ${serverFriends.length}`);
                 }
             } catch (e) {
-                console.warn('[FriendSync] friends sync error:', e.message);
+                // Rate limit sync error messages
+                if (!this._lastFriendsSyncErrorLogAt || Date.now() - this._lastFriendsSyncErrorLogAt > 8000) {
+                    this._lastFriendsSyncErrorLogAt = Date.now();
+                    console.warn('[FriendSync] friends sync error:', e.message);
+                }
             }
         }
 
@@ -224,7 +228,11 @@
                     console.log(`[FriendSync] Incoming requests synced: ${reqs.length}`);
                 }
             } catch (e) {
-                console.warn('[FriendSync] incoming requests sync error:', e.message);
+                // Rate limit sync error messages
+                if (!this._lastIncomingRequestsSyncErrorLogAt || Date.now() - this._lastIncomingRequestsSyncErrorLogAt > 8000) {
+                    this._lastIncomingRequestsSyncErrorLogAt = Date.now();
+                    console.warn('[FriendSync] incoming requests sync error:', e.message);
+                }
             }
         }
 
@@ -245,7 +253,11 @@
                     console.log(`[FriendSync] Sent requests synced: ${reqs.length}`);
                 }
             } catch (e) {
-                console.warn('[FriendSync] sent requests sync error:', e.message);
+                // Rate limit sync error messages
+                if (!this._lastSentRequestsSyncErrorLogAt || Date.now() - this._lastSentRequestsSyncErrorLogAt > 8000) {
+                    this._lastSentRequestsSyncErrorLogAt = Date.now();
+                    console.warn('[FriendSync] sent requests sync error:', e.message);
+                }
             }
         }
 
