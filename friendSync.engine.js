@@ -639,25 +639,28 @@
                 || window.AUTH_SESSION?.token
                 || localStorage.getItem('kynecta_token');
 
+            if (!token) {
+                throw new Error('No authentication token available');
+            }
+
             const headers = {
                 'Content-Type': 'application/json',
-                ...(token ? { Authorization: `Bearer ${token}` } : {}),
+                Authorization: `Bearer ${token}`,
             };
 
+            // Reduce timeout for better responsiveness
+            const EFFECTIVE_TIMEOUT = Math.min(REQUEST_TIMEOUT_MS, 8000);
             const controller = new AbortController();
-            const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+            const timeout = setTimeout(() => controller.abort(), EFFECTIVE_TIMEOUT);
 
             try {
-                if (window.api?.request?.request) {
-                    return window.api.request.request(endpoint, { ...options, headers });
-                }
                 // Use parent communication system like other modules
                 if (window.parent && window.parent !== window) {
                     return new Promise((resolve, reject) => {
                         const requestId = 'friendSync_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
                         const timeoutId = setTimeout(() => {
                             reject(new Error('API request timeout'));
-                        }, REQUEST_TIMEOUT_MS);
+                        }, EFFECTIVE_TIMEOUT);
 
                         const handleMessage = (event) => {
                             if (event.data && event.data.type === 'API_RESPONSE' && event.data.requestId === requestId) {
@@ -667,7 +670,13 @@
                                 if (event.data.payload && event.data.payload.success !== false) {
                                     resolve(event.data.payload);
                                 } else {
-                                    reject(new Error(event.data.payload?.message || 'API operation failed'));
+                                    const errorMsg = event.data.payload?.message || 'API operation failed';
+                                    // Handle 401/403 authentication errors specifically
+                                    if (event.data.status === 401 || event.data.status === 403) {
+                                        reject(new Error(`Authentication failed: ${errorMsg}`));
+                                    } else {
+                                        reject(new Error(errorMsg));
+                                    }
                                 }
                             }
                         };
@@ -693,7 +702,12 @@
                     credentials: 'include',
                     signal: controller.signal,
                 });
-                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                if (!res.ok) {
+                    if (res.status === 401 || res.status === 403) {
+                        throw new Error(`Authentication failed: HTTP ${res.status}`);
+                    }
+                    throw new Error(`HTTP ${res.status}`);
+                }
                 return res.json();
             } finally {
                 clearTimeout(timeout);

@@ -588,20 +588,76 @@ self.addEventListener('message', function(event) {
       );
       break;
 
-    case 'CHECK_HEALTH':
-      if (event.ports && event.ports[0]) {
-        event.ports[0].postMessage({
-          type: 'HEALTH_RESPONSE',
-          status: 'healthy',
-          version: SW_VERSION,
-          timestamp: Date.now()
-        });
-      }
+    case 'CLEAR_TOKEN_CACHE':
+      // Clear any cached responses that might contain tokens
+      event.waitUntil(
+        caches.open(CACHE_NAME).then(function(cache) {
+          return cache.keys().then(function(keys) {
+            var tokenRelatedKeys = keys.filter(function(request) {
+              var url = request.url;
+              // Clear auth-related cached responses
+              return /\/auth\//i.test(url) || 
+                     /\/api\/.*auth/i.test(url) ||
+                     /\/login/i.test(url) ||
+                     /\/register/i.test(url) ||
+                     /\/token/i.test(url);
+            });
+            
+            return Promise.all(tokenRelatedKeys.map(function(request) {
+              console.log('[SW] Clearing token-related cache: ' + request.url);
+              return cache.delete(request);
+            }));
+          });
+        }).then(function() {
+          // Notify all clients that token cache was cleared
+          return self.clients.matchAll();
+        }).then(function(clients) {
+          clients.forEach(function(client) {
+            client.postMessage({ 
+              type: 'TOKEN_CACHE_CLEARED', 
+              timestamp: Date.now() 
+            });
+          });
+          console.log('[SW] Token cache cleared');
+        })
+      );
       break;
 
-    case 'CLEAR_LOGS':
-      loggedCacheHits.clear();
-      console.log('[SW] Logs cleared');
+    case 'FORCE_REFRESH':
+      // Force refresh of critical auth files
+      event.waitUntil(
+        caches.open(CACHE_NAME).then(function(cache) {
+          var authFiles = [
+            '/js/api.core.js',
+            '/js/api.auth.js',
+            '/js/auth.session.manager.js',
+            '/js/authStorage.js',
+            '/js/app.core.session.js'
+          ];
+          
+          return Promise.all(authFiles.map(function(file) {
+            var request = new Request(file, { cache: 'no-store' });
+            return fetch(request).then(function(response) {
+              if (response.ok) {
+                console.log('[SW] Force refreshed: ' + file);
+                return cache.put(request, response);
+              }
+            }).catch(function(err) {
+              console.warn('[SW] Failed to force refresh: ' + file, err);
+            });
+          }));
+        }).then(function() {
+          // Notify clients
+          return self.clients.matchAll();
+        }).then(function(clients) {
+          clients.forEach(function(client) {
+            client.postMessage({ 
+              type: 'FORCE_REFRESH_COMPLETE', 
+              timestamp: Date.now() 
+            });
+          });
+        })
+      );
       break;
 
     // ✅ SAFE: Update notification only - no forced reloads
@@ -633,10 +689,6 @@ self.addEventListener('message', function(event) {
   }
 });
 
-// ---------------------------------------------------------------------------
-// PERIODIC CACHE CLEANUP - evict entries older than CACHE_MAX_AGE
-//
-// FIX: setInterval() does NOT work reliably in Service Workers because the
 //      browser terminates the SW between events. The interval is reset every
 //      time the SW wakes up, so the callback will never fire as intended.
 //

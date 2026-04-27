@@ -130,6 +130,12 @@
     async getById(id) {
       if (!id) return null;
       const cache = await getCache();
+      if (!cache) {
+        // Fallback to localStorage if AppCache is not available
+        const key = `kynecta_calls_${id}`;
+        const stored = localStorage.getItem(key);
+        return stored ? JSON.parse(stored) : null;
+      }
       return cache.get(COLLECTION, String(id));
     },
 
@@ -140,6 +146,14 @@
     async save(record) {
       if (!record) return null;
       const cache = await getCache();
+      if (!cache) {
+        // Fallback to localStorage if AppCache is not available
+        console.warn('[CallLocalStore] Using localStorage fallback for save');
+        const normalised = normalise(record);
+        const key = `kynecta_calls_${normalised.id}`;
+        localStorage.setItem(key, JSON.stringify(normalised));
+        return normalised;
+      }
       const normalised = normalise(record);
       return cache.save(COLLECTION, normalised);
     },

@@ -1179,11 +1179,48 @@ if (requiresAuth) {
                 localStorage.getItem('accessToken');
     }
     
+    // Enhanced token validation before using
     if (token && typeof token === 'string' && token.length > 20) {
-        fetchOptions.headers['Authorization'] = `Bearer ${token}`;
-        console.log(`[API] 🔐 Auth header attached for: ${endpointPath} (token length: ${token.length})`);
+        const tokenValidation = validateToken(token);
+        if (tokenValidation.valid) {
+            fetchOptions.headers['Authorization'] = `Bearer ${token}`;
+            console.log(`[API] 🔐 Auth header attached for: ${endpointPath} (token length: ${token.length}, type: ${tokenValidation.type})`);
+            
+            // Check if token needs refresh (only for JWT tokens)
+            if (tokenValidation.type === 'JWT' && TokenManager && TokenManager.shouldRefreshToken()) {
+                console.log('[API] 🔄 Token needs refresh, attempting background refresh');
+                // Attempt background refresh without blocking the request
+                refreshTokenIfNeeded().catch(err => {
+                    console.warn('[API] Background token refresh failed:', err.message);
+                });
+            }
+        } else {
+            console.warn(`[API] ⚠️ Invalid token for protected endpoint: ${endpointPath} - ${tokenValidation.error}`);
+            
+            // Try to refresh the token if we have a refresh token
+            if (TokenManager && TokenManager.getRefreshToken()) {
+                console.log('[API] 🔄 Attempting token refresh due to validation failure');
+                try {
+                    const refreshResult = await refreshTokenIfNeeded();
+                    if (refreshResult && refreshResult.success) {
+                        token = refreshResult.token;
+                        fetchOptions.headers['Authorization'] = `Bearer ${token}`;
+                        console.log(`[API] ✅ Refreshed token attached for: ${endpointPath}`);
+                    } else {
+                        console.error('[API] ❌ Token refresh failed, request may fail');
+                        // Don't set the header, let the request fail with 401
+                    }
+                } catch (refreshError) {
+                    console.error('[API] ❌ Token refresh error:', refreshError.message);
+                    // Don't set the header, let the request fail with 401
+                }
+            } else {
+                console.error('[API] ❌ No refresh token available, request may fail');
+                // Don't set the header, let the request fail with 401
+            }
+        }
     } else {
-        console.warn(`[API] ⚠️ No token for protected endpoint: ${endpointPath}`);
+        console.warn(`[API] ⚠️ No valid token for protected endpoint: ${endpointPath}`);
     }
 }
             
@@ -1356,45 +1393,110 @@ const timeoutId = setTimeout(() => {
             if (!response.ok) {
                 if (response.status === 401) {
                     if (!_401logged) {
-                        console.warn('[API] âš ï¸ 401 Unauthorized - attempting token refresh');
+                        console.warn('[API] ⚠️ 401 Unauthorized - attempting token refresh');
                         _401logged = true;
                     }
                     
-                    if (retryCount < MAX_RETRIES && TokenManager && TokenManager.getRefreshToken()) {
-    console.log(`[API] 🔄 Attempting token refresh (attempt ${retryCount + 1}/${MAX_RETRIES})`);
-    const refreshResult = await refreshTokenIfNeeded();
-    
-    if (refreshResult && refreshResult.success) {
-        console.log('[API] ✅ Token refresh successful, retrying request');
-        retryCount++;
-        return executeRequest();
-    } else {
-        console.warn('[AUTH] No refresh token available — checking stored token');
-        // Only clear if storage also has no token
-        const storedToken = _getTokenFromStorage();
-        if (!storedToken) {
-            clearUserToken('401.response');
-        } else {
-            // Restore from storage without clearing
-            AUTH_TOKEN = storedToken;
-            TOKEN_READY = true;
-            console.log('[API] Restored token from storage after 401');
-        }
-    }
-} else {
-    console.warn('[AUTH] No refresh token available — checking stored token');
-    // Only clear if storage also has no token
-    const storedToken = _getTokenFromStorage();
-    if (!storedToken) {
-        clearUserToken('401.response');
-    } else {
-        // Restore from storage without clearing
-        AUTH_TOKEN = storedToken;
-        TOKEN_READY = true;
-        console.log('[API] Restored token from storage after 401');
-    }
-}
+                    // Enhanced 401 handling with token validation
+                    if (retryCount < MAX_RETRIES) {
+                        // First, validate current token to see if it's the issue
+                        const currentToken = getUserToken('401.handler');
+                        const tokenValidation = validateToken(currentToken);
+                        
+                        if (!tokenValidation.valid) {
+                            console.warn('[AUTH] Current token is invalid, attempting refresh');
+                        }
+                        
+                        // Attempt refresh if we have a refresh token
+                        if (TokenManager && TokenManager.getRefreshToken()) {
+                            console.log(`[API] 🔄 Attempting token refresh (attempt ${retryCount + 1}/${MAX_RETRIES})`);
+                            const refreshResult = await refreshTokenIfNeeded();
+                            
+                            if (refreshResult && refreshResult.success) {
+                                console.log('[API] ✅ Token refresh successful, retrying request');
+                                retryCount++;
+                                return executeRequest();
+                            } else if (refreshResult && refreshResult.requiresReauth) {
+                                console.error('[AUTH] Token refresh failed - requires reauthentication');
+                                clearUserToken('401.refresh_failed');
+                                
+                                // Dispatch auth expired event
+                                if (typeof window !== 'undefined') {
+                                    window.dispatchEvent(new CustomEvent('auth:expired', {
+                                        detail: {
+                                            endpoint: endpointPath,
+                                            requestId,
+                                            reason: 'refresh_failed',
+                                            timestamp: new Date().toISOString()
+                                        }
+                                    }));
+                                }
+                                
+                                if (handleUnauthorizedAccess && !options._suppressAuthRedirect) {
+                                    handleUnauthorizedAccess();
+                                }
+                            } else {
+                                console.warn('[AUTH] Refresh failed - checking stored token');
+                                // Only clear if storage also has no token
+                                const storedToken = _getTokenFromStorage();
+                                if (!storedToken) {
+                                    clearUserToken('401.no_storage_token');
+                                } else {
+                                    // Validate stored token before restoring
+                                    const storedValidation = validateToken(storedToken);
+                                    if (storedValidation.valid) {
+                                        // Restore from storage without clearing
+                                        AUTH_TOKEN = storedToken;
+                                        TOKEN_READY = true;
+                                        console.log('[API] Restored valid token from storage after 401');
+                                        retryCount++;
+                                        return executeRequest();
+                                    } else {
+                                        console.warn('[API] Stored token is also invalid, clearing');
+                                        clearUserToken('401.invalid_storage_token');
+                                    }
+                                }
+                            }
+                        } else {
+                            console.warn('[AUTH] No refresh token available — checking stored token');
+                            // Only clear if storage also has no token
+                            const storedToken = _getTokenFromStorage();
+                            if (!storedToken) {
+                                clearUserToken('401.no_refresh_or_storage');
+                            } else {
+                                // Validate stored token before restoring
+                                const storedValidation = validateToken(storedToken);
+                                if (storedValidation.valid) {
+                                    // Restore from storage without clearing
+                                    AUTH_TOKEN = storedToken;
+                                    TOKEN_READY = true;
+                                    console.log('[API] Restored valid token from storage after 401');
+                                    retryCount++;
+                                    return executeRequest();
+                                } else {
+                                    console.warn('[API] Stored token is invalid, clearing');
+                                    clearUserToken('401.invalid_storage_token');
+                                }
+                            }
+                        }
+                    } else {
+                        console.error('[AUTH] Max retries exceeded for 401, clearing session');
+                        clearUserToken('401.max_retries');
+                        
+                        // Dispatch auth expired event
+                        if (typeof window !== 'undefined') {
+                            window.dispatchEvent(new CustomEvent('auth:expired', {
+                                detail: {
+                                    endpoint: endpointPath,
+                                    requestId,
+                                    reason: 'max_retries',
+                                    timestamp: new Date().toISOString()
+                                }
+                            }));
+                        }
+                    }
                     
+                    // Dispatch unauthorized event for general handling
                     if (typeof window !== 'undefined') {
                         window.dispatchEvent(new CustomEvent('auth:unauthorized', {
                             detail: {
@@ -2898,6 +3000,18 @@ refreshTokenIfNeeded = async function() {
             return { success: false, error: 'No token to refresh' };
         }
         
+        // Enhanced token validation
+        const validationResult = validateToken(currentToken);
+        if (!validationResult.valid) {
+            console.warn('[TOKEN] Token validation failed:', validationResult.error);
+            return { 
+                success: false, 
+                error: validationResult.error,
+                token: currentToken,
+                requiresReauth: true
+            };
+        }
+        
         if (!TokenManager.shouldRefreshToken()) {
             return { 
                 success: true, 
@@ -2912,7 +3026,8 @@ refreshTokenIfNeeded = async function() {
             return { 
                 success: false, 
                 error: 'No refresh token available',
-                token: currentToken
+                token: currentToken,
+                requiresReauth: true
             };
         }
         
@@ -2929,7 +3044,8 @@ refreshTokenIfNeeded = async function() {
                         'Content-Type': 'application/json'
                     },
                     body: JSON.stringify({ refreshToken }),
-                    credentials: 'include'
+                    credentials: 'include',
+                    signal: AbortSignal.timeout(10000) // 10 second timeout
                 });
                 
                 let data = null;
@@ -2945,9 +3061,22 @@ refreshTokenIfNeeded = async function() {
                     const expiresIn = data.expiresIn || TokenManager.DEFAULT_EXPIRY;
                     
                     if (newToken) {
+                        // Validate new token before accepting
+                        const newValidation = validateToken(newToken);
+                        if (!newValidation.valid) {
+                            console.error('[TOKEN] Received invalid token from refresh endpoint');
+                            return {
+                                success: false,
+                                error: 'Invalid token received from refresh',
+                                token: currentToken,
+                                requiresReauth: true
+                            };
+                        }
+                        
                         setUserToken(newToken, true, 'token.refresh');
                         TokenManager.setToken(newToken, newRefreshToken, expiresIn);
                         
+                        console.log('[TOKEN] ✅ Token refreshed successfully');
                         return {
                             success: true,
                             token: newToken,
@@ -2955,13 +3084,34 @@ refreshTokenIfNeeded = async function() {
                             expiresIn: expiresIn
                         };
                     }
+                } else {
+                    // Handle specific error cases
+                    if (response.status === 401 || response.status === 403) {
+                        console.warn('[TOKEN] Refresh token rejected - may be expired');
+                        return {
+                            success: false,
+                            error: 'Refresh token expired or invalid',
+                            token: currentToken,
+                            requiresReauth: true
+                        };
+                    }
                 }
                 
                 return {
                     success: false,
-                    error: 'Refresh failed',
-                    token: currentToken
+                    error: data?.message || 'Refresh failed',
+                    token: currentToken,
+                    requiresReauth: response.status === 401 || response.status === 403
                 };
+            } catch (error) {
+                if (error.name === 'AbortError') {
+                    return {
+                        success: false,
+                        error: 'Refresh request timeout',
+                        token: currentToken
+                    };
+                }
+                throw error;
             } finally {
                 TokenManager._refreshLock = false;
                 TokenManager._refreshPromise = null;
@@ -2980,6 +3130,66 @@ refreshTokenIfNeeded = async function() {
             error: error.message || 'Refresh failed',
             token: getUserToken('refreshTokenIfNeeded.error')
         };
+    }
+};
+
+// ============================================================================
+// TOKEN VALIDATION
+// ============================================================================
+
+validateToken = function(token) {
+    try {
+        if (!token || typeof token !== 'string') {
+            return { valid: false, error: 'Token is missing or not a string' };
+        }
+        
+        // Check basic token format (JWT or opaque token)
+        if (token.length < 10) {
+            return { valid: false, error: 'Token too short' };
+        }
+        
+        // If it's a JWT, validate structure
+        const parts = token.split('.');
+        if (parts.length === 3) {
+            try {
+                const header = JSON.parse(atob(parts[0]));
+                const payload = JSON.parse(atob(parts[1]));
+                
+                // Check for required JWT fields
+                if (!header || !payload) {
+                    return { valid: false, error: 'Invalid JWT structure' };
+                }
+                
+                // Check expiration if present
+                if (payload.exp && typeof payload.exp === 'number') {
+                    const now = Math.floor(Date.now() / 1000);
+                    if (payload.exp < now) {
+                        return { valid: false, error: 'Token expired (JWT exp claim)' };
+                    }
+                }
+                
+                // Check not before if present
+                if (payload.nbf && typeof payload.nbf === 'number') {
+                    const now = Math.floor(Date.now() / 1000);
+                    if (payload.nbf > now) {
+                        return { valid: false, error: 'Token not yet valid (JWT nbf claim)' };
+                    }
+                }
+                
+                return { valid: true, type: 'JWT', payload };
+            } catch (e) {
+                return { valid: false, error: 'Failed to parse JWT payload' };
+            }
+        }
+        
+        // For opaque tokens, just check basic format
+        if (/^[A-Za-z0-9\-_]+$/.test(token)) {
+            return { valid: true, type: 'opaque' };
+        }
+        
+        return { valid: false, error: 'Invalid token format' };
+    } catch (error) {
+        return { valid: false, error: 'Token validation error: ' + error.message };
     }
 };
 
@@ -6696,21 +6906,6 @@ try {
     
     // Ensure gateway is ready before any requests are processed
     initializeGateway().then(() => {
-        console.log('[API-CORE] Gateway ready, processing any queued requests');
-    }).catch(error => {
-        console.error('[API-CORE] Gateway initialization failed:', error);
-    });
-    
-    setInterval(() => {
-        if (TokenManager && TokenManager.shouldRefreshToken && TokenManager.shouldRefreshToken()) {
-            refreshTokenIfNeeded().catch(() => {});
-        }
-    }, 120000);
-    
-    setInterval(() => {
-        if (navigator.onLine) {
-            checkNetworkStatus().catch(() => {});
-        }
     }, 60000);
     
     root.ApiGateway = ApiGateway;
@@ -7199,3 +7394,107 @@ export {
     getChatHistory,
     getUnreadCount
 };
+
+// ============================================================================
+// AUTH EVENT HANDLERS
+// ============================================================================
+
+// Token expiry check interval
+setInterval(() => {
+    if (TokenManager && TokenManager.shouldRefreshToken && TokenManager.shouldRefreshToken()) {
+        refreshTokenIfNeeded().catch(() => {});
+    }
+}, 120000);
+
+// Global auth event handlers for token expiration and reauthentication
+if (typeof window !== 'undefined') {
+    // Handle auth:expired events
+    window.addEventListener('auth:expired', async (event) => {
+        const { reason, endpoint, requestId } = event.detail;
+        console.error(`[AUTH] Session expired: ${reason} for endpoint: ${endpoint}`);
+        
+        // Clear all auth data
+        clearUserToken('auth.expired');
+        
+        // Clear service worker cache to prevent serving stale token responses
+        if (navigator.serviceWorker && navigator.serviceWorker.controller) {
+            try {
+                navigator.serviceWorker.controller.postMessage({
+                    type: 'CLEAR_TOKEN_CACHE',
+                    timestamp: Date.now()
+                });
+                console.log('[AUTH] Sent token cache clear request to service worker');
+            } catch (err) {
+                console.warn('[AUTH] Failed to clear service worker token cache:', err);
+            }
+        }
+        
+        // Force refresh critical auth files
+        if (navigator.serviceWorker && navigator.serviceWorker.controller) {
+            try {
+                navigator.serviceWorker.controller.postMessage({
+                    type: 'FORCE_REFRESH',
+                    timestamp: Date.now()
+                });
+                console.log('[AUTH] Sent force refresh request to service worker');
+            } catch (err) {
+                console.warn('[AUTH] Failed to force refresh service worker cache:', err);
+            }
+        }
+        
+        // Dispatch auth state change
+        window.dispatchEvent(new CustomEvent('auth:stateChanged', {
+            detail: {
+                authenticated: false,
+                reason: 'expired',
+                timestamp: Date.now()
+            }
+        }));
+        
+        // Redirect to login if not suppressed
+        if (handleUnauthorizedAccess) {
+            handleUnauthorizedAccess();
+        }
+    });
+    
+    // Handle auth:unauthorized events
+    window.addEventListener('auth:unauthorized', (event) => {
+        const { endpoint, requestId } = event.detail;
+        console.warn(`[AUTH] Unauthorized access to: ${endpoint}`);
+        
+        // Update auth state
+        window.dispatchEvent(new CustomEvent('auth:stateChanged', {
+            detail: {
+                authenticated: false,
+                reason: 'unauthorized',
+                timestamp: Date.now()
+            }
+        }));
+    });
+    
+    // Handle successful token refresh
+    window.addEventListener('token:refreshed', (event) => {
+        const { token, expiresIn } = event.detail;
+        console.log('[AUTH] Token refreshed successfully');
+        
+        // Update auth state
+        window.dispatchEvent(new CustomEvent('auth:stateChanged', {
+            detail: {
+                authenticated: true,
+                reason: 'refreshed',
+                timestamp: Date.now(),
+                expiresIn
+            }
+        }));
+    });
+    
+    // Handle service worker token cache cleared confirmation
+    window.addEventListener('TOKEN_CACHE_CLEARED', (event) => {
+        console.log('[AUTH] Service worker token cache cleared');
+    });
+    
+    // Handle service worker force refresh completion
+    window.addEventListener('FORCE_REFRESH_COMPLETE', (event) => {
+        console.log('[AUTH] Service worker force refresh completed');
+    });
+}

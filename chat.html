@@ -4068,17 +4068,20 @@
                         userId:       data.payload.userId,
                         userName:     data.payload.userName || data.payload.name || 'User',
                         findExisting: true,
-                        timestamp:    Date.now()
+                        timestamp: Date.now()
                     };
                     navigateToPage('messages');
-                    if (window.innerWidth <= 768) document.body.classList.add('chat-panel-active');
-                    // FIX: Use a flag instead of sessionStorage to control the retry loop.
-                    // message.html's tryOpen() will send CHAT_OPENED when the panel actually opens,
-                    // which sets window.__dcChatOpened = true and stops the loop.
-                    window.__dcChatOpened = false;
-                    let _dcAttempts = 0;
+                    
+                    // Fix infinite loop - use proper counter and acknowledgment
+                    if (!window.__dcAttempts) window.__dcAttempts = 0;
+                    if (!window.__dcChatOpened) window.__dcChatOpened = false;
+                    
                     const _postChatOpen = () => {
-                        if (window.__dcChatOpened) return; // ACK received — stop
+                        if (window.__dcChatOpened) {
+                            window.__dcAttempts = 0; // Reset counter on success
+                            return; // ACK received — stop
+                        }
+                        
                         const messagesIframe = document.getElementById('messagesIframe');
                         if (messagesIframe && messagesIframe.contentWindow) {
                             messagesIframe.contentWindow.postMessage({
@@ -4087,12 +4090,20 @@
                                 source:  'parent-frame',
                                 timestamp: Date.now()
                             }, '*');
-                            console.log('[chat.html] DIRECT_CHAT_REQUEST → OPEN_CHAT_WITH_USER sent, attempt', _dcAttempts + 1);
+                            console.log('[chat.html] DIRECT_CHAT_REQUEST → OPEN_CHAT_WITH_USER sent, attempt', window.__dcAttempts + 1);
                         }
-                        if (_dcAttempts++ < 12) {
+                        
+                        if (window.__dcAttempts++ < 3) { // Reduced from 12 to 3 attempts
                             setTimeout(_postChatOpen, 600);
+                        } else {
+                            console.warn('[chat.html] DIRECT_CHAT_REQUEST failed after 3 attempts, stopping to prevent infinite loop');
+                            window.__dcAttempts = 0; // Reset counter
                         }
                     };
+                    
+                    // Reset state before starting new request
+                    window.__dcChatOpened = false;
+                    window.__dcAttempts = 0;
                     setTimeout(_postChatOpen, 300);
                 }
 
