@@ -63,9 +63,9 @@
     // Config
     // ─────────────────────────────────────────────────────────────────────────
     const SOCKET_CONFIG = {
-        reconnectAttempts: 25,      // FIXED: Increased to prevent premature DEGRADED mode
+        reconnectAttempts: 9999,    // ✅ FIX A1: Never stop retrying — backend may restart at any time
         reconnectBaseDelay: 2000,    // FIXED: Increased from 1000ms for more stable retries
-        reconnectMaxDelay: 30000,
+        reconnectMaxDelay: 15000,  // ✅ FIX A2: Cap at 15s so reconnect stays responsive
         reconnectJitter:    0.3,
         reconnectCooldown: 1000,     // NEW: Cooldown between retry attempts
         errorCooldown:      5000,     // NEW: Cooldown after errors
@@ -825,12 +825,14 @@
                 this._socket = null;
             }
 
-            // ✅ FIXED: Enhanced reconnect logic with consecutive error limit
-            if (this._reconnectAttempts < SOCKET_CONFIG.reconnectAttempts && 
-                this._consecutiveErrors < SOCKET_CONFIG.maxConsecutiveErrors) {
+            // ✅ FIX A4: Only DEGRADE on consecutive errors, not attempt count.
+            // Attempt count is now effectively infinite (9999) — consecutive errors
+            // remain the only signal that the backend is truly unreachable right now.
+            if (this._consecutiveErrors < SOCKET_CONFIG.maxConsecutiveErrors) {
                 this._scheduleReconnect();
             } else {
-                console.warn('[Realtime] Max reconnect attempts or consecutive errors reached — entering DEGRADED mode.');
+                console.warn('[Realtime] Max consecutive errors reached — entering DEGRADED mode (will auto-recover).');
+                this._consecutiveErrors = 0; // ✅ Reset so next auto-recovery attempt can succeed
                 this._state = CONNECTION_STATE.DEGRADED;
                 this._emitStateChange();
                 // ── FIX: Auto-recover from DEGRADED after 30 s ───────────────
@@ -1256,11 +1258,12 @@
         // ── PRIVATE: RECONNECT ───────────────────────────────────────────────
 
         _scheduleReconnect() {
+            // ✅ FIX A3: Never enter DEGRADED based on attempt count — reset and keep retrying.
+            // Backend may restart (cold start, deploy, etc). Persistent retry is correct behaviour.
             if (this._reconnectAttempts >= SOCKET_CONFIG.reconnectAttempts) {
-                console.warn('[Realtime] Max reconnect attempts reached - entering degraded mode');
-                this._state = CONNECTION_STATE.DEGRADED;
-                this._emitStateChange();
-                return;
+                console.warn('[Realtime] Attempt ceiling reached — resetting counter and continuing retries');
+                this._reconnectAttempts = 0;
+                this._consecutiveErrors = 0;
             }
 
             this._clearReconnectTimer();

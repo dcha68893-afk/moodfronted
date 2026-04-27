@@ -902,7 +902,7 @@
         try { patchCategoryTabs();             } catch (e) { console.warn('[patch] categoryTabs:', e); }
         // Wire GroupCore real-time events → UI (retry until GroupCore exists)
         wireGroupCoreEvents();
-        console.log('[GroupUIPatch v4.0.0] ✅ All patches applied');
+        // (log suppressed)
     }
 
     /* ─── GroupCore real-time event → UI wiring ─────────────────────────────
@@ -927,14 +927,14 @@
 
         // ── groups:list-updated → re-render counts + active section ────────
         GC.on('groups:list-updated', function (data) {
-            console.log('[GROUP FLOW] groups:list-updated →', data?.groups?.length, 'groups');
+            // (log suppressed)
             try { if (typeof updateGroupCounts   === 'function') updateGroupCounts();   } catch (_) {}
             try { if (typeof updateCurrentSection === 'function') updateCurrentSection(); } catch (_) {}
         });
 
         // ── groups:loaded → same as above (cache/IDB load) ─────────────────
         GC.on('groups:loaded', function (data) {
-            console.log('[GROUP FLOW] groups:loaded —', data?.groups?.length || 0, 'groups from', data?.source || 'cache');
+            // (log suppressed)
             try { if (typeof updateGroupCounts   === 'function') updateGroupCounts();   } catch (_) {}
             try { if (typeof updateCurrentSection === 'function') updateCurrentSection(); } catch (_) {}
         });
@@ -942,7 +942,7 @@
         // ── group:created → prepend to My Groups + All Groups lists ────────
         GC.on('group:created', function (newGroup) {
             if (!newGroup?.id) return;
-            console.log('[GROUP FLOW] group:created UI update →', newGroup.name);
+            // (log suppressed)
             try { if (typeof updateGroupCounts   === 'function') updateGroupCounts();   } catch (_) {}
             try { if (typeof updateCurrentSection === 'function') updateCurrentSection(); } catch (_) {}
 
@@ -972,7 +972,7 @@
         GC.on('group:message-received', function (data) {
             const { groupId, message } = data || {};
             if (!groupId || !message) return;
-            console.log('[GROUP FLOW] group:message-received → groupId', groupId);
+            // (log suppressed)
             try {
                 const isOpen = typeof currentChatGroup !== 'undefined' && currentChatGroup?.id === groupId;
                 if (isOpen) {
@@ -995,7 +995,7 @@
         GC.on('group:message-sent', function (data) {
             const { message } = data || {};
             if (!message?.id || String(message.id).startsWith('temp_')) return;
-            console.log('[GROUP FLOW] group:message-sent confirmed →', message.id);
+            // (log suppressed)
             try {
                 const tempEl = document.querySelector('[data-message-id^="temp_"]');
                 if (tempEl) {
@@ -1029,7 +1029,7 @@
             } catch (_) {}
         });
 
-        console.log('[GROUP FLOW] GroupCore UI event listeners bound ✅');
+        // (log suppressed)
     }
 
     if (document.readyState === 'loading') {

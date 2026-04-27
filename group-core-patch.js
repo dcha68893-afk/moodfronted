@@ -58,7 +58,7 @@ async function applyPatch() {
         return setTimeout(applyPatch, 200);
     }
     _patchApplied = true;
-    console.log('[patch] v3.0.0 applying...');
+    // (log suppressed)
 
     // 1. Wire dependencies
     GroupQueueManager.setStore(LocalGroupStore);
@@ -119,7 +119,8 @@ async function applyPatch() {
 
         // Create locally first — instant UI, no waiting
         const localGroup = await GroupSyncEngine.optimisticCreate(groupData, uid);
-        console.log('[patch] Group created locally:', localGroup.name, '— syncing to backend...');
+        // (log suppressed)
+        // Note: optimisticCreate already emits 'group:created' and 'groups:list-updated'
 
         // Fire backend in background — never blocks UI
         if (navigator.onLine && _origCreate) {
@@ -127,7 +128,7 @@ async function applyPatch() {
                 // FIX 10: backend returns { data: { group } }, not { data: group }
                 const serverGroup = res?.data?.group || (res?.data && !res.data._localSync ? res.data : null);
                 if (res?.success && serverGroup?.id) {
-                    console.log('[GROUP FLOW] Group created successfully on backend:', serverGroup.id);
+                    // (log suppressed)
                     await _remapGroupId(GC, localGroup.id, serverGroup);
                     if (pickerIds.length) _inviteMembers(serverGroup.id, pickerIds, uid);
                 } else {
@@ -242,7 +243,7 @@ async function applyPatch() {
     // FIX 13: Patch handleSessionUpdate const-reassignment
     _patchSessionUpdateHandler();
 
-    console.log('[patch] v4.0.0 applied');
+    // (log suppressed)
 }
 
 // =============================================================================
@@ -490,7 +491,7 @@ function _setupSocketHandlers(GC) {
             GC.emit('group:invites-updated', GC.groupInvites);
         });
 
-        console.log('[patch] Socket handlers wired');
+        // (log suppressed)
     };
 
     const s = window.socket || window.__socket;
@@ -535,16 +536,16 @@ async function _remapGroupId(GC, tempId, serverGroup) {
     await LocalGroupStore.deleteGroupLocal(tempId).catch(() => {});
     await LocalGroupStore.saveGroupLocal({ ...serverGroup, serverId: serverGroup.id, isLocalOnly: false, syncState: 'synced' });
 
+    // Emit updated event so the UI replaces the temp group entry with the confirmed one
+    GC.emit('group:updated', { ...serverGroup, id: serverGroup.id });
+
     // ── Join the confirmed group's socket room ────────────────────────────
-    // Tell the server to subscribe this client to group:${serverGroup.id}.
-    // This ensures the creator receives their own group's future messages.
     try {
         const wsRef = window.KynectaRealtime || window.wsService?._realtime;
         const rawSend = wsRef?._sendRaw?.bind(wsRef) || wsRef?.sendRaw?.bind(wsRef);
         if (rawSend) {
             rawSend({ type: 'join', room: `group:${serverGroup.id}` });
             rawSend({ type: 'join_group_rooms', groupIds: [serverGroup.id] });
-            console.log('[GROUP FLOW] Joined WS room for confirmed group', serverGroup.id);
         }
     } catch (_) {}
 }
@@ -649,7 +650,7 @@ function _installGroupWsBridge(GC) {
 
         // group:message → render in open chat or increment badge
         ws.on('group:message', data => {
-            console.log('[GROUP FLOW] WebSocket received group:message →', data?.groupId);
+            // (log suppressed)
             const groupId = data?.groupId || data?.group_id;
             const message = data?.message || data;
             if (!groupId || !message) return;
@@ -666,7 +667,7 @@ function _installGroupWsBridge(GC) {
 
         // group:created → add to lists for all members
         ws.on('group:created', data => {
-            console.log('[GROUP FLOW] WebSocket received group:created →', data?.group?.id || data?.id);
+            // (log suppressed)
             const group = data?.group || data;
             if (!group?.id) return;
             postToSelf('GROUP_CREATED', { group });
@@ -675,7 +676,7 @@ function _installGroupWsBridge(GC) {
 
         // group:localSync → all action types (create/update/delete/member_*)
         ws.on('group:localSync', data => {
-            console.log('[GROUP FLOW] WebSocket group:localSync →', data?.action);
+            // (log suppressed)
             const { action, group, groupId, member, userId } = data || {};
             switch (action) {
                 case 'create':
@@ -711,7 +712,7 @@ function _installGroupWsBridge(GC) {
         ws.on('group:typing',         d => postToSelf('GROUP_TYPING',         d));
 
         _wsBridgeBound = true;
-        console.log('[patch] WebSocket → groupIframe bridge installed ✅');
+        // (log suppressed)
         return true;
     }
 
@@ -748,7 +749,7 @@ function _installGroupWsBridge(GC) {
             if (type === 'group:created' || type === 'GROUP_CREATED') {
                 const group = payload.group || payload;
                 if (!group || !group.id) return;
-                console.log('[GROUP BRIDGE] postMessage group:created → group', group.id);
+                // (log suppressed)
                 if (GC && !GC.groups?.some(g => String(g.id) === String(group.id))) {
                     GC.groups = GC.groups || [];
                     GC.groups.push(group);
@@ -761,7 +762,7 @@ function _installGroupWsBridge(GC) {
                     }
                     GC.saveGroups?.();
                     GC.emit?.('group:created', group);
-                    console.log('[GROUP BRIDGE] Group added to local lists:', group.name);
+                    // (log suppressed)
                 }
             }
 
@@ -769,7 +770,7 @@ function _installGroupWsBridge(GC) {
                 const groupId = payload.groupId || payload.group_id;
                 const message = payload.message || payload;
                 if (!groupId || !message) return;
-                console.log('[GROUP BRIDGE] postMessage group:message → group', groupId);
+                // (log suppressed)
                 if (GC) {
                     GC.addGroupMessage?.(groupId, message);
                     GC.emit?.('group:message-received', { groupId, message });
@@ -778,7 +779,7 @@ function _installGroupWsBridge(GC) {
 
             else if (type === 'group:localSync') {
                 const { action, group, groupId, member, userId: uid2 } = payload;
-                console.log('[GROUP BRIDGE] postMessage group:localSync →', action);
+                // (log suppressed)
                 if (GC) {
                     if ((action === 'create' || action === 'upsert') && group?.id) {
                         if (!GC.groups?.some(g => String(g.id) === String(group.id))) {
@@ -810,7 +811,7 @@ function _installGroupWsBridge(GC) {
             // Silent — bridge events must never break the app
         }
     });
-    console.log('[patch] Window postMessage group bridge installed ✅');
+    // (log suppressed)
 }
 
 // =============================================================================
@@ -822,7 +823,7 @@ function _patchSendGroupMessage(GC) {
 
     GC.sendGroupMessage = async function (groupId, content, topic = null, anonymous = false) {
         if (!groupId || !content?.trim()) return { success: false, error: 'Missing groupId or content' };
-        console.log('[GROUP FLOW] Sending group message to', groupId, '...');
+        // (log suppressed)
 
         try {
             const res = await _orig.call(this, groupId, content, topic, anonymous);
@@ -831,7 +832,7 @@ function _patchSendGroupMessage(GC) {
             // If it succeeded with data, it already called addGroupMessage.
             // We just need to make sure we read the right field.
             if (res?.success) {
-                console.log('[GROUP FLOW] Message sent and confirmed:', res.data?.id || res.data?.message?.id);
+                // (log suppressed)
             } else {
                 console.error('[GROUP FLOW] Message send failed:', res?.error || 'unknown');
             }
@@ -862,7 +863,7 @@ function _patchSendGroupMessage(GC) {
                                  || (response?.data && !response.data.message ? response.data : null);
 
                 if (response?.success && messageData) {
-                    console.log('[GROUP FLOW] Message saved by backend, id:', messageData.id);
+                    // (log suppressed)
                     this.addGroupMessage(groupId, messageData);
                     this.emit('group:message-sent', { groupId, message: messageData });
                     return { success: true, data: messageData };
@@ -890,7 +891,7 @@ function _patchRequestGroupList(GC) {
         // Load from IDB cache first (offline-first)
         await this.loadGroupsFromCache().catch(() => {});
 
-        console.log('[GROUP FLOW] Fetching group list from backend...');
+        // (log suppressed)
 
         try {
             const apiRequestFn = typeof apiRequest === 'function' ? apiRequest : _apiBridge;
@@ -905,15 +906,23 @@ function _patchRequestGroupList(GC) {
                 const uid           = String(this.currentUser?.id || this.currentUser?.uid || '');
 
                 if (serverGroups.length > 0) {
-                    this.groups       = serverGroups;
+                    // Preserve any local-only (pending sync) groups that server doesn't know about yet
+                    const localOnly = this.groups.filter(g => g.isLocalOnly);
+                    const serverIds = new Set(serverGroups.map(g => String(g.id)));
+                    const keepLocal = localOnly.filter(g => !serverIds.has(String(g.id)));
+
+                    this.groups       = [...serverGroups, ...keepLocal];
                     // Use server-partitioned arrays when provided; fall back to
                     // recomputing only if server didn't send them
-                    this.myGroups     = serverMy.length    ? serverMy    : serverGroups.filter(g => g.isCreator || String(g.createdBy) === uid);
-                    this.adminGroups  = serverAdmin.length ? serverAdmin : serverGroups.filter(g => g.isAdmin || g.isCreator);
-                    this.joinedGroups = serverJoined.length? serverJoined: serverGroups.filter(g => !g.isCreator && !g.isAdmin);
+                    this.myGroups     = serverMy.length    ? [...serverMy,     ...keepLocal.filter(g => g.isCreator)] : this.groups.filter(g => g.isCreator || String(g.createdBy) === uid);
+                    this.adminGroups  = serverAdmin.length ? [...serverAdmin,  ...keepLocal.filter(g => g.isAdmin || g.isCreator)] : this.groups.filter(g => g.isAdmin || g.isCreator);
+                    this.joinedGroups = serverJoined.length? [...serverJoined, ...keepLocal.filter(g => !g.isCreator && !g.isAdmin)] : this.groups.filter(g => !g.isCreator && !g.isAdmin);
                 } else {
-                    this.groups = this.myGroups = this.joinedGroups = this.adminGroups = [];
-                    console.log('[GROUP FLOW] Server returned empty group list');
+                    // Server returned empty — keep local-only groups (they may be pending sync)
+                    const localOnly = this.groups.filter(g => g.isLocalOnly);
+                    if (!localOnly.length) {
+                        this.groups = this.myGroups = this.joinedGroups = this.adminGroups = [];
+                    }
                 }
 
                 await this.saveGroups();
@@ -934,11 +943,11 @@ function _patchRequestGroupList(GC) {
                         rawSend({ type: 'join_group_rooms', groupIds });
                         // Also join individual rooms as fallback
                         groupIds.forEach(gid => rawSend({ type: 'join', room: `group:${gid}` }));
-                        console.log('[GROUP FLOW] Requested WS join for', groupIds.length, 'group room(s)');
+                        // (log suppressed)
                     }
                 } catch (_wsErr) {}
 
-                console.log('[GROUP FLOW] Group list synced:', this.groups.length, 'groups');
+                // (log suppressed)
                 return { success: true, fromServer: true, data: this.getGroupsData() };
             }
 

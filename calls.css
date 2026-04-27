@@ -3505,6 +3505,24 @@ input:focus + .toggle-slider,
 
 /* When calling screen is active, hide idle screen */
 #callingScreen.active ~ #idleScreen,
-#callingScreen.active + #idleScreen {
+#callingScreen.active + #idleScreen,
+#callingScreen.active {
+    /* Ensure calling screen is visible */
+    display: flex !important;
+}
+
+/* CRITICAL FIX: Explicitly hide idle screen when calling screen is active */
+#callingScreen.active ~ #idleScreen {
+    display: none !important;
+}
+
+/* Alternative: Hide idle screen when calling screen has active class */
+.call-container #callingScreen.active ~ #idleScreen,
+.call-container #callingScreen.active + #idleScreen {
+    display: none !important;
+}
+
+/* Most explicit: When any screen is active, hide others */
+.call-container .call-screen.active ~ .call-screen:not(.active) {
     display: none !important;
 }

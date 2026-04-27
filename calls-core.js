@@ -3489,6 +3489,8 @@ if (message.type === 'SETTING_CHANGED' || message.type === 'SETTINGS_UPDATED') {
             this._connectionTimeout = setTimeout(() => {
                 if (callsState.callState !== 'connected') {
                     logWarn(MODULE, 'Connection timeout reached');
+                    
+                    // Let the normal call end flow handle navigation - don't send duplicate CALL_ENDED_RETURN
                     this._notifyListeners('call_timeout', {});
                     notifyListeners('call_timeout', { callId: this._currentCallId });
                 }

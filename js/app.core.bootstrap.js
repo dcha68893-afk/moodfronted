@@ -202,6 +202,12 @@
   
   function validateSessionInBackground() {
     try {
+      // CRITICAL FIX: Skip validation entirely when offline to allow app to open
+      if (!navigator.onLine) {
+        console.log('[Bootstrap] 📴 Device offline - skipping background validation to allow app to open');
+        return;
+      }
+      
       // Don't validate if we don't have a temp token
       if (!window.__AUTH_TEMP_TOKEN__) {
         console.log('[Bootstrap] No temp token, skipping background validation');
@@ -228,8 +234,9 @@
               // Clean up temp token
               delete window.__AUTH_TEMP_TOKEN__;
             } else {
-              console.warn('[Bootstrap] â Background validation failed - session may be invalid');
-              handleInvalidSession();
+              console.warn('[Bootstrap] â Background validation failed - attempting token refresh');
+              // Try refresh before clearing session
+              attemptTokenRefreshInBackground();
             }
           });
           
@@ -248,6 +255,32 @@
       }
     } catch (error) {
       console.warn('[Bootstrap] â Background validation setup failed:', error.message);
+    }
+  }
+  
+  function attemptTokenRefreshInBackground() {
+    try {
+      if (window.api && window.api.auth && typeof window.api.auth.refreshToken === 'function') {
+        console.log('[Bootstrap] 🔄 Attempting background token refresh');
+        window.api.auth.refreshToken().then(result => {
+          if (result && result.success !== false) {
+            console.log('[Bootstrap] ✅ Background token refresh successful');
+            delete window.__AUTH_TEMP_TOKEN__;
+          } else {
+            console.warn('[Bootstrap] ⚠️ Background token refresh failed - clearing session');
+            handleInvalidSession();
+          }
+        }).catch(error => {
+          console.warn('[Bootstrap] ⚠️ Background token refresh error:', error.message);
+          handleInvalidSession();
+        });
+      } else {
+        console.warn('[Bootstrap] ⚠️ Token refresh not available - clearing session');
+        handleInvalidSession();
+      }
+    } catch (error) {
+      console.warn('[Bootstrap] ⚠️ Token refresh attempt failed:', error.message);
+      handleInvalidSession();
     }
   }
   
@@ -286,7 +319,43 @@
   // ── Network-aware sync trigger ─────────────────────────────────────────────
   // When we come back online, trigger full background sync
   window.addEventListener('online', function() {
-    console.log('[Bootstrap] 🌐 Network restored — scheduling sync');
+    console.log('[Bootstrap] 🌐 Network restored — checking if token refresh needed');
+    
+    // Check if we have a session that might need refreshing
+    try {
+      const rawAuth = localStorage.getItem('kynecta_auth');
+      if (rawAuth) {
+        const auth = JSON.parse(rawAuth);
+        if (auth && auth.token) {
+          // Check if token is expired or close to expiring
+          try {
+            const parts = auth.token.split('.');
+            if (parts.length === 3) {
+              const payload = JSON.parse(atob(parts[1]));
+              if (payload.exp) {
+                const expiryTime = payload.exp * 1000;
+                const now = Date.now();
+                const timeUntilExpiry = expiryTime - now;
+                
+                // If token expires within next hour, try to refresh it
+                if (timeUntilExpiry < 60 * 60 * 1000 && timeUntilExpiry > 0) {
+                  console.log('[Bootstrap] 🔄 Token expires soon, attempting refresh');
+                  setTimeout(() => {
+                    attemptTokenRefreshInBackground();
+                  }, 1000);
+                }
+              }
+            }
+          } catch (error) {
+            console.warn('[Bootstrap] ⚠️ Could not check token expiry:', error.message);
+          }
+        }
+      }
+    } catch (error) {
+      console.warn('[Bootstrap] ⚠️ Error checking session on network restore:', error.message);
+    }
+    
+    // Schedule regular sync
     setTimeout(function() {
       if (window.KynectaSync && typeof window.KynectaSync.syncAll === 'function') {
         const syncPromise = window.KynectaSync.syncAll();

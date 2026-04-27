@@ -117,15 +117,31 @@ const UIState = {
                     userAvatar = `<i class="fas fa-user"></i>`;
                 }
                 
-                // SHOW CALLING SCREEN IMMEDIATELY
-                console.log('[PATCH] Showing calling screen for:', userName);
-                showCallingScreenViaPatch({
-                    userName: userName,
-                    userId: userId,
-                    callType: callType === 'video' ? 'video' : 'voice',
-                    status: 'Calling...',
-                    userAvatar: userAvatar
-                });
+                // CRITICAL FIX: Ensure parent window navigates to calls page BEFORE showing call screen
+                console.log('[PATCH] Ensuring parent navigation to calls page before showing call screen for:', userName);
+                
+                // Tell parent to navigate to calls page first
+                if (window.parent && window.parent !== window) {
+                    window.parent.postMessage({
+                        type: 'NAVIGATE_TO_CALLS_FOR_CALL',
+                        payload: { 
+                            userName: userName,
+                            userId: userId,
+                            callType: callType === 'video' ? 'video' : 'voice'
+                        }
+                    }, '*');
+                }
+                
+                // Show calling screen after a small delay to allow parent navigation
+                setTimeout(() => {
+                    showCallingScreenViaPatch({
+                        userName: userName,
+                        userId: userId,
+                        callType: callType === 'video' ? 'video' : 'voice',
+                        status: 'Calling...',
+                        userAvatar: userAvatar
+                    });
+                }, 100);
                 
                 // Call original method
                 return originalStartCall.call(window.callCore, userId, callType);
@@ -160,15 +176,31 @@ const UIState = {
                     userAvatar = `<i class="fas fa-user"></i>`;
                 }
                 
-                // SHOW CALLING SCREEN IMMEDIATELY
-                console.log('[PATCH] Showing calling screen for:', userName);
-                showCallingScreenViaPatch({
-                    userName: userName,
-                    userId: userId,
-                    callType: callType === 'video' ? 'video' : 'voice',
-                    status: 'Calling...',
-                    userAvatar: userAvatar
-                });
+                // CRITICAL FIX: Ensure parent window navigates to calls page BEFORE showing call screen
+                console.log('[PATCH] Ensuring parent navigation to calls page before showing call screen for:', userName);
+                
+                // Tell parent to navigate to calls page first
+                if (window.parent && window.parent !== window) {
+                    window.parent.postMessage({
+                        type: 'NAVIGATE_TO_CALLS_FOR_CALL',
+                        payload: { 
+                            userName: userName,
+                            userId: userId,
+                            callType: callType === 'video' ? 'video' : 'voice'
+                        }
+                    }, '*');
+                }
+                
+                // Show calling screen after a small delay to allow parent navigation
+                setTimeout(() => {
+                    showCallingScreenViaPatch({
+                        userName: userName,
+                        userId: userId,
+                        callType: callType === 'video' ? 'video' : 'voice',
+                        status: 'Calling...',
+                        userAvatar: userAvatar
+                    });
+                }, 100);
                 
                 return originalInitiateCall.call(window.callCore, callType, participants);
             };
@@ -176,95 +208,120 @@ const UIState = {
         }
     }, 100);
 })();
-
-// Helper function to show calling screen
 function showCallingScreenViaPatch(callInfo) {
     console.log('[PATCH] showCallingScreenViaPatch called with:', callInfo);
     
-    // Get all screen elements
+    // Get the CORRECT calling overlay system
+    console.log('[PATCH] DOM Elements Search (CORRECTED):');
+    const callingOverlay = document.getElementById('callingOverlay');
+    console.log('[PATCH] callingOverlay found:', !!callingOverlay, callingOverlay ? callingOverlay.className : 'null');
+    
     const idleScreen = document.getElementById('idleScreen');
-    const callingScreen = document.getElementById('callingScreen');
-    const inCallScreen = document.getElementById('inCallScreen');
-    const sidebar = document.getElementById('sidebar');
+    console.log('[PATCH] idleScreen found:', !!idleScreen, idleScreen ? idleScreen.className : 'null');
     
-    // Force hide idle screen
+    // Check what's actually visible in the viewport
+    const visibleElements = document.elementsFromPoint(window.innerWidth/2, window.innerHeight/2);
+    console.log('[PATCH] Elements at center of screen:', visibleElements.map(el => ({tag: el.tagName, id: el.id, className: el.className, display: window.getComputedStyle(el).display})));
+    
+    // Hide idle screen
     if (idleScreen) {
-        idleScreen.style.display = 'none';
         idleScreen.classList.remove('active');
+        idleScreen.style.setProperty('display', 'none', 'important');
+        console.log('[PATCH] Idle screen explicitly hidden');
     }
     
-    // Hide in-call screen
-    if (inCallScreen) {
-        inCallScreen.style.display = 'none';
-        inCallScreen.classList.remove('active');
-    }
-    
-    // Show calling screen
-    if (callingScreen) {
-        callingScreen.style.display = 'flex';
-        callingScreen.classList.add('active');
+    // Show calling OVERLAY — this is the correct system!
+    if (callingOverlay) {
+        callingOverlay.classList.add('active');
+        callingOverlay.style.setProperty('display', 'flex', 'important');
         
-        // Update content
+        // CRITICAL: Also hide the callContainer and idle screen completely
+        const callContainer = document.getElementById('callContainer');
+        if (callContainer) {
+            callContainer.classList.remove('active');
+            callContainer.style.setProperty('display', 'none', 'important');
+        }
+        
+        // Ensure idle screen is hidden
+        if (idleScreen) {
+            idleScreen.classList.remove('active');
+            idleScreen.style.setProperty('display', 'none', 'important');
+            console.log('[PATCH] Idle screen explicitly hidden for overlay');
+        }
+        
+        // Update the overlay content
         const callingAvatar = document.getElementById('callingAvatar');
         const callingName = document.getElementById('callingName');
         const callingStatus = document.getElementById('callingStatus');
         const callingType = document.getElementById('callingType');
         const callingCancelBtn = document.getElementById('callingCancelBtn');
         
+        console.log('[PATCH] Updating overlay content:', { callingAvatar: !!callingAvatar, callingName: !!callingName, callingStatus: !!callingStatus, callingType: !!callingType, callingCancelBtn: !!callingCancelBtn });
+        
         if (callingAvatar) {
             callingAvatar.innerHTML = callInfo.userAvatar || '<i class="fas fa-user"></i>';
+            console.log('[PATCH] Updated avatar:', callInfo.userAvatar);
         }
         
         if (callingName) {
             callingName.textContent = callInfo.userName || 'User';
+            console.log('[PATCH] Updated name:', callInfo.userName);
         }
         
         if (callingStatus) {
             callingStatus.textContent = callInfo.status || 'Calling...';
+            console.log('[PATCH] Updated status:', callInfo.status);
         }
         
         if (callingType) {
             callingType.textContent = callInfo.callType === 'video' ? 'Video Call' : 'Voice Call';
+            console.log('[PATCH] Updated type:', callInfo.callType);
         }
         
         // Wire cancel button
         if (callingCancelBtn && !callingCancelBtn._patchedWired) {
             callingCancelBtn._patchedWired = true;
             callingCancelBtn.onclick = function() {
+                console.log('[PATCH] Cancel button clicked');
                 if (window.callCore && window.callCore.endCall) {
                     window.callCore.endCall();
                 }
-                // Hide calling screen
-                if (callingScreen) {
-                    callingScreen.style.display = 'none';
-                    callingScreen.classList.remove('active');
+                if (typeof showIdleScreen === 'function') {
+                    showIdleScreen();
+                } else {
+                    // Fallback: hide overlay and show idle
+                    callingOverlay.classList.remove('active');
+                    callingOverlay.style.display = 'none';
+                    const idleScreen = document.getElementById('idleScreen');
+                    if (idleScreen) {
+                        idleScreen.classList.add('active');
+                        idleScreen.style.display = 'flex';
+                    }
                 }
-                if (idleScreen) {
-                    idleScreen.style.display = 'block';
-                    idleScreen.classList.add('active');
-                }
-                // ── FIX: Restore parent layout ──────────────────────────────
                 window.__callActive = false;
                 if (window.parent && window.parent !== window) {
                     window.parent.postMessage({ type: 'CALL_SCREEN_ACTIVE', payload: { active: false } }, '*');
                 }
             };
+            console.log('[PATCH] Cancel button wired');
         }
+        
+        // CRITICAL FIX: Don't auto-navigate away on connection timeout
+        // Let the user see the error and manually decide to go back
+        console.log('[PATCH] Calling screen shown - preventing auto-navigation on connection issues');
         
         console.log('[PATCH] Calling screen is now VISIBLE');
 
-        // ── FIX: Tell parent to expand calls iframe to full viewport ──────────
-        // chat.html listens for CALL_SCREEN_ACTIVE and applies
-        // body.call-screen-active which makes #callsContent cover 100vw/100vh
         if (window.parent && window.parent !== window) {
             window.parent.postMessage({ type: 'CALL_SCREEN_ACTIVE', payload: { active: true } }, '*');
         }
         window.__callActive = true;
     } else {
-        console.error('[PATCH] callingScreen element not found!');
+        console.error('[PATCH] callingOverlay element not found!');
     }
     
     // Keep sidebar visible
+    const sidebar = document.getElementById('sidebar');
     if (sidebar) {
         sidebar.style.display = 'flex';
     }
@@ -281,21 +338,21 @@ function showCallingScreenViaPatch(callInfo) {
     let callingScreenObserver = null;
     
     function ensureCallingScreenVisible() {
-        const callingScreen = document.getElementById('callingScreen');
+        const callingOverlay = document.getElementById('callingOverlay');
         const idleScreen = document.getElementById('idleScreen');
         
-        if (!callingScreen) return;
+        if (!callingOverlay) return;
         
-        // If we're in a call (activeCallId exists), calling screen MUST be visible
+        // If we're in a call (activeCallId exists), calling overlay MUST be visible
         if (window.UIState && window.UIState.activeCallId) {
-            if (callingScreen.style.display !== 'flex' || !callingScreen.classList.contains('active')) {
-                console.log('[FORCE] Re-showing calling screen - it was hidden but call active');
+            if (!callingOverlay.classList.contains('active')) {
+                console.log('[FORCE] Re-showing calling overlay - it was hidden but call active');
                 if (idleScreen) {
-                    idleScreen.style.display = 'none';
                     idleScreen.classList.remove('active');
+                    idleScreen.style.setProperty('display', 'none', 'important');
                 }
-                callingScreen.style.display = 'flex';
-                callingScreen.classList.add('active');
+                callingOverlay.classList.add('active');
+                callingOverlay.style.setProperty('display', 'flex', 'important');
             }
         }
     }
@@ -345,15 +402,22 @@ function showCallingScreenViaPatch(callInfo) {
         const idleScreen = document.getElementById('idleScreen');
         const callingScreen = document.getElementById('callingScreen');
         const inCallScreen = document.getElementById('inCallScreen');
+        const callContainer = document.getElementById('callContainer');
         
-        // Hide all other screens
+        // FIX: Show callContainer first (parent must be visible)
+        if (callContainer) {
+            callContainer.classList.add('active');
+            callContainer.style.display = 'flex';
+        }
+        
+        // Hide all other screens — CSS uses !important
         if (idleScreen) {
-            idleScreen.style.display = 'none';
             idleScreen.classList.remove('active');
+            idleScreen.style.setProperty('display', 'none', 'important');
         }
         if (inCallScreen) {
-            inCallScreen.style.display = 'none';
             inCallScreen.classList.remove('active');
+            inCallScreen.style.setProperty('display', 'none', 'important');
         }
         
         // Get avatar
@@ -365,10 +429,10 @@ function showCallingScreenViaPatch(callInfo) {
             userAvatar = '<i class="fas fa-user"></i>';
         }
         
-        // Show calling screen
+        // Show calling screen — CSS requires .active (has !important display:flex)
         if (callingScreen) {
-            callingScreen.style.display = 'flex';
             callingScreen.classList.add('active');
+            callingScreen.style.setProperty('display', 'flex', 'important');
             
             // Update content
             const callingAvatar = document.getElementById('callingAvatar');
@@ -561,7 +625,8 @@ const GlobalCallHistory = {
     }
     
     // ========== STEP 3: Update status to ringing ==========
-    const statusEl = document.getElementById('callingStatus');
+    const _callingScreen = document.getElementById('callingScreen');
+    const statusEl = (_callingScreen && _callingScreen.querySelector('#callingStatus')) || document.getElementById('callingStatus');
     if (statusEl) {
         statusEl.textContent = 'Ringing...';
     }
@@ -705,37 +770,39 @@ const GlobalCallHistory = {
     const sidebar = document.getElementById('sidebar');
     const callContainer = document.getElementById('callContainer');
     
-    // CRITICAL: Force hide idle screen
+    // FIX: callContainer is the PARENT of all screens — it must be VISIBLE (not hidden).
+    // CSS: .call-container { display:none } / .call-container.active { display:flex }
+    // Previously this block removed .active and set display:none — hiding callingScreen's parent.
+    if (callContainer) {
+        callContainer.classList.add('active');
+        callContainer.style.display = 'flex';
+    }
+    
+    // Hide idle screen — CSS uses !important so setProperty is required
     if (idleScreen) {
-        idleScreen.style.display = 'none';
         idleScreen.classList.remove('active');
+        idleScreen.style.setProperty('display', 'none', 'important');
         console.log('[Calls UI] Idle screen hidden');
     }
     
-    // Hide in-call screen if visible
+    // Hide in-call screen
     if (inCallScreen) {
-        inCallScreen.style.display = 'none';
         inCallScreen.classList.remove('active');
+        inCallScreen.style.setProperty('display', 'none', 'important');
     }
     
-    // Hide call container if visible
-    if (callContainer) {
-        callContainer.classList.remove('active');
-        callContainer.style.display = 'none';
-    }
-    
-    // Show calling screen
+    // Show calling screen — CSS uses !important on .active { display:flex }
     if (callingScreen) {
-        callingScreen.style.display = 'flex';
         callingScreen.classList.add('active');
+        callingScreen.style.setProperty('display', 'flex', 'important');
         console.log('[Calls UI] Calling screen is now VISIBLE');
         
-        // Update calling screen content
-        const callingAvatar = document.getElementById('callingAvatar');
-        const callingName = document.getElementById('callingName');
-        const callingStatus = document.getElementById('callingStatus');
-        const callingType = document.getElementById('callingType');
-        const callingCancelBtn = document.getElementById('callingCancelBtn');
+        // Update calling screen content — scope queries to callingScreen to avoid duplicate ID confusion
+        const callingAvatar  = callingScreen.querySelector('#callingAvatar')  || document.getElementById('callingAvatar');
+        const callingName    = callingScreen.querySelector('#callingName')    || document.getElementById('callingName');
+        const callingStatus  = callingScreen.querySelector('#callingStatus')  || document.getElementById('callingStatus');
+        const callingType    = callingScreen.querySelector('#callingType')    || document.getElementById('callingType');
+        const callingCancelBtn = callingScreen.querySelector('#callingCancelBtn') || document.getElementById('callingCancelBtn');
         
         if (callingAvatar) {
             if (callInfo.userAvatar) {
@@ -792,6 +859,7 @@ function showIdleScreen() {
     const callingScreen = document.getElementById('callingScreen');
     const inCallScreen = document.getElementById('inCallScreen');
     const sidebar = document.getElementById('sidebar');
+    const callContainer = document.getElementById('callContainer');
     
     // Stop any active timers
     if (window._currentCallTimer) {
@@ -799,10 +867,10 @@ function showIdleScreen() {
         window._currentCallTimer = null;
     }
     
-    // Hide calling screen
+    // Hide calling screen — CSS uses !important so setProperty is required
     if (callingScreen) {
-        callingScreen.style.display = 'none';
         callingScreen.classList.remove('active');
+        callingScreen.style.setProperty('display', 'none', 'important');
         console.log('[Calls UI] Calling screen hidden');
         
         // Reset calling status text
@@ -814,14 +882,20 @@ function showIdleScreen() {
     
     // Hide in-call screen
     if (inCallScreen) {
-        inCallScreen.style.display = 'none';
         inCallScreen.classList.remove('active');
+        inCallScreen.style.setProperty('display', 'none', 'important');
     }
     
-    // Show idle screen
+    // Keep callContainer active so idleScreen (inside it) stays visible
+    if (callContainer) {
+        callContainer.classList.add('active');
+        callContainer.style.display = 'flex';
+    }
+    
+    // Show idle screen — CSS uses !important
     if (idleScreen) {
-        idleScreen.style.display = 'block';
         idleScreen.classList.add('active');
+        idleScreen.style.setProperty('display', 'block', 'important');
         console.log('[Calls UI] Idle screen is now VISIBLE');
     } else {
         console.error('[Calls UI] idleScreen element NOT FOUND!');
@@ -852,16 +926,16 @@ function transitionToInCall(callInfo) {
     const callingScreen = document.getElementById('callingScreen');
     const inCallScreen = document.getElementById('inCallScreen');
     
-    // Hide calling screen
+    // Hide calling screen — CSS uses !important
     if (callingScreen) {
-        callingScreen.style.display = 'none';
         callingScreen.classList.remove('active');
+        callingScreen.style.setProperty('display', 'none', 'important');
     }
     
-    // Show in-call screen
+    // Show in-call screen — CSS uses !important on .active { display:flex }
     if (inCallScreen) {
-        inCallScreen.style.display = 'flex';
         inCallScreen.classList.add('active');
+        inCallScreen.style.setProperty('display', 'flex', 'important');
         // ── FIX: keep parent in fullscreen mode for in-call ──────────────────
         window.__callActive = true;
         if (window.parent && window.parent !== window) {
@@ -943,23 +1017,30 @@ function showInCallScreen(callInfo) {
     const idleScreen = document.getElementById('idleScreen');
     const callingScreen = document.getElementById('callingScreen');
     const inCallScreen = document.getElementById('inCallScreen');
+    const callContainer = document.getElementById('callContainer');
+    
+    // Ensure callContainer (parent) is visible
+    if (callContainer) {
+        callContainer.classList.add('active');
+        callContainer.style.display = 'flex';
+    }
     
     // Hide idle screen
     if (idleScreen) {
-        idleScreen.style.display = 'none';
         idleScreen.classList.remove('active');
+        idleScreen.style.setProperty('display', 'none', 'important');
     }
     
-    // Hide calling screen
+    // Hide calling screen — CSS uses !important
     if (callingScreen) {
-        callingScreen.style.display = 'none';
         callingScreen.classList.remove('active');
+        callingScreen.style.setProperty('display', 'none', 'important');
     }
     
-    // Show in-call screen
+    // Show in-call screen — CSS uses !important on .active
     if (inCallScreen) {
-        inCallScreen.style.display = 'flex';
         inCallScreen.classList.add('active');
+        inCallScreen.style.setProperty('display', 'flex', 'important');
         
         // Update in-call screen content
         const callWithName = document.getElementById('callWithName');
@@ -5047,9 +5128,11 @@ case 'CALL_INITIATED':
             const callingScreen = document.getElementById('callingScreen');
             const inCallScreen  = document.getElementById('inCallScreen');
             const idleScreen    = document.getElementById('idleScreen');
-            if (callingScreen) { callingScreen.style.display = 'none'; callingScreen.classList.remove('active'); }
-            if (inCallScreen)  { inCallScreen.style.display  = 'none'; inCallScreen.classList.remove('active'); }
-            if (idleScreen)    { idleScreen.style.display    = 'block'; idleScreen.classList.add('active'); }
+            const callContainer = document.getElementById('callContainer');
+            if (callingScreen) { callingScreen.classList.remove('active'); callingScreen.style.setProperty('display', 'none', 'important'); }
+            if (inCallScreen)  { inCallScreen.classList.remove('active');  inCallScreen.style.setProperty('display', 'none', 'important'); }
+            if (callContainer) { callContainer.classList.add('active'); callContainer.style.display = 'flex'; }
+            if (idleScreen)    { idleScreen.classList.add('active'); idleScreen.style.setProperty('display', 'block', 'important'); }
 
             // ── LOCAL-FIRST: finalize call record ─────────────────────────────
             (function _saveEndedLocally() {
@@ -5191,7 +5274,21 @@ case 'CALL_INITIATED':
                 if (sidebar) sidebar.style.display = 'flex'; // Always keep sidebar visible
                 
                 // Show idle screen
-                showIdleScreen();
+                if (typeof showIdleScreen === 'function') {
+                    showIdleScreen();
+                } else {
+                    // Fallback: manually show idle screen
+                    const idleScreen = document.getElementById('idleScreen');
+                    const callingOverlay = document.getElementById('callingOverlay');
+                    if (idleScreen) {
+                        idleScreen.classList.add('active');
+                        idleScreen.style.display = 'flex';
+                    }
+                    if (callingOverlay) {
+                        callingOverlay.classList.remove('active');
+                        callingOverlay.style.display = 'none';
+                    }
+                }
                 UIState.currentView = 'sidebar';
             }, 350); // 350ms — enough for overlay fade but snappy UX
 
@@ -9134,12 +9231,18 @@ if (detectExistingCore()) {
             appContainer.style.pointerEvents = 'auto';
         }
 
-        // Also ensure call-container never pushes out the sidebar
+        // FIX: Only hide callContainer if no call screen is currently active.
+        // Previously this always removed .active — fighting showCallingScreen.
         const callContainer = _el('callContainer') || document.querySelector('.call-container');
         if (callContainer) {
-            // call-container should not activate as a layout replacement
-            callContainer.classList.remove('active');
-            callContainer.style.display = 'none';
+            const callingScreen = document.getElementById('callingScreen');
+            const inCallScreen  = document.getElementById('inCallScreen');
+            const callScreenActive = (callingScreen && callingScreen.classList.contains('active')) ||
+                                     (inCallScreen  && inCallScreen.classList.contains('active'));
+            if (!callScreenActive) {
+                callContainer.classList.remove('active');
+                callContainer.style.display = 'none';
+            }
         }
     }
 

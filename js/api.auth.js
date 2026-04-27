@@ -2168,6 +2168,12 @@
     }
     
     async function refreshToken() {
+        // CRITICAL FIX: Check if offline first - don't attempt refresh when offline
+        if (!_isOnline()) {
+            console.log('[API-AUTH] 📴 Device offline - skipping token refresh');
+            return { success: false, offline: true, message: 'Device offline' };
+        }
+        
         if (_moduleState.tokenRefreshInProgress) {
             return new Promise((resolve, reject) => {
                 _moduleState.pendingAuthRequests.push({ resolve, reject });
@@ -2192,7 +2198,7 @@
             }
             
             const apiRequest = _getApiRequest();
-            if (!apiRequest || !apiRequest.post) {
+            if (!apiRequest) {
                 throw new Error('API request module not available');
             }
             
@@ -2208,6 +2214,19 @@
             if (response.success && response.data) {
                 const newToken = response.data.accessToken || response.data.token;
                 const expiresIn = response.data.expiresIn || CONFIG.DEFAULT_TOKEN_EXPIRY;
+                const newRefreshToken = response.data.refreshToken || refreshToken;
+                
+                // CRITICAL FIX: Update all storage locations consistently
+                _persistAuthData(newToken, unifiedAuth?.user || null, newRefreshToken, expiresIn);
+                
+                // Update global token references
+                AUTH_TOKEN = newToken;
+                TOKEN_READY = true;
+                
+                // Reset refresh state
+                _moduleState.tokenRefreshInProgress = false;
+                _moduleState.refreshAttempts = 0;
+                _moduleState.lastTokenRefresh = Date.now();
                 
                 _emitEvent('session-refreshed', {
                     newToken: newToken,

@@ -43,17 +43,17 @@ const VALID_TRANSITIONS = {
 function transitionTo(nextState, reason = '') {
     // Prevent duplicate transitions
     if (currentState === nextState) {
-        console.log(`[Tools][Lifecycle] Already in ${nextState} - ignoring transition request`);
+        if (window.__TOOLS_DEBUG__) console.log(`[Tools][Lifecycle] Already in ${nextState} - ignoring transition request`);
         return true;
     }
     
     if (!VALID_TRANSITIONS[currentState]?.includes(nextState)) {
-        console.error(`[Tools][Lifecycle] INVALID TRANSITION: ${currentState} → ${nextState}`, reason);
+        if (window.__TOOLS_DEBUG__) console.error(`[Tools][Lifecycle] INVALID TRANSITION: ${currentState} → ${nextState}`, reason);
         return false;
     }
     
     const fromState = currentState;
-    console.log(`[Tools][Lifecycle] ${fromState} → ${nextState}`, reason);
+    if (window.__TOOLS_DEBUG__) console.log(`[Tools][Lifecycle] ${fromState} → ${nextState}`, reason);
     currentState = nextState;
     moduleState.bootState = nextState;
     
@@ -72,7 +72,7 @@ function transitionTo(nextState, reason = '') {
 
 function assertActive(actionName) {
     if (currentState !== LIFECYCLE_STATE.ACTIVE) {
-        console.warn(`[Tools][Lifecycle] Blocked action "${actionName}" — not ACTIVE (current: ${currentState})`);
+        if (window.__TOOLS_DEBUG__) console.warn(`[Tools][Lifecycle] Blocked action "${actionName}" — not ACTIVE (current: ${currentState})`);
         return false;
     }
     return true;
@@ -274,7 +274,7 @@ const SessionClient = {
         
         // Only request if active or waiting for auth
         if (!isActive() && currentState !== LIFECYCLE_STATE.WAITING_AUTH && currentState !== LIFECYCLE_STATE.WAIT_PARENT) {
-            console.warn('[Tools][Session] Cannot request session - module not ready');
+            if (window.__TOOLS_DEBUG__) console.warn('[Tools][Session] Cannot request session - module not ready');
             return Promise.reject(new Error('Module not ready'));
         }
         
@@ -300,7 +300,7 @@ const SessionClient = {
     handleSessionData(sessionData, requestId = null) {
         // STRICT: Validate session before accepting
         if (!__isValidSession(sessionData)) {
-            console.warn('[Tools][Session] Rejected invalid session data', { 
+            if (window.__TOOLS_DEBUG__) console.warn('[Tools][Session] Rejected invalid session data', {
                 hasToken: !!(sessionData?.userToken || sessionData?.token),
                 userId: sessionData?.userId || sessionData?.user_id || sessionData?.id
             });
@@ -316,14 +316,14 @@ const SessionClient = {
         // Prevent session downgrade: if we already have a valid session, don't overwrite with invalid
         if (this.session && __isValidSession(this.session)) {
             if (!__isValidSession(sessionData)) {
-                console.warn('[Tools][Session] Prevented session downgrade - ignoring invalid session');
+                if (window.__TOOLS_DEBUG__) console.warn('[Tools][Session] Prevented session downgrade - ignoring invalid session');
                 return false;
             }
             
             // Check for duplicate session using session ID
             const newSessionId = this._generateSessionId(sessionData);
             if (this._lastSessionId === newSessionId) {
-                console.log('[Tools][Session] Duplicate session ignored');
+                if (window.__TOOLS_DEBUG__) console.log('[Tools][Session] Duplicate session ignored');
                 if (requestId && this.pendingRequests.has(requestId)) {
                     const { resolve, timeout } = this.pendingRequests.get(requestId);
                     clearTimeout(timeout);
@@ -361,7 +361,7 @@ const SessionClient = {
             detail: this.session 
         }));
         
-        console.log('[Tools][Session] Valid session accepted', { 
+        if (window.__TOOLS_DEBUG__) console.log('[Tools][Session] Valid session accepted', {
             userId: this.session.userId || this.session.user_id || this.session.id,
             hasToken: !!(this.session.userToken || this.session.token)
         });
@@ -510,7 +510,7 @@ function logOnce(level, message, data = null) {
                    level === 'init' ? '🚀 INIT' :
                    level === 'ready' ? '🔵 READY' : '⚪ INFO';
     
-    console.log(`${LOG_PREFIX} ${prefix} - ${message}`, data ? data : '');
+    if (window.__TOOLS_DEBUG__) console.log(`${LOG_PREFIX} ${prefix} - ${message}`, data ? data : '');
 }
 
 function logError(module, error, context = '') {
@@ -588,7 +588,7 @@ function safeSend(type, payload = {}) {
     // STRICT RULE: Only CHILD_READY allowed before WAIT_PARENT
     if (!parentReadyReceived && type !== 'CHILD_READY') {
         if (currentState === LIFECYCLE_STATE.WAIT_PARENT || currentState === LIFECYCLE_STATE.WAITING_AUTH) {
-            console.warn(`[Tools][Queue] Message ${type} blocked - in ${currentState} state (only CHILD_READY allowed)`);
+            if (window.__TOOLS_DEBUG__) console.warn(`[Tools][Queue] Message ${type} blocked - in ${currentState} state (only CHILD_READY allowed)`);
             return { success: false, error: 'wait_parent_blocked', queued: false };
         }
         debugLog(`[Queue] Message ${type} queued - parent not ready`);
@@ -607,7 +607,7 @@ function safeSend(type, payload = {}) {
 function flushMessageQueue() {
     if (!parentReadyReceived || messageQueue.length === 0) return;
     
-    console.log(`[Tools][Queue] Flushing ${messageQueue.length} queued messages`);
+    if (window.__TOOLS_DEBUG__) console.log(`[Tools][Queue] Flushing ${messageQueue.length} queued messages`);
     
     while (messageQueue.length > 0) {
         const queued = messageQueue.shift();
@@ -1336,7 +1336,7 @@ acceptParentSession(sessionData) {
     try {
         if (!sessionData || typeof sessionData !== 'object') return false;
         
-        console.log('[Tools][SessionWrapper] Processing session:', {
+        if (window.__TOOLS_DEBUG__) console.log('[Tools][SessionWrapper] Processing session:', {
             userId: sessionData.userId || sessionData.id,
             hasToken: !!(sessionData.userToken || sessionData.token)
         });
@@ -1350,14 +1350,14 @@ acceptParentSession(sessionData) {
         }
         
         if (!userId) {
-            console.warn('[Tools][SessionWrapper] No userId found');
+            if (window.__TOOLS_DEBUG__) console.warn('[Tools][SessionWrapper] No userId found');
             return false;
         }
         
         // Reject fake IDs
         const fakeIds = ['user', 'default', 'null', 'undefined', ''];
         if (typeof userId === 'string' && fakeIds.includes(userId.toLowerCase())) {
-            console.warn('[Tools][SessionWrapper] Rejected fake userId:', userId);
+            if (window.__TOOLS_DEBUG__) console.warn('[Tools][SessionWrapper] Rejected fake userId:', userId);
             return false;
         }
         
@@ -1393,11 +1393,11 @@ acceptParentSession(sessionData) {
         this.notifyListeners('session:updated', this.currentSession);
         this.sessionState.received = true;
         
-        console.log('[Tools][SessionWrapper] Session accepted, userId:', userId);
+        if (window.__TOOLS_DEBUG__) console.log('[Tools][SessionWrapper] Session accepted, userId:', userId);
         return true;
         
     } catch (error) {
-        console.error('[Tools][SessionWrapper] Error:', error);
+        if (window.__TOOLS_DEBUG__) console.error('[Tools][SessionWrapper] Error:', error);
         return false;
     }
 }
@@ -1648,12 +1648,12 @@ class MessageHandler {
         this.registerHandler('AUTH_READY', (message) => {
     // Ignore if already active
     if (currentState === LIFECYCLE_STATE.ACTIVE) {
-        console.log('[Tools][Lifecycle] AUTH_READY received - already ACTIVE');
+        if (window.__TOOLS_DEBUG__) console.log('[Tools][Lifecycle] AUTH_READY received - already ACTIVE');
         return;
     }
     
-    console.log('[Tools][Lifecycle] AUTH_READY received, currentState:', currentState);
-    console.log('[Tools][Lifecycle] AUTH_READY payload:', message.payload);
+    if (window.__TOOLS_DEBUG__) console.log('[Tools][Lifecycle] AUTH_READY received, currentState:', currentState);
+    if (window.__TOOLS_DEBUG__) console.log('[Tools][Lifecycle] AUTH_READY payload:', message.payload);
     
     // Extract session from AUTH_READY payload - handle multiple formats
     let sessionData = null;
@@ -1701,22 +1701,22 @@ class MessageHandler {
     }
     
     if (sessionData) {
-        console.log('[Tools][Lifecycle] Extracted session from AUTH_READY:', {
+        if (window.__TOOLS_DEBUG__) console.log('[Tools][Lifecycle] Extracted session from AUTH_READY:', {
             userId: sessionData.userId,
             hasToken: !!sessionData.userToken
         });
         const sessionValid = this.handleSessionData(sessionData);
         if (!sessionValid) {
-            console.warn('[Tools][Lifecycle] AUTH_READY contained invalid session');
+            if (window.__TOOLS_DEBUG__) console.warn('[Tools][Lifecycle] AUTH_READY contained invalid session');
         }
     } else {
-        console.log('[Tools][Lifecycle] AUTH_READY - no session data found in payload');
+        if (window.__TOOLS_DEBUG__) console.log('[Tools][Lifecycle] AUTH_READY - no session data found in payload');
     }
     
     // Force transition to ACTIVE if we have a valid session
     const session = sessionClient.getSession();
     if (session && __isValidSession(session)) {
-        console.log('[Tools][Lifecycle] AUTH_READY: valid session present, activating');
+        if (window.__TOOLS_DEBUG__) console.log('[Tools][Lifecycle] AUTH_READY: valid session present, activating');
         transitionTo(LIFECYCLE_STATE.ACTIVE, 'auth_ready_valid_session');
         flushMessageQueue();
         if (!activationComplete) {
@@ -1724,7 +1724,7 @@ class MessageHandler {
             activationComplete = true;
         }
     } else {
-        console.log('[Tools][Lifecycle] AUTH_READY: no valid session yet, waiting');
+        if (window.__TOOLS_DEBUG__) console.log('[Tools][Lifecycle] AUTH_READY: no valid session yet, waiting');
         transitionTo(LIFECYCLE_STATE.WAITING_AUTH, 'auth_ready_waiting');
         if (!moduleState.sessionState.requested) {
             moduleState.sessionState.requested = true;
@@ -1737,11 +1737,11 @@ class MessageHandler {
 this.registerHandler('PARENT_READY', (message) => {
     // Ignore if already active
     if (currentState === LIFECYCLE_STATE.ACTIVE) {
-        console.log('[Tools][Lifecycle] PARENT_READY received - already ACTIVE');
+        if (window.__TOOLS_DEBUG__) console.log('[Tools][Lifecycle] PARENT_READY received - already ACTIVE');
         return;
     }
     
-    console.log(`[Tools][Lifecycle] PARENT_READY received in state: ${currentState}`);
+    if (window.__TOOLS_DEBUG__) console.log(`[Tools][Lifecycle] PARENT_READY received in state: ${currentState}`);
     this.handleParentReady(message);
 });
         this.registerHandler('REGISTERED', (message) => {
@@ -1754,10 +1754,10 @@ this.registerHandler('PARENT_READY', (message) => {
 
         this.registerHandler('SESSION_DATA', (message) => {
     if (!isActive() && currentState !== LIFECYCLE_STATE.ACTIVE && currentState !== LIFECYCLE_STATE.WAITING_AUTH) {
-        console.log('[Tools][Lifecycle] SESSION_DATA received before active - still processing');
+        if (window.__TOOLS_DEBUG__) console.log('[Tools][Lifecycle] SESSION_DATA received before active - still processing');
     }
     
-    console.log('[Tools][Lifecycle] SESSION_DATA received, payload:', message.payload);
+    if (window.__TOOLS_DEBUG__) console.log('[Tools][Lifecycle] SESSION_DATA received, payload:', message.payload);
     
     // Extract session from SESSION_DATA payload - handle multiple formats
     let sessionData = null;
@@ -1773,12 +1773,12 @@ this.registerHandler('PARENT_READY', (message) => {
                 isPremium: message.payload.user.isPremium,
                 trustLevel: message.payload.user.trustLevel
             };
-            console.log('[Tools][Lifecycle] Extracted session from user+token');
+            if (window.__TOOLS_DEBUG__) console.log('[Tools][Lifecycle] Extracted session from user+token');
         }
         // Format 2: { payload: { session: {...} } }
         else if (message.payload.session) {
             sessionData = message.payload.session;
-            console.log('[Tools][Lifecycle] Extracted session from payload.session');
+            if (window.__TOOLS_DEBUG__) console.log('[Tools][Lifecycle] Extracted session from payload.session');
         }
         // Format 3: Direct data in payload
         else if (message.payload.userId || message.payload.userToken || message.payload.token) {
@@ -1791,24 +1791,24 @@ this.registerHandler('PARENT_READY', (message) => {
                 isPremium: message.payload.isPremium || false,
                 trustLevel: message.payload.trustLevel || 'new'
             };
-            console.log('[Tools][Lifecycle] Extracted session from direct payload');
+            if (window.__TOOLS_DEBUG__) console.log('[Tools][Lifecycle] Extracted session from direct payload');
         }
         else {
             sessionData = message.payload;
-            console.log('[Tools][Lifecycle] Using payload as session directly');
+            if (window.__TOOLS_DEBUG__) console.log('[Tools][Lifecycle] Using payload as session directly');
         }
     }
     // Check if message itself has session data
     else if (message.userId || message.token) {
         sessionData = message;
-        console.log('[Tools][Lifecycle] Using message as session directly');
+        if (window.__TOOLS_DEBUG__) console.log('[Tools][Lifecycle] Using message as session directly');
     }
     
     if (sessionData) {
-        console.log('[Tools][Lifecycle] Processing SESSION_DATA, userId:', sessionData.userId);
+        if (window.__TOOLS_DEBUG__) console.log('[Tools][Lifecycle] Processing SESSION_DATA, userId:', sessionData.userId);
         this.handleSessionData(sessionData);
     } else {
-        console.warn('[Tools][Lifecycle] SESSION_DATA had no extractable session data');
+        if (window.__TOOLS_DEBUG__) console.warn('[Tools][Lifecycle] SESSION_DATA had no extractable session data');
     }
 });
 
@@ -1833,7 +1833,7 @@ this.registerHandler('PARENT_READY', (message) => {
             
             // Validate session update before applying
             if (!__isValidSession(message.payload)) {
-                console.warn('[Tools][MessageHandler] Ignored invalid session update');
+                if (window.__TOOLS_DEBUG__) console.warn('[Tools][MessageHandler] Ignored invalid session update');
                 return;
             }
             
@@ -1844,7 +1844,7 @@ this.registerHandler('PARENT_READY', (message) => {
                 if (__isValidSession(mergedSession)) {
                     sessionClient.acceptParentSession(mergedSession);
                 } else {
-                    console.warn('[Tools][MessageHandler] Session update would create invalid session - rejected');
+                    if (window.__TOOLS_DEBUG__) console.warn('[Tools][MessageHandler] Session update would create invalid session - rejected');
                 }
             } else {
                 sessionClient.acceptParentSession(message.payload);
@@ -2026,7 +2026,7 @@ this.registerHandler('SETTINGS_UPDATED', (message) => {
             
             const { requestId, endpoint, method, data } = message.payload;
             if (!requestId || !endpoint || !method) {
-                console.warn('[Tools] Invalid API_REQUEST - missing required fields');
+                if (window.__TOOLS_DEBUG__) console.warn('[Tools] Invalid API_REQUEST - missing required fields');
                 return;
             }
             
@@ -2060,7 +2060,7 @@ handleParentReady(message) {
         this.parentReadyTimeout = null;
     }
 
-    console.log('[Tools][Lifecycle] PARENT_READY received with payload:', message.payload);
+    if (window.__TOOLS_DEBUG__) console.log('[Tools][Lifecycle] PARENT_READY received with payload:', message.payload);
 
     // Extract session from PARENT_READY payload - handle multiple formats
     let sessionData = null;
@@ -2068,7 +2068,7 @@ handleParentReady(message) {
         // Format 1: { payload: { session: {...} } }
         if (message.payload.session) {
             sessionData = message.payload.session;
-            console.log('[Tools][Lifecycle] Extracted session from payload.session');
+            if (window.__TOOLS_DEBUG__) console.log('[Tools][Lifecycle] Extracted session from payload.session');
         }
         // Format 2: { payload: { user: {...}, token: ... } }
         else if (message.payload.user && message.payload.token) {
@@ -2081,7 +2081,7 @@ handleParentReady(message) {
                 isPremium: message.payload.user.isPremium,
                 trustLevel: message.payload.user.trustLevel
             };
-            console.log('[Tools][Lifecycle] Extracted session from user+token');
+            if (window.__TOOLS_DEBUG__) console.log('[Tools][Lifecycle] Extracted session from user+token');
         }
         // Format 3: { payload: { userId, userToken, ... } }
         else if (message.payload.userId || message.payload.userToken || message.payload.token) {
@@ -2094,12 +2094,12 @@ handleParentReady(message) {
                 isPremium: message.payload.isPremium || false,
                 trustLevel: message.payload.trustLevel || 'new'
             };
-            console.log('[Tools][Lifecycle] Extracted session from direct payload');
+            if (window.__TOOLS_DEBUG__) console.log('[Tools][Lifecycle] Extracted session from direct payload');
         }
         // Format 4: Just raw session data
         else if (message.payload.id || message.payload.userId) {
             sessionData = message.payload;
-            console.log('[Tools][Lifecycle] Using payload as session directly');
+            if (window.__TOOLS_DEBUG__) console.log('[Tools][Lifecycle] Using payload as session directly');
         }
     }
 
@@ -2107,9 +2107,9 @@ handleParentReady(message) {
     if (sessionData) {
         sessionValid = this.handleSessionData(sessionData);
         if (sessionValid) {
-            console.log('[Tools][Lifecycle] PARENT_READY: session applied successfully');
+            if (window.__TOOLS_DEBUG__) console.log('[Tools][Lifecycle] PARENT_READY: session applied successfully');
         } else {
-            console.warn('[Tools][Lifecycle] PARENT_READY: session was invalid');
+            if (window.__TOOLS_DEBUG__) console.warn('[Tools][Lifecycle] PARENT_READY: session was invalid');
         }
     }
 
@@ -2118,7 +2118,7 @@ handleParentReady(message) {
     const hasValidSession = existingSession && __isValidSession(existingSession);
     
     if (hasValidSession || sessionValid) {
-        console.log('[Tools][Lifecycle] PARENT_READY: has valid session, activating');
+        if (window.__TOOLS_DEBUG__) console.log('[Tools][Lifecycle] PARENT_READY: has valid session, activating');
         transitionTo(LIFECYCLE_STATE.ACTIVE, 'parent_ready_valid_session');
         flushMessageQueue();
         if (!activationComplete) {
@@ -2126,21 +2126,21 @@ handleParentReady(message) {
             activationComplete = true;
         }
     } else {
-        console.log('[Tools][Lifecycle] PARENT_READY: no valid session yet, waiting for AUTH_READY or SESSION_DATA');
+        if (window.__TOOLS_DEBUG__) console.log('[Tools][Lifecycle] PARENT_READY: no valid session yet, waiting for AUTH_READY or SESSION_DATA');
         transitionTo(LIFECYCLE_STATE.WAITING_AUTH, 'parent_ready_waiting_session');
         
         // Request session if not already requested
         if (!moduleState.sessionState.requested) {
             moduleState.sessionState.requested = true;
-            console.log('[Tools][Lifecycle] Requesting session from parent');
+            if (window.__TOOLS_DEBUG__) console.log('[Tools][Lifecycle] Requesting session from parent');
             SessionClient.requestSession().catch(err => {
-                console.warn('[Tools][Lifecycle] Session request failed:', err);
+                if (window.__TOOLS_DEBUG__) console.warn('[Tools][Lifecycle] Session request failed:', err);
             });
         }
         
         // Set timeout for fallback - but increase to 8 seconds
         this.parentReadyTimeout = setTimeout(() => {
-            console.log('[Tools][Lifecycle] PARENT_READY timeout: forcing activation');
+            if (window.__TOOLS_DEBUG__) console.log('[Tools][Lifecycle] PARENT_READY timeout: forcing activation');
             if (currentState !== LIFECYCLE_STATE.ACTIVE) {
                 transitionTo(LIFECYCLE_STATE.ACTIVE, 'parent_ready_timeout');
                 flushMessageQueue();
@@ -2185,7 +2185,7 @@ handleParentReady(message) {
     handleSessionData(sessionData) {
     if (!sessionData) return false;
     
-    console.log('[Tools][MessageHandler] handleSessionData received:', {
+    if (window.__TOOLS_DEBUG__) console.log('[Tools][MessageHandler] handleSessionData received:', {
         hasUserId: !!(sessionData.userId || sessionData.id),
         hasToken: !!(sessionData.userToken || sessionData.token),
         hasNestedUser: !!sessionData.user
@@ -2240,7 +2240,7 @@ handleParentReady(message) {
         
         // If waiting for auth, activate now
         if (currentState === LIFECYCLE_STATE.WAITING_AUTH || currentState === LIFECYCLE_STATE.WAIT_PARENT) {
-            console.log('[Tools][Lifecycle] Valid session received, activating');
+            if (window.__TOOLS_DEBUG__) console.log('[Tools][Lifecycle] Valid session received, activating');
             transitionTo(LIFECYCLE_STATE.ACTIVE, 'valid_session_received');
             flushMessageQueue();
             if (!activationComplete) {
@@ -3114,7 +3114,7 @@ class MarketplaceCoreImpl {
                 return;
             }
             
-            if (!sessionClient.isReady ? sessionClient.isReady() : false) {
+            if (!sessionClient.isValid()) {
                 reject(new Error('Session not ready'));
                 return;
             }
@@ -3137,7 +3137,7 @@ class MarketplaceCoreImpl {
                 requestId: requestId,
                 ...payload,
                 _auth: {
-                    hasSession: sessionClient.isReady ? sessionClient.isReady() : false
+                    hasSession: sessionClient.isValid()
                 }
             });
             
@@ -3187,74 +3187,158 @@ class MarketplaceCoreImpl {
 
     async createListing(listingData) {
         if (!assertActive('createListing')) throw new Error('Module not active');
-        if (!sessionClient.isReady ? sessionClient.isReady() : false) throw new Error('User not authenticated');
+        if (!sessionClient.isValid()) throw new Error('User not authenticated');
 
         if (!listingData.title || !listingData.description) {
             throw new Error('Title and description are required');
         }
 
         const sanitized = this.sanitizeListingData(listingData);
-        
         const user = sessionClient.getUser ? sessionClient.getUser() : null;
         const userId = user?.id;
-        
-        // FIX: Use direct API call instead of postMessage
+        const fakeId  = 'optimistic_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7);
+
+        // ── STEP 1: Optimistic write — update UI and IDB immediately ──────────
+        const optimistic = {
+            id: fakeId,
+            _isOptimistic: true,
+            sellerId: userId,
+            userId: userId,
+            seller: {
+                id: userId,
+                name: user?.displayName || user?.name || 'You',
+                photoURL: user?.photoURL || ''
+            },
+            title: this.escapeHtml(sanitized.title),
+            description: this.escapeHtml(sanitized.description),
+            price: this.validatePrice(sanitized.price),
+            category: sanitized.category || 'other',
+            type: listingData.type || 'service',
+            condition: listingData.condition || 'new',
+            images: sanitized.images || [],
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+            available: sanitized.available !== false,
+            savedBy: [],
+            views: 0
+        };
+
+        // Snapshot for rollback
+        const prevListings   = [...this.listings];
+        const prevMyListings = [...this.myListings];
+
+        // Prepend optimistic entry
+        this.listings   = [optimistic, ...this.listings];
+        this.myListings = [optimistic, ...this.myListings];
+
+        // Persist optimistic state to IDB + window globals immediately
+        window.allListings = this.listings;
+        window.myListings  = this.myListings;
+        safeStorage.set(LOCAL_STORAGE_KEYS.ALL_LISTINGS, this.listings);
+        safeStorage.set(LOCAL_STORAGE_KEYS.MY_LISTINGS,  this.myListings);
+
+        // Fire UI update NOW — user sees listing instantly
+        this.notifyUI('listingCreated', optimistic);
+        window.dispatchEvent(new CustomEvent('marketplace:data-updated', {
+            detail: { listings: this.listings, source: 'optimistic' }
+        }));
+
+        // ── STEP 2: Backend call — reconcile with real server ID ──────────────
         try {
+            // Wait briefly for token if session just became active
+            let token = sessionClient.getToken ? sessionClient.getToken() : null;
+            if (!token) {
+                await new Promise(r => setTimeout(r, 800));
+                token = sessionClient.getToken ? sessionClient.getToken() : null;
+            }
+
             const result = await safeApiCall('POST', '/api/marketplace/listings', {
-                title: sanitized.title,
+                title:       sanitized.title,
                 description: sanitized.description,
-                price: sanitized.price,
-                category: sanitized.category,
-                type: listingData.type || 'service',
-                images: sanitized.images || [],
-                available: sanitized.available !== false
+                price:       sanitized.price,
+                category:    sanitized.category,
+                type:        listingData.type || 'service',
+                condition:   listingData.condition || 'new',
+                images:      sanitized.images || [],
+                available:   sanitized.available !== false
             });
 
-            if (result && result.data?.listing) {
-                const listing = result.data.listing;
-                const normalizedListing = {
-                    id: listing.id,
-                    sellerId: listing.sellerId || userId,
-                    userId: listing.sellerId || userId,
-                    seller: {
-                        id: userId,
-                        name: user?.displayName || user?.name,
-                        photoURL: user?.photoURL
-                    },
-                    title: this.escapeHtml(sanitized.title),
-                    description: this.escapeHtml(sanitized.description),
-                    price: this.validatePrice(sanitized.price),
-                    category: sanitized.category || 'other',
-                    type: listingData.type || 'service',
-                    images: sanitized.images || [],
-                    createdAt: listing.createdAt || new Date().toISOString(),
-                    updatedAt: listing.updatedAt || new Date().toISOString(),
-                    available: sanitized.available !== false,
-                    savedBy: [],
-                    views: 0
-                };
-                this.listings = [normalizedListing, ...this.listings];
-                this.myListings = [normalizedListing, ...this.myListings];
-                safeStorage.set(LOCAL_STORAGE_KEYS.ALL_LISTINGS, this.listings);
-                safeStorage.set(LOCAL_STORAGE_KEYS.MY_LISTINGS, this.myListings);
-                this.notifyUI('listingCreated', normalizedListing);
-                if (this.syncChannel) {
-                    this.syncChannel.postMessage({ type: 'LISTING_CREATED', listing: normalizedListing });
-                }
-                logOnce('send', 'Listing created', { id: normalizedListing.id });
-                return normalizedListing;
-            } else {
-                throw new Error('Failed to create listing: Invalid response');
+            // Normalise response — backend wraps in data.listing or listing
+            const serverListing = result?.data?.listing || result?.listing;
+            if (!serverListing || !serverListing.id) {
+                throw new Error('Server returned no listing payload');
             }
+
+            // ── STEP 3: Reconcile — swap optimistic entry with confirmed one ─
+            const committed = {
+                ...optimistic,
+                ...serverListing,
+                id:             serverListing.id,
+                _isOptimistic:  false,
+                title:          this.escapeHtml(serverListing.title   || sanitized.title),
+                description:    this.escapeHtml(serverListing.description || sanitized.description),
+                price:          this.validatePrice(serverListing.price ?? sanitized.price),
+                createdAt:      serverListing.createdAt || optimistic.createdAt,
+                updatedAt:      serverListing.updatedAt || optimistic.updatedAt,
+                seller:         optimistic.seller,
+                user:           optimistic.seller,
+            };
+
+            this.listings   = this.listings.map(l   => l.id === fakeId ? committed : l);
+            this.myListings = this.myListings.map(l => l.id === fakeId ? committed : l);
+            window.allListings = this.listings;
+            window.myListings  = this.myListings;
+            safeStorage.set(LOCAL_STORAGE_KEYS.ALL_LISTINGS, this.listings);
+            safeStorage.set(LOCAL_STORAGE_KEYS.MY_LISTINGS,  this.myListings);
+
+            // Notify UI with committed listing (replaces optimistic)
+            this.notifyUI('listingCommitted', committed);
+            window.dispatchEvent(new CustomEvent('marketplace:data-updated', {
+                detail: { listings: this.listings, source: 'committed' }
+            }));
+
+            // Broadcast to other tabs with real server ID
+            try {
+                const ch = new BroadcastChannel('marketplace_sync');
+                ch.postMessage({ type: 'LISTING_CREATED', listing: committed });
+                ch.close();
+            } catch (_) {}
+
+            return committed;
+
         } catch (error) {
+            // ── STEP 4: Rollback on hard failure ─────────────────────────────
+            // Queue for background retry rather than silently losing the listing
+            if (typeof queueForSync === 'function') {
+                queueForSync({ ...optimistic, id: undefined }, 'listing');
+            }
+
+            // Keep optimistic in UI until sync succeeds — better UX than disappearing
+            // But mark it clearly as pending
+            this.listings   = this.listings.map(l   =>
+                l.id === fakeId ? { ...l, _syncPending: true, _isOptimistic: true } : l
+            );
+            this.myListings = this.myListings.map(l =>
+                l.id === fakeId ? { ...l, _syncPending: true, _isOptimistic: true } : l
+            );
+            window.allListings = this.listings;
+            window.myListings  = this.myListings;
+            safeStorage.set(LOCAL_STORAGE_KEYS.ALL_LISTINGS, this.listings);
+            safeStorage.set(LOCAL_STORAGE_KEYS.MY_LISTINGS,  this.myListings);
+
+            window.dispatchEvent(new CustomEvent('marketplace:data-updated', {
+                detail: { listings: this.listings, source: 'sync-pending' }
+            }));
+
             logError('createListing', error);
-            throw error;
+            // Don't throw — optimistic entry is still visible and queued
+            return { ...optimistic, _syncPending: true };
         }
     }
 
     async updateListing(listingId, updates) {
         if (!assertActive('updateListing')) throw new Error('Module not active');
-        if (!sessionClient.isReady ? sessionClient.isReady() : false) throw new Error('User not authenticated');
+        if (!sessionClient.isValid()) throw new Error('User not authenticated');
 
         const listing = this.listings.find(l => l.id === listingId);
         if (!listing) throw new Error('Listing not found');
@@ -3298,7 +3382,7 @@ class MarketplaceCoreImpl {
 
     async deleteListing(listingId) {
         if (!assertActive('deleteListing')) throw new Error('Module not active');
-        if (!sessionClient.isReady ? sessionClient.isReady() : false) throw new Error('User not authenticated');
+        if (!sessionClient.isValid()) throw new Error('User not authenticated');
         
         const listing = this.listings.find(l => l.id === listingId);
         if (!listing) throw new Error('Listing not found');
@@ -3333,7 +3417,7 @@ class MarketplaceCoreImpl {
 
     async toggleSave(listingId) {
         if (!assertActive('toggleSave')) throw new Error('Module not active');
-        if (!sessionClient.isReady ? sessionClient.isReady() : false) throw new Error('User not authenticated');
+        if (!sessionClient.isValid()) throw new Error('User not authenticated');
 
         const listing = this.listings.find(l => l.id === listingId);
         if (!listing) throw new Error('Listing not found');
@@ -3385,7 +3469,7 @@ class MarketplaceCoreImpl {
 
     async contactSeller(listingId, message = '') {
         if (!assertActive('contactSeller')) throw new Error('Module not active');
-        if (!sessionClient.isReady ? sessionClient.isReady() : false) throw new Error('User not authenticated');
+        if (!sessionClient.isValid()) throw new Error('User not authenticated');
 
         const listing = this.listings.find(l => l.id === listingId);
         if (!listing) throw new Error('Listing not found');
@@ -3878,13 +3962,13 @@ export async function sendToParent(type, payload = {}) {
 function sendChildReady() {
     // STRICT: Prevent multiple sends
     if (childReadySent) {
-        console.warn('[Tools][Lifecycle] CHILD_READY already sent — skipping');
+        if (window.__TOOLS_DEBUG__) console.warn('[Tools][Lifecycle] CHILD_READY already sent — skipping');
         return;
     }
 
     // STRICT: Only send in READY state
     if (currentState !== LIFECYCLE_STATE.READY) {
-        console.warn(`[Tools][Lifecycle] Cannot send CHILD_READY — invalid state: ${currentState}`);
+        if (window.__TOOLS_DEBUG__) console.warn(`[Tools][Lifecycle] Cannot send CHILD_READY — invalid state: ${currentState}`);
         return;
     }
 
@@ -3916,7 +4000,7 @@ function sendChildReady() {
 // =============================================
 
 function onModuleActive() {
-    console.log('[Tools][Lifecycle] Module ACTIVE - all systems go');
+    if (window.__TOOLS_DEBUG__) console.log('[Tools][Lifecycle] Module ACTIVE - all systems go');
 
     moduleState.ready = true;
     moduleState.initialized = true;
@@ -3949,7 +4033,7 @@ let _bindCompleteShown = false;
 function forceBindAllUIEvents() {
     // Only log once total, not once per call
     if (!_bindLogShown) {
-        console.log('[Tools] Force binding all UI events (direct DOM)');
+        if (window.__TOOLS_DEBUG__) console.log('[Tools] Force binding all UI events (direct DOM)');
         _bindLogShown = true;
     }
 
@@ -4055,7 +4139,7 @@ function forceBindAllUIEvents() {
                     window.dispatchEvent(new CustomEvent('marketplace:publish-listing'));
                 }
             } catch (error) {
-                console.error('[Tools] Publish button error:', error);
+                if (window.__TOOLS_DEBUG__) console.error('[Tools] Publish button error:', error);
                 if (typeof showNotification === 'function') {
                     showNotification('Failed to publish listing', 'error');
                 }
@@ -4088,7 +4172,7 @@ function forceBindAllUIEvents() {
 
     // Only log completion once
     if (!_bindCompleteShown) {
-        console.log('[Tools] Direct DOM binding complete');
+        if (window.__TOOLS_DEBUG__) console.log('[Tools] Direct DOM binding complete');
         _bindCompleteShown = true;
     }
 
@@ -4109,7 +4193,7 @@ window.forceBindAllUIEvents = forceBindAllUIEvents;
 function initializeModule() {
     // Prevent double initialization
     if (initializationLock) {
-        console.warn('[Tools][Lifecycle] Module already initializing - skipping');
+        if (window.__TOOLS_DEBUG__) console.warn('[Tools][Lifecycle] Module already initializing - skipping');
         return;
     }
     
@@ -4199,12 +4283,12 @@ window.addEventListener('message', function directSessionListener(event) {
     
     // Log all incoming messages for debugging
     if (data.type === 'SESSION_DATA' || data.type === 'AUTH_READY' || data.type === 'PARENT_READY') {
-        console.log('[Tools][DirectListener] Received:', data.type, data);
+        if (window.__TOOLS_DEBUG__) console.log('[Tools][DirectListener] Received:', data.type, data);
     }
     
     // Handle SESSION_DATA directly
     if (data.type === 'SESSION_DATA') {
-        console.log('[Tools][DirectListener] Processing SESSION_DATA directly');
+        if (window.__TOOLS_DEBUG__) console.log('[Tools][DirectListener] Processing SESSION_DATA directly');
         let sessionInfo = data.payload || data;
         
         // Extract userId and token
@@ -4212,7 +4296,7 @@ window.addEventListener('message', function directSessionListener(event) {
         let token = sessionInfo.userToken || sessionInfo.token || sessionInfo.user?.token;
         
         if (userId && token) {
-            console.log('[Tools][DirectListener] Found session data:', { userId, hasToken: !!token });
+            if (window.__TOOLS_DEBUG__) console.log('[Tools][DirectListener] Found session data:', { userId, hasToken: !!token });
             const session = {
                 userId: userId,
                 userToken: token,
@@ -4225,7 +4309,7 @@ window.addEventListener('message', function directSessionListener(event) {
             
             const accepted = sessionClient.acceptParentSession(session);
             if (accepted && currentState !== LIFECYCLE_STATE.ACTIVE) {
-                console.log('[Tools][DirectListener] Session accepted, activating module');
+                if (window.__TOOLS_DEBUG__) console.log('[Tools][DirectListener] Session accepted, activating module');
                 transitionTo(LIFECYCLE_STATE.ACTIVE, 'direct_session_received');
                 flushMessageQueue();
                 if (!activationComplete) {
@@ -4238,7 +4322,7 @@ window.addEventListener('message', function directSessionListener(event) {
     
     // Handle AUTH_READY directly
     if (data.type === 'AUTH_READY') {
-        console.log('[Tools][DirectListener] Processing AUTH_READY directly');
+        if (window.__TOOLS_DEBUG__) console.log('[Tools][DirectListener] Processing AUTH_READY directly');
         const payload = data.payload || data;
         let sessionInfo = payload.session || payload;
         
@@ -4246,7 +4330,7 @@ window.addEventListener('message', function directSessionListener(event) {
         let token = sessionInfo.userToken || sessionInfo.token || sessionInfo.user?.token || payload.token;
         
         if (userId && token) {
-            console.log('[Tools][DirectListener] Found session in AUTH_READY:', { userId });
+            if (window.__TOOLS_DEBUG__) console.log('[Tools][DirectListener] Found session in AUTH_READY:', { userId });
             const session = {
                 userId: userId,
                 userToken: token,
@@ -4259,7 +4343,7 @@ window.addEventListener('message', function directSessionListener(event) {
             
             const accepted = sessionClient.acceptParentSession(session);
             if (accepted && currentState !== LIFECYCLE_STATE.ACTIVE) {
-                console.log('[Tools][DirectListener] Session accepted from AUTH_READY, activating');
+                if (window.__TOOLS_DEBUG__) console.log('[Tools][DirectListener] Session accepted from AUTH_READY, activating');
                 transitionTo(LIFECYCLE_STATE.ACTIVE, 'direct_auth_ready_received');
                 flushMessageQueue();
                 if (!activationComplete) {
@@ -4315,7 +4399,7 @@ window.addEventListener('message', function directSessionListener(event) {
 
 setTimeout(() => {
     if (currentState !== LIFECYCLE_STATE.ACTIVE) {
-        console.log('[Tools][Lifecycle] Activation timeout: forcing ACTIVE state');
+        if (window.__TOOLS_DEBUG__) console.log('[Tools][Lifecycle] Activation timeout: forcing ACTIVE state');
         parentReadyReceived = true;
         moduleState.parentDetected = true;
         moduleState.handshakeState.parentReadyReceived = true;
@@ -4390,7 +4474,7 @@ initializeCore = async function(options = {}) {
         isInitializing = false;
         isBootstrapped = true;
         handshakeComplete = moduleState.handshakeComplete;
-        sessionValid = sessionClient.isReady ? sessionClient.isReady() : false;
+        sessionValid = sessionClient.isValid();
         sessionData = sessionClient.getSession();
 
         if (sessionData && !sessionData.isGuest && !sessionData.isDemo && __isValidSession(sessionData)) {
@@ -4547,7 +4631,7 @@ checkParentHealth = function() {
             initializationLock
         },
         memorySession: {
-            ready: sessionClient.isReady ? sessionClient.isReady() : false,
+            ready: sessionClient.isValid(),
             hasToken: !!sessionClient.getToken ? sessionClient.getToken() : false,
             hasUser: !!sessionClient.getUser ? sessionClient.getUser() : false,
             validSession: sessionClient.isReady() ? __isValidSession(sessionClient.getSession()) : false
@@ -4749,7 +4833,7 @@ export function handleRefreshDataRequest(payload) {
 
 export async function fetchData(dataType) {
     try {
-        if (!sessionClient.isReady ? sessionClient.isReady() : false) throw new Error('No valid session for API call');
+        if (!sessionClient.isValid()) throw new Error('No valid session for API call');
         if (!isActive()) throw new Error('Module not active');
         
         let endpoint;
@@ -4825,7 +4909,7 @@ export const pageCore = {
             if (window.parent && window.parent !== window) {
                 await new Promise((resolve) => {
                     const checkSession = () => {
-                        if (sessionData || moduleState.sessionActive || (sessionClient.isReady ? sessionClient.isReady() : false)) {
+                        if (sessionData || moduleState.sessionActive || (sessionClient.isValid())) {
                             if (sessionClient.getSession() && __isValidSession(sessionClient.getSession())) {
                                 resolve();
                             } else {
@@ -4862,7 +4946,7 @@ export const pageCore = {
     
     loadUserFriends: async () => {
         try {
-            if ((sessionClient.isReady ? sessionClient.isReady() : false) && isActive()) {
+            if ((sessionClient.isValid()) && isActive()) {
                 // FIX: First check session data for friends
                 const session = sessionClient.getSession();
                 if (session && session.friends && Array.isArray(session.friends)) {
@@ -4894,7 +4978,7 @@ export const pageCore = {
     
     loadUserGroups: async () => {
         try {
-            if ((sessionClient.isReady ? sessionClient.isReady() : false) && isActive()) {
+            if ((sessionClient.isValid()) && isActive()) {
                 // FIX: First check session data for groups
                 const session = sessionClient.getSession();
                 if (session && session.groups && Array.isArray(session.groups)) {
@@ -4926,7 +5010,7 @@ export const pageCore = {
     
     loadListings: async () => {
         try {
-            if ((sessionClient.isReady ? sessionClient.isReady() : false) && isActive()) {
+            if ((sessionClient.isValid()) && isActive()) {
                 const response = await authorizedFetch('/api/marketplace/listings', { method: 'GET' });
                 if (response && response.data?.listings) {
                     allListings = response.data.listings;
@@ -4951,7 +5035,7 @@ export const pageCore = {
     
     loadTeamMembers: async () => {
         try {
-            if ((sessionClient.isReady ? sessionClient.isReady() : false) && userSubscription && (userSubscription.plan === 'business' || userSubscription.plan === 'team') && isActive()) {
+            if ((sessionClient.isValid()) && userSubscription && (userSubscription.plan === 'business' || userSubscription.plan === 'team') && isActive()) {
                 const members = await getTeamMembers();
                 if (members && Array.isArray(members)) {
                     teamMembers = members;
@@ -4963,7 +5047,7 @@ export const pageCore = {
     
     loadLeaderboard: async () => {
         try {
-            if ((sessionClient.isReady ? sessionClient.isReady() : false) && isActive()) {
+            if ((sessionClient.isValid()) && isActive()) {
                 const response = await authorizedFetch('/api/marketplace/leaderboard', { method: 'GET' });
                 if (response && response.data?.leaderboard) {
                     leaderboardData = response.data.leaderboard;
@@ -4978,7 +5062,7 @@ export const pageCore = {
     
     loadAnalyticsData: async () => {
         try {
-            if ((sessionClient.isReady ? sessionClient.isReady() : false) && isUserPremium() && isActive()) {
+            if ((sessionClient.isValid()) && isUserPremium() && isActive()) {
                 const analytics = await getAnalyticsData();
                 if (analytics) {
                     analyticsData = analytics;
@@ -4990,7 +5074,7 @@ export const pageCore = {
     
     loadPremiumFeatures: async () => {
         try {
-            if ((sessionClient.isReady ? sessionClient.isReady() : false) && isActive()) {
+            if ((sessionClient.isValid()) && isActive()) {
                 const response = await authorizedFetch('/api/premium/features', { method: 'GET' });
                 if (response && response.features) {
                     premiumFeatures = response.features;
@@ -5039,7 +5123,7 @@ export function handleSessionDataFromParent(sessionDataFromParent) {
         
         // Validate session content
         if (!__isValidSession(sessionDataFromParent)) {
-            console.warn('[Tools] Rejected invalid session from parent', {
+            if (window.__TOOLS_DEBUG__) console.warn('[Tools] Rejected invalid session from parent', {
                 hasToken: !!(sessionDataFromParent?.userToken || sessionDataFromParent?.token),
                 userId: sessionDataFromParent?.userId || sessionDataFromParent?.user_id
             });
@@ -5192,7 +5276,7 @@ export function handleSessionUpdate(updatedData) {
         
         // Validate update data
         if (!__isValidSession(updatedData)) {
-            console.warn('[Tools] Ignored invalid session update');
+            if (window.__TOOLS_DEBUG__) console.warn('[Tools] Ignored invalid session update');
             return;
         }
         
@@ -5203,7 +5287,7 @@ export function handleSessionUpdate(updatedData) {
             sessionData = mergedSession;
             sessionClient.acceptParentSession(mergedSession);
         } else {
-            console.warn('[Tools] Session update would create invalid session - rejected');
+            if (window.__TOOLS_DEBUG__) console.warn('[Tools] Session update would create invalid session - rejected');
             return;
         }
         
@@ -5352,11 +5436,17 @@ export async function handleUnauthorized() {
 }
 
 export async function safeApiCall(method, endpoint, data = null) {
-    // FIX: Do NOT swallow errors. Callers must handle failures explicitly so
-    // the UI never shows false-success when the backend was never reached.
-    console.log('[TOOLS FLOW] Step 2: API request sent', { method, endpoint });
+    // If no token yet, wait briefly for session to arrive before giving up.
+    // This prevents optimistic-UI rollback when the module just became ACTIVE.
+    let token = sessionClient.getToken ? sessionClient.getToken() : null;
+    if (!token) {
+        await new Promise(resolve => setTimeout(resolve, 800));
+        token = sessionClient.getToken ? sessionClient.getToken() : null;
+    }
+
+    if (window.__TOOLS_DEBUG__) console.log('[TOOLS FLOW] Step 2: API request sent', { method, endpoint, hasToken: !!token });
     const response = await secureApiCall(method, endpoint, data);
-    console.log('[TOOLS FLOW] Step 3: API response received', response);
+    if (window.__TOOLS_DEBUG__) console.log('[TOOLS FLOW] Step 3: API response received', response);
     if (response === null || response === undefined) {
         throw new Error('No response from server — token missing or module not active');
     }
@@ -5399,7 +5489,7 @@ export function initializeTokenSystem() {
     
     tokenInitializationPromise = new Promise(async (resolve, reject) => {
         try {
-            if (!(sessionClient.isReady ? sessionClient.isReady() : false)) {
+            if (!(sessionClient.isValid())) {
                 throw new Error('No session data available for token initialization');
             }
             
@@ -5436,12 +5526,12 @@ export async function bootstrapIframe() {
     if (isBootstrapped || moduleState.initialized) return;
     
     try {
-        if (!sessionData && !moduleState.sessionActive && !(sessionClient.isReady ? sessionClient.isReady() : false)) await new Promise(resolve => setTimeout(resolve, 1000));
+        if (!sessionData && !moduleState.sessionActive && !(sessionClient.isValid())) await new Promise(resolve => setTimeout(resolve, 1000));
         if (tokenInitializationPromise) {
             try { await tokenInitializationPromise; } catch {}
         }
         loadCachedDataInstantly();
-        if ((sessionClient.isReady ? sessionClient.isReady() : false) && isActive() && __isValidSession(sessionClient.getSession())) {
+        if ((sessionClient.isValid()) && isActive() && __isValidSession(sessionClient.getSession())) {
             try { await authorizedFetch('/api/auth/verify', { method: 'GET' }); } catch {}
         }
         isBootstrapped = true;
@@ -5597,7 +5687,7 @@ export async function loadListingsFromBackend() {
         }
     } catch(e) {
         // Server fetch failed — cached data was already hydrated above, just log
-        console.warn('[loadListingsFromBackend] Server fetch failed, using cache:', e.message);
+        if (window.__TOOLS_DEBUG__) console.warn('[loadListingsFromBackend] Server fetch failed, using cache:', e.message);
     }
 }
 
@@ -5777,13 +5867,16 @@ export async function createPremiumServiceListing(title, description, premiumOpt
         
         try {
             const response = await safeApiCall('POST', '/api/marketplace/listings/premium', listing);
-            if (response && response.listing) listing.id = response.listing.id || listingId;
+            if (response && response.listing) {
+                listing.id = response.listing.id || listingId;
+                // Only increment stats after confirmed backend success
+                updateListingStreak();
+                updateTrustStats('listingCreated');
+            }
         } catch {
             queueForSync(listing, 'premium_listing');
+            // Stats NOT incremented on failure
         }
-        
-        updateListingStreak();
-        updateTrustStats('listingCreated');
         
         return listing;
     } catch {
@@ -5851,13 +5944,14 @@ export async function createPremiumDigitalListing(title, description, fileData, 
         
         try {
             const response = await safeApiCall('POST', '/api/marketplace/listings/premium', listing);
-            if (response && response.listing) listing.id = response.listing.id || listingId;
+            if (response && response.listing) {
+                listing.id = response.listing.id || listingId;
+                updateListingStreak();
+                updateTrustStats('listingCreated');
+            }
         } catch {
             queueForSync(listing, 'premium_listing');
         }
-        
-        updateListingStreak();
-        updateTrustStats('listingCreated');
         
         return listing;
     } catch {
@@ -6211,15 +6305,15 @@ export function formatFileSize(bytes) {
 }
 
 export async function createServiceListing(title, description, options = {}) {
-    console.log('[TOOLS FLOW] Step 1: UI triggered — createServiceListing', { title });
+    if (window.__TOOLS_DEBUG__) console.log('[TOOLS FLOW] Step 1: UI triggered — createServiceListing', { title });
 
     if (!hasValidUser()) {
-        console.error('[TOOLS FLOW] createServiceListing: user not authenticated');
+        if (window.__TOOLS_DEBUG__) console.error('[TOOLS FLOW] createServiceListing: user not authenticated');
         showNotification('Please log in to create a listing.', 'error');
         return null;
     }
     if (!isActive()) {
-        console.error('[TOOLS FLOW] createServiceListing: module not active');
+        if (window.__TOOLS_DEBUG__) console.error('[TOOLS FLOW] createServiceListing: module not active');
         showNotification('Module not ready. Please try again.', 'error');
         return null;
     }
@@ -6272,7 +6366,7 @@ export async function createServiceListing(title, description, options = {}) {
 
     // Backend call — safeApiCall now throws on failure (no silent null)
     try {
-        console.log('[TOOLS FLOW] Step 2: API request sending');
+        if (window.__TOOLS_DEBUG__) console.log('[TOOLS FLOW] Step 2: API request sending');
         const response = await safeApiCall('POST', '/api/marketplace/listings', {
             title: optimistic.title,
             description: optimistic.description,
@@ -6283,7 +6377,7 @@ export async function createServiceListing(title, description, options = {}) {
             available: true
         });
 
-        console.log('[TOOLS FLOW] Step 3: API response received, status:', response?.success);
+        if (window.__TOOLS_DEBUG__) console.log('[TOOLS FLOW] Step 3: API response received, status:', response?.success);
         const confirmed = response?.data?.listing;
         if (!confirmed || !confirmed.id) {
             throw new Error('Backend did not return a valid listing — DB write may have failed');
@@ -6302,14 +6396,14 @@ export async function createServiceListing(title, description, options = {}) {
         // Broadcast to other tabs
         try { const ch = new BroadcastChannel('marketplace_sync'); ch.postMessage({ type: 'LISTING_CREATED', listing: committed }); ch.close(); } catch (_) {}
 
-        console.log('[TOOLS FLOW] Step 4: UI updated — listing committed to DB', { id: committed.id });
+        if (window.__TOOLS_DEBUG__) console.log('[TOOLS FLOW] Step 4: UI updated — listing committed to DB', { id: committed.id });
         updateListingStreak();
         updateTrustStats('listingCreated');
         return committed;
 
     } catch (err) {
         // Rollback optimistic update — do NOT leave ghost listing in UI or cache
-        console.error('[TOOLS FLOW] createServiceListing failed — rolling back', err.message);
+        if (window.__TOOLS_DEBUG__) console.error('[TOOLS FLOW] createServiceListing failed — rolling back', err.message);
         allListings = prevAll;
         myListings  = prevMy;
         window.allListings = allListings;
@@ -6323,15 +6417,15 @@ export async function createServiceListing(title, description, options = {}) {
 }
 
 export async function createDigitalListing(title, description, fileData, options = {}) {
-    console.log('[TOOLS FLOW] Step 1: UI triggered — createDigitalListing', { title });
+    if (window.__TOOLS_DEBUG__) console.log('[TOOLS FLOW] Step 1: UI triggered — createDigitalListing', { title });
 
     if (!hasValidUser()) {
-        console.error('[TOOLS FLOW] createDigitalListing: user not authenticated');
+        if (window.__TOOLS_DEBUG__) console.error('[TOOLS FLOW] createDigitalListing: user not authenticated');
         showNotification('Please log in to create a listing.', 'error');
         return null;
     }
     if (!isActive()) {
-        console.error('[TOOLS FLOW] createDigitalListing: module not active');
+        if (window.__TOOLS_DEBUG__) console.error('[TOOLS FLOW] createDigitalListing: module not active');
         showNotification('Module not ready. Please try again.', 'error');
         return null;
     }
@@ -6416,14 +6510,14 @@ export async function createDigitalListing(title, description, fileData, options
         // Broadcast to other tabs
         try { const ch = new BroadcastChannel('marketplace_sync'); ch.postMessage({ type: 'LISTING_CREATED', listing: committed }); ch.close(); } catch (_) {}
 
-        console.log('[TOOLS FLOW] Step 4: UI updated — digital listing committed to DB', { id: committed.id });
+        if (window.__TOOLS_DEBUG__) console.log('[TOOLS FLOW] Step 4: UI updated — digital listing committed to DB', { id: committed.id });
         updateListingStreak();
         updateTrustStats('listingCreated');
         return committed;
 
     } catch (err) {
         // Rollback
-        console.error('[TOOLS FLOW] createDigitalListing failed — rolling back', err.message);
+        if (window.__TOOLS_DEBUG__) console.error('[TOOLS FLOW] createDigitalListing failed — rolling back', err.message);
         allListings = prevAll;
         myListings  = prevMy;
         window.allListings = allListings;
@@ -6465,20 +6559,14 @@ export async function downloadDigitalFile(listingId, fileUrl, fileName) {
         downloadIndicator.innerHTML = `<i class="fas fa-spinner fa-spin"></i><span>Downloading ${escapeHtml(fileName)}...</span>`;
         document.body.appendChild(downloadIndicator);
         
-        updateTrustStats('fileDownloaded');
-        
-        const link = document.createElement('a');
-        link.href = fileUrl;
-        link.download = fileName;
-        link.style.display = 'none';
-        document.body.appendChild(link);
-        
         requestAnimationFrame(() => {
             link.click();
             const cleanup = () => {
                 if (link.parentNode) document.body.removeChild(link);
                 if (downloadIndicator.parentNode) document.body.removeChild(downloadIndicator);
                 showNotification(`Downloaded ${fileName}`, 'success');
+                // Only count after the download link actually fired
+                updateTrustStats('fileDownloaded');
             };
             setTimeout(cleanup, 5000);
         });
@@ -6734,13 +6822,13 @@ export function processUserData(userDataFromSource, source) {
     try {
         // Validate user data before processing
         if (!userDataFromSource || !userDataFromSource.id) {
-            console.warn('[Tools] Invalid user data received from', source);
+            if (window.__TOOLS_DEBUG__) console.warn('[Tools] Invalid user data received from', source);
             return;
         }
         
         const userId = userDataFromSource.id || userDataFromSource.userId;
         if (userId === 'user' || userId === 'default' || userId === 'null' || userId === 'undefined') {
-            console.warn('[Tools] Rejected fake user ID from', source);
+            if (window.__TOOLS_DEBUG__) console.warn('[Tools] Rejected fake user ID from', source);
             return;
         }
         
@@ -6761,7 +6849,7 @@ export function processUserData(userDataFromSource, source) {
         if (__isValidSession(sessionData)) {
             sessionClient.acceptParentSession(sessionData);
         } else {
-            console.warn('[Tools] Invalid session data from', source);
+            if (window.__TOOLS_DEBUG__) console.warn('[Tools] Invalid session data from', source);
         }
     } catch {}
 }
@@ -6877,7 +6965,7 @@ export function migrateLegacyUserData(data) {
         // Validate legacy data
         const userId = data.id || data.userId || data.user_id;
         if (userId === 'user' || userId === 'default' || userId === 'null' || userId === 'undefined') {
-            console.warn('[Tools] Rejected legacy user data with fake ID');
+            if (window.__TOOLS_DEBUG__) console.warn('[Tools] Rejected legacy user data with fake ID');
             return;
         }
         
@@ -7044,7 +7132,7 @@ if (typeof window !== 'undefined') {
             __MODULE_SESSION_ACTIVE__: () => window.__MODULE_SESSION_ACTIVE__,
             authorizedFetch: authorizedFetch,
             sessionStore: {
-                isReady: () => sessionClient.isReady ? sessionClient.isReady() : false,
+                isReady: () => sessionClient.isValid(),
                 getUser: () => sessionClient.getUser ? sessionClient.getUser() : null,
                 hasToken: () => !!sessionClient.getToken ? sessionClient.getToken() : false,
                 isValidSession: () => {
@@ -7155,7 +7243,7 @@ export async function openChat(userId, userName) {
 
 export async function loadAnalyticsData() {
     try {
-        if ((sessionClient.isReady ? sessionClient.isReady() : false) && isUserPremium() && isActive()) {
+        if ((sessionClient.isValid()) && isUserPremium() && isActive()) {
             const analytics = await getAnalyticsData();
             if (analytics) {
                 analyticsData = analytics;
@@ -7171,7 +7259,7 @@ export async function loadAnalyticsData() {
 
 export async function loadLeaderboard() {
     try {
-        if ((sessionClient.isReady ? sessionClient.isReady() : false) && isActive()) {
+        if ((sessionClient.isValid()) && isActive()) {
             const response = await authorizedFetch('/api/marketplace/leaderboard', { method: 'GET' });
             if (response && response.data?.leaderboard) {
                 leaderboardData = response.data.leaderboard;
@@ -7191,7 +7279,7 @@ export async function loadLeaderboard() {
 
 export async function updateTeamMemberRole(changes) {
     try {
-        if (!(sessionClient.isReady ? sessionClient.isReady() : false) || (!userSubscription || (userSubscription.plan !== 'business' && userSubscription.plan !== 'team'))) {
+        if (!(sessionClient.isValid()) || (!userSubscription || (userSubscription.plan !== 'business' && userSubscription.plan !== 'team'))) {
             throw new Error('Team features require a business or team subscription');
         }
         if (!isActive()) throw new Error('Module not active');
@@ -7299,7 +7387,7 @@ export default marketplace;
                 try { applySettingToToolsModule(section, ke[0], ke[1]); } catch(e) {}
             });
         });
-        console.log('[Tool-core] ✅ Settings bootstrapped from cache');
+        if (window.__TOOLS_DEBUG__) console.log('[Tool-core] ✅ Settings bootstrapped from cache');
     } catch(e) {}
     window.addEventListener('online', function() {
         try {

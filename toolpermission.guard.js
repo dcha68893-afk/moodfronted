@@ -33,7 +33,8 @@
     const _grantedPerms = new Map();
     const _auditLog = [];
     const MAX_AUDIT = 500;
-    const RATE_LIMIT = 60;
+    const RATE_LIMIT = 60;          // max calls per window
+    const RATE_WINDOW = 60 * 1000;  // FIX: was undefined — 1-minute rolling window in ms
     const _rateLimits = new Map();
     const _blocked = new Set();
 
@@ -49,7 +50,7 @@
         if (_auditLog.length > MAX_AUDIT) _auditLog.shift();
 
         if (result === 'denied') {
-            console.warn(`[PermissionGuard] ❌ DENIED [${toolId}] ${action} — ${reason}`);
+            if (window.__TOOLS_DEBUG__) console.warn(`[PermissionGuard] ❌ DENIED [${toolId}] ${action} — ${reason}`);
         }
 
         try {
@@ -153,7 +154,7 @@
 
         grantPermission(toolId, permission) {
             if (!ToolRegistryManager || !ToolRegistryManager.VALID_PERMISSIONS.has(permission)) {
-                console.warn('[PermissionGuard] Unknown permission:', permission);
+                if (window.__TOOLS_DEBUG__) console.warn('[PermissionGuard] Unknown permission:', permission);
                 return false;
             }
             if (!_grantedPerms.has(toolId)) _grantedPerms.set(toolId, new Set());

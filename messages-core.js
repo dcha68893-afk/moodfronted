@@ -5764,31 +5764,40 @@ try {
     }
     
     function restoreLastChat() {
+        // ✅ FIX B: Only auto-restore once per browser session.
+        // Without this guard, every navigateToPage('messages') call re-opens
+        // the chat panel, bypassing the sidebar entirely on fresh load.
+        // Users expect to see the SIDEBAR first; they choose which chat to open.
+        const SESSION_KEY = 'kyn_chat_restored_' + (SafeStorage.get('kyn_session_epoch') || '0');
+        if (sessionStorage.getItem(SESSION_KEY)) {
+            // Already restored this session — don't force-open the panel again.
+            return;
+        }
+        sessionStorage.setItem(SESSION_KEY, '1');
+
         const lastChatId = SafeStorage.get('lastChatId');
         if (!lastChatId) return;
 
-        const conversation = ChatManager.getConversation(lastChatId);
-        if (conversation) {
-            ConversationManager.openConversation(lastChatId);
-            return;
-        }
-
-        // Conversation not in memory yet (fetch still in flight or first load).
-        // Poll briefly then give up to avoid infinite loop.
+        // Give conversations 400ms to load from cache before trying
         let attempts = 0;
-        const MAX_ATTEMPTS = 10;
+        const MAX_ATTEMPTS = 8;
         const poll = setInterval(() => {
             attempts++;
-            const conv = ChatManager.getConversation(lastChatId);
+            const conv = ChatManager.getConversation
+                ? ChatManager.getConversation(lastChatId)
+                : null;
             if (conv) {
                 clearInterval(poll);
-                ConversationManager.openConversation(lastChatId);
+                // ✅ FIX B2: Restore to sidebar-highlight only, not forced panel open.
+                // Dispatch a custom event so the UI can highlight the chat in the list
+                // without opening the panel. Panel opens only on explicit user click.
+                window.dispatchEvent(new CustomEvent('kyn:restoreLastChat', {
+                    detail: { chatId: lastChatId, conversation: conv }
+                }));
+                // Pre-load messages into memory so first click is instant
+                ChatManager.fetchMessages?.(lastChatId, { background: true, minFetchGap: 0 }).catch(() => {});
             } else if (attempts >= MAX_ATTEMPTS) {
                 clearInterval(poll);
-                // Last resort: try by numeric id search across all conversations
-                const all = ChatManager.getConversations ? ChatManager.getConversations() : [];
-                const found = all.find(c => String(c.id) === String(lastChatId));
-                if (found) ConversationManager.openConversation(found.id);
             }
         }, 300);
     }

@@ -5042,39 +5042,48 @@ Type: ${message.type || 'text'}`;
 
     function openChatWithUserInUI(userId, userName, userAvatar, options = {}) {
         const { findExisting = false, returnFromCall = false } = options;
-        console.log('[MessageUI] Opening chat with user:', { userId, userName, userAvatar, findExisting, returnFromCall });
         
+        // Convert to numeric ID
         const numericUserId = parseInt(userId);
-        const core = getMessagesCore();
-
+        
         // Resolve name/avatar from FriendManager if not provided
-        let resolvedName = userName || 'User';
+        let resolvedName = userName;
         let resolvedAvatar = userAvatar || null;
+        
+        const core = getMessagesCore();
         if (core && core.FriendManager) {
             const friend = core.FriendManager.getFriend(numericUserId)
                         || core.FriendManager.getFriend(String(numericUserId));
             if (friend) {
-                resolvedName = friend.displayName || friend.username || friend.name || resolvedName;
+                resolvedName = resolvedName || friend.displayName || friend.username || friend.name;
                 resolvedAvatar = resolvedAvatar || friend.avatar || friend.photoURL || friend.avatarUrl || null;
             }
         }
         
-        const chatPanel = document.getElementById('chatPanel');
-        const sidebar = document.getElementById('sidebar');
-        const contactsSidebar = document.getElementById('contactsSidebar');
+        // If still no name, try to get from conversation data
+        if (!resolvedName && core && core.ChatManager) {
+            const conversation = core.ChatManager.getConversationByUserId(numericUserId);
+            if (conversation && conversation.chatName) {
+                resolvedName = conversation.chatName;
+            }
+        }
+        
+        // Final fallback
+        if (!resolvedName) {
+            resolvedName = 'User';
+        }
         
         if (contactsSidebar) { contactsSidebar.classList.add('hidden'); contactsSidebar.style.pointerEvents = 'none'; }
         if (sidebar) sidebar.classList.add('active');
         if (chatPanel) {
             chatPanel.classList.remove('hidden');
             UIStateManager.setState('chatVisible', true);
-            // FIX: If arriving from calls module, hide the back arrow so user can't
+            // FIX: If arriving from call, hide the back arrow so user can't
             // navigate "back" to an empty sidebar frame — the call module handles navigation.
-            const sourceIsCall = (window.__messageChatReturnUserId && window.__messageChatReturnId);
             const backBtn = document.getElementById('backToChatsBtn');
             if (backBtn) {
-                // On mobile show back button normally; on call-return hide it
-                backBtn.style.display = (sourceIsCall && window.innerWidth <= 768) ? 'none' : '';
+                // Hide back button when returning from call regardless of screen size
+                backBtn.style.display = returnFromCall ? 'none' : '';
             }
             // Push history state for device-back navigation support
             try {
@@ -5722,6 +5731,34 @@ Type: ${message.type || 'text'}`;
                         : [];
                     if (Array.isArray(cachedMessages) && cachedMessages.length > 0) {
                         UIRenderer.renderMessages(cachedMessages);
+                    } else if (existingConversation?.id && window.KynectaLocalStore) {
+                        // ✅ FIX C2: Load from IDB before showing "empty" state.
+                        // getCachedMessages() only checks the in-memory map which may
+                        // not be populated yet on first load — IDB has the real history.
+                        window.KynectaLocalStore.getMessagesByChat(String(existingConversation.id), { limit: 100 })
+                            .then(idbMsgs => {
+                                if (idbMsgs && idbMsgs.length > 0) {
+                                    UIRenderer.renderMessages(idbMsgs);
+                                    console.log('[messagesUI] ✅ FIX C2 Loaded', idbMsgs.length, 'messages from IDB for chat', existingConversation.id);
+                                } else {
+                                    messagesContainer.innerHTML = `
+                                        <div class="empty-chat">
+                                            <i class="fas fa-comment-dots empty-chat-icon"></i>
+                                            <div class="empty-chat-title">Conversation ready</div>
+                                            <div class="empty-chat-message">Type your first message below to start the conversation with ${displayName}</div>
+                                        </div>
+                                    `;
+                                }
+                            })
+                            .catch(() => {
+                                messagesContainer.innerHTML = `
+                                    <div class="empty-chat">
+                                        <i class="fas fa-comment-dots empty-chat-icon"></i>
+                                        <div class="empty-chat-title">Conversation ready</div>
+                                        <div class="empty-chat-message">Type your first message below to start the conversation with ${displayName}</div>
+                                    </div>
+                                `;
+                            });
                     } else {
                         messagesContainer.innerHTML = `
                             <div class="empty-chat">
@@ -5788,7 +5825,8 @@ Type: ${message.type || 'text'}`;
 
             if (existingConversation?.id && core.openConversation) {
                 console.log('[messagesUI] Opening existing conversation instantly:', existingConversation.id);
-                core.openConversation(existingConversation.id, { minFetchGap: 25000 }).catch?.(() => {});
+                // ✅ FIX C1: minFetchGap:0 on explicit user open — always fetch fresh messages.
+                core.openConversation(existingConversation.id, { minFetchGap: 0 }).catch?.(() => {});
                 ensureChatPanelOpen(existingConversation.id);
                 return;
             }

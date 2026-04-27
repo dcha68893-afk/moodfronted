@@ -2375,9 +2375,22 @@
             }
             updateHeaderContext(page);
             updateHeaderActions(page);
-            document.querySelectorAll('.iframe-container').forEach(c => c.classList.add('hidden'));
+            
+            console.log('[Navigation] Hiding all iframe containers...');
+            document.querySelectorAll('.iframe-container').forEach(c => {
+                console.log('[Navigation] Hiding:', c.id, 'current classes:', c.className);
+                c.classList.add('hidden');
+            });
+            
             const target = document.getElementById(`${page}Content`);
-            if (target) target.classList.remove('hidden');
+            console.log('[Navigation] Target element:', target, 'for page:', page);
+            if (target) {
+                console.log('[Navigation] Target before removing hidden:', target.className);
+                target.classList.remove('hidden');
+                console.log('[Navigation] Target after removing hidden:', target.className);
+            } else {
+                console.error('[Navigation] Target element not found for page:', page);
+            }
             document.querySelectorAll('.nav-icon, .mobile-nav-icon').forEach(b => b.classList.remove('active'));
             document.querySelectorAll(`.nav-icon[data-page="${page}"], .mobile-nav-icon[data-page="${page}"]`).forEach(b => b.classList.add('active'));
             
@@ -2406,9 +2419,26 @@
             if (iframeId) {
                 const iframe = document.getElementById(iframeId);
                 applyParentShellToIframe(iframe, page);
+                // ✅ FIX D: Always refresh cachedToken before sending session.
+                // After call-end or internal navigation, cachedToken may be stale/null
+                // even though the user is still authenticated.
+                // updateSessionCache() re-reads from localStorage so sendSessionToModule
+                // always has a valid token — prevents hasToken:false rejection in modules.
+                if (!window.__cachedToken || !window.__cachedUserId) {
+                    if (typeof updateSessionCache === 'function') updateSessionCache();
+                }
                 if (iframe && iframe.contentWindow && window.__cachedToken && window.__cachedUserId) {
                     window.__sendSessionToModule(iframe, page);
                     setTimeout(() => window.__pushSettingsToModule(iframe, page), 150);
+                } else if (iframe && iframe.contentWindow) {
+                    // ✅ FIX D2: Token still unavailable — retry once after 500ms
+                    setTimeout(() => {
+                        if (typeof updateSessionCache === 'function') updateSessionCache();
+                        if (window.__cachedToken && window.__cachedUserId) {
+                            window.__sendSessionToModule(iframe, page);
+                            setTimeout(() => window.__pushSettingsToModule(iframe, page), 150);
+                        }
+                    }, 500);
                 }
             }
 
@@ -2531,6 +2561,7 @@
                     }
                 }
                 
+                                
                 // Handle call termination events from child
                 if (data.type === 'CALL_ENDED' || data.type === 'CALL_FORCE_ENDED' || data.type === 'CALL_REJECTED') {
                     hideGlobalBanner();
@@ -2554,6 +2585,9 @@
             }
         });
     </script>
+    
+    <!-- 🔇 CONSOLE NOISE FILTER - Must be first -->
+    <script src="js/console-noise-filter.js"></script>
     
     <!-- ✅ SAFETY LAYER — Must be first (patch v1) -->
     <script src="js/kynecta.safety.layer.js"></script>
@@ -3439,6 +3473,27 @@
                 }
                 
                 // ==================================================================
+                // CALL NAVIGATION HANDLER - CRITICAL FIX FOR CALL SCREEN
+                // ==================================================================
+                if (data.type === 'NAVIGATE_TO_CALLS_FOR_CALL') {
+                    console.log('[Parent] Navigation request for call:', data.payload);
+                    console.log('[Parent] Current page before navigation:', window.__currentPage);
+                    console.log('[Parent] callsContent element before:', document.getElementById('callsContent')?.className);
+                    
+                    // Navigate to calls page immediately to make iframe visible
+                    navigateToPage('calls');
+                    
+                    console.log('[Parent] Current page after navigation:', window.__currentPage);
+                    console.log('[Parent] callsContent element after:', document.getElementById('callsContent')?.className);
+                    
+                    // Apply call-screen-active class immediately for full screen
+                    window.__activeCallInProgress = true;
+                    document.body.classList.add('call-screen-active');
+                    console.log('[Parent] call-screen-active class applied');
+                    return;
+                }
+                
+                // ==================================================================
                 // CALL CANCELLED HANDLER
                 // ==================================================================
                 if (data.type === 'CALL_CANCELLED' || data.type === 'call:cancelled') {
@@ -3602,7 +3657,9 @@
 
                 if (data.type === 'SWITCH_MODULE' && data.module === 'calls') {
                     const p = data.payload || {};
-                    __dispatchCallToIframe(p.userId, p.userName || 'User', p.callType || 'voice', p.returnTo || 'messages', p.chatUserId || p.userId, 'messages-module');
+                    // CRITICAL FIX: Preserve the original returnTo from payload
+                    const returnTo = p.returnTo || (window.__currentPage && window.__currentPage !== 'calls') ? window.__currentPage : (window.__lastActivePage || 'messages');
+                    __dispatchCallToIframe(p.userId, p.userName || 'User', p.callType || 'voice', returnTo, p.chatUserId || p.userId, data.source || 'messages-module');
                     return;
                 }
 
@@ -3631,7 +3688,7 @@
                                 setTimeout(() => {
                                     msgIframe.contentWindow.postMessage({
                                         type: 'OPEN_CHAT_WITH_USER',
-                                        payload: { userId: ctx.chatUserId, userName: ctx.userName || 'User', returnFromCall: true, timestamp: Date.now() },
+                                        payload: { userId: ctx.chatUserId, userName: ctx.userName, returnFromCall: true, timestamp: Date.now() },
                                         source: 'parent-frame'
                                     }, '*');
                                     if (window.innerWidth <= 768) document.body.classList.add('chat-panel-active');
@@ -4339,8 +4396,6 @@
                 }
 
                 function _fwdGroupCreated(data) {
-                    console.log('[GROUP FLOW] RECEIVED: group:created id=',
-                        data && data.group ? data.group.id : (data && data.id));
                     _fwdToGroupIframe('GROUP_CREATED',   data);
                     _fwdToGroupIframe('group:created',   data);
                     _fwdToGroupIframe('group:localSync', {
@@ -4348,11 +4403,9 @@
                         group:   (data && data.group) || data,
                         groupId: (data && data.group && data.group.id) || (data && data.id)
                     });
-                    console.log('[GROUP FLOW] RENDERED: group:created → groupIframe');
                 }
 
                 function _fwdGroupMessage(data) {
-                    console.log('[GROUP FLOW] RECEIVED: group:message groupId=', data && data.groupId);
                     _fwdToGroupIframe('GROUP_MESSAGE',   data);
                     _fwdToGroupIframe('group:message',   data);
                     _fwdToGroupIframe('group:localSync', {
@@ -4360,7 +4413,6 @@
                         groupId: data && data.groupId,
                         message: (data && data.message) || data
                     });
-                    console.log('[GROUP FLOW] RENDERED: group:message → groupIframe');
                 }
 
                 function _fwdGroupLocalSync(data) {
@@ -4394,7 +4446,6 @@
                 window.wsService.on('group_joined',              _fwdGroupCreated);
                 window.wsService.on('group:invitation:received', function(d) { _fwdToGroupIframe('GROUP_INVITE_RECEIVED', d); });
                 window.wsService.on('group:typing',              function(d) { _fwdToGroupIframe('GROUP_TYPING',          d); });
-                console.log('[GROUP BRIDGE] Group WebSocket -> groupIframe bridge active');
             }
 
             // Bind now if wsService is already real

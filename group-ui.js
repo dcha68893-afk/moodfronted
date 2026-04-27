@@ -1843,7 +1843,7 @@ export function registerMessageHandlers() {
             if (message.type === 'GROUP_CREATED' || message.type === 'group:created') {
                 const grp = (message.payload && message.payload.group) || message.payload;
                 if (grp && grp.id) {
-                    console.log('[GroupUI] REALTIME group:created → group', grp.id, grp.name);
+                    // (log suppressed)
                     // Add to GroupCore if available
                     if (window.GroupCore) {
                         const GC = window.GroupCore;
@@ -1879,7 +1879,7 @@ export function registerMessageHandlers() {
                 const gid = p.groupId || p.group_id;
                 const msg = p.message || p;
                 if (!gid || !msg) return;
-                console.log('[GroupUI] REALTIME group:message → group', gid);
+                // (log suppressed)
                 // Update GroupCore in-memory store
                 if (window.GroupCore && typeof window.GroupCore.addGroupMessage === 'function') {
                     window.GroupCore.addGroupMessage(gid, msg);
@@ -1904,7 +1904,7 @@ export function registerMessageHandlers() {
             // ── GROUP LOCALYNC (covers create/update/delete/member changes) ─
             if (message.type === 'group:localSync') {
                 const d = message.payload || {};
-                console.log('[GroupUI] REALTIME group:localSync →', d.action);
+                // (log suppressed)
                 if (d.action === 'create' || d.action === 'upsert') {
                     // Re-render to show new group
                     if (typeof renderGroupsListSecure === 'function') renderGroupsListSecure();
@@ -1925,14 +1925,14 @@ export function registerMessageHandlers() {
 
             // ── GROUP MEMBER CHANGES ──────────────────────────────────────────
             if (message.type === 'GROUP_MEMBER_ADDED' || message.type === 'GROUP_MEMBER_REMOVED' || message.type === 'GROUP_MEMBER_LEFT') {
-                console.log('[GroupUI] REALTIME', message.type);
+                // (log suppressed)
                 if (typeof renderGroupsListSecure === 'function') renderGroupsListSecure();
                 return;
             }
 
             // ── GROUP INVITE RECEIVED ─────────────────────────────────────────
             if (message.type === 'GROUP_INVITE_RECEIVED' || message.type === 'group:invitation:received') {
-                console.log('[GroupUI] REALTIME group invitation received');
+                // (log suppressed)
                 if (typeof renderGroupInvitesSecure === 'function') renderGroupInvitesSecure();
                 if (typeof showNotification === 'function') showNotification('You have a new group invitation!', 'info');
                 return;
@@ -3462,7 +3462,7 @@ export function setupCreateGroupModal() {
  * Bind create group modal events
  */
 function bindCreateGroupModalEvents() {
-    console.log('[GroupUI] Binding create group modal events...');
+    // (log suppressed)
     // Close (×) button at top
     const createGroupClose = safeGetElement('#createGroupClose');
     if (createGroupClose) {
@@ -3492,7 +3492,7 @@ function bindCreateGroupModalEvents() {
             e.preventDefault();
             e.stopPropagation();
             
-            console.log('[GroupUI] Cancel button clicked');
+            // (log suppressed)
             
             const modal = safeGetElement('#createGroupModal');
             if (modal) { 
@@ -3508,10 +3508,10 @@ function bindCreateGroupModalEvents() {
             const chips = safeGetElement('#selectedMembersChips');
             if (chips) chips.innerHTML = '';
             
-            console.log('[GroupUI] Create group modal cancelled');
+            // (log suppressed)
         });
         
-        console.log('[GroupUI] Cancel button event listener attached');
+        // (log suppressed)
     } else {
         console.warn('[GroupUI] Cancel button not found in DOM');
     }
@@ -3527,7 +3527,7 @@ function bindCreateGroupModalEvents() {
             e.preventDefault();
             e.stopPropagation();
             
-            console.log('[GroupUI] Create Group button clicked');
+            // (log suppressed)
             
             const nameInput = safeGetElement('#groupNameInput');
             if (!nameInput || !nameInput.value.trim()) {
@@ -3573,7 +3573,7 @@ function bindCreateGroupModalEvents() {
                         window.__pendingInvitationMethods.set(friendId, 'invite');
                     });
                     
-                    console.log(`[GroupUI] Creating group with ${directAdditions.length} direct members and ${pendingInvitations.length} pending invitations`);
+                    // (log suppressed)
                 }
                 
                 // Create the group
@@ -3605,7 +3605,7 @@ function bindCreateGroupModalEvents() {
             }
         });
         
-        console.log('[GroupUI] Create Group button event listener attached');
+        // (log suppressed)
     } else {
         console.warn('[GroupUI] Create Group button not found in DOM');
     }
@@ -4323,7 +4323,7 @@ export function registerUICoreEvents() {
 
         // group:created — new group appeared (sender's optimistic OR receiver's realtime)
         GC.on('group:created', (grp) => {
-            console.log('[GroupUI] GroupCore group:created → re-rendering', grp?.name);
+            // (log suppressed)
             if (typeof renderGroupsListSecure === 'function') {
                 try { renderGroupsListSecure(); } catch(_) {}
             }
@@ -4380,7 +4380,7 @@ export function registerUICoreEvents() {
             }
         });
 
-        console.log('[GroupUI] ✅ GroupCore → UI event bridge installed');
+        // (log suppressed)
     } else if (!window.__groupUiCoreEventsBound) {
         // GroupCore may not be ready yet — wait up to 5s
         let attempts = 0;
@@ -4958,7 +4958,7 @@ document.addEventListener('click', function(e) {
         e.preventDefault();
         e.stopPropagation();
         
-        console.log('[GroupUI] Cancel button clicked (global handler)');
+        // (log suppressed)
         
         const modal = document.querySelector('#createGroupModal');
         if (modal) { 
@@ -4976,14 +4976,14 @@ document.addEventListener('click', function(e) {
         const chips = document.querySelector('#selectedMembersChips');
         if (chips) chips.innerHTML = '';
         
-        console.log('[GroupUI] Create group modal cancelled (global handler)');
+        // (log suppressed)
     }
     
     if (e.target.id === 'createGroupBtnModal') {
         e.preventDefault();
         e.stopPropagation();
         
-        console.log('[GroupUI] Create Group button clicked (global handler)');
+        // (log suppressed)
         
         const nameInput = document.querySelector('#groupNameInput');
         if (!nameInput || !nameInput.value.trim()) {
@@ -5013,7 +5013,7 @@ async function createGroupAsync(buttonElement) {
         buttonElement.textContent = 'Creating…';
         buttonElement.classList && buttonElement.classList.add('btn-loading');
     }
-    console.log('[GROUP FLOW] SENT: createGroupAsync started');
+    // (log suppressed)
 
     try {
         const groupData = typeof collectGroupFormData === 'function' ? collectGroupFormData() : {};
@@ -5042,7 +5042,7 @@ async function createGroupAsync(buttonElement) {
                 window.__pendingInvitationMethods.set(friendId, 'invite');
             });
 
-            console.log(`[GroupUI] Creating group with ${directAdditions.length} direct members and ${pendingInvitations.length} pending invitations`);
+            // (log suppressed)
         }
 
         // ── SENT: call backend ────────────────────────────────────────────
@@ -5051,11 +5051,11 @@ async function createGroupAsync(buttonElement) {
             const result = await createGroupOnline(groupData);
             // Normalise result shape
             createdGroup = result?.group || result?.data?.group || result?.data || null;
-            console.log('[GROUP FLOW] EMITTED: createGroupOnline resolved', createdGroup?.id || '(no id)');
+            // (log suppressed)
         } else if (window.GroupCore && typeof window.GroupCore.createGroup === 'function') {
             const result = await window.GroupCore.createGroup(groupData);
             createdGroup = result?.data?.group || result?.data || null;
-            console.log('[GROUP FLOW] EMITTED: GroupCore.createGroup resolved', createdGroup?.id || '(no id)');
+            // (log suppressed)
         }
 
         // Reset selection
@@ -5077,7 +5077,7 @@ async function createGroupAsync(buttonElement) {
         if (typeof showNotification === 'function') {
             showNotification('Group created successfully!', 'success');
         }
-        console.log('[GROUP FLOW] RENDERED: Group list refreshed after creation');
+        // (log suppressed)
 
     } catch (e) {
         console.error('[GroupUI] Create group error:', e);

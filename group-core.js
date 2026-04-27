@@ -997,7 +997,8 @@ case 'SETTING_CHANGED':
     },
     
     handleSessionUpdate(message) {
-        const updateData = message.payload;
+        // Use let (not const) — we reassign when normalising the userId below
+        let updateData = message.payload;
         /* lifecycle log suppressed */
         
         if (updateData && LifecycleState.isActive()) {
@@ -1062,9 +1063,18 @@ case 'SETTING_CHANGED':
     
     handleApiResponse(message) {
         const payload = message.payload || {};
-        const { requestId, success, data, error } = payload;
-        
-        console.log(`[${MODULE_NAME}] API_RESPONSE received for ${requestId}: ${success ? 'SUCCESS' : 'FAILED'}`);
+        const { requestId, success, error } = payload;
+        // Normalise common backend response shapes so callers always get the entity directly:
+        //   { data: { group: {…} } }  →  data = group object
+        //   { data: { message: {…} } } →  data = message object
+        //   { data: { member: {…} } }  →  data = member object
+        //   { data: { groups: […] } }  →  left intact (requestGroupList expects array wrapper)
+        let data = payload.data;
+        if (data && typeof data === 'object' && !Array.isArray(data)) {
+            if (data.group   && !data.groups)  data = data.group;
+            else if (data.message && !data.groups) data = data.message;
+            else if (data.member  && !data.groups) data = data.member;
+        }
         
         if (requestId) {
             if (success) {
@@ -1181,6 +1191,12 @@ handleSettingsChange(message) {
                 } else {
                     if (typeof joinedGroups !== 'undefined') joinedGroups.push(newGroup);
                 }
+            }
+
+            // Refresh UI so the new group appears immediately
+            if (LifecycleState.isActive()) {
+                if (typeof updateGroupCounts === 'function') updateGroupCounts();
+                if (typeof updateCurrentSection === 'function') updateCurrentSection();
             }
         }
     },
@@ -3040,7 +3056,7 @@ if (typeof window !== 'undefined' && !window.__GROUPS_MESSAGE_LISTENER_SET__) {
     
     // ✅ ENHANCED: Handle real-time group member events
     function handleGroupMemberEvent(eventName, data) {
-        console.log(`[GroupsCore] 📋 GROUP MEMBER EVENT:`, { eventName, data });
+        // member event received
         
         try {
             const { groupId, memberId, role, userId, member } = data || {};
@@ -3063,13 +3079,13 @@ if (typeof window !== 'undefined' && !window.__GROUPS_MESSAGE_LISTENER_SET__) {
                     if (member && !group.members.find(m => m.id === member.id)) {
                         group.members.push(member);
                     }
-                    console.log(`[GroupsCore] ✅ Member added to group ${groupId}:`, member);
+                    // member added
                     break;
                     
                 case 'group:member_removed':
                 case 'group:member_left':
                     group.members = group.members.filter(m => m.id !== memberId);
-                    console.log(`[GroupsCore] ✅ Member removed from group ${groupId}:`, memberId);
+                    // member removed
                     break;
                     
                 case 'group:member_role_changed':
@@ -3077,7 +3093,7 @@ if (typeof window !== 'undefined' && !window.__GROUPS_MESSAGE_LISTENER_SET__) {
                     if (memberToUpdate && role) {
                         memberToUpdate.role = role;
                     }
-                    console.log(`[GroupsCore] ✅ Member role changed in group ${groupId}:`, { memberId, role });
+                    // role changed
                     break;
             }
             
@@ -3423,6 +3439,20 @@ function processGroupActionQueue() {
 // =============================================
 // GLOBAL VARIABLES (PRESERVED FOR BACKWARD COMPATIBILITY)
 // =============================================
+// =============================================
+// SAFE ARRAY / OBJECT HELPERS
+// =============================================
+function safeArray(v) {
+    if (Array.isArray(v)) return v;
+    if (v == null) return [];
+    if (typeof v === 'object' && Array.isArray(v.data)) return v.data;
+    return [];
+}
+function safeObject(v) {
+    if (v && typeof v === 'object' && !Array.isArray(v)) return v;
+    return {};
+}
+
 let currentUser = null; // Will be updated from session
 let userData = null;    // Will be updated from session
 let groups = [];
@@ -4965,6 +4995,8 @@ function addMessageToChat(messageData, isNew = true) {
         
         const messageElement = document.createElement('div');
         messageElement.className = 'message';
+        // Required so confirmed messages can replace their temp counterpart in the DOM
+        messageElement.dataset.messageId = safeMessageData.id || '';
         
         const isSystem = safeMessageData.type === 'system';
         const isSent = safeMessageData.senderId === (session.user?.uid || session.user?.id);
@@ -5087,13 +5119,20 @@ const sendGroupMessage = async function() {
             const response = await GroupCore.sendGroupMessage(currentChatGroup.id, messageContent, selectedTopic, isAnonymousMode);
             
             if (response && response.success) {
-                const finalMessage = {
-                    ...tempMessage,
-                    id: response.data?.id || tempMessage.id
-                };
+                const confirmedId = response.data?.id || tempMessage.id;
+                // Update the temp element's id in-place — avoids a duplicate message appearing
+                const tempEl = document.querySelector(`[data-message-id="${tempMessage.id}"]`);
+                if (tempEl) {
+                    tempEl.dataset.messageId = confirmedId;
+                    tempEl.classList.remove('sending', 'pending');
+                }
+                const finalMessage = { ...tempMessage, id: confirmedId };
                 GroupCore.saveGroupMessages(currentChatGroup.id, [finalMessage]);
-                
-                GroupCore.addGroupMessage(currentChatGroup.id, finalMessage);
+                // Only call addGroupMessage for cache; NOT addMessageToChat again (would duplicate)
+                GroupCore.groupMessages[currentChatGroup.id] = GroupCore.groupMessages[currentChatGroup.id] || [];
+                if (!GroupCore.groupMessages[currentChatGroup.id].some(m => m.id === confirmedId)) {
+                    GroupCore.groupMessages[currentChatGroup.id].push(finalMessage);
+                }
                 
                 if (isAnonymousMode) {
                     toggleAnonymousMode();
@@ -5844,52 +5883,31 @@ const createGroupOnline = async function(groupData) {
             participationModes: groupData.participationModes || {}
         };
         
-        // FIXED: Add timeout and retry logic for group creation
+        // Call GroupCore.createGroup — with the patch applied, this returns immediately
+        // (optimistic local group) without waiting for the backend.
         let response = null;
-        let retryCount = 0;
-        const maxRetries = 3;
-        
-        while (retryCount < maxRetries && (!response || !response.success)) {
-            try {
-                response = await GroupCore.createGroup(groupDataToSave);
-                if (response && response.success) break;
-                
-                retryCount++;
-                if (retryCount < maxRetries) {
-                    console.log(`[GROUP CREATE] Retry ${retryCount}/${maxRetries} for group: ${groupData.name}`);
-                    await new Promise(resolve => setTimeout(resolve, 1000 * retryCount));
-                }
-            } catch (error) {
-                console.warn(`[GROUP CREATE] Attempt ${retryCount + 1} failed:`, error.message);
-                retryCount++;
-                if (retryCount < maxRetries) {
-                    await new Promise(resolve => setTimeout(resolve, 1000 * retryCount));
-                }
-            }
+        try {
+            response = await GroupCore.createGroup(groupDataToSave);
+        } catch (error) {
+            console.warn('[GROUP CREATE] createGroup error:', error.message);
         }
         
         if (!response || !response.success) {
-            throw new Error(response?.error || `Failed to create group after ${maxRetries} attempts`);
+            throw new Error(response?.error || 'Failed to create group');
         }
         
         const newGroup = response.data;
         
-        groups.push(newGroup);
-        myGroups.push(newGroup);
-        adminGroups.push(newGroup);
+        // Push to globals in case patch didn't already (dedup by id)
+        if (!groups.some(g => g.id === newGroup.id)) groups.push(newGroup);
+        if (!myGroups.some(g => g.id === newGroup.id)) myGroups.push(newGroup);
+        if (!adminGroups.some(g => g.id === newGroup.id)) adminGroups.push(newGroup);
         
         GroupCore.saveGroups();
         updateGroupCounts();
         updateCurrentSection();
         
-        const inviteLinkInput = safeGetElement('#inviteLinkInput');
-        const copyInviteLinkBtn = safeGetElement('#copyInviteLinkBtn');
-        const shareInviteLinkBtn = safeGetElement('#shareInviteLinkBtn');
-        
-        if (inviteLinkInput) inviteLinkInput.value = `${window.location.origin}/group.html?join=${newGroup.id}`;
-        if (copyInviteLinkBtn) copyInviteLinkBtn.disabled = false;
-        if (shareInviteLinkBtn) shareInviteLinkBtn.disabled = false;
-        
+        // Close modals immediately — group is already visible in UI
         const createGroupModal = safeGetElement('#createGroupModal');
         const friendSelectionModal = safeGetElement('#friendSelectionModal');
 
@@ -5901,6 +5919,14 @@ const createGroupOnline = async function(groupData) {
             friendSelectionModal.classList.remove('active');
             friendSelectionModal.style.display = 'none';
         }
+
+        const inviteLinkInput = safeGetElement('#inviteLinkInput');
+        const copyInviteLinkBtn = safeGetElement('#copyInviteLinkBtn');
+        const shareInviteLinkBtn = safeGetElement('#shareInviteLinkBtn');
+        
+        if (inviteLinkInput) inviteLinkInput.value = `${window.location.origin}/group.html?join=${newGroup.id}`;
+        if (copyInviteLinkBtn) copyInviteLinkBtn.disabled = false;
+        if (shareInviteLinkBtn) shareInviteLinkBtn.disabled = false;
 
         const allInvites = [...new Set([
             ...safeArray(selectedFriends),
@@ -7873,7 +7899,7 @@ window.GroupCore = GroupCore;
                 try { applySettingToGroupModule(section, keyEntry[0], keyEntry[1]); } catch(e) {}
             });
         });
-        console.log('[group-core] ✅ Settings bootstrapped from cache');
+        // settings bootstrapped;
     } catch(e) {}
     window.addEventListener('online', function() {
         try {
@@ -7881,4 +7907,3 @@ window.GroupCore = GroupCore;
         } catch(e) {}
     });
 })();
-
