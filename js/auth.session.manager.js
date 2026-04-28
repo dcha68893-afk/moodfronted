@@ -270,17 +270,15 @@
         if (!token || typeof token !== 'string') return false;
         
         try {
+            // PATCH: Only validate JWT structure (3 parts) — do NOT check expiry locally.
+            // Local expiry checks cause false negatives: a token that is expired but has a
+            // valid refresh token will be rejected here, skipping the /api/auth/refresh call
+            // entirely and producing a flood of 401 errors.  Expiry enforcement is the
+            // server's responsibility; the client must always attempt a silent refresh on 401.
             const parts = token.split('.');
             if (parts.length !== 3) return false;
-            
-            const payload = JSON.parse(atob(parts[1]));
-            if (payload.exp) {
-                const expiryTime = payload.exp * 1000;
-                if (Date.now() > expiryTime) {
-                    console.log('[SessionManager] Token expired');
-                    return false;
-                }
-            }
+            // Confirm the payload is decodable (guards against corrupt storage values)
+            JSON.parse(atob(parts[1]));
             return true;
         } catch (error) {
             return false;

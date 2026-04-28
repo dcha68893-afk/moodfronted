@@ -3821,31 +3821,84 @@ try {
     }
 
     /**
-     * PUBLIC: Validate token - non-blocking, offline-first
-     * PATCH: Uses kynecta_auth as primary key; always returns a Promise
+     * PUBLIC: Validate token — always calls the server endpoint.
+     * PATCH v1.6: Removed local-only validation. Previously this function read
+     * kynecta_auth from localStorage and returned { valid: true } without ever
+     * contacting the server. That meant an expired (but structurally valid) token
+     * was treated as valid, so the 401 interceptor in _safeApiCall never got a
+     * chance to attempt a silent refresh. Now we always POST to /api/auth/validate-token.
+     * Offline fallback: if the device has no network we return the local token as
+     * "valid" to avoid breaking offline UX — the server will enforce expiry on the
+     * next real request.
      */
-    function validateToken() {
+    async function validateToken() {
         try {
-            // Primary: kynecta_auth (used by authStorage.js and the rest of the app)
-            const raw = localStorage.getItem('kynecta_auth');
-            if (raw) {
-                const auth = JSON.parse(raw);
-                if (auth && auth.token) {
-                    return Promise.resolve({ valid: true, token: auth.token, user: auth.user || null });
+            // Retrieve local token first — if there is none there is nothing to validate.
+            let localToken = null;
+            try {
+                const raw = localStorage.getItem('kynecta_auth');
+                if (raw) {
+                    const auth = JSON.parse(raw);
+                    if (auth && auth.token) localToken = auth.token;
                 }
+            } catch (_) {}
+            if (!localToken) {
+                // Legacy fallback keys
+                localToken = localStorage.getItem('auth_token') ||
+                             localStorage.getItem('accessToken') ||
+                             localStorage.getItem('USER_TOKEN') ||
+                             localStorage.getItem('kynecta_token') || null;
             }
-            // Legacy fallback keys
-            const token = localStorage.getItem('auth_token') ||
-                          localStorage.getItem('accessToken') ||
-                          localStorage.getItem('USER_TOKEN') ||
-                          localStorage.getItem('kynecta_token');
-            if (!token) {
-                return Promise.resolve({ valid: false, reason: 'no_token' });
+
+            if (!localToken) {
+                return { valid: false, reason: 'no_token' };
             }
-            const user = getUser();
-            return Promise.resolve({ valid: !!user, token, user: user || null });
+
+            // Offline: trust the local token and let the server reject it later.
+            if (!_isOnline()) {
+                return { valid: true, token: localToken, user: getUser(), offline: true };
+            }
+
+            // Online: ask the server — this is the only authoritative check.
+            const baseUrl = _getBaseUrl();
+            const response = await fetch(`${baseUrl}/api/auth/validate-token`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${localToken}`
+                },
+                body: JSON.stringify({ token: localToken })
+            });
+
+            const data = await response.json().catch(() => ({}));
+
+            if (response.ok && data.valid) {
+                return { valid: true, token: localToken, user: data.user || getUser() };
+            }
+
+            // Token rejected by server — attempt a silent refresh before giving up.
+            if (response.status === 401) {
+                console.warn('[validateToken] Server rejected token (401) — attempting silent refresh');
+                try {
+                    const refreshed = await refreshToken();
+                    if (refreshed) {
+                        // Reload the fresh token and report valid.
+                        const freshRaw = localStorage.getItem('kynecta_auth');
+                        const freshToken = freshRaw ? JSON.parse(freshRaw).token : null;
+                        return { valid: !!freshToken, token: freshToken, user: getUser(), refreshed: true };
+                    }
+                } catch (_) {}
+                return { valid: false, reason: 'token_rejected_refresh_failed' };
+            }
+
+            return { valid: false, reason: 'server_rejected', status: response.status };
         } catch (error) {
-            return Promise.resolve({ valid: false, reason: 'validation_error', error: error.message });
+            // Network error — fall back to local token so offline mode still works.
+            console.warn('[validateToken] Network error, falling back to local token:', error.message);
+            const localToken = getUserToken();
+            return localToken
+                ? { valid: true, token: localToken, user: getUser(), offline: true, error: error.message }
+                : { valid: false, reason: 'validation_error', error: error.message };
         }
     }
     
