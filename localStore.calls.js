@@ -48,22 +48,23 @@
     return new Promise((resolve) => {
       const handleCacheReady = () => {
         if (window.AppCache) {
+          window.removeEventListener('kyn:cacheReady', handleCacheReady);
           resolve(window.AppCache);
         }
       };
       
       window.addEventListener('kyn:cacheReady', handleCacheReady, { once: true });
       
-      // Fallback: check if AppCache becomes available within 2 seconds
+      // Fallback: check if AppCache becomes available within 5 seconds
       setTimeout(() => {
         if (window.AppCache) {
           window.removeEventListener('kyn:cacheReady', handleCacheReady);
           resolve(window.AppCache);
         } else {
-          console.log('[CallLocalStore] AppCache not available, using localStorage fallback');
+          console.log('[CallLocalStore] AppCache not available after 5s, using localStorage fallback');
           resolve(null);
         }
-      }, 2000);
+      }, 5000);
     });
   }
 

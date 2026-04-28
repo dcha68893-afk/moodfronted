@@ -84,7 +84,7 @@
         maxConsecutiveErrors: 5,
         heartbeatInterval: 30000,
         heartbeatTimeout:   5000,
-        connectionTimeout: 10000,
+        connectionTimeout: 20000,
         authTimeout:        5000,
         messageQueueLimit: 500,
         tokenWaitMs:        5000,
@@ -424,8 +424,9 @@
         }
 
         async _connectSocketIO() {
-            const baseUrl = getBackendBaseUrl();
-            const socketUrl = baseUrl.replace(/^http/, 'ws');
+            // Use the frontend URL for Socket.IO connection, not the backend
+            // Socket.IO will handle the WebSocket connection internally
+            const socketUrl = getBackendBaseUrl(); // Keep as HTTP/HTTPS, let Socket.IO handle WebSocket
             
             console.log('[Realtime] Connecting Socket.IO to', socketUrl);
             
