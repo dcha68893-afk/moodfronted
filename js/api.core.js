@@ -80,6 +80,7 @@ let GATED_REQUESTS_QUEUE = [];
 // Active requests tracking for deduplication
 const activeRequests = new Map();
 const requestTimeouts = new Map();
+const abortControllers = new Map(); 
 
 let TokenManager;
 let SecureStorage;
