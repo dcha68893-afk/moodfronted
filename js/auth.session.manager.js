@@ -1,5 +1,5 @@
 // js/auth.session.manager.js - Complete Session Manager for Auto-Login
-// Version: 1.4.0 - Proactive online-return refresh + atomic old-token wipe
+// Version: 1.5.0 - Refresh-first 401 handling, no redirect on token expiry + atomic old-token wipe
 // Handles: Persistent sessions, auto-login, account limits, logout detection, token refresh
 
 (function() {
@@ -454,7 +454,10 @@
         }
         
         if (window.location.pathname.includes('chat.html')) {
-            console.log('[SessionManager] Logout complete, redirecting to index');
+            // PATCH v1.5: Only redirect to login on EXPLICIT user-initiated logout.
+            // Token expiry / refresh failure dispatches auth:session:ended instead,
+            // which the UI handles with a modal/banner — not a hard navigation.
+            console.log('[SessionManager] Explicit logout complete, redirecting to index');
             setTimeout(() => {
                 window.location.href = 'index.html';
             }, 500);
@@ -648,11 +651,14 @@
 
                     const refreshed = await _attemptTokenRefresh(session);
                     if (!refreshed) {
-                        console.log('[SessionManager] Refresh failed — clearing session');
+                        console.log('[SessionManager] Refresh failed — clearing session (genuine session end)');
                         clearSession();
+                        // Dispatch auth:session:ended (semantic) instead of session:expired
+                        // so UI layers know the session is truly over (not just expiry).
+                        // UI should show a gentle re-auth prompt, NOT do window.location redirect.
                         try {
-                            window.dispatchEvent(new CustomEvent('session:expired', {
-                                detail: { timestamp: Date.now() }
+                            window.dispatchEvent(new CustomEvent('auth:session:ended', {
+                                detail: { reason: 'refresh_failed', timestamp: Date.now() }
                             }));
                         } catch (error) {}
                     } else {

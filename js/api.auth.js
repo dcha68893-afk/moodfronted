@@ -1,5 +1,5 @@
 // api.auth.js - Modular Authentication Service with IIFE Protection
-// Version: 22.0.1 - CRITICAL FIX: Fixed getBaseUrl undefined error, centralized API integration
+// Version: 22.1.0 - CRITICAL FIX: Fixed getBaseUrl undefined error, centralized API integration
 // Date: 2026-04-02
 // 🔧 FIXED: getBaseUrl is not defined error
 // 🔧 FIXED: Centralized API request integration
@@ -20,7 +20,7 @@
     // ============================================================================
     
     // CRITICAL: Ultimate singleton guard - prevents ANY possibility of multiple initialization
-    const VERSION = '22.0.1';
+    const VERSION = '22.1.0';
     const GUARD_KEY = '__API_AUTH_SINGLETON_GUARD__';
     
     // Check if we already have a fully initialized instance
@@ -2108,12 +2108,41 @@
         try {
             const result = await apiRequestFunc(endpoint, payload, options);
 
-            // PATCH v1.3: Global 401 interceptor — the only correct place to force-logout.
-            // When the server rejects our token, we must atomically clear ALL session
-            // state and redirect. Without this, the app loop: kynecta_auth still present
-            // → userLoggedIn()=true → loadApp → no valid session → showAuthUI → loop.
-            if (result && result.status === 401 && !endpoint.includes('/login') && !endpoint.includes('/register')) {
-                console.warn('[API-AUTH] 401 received — clearing session and redirecting to login');
+            // PATCH v1.5: Global 401 interceptor — REFRESH-FIRST strategy.
+            // On 401 we FIRST attempt a silent background token refresh.
+            // Only if the refresh itself fails (no refresh token, server rejected it, etc.)
+            // do we clear the session and redirect to login.
+            // This means token expiry is NEVER visible to the user as a redirect —
+            // the app seamlessly continues after the silent refresh.
+            // The login page is only shown for: (1) explicit logout, (2) refresh token
+            // also expired/revoked (genuine end of session).
+            if (result && result.status === 401 && !endpoint.includes('/login') && !endpoint.includes('/register') && !endpoint.includes('/refresh')) {
+                console.warn('[API-AUTH] 401 received — attempting silent token refresh before any logout');
+
+                // Avoid re-entrant refreshes from within a refresh call
+                if (!_moduleState.tokenRefreshInProgress) {
+                    try {
+                        const refreshed = await refreshToken();
+                        if (refreshed) {
+                            // Refresh succeeded — the caller should retry their request.
+                            // Return a special sentinel so callers know to retry.
+                            console.log('[API-AUTH] ✅ Silent refresh succeeded after 401 — request can be retried');
+                            return {
+                                success: false,
+                                status: 401,
+                                code: 'TOKEN_REFRESHED_RETRY',
+                                _tokenRefreshed: true,
+                                message: 'Token was silently refreshed — please retry the request'
+                            };
+                        }
+                    } catch (refreshErr) {
+                        console.warn('[API-AUTH] Silent refresh attempt threw:', refreshErr.message);
+                    }
+                }
+
+                // Refresh failed or was already in progress and didn't recover —
+                // now it is safe to treat this as a genuine session end.
+                console.warn('[API-AUTH] Refresh failed after 401 — clearing session. Login required only now.');
                 try {
                     if (window.AuthStorage && typeof window.AuthStorage.clearAuth === 'function') {
                         window.AuthStorage.clearAuth();
@@ -2130,10 +2159,18 @@
                     window.__SESSION_READY__ = false;
                     window.currentUser = null;
                 } catch(e) {}
-                // Redirect only if not already on login page
-                if (!window.location.pathname.includes('index') && window.location.pathname !== '/') {
-                    window.location.href = '/index.html';
-                }
+
+                // Dispatch a semantic event so UI layers can react gracefully
+                try {
+                    window.dispatchEvent(new CustomEvent('auth:session:ended', {
+                        detail: { reason: 'refresh_failed', timestamp: Date.now() }
+                    }));
+                } catch(_) {}
+
+                // Only redirect to login for an explicit session end, never for a
+                // token expiry that could have been (but wasn't) refreshed.
+                // The UI should listen to auth:session:ended and handle the transition.
+                // We do NOT call window.location.href here — that is the UI layer's job.
             }
 
             delete _moduleState.apiCallFailures[`${endpoint}:suppressed`];
@@ -2262,14 +2299,27 @@
                 throw new Error(response.data?.message || 'Token refresh failed');
             }
         } catch (error) {
+            // PATCH v1.5: On refresh failure, clear tokens silently WITHOUT firing
+            // the full logout event chain (which could trigger UI redirect to login).
+            // The caller decides what to do — only an explicit user logout should
+            // redirect to the login page.
             clearUserToken();
             _clearPersistedAuthData();
             _safeStorageRemove(CONFIG.REFRESH_TOKEN_KEY);
             
+            // Emit token-expired so the proactive scheduler knows, but NOT logout
             _emitEvent('token-expired', {
                 reason: error.message,
                 refreshAttempts: _moduleState.refreshAttempts
             });
+            
+            // Dispatch a semantic event so UI can gracefully show a re-auth prompt
+            // without a hard redirect.
+            try {
+                window.dispatchEvent(new CustomEvent('auth:session:ended', {
+                    detail: { reason: 'refresh_failed', error: error.message, timestamp: Date.now() }
+                }));
+            } catch(_) {}
             
             _moduleState.pendingAuthRequests.forEach(({ reject }) => {
                 try { reject(false); } catch (error) {}
@@ -2319,7 +2369,13 @@
                 
                 if (response.success) {
                     return true;
-                } else if (response.status === 401) {
+                } else if (response.status === 401 || response.code === 'TOKEN_REFRESHED_RETRY') {
+                    // PATCH v1.5: If _safeApiCall already refreshed (TOKEN_REFRESHED_RETRY),
+                    // report valid so the caller doesn't try to refresh again.
+                    if (response._tokenRefreshed) {
+                        return true;
+                    }
+                    // Otherwise try an explicit refresh now.
                     const hasRefreshToken = !!_loadPersistedAuthData()?.refreshToken || !!_safeStorageGet(CONFIG.REFRESH_TOKEN_KEY);
                     if (hasRefreshToken) {
                         const refreshed = await refreshToken();
@@ -3559,13 +3615,38 @@ try {
                 return { success: false, error: 'No stored authentication data' };
             }
             
-            // CRITICAL: Check if token is expired locally first
+            // PATCH v1.5: If the token appears locally expired, attempt a SILENT
+            // background refresh BEFORE giving up.  Only clear the session if the
+            // refresh itself fails (no refresh token, server rejected it, etc.).
+            // This means a user who closes and reopens the app after their JWT
+            // expired will be seamlessly kept logged in via the refresh token —
+            // they will NEVER be redirected to the login page due to expiry alone.
             if (unifiedAuth.expiresIn && unifiedAuth.timestamp) {
                 const expiryTime = unifiedAuth.timestamp + unifiedAuth.expiresIn;
-                if (Date.now() > expiryTime) {
-                    console.log(' [AUTH] Stored token has expired locally');
-                    _clearPersistedAuthData();
-                    return { success: false, error: 'Token expired locally' };
+                const isExpired = Date.now() > expiryTime;
+                if (isExpired) {
+                    console.log('[AUTH] Stored token expired locally — attempting silent background refresh');
+                    try {
+                        const refreshed = await refreshToken();
+                        if (refreshed) {
+                            console.log('[AUTH] ✅ Silent refresh succeeded during autoLogin — reloading auth data');
+                            // Reload the fresh persisted data and continue
+                            const freshAuth = _loadPersistedAuthData();
+                            if (freshAuth && freshAuth.token) {
+                                Object.assign(unifiedAuth, freshAuth);
+                            }
+                        } else {
+                            console.log('[AUTH] Silent refresh failed — clearing session (genuine session end)');
+                            _clearPersistedAuthData();
+                            clearTimeout(autoLoginTimeout);
+                            return { success: false, error: 'Session expired and refresh failed', code: 'REFRESH_FAILED' };
+                        }
+                    } catch (refreshErr) {
+                        console.warn('[AUTH] Silent refresh threw during autoLogin:', refreshErr.message);
+                        _clearPersistedAuthData();
+                        clearTimeout(autoLoginTimeout);
+                        return { success: false, error: 'Session refresh error', code: 'REFRESH_ERROR' };
+                    }
                 }
             }
             

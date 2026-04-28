@@ -2865,6 +2865,12 @@
 
             this.messageTemplates.set('note', this._createNoteMessageTemplate);
 
+            this.messageTemplates.set('call', this._createCallMessageTemplate);
+
+            this.messageTemplates.set('voice_call', this._createCallMessageTemplate);
+
+            this.messageTemplates.set('video_call', this._createCallMessageTemplate);
+
         },
 
 
@@ -3353,7 +3359,7 @@
 
                 <div class="message ${isSent ? 'sent' : 'received'} ${deletedClass} ${failedClass} ${sendingClass}" data-message-id="${message.id}" data-message-type="text" data-status="${status}">
 
-                    <div class="message-bubble" onclick="window.messagesUI?.showMessageActions(${safeMessage}, event.clientX, event.clientY)">
+                    <div class="message-bubble ${isSent ? 'sent' : 'received'}" onclick="window.messagesUI?.showMessageActions(${safeMessage}, event.clientX, event.clientY)">
 
                         ${replyIndicator}
 
@@ -3873,7 +3879,7 @@
 
                 <div class="message note-message ${isSent ? 'sent' : 'received'}" data-message-id="${message.id}" data-message-type="note" data-status="${status}">
 
-                    <div class="message-bubble" onclick="window.messagesUI?.showMessageActions(${safeMessage}, event.clientX, event.clientY)">
+                    <div class="message-bubble ${isSent ? 'sent' : 'received'}" onclick="window.messagesUI?.showMessageActions(${safeMessage}, event.clientX, event.clientY)">
 
                         <div class="note-icon"><i class="fas fa-sticky-note"></i></div>
 
@@ -3896,6 +3902,71 @@
             `;
 
         },
+
+        _createCallMessageTemplate(message, currentUser) {
+
+            const core = getMessagesCore();
+
+            const currentUserId = core?.getCurrentUserId?.() || getCurrentUserId();
+
+            const isSent = String(message.senderId) === String(currentUserId);
+
+            const time = core?.formatTime ?
+
+                core.formatTime(message.createdAt || message.timestamp) :
+
+                new Date(message.createdAt || message.timestamp).toLocaleTimeString([], {hour:'numeric',minute:'2-digit',hour12:true});
+
+            // Determine call type and status
+            const callType = message.callType || (message.type === 'video_call' ? 'video' : 'voice');
+            const isVideo = callType === 'video';
+            const callStatus = message.callStatus || message.status || 'ended';
+            const isMissed = callStatus === 'missed' || callStatus === 'rejected' || callStatus === 'cancelled';
+            const duration = message.duration || message.callDuration;
+
+            // Format duration like "38 secs" or "2 min 14 secs"
+            let durationText = '';
+            if (duration && !isMissed) {
+                const d = parseInt(duration);
+                if (d >= 60) {
+                    const m = Math.floor(d / 60), s = d % 60;
+                    durationText = s > 0 ? `${m} min ${s} secs` : `${m} min`;
+                } else {
+                    durationText = `${d} secs`;
+                }
+            }
+
+            const iconClass = isVideo ? 'fa-video' : 'fa-phone';
+            const iconColor = isMissed ? '#ff3b30' : '#00a884';
+            const callLabel = isVideo ? 'Video call' : 'Voice call';
+            const statusText = isMissed ? 'Missed call' : (durationText || 'Call ended');
+
+            const safeMessage = JSON.stringify(message).replace(/"/g, '&quot;');
+
+            // WhatsApp-style: call appears as a special bubble with icon + label + duration
+            return `
+                <div class="message ${isSent ? 'sent' : 'received'}" data-message-id="${message.id}" data-message-type="call" data-status="${callStatus}">
+                    <div class="message-bubble ${isSent ? 'sent' : 'received'} call-message-bubble" style="min-width:180px;cursor:pointer;" onclick="window.messagesUI?.showMessageActions(${safeMessage}, event.clientX, event.clientY)">
+                        <div style="display:flex;align-items:center;gap:10px;padding:2px 0;">
+                            <div style="width:36px;height:36px;border-radius:50%;background:rgba(${isMissed?'255,59,48':'0,168,132'},0.15);display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+                                <i class="fas ${iconClass}" style="color:${iconColor};font-size:15px;${isSent && !isVideo ? 'transform:scaleX(-1);' : ''}"></i>
+                            </div>
+                            <div style="flex:1;min-width:0;">
+                                <div style="font-weight:600;font-size:14px;color:#e9edef;">${callLabel}</div>
+                                <div style="font-size:12px;color:#8696a0;margin-top:1px;">${statusText}</div>
+                            </div>
+                        </div>
+                        <div class="message-meta">
+                            <span class="message-time">${time}</span>
+                            ${isSent ? `<span class="message-status"><i class="fas fa-check-double" style="color:#53bdeb;"></i></span>` : ''}
+                        </div>
+                    </div>
+                </div>
+            `;
+
+        },
+
+
 
 
 

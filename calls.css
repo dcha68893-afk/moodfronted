@@ -4030,3 +4030,170 @@ body.call-active #idleScreen {
         opacity: 0.85 !important;
     }
 }
+/* =================================================================
+   IDLE SCREEN OVERHAUL — WhatsApp-style "Ready to Connect" sidebar
+   The idle screen shows when no call is active; it should look like
+   the normal call list UI, NOT a dark video area.
+   ================================================================= */
+
+/* Override the dark video background on idle screen */
+#idleScreen {
+    background: var(--bg-color, #ffffff) !important;
+    color: var(--text-primary, #050505) !important;
+    align-items: flex-start !important;
+    justify-content: flex-start !important;
+    padding: 0 !important;
+    overflow-y: auto !important;
+}
+
+.idle-content {
+    width: 100%;
+    padding: 30px 20px 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
+}
+
+.welcome-section {
+    text-align: center;
+    padding: 10px 0 4px;
+}
+
+.welcome-title {
+    font-size: 22px;
+    font-weight: 700;
+    color: var(--text-primary, #050505);
+    margin-bottom: 6px;
+}
+
+.welcome-subtitle {
+    font-size: 14px;
+    color: var(--text-secondary, #65676b);
+}
+
+/* Quick call action cards — like WhatsApp's Voice/Video/Group row */
+.quick-call-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.quick-call-card {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 16px 20px;
+    background: var(--secondary-color, #f0f2f5);
+    border: none;
+    border-radius: 12px;
+    cursor: pointer;
+    transition: background 0.2s, transform 0.15s;
+    width: 100%;
+    text-align: left;
+    color: var(--text-primary, #050505);
+}
+
+.quick-call-card:hover {
+    background: #e4e6e9;
+    transform: translateY(-1px);
+}
+
+.quick-call-card:active {
+    transform: scale(0.98);
+}
+
+.quick-call-icon {
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    background: #e3f0ff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 20px;
+    color: #0084ff;
+    flex-shrink: 0;
+    position: relative;
+}
+
+.quick-call-icon.video {
+    background: #e8f5e9;
+    color: #34c759;
+}
+
+.quick-call-icon.group {
+    background: #f3e5f5;
+    color: #9c27b0;
+}
+
+.quick-call-info h3 {
+    font-size: 15px;
+    font-weight: 600;
+    margin-bottom: 2px;
+    color: var(--text-primary, #050505);
+}
+
+.quick-call-info p {
+    font-size: 13px;
+    color: var(--text-secondary, #65676b);
+}
+
+/* Recent calls section on idle */
+.recent-calls-preview {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.recent-calls-preview h3 {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-secondary, #65676b);
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+    padding: 0 4px;
+}
+
+.no-recent-calls {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    padding: 24px;
+    color: var(--text-secondary, #65676b);
+    opacity: 0.6;
+    font-size: 14px;
+}
+
+.no-recent-calls i {
+    font-size: 28px;
+}
+
+/* Dark theme support for idle screen */
+[data-theme="dark"] #idleScreen {
+    background: #1a1a2e !important;
+}
+
+[data-theme="dark"] .quick-call-card {
+    background: #2d2d3d;
+    color: #e9edef;
+}
+
+[data-theme="dark"] .quick-call-card:hover {
+    background: #3a3a4d;
+}
+
+[data-theme="dark"] .welcome-title {
+    color: #e9edef;
+}
+
+[data-theme="dark"] .welcome-subtitle,
+[data-theme="dark"] .quick-call-info p,
+[data-theme="dark"] .recent-calls-preview h3,
+[data-theme="dark"] .no-recent-calls {
+    color: #8696a0;
+}
+
+[data-theme="dark"] .quick-call-info h3 {
+    color: #e9edef;
+}

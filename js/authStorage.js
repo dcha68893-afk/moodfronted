@@ -1,5 +1,5 @@
 // authStorage.js - Persistent Authentication Storage
-// VERSION: 1.4.0 - Proactive refresh helpers + atomic old-token wipe on save
+// VERSION: 1.5.0 - Silent refresh-first strategy, no redirect on token expiry + atomic old-token wipe on save
 // PURPOSE: Single source of truth for auth persistence in localStorage
 
 (function () {
@@ -109,11 +109,24 @@
     function hasValidAuth() {
         const auth = getAuth();
         if (!auth || !auth.token) return false;
-        // NOTE: Do NOT block on expiresAt here.
-        // Expired-but-present sessions are still valid for offline/auto-login.
-        // Background validation (api_auth.js validateSession) will handle logout
-        // if the server rejects the token when the device is online.
+        // PATCH v1.5: NEVER block on expiresAt here.
+        // Token expiry is handled by the proactive refresh scheduler (api_auth.js) and
+        // the periodic session check (auth_session_manager.js) — both attempt a silent
+        // background refresh and only clear the session if the refresh itself fails.
+        // Blocking here would cause flash-redirects to login on every app open when
+        // the JWT has expired but the refresh token is still valid.
         return true;
+    }
+
+    // PATCH v1.5: Safe re-auth helper — called by UI when auth:session:ended fires.
+    // Shows a gentle re-authentication prompt rather than a hard page redirect.
+    // The UI layer should call this instead of doing window.location.href manually.
+    function notifySessionEnded(reason) {
+        try {
+            window.dispatchEvent(new CustomEvent('auth:session:ended', {
+                detail: { reason: reason || 'unknown', timestamp: Date.now() }
+            }));
+        } catch (_) {}
     }
 
     // PATCH v1.4: Returns milliseconds until the stored token expires, or 0 if already expired.
@@ -223,7 +236,9 @@
         // v1.3 additions
         isValidSession, setSession, clearSession, getSession, getSessionSync,
         // v1.4 additions — proactive refresh support
-        getTokenExpiresAt, isTokenExpiringSoon
+        getTokenExpiresAt, isTokenExpiringSoon,
+        // v1.5 additions — graceful re-auth without redirect
+        notifySessionEnded
     };
 
     window.AuthStorage = AuthStorage;
