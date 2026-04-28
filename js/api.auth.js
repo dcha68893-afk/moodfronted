@@ -81,29 +81,12 @@
     } catch (e) {}
     
 
-    // ── PERSISTENT AUTH HELPER ──────────────────────────────────────────────
-    // Called after every successful login/register to persist session locally.
-    // This enables auto-login on next app start (WhatsApp-style).
-    function _persistAuthLocally(token, refreshToken, user, expiresAt) {
-        try {
-            const payload = {
-                token:        token,
-                refreshToken: refreshToken || null,
-                user:         user         || null,
-                expiresAt:    expiresAt    || (Date.now() + 24 * 60 * 60 * 1000),
-                issuedAt:     Date.now()
-            };
-            // Prefer AuthStorage module if available
-            if (window.AuthStorage && typeof window.AuthStorage.saveAuth === 'function') {
-                window.AuthStorage.saveAuth(payload);
-            } else {
-                localStorage.setItem('kynecta_auth', JSON.stringify(payload));
-            }
-            console.log('[API-AUTH] \u2705 Auth persisted to localStorage');
-        } catch(e) {
-            console.warn('[API-AUTH] \u26a0\ufe0f Could not persist auth locally:', e.message);
-        }
-    }
+    // BUG FIX #10: _persistAuthLocally() removed — it stored expiresAt as an absolute timestamp
+    // while _persistAuthData() stored expiresIn as a duration, creating an inconsistency where
+    // AuthStorage.isTokenExpiringSoon() only worked for data written by _persistAuthLocally.
+    // All callers should use _persistAuthData() exclusively (defined below near line 603).
+    // _persistAuthData has also been updated to write expiresAt as an absolute timestamp
+    // in addition to expiresIn, so AuthStorage.isTokenExpiringSoon() works for all sessions.
 
     // ── CLEAR PERSISTED AUTH (called on logout) ─────────────────────────────
     function _clearPersistedAuth() {
@@ -599,7 +582,9 @@
         }
     }
     
-    // CRITICAL: Single source of truth for auth persistence
+    // CANONICAL auth persistence function — use this exclusively (see Fix #10 note above).
+    // Writes both expiresIn (duration) and expiresAt (absolute ms) so AuthStorage.isTokenExpiringSoon()
+    // works regardless of which field is checked.
     function _persistAuthData(token, user, refreshToken = null, expiresIn = null) {
         try {
             if (!token) {
@@ -612,6 +597,8 @@
                 user: user || null,
                 refreshToken: refreshToken,
                 expiresIn: expiresIn,
+                // FIX #10: also store absolute timestamp so AuthStorage.isTokenExpiringSoon() works
+                expiresAt: expiresIn ? (Date.now() + expiresIn) : (Date.now() + 24 * 60 * 60 * 1000),
                 timestamp: Date.now(),
                 version: VERSION
             };
@@ -2216,12 +2203,37 @@
                 const expiresIn = response.data.expiresIn || CONFIG.DEFAULT_TOKEN_EXPIRY;
                 const newRefreshToken = response.data.refreshToken || refreshToken;
                 
+                // PATCH v1.4: Atomically clear every old token location BEFORE writing
+                // the new token so no stale copy can survive alongside the fresh one.
+                // Previously the new token was simply written on top, leaving legacy keys
+                // (authToken, moodchat_token, etc.) holding the expired value.
+                // api_core.js and iframes reading those keys would then send the old,
+                // rejected token and receive 401s even though the refresh succeeded.
+                try {
+                    if (window.AuthStorage && typeof window.AuthStorage.clearAuth === 'function') {
+                        window.AuthStorage.clearAuth();
+                    } else {
+                        (CONFIG.TOKEN_KEYS || []).forEach(k => { try { localStorage.removeItem(k); } catch(_) {} });
+                        try { localStorage.removeItem(CONFIG.REFRESH_TOKEN_KEY); } catch(_) {}
+                        try { localStorage.removeItem(CONFIG.TOKEN_EXPIRY_KEY); } catch(_) {}
+                        try { localStorage.removeItem(CONFIG.AUTH_STORAGE_KEY); } catch(_) {}
+                    }
+                    // Also clear window globals immediately
+                    window.__userToken   = null;
+                    window.__accessToken = null;
+                    window.token         = null;
+                } catch (_) {}
+
                 // CRITICAL FIX: Update all storage locations consistently
                 _persistAuthData(newToken, unifiedAuth?.user || null, newRefreshToken, expiresIn);
                 
                 // Update global token references
                 AUTH_TOKEN = newToken;
                 TOKEN_READY = true;
+
+                // Propagate to all core systems so every subsequent request uses the
+                // fresh token without waiting for the next getUserToken() call.
+                _registerTokenWithCoreSystem(newToken);
                 
                 // Reset refresh state
                 _moduleState.tokenRefreshInProgress = false;
@@ -2232,6 +2244,13 @@
                     newToken: newToken,
                     expiresIn: expiresIn
                 });
+
+                // Notify all parts of the app about the new token
+                try {
+                    window.dispatchEvent(new CustomEvent('auth:token:refreshed', {
+                        detail: { token: newToken, expiresIn, timestamp: Date.now() }
+                    }));
+                } catch (_) {}
                 
                 _moduleState.pendingAuthRequests.forEach(({ resolve }) => {
                     try { resolve(true); } catch (error) {}
@@ -3553,18 +3572,18 @@ try {
             // Set token immediately for UI rendering
             setUserToken(unifiedAuth.token, unifiedAuth.expiresIn);
             
-            // Validate token with server (non-blocking)
-            const validation = await _validateTokenWithServer(unifiedAuth.token);
-            if (validation.valid) {
-                console.log(' [AUTH] Auto-login successful');
-                return { 
-                    success: true, 
-                    user: validation.user,
-                    token: unifiedAuth.token 
-                };
-            } else {
+            // SECURITY FIX #3: _validateTokenWithServer was called but never defined anywhere,
+            // causing a ReferenceError on every auto-login attempt. Replaced with the existing
+            // validateSession() function which performs the same server-side token check.
+            //
+            // BUG FIX #7: The original code had early `return` statements that made the
+            // user-assignment, cross-tab sync, and session:ready dispatch unreachable (dead code).
+            // Restructured so those side effects always run on the success path before returning.
+            const isValid = await validateSession();
+            if (!isValid) {
                 console.log(' [AUTH] Auto-login failed - invalid token');
                 clearUserToken();
+                clearTimeout(autoLoginTimeout);
                 return { 
                     success: false, 
                     error: 'Invalid token',
@@ -3572,8 +3591,10 @@ try {
                     message: 'Your session is no longer valid'
                 };
             }
-            
-            // Restore user from unified storage or legacy storage
+
+            console.log(' [AUTH] Auto-login successful');
+
+            // Restore user from unified storage or legacy storage (was unreachable before fix)
             let user = unifiedAuth?.user || null;
             if (!user) {
                 for (const key of CONFIG.USER_DATA_KEYS) {
@@ -3594,7 +3615,7 @@ try {
             _initCrossTabSync();
             _initIframeSync();
             
-            // Dispatch session ready event for sync manager
+            // Dispatch session ready event for sync manager (was unreachable before fix)
             try {
                 window.dispatchEvent(new CustomEvent('session:ready', {
                     detail: {
@@ -4283,6 +4304,95 @@ try {
                     }
                 }
             }, 60000);
+
+            // ── PATCH v1.4: PROACTIVE BACKGROUND TOKEN REFRESH SCHEDULER ──────────
+            // Checks every 60 s whether the stored token will expire within the next
+            // 5 minutes.  If so, and the device is online, it silently refreshes in
+            // the background — the user never sees a disruption.
+            // If the device is offline we skip the attempt; the session remains
+            // usable with the existing (expired) token until connectivity returns,
+            // at which point the very next interval tick will trigger the refresh.
+            (function _startProactiveRefreshScheduler() {
+                const PROACTIVE_THRESHOLD_MS = 5 * 60 * 1000;  // refresh 5 min before expiry
+                const SCHEDULER_INTERVAL_MS  = 60 * 1000;       // check every 60 s
+
+                _setSafeInterval(async () => {
+                    try {
+                        // Skip if a refresh is already running
+                        if (_moduleState.tokenRefreshInProgress) return;
+
+                        // Skip entirely while offline — the old token keeps the session
+                        // alive for offline use; we'll refresh as soon as we come back.
+                        if (!_isOnline()) return;
+
+                        // Check expiry via AuthStorage if available, else decode JWT directly
+                        let expiringSoon = false;
+                        if (window.AuthStorage && typeof window.AuthStorage.isTokenExpiringSoon === 'function') {
+                            expiringSoon = window.AuthStorage.isTokenExpiringSoon(PROACTIVE_THRESHOLD_MS);
+                        } else {
+                            // Inline fallback: decode JWT exp claim
+                            const token = getUserToken();
+                            if (token) {
+                                try {
+                                    const parts = token.split('.');
+                                    if (parts.length === 3) {
+                                        const p = JSON.parse(atob(parts[1]));
+                                        if (p.exp) {
+                                            const msLeft = p.exp * 1000 - Date.now();
+                                            expiringSoon = msLeft <= PROACTIVE_THRESHOLD_MS;
+                                        }
+                                    }
+                                } catch (_) {}
+                            }
+                        }
+
+                        if (!expiringSoon) return;
+
+                        console.log('[API-AUTH] 🔄 Proactive token refresh triggered (expiry within 5 min)');
+                        const result = await refreshToken();
+                        if (result) {
+                            console.log('[API-AUTH] ✅ Proactive token refresh succeeded');
+                        } else {
+                            console.warn('[API-AUTH] ⚠️ Proactive token refresh returned falsy — will retry next tick');
+                        }
+                    } catch (err) {
+                        // Never crash the scheduler — just log and wait for next tick
+                        console.warn('[API-AUTH] Proactive refresh scheduler error:', err.message);
+                    }
+                }, SCHEDULER_INTERVAL_MS);
+
+                // Also listen for the online event so we attempt a refresh immediately
+                // after coming back online instead of waiting up to 60 s.
+                window.addEventListener('online', async () => {
+                    try {
+                        if (_moduleState.tokenRefreshInProgress) return;
+                        const token = getUserToken();
+                        if (!token) return;
+
+                        let needsRefresh = false;
+                        if (window.AuthStorage && typeof window.AuthStorage.isTokenExpiringSoon === 'function') {
+                            needsRefresh = window.AuthStorage.isTokenExpiringSoon(PROACTIVE_THRESHOLD_MS);
+                        } else {
+                            try {
+                                const parts = token.split('.');
+                                if (parts.length === 3) {
+                                    const p = JSON.parse(atob(parts[1]));
+                                    if (p.exp) needsRefresh = p.exp * 1000 - Date.now() <= PROACTIVE_THRESHOLD_MS;
+                                }
+                            } catch (_) {}
+                        }
+
+                        if (needsRefresh) {
+                            console.log('[API-AUTH] 🌐 Back online — triggering immediate background token refresh');
+                            await refreshToken();
+                        }
+                    } catch (err) {
+                        console.warn('[API-AUTH] Online-event refresh error:', err.message);
+                    }
+                });
+
+                console.log('[API-AUTH] ✅ Proactive background refresh scheduler started');
+            })();
             
             window._API_AUTH_V22_LOADED_.loadingStage = 'bootstrap_complete';
             console.log('🚀 [AUTH] Immediate bootstrap completed successfully');

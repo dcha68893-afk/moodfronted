@@ -94,6 +94,7 @@ let getTokenExpiryTime;
 let setTokenWithExpiry;
 let clearExpiredTokens;
 let migrateLegacyTokens;
+let validateToken;
 let validateTokenFormat;
 let sanitizeToken;
 
@@ -7394,6 +7395,18 @@ export {
     getChatHistory,
     getUnreadCount
 };
+
+// ============================================================================
+// GLOBAL TOKEN MANAGEMENT FUNCTIONS
+// ============================================================================
+
+// Make token management functions globally available for cross-module access
+if (typeof window !== 'undefined') {
+    window.refreshTokenIfNeeded = refreshTokenIfNeeded;
+    window.validateToken = validateToken;
+    window.clearUserToken = clearUserToken;
+    window.TokenManager = TokenManager;
+}
 
 // ============================================================================
 // AUTH EVENT HANDLERS

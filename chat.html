@@ -448,8 +448,13 @@
             z-index: 90;
         }
 
+        /* Iframes are hidden via visibility+pointer-events so their JS initialises
+           eagerly in the background — tab switching is instant instead of waiting
+           for the iframe to boot on first click. */
         .iframe-container.hidden {
-            display: none;
+            visibility: hidden !important;
+            pointer-events: none !important;
+            /* Keep display:block so the iframe document loads & runs */
         }
 
         /* ── CALL SCREEN: full screen on ALL screen sizes ── */
@@ -1411,8 +1416,8 @@
         </div>
     </div>
 
-    <!-- Mobile Back Button (visible only when chat panel OR call screen is active) -->
-    <button id="mobileBackBtn" class="mobile-back-btn">
+    <!-- Mobile Back Button: hidden — device back-gesture (popstate) and backbutton event handle navigation -->
+    <button id="mobileBackBtn" class="mobile-back-btn" style="display:none!important;" aria-hidden="true">
         <i class="fas fa-arrow-left"></i>
     </button>
 
@@ -1887,14 +1892,17 @@
                 banner.style.display = 'flex';
 
                 // ── FIX 1: Navigate to calls page so the iframe becomes visible ──
+                // CRITICAL: Set __activeCallInProgress BEFORE navigating so navigateToPage
+                // does NOT strip call-screen-active when switching away from the current page.
+                document.body.classList.add('call-screen-active');
+                window.__activeCallInProgress = true;
+
                 if (window.__currentPage !== 'calls') {
                     window.__lastActivePage = window.__currentPage || 'messages';
                     navigateToPage('calls');
                 }
 
-                // ── FIX 2: Apply fullscreen on parent so iframe covers viewport ──
-                document.body.classList.add('call-screen-active');
-                window.__activeCallInProgress = true;
+                // ── FIX 2: (already applied above — call-screen-active set before navigate) ──
 
                 // ── FIX 3: Delay CALL_INCOMING postMessage by 350ms so the iframe
                 //    has time to become visible and its DOM is ready to activate
@@ -2395,13 +2403,16 @@
             document.querySelectorAll(`.nav-icon[data-page="${page}"], .mobile-nav-icon[data-page="${page}"]`).forEach(b => b.classList.add('active'));
             
             // Handle mobile panel states - CRITICAL FIX
-            // Remove call-screen-active when leaving calls page unless a call is active
+            // NEVER remove call-screen-active while a call is in progress.
+            // __activeCallInProgress is set by CALL_SCREEN_ACTIVE messages from the iframe.
             if (page !== 'calls') {
-                // Only remove call-screen-active if no active call is in progress
-                // This will be managed by CALL_SCREEN_ACTIVE events
                 if (!window.__activeCallInProgress) {
                     document.body.classList.remove('call-screen-active');
                 }
+            }
+            // When navigating TO calls page, always ensure callsContent is fully visible
+            if (page === 'calls' && window.__activeCallInProgress) {
+                document.body.classList.add('call-screen-active');
             }
             
             // chat-panel-active is managed by message iframe events
@@ -2409,11 +2420,11 @@
                 // Don't auto-remove chat-panel-active - let messages iframe manage it
             }
             
-            if (page === 'calls')    setTimeout(() => sendFriendsToCallsIframe(), 300);
-            if (page === 'messages') setTimeout(() => sendFriendsToMessagesIframe(), 300);
-            if (page === 'group')    setTimeout(() => sendFriendsToGroupIframe(), 300);
-            if (page === 'status')   setTimeout(() => sendFriendsToStatusIframe(), 300);
-            if (page === 'tools')    setTimeout(() => sendFriendsToToolsIframe(), 300);
+            if (page === 'calls')    sendFriendsToCallsIframe();
+            if (page === 'messages') sendFriendsToMessagesIframe();
+            if (page === 'group')    sendFriendsToGroupIframe();
+            if (page === 'status')   sendFriendsToStatusIframe();
+            if (page === 'tools')    sendFriendsToToolsIframe();
 
             const iframeId = moduleToIframeId[page];
             if (iframeId) {
@@ -2574,14 +2585,19 @@
         document.addEventListener('DOMContentLoaded', function() {
             setupPanelDetection();
             dismissLoadingScreen(0);
+            // NOTE: Only strip chat-panel-active on load — never call-screen-active,
+            // because a call may have already been initiated before DOMContentLoaded fires.
             if (window.innerWidth <= 768) {
-                document.body.classList.remove('chat-panel-active', 'call-screen-active');
+                document.body.classList.remove('chat-panel-active');
             }
         });
         
         window.addEventListener('resize', function() {
+            // NOTE: Never remove call-screen-active on resize — an active call
+            // must keep its fullscreen overlay regardless of viewport width.
+            // Only remove chat-panel-active on desktop (no chat panel there).
             if (window.innerWidth > 768) {
-                document.body.classList.remove('chat-panel-active', 'call-screen-active');
+                document.body.classList.remove('chat-panel-active');
             }
         });
     </script>
@@ -2908,20 +2924,71 @@
                     if (queryString) url += '?' + queryString;
                 }
 
+                // Use token refresh mechanism from api.core.js if available
+                let currentToken = token;
+                if (window.refreshTokenIfNeeded && window.validateToken) {
+                    try {
+                        // Validate current token
+                        const validation = window.validateToken(currentToken);
+                        if (!validation.valid) {
+                            console.log('[Parent] Token invalid, attempting refresh...');
+                            const refreshResult = await window.refreshTokenIfNeeded();
+                            if (refreshResult.success) {
+                                currentToken = refreshResult.token;
+                                console.log('[Parent] Token refreshed successfully');
+                            } else if (refreshResult.requiresReauth) {
+                                console.log('[Parent] Token refresh requires reauthentication');
+                                return { success: false, error: 'Token expired and requires reauthentication', statusCode: 401, data: null };
+                            }
+                        }
+                    } catch (err) {
+                        console.warn('[Parent] Token validation failed:', err);
+                    }
+                }
+
                 const headers = { 'Accept': 'application/json' };
                 if (body && !(body instanceof FormData)) headers['Content-Type'] = 'application/json';
-                if (token) headers['Authorization'] = `Bearer ${token}`;
+                if (currentToken) headers['Authorization'] = `Bearer ${currentToken}`;
 
                 const fetchOptions = { method, headers, credentials: 'include' };
                 if (body && method !== 'GET') {
                     fetchOptions.body = body instanceof FormData ? body : JSON.stringify(body);
                 }
 
-                const response = await fetch(url, fetchOptions);
-                const contentType = response.headers.get('content-type') || '';
+                let response = await fetch(url, fetchOptions);
                 let responseData;
+                let contentType = response.headers.get('content-type') || '';
+                
                 if (contentType.includes('application/json')) responseData = await response.json();
                 else responseData = { message: await response.text() || 'Request completed' };
+
+                // Handle 401 Unauthorized with token refresh
+                if (response.status === 401 && window.refreshTokenIfNeeded && window.validateToken) {
+                    console.log('[Parent] 401 response, attempting token refresh...');
+                    try {
+                        const refreshResult = await window.refreshTokenIfNeeded();
+                        if (refreshResult.success) {
+                            console.log('[Parent] Token refreshed, retrying request...');
+                            // Retry with new token
+                            headers['Authorization'] = `Bearer ${refreshResult.token}`;
+                            const retryOptions = { method, headers, credentials: 'include' };
+                            if (body && method !== 'GET') {
+                                retryOptions.body = body instanceof FormData ? body : JSON.stringify(body);
+                            }
+                            
+                            response = await fetch(url, retryOptions);
+                            contentType = response.headers.get('content-type') || '';
+                            if (contentType.includes('application/json')) responseData = await response.json();
+                            else responseData = { message: await response.text() || 'Request completed' };
+                        } else if (refreshResult.requiresReauth) {
+                            console.log('[Parent] Token refresh requires reauthentication');
+                            return { success: false, error: 'Token expired and requires reauthentication', statusCode: 401, data: responseData };
+                        }
+                    } catch (refreshErr) {
+                        console.warn('[Parent] Token refresh failed:', refreshErr);
+                        return { success: false, error: 'Token refresh failed', statusCode: 401, data: responseData };
+                    }
+                }
 
                 if (!response.ok) {
                     return { success: false, error: responseData?.message || responseData?.error || `HTTP ${response.status}`, statusCode: response.status, data: responseData };
@@ -3477,15 +3544,16 @@
                     console.log('[Parent] Current page before navigation:', window.__currentPage);
                     console.log('[Parent] callsContent element before:', document.getElementById('callsContent')?.className);
                     
-                    // Navigate to calls page immediately to make iframe visible
+                    // CRITICAL: Set __activeCallInProgress BEFORE navigating so that
+                    // navigateToPage() does NOT strip call-screen-active when switching pages.
+                    window.__activeCallInProgress = true;
+                    document.body.classList.add('call-screen-active');
+
+                    // Navigate to calls page so the iframe becomes visible
                     navigateToPage('calls');
                     
                     console.log('[Parent] Current page after navigation:', window.__currentPage);
                     console.log('[Parent] callsContent element after:', document.getElementById('callsContent')?.className);
-                    
-                    // Apply call-screen-active class immediately for full screen
-                    window.__activeCallInProgress = true;
-                    document.body.classList.add('call-screen-active');
                     console.log('[Parent] call-screen-active class applied');
                     return;
                 }
@@ -3631,6 +3699,11 @@
                     try { sessionStorage.setItem('call_return_ctx', JSON.stringify(ctx)); } catch(e) {}
 
                     console.log(`[Parent] 📞 Dispatching call → user=${userName}(${userId}) type=${callType} returnTo=${returnTo}`);
+
+                    // CRITICAL: Set __activeCallInProgress BEFORE navigating so that
+                    // navigateToPage does NOT strip call-screen-active.
+                    window.__activeCallInProgress = true;
+                    document.body.classList.add('call-screen-active');
 
                     navigateToPage('calls');
 

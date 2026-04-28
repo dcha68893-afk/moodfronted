@@ -63,7 +63,6 @@ window.__CALLS_IFRAME__ = {
     name: window.name
 };
 </script>
-    <script src="/js/console-noise-filter.js"></script>
     <script src="/js/kynecta.safety.layer.js"></script>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=yes">
@@ -2463,55 +2462,49 @@ window.__CALLS_IFRAME__ = {
         </div>
     </div>
     
-    <!-- Incoming Call Modal -->
-    <div class="incoming-call-modal" id="incomingCallModal">
-        <div class="incoming-call-container">
-            <div class="pulsing-ring"></div>
-            <div class="incoming-call-avatar" id="incomingCallAvatar">
-                <!-- Avatar will be set dynamically -->
+    <!-- ==================== INCOMING CALL SCREEN (RECEIVER) ==================== -->
+    <!-- Shows to the person being called. Stays until: accepted → in-call, declined → idle, or caller cancels → idle -->
+    <div class="unified-incoming-screen" id="incomingCallModal">
+        <div class="unified-call-bg incoming-bg"></div>
+        <div class="unified-call-wrap">
+            <p class="unified-call-label incoming-label">Incoming Call</p>
+            <div class="unified-avatar" id="incomingCallAvatar"><i class="fas fa-user"></i></div>
+            <div class="unified-pulse-rings incoming-rings">
+                <span></span><span></span><span></span>
             </div>
-            <h3 class="incoming-call-name" id="incomingCallName">Caller Name</h3>
-            <p class="incoming-call-type" id="incomingCallType">Voice Call</p>
-            <div class="incoming-call-actions" style="display:flex;justify-content:center;gap:28px;margin-top:8px;">
-                <button class="control-btn danger" id="declineCallBtn" style="width:72px;height:72px;font-size:28px;" title="Decline">
-                    <i class="fas fa-phone-slash"></i>
-                </button>
-                <button class="control-btn" id="acceptCallBtn" style="width:72px;height:72px;font-size:28px;background:var(--success-color,#34c759);" title="Accept Audio">
-                    <i class="fas fa-phone"></i>
-                </button>
-                <button class="control-btn" id="acceptVideoCallBtn" style="width:72px;height:72px;font-size:28px;background:#0084ff;" title="Accept Video">
-                    <i class="fas fa-video"></i>
-                </button>
+            <h2 class="unified-call-name" id="incomingCallName">Caller Name</h2>
+            <p class="unified-call-sub">is calling you</p>
+            <p class="unified-call-type" id="incomingCallType">Voice Call</p>
+            <div id="incomingCallMood" style="display:none;" class="unified-mood-badge">
+                <i class="fas fa-smile"></i><span>Neutral</span>
             </div>
-            <div class="mood-indicator mood-neutral" id="incomingCallMood" style="margin-top: 20px; display: none;">
-                <i class="fas fa-smile"></i>
-                <span>Neutral</span>
+            <div id="incomingCallIntention" style="display:none;" class="unified-intention-badge">
+                <i class="fas fa-heart"></i><span>Check-in</span>
             </div>
-            <div class="intention-indicator intention-checkin" id="incomingCallIntention" style="margin-top: 10px; display: none;">
-                <i class="fas fa-heart"></i>
-                <span>Check-in</span>
-            </div>
-            <div id="autoDeclineTimer" style="margin-top: 15px; color: var(--text-secondary); font-size: 14px;">
-                Auto declining in <span id="declineTimer">120</span>s
-            </div>
-        </div>
-    </div>
-    
-    <!-- Calling Overlay (Outgoing Call) - IDs prefixed with "overlay_" to avoid clash with #callingScreen -->
-    <div class="calling-overlay" id="callingOverlay" style="display:none;">
-        <div class="calling-container">
-            <div class="calling-pulse-ring"></div>
-            <div class="calling-avatar" id="overlay_callingAvatar"></div>
-            <h3 class="calling-name" id="overlay_callingName">Calling...</h3>
-            <p class="calling-status" id="overlay_callingStatus">Ringing...</p>
-            <p class="calling-type" id="overlay_callingType">Voice Call</p>
-            <div class="calling-actions">
-                <button class="control-btn danger" id="cancelCallBtn" style="width:72px;height:72px;font-size:28px;" title="Cancel Call">
-                    <i class="fas fa-phone-slash"></i>
-                </button>
+            <p class="unified-auto-decline">Auto declining in <span id="declineTimer">120</span>s</p>
+            <div class="unified-call-actions">
+                <div class="unified-action-item">
+                    <button class="unified-btn unified-btn-decline" id="declineCallBtn">
+                        <i class="fas fa-phone-slash"></i>
+                    </button>
+                    <span>Decline</span>
+                </div>
+                <div class="unified-action-item">
+                    <button class="unified-btn unified-btn-accept" id="acceptCallBtn">
+                        <i class="fas fa-phone"></i>
+                    </button>
+                    <span>Audio</span>
+                </div>
+                <div class="unified-action-item">
+                    <button class="unified-btn unified-btn-video" id="acceptVideoCallBtn">
+                        <i class="fas fa-video"></i>
+                    </button>
+                    <span>Video</span>
+                </div>
             </div>
         </div>
     </div>
+
 
     <!-- New Call Modal -->
     <div class="new-call-modal" id="newCallModal">
@@ -3060,39 +3053,30 @@ window.__CALLS_IFRAME__ = {
                 </div>
             </div>
             
-            <!-- ==================== CALLING SCREEN ==================== -->
+            <!-- ==================== OUTGOING CALLING SCREEN (CALLER) ==================== -->
+            <!-- Shows immediately when caller initiates a call. Stays until: answered → in-call, or cancelled → idle -->
             <div class="call-screen" id="callingScreen" data-screen="calling">
-                <div class="calling-content">
-                    <div class="calling-header">
-                        <h2>Calling...</h2>
+                <div class="unified-call-bg"></div>
+                <div class="unified-call-wrap">
+                    <p class="unified-call-label" id="callingLabel">Calling...</p>
+                    <div class="unified-avatar" id="callingAvatar"><i class="fas fa-user"></i></div>
+                    <div class="unified-pulse-rings">
+                        <span></span><span></span><span></span>
                     </div>
-                    
-                    <div class="calling-user">
-                        <div class="calling-avatar" id="callingAvatar">
-                            <i class="fas fa-user"></i>
+                    <h2 class="unified-call-name" id="callingName">User</h2>
+                    <p class="unified-call-sub" id="callingStatus">Ringing...</p>
+                    <p class="unified-call-type" id="callingType">Voice Call</p>
+                    <div class="unified-call-actions">
+                        <div class="unified-action-item">
+                            <button class="unified-btn unified-btn-decline" id="callingCancelBtn">
+                                <i class="fas fa-phone-slash"></i>
+                            </button>
+                            <span>Cancel</span>
                         </div>
-                        <div class="calling-info">
-                            <div class="calling-name" id="callingName">User</div>
-                            <div class="calling-status" id="callingStatus">Ringing...</div>
-                            <div class="calling-type" id="callingType">Voice Call</div>
-                        </div>
-                    </div>
-                    
-                    <div class="calling-animation">
-                        <div class="pulse-ring"></div>
-                        <div class="pulse-ring delay-1"></div>
-                        <div class="pulse-ring delay-2"></div>
-                    </div>
-                    
-                    <div class="calling-actions">
-                        <button class="calling-action-btn cancel" id="callingCancelBtn">
-                            <i class="fas fa-phone-slash"></i>
-                            <span>Cancel Call</span>
-                        </button>
                     </div>
                 </div>
             </div>
-            
+
             <!-- ==================== IN-CALL SCREEN ==================== -->
             <div class="call-screen" id="inCallScreen" data-screen="in-call">
                 <!-- In-Call Header Bar -->

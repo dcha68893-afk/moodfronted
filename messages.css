@@ -167,6 +167,7 @@ body {
     justify-content: space-between;
     z-index: 100;
     flex-shrink: 0;
+    position: relative;
 }
 
 .chat-info {
@@ -3874,5 +3875,161 @@ input:focus + .toggle-slider,
         display: flex;
         align-items: center;
         justify-content: center;
+    }
+}
+
+/* ── Static in-chat date separators: hidden (replaced by scroll-date-badge) */
+.message-date-separator,
+.date-separator,
+.chat-date-separator {
+    display: none !important;
+}
+
+/* ── Floating scroll-date badge ─────────────────────────────────────────── */
+/* Sits inside .chat-header, absolutely positioned so it doesn't shift layout */
+.scroll-date-badge {
+    position: absolute;
+    left: 50%;
+    transform: translateX(-50%);
+    top: 50%;
+    margin-top: -11px;   /* vertically center inside header */
+    background: rgba(0, 0, 0, 0.55);
+    color: #fff;
+    font-size: 11px;
+    font-weight: 500;
+    padding: 3px 10px;
+    border-radius: 12px;
+    white-space: nowrap;
+    pointer-events: none;
+    z-index: 20;
+    opacity: 0;
+    transition: opacity 0.25s ease;
+    max-width: 140px;
+    text-align: center;
+    backdrop-filter: blur(4px);
+}
+.scroll-date-badge.visible {
+    opacity: 1;
+}
+
+/* ================================================================
+   MOBILE-RESPONSIVE IMPROVEMENTS FOR CHAT PANEL
+   ================================================================ */
+
+/* ── Back button: always hidden on desktop, shown on mobile ── */
+#backToChatsBtn {
+    display: none;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    flex-shrink: 0;
+    border-radius: 50%;
+    background: transparent;
+    border: none;
+    color: inherit;
+    cursor: pointer;
+    font-size: 16px;
+    margin-right: 4px;
+    /* Ensure icon is always visible */
+    opacity: 1 !important;
+    visibility: visible !important;
+}
+
+@media (max-width: 768px) {
+    #backToChatsBtn {
+        display: flex !important;
+    }
+
+    /* Chat header: give room for back btn + badge */
+    .chat-header {
+        padding: 8px 10px !important;
+        gap: 6px;
+    }
+
+    /* Chat name: don't let it overflow */
+    #chatFriendName {
+        font-size: 14px !important;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        max-width: 120px;
+    }
+
+    /* Status text: smaller on mobile */
+    #chatStatusText {
+        font-size: 11px !important;
+    }
+
+    /* Action buttons: tighter */
+    .chat-actions {
+        gap: 4px !important;
+    }
+
+    .chat-action-btn {
+        width: 34px !important;
+        height: 34px !important;
+        font-size: 14px !important;
+    }
+
+    /* Input area: adjust for virtual keyboard */
+    .input-area {
+        padding: 6px 8px !important;
+    }
+
+    /* Scroll badge position on mobile */
+    .scroll-date-badge {
+        font-size: 10px !important;
+        padding: 2px 8px !important;
+        max-width: 110px !important;
+    }
+}
+
+@media (max-width: 480px) {
+    #chatFriendName {
+        max-width: 90px !important;
+    }
+
+    .chat-header {
+        padding: 6px 8px !important;
+    }
+
+    /* Hide less-critical action buttons on very small screens */
+    #videoCallBtn {
+        display: none !important;
+    }
+}
+
+@media (max-width: 360px) {
+    #chatFriendName {
+        max-width: 70px !important;
+        font-size: 13px !important;
+    }
+
+    /* Hide options button too, keep only voice call */
+    #videoCallBtn,
+    #chatOptionsBtn {
+        display: none !important;
+    }
+}
+
+/* ── Touch targets ── */
+@media (hover: none) and (pointer: coarse) {
+    .chat-action-btn {
+        min-width: 44px !important;
+        min-height: 44px !important;
+    }
+
+    .message-action-btn,
+    .emoji-btn,
+    .attach-btn {
+        min-width: 44px !important;
+        min-height: 44px !important;
+    }
+
+    /* Active feedback */
+    .chat-action-btn:active {
+        opacity: 0.7;
+        transform: scale(0.94);
     }
 }

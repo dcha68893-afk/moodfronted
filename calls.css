@@ -2920,81 +2920,137 @@ input:focus + .toggle-slider,
 ═══════════════════════════════════════════════════════════ */
 
 /* ── Main Call Overlay Container ────────────────────────────────── */
+/* ── FULLSCREEN CALL OVERLAY — WhatsApp-style ── */
 .call-overlay {
     position: fixed;
-    bottom: 24px;
-    right: 24px;
-    width: 320px;
-    height: auto;
-    max-height: 520px;
-    z-index: 9999;
+    inset: 0;
+    width: 100vw;
+    height: 100vh;
+    z-index: 999999;
     pointer-events: none;
     opacity: 0;
     visibility: hidden;
-    transition: opacity 0.3s ease, visibility 0.3s ease, transform 0.3s ease;
-    border-radius: 16px;
+    transition: opacity 0.3s ease, visibility 0.3s ease;
+    border-radius: 0;
     overflow: hidden;
-    transform: translateY(20px) scale(0.95);
-    background: var(--overlay-bg-primary, linear-gradient(160deg, #0d1b2a 0%, #1a2744 50%, #0a1628 100%));
-    box-shadow: 0 20px 60px rgba(0,0,0,0.4), 0 0 0 1px var(--overlay-border-color, rgba(255,255,255,0.1));
+    transform: none;
+    background: linear-gradient(160deg, #0d1b2a 0%, #1a2744 55%, #0a1628 100%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
 }
 
 .call-overlay[data-state="idle"] {
-    display: none;
+    pointer-events: none;
+    opacity: 0;
+    visibility: hidden;
 }
 
 .call-overlay[data-state="calling"] {
     pointer-events: auto;
     opacity: 1;
     visibility: visible;
-    transform: translateY(0) scale(1);
 }
 
 .call-overlay[data-state="in-call"] {
     pointer-events: auto;
     opacity: 1;
     visibility: visible;
-    transform: translateY(0) scale(1);
-    width: min(90vw, 480px);
-    height: min(80vh, 600px);
 }
 
-/* ── Legacy calling-overlay (deprecated, kept for compatibility) ── */
-.calling-overlay {
-    position: fixed;
-    bottom: 24px;
-    right: 24px;
-    width: 320px;
-    height: auto;
-    max-height: 520px;
-    z-index: 10000;
-    background: var(--overlay-bg-primary, linear-gradient(160deg, #0d1b2a 0%, #1a2744 50%, #0a1628 100%));
+/* ── Floating panel (CALLING state) — fullscreen WhatsApp style ── */
+.call-overlay-floating {
     display: none;
+    width: 100%;
+    height: 100%;
+    flex-direction: column;
     align-items: center;
     justify-content: center;
-    flex-direction: column;
-    border-radius: 16px;
-    overflow: hidden;
-    box-shadow: 0 20px 60px rgba(0,0,0,0.4), 0 0 0 1px var(--overlay-border-color, rgba(255,255,255,0.1));
-    transform: translateY(20px) scale(0.95);
-    opacity: 0;
-    transition: opacity 0.3s ease, transform 0.3s ease;
+    gap: 16px;
 }
-.calling-overlay.active {
+.call-overlay[data-state="calling"] .call-overlay-floating {
     display: flex;
-    opacity: 1;
-    transform: translateY(0) scale(1);
+}
+.call-overlay[data-state="calling"] .call-overlay-expanded {
+    display: none;
 }
 
-.calling-container {
-    position: relative;
+/* ── Expanded panel (IN-CALL state) — fullscreen ── */
+.call-overlay-expanded {
+    display: none;
+    width: 100%;
+    height: 100%;
+    flex-direction: column;
+}
+.call-overlay[data-state="in-call"] .call-overlay-expanded {
+    display: flex;
+}
+.call-overlay[data-state="in-call"] .call-overlay-floating {
+    display: none;
+}
+
+/* ── Floating panel inner layout ── */
+.floating-content {
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 12px;
-    padding: 40px 32px;
+    gap: 24px;
+    width: 100%;
+    max-width: 340px;
+}
+.floating-user {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 16px;
+}
+.floating-avatar {
+    width: 120px;
+    height: 120px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #0084ff, #7b2ff7);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 48px;
+    color: white;
+    overflow: hidden;
+    border: 3px solid rgba(255,255,255,0.3);
+    position: relative;
+}
+.floating-avatar img {
+    width: 100%; height: 100%; object-fit: cover; border-radius: 50%;
+}
+.floating-info {
     text-align: center;
 }
+.floating-name {
+    font-size: 28px;
+    font-weight: 700;
+    color: white;
+    margin-bottom: 6px;
+}
+.floating-status {
+    font-size: 16px;
+    color: rgba(255,255,255,0.65);
+}
+.floating-cancel {
+    width: 72px;
+    height: 72px;
+    border-radius: 50%;
+    background: #ff3b30;
+    border: none;
+    color: white;
+    font-size: 28px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: transform 0.2s, background 0.2s;
+    margin-top: 20px;
+}
+.floating-cancel:hover { transform: scale(1.1); background: #e0281e; }
+
 
 /* Pulsing ring animation */
 .calling-pulse-ring {
@@ -3364,165 +3420,613 @@ input:focus + .toggle-slider,
 .in-call-control-btn.active {
     background: #22c55e;
 }
-/* Ensure proper screen positioning */
-#idleScreen,
-#callingScreen,
-#inCallScreen {
-    position: relative;
-    width: 100%;
-    height: 100%;
-    min-height: 500px;
-    background: var(--video-bg, #1a1a1a);
-}
+/* =============================================================
+   AUTHORITATIVE CALL SCREEN RULES — single source of truth.
+   All previous conflicting blocks above are superseded by this.
 
-#idleScreen { display: block; }
-#callingScreen { display: none; }
-#inCallScreen { display: none; }
+   Strategy:
+   • #callContainer  → normal flex child of .app-container (sidebar + content)
+   • #idleScreen     → fills callContainer when no call is active
+   • #callingScreen  → position:fixed fullscreen overlay (covers everything)
+   • #inCallScreen   → position:fixed fullscreen overlay (covers everything)
+   • .unified-incoming-screen → position:fixed fullscreen overlay (incoming)
 
-#idleScreen.active { display: block; }
-#callingScreen.active { display: flex; flex-direction: column; }
-#inCallScreen.active { display: flex; flex-direction: column; }
+   Using position:fixed for call screens means z-index beats the sidebar
+   without fighting the flex layout.
+   ============================================================= */
 
-/* Ensure sidebar never gets hidden */
-.sidebar {
-    display: flex !important;
-}
-/* Ensure calling screen is always on top */
-#callingScreen {
-    position: fixed !important;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    z-index: 9999 !important;
-    background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%) !important;
-    display: none;
-}
-
-#callingScreen.active {
-    display: flex !important;
-}
-
-#idleScreen {
-    position: relative;
-    width: 100%;
-    height: 100%;
-}
-
-/* Ensure sidebar never covers the calling screen */
-.sidebar {
-    z-index: 1;
-}
-
-#callingScreen {
-    z-index: 10000 !important;
-}
-/* Force calling screen to be visible and on top */
-#callingScreen {
-    position: fixed !important;
-    top: 0 !important;
-    left: 0 !important;
-    width: 100% !important;
-    height: 100% !important;
-    z-index: 99999 !important;
-    background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%) !important;
-    display: none !important;
-}
-
-#callingScreen.active {
-    display: flex !important;
-    visibility: visible !important;
-    opacity: 1 !important;
-}
-
-#idleScreen {
-    position: relative;
-    width: 100%;
-    height: 100%;
-}
-
-/* Ensure sidebar stays visible but behind calling screen */
-.sidebar {
-    z-index: 1 !important;
-}
-
-/* Hide call container completely */
+/* ── Call container: normal flex child ── */
 .call-container {
-    display: none !important;
-}
-/* FORCE call container and screens to be visible */
-.call-container {
-    display: block !important;
+    display: flex !important;
+    flex: 1 !important;
     position: relative !important;
     width: 100% !important;
     height: 100% !important;
-    flex: 1 !important;
+    overflow: hidden !important;
 }
 
-/* Make all screens absolute positioned inside the container */
-.call-screen {
-    position: absolute !important;
-    top: 0 !important;
-    left: 0 !important;
-    width: 100% !important;
-    height: 100% !important;
-}
-
-/* Idle screen visible by default */
+/* ── Idle screen: fills callContainer, visible by default ── */
 #idleScreen {
-    display: block !important;
+    position: absolute !important;
+    inset: 0 !important;
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: center !important;
+    justify-content: center !important;
+    background: var(--video-bg, #1a1a2e) !important;
+    z-index: 1 !important;
+    overflow-y: auto !important;
+}
+
+/* ── Calling screen: fixed fullscreen, hidden by default ── */
+#callingScreen {
+    position: fixed !important;
+    inset: 0 !important;
+    z-index: 999999 !important;
+    display: none !important;
+    flex-direction: column !important;
+    align-items: center !important;
+    justify-content: center !important;
+    overflow: hidden !important;
+}
+#callingScreen.active {
+    display: flex !important;
     visibility: visible !important;
     opacity: 1 !important;
 }
 
-/* Calling screen hidden by default */
-#callingScreen {
-    display: none !important;
-}
-
-/* In-call screen hidden by default */
+/* ── In-call screen: fixed fullscreen, hidden by default ── */
 #inCallScreen {
+    position: fixed !important;
+    inset: 0 !important;
+    z-index: 999999 !important;
     display: none !important;
-}
-
-/* When active, show the respective screen */
-#callingScreen.active {
-    display: flex !important;
     flex-direction: column !important;
-    z-index: 100 !important;
+    overflow: hidden !important;
+    background: #1a1a1a !important;
 }
-
 #inCallScreen.active {
     display: flex !important;
-    flex-direction: column !important;
-    z-index: 100 !important;
+    visibility: visible !important;
+    opacity: 1 !important;
 }
 
-/* Ensure idle screen is hidden when other screens are active */
-#idleScreen.active {
-    display: block !important;
+/* ── Sidebar always below call screens ── */
+.sidebar { z-index: 1 !important; }
+
+/* ── Hide idle screen when a call screen is active (belt & suspenders) ── */
+body.call-active #idleScreen {
+    display: none !important;
 }
 
-/* When calling screen is active, hide idle screen */
-#callingScreen.active ~ #idleScreen,
-#callingScreen.active + #idleScreen,
-#callingScreen.active {
-    /* Ensure calling screen is visible */
+/* =============================================================
+   UNIFIED CALL SCREENS — WhatsApp-style fullscreen overlays
+   • .unified-incoming-screen  = receiver's incoming call view
+   • #callingScreen            = caller's outgoing call view
+   Both use the same layout class .unified-call-wrap
+   ============================================================= */
+
+/* ── Incoming fullscreen overlay ── */
+.unified-incoming-screen {
+    position: fixed;
+    inset: 0;
+    z-index: 99999;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+}
+.unified-incoming-screen.active {
     display: flex !important;
 }
 
-/* CRITICAL FIX: Explicitly hide idle screen when calling screen is active */
-#callingScreen.active ~ #idleScreen {
+/* ── Outgoing calling screen (inside call-container) ── */
+#callingScreen {
+    position: absolute;
+    inset: 0;
+    z-index: 100;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+}
+#callingScreen.active {
+    display: flex !important;
+}
+
+/* ── Shared dark gradient background ── */
+.unified-call-bg {
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(160deg, #0d1b2a 0%, #1a2744 55%, #0a1628 100%);
+    z-index: 0;
+}
+.incoming-bg {
+    background: linear-gradient(160deg, #0a1f0d 0%, #143320 55%, #0a160d 100%);
+}
+
+/* ── Radial glow on top of background ── */
+.unified-call-bg::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: radial-gradient(ellipse at 50% 30%, rgba(0,132,255,0.12) 0%, transparent 65%);
+}
+.incoming-bg::after {
+    background: radial-gradient(ellipse at 50% 30%, rgba(52,199,89,0.12) 0%, transparent 65%);
+}
+
+/* ── Content wrapper ── */
+.unified-call-wrap {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 14px;
+    padding: 60px 40px 50px;
+    text-align: center;
+    width: 100%;
+    max-width: 420px;
+}
+
+/* ── Top label ("Calling…" / "Incoming Call") ── */
+.unified-call-label {
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: rgba(255,255,255,0.5);
+    margin: 0;
+    animation: unifiedLabelPulse 2s ease-in-out infinite;
+}
+.incoming-label { color: rgba(52,199,89,0.8); }
+
+@keyframes unifiedLabelPulse {
+    0%, 100% { opacity: 0.5; }
+    50%       { opacity: 1; }
+}
+
+/* ── Avatar circle ── */
+.unified-avatar {
+    width: 130px;
+    height: 130px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #667eea, #764ba2);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 52px;
+    color: #fff;
+    overflow: hidden;
+    border: 4px solid rgba(255,255,255,0.18);
+    box-shadow: 0 0 0 8px rgba(255,255,255,0.05),
+                0 20px 60px rgba(0,0,0,0.5);
+    flex-shrink: 0;
+    position: relative;
+    z-index: 2;
+}
+.unified-avatar img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    border-radius: 50%;
+}
+
+/* ── Pulsing rings around avatar ── */
+.unified-pulse-rings {
+    position: absolute;
+    /* stack behind avatar */
+    width: 130px;
+    height: 130px;
+    pointer-events: none;
+    /* shifted up to wrap avatar — handled by flex gap so rings share space */
+}
+.unified-pulse-rings span {
+    position: absolute;
+    inset: -18px;
+    border-radius: 50%;
+    border: 2px solid rgba(100,150,255,0.25);
+    animation: unifiedRingPulse 2.4s ease-out infinite;
+}
+.unified-pulse-rings span:nth-child(2) {
+    inset: -36px;
+    animation-delay: 0.6s;
+    border-color: rgba(100,150,255,0.15);
+}
+.unified-pulse-rings span:nth-child(3) {
+    inset: -54px;
+    animation-delay: 1.2s;
+    border-color: rgba(100,150,255,0.08);
+}
+.incoming-rings span { border-color: rgba(52,199,89,0.25); }
+.incoming-rings span:nth-child(2) { border-color: rgba(52,199,89,0.15); }
+.incoming-rings span:nth-child(3) { border-color: rgba(52,199,89,0.08); }
+
+@keyframes unifiedRingPulse {
+    0%   { transform: scale(1);   opacity: 1; }
+    80%  { transform: scale(1.45); opacity: 0; }
+    100% { transform: scale(1.45); opacity: 0; }
+}
+
+/* ── Name ── */
+.unified-call-name {
+    font-size: 30px;
+    font-weight: 700;
+    color: #fff;
+    margin: 4px 0 0;
+    letter-spacing: -0.3px;
+}
+
+/* ── Sub-line (Ringing… / is calling you) ── */
+.unified-call-sub {
+    font-size: 15px;
+    color: rgba(255,255,255,0.55);
+    margin: 0;
+}
+
+/* ── Call type badge ── */
+.unified-call-type {
+    font-size: 12px;
+    color: rgba(255,255,255,0.35);
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    margin: 0;
+}
+
+/* ── Auto-decline countdown ── */
+.unified-auto-decline {
+    font-size: 12px;
+    color: rgba(255,255,255,0.3);
+    margin: 0;
+}
+
+/* ── Mood / intention badges ── */
+.unified-mood-badge,
+.unified-intention-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 14px;
+    border-radius: 999px;
+    background: rgba(255,255,255,0.08);
+    color: rgba(255,255,255,0.7);
+    font-size: 13px;
+}
+
+/* ── Action buttons row ── */
+.unified-call-actions {
+    display: flex;
+    justify-content: center;
+    gap: 36px;
+    margin-top: 28px;
+}
+.unified-action-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+}
+.unified-action-item span {
+    font-size: 12px;
+    color: rgba(255,255,255,0.55);
+    letter-spacing: 0.5px;
+}
+
+/* ── Button base ── */
+.unified-btn {
+    width: 72px;
+    height: 72px;
+    border-radius: 50%;
+    border: none;
+    cursor: pointer;
+    font-size: 28px;
+    color: #fff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: transform 0.18s ease, box-shadow 0.18s ease;
+    outline: none;
+    -webkit-tap-highlight-color: transparent;
+}
+.unified-btn:active { transform: scale(0.9); }
+.unified-btn:hover  { transform: scale(1.07); }
+
+/* Decline / Cancel — red */
+.unified-btn-decline {
+    background: linear-gradient(135deg, #ff3b30, #c0392b);
+    box-shadow: 0 8px 24px rgba(255,59,48,0.4);
+}
+.unified-btn-decline:hover {
+    box-shadow: 0 12px 32px rgba(255,59,48,0.6);
+}
+
+/* Accept audio — green */
+.unified-btn-accept {
+    background: linear-gradient(135deg, #34c759, #27ae60);
+    box-shadow: 0 8px 24px rgba(52,199,89,0.4);
+}
+.unified-btn-accept:hover {
+    box-shadow: 0 12px 32px rgba(52,199,89,0.6);
+}
+
+/* Accept video — blue */
+.unified-btn-video {
+    background: linear-gradient(135deg, #0084ff, #0055cc);
+    box-shadow: 0 8px 24px rgba(0,132,255,0.4);
+}
+.unified-btn-video:hover {
+    box-shadow: 0 12px 32px rgba(0,132,255,0.6);
+}
+
+/* ── Remove old back/chevron arrows that appear after call ends ── */
+.call-back-arrow,
+.call-return-arrow,
+.back-to-calls,
+[class*="back-arrow"],
+[class*="return-arrow"] {
     display: none !important;
 }
 
-/* Alternative: Hide idle screen when calling screen has active class */
-.call-container #callingScreen.active ~ #idleScreen,
-.call-container #callingScreen.active + #idleScreen {
-    display: none !important;
+/* ── Responsive tweaks ── */
+@media (max-width: 480px) {
+    .unified-call-wrap { padding: 40px 20px 36px; gap: 10px; }
+    .unified-avatar { width: 110px; height: 110px; font-size: 42px; }
+    .unified-call-name { font-size: 24px; }
+    .unified-btn { width: 64px; height: 64px; font-size: 24px; }
+    .unified-call-actions { gap: 24px; }
 }
 
-/* Most explicit: When any screen is active, hide others */
-.call-container .call-screen.active ~ .call-screen:not(.active) {
-    display: none !important;
+/* ================================================================
+   COMPREHENSIVE MOBILE-RESPONSIVE FIXES FOR CALL MODULE
+   Covers: ≤768px (tablet/large phone), ≤480px (phone), ≤360px (small phone)
+   ================================================================ */
+
+/* ── Sidebar + layout on mobile ── */
+@media (max-width: 768px) {
+    /* Full-screen sidebar on mobile */
+    .sidebar,
+    .call-sidebar {
+        width: 100% !important;
+        min-width: unset !important;
+        max-width: unset !important;
+        position: fixed !important;
+        inset: 0 !important;
+        z-index: 50 !important;
+        transform: translateX(0);
+    }
+
+    /* Content panel slides out of view on mobile when sidebar is shown */
+    .call-content,
+    #callContainer,
+    .app-content {
+        width: 100% !important;
+    }
+
+    /* ── Idle screen: stack cards vertically ── */
+    .quick-call-actions {
+        flex-direction: column !important;
+        gap: 10px !important;
+    }
+
+    .quick-call-card {
+        width: 100% !important;
+        max-width: 340px !important;
+        margin: 0 auto !important;
+        padding: 12px 16px !important;
+    }
+
+    /* ── In-call header: compact ── */
+    .in-call-header {
+        padding: 10px 12px !important;
+        flex-wrap: wrap;
+        gap: 6px;
+    }
+
+    .in-call-type-icon {
+        width: 32px !important;
+        height: 32px !important;
+        font-size: 14px !important;
+    }
+
+    .in-call-name {
+        font-size: 14px !important;
+    }
+
+    .in-call-status {
+        font-size: 11px !important;
+    }
+
+    .in-call-timer {
+        font-size: 14px !important;
+        padding: 4px 10px !important;
+    }
+
+    /* ── In-call controls: always visible, larger touch targets ── */
+    .in-call-controls {
+        bottom: 16px !important;
+        gap: 10px !important;
+        padding: 10px 16px !important;
+        border-radius: 40px !important;
+        flex-wrap: wrap !important;
+        justify-content: center !important;
+        max-width: calc(100vw - 32px) !important;
+    }
+
+    .in-call-control-btn {
+        width: 52px !important;
+        height: 52px !important;
+        font-size: 18px !important;
+    }
+
+    .in-call-control-btn .control-label {
+        font-size: 9px !important;
+    }
+
+    /* ── Calling screen ── */
+    .unified-call-wrap {
+        padding: 48px 20px 40px !important;
+        gap: 12px !important;
+    }
+
+    .unified-avatar {
+        width: 120px !important;
+        height: 120px !important;
+        font-size: 44px !important;
+    }
+
+    .unified-call-name {
+        font-size: 22px !important;
+    }
+
+    .unified-call-sub,
+    .unified-call-type {
+        font-size: 13px !important;
+    }
+
+    /* ── Incoming call modal ── */
+    .unified-incoming-screen .unified-call-wrap,
+    .incoming-call-modal .unified-call-wrap {
+        padding: 40px 20px 32px !important;
+    }
+
+    /* ── Call history items ── */
+    .call-history-item {
+        padding: 8px 10px !important;
+        margin: 3px 6px !important;
+    }
+
+    /* ── Category tabs: scrollable horizontal ── */
+    .category-tabs,
+    .call-tabs {
+        overflow-x: auto !important;
+        -webkit-overflow-scrolling: touch !important;
+        scrollbar-width: none !important;
+        white-space: nowrap !important;
+    }
+
+    .category-tabs::-webkit-scrollbar,
+    .call-tabs::-webkit-scrollbar {
+        display: none !important;
+    }
+
+    /* ── Contacts/Dialer panels ── */
+    .contacts-panel,
+    .dialer-panel {
+        padding: 8px !important;
+    }
+
+    /* ── Dialer keys: bigger on touch ── */
+    .dialer-key {
+        min-height: 56px !important;
+        font-size: 22px !important;
+    }
+
+    /* ── Stats / insights panel ── */
+    .insights-panel,
+    .call-insights {
+        padding: 12px !important;
+    }
+}
+
+/* ── Very small phones (≤480px) ── */
+@media (max-width: 480px) {
+    .unified-call-wrap {
+        padding: 36px 14px 32px !important;
+        gap: 8px !important;
+    }
+
+    .unified-avatar {
+        width: 96px !important;
+        height: 96px !important;
+        font-size: 36px !important;
+    }
+
+    .unified-call-name { font-size: 20px !important; }
+    .unified-btn { width: 60px !important; height: 60px !important; font-size: 22px !important; }
+    .unified-call-actions { gap: 20px !important; }
+
+    .in-call-controls {
+        gap: 8px !important;
+        padding: 8px 12px !important;
+    }
+
+    .in-call-control-btn {
+        width: 46px !important;
+        height: 46px !important;
+        font-size: 16px !important;
+    }
+
+    .call-history-item {
+        padding: 6px 8px !important;
+    }
+
+    /* Avatar in call history: slightly smaller */
+    .call-avatar {
+        width: 36px !important;
+        height: 36px !important;
+        font-size: 12px !important;
+    }
+
+    /* Action buttons in call history */
+    .call-action-btn,
+    .chat-action-btn {
+        width: 28px !important;
+        height: 28px !important;
+        font-size: 11px !important;
+    }
+
+    /* Quick call cards: single column, full width */
+    .quick-call-card {
+        padding: 10px 12px !important;
+    }
+
+    .quick-call-icon {
+        width: 36px !important;
+        height: 36px !important;
+        font-size: 16px !important;
+    }
+}
+
+/* ── Extra-small phones (≤360px) ── */
+@media (max-width: 360px) {
+    .unified-avatar { width: 80px !important; height: 80px !important; font-size: 30px !important; }
+    .unified-call-name { font-size: 18px !important; }
+    .unified-btn { width: 54px !important; height: 54px !important; font-size: 20px !important; }
+    .unified-call-actions { gap: 14px !important; }
+
+    .in-call-control-btn { width: 42px !important; height: 42px !important; font-size: 15px !important; }
+    .in-call-controls { gap: 6px !important; padding: 6px 10px !important; }
+
+    .in-call-timer { font-size: 12px !important; padding: 3px 8px !important; }
+    .in-call-name  { font-size: 13px !important; }
+
+    .call-avatar { width: 32px !important; height: 32px !important; }
+}
+
+/* ── Touch-device improvements ── */
+@media (hover: none) and (pointer: coarse) {
+    /* Larger tap targets */
+    .in-call-control-btn,
+    .unified-btn,
+    .call-action-btn,
+    .chat-action-btn,
+    .category-btn,
+    .call-history-item button {
+        min-width: 44px !important;
+        min-height: 44px !important;
+    }
+
+    /* Remove hover effects that look wrong on touch */
+    .in-call-control-btn:hover,
+    .unified-btn:hover {
+        transform: none !important;
+    }
+
+    /* Active feedback instead */
+    .in-call-control-btn:active,
+    .unified-btn:active {
+        transform: scale(0.94) !important;
+        opacity: 0.85 !important;
+    }
 }

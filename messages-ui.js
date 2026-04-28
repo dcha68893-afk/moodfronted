@@ -2709,9 +2709,8 @@
         
 
         if (nameEl) {
-
-            nameEl.textContent = chat.friendName || chat.name || 'User';
-
+            const _rawName = chat.friendName || chat.name || 'User';
+            nameEl.textContent = _rawName.replace(/\s+User$/i, '').trim() || _rawName;
         }
 
         if (statusEl) {
@@ -3105,51 +3104,9 @@
 
 
         _getPassiveLoadingState() {
-
+            // Return invisible placeholder — no visible spinner box while lifecycle boots
             const lifecycleState = UIStateManager.getState('lifecycleState');
-
-            let message = 'Loading...';
-
-            
-
-            if (lifecycleState === 'BOOT' || lifecycleState === 'INITIALIZING') {
-
-                message = 'Initializing module...';
-
-            } else if (lifecycleState === 'READY') {
-
-                message = 'Ready...';
-
-            } else if (lifecycleState === 'WAIT_PARENT') {
-
-                return `<div class="passive-loading-state" data-lifecycle="${lifecycleState}" style="opacity:0; height:0; overflow:hidden;"></div>`;
-
-            } else if (lifecycleState === 'WAITING_AUTH') {
-
-                message = 'Waiting for authentication...';
-
-            } else if (lifecycleState === 'ACTIVE') {
-
-                message = 'Ready';
-
-            }
-
-            
-
-            return `
-
-                <div class="passive-loading-state" data-lifecycle="${lifecycleState}">
-
-                    <i class="fas fa-spinner fa-spin" style="font-size: 24px; color: var(--primary-color); margin-bottom: 10px;"></i>
-
-                    <p>${message}</p>
-
-                    <p class="subtext" style="font-size: 10px; margin-top: 5px;">${lifecycleState}</p>
-
-                </div>
-
-            `;
-
+            return `<div class="passive-loading-state" data-lifecycle="${lifecycleState}" style="opacity:0;height:0;overflow:hidden;pointer-events:none;"></div>`;
         },
 
 
@@ -4266,7 +4223,7 @@
 
                             <div class="chat-name-row">
 
-                                <span class="chat-name">${chat.friendName || 'User'}</span>
+                                <span class="chat-name">${(chat.friendName || 'User').replace(/\s+User$/i, '').trim() || (chat.friendName || 'User')}</span>
 
                                 <span class="chat-time">${time}</span>
 
@@ -4539,10 +4496,8 @@
             if (nameEl) UIFailsafe.safeSetText(nameEl, friendName);
 
             // Use real online status from FriendManager if available
-
             const _core = getMessagesCore();
-
-            let _isOnline = !!chat.online;
+            let _isOnline = !!(chat.online || chat.status === 'online');
 
             if (_core && _core.FriendManager) {
 
@@ -4550,9 +4505,11 @@
 
                 if (_fid) {
 
-                    const _friend = _core.FriendManager.getFriend(_fid) || _core.FriendManager.getFriend(parseInt(_fid));
+                    const _friend = _core.FriendManager.getFriend(_fid)
+                                 || _core.FriendManager.getFriend(parseInt(_fid))
+                                 || _core.FriendManager.getFriend(String(_fid));
 
-                    if (_friend) _isOnline = !!_friend.online;
+                    if (_friend) _isOnline = !!(_friend.online || _friend.status === 'online');
 
                 }
 
@@ -5706,11 +5663,12 @@
 
 
 
-                // FIX: Restore back button since we're back in messages context
-
-                const backBtn = document.getElementById('backToChatsBtn');
-
-                if (backBtn) backBtn.style.display = '';
+                // Set global flag BEFORE opening the chat so _showChatPanel (messages-core)
+                // and openChatWithUserInUI both know we are returning from a call.
+                window.__returningFromCall = true;
+                // Do NOT hide back button here — CSS handles mobile/desktop visibility.
+                // Restore flag after navigation settles.
+                setTimeout(() => { window.__returningFromCall = false; }, 1500);
 
                 
 
@@ -5719,6 +5677,8 @@
                     setTimeout(() => {
 
                         window.messagesUI.loadChatByFriendId(returnUserId, returnName || '');
+                        // Clear the flag after the panel has fully opened
+                        setTimeout(() => { window.__returningFromCall = false; }, 1500);
 
                     }, 300);
 
@@ -5727,9 +5687,13 @@
                     setTimeout(() => {
 
                         window.messagesUI.openChat({ id: returnChatId });
+                        setTimeout(() => { window.__returningFromCall = false; }, 1500);
 
                     }, 300);
 
+                } else {
+                    // No specific chat to open — still clear the flag
+                    setTimeout(() => { window.__returningFromCall = false; }, 1500);
                 }
 
                 
@@ -7616,6 +7580,46 @@ Type: ${message.type || 'text'}`;
 
             }
 
+            // ── Scroll-date badge: shows current date group when user scrolls ──
+            (function _initScrollDateBadge() {
+                const msgContainer = document.getElementById('messagesContainer');
+                const badge = document.getElementById('scrollDateBadge');
+                if (!msgContainer || !badge) return;
+
+                let _badgeTimer = null;
+
+                function _showBadge(text) {
+                    if (!text) return;
+                    badge.textContent = text;
+                    badge.classList.add('visible');
+                    clearTimeout(_badgeTimer);
+                    _badgeTimer = setTimeout(() => badge.classList.remove('visible'), 1800);
+                }
+
+                function _getVisibleDateLabel() {
+                    // Find the first date separator that is at or above the current scroll position
+                    const separators = msgContainer.querySelectorAll('.message-date-separator, .date-separator, .chat-date-separator');
+                    if (!separators.length) return null;
+                    const containerTop = msgContainer.scrollTop;
+                    let label = null;
+                    separators.forEach(sep => {
+                        if (sep.offsetTop <= containerTop + 80) {
+                            label = (sep.querySelector('span') || sep).textContent.trim();
+                        }
+                    });
+                    return label;
+                }
+
+                let _scrollDebounce = null;
+                msgContainer.addEventListener('scroll', function() {
+                    clearTimeout(_scrollDebounce);
+                    _scrollDebounce = setTimeout(() => {
+                        const label = _getVisibleDateLabel();
+                        if (label) _showBadge(label);
+                    }, 60);
+                }, { passive: true });
+            })();
+
 
 
             // Chat search button
@@ -8084,7 +8088,25 @@ Type: ${message.type || 'text'}`;
 
                         if (chat && core) {
 
-                            const info = core.showChatInfo?.(chat);
+                            let info = core.showChatInfo?.(chat);
+
+                            // Guard: showChatInfo may return undefined if not implemented
+                            if (!info || typeof info.title === 'undefined') {
+                                const name = chat.friendName || chat.name || 'Chat Info';
+                                info = {
+                                    title: name,
+                                    sections: [
+                                        {
+                                            title: 'Contact',
+                                            items: [
+                                                { label: 'Name', value: name },
+                                                { label: 'Status', value: chat.online ? 'Online' : 'Offline' },
+                                                { label: 'Chat ID', value: String(chat.id || '') }
+                                            ]
+                                        }
+                                    ]
+                                };
+                            }
 
                             this._showChatInfoModal(info);
 
@@ -9904,7 +9926,12 @@ Type: ${message.type || 'text'}`;
 
             const width = window.innerWidth;
 
-            
+            // ── Back button: show on mobile when chat is open, hide on desktop ──
+            const backBtn = UIFailsafe.safeGetElement('backToChatsBtn');
+            if (backBtn && !window.__returningFromCall) {
+                // Remove any inline style override so CSS @media rules take effect
+                backBtn.style.display = '';
+            }
 
             if (width <= 768) {
 
@@ -10086,6 +10113,9 @@ Type: ${message.type || 'text'}`;
 
         const { findExisting = false, returnFromCall = false } = options;
 
+        // Set a global flag so _showChatPanel (in messages-core) also knows we came from a call
+        window.__returningFromCall = returnFromCall === true;
+
         console.log('[MessageUI] Opening chat with user:', { userId, userName, userAvatar, findExisting, returnFromCall });
 
         
@@ -10097,8 +10127,9 @@ Type: ${message.type || 'text'}`;
 
 
         // Resolve name/avatar from FriendManager if not provided
+        const _stripUserSuffix = (n) => n ? n.replace(/\s+User$/i, '').trim() || n : n;
 
-        let resolvedName = userName || 'User';
+        let resolvedName = _stripUserSuffix(userName) || 'User';
 
         let resolvedAvatar = userAvatar || null;
 
@@ -10110,7 +10141,7 @@ Type: ${message.type || 'text'}`;
 
             if (friend) {
 
-                resolvedName = friend.displayName || friend.username || friend.name || resolvedName;
+                resolvedName = _stripUserSuffix(friend.displayName || friend.username || friend.name) || resolvedName;
 
                 resolvedAvatar = resolvedAvatar || friend.avatar || friend.photoURL || friend.avatarUrl || null;
 
@@ -10138,20 +10169,15 @@ Type: ${message.type || 'text'}`;
 
             UIStateManager.setState('chatVisible', true);
 
-            // FIX: If arriving from calls module, hide the back arrow so user can't
-
-            // navigate "back" to an empty sidebar frame — the call module handles navigation.
-
-            const sourceIsCall = (window.__messageChatReturnUserId && window.__messageChatReturnId);
-
-            const backBtn = document.getElementById('backToChatsBtn');
-
-            if (backBtn) {
-
-                // On mobile show back button normally; on call-return hide it
-
-                backBtn.style.display = (sourceIsCall && window.innerWidth <= 768) ? 'none' : '';
-
+            // Back button visibility is 100% controlled by CSS:
+            //   desktop (>768px) → display:none via #backToChatsBtn rule
+            //   mobile  (≤768px) → display:flex via @media rule
+            // Never set inline style here — that would override the CSS.
+            // Just clear any leftover inline style so CSS takes effect.
+            const _backBtn = document.getElementById('backToChatsBtn');
+            if (_backBtn) _backBtn.style.display = '';
+            if (returnFromCall) {
+                setTimeout(() => { window.__returningFromCall = false; }, 1500);
             }
 
             // Push history state for device-back navigation support
@@ -10177,6 +10203,41 @@ Type: ${message.type || 'text'}`;
         const nameEl = document.getElementById('chatFriendName');
 
         if (nameEl) nameEl.textContent = resolvedName;
+
+        // ── FIX: Resolve real online status from FriendManager immediately ──
+        {
+            let _openIsOnline = false;
+            const _coreRef = getMessagesCore();
+            if (_coreRef && _coreRef.FriendManager) {
+                const _fObj = _coreRef.FriendManager.getFriend(numericUserId)
+                           || _coreRef.FriendManager.getFriend(String(numericUserId));
+                if (_fObj) _openIsOnline = !!(_fObj.online || _fObj.status === 'online');
+            }
+            const _statusEl2 = document.getElementById('chatStatusText');
+            const _indicatorEl2 = document.getElementById('chatStatusIndicator');
+            if (_openIsOnline) {
+                // Immediately show "Active now" — no flicker needed
+                if (_statusEl2) _statusEl2.textContent = 'Active now';
+                if (_indicatorEl2) _indicatorEl2.className = 'chat-status online';
+            } else {
+                // Delay "Offline" slightly — gives FriendManager a chance to resolve
+                // real status before we settle on offline, preventing Online→Offline flicker
+                setTimeout(() => {
+                    const _core3 = getMessagesCore();
+                    let _stillOnline = false;
+                    if (_core3 && _core3.FriendManager) {
+                        const _fObj2 = _core3.FriendManager.getFriend(numericUserId)
+                                    || _core3.FriendManager.getFriend(String(numericUserId));
+                        if (_fObj2) _stillOnline = !!(_fObj2.online || _fObj2.status === 'online');
+                    }
+                    const _s = document.getElementById('chatStatusText');
+                    const _i = document.getElementById('chatStatusIndicator');
+                    if (_s) _s.textContent = _stillOnline ? 'Active now' : 'Offline';
+                    if (_i) _i.className = 'chat-status ' + (_stillOnline ? 'online' : 'offline');
+                }, 600);
+            }
+        }
+        // ── END online status FIX ──
 
         const avatarEl = document.getElementById('chatFriendAvatar');
 
@@ -10280,23 +10341,25 @@ Type: ${message.type || 'text'}`;
 
                     if (_core2 && _core2.FriendManager) {
 
-                        const _f = _core2.FriendManager.getFriend(numericUserId);
+                        const _f = _core2.FriendManager.getFriend(numericUserId)
+                                || _core2.FriendManager.getFriend(String(numericUserId));
 
-                        if (_f) _realOnline = !!_f.online;
+                        if (_f) _realOnline = !!(_f.online || _f.status === 'online');
 
                     }
 
-                    // FIX: Only show "Active now" when online; leave blank otherwise (no "Offline" text)
-
-                    statusEl.textContent = _realOnline ? 'Active now' : '';
+                    statusEl.textContent = _realOnline ? 'Active now' : 'Offline';
 
                 }
 
                 const indicatorEl = document.getElementById('chatStatusIndicator');
 
-                if (indicatorEl) indicatorEl.className = `chat-status ${document.getElementById('chatStatusText')?.textContent === 'Active now' ? 'online' : 'offline'}`;
+                if (indicatorEl) {
+                    const _isNowOnline = document.getElementById('chatStatusText')?.textContent === 'Active now';
+                    indicatorEl.className = `chat-status ${_isNowOnline ? 'online' : 'offline'}`;
+                }
 
-                
+
 
                 const messagesContainer = document.getElementById('messagesContainer');
 
@@ -11288,11 +11351,13 @@ Type: ${message.type || 'text'}`;
 
             if (core && core.openConversation) {
 
+                // Pass full chat object as options so friendName is available immediately in the header
+                const _chatId = (chat && chat.id) ? chat.id : chat;
+                const _chatOpts = (chat && typeof chat === 'object') ? { friendName: chat.friendName || chat.name, friendAvatar: chat.friendAvatar || chat.avatar, userName: chat.friendName || chat.name } : {};
+
                 if (coreState?.state === 'ACTIVE') {
 
-                    const id = (chat && chat.id) ? chat.id : chat;
-
-                    core.openConversation(id).catch?.(() => {});
+                    core.openConversation(_chatId, _chatOpts).catch?.(() => {});
 
                 } else {
 
@@ -11310,9 +11375,7 @@ Type: ${message.type || 'text'}`;
 
                         if (s?.state === 'ACTIVE') {
 
-                            const id = (chat && chat.id) ? chat.id : chat;
-
-                            c.openConversation(id).catch?.(() => {});
+                            c.openConversation(_chatId, _chatOpts).catch?.(() => {});
 
                         } else if (attempts < 20) {
 

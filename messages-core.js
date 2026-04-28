@@ -2659,7 +2659,9 @@ try {
                 const otherUser = chat.otherParticipant || 
                     (chat.participants && chat.participants.find(p => p.id !== currentUserId));
                 
-                const friendName = otherUser?.displayName || otherUser?.username || otherUser?.firstName || chat.name || 'User';
+                // Strip trailing " User" suffix that backend sometimes appends to display names
+                const _rawFriendName = otherUser?.displayName || otherUser?.username || otherUser?.firstName || chat.name || 'User';
+                const friendName = _rawFriendName.replace(/\s+User$/i, '').trim() || _rawFriendName;
                 const friendAvatar = otherUser?.avatar || chat.avatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(friendName)}&background=random&color=fff`;
                 
                 let lastMessageText = chat.lastMessage?.content || chat.lastMessageContent || '';
@@ -2746,10 +2748,24 @@ try {
         },
         
         setMessages: function(messages, conversationId) {
+            // CACHE-PROTECTION: Never overwrite a populated cache with an empty array.
+            // If the incoming messages list is empty, keep whatever is already cached.
+            const incomingMessages = ensureSafeArray(messages);
+            if (incomingMessages.length === 0) {
+                const existingCache = this.loadPreviousMessages(conversationId || this._activeConversation?.id);
+                if (existingCache && existingCache.length > 0) {
+                    // Retain cached messages — API returned empty (likely auth issue or no new msgs)
+                    this._messages = existingCache;
+                    this._rebuildMessagesMap();
+                    this._notifySubscribers();
+                    return;
+                }
+                // No cache either — allow the empty set so the UI shows "no messages"
+            }
             // Deduplicate: for each message, a serverId-confirmed copy wins over
             // an optimistic copy with the same localId.
             const byId = new Map();
-            for (const msg of ensureSafeArray(messages)) {
+            for (const msg of incomingMessages) {
                 if (!msg.id) continue;
                 const existing = byId.get(msg.id);
                 if (!existing) {
@@ -4001,7 +4017,14 @@ try {
                 ChatManager.setActiveConversation(conversation);
                 this._showChatPanel(conversation);
             } else {
-                const tempConversation = { id: actualId, friendName: 'Loading...', friendAvatar: '', online: false };
+                // No cached conversation: show the name passed via openConversation opts (userName) immediately
+                // so header never shows "Loading..." to the user
+                const _resolvedName = (typeof conversationId === 'object' && conversationId.friendName)
+                    ? conversationId.friendName
+                    : (options && options.friendName) || (options && options.userName) || null;
+                // Never show ".." placeholder — only set if we actually have a real name
+                const _displayName = _resolvedName && _resolvedName !== '..' ? _resolvedName : null;
+                const tempConversation = { id: actualId, friendName: _displayName || 'Loading…', friendAvatar: '', online: false };
                 ChatManager.setActiveConversation(tempConversation);
                 this._showChatPanel(tempConversation);
             }
@@ -4065,8 +4088,9 @@ try {
             if (sidebar && window.innerWidth <= 768) {
                 sidebar.classList.remove('active');
             }
-            if (backBtn && window.innerWidth <= 768) {
-                backBtn.style.display = 'flex';
+            if (backBtn) {
+                // Back button is hidden — device back-gesture / popstate handles navigation
+                backBtn.style.display = 'none';
             }
             
             const nameEl = document.getElementById('chatFriendName');

@@ -1,5 +1,5 @@
 // authStorage.js - Persistent Authentication Storage
-// VERSION: 1.1.0 - WhatsApp-style persistent auth layer
+// VERSION: 1.4.0 - Proactive refresh helpers + atomic old-token wipe on save
 // PURPOSE: Single source of truth for auth persistence in localStorage
 
 (function () {
@@ -43,14 +43,19 @@
             };
 
             withAuthMutation(() => {
+                // PATCH v1.4: Wipe ALL old token copies first so no stale token can
+                // linger alongside the new one and cause auth header mismatches.
+                LEGACY_TOKEN_KEYS.forEach((key) => localStorage.removeItem(key));
+                LEGACY_USER_KEYS.forEach((key) => localStorage.removeItem(key));
+
+                // Now write fresh values
                 localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(payload));
                 LEGACY_TOKEN_KEYS.forEach((key) => localStorage.setItem(key, payload.token));
                 LEGACY_USER_KEYS.forEach((key) => localStorage.setItem(key, JSON.stringify(payload.user || null)));
                 localStorage.setItem(LOGIN_STATE_KEY, 'true');
             });
 
-            console.log('[AuthStorage] Auth saved to localStorage');
-            console.log('[AUTH TOKEN]', payload.token);
+            console.log('[AuthStorage] Auth saved to localStorage, token length:', payload.token.length);
             return true;
         } catch (error) {
             console.error('[AuthStorage] saveAuth failed:', error.message);
@@ -111,6 +116,43 @@
         return true;
     }
 
+    // PATCH v1.4: Returns milliseconds until the stored token expires, or 0 if already expired.
+    // Returns null if no expiry information is present (non-expiring / unknown).
+    function getTokenExpiresAt() {
+        const auth = getAuth();
+        if (!auth) return null;
+
+        // Prefer the explicit expiresAt stored in our payload
+        if (auth.expiresAt && typeof auth.expiresAt === 'number') {
+            return auth.expiresAt;
+        }
+
+        // Fall back to decoding JWT exp claim directly
+        try {
+            const parts = (auth.token || '').split('.');
+            if (parts.length === 3) {
+                const payload = JSON.parse(atob(parts[1]));
+                if (payload.exp) return payload.exp * 1000;
+            }
+        } catch (_) {}
+
+        return null;
+    }
+
+    // PATCH v1.4: Returns true when the token is present but will expire within
+    // `thresholdMs` milliseconds (default 5 minutes).  Used by the proactive
+    // refresh scheduler to trigger a background refresh before the token actually
+    // expires, so the user never notices a token change.
+    function isTokenExpiringSoon(thresholdMs = 5 * 60 * 1000) {
+        const auth = getAuth();
+        if (!auth || !auth.token) return false;
+        const expiresAt = getTokenExpiresAt();
+        if (expiresAt === null) return false; // no expiry info → assume valid
+        const msRemaining = expiresAt - Date.now();
+        // Also return true when already expired so callers treat both cases uniformly
+        return msRemaining <= thresholdMs;
+    }
+
     function updateAuthTokens({ token, refreshToken, expiresAt }) {
         try {
             const existing = getAuth() || {};
@@ -130,7 +172,7 @@
     function getToken() {
         const auth = getAuth();
         const token = auth?.token || null;
-        console.log('[AUTH TOKEN]', token);
+        console.log('[AuthStorage] getToken() called, token present:', !!token);
         return token;
     }
 
@@ -179,7 +221,9 @@
     const AuthStorage = {
         saveAuth, getAuth, clearAuth, hasValidAuth, updateAuthTokens, getToken, getUser,
         // v1.3 additions
-        isValidSession, setSession, clearSession, getSession, getSessionSync
+        isValidSession, setSession, clearSession, getSession, getSessionSync,
+        // v1.4 additions — proactive refresh support
+        getTokenExpiresAt, isTokenExpiringSoon
     };
 
     window.AuthStorage = AuthStorage;

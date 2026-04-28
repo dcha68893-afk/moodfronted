@@ -1,5 +1,5 @@
 // js/auth.session.manager.js - Complete Session Manager for Auto-Login
-// Version: 1.3.0 - FIXED: Token expiry now triggers refresh instead of immediate session clear
+// Version: 1.4.0 - Proactive online-return refresh + atomic old-token wipe
 // Handles: Persistent sessions, auto-login, account limits, logout detection, token refresh
 
 (function() {
@@ -549,6 +549,20 @@
 
             const newRefresh = data.refreshToken || storedRefresh;
 
+            // PATCH v1.4: Wipe ALL old token locations atomically before persisting
+            // the new ones.  Without this step the legacy keys (authToken, moodchat_token,
+            // USER_TOKEN, …) kept holding the expired token value.  Any module that
+            // reads those keys directly — including api_core.js and embedded iframes —
+            // would then continue sending the expired token and receive 401 errors
+            // even though the refresh succeeded.
+            const LEGACY_TOKEN_KEYS_SM = ['authToken', 'accessToken', 'token', 'moodchat_token',
+                                           'USER_TOKEN', 'kynecta_token', 'auth_token'];
+            LEGACY_TOKEN_KEYS_SM.forEach(k => { try { localStorage.removeItem(k); } catch (_) {} });
+            // Also clear window globals so nothing reads a stale in-memory value
+            window.__userToken   = null;
+            window.__accessToken = null;
+            if (window.token !== undefined) { try { window.token = null; } catch(_) {} }
+
             // Persist new tokens into every storage location the app reads
             const updatedSession = {
                 ...session,
@@ -647,6 +661,33 @@
                 }
             }
         }, CONFIG.CHECK_INTERVAL);
+
+        // PATCH v1.4: When the device comes back online, immediately attempt a
+        // background refresh if the stored token has expired or is expiring soon.
+        // This ensures the user who opened the app offline and then reconnected
+        // gets a valid token in the background without having to interact at all.
+        if (!window.__SESSION_MANAGER_ONLINE_LISTENER__) {
+            window.__SESSION_MANAGER_ONLINE_LISTENER__ = true;
+            window.addEventListener('online', async () => {
+                try {
+                    console.log('[SessionManager] 🌐 Back online — checking token validity');
+                    const session = loadSession();
+                    if (!session || !session.token) return;
+
+                    if (!isTokenValid(session.token)) {
+                        console.log('[SessionManager] Token expired — triggering immediate background refresh after reconnect');
+                        const refreshed = await _attemptTokenRefresh(session);
+                        if (refreshed) {
+                            console.log('[SessionManager] ✅ Token refreshed silently after reconnect');
+                        } else {
+                            console.warn('[SessionManager] ⚠️ Refresh after reconnect failed — session may be invalid');
+                        }
+                    }
+                } catch (err) {
+                    console.warn('[SessionManager] Online-event refresh error:', err.message);
+                }
+            });
+        }
 
         console.log('[SessionManager] Session check started');
     }
