@@ -63,13 +63,27 @@
   /* ── Wait for AppCache ───────────────────────────────────────────────────── */
   function getCache() {
     if (window.AppCache) return Promise.resolve(window.AppCache);
-    return new Promise((resolve, reject) => {
-      let tries = 0;
-      const timer = setInterval(() => {
-        tries++;
-        if (window.AppCache) { clearInterval(timer); resolve(window.AppCache); return; }
-        if (tries >= 100) { clearInterval(timer); reject(new Error('[GroupLocalStore] AppCache unavailable')); }
-      }, 50);
+    
+    // Listen for cache ready event instead of polling
+    return new Promise((resolve) => {
+      const handleCacheReady = () => {
+        if (window.AppCache) {
+          resolve(window.AppCache);
+        }
+      };
+      
+      window.addEventListener('kyn:cacheReady', handleCacheReady, { once: true });
+      
+      // Fallback: check if AppCache becomes available within 2 seconds
+      setTimeout(() => {
+        if (window.AppCache) {
+          window.removeEventListener('kyn:cacheReady', handleCacheReady);
+          resolve(window.AppCache);
+        } else {
+          console.log('[GroupLocalStore] AppCache not available, using localStorage fallback');
+          resolve(null);
+        }
+      }, 2000);
     });
   }
 

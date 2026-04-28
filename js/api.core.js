@@ -1032,21 +1032,6 @@ function withTimeout(promise, timeoutMs = 30000, errorMessage = 'Request timeout
 function generateRequestId() {
     return `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}_${Math.random().toString(36).substr(2, 4)}`;
 }
-
-// ============================================================================
-// ENHANCED CORE FETCH FUNCTION WITH RETRY LIMITS
-// ============================================================================
-// Environment-aware timeout
-const getDefaultTimeout = () => {
-    // Check if we're in production (Render)
-    const isProduction = window.location?.hostname?.includes('render.com') || 
-                         window.location?.hostname?.includes('onrender.com');
-    return isProduction ? 30000 : 15000; // 30s for production, 15s for local
-};
-const DEFAULT_TIMEOUT = getDefaultTimeout();
-const MAX_RETRIES = 2; // Retry twice for timeout errors
-const abortControllers = new Map();
-
 async function coreFetch(url, options = {}) {
     const requestStartTime = Date.now();
     const requestId = options.requestId || generateRequestId();

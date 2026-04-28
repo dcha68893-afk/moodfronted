@@ -429,15 +429,21 @@
             
             console.log('[Realtime] Connecting Socket.IO to', socketUrl);
             
-            this._socket = socketIOClient(socketUrl, {
-                auth: {
-                    token: this._sessionToken
-                },
+            // Use query parameter for token to match backend expectations
+            const socketOptions = {
                 transports: ['websocket', 'polling'],
                 timeout: SOCKET_CONFIG.connectionTimeout,
                 reconnection: false,
                 forceNew: true
-            });
+            };
+            
+            // Add token as query parameter if available (fallback for session-based auth)
+            if (this._sessionToken) {
+                socketOptions.query = { token: this._sessionToken };
+                socketOptions.auth = { token: this._sessionToken };
+            }
+            
+            this._socket = socketIOClient(socketUrl, socketOptions);
 
             // Socket.IO event handlers
             this._socket.on('connect', () => {

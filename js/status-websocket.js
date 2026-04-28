@@ -380,12 +380,16 @@ window.StatusWebSocket = new StatusWebSocket();
     function tryInit() {
         if (window.StatusWebSocket.isConnected) return; // already done
         if (attempts >= MAX) {
-            console.warn('[StatusWebSocket] Gave up waiting for socket after', MAX, 'attempts');
+            console.warn('[StatusWebSocket] Gave up waiting for socket after', MAX, 'attempts - using fallback mode');
+            // Set fallback mode to prevent further retries
+            window.StatusWebSocket.fallbackMode = true;
             return;
         }
         attempts++;
         if (!window.StatusWebSocket.init()) {
-            setTimeout(tryInit, 200);
+            // Exponential backoff to reduce noise
+            const delay = Math.min(200 * Math.pow(1.5, attempts - 1), 2000);
+            setTimeout(tryInit, delay);
         }
     }
 
