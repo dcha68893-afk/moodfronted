@@ -5439,9 +5439,29 @@ case 'CALL_ACCEPTED':
         callType: UIState.callType || 'voice'
     });
     break;
-                    case 'CALL_INCOMING':
-                        UIEventHandlers.handleIncomingCall && UIEventHandlers.handleIncomingCall(data.payload || {});
+                    case 'CALL_INCOMING': {
+                        const _incomingPayload = data.payload || {};
+                        // Store so late-arriving callCore listeners can still pick it up
+                        window.__pendingIncomingCallData = _incomingPayload;
+                        if (UIEventHandlers.handleIncomingCall) {
+                            UIEventHandlers.handleIncomingCall(_incomingPayload);
+                        } else {
+                            // callCore or UI not fully ready — retry up to 3x with 300ms gaps
+                            let _retries = 0;
+                            const _retryIncoming = setInterval(() => {
+                                _retries++;
+                                if (UIEventHandlers.handleIncomingCall) {
+                                    clearInterval(_retryIncoming);
+                                    UIEventHandlers.handleIncomingCall(_incomingPayload);
+                                    window.__pendingIncomingCallData = null;
+                                } else if (_retries >= 3) {
+                                    clearInterval(_retryIncoming);
+                                    console.warn('[Calls UI] handleIncomingCall still not ready after retries');
+                                }
+                            }, 300);
+                        }
                         break;
+                    }
                     case 'AUTO_ACCEPT_CALL':
                     case 'ANSWER_CALL': {
                         // Parent banner/overlay accepted — answer the call

@@ -380,6 +380,13 @@
 
         }
 
+        // FIX Bug6: fallback to globally-cached userId set by SessionManager on login.
+        // This ensures message bubbles always resolve sent/received correctly even
+        // when the core reference is not yet available during async renders.
+        if (window._kynCurrentUserId) {
+            return window._kynCurrentUserId;
+        }
+
         return null;
 
     }
@@ -10378,19 +10385,21 @@ Type: ${message.type || 'text'}`;
 
                     console.log('[MessageUI] Found existing conversation:', existingConv.id);
 
-                    core.openConversation(existingConv.id);
+                    // FIX Bug5: pass name so header never shows Loading...
+                    core.openConversation(existingConv.id, { friendName: resolvedName, userName: resolvedName, minFetchGap: 0 });
 
                 } else {
 
                     console.log('[MessageUI] No existing conversation found, creating new one');
 
-                    core.openConversation(numericUserId);
+                    core.openConversation(numericUserId, { friendName: resolvedName, userName: resolvedName, minFetchGap: 0 });
 
                 }
 
             } else {
 
-                core.openConversation(numericUserId);
+                // FIX Bug5: pass name so header never shows Loading...
+                core.openConversation(numericUserId, { friendName: resolvedName, userName: resolvedName, minFetchGap: 0 });
 
             }
 
@@ -11768,10 +11777,15 @@ Type: ${message.type || 'text'}`;
 
                 console.log('[messagesUI] Opening existing conversation instantly:', existingConversation.id);
 
-                // ✅ FIX C1: minFetchGap:0 on explicit user open — always fetch fresh messages.
+                // FIX Bug3: ensureChatPanelOpen must run AFTER openConversation resolves
+                // so messages are loaded before the panel is shown (no more blank panel).
+                // FIX Bug4: pass friendName/userName so _showChatPanel never falls back to 'Loading…'.
+                core.openConversation(existingConversation.id, { minFetchGap: 0, friendName: displayName, userName: displayName })
+                    .then(() => ensureChatPanelOpen(existingConversation.id))
+                    .catch(() => ensureChatPanelOpen(existingConversation.id));
 
-                core.openConversation(existingConversation.id, { minFetchGap: 0 }).catch?.(() => {});
-
+                // Also call ensureChatPanelOpen immediately for instant visual feedback
+                // (shows the panel with correct name right away, messages fill in async)
                 ensureChatPanelOpen(existingConversation.id);
 
                 return;

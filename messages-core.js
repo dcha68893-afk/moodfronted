@@ -1427,6 +1427,11 @@ try {
             
             _storedSession = this._session;
             _validSessionSet = true;
+
+            // FIX Bug6: cache userId globally so message bubble renderer
+            // never falls back to null when getCurrentUserId() is called
+            // during async renders before the core reference is available.
+            try { window._kynCurrentUserId = this._session.userId; } catch (_e) {}
             
             Logger.success('SessionManager', 'Session established', { 
                 authenticated: true,
@@ -2793,6 +2798,21 @@ try {
             this._saveMessagesToCache(cacheId);
             this._notifySubscribers();
 
+            // FIX Bug2: Also fire renderMessages so the chat panel re-draws
+            // immediately whenever messages are loaded/updated — without waiting
+            // for a real-time newMessage socket event.
+            try {
+                if (this._activeConversation) {
+                    window.dispatchEvent(new CustomEvent('renderMessages', {
+                        detail: {
+                            messages: this._messages,
+                            currentChat: this._activeConversation,
+                            currentUser: null
+                        }
+                    }));
+                }
+            } catch (_e) {}
+
             // ── OFFLINE-FIRST: persist ALL messages to IndexedDB ─────────────
             if (window.KynectaLocalStore && uniqueMessages.length > 0) {
                 const chatId = cacheId || uniqueMessages[0]?.chatId || uniqueMessages[0]?.conversationId;
@@ -4021,10 +4041,13 @@ try {
                 // so header never shows "Loading..." to the user
                 const _resolvedName = (typeof conversationId === 'object' && conversationId.friendName)
                     ? conversationId.friendName
-                    : (options && options.friendName) || (options && options.userName) || null;
+                    : (options && options.friendName) || (options && options.userName)
+                      // FIX Bug4: also check the globally-cached name set by loadChatByFriendId
+                      || window.currentFriendName || null;
                 // Never show ".." placeholder — only set if we actually have a real name
                 const _displayName = _resolvedName && _resolvedName !== '..' ? _resolvedName : null;
-                const tempConversation = { id: actualId, friendName: _displayName || 'Loading…', friendAvatar: '', online: false };
+                // FIX Bug4: use empty string instead of 'Loading…' so _showChatPanel keeps existing DOM name
+                const tempConversation = { id: actualId, friendName: _displayName || '', friendAvatar: '', online: false };
                 ChatManager.setActiveConversation(tempConversation);
                 this._showChatPanel(tempConversation);
             }
@@ -4099,7 +4122,15 @@ try {
             const indicatorEl = document.getElementById('chatStatusIndicator');
             
             if (nameEl) {
-                nameEl.textContent = conversation.friendName || conversation.name || 'Chat';
+                const resolvedPanelName = conversation.friendName || conversation.name || '';
+                // FIX Bug4/5: Never overwrite a real name with the "Loading…" placeholder.
+                // If we already have a real name in the DOM, keep it until we get a better one.
+                const existingName = nameEl.textContent || '';
+                const incomingIsPlaceholder = !resolvedPanelName || resolvedPanelName === 'Loading…' || resolvedPanelName === 'Chat';
+                const existingIsPlaceholder = !existingName || existingName === 'Loading…' || existingName === 'Select a chat' || existingName === 'Chat';
+                if (!incomingIsPlaceholder || existingIsPlaceholder) {
+                    nameEl.textContent = resolvedPanelName || existingName || 'Chat';
+                }
             }
             // FIX: Always resolve real online status from FriendManager — not stale conversation snapshot
             const _fid = conversation.friendId || conversation.otherUserId || (conversation.otherParticipant && conversation.otherParticipant.id);
@@ -5747,7 +5778,7 @@ try {
                 }
                 _lastPollChatId = activeChat.id;
                 _lastPollMsgCount = msgCount;
-                ChatManager.fetchMessages(activeChat.id, { limit: 20, minFetchGap: 25000 }).catch(() => {});
+                ChatManager.fetchMessages(activeChat.id, { limit: 20, minFetchGap: 10000 }).catch(() => {});
             }, 30000);
         }
     }

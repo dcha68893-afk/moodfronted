@@ -302,7 +302,9 @@ function __isValidSession(session) {
 
 
 
-                        console.warn(`[${MODULE_NAME}][StorageProxy] GET timeout for key: ${key}`);
+                        // Only warn once per key to avoid repeated noise on page load
+                        const _warnKey = '_storageTimeoutWarn_' + key;
+                        if (!window[_warnKey]) { window[_warnKey] = true; console.warn('[' + MODULE_NAME + '][StorageProxy] GET timeout for key: ' + key + ' (once only)'); }
 
 
 
@@ -3020,13 +3022,22 @@ function applySession(sessionData) {
 
         window.dispatchEvent(new CustomEvent('CALLS_CORE_READY', {
 
-
-
             detail: { core: window.callCore, timestamp: Date.now() }
 
-
-
         }));
+
+        // ── PENDING INCOMING CALL REPLAY ─────────────────────────────────
+        // If a call:incoming event arrived before the module was ACTIVE,
+        // chat.html stores it in window.__pendingIncomingCallData.
+        // Replay it now that we're active so the receiver sees it.
+        setTimeout(function() {
+            const pending = window.__pendingIncomingCallData;
+            if (pending && pending.callId) {
+                console.log('[CallsCore] 🔔 Replaying pending incoming call after module became ACTIVE:', pending.callId);
+                window.__pendingIncomingCallData = null;
+                handleIncomingCall(pending);
+            }
+        }, 200);
 
 
 

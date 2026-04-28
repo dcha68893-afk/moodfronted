@@ -307,6 +307,9 @@
             this._state = CONNECTION_STATE.DISCONNECTED;
             this._authenticated = false;
             this._registeredSocketListeners.clear();
+            // Reset per-connection flags so the next socket gets full setup
+            this._bridgeListenersLogged = false;
+            this._hasSyncedThisConnection = false;
             this._emitStateChange();
         }
 
@@ -428,7 +431,10 @@
             // Socket.IO will handle the WebSocket connection internally
             const socketUrl = getBackendBaseUrl(); // Keep as HTTP/HTTPS, let Socket.IO handle WebSocket
             
-            console.log('[Realtime] Connecting Socket.IO to', socketUrl);
+            // Only log on first connect or every 5th attempt to reduce noise
+            if (!this._hasEverConnected || this._reconnectAttempts === 0 || this._reconnectAttempts % 5 === 0) {
+                console.log('[Realtime] Connecting Socket.IO to', socketUrl);
+            }
             
             // Use query parameter for token to match backend expectations
             const socketOptions = {
@@ -447,18 +453,29 @@
             this._socket = socketIOClient(socketUrl, socketOptions);
 
             // Socket.IO event handlers
+            // ── Noise guards: only log state changes, not every cycle ──────────
+            this._lastConnectLogState = this._lastConnectLogState || 'disconnected';
+
             this._socket.on('connect', () => {
                 console.log('[Realtime] Socket.IO connected successfully');
+                this._lastConnectLogState = 'connected';
                 this._onSocketIOConnect();
             });
 
             this._socket.on('connect_error', (err) => {
-                console.error('[Realtime] Socket.IO connection error:', err);
+                const now = Date.now();
+                if (!this._lastConnectErrLogAt || now - this._lastConnectErrLogAt > 60000) {
+                    this._lastConnectErrLogAt = now;
+                    console.error('[Realtime] Socket.IO connection error:', err.message || err);
+                }
                 this._onError(err);
             });
 
             this._socket.on('disconnect', (reason) => {
-                console.log('[Realtime] Socket.IO disconnected:', reason);
+                if (this._lastConnectLogState !== 'disconnected') {
+                    console.log('[Realtime] Socket.IO disconnected:', reason);
+                    this._lastConnectLogState = 'disconnected';
+                }
                 this._onClose();
             });
 
@@ -653,6 +670,9 @@
             }
             this._authenticated = false;
             this._registeredSocketListeners.clear();
+            // Reset per-connection flags so next socket gets full setup
+            this._bridgeListenersLogged = false;
+            this._hasSyncedThisConnection = false;
 
             if (event && event.code === 1000 && this._manualDisconnect) {
                 this._state = CONNECTION_STATE.DISCONNECTED;
@@ -962,11 +982,16 @@
             const jitter = delay * SOCKET_CONFIG.reconnectJitter;
             const finalDelay = delay + (Math.random() * jitter - jitter / 2);
 
-            this._reconnectTimer = setTimeout(() => {
-                if (!this._lastReconnectLogAt || Date.now() - this._lastReconnectLogAt > SOCKET_CONFIG.reconnectCooldown) {
-                    this._lastReconnectLogAt = Date.now();
-                    console.log(`[Realtime] Reconnecting in ${Math.round(finalDelay)}ms (attempt ${this._reconnectAttempts + 1})`);
+            // Only log once per reconnect attempt block (not every call)
+            const attemptNum = this._reconnectAttempts + 1;
+            if (!this._lastReconnectLogAttempt || this._lastReconnectLogAttempt !== attemptNum) {
+                this._lastReconnectLogAttempt = attemptNum;
+                if (attemptNum === 1 || attemptNum % 5 === 0) {
+                    console.log(`[Realtime] Reconnecting in ${Math.round(finalDelay)}ms (attempt ${attemptNum})`);
                 }
+            }
+
+            this._reconnectTimer = setTimeout(() => {
                 this._reconnectAttempts++;
                 this._connectInternal();
             }, finalDelay);
@@ -976,20 +1001,55 @@
             if (this._bridgeListenersLogged) return;
             this._bridgeListenersLogged = true;
 
-            console.log('[Realtime] ✅ Message bridge listeners registered');
+            // ── CRITICAL: Forward call events from Socket.IO to the _routeMessage
+            // pipeline so chat.html's wsService.on('call:incoming', ...) listeners fire.
+            // Without this, incoming call notifications are delivered to the Socket.IO
+            // socket but never reach any JavaScript handler.
+            const callEvents = [
+                'call:incoming',  'call_incoming',  'incoming_call', 'CALL_INCOMING',
+                'call:accepted',  'call_accepted',  'call:answered', 'call_answered',
+                'call:rejected',  'call_rejected',
+                'call:ended',     'call_ended',     'call_force_ended',
+                'call:cancelled', 'call_cancelled',
+                'call:initiated', 'call_initiated',
+                'webrtc:signal',  'webrtc_signal',
+                'call:ringing',   'call_ringing',
+            ];
+
+            if (this._socket && typeof this._socket.on === 'function') {
+                callEvents.forEach(eventType => {
+                    if (this._registeredSocketListeners.has(eventType)) return;
+                    this._registeredSocketListeners.add(eventType);
+
+                    this._socket.on(eventType, (payload) => {
+                        // Normalise into the standard message envelope
+                        const msg = (payload && typeof payload === 'object' && payload.type)
+                            ? payload
+                            : { type: eventType, payload: payload || {} };
+
+                        this._routeMessage(msg);
+
+                        // Also dispatch on KynectaEventBus for any bus listeners
+                        if (window.KynectaEventBus) {
+                            window.KynectaEventBus.emit(`REALTIME_${eventType}`, msg.payload || payload, { async: true });
+                        }
+                    });
+                });
+
+                console.log('[Realtime] ✅ Message bridge listeners registered');
+            }
         }
 
         _triggerSync() {
-            if (!this._lastSyncLogAt || Date.now() - this._lastSyncLogAt > 30000) {
-                this._lastSyncLogAt = Date.now();
-                console.log('[Realtime] 🔄 Sync required after connection');
-                
-                if (window.KynectaEventBus) {
-                    window.KynectaEventBus.emit('kyn:syncRequired', { 
-                        source: 'realtime-socket',
-                        timestamp: Date.now()
-                    });
-                }
+            // Only log and emit once per connection (not every reconnect)
+            if (this._hasSyncedThisConnection) return;
+            this._hasSyncedThisConnection = true;
+
+            if (window.KynectaEventBus) {
+                window.KynectaEventBus.emit('kyn:syncRequired', { 
+                    source: 'realtime-socket',
+                    timestamp: Date.now()
+                });
             }
         }
     }

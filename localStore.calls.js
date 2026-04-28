@@ -61,7 +61,10 @@
           window.removeEventListener('kyn:cacheReady', handleCacheReady);
           resolve(window.AppCache);
         } else {
-          console.log('[CallLocalStore] AppCache not available after 5s, using localStorage fallback');
+          if (!window._callLocalStoreFallbackWarned) {
+            window._callLocalStoreFallbackWarned = true;
+            console.log('[CallLocalStore] AppCache not available after 5s, using localStorage fallback (once only)');
+          }
           resolve(null);
         }
       }, 5000);
@@ -127,7 +130,7 @@
       const cache = await getCache();
       if (!cache) {
         // Fallback to localStorage if AppCache is not available
-        console.warn('[CallLocalStore] Using localStorage fallback for save');
+        if (!window._callLocalStoreSaveWarnShown) { window._callLocalStoreSaveWarnShown = true; console.warn('[CallLocalStore] Using localStorage fallback for save (once only)'); }
         const normalised = normalise(record);
         const key = `kynecta_calls_${normalised.id}`;
         localStorage.setItem(key, JSON.stringify(normalised));
