@@ -63,7 +63,7 @@ const EXPECTED_PARENT_ORIGIN = window.location.origin;
 // =============================================
 
 const POLLING_CONFIG = {
-    INCOMING_REQUESTS_INTERVAL: 30000, // 30 seconds
+    INCOMING_REQUESTS_INTERVAL: 120000, // 2 minutes - reduced from 30s to avoid noise
     MAX_RETRY_ATTEMPTS: 3,
     RETRY_DELAY: 5000,
     ENABLED: true
