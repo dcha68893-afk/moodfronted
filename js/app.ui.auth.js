@@ -2282,18 +2282,35 @@ try {
                     }
                     
                     // 2. Unified auth storage (kynecta_auth)
+                    // FIX #3: Added issuedAt (required by SESSION_SCHEMA in app_core_session.js).
+                    // Without issuedAt, validateSession() returns isValid:false → getToken() returns
+                    // null → socket connects with no token → server rejects with auth/token-missing.
                     try {
+                        const now = Date.now();
                         const unifiedAuth = {
                             token: token,
                             user: user,
                             userId: user?.id || user?.userId,
-                            timestamp: Date.now(),
+                            timestamp: now,
+                            issuedAt: now,                           // ← FIX: required by SESSION_SCHEMA
+                            expiresAt: now + (24 * 60 * 60 * 1000), // 24h to match JWT expiry
+                            refreshToken: response?.refreshToken || null,
                             validated: true,
-                            expiresAt: Date.now() + 3600000,
-                            version: '4.1.1'
+                            version: '4.1.2'
                         };
                         localStorage.setItem('kynecta_auth', JSON.stringify(unifiedAuth));
-                        console.log('✅ Token stored in unified auth storage');
+
+                        // Propagate immediately so socket can use it without a storage read cycle
+                        window.__kynToken = token;
+                        if (window.__kynAPI) window.__kynAPI.token = token;
+                        if (window.AuthSessionManager && typeof window.AuthSessionManager.setToken === 'function') {
+                            window.AuthSessionManager.setToken(token);
+                        }
+                        if (window.KynectaRealtime) {
+                            window.KynectaRealtime._sessionToken = token;
+                        }
+
+                        console.log('✅ Token stored in unified auth storage (with issuedAt fix)');
                     } catch (e) {
                         console.warn('⚠️ Failed to store unified auth:', e);
                     }
@@ -2446,13 +2463,15 @@ if (window.SessionManager && token && user) {
                     localStorage.setItem('accessToken', token);
                     localStorage.setItem('moodchat_token', token);
                     
+                    const _retryNow = Date.now();
                     const retryUnified = {
                         token: token,
                         user: user,
                         userId: user?.id,
-                        timestamp: Date.now(),
-                        validated: true,
-                        expiresAt: Date.now() + 3600000
+                        timestamp: _retryNow,
+                        issuedAt: _retryNow,                           // ← FIX: required by SESSION_SCHEMA
+                        expiresAt: _retryNow + (24 * 60 * 60 * 1000), // 24h to match JWT expiry
+                        validated: true
                     };
                     localStorage.setItem('kynecta_auth', JSON.stringify(retryUnified));
                     
@@ -2754,7 +2773,18 @@ if (window.SessionManager && token && user) {
                         localStorage.setItem('accessToken', token);
                         localStorage.setItem('moodchat_token', token);
                         localStorage.setItem('USER_TOKEN', token);
-                        localStorage.setItem('kynecta_auth', JSON.stringify({ token, user, timestamp: Date.now() }));
+                        const _authNow = Date.now();
+                        localStorage.setItem('kynecta_auth', JSON.stringify({
+                            token,
+                            user,
+                            userId: user?.id || user?.userId,
+                            timestamp: _authNow,
+                            issuedAt: _authNow,                           // ← FIX: required by SESSION_SCHEMA
+                            expiresAt: _authNow + (24 * 60 * 60 * 1000), // 24h to match JWT expiry
+                            refreshToken: null
+                        }));
+                        window.__kynToken = token; // immediate propagation
+                        if (window.KynectaRealtime) window.KynectaRealtime._sessionToken = token;
                         window.token = token;
                         window.accessToken = token;
                         window.currentUser = user;

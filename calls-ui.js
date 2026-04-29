@@ -538,6 +538,10 @@ const GlobalCallHistory = {
     console.log('[Calls UI] Calling screen setup complete');
 }
 
+// Expose on window so other IIFEs / global functions can reach it
+window.showCallingScreen = showCallingScreen;
+window.startCallWithUser = startCallWithUser;
+
 function showIdleScreen() {
     console.log('[UI] showIdleScreen → returning to idle (no arrows)');
     // Expose on window immediately so cancelBtn.onclick can always reach it
@@ -961,8 +965,12 @@ function handleCallActionClick(e) {
 
     console.log('[Calls UI] Call-back triggered:', { userId: userId, userName: userName, callType: callType });
 
-    if (typeof startCallWithUser === 'function') {
-        startCallWithUser(userId, userName, callType);
+    // FIX: startCallWithUser lives inside setupEarlyCallListener IIFE — use window export
+    const _startCall = (typeof startCallWithUser === 'function')
+        ? startCallWithUser
+        : window.startCallWithUser;
+    if (typeof _startCall === 'function') {
+        _startCall(userId, userName, callType);
     } else if (window.callCore && typeof window.callCore.startCall === 'function') {
         window.callCore.startCall(userId, callType);
     } else {
@@ -2269,13 +2277,22 @@ async function initiateCallWithPendingUser() {
         }
 
         // Show calling screen IMMEDIATELY — before the async startCall so user sees feedback right away
-        showCallingScreen({
-            userId:    userId,
-            userName:  userName,
-            callType:  callType,
-            status:    'Calling...',
-            userAvatar: null
-        });
+        // NOTE: showCallingScreen is defined in a sibling IIFE (setupEarlyCallListener), so we
+        // always access it through window.showCallingScreen which is exported from that scope.
+        const _showCalling = (typeof showCallingScreen === 'function')
+            ? showCallingScreen
+            : window.showCallingScreen;
+        if (typeof _showCalling === 'function') {
+            _showCalling({
+                userId:    userId,
+                userName:  userName,
+                callType:  callType,
+                status:    'Calling...',
+                userAvatar: null
+            });
+        } else {
+            console.error('[Calls UI] showCallingScreen not available — check IIFE export');
+        }
 
         // CRITICAL FIX: Use startCall method instead of sendAction
         if (coreInstance.startCall) {

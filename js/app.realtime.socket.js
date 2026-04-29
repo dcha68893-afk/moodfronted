@@ -1,34 +1,26 @@
 /**
- * app.realtime.socket.js  — SOCKET.IO COMPATIBLE v3.0.0
- * 
- * CRITICAL FIX: Replace raw WebSocket with Socket.IO client to match backend
- * Backend uses Socket.IO server, frontend was using raw WebSocket - causing connection failures
- * 
- * Changes from v2.3.0:
- *  1. SOCKET.IO CLIENT: Replaced raw WebSocket with Socket.IO client library
- *  2. PROTOCOL COMPATIBILITY: Now uses Socket.IO handshake and authentication
- *  3. EVENT BRIDGE: Maintains compatibility with existing event listeners
- *  4. FALLBACK: Keeps raw WebSocket as fallback for non-Socket.IO environments
- *  5. TOKEN HANDLING: Updated for Socket.IO auth format
+ * app.realtime.socket.js — SOCKET.IO COMPATIBLE v3.1.0
+ *
+ * FIXES IN THIS VERSION:
+ *  1. acquireToken() now checks window.__kynToken FIRST (set immediately after login)
+ *  2. kynecta_auth parsing now tolerates missing issuedAt (schema mismatch guard)
+ *  3. Added pre-connect token debug log so you can confirm token is present
+ *  4. Token passed in BOTH auth.token AND query.token for max compatibility
+ *  5. Reconnect loop prevention: auth errors don't auto-reconnect (avoids spam)
  */
 
 (function () {
     'use strict';
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // SOCKET.IO CLIENT LOADER
-    // ─────────────────────────────────────────────────────────────────────────
+    // ── Socket.IO client loader ───────────────────────────────────────────────
     let socketIOClient = null;
     let useRawWebSocket = false;
-    
-    // Try to load Socket.IO client
+
     try {
-        // Check if Socket.IO is already loaded
         if (typeof io !== 'undefined') {
             socketIOClient = io;
             console.log('[Realtime] Socket.IO client found');
         } else {
-            // Try to load Socket.IO from CDN
             const script = document.createElement('script');
             script.src = 'https://cdn.socket.io/4.7.5/socket.io.min.js';
             script.async = true;
@@ -39,27 +31,22 @@
                 }
             };
             script.onerror = () => {
-                console.warn('[Realtime] Socket.IO client failed to load, using raw WebSocket fallback');
+                console.warn('[Realtime] Socket.IO CDN failed, using raw WebSocket fallback');
                 useRawWebSocket = true;
             };
             document.head.appendChild(script);
         }
     } catch (err) {
-        console.warn('[Realtime] Socket.IO not available, using raw WebSocket fallback:', err);
+        console.warn('[Realtime] Socket.IO not available:', err);
         useRawWebSocket = true;
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // SINGLETON GUARD — only one instance ever
-    // ─────────────────────────────────────────────────────────────────────────
+    // ── Singleton guard ───────────────────────────────────────────────────────
     if (window.KynectaRealtime && window.KynectaRealtime.__hardened) {
         console.log('[Realtime] Already initialized — skipping duplicate script load.');
         return;
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // Connection state enum
-    // ─────────────────────────────────────────────────────────────────────────
     const CONNECTION_STATE = {
         DISCONNECTED:   'disconnected',
         CONNECTING:     'connecting',
@@ -71,30 +58,23 @@
         DEGRADED:       'degraded'
     };
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // Config
-    // ─────────────────────────────────────────────────────────────────────────
     const SOCKET_CONFIG = {
-        reconnectAttempts: 9999,
-        reconnectBaseDelay: 2000,
-        reconnectMaxDelay: 15000,
-        reconnectJitter:    0.3,
-        reconnectCooldown: 1000,
-        errorCooldown:      5000,
+        reconnectAttempts:    15,
+        reconnectBaseDelay:   3000,
+        reconnectMaxDelay:    30000,
+        reconnectJitter:      0.3,
+        errorCooldown:        5000,
         maxConsecutiveErrors: 5,
-        heartbeatInterval: 30000,
-        heartbeatTimeout:   5000,
-        connectionTimeout: 20000,
-        authTimeout:        5000,
-        messageQueueLimit: 500,
-        tokenWaitMs:        5000,
-        tokenPollInterval: 200,
-        debug:              false
+        heartbeatInterval:    30000,
+        heartbeatTimeout:     5000,
+        connectionTimeout:    20000,
+        authTimeout:          5000,
+        messageQueueLimit:    500,
+        tokenWaitMs:          10000,
+        tokenPollInterval:    200,
+        debug:                false
     };
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // Environment helpers
-    // ─────────────────────────────────────────────────────────────────────────
     function detectLocalEnvironment() {
         const h = window.location.hostname;
         return h === 'localhost' || h === '127.0.0.1' || h.startsWith('192.168.');
@@ -113,62 +93,56 @@
         return 'http://localhost:3000';
     }
 
-    function getWebSocketUrl() {
-        if (window.Environment && window.Environment.wsBaseUrl) {
-            return window.Environment.wsBaseUrl;
-        }
-        return getBackendBaseUrl();
-    }
-
-    // ─────────────────────────────────────────────────────────────────────────
-    // Token acquisition — checks every known location, returns null if missing
-    // ─────────────────────────────────────────────────────────────────────────
+    // ── FIX #1: Token acquisition — check globals FIRST (set right after login) ──
     function acquireToken() {
         const TOKEN_KEYS = [
-            'moodchat_token',
-            'kynecta_token', 'auth_token', 'token', 'jwt',
+            'moodchat_token', 'kynecta_token', 'auth_token', 'token', 'jwt',
             'access_token', '__kyn_token', 'kyn_access_token',
-            'kynecta_access_token', 'kyn_token', 'userToken'
+            'kynecta_access_token', 'kyn_token', 'userToken', 'accessToken',
+            'authToken', 'USER_TOKEN'
         ];
 
-        // 1. Dedicated session manager
-        if (window.AuthSessionManager && typeof window.AuthSessionManager.getToken === 'function') {
-            const t = window.AuthSessionManager.getToken();
-            if (t) return t;
-        }
-
-        // 2. API core cache
-        if (window.__kynToken) return window.__kynToken;
+        // ── Priority 1: window globals (set immediately after login response) ─
+        if (window.__kynToken && window.__kynToken.length > 10) return window.__kynToken;
+        if (window.__accessToken && window.__accessToken.length > 10) return window.__accessToken;
+        if (window.accessToken && typeof window.accessToken === 'string' && window.accessToken.length > 10) return window.accessToken;
+        if (window.__userToken && window.__userToken.length > 10) return window.__userToken;
         if (window.__kynAPI && window.__kynAPI.token) return window.__kynAPI.token;
 
-        // 3. localStorage / sessionStorage — known keys
+        // ── Priority 2: AuthSessionManager ───────────────────────────────────
+        if (window.AuthSessionManager && typeof window.AuthSessionManager.getToken === 'function') {
+            const t = window.AuthSessionManager.getToken();
+            if (t && t.length > 10) return t;
+        }
+
+        // ── Priority 3: Flat localStorage / sessionStorage keys ───────────────
         for (const key of TOKEN_KEYS) {
             const t = localStorage.getItem(key) || sessionStorage.getItem(key);
             if (t && t.length > 10 && !t.startsWith('{')) return t;
         }
 
-        // 4. kynecta_auth object
+        // ── Priority 4: kynecta_auth object (FIX: tolerant parse) ────────────
         for (const key of ['kynecta_auth', 'kynecta_session', 'kyn_session', 'auth_session', 'moodchat_auth']) {
             try {
                 const raw = localStorage.getItem(key) || sessionStorage.getItem(key);
-                if (raw) {
-                    const obj = JSON.parse(raw);
-                    const t = obj.token || obj.accessToken || obj.access_token ||
-                              (obj.session && (obj.session.token || obj.session.accessToken)) ||
-                              (obj.data && obj.data.token);
-                    if (t && t.length > 10) return t;
-                }
+                if (!raw) continue;
+                const obj = JSON.parse(raw);
+                // FIX: extract token regardless of schema validity
+                const t = obj.token || obj.accessToken || obj.access_token ||
+                          (obj.session && (obj.session.token || obj.session.accessToken)) ||
+                          (obj.data && obj.data.token);
+                if (t && t.length > 10) return t;
             } catch (_) {}
         }
 
-        // 5. JWT pattern scan
+        // ── Priority 5: JWT pattern scan ──────────────────────────────────────
         try {
             const jwtPattern = /^eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/;
             for (let i = 0; i < localStorage.length; i++) {
                 const k = localStorage.key(i);
                 const v = localStorage.getItem(k);
                 if (v && jwtPattern.test(v.trim())) {
-                    if (SOCKET_CONFIG.debug) console.log('[Realtime] 🔑 Token found via JWT scan, key:', k);
+                    if (SOCKET_CONFIG.debug) console.log('[Realtime] Token found via JWT scan, key:', k);
                     return v.trim();
                 }
             }
@@ -193,21 +167,18 @@
         });
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // Main manager class
-    // ─────────────────────────────────────────────────────────────────────────
+    // ── Main manager class ────────────────────────────────────────────────────
     class KynectaRealtimeManager {
         constructor() {
             this.__hardened = true;
 
             this._socket = null;
             this._state = CONNECTION_STATE.DISCONNECTED;
-            this._url = getWebSocketUrl();
+            this._url = getBackendBaseUrl();
             this._reconnectAttempts = 0;
             this._reconnectTimer = null;
             this._heartbeatTimer = null;
             this._heartbeatTimeoutTimer = null;
-            this._authTimer = null;
             this._connectionTimeout = null;
             this._messageQueue = [];
             this._pendingMessages = new Map();
@@ -219,40 +190,31 @@
             this._lastSignalPayload = null;
             this._manualDisconnect = false;
             this._lastParseErrorAt = null;
-            this._socketIoPingInterval = 25000;
 
-            // Enhanced error tracking
             this._consecutiveErrors = 0;
             this._lastConnectionAttempt = 0;
             this._lastErrorTime = 0;
             this._lastReconnectLogAt = 0;
-            this._lastSyncLogAt = 0;
             this._hasJoinedUserRoom = false;
             this._bridgeListenersLogged = false;
             this._hasEverConnected = false;
-            this._hasSid = false;
-            this._resolvedUserId = null;
             this._hasLoggedInitialError = false;
-
-            // Track Socket.IO event types to avoid duplicates
             this._registeredSocketListeners = new Set();
 
             this._stats = {
-                messagesSent:     0,
+                messagesSent: 0,
                 messagesReceived: 0,
-                reconnections:    0,
-                errors:           0,
-                heartbeats:       0,
-                queueSize:        0
+                reconnections: 0,
+                errors: 0,
+                heartbeats: 0,
+                queueSize: 0
             };
 
             this._setupNetworkMonitoring();
 
             window.KynectaRealtime = this;
-            console.log('[Realtime] ✅ Socket.IO compatible manager initialized');
+            console.log('[Realtime] ✅ Socket.IO compatible manager initialized (v3.1.0)');
         }
-
-        // ── PUBLIC API ────────────────────────────────────────────────────────
 
         connect(token = null) {
             if (this._state === CONNECTION_STATE.AUTHENTICATED ||
@@ -282,9 +244,16 @@
                 if (!this._sessionToken) {
                     this._sessionToken = await waitForToken();
                 }
-                if (!this._sessionToken) {
-                    console.warn('[Realtime] No auth token found — connecting unauthenticated (server may reject).');
+
+                // ── FIX #3: Debug log before connection ───────────────────────
+                if (this._sessionToken) {
+                    console.log('[Realtime] 🔑 Connecting with token (first 20 chars):',
+                        this._sessionToken.substring(0, 20) + '...',
+                        'length:', this._sessionToken.length);
+                } else {
+                    console.warn('[Realtime] ⚠️ No auth token found — server will likely reject connection');
                 }
+
                 this._connectInternal();
             })();
 
@@ -307,7 +276,6 @@
             this._state = CONNECTION_STATE.DISCONNECTED;
             this._authenticated = false;
             this._registeredSocketListeners.clear();
-            // Reset per-connection flags so the next socket gets full setup
             this._bridgeListenersLogged = false;
             this._hasSyncedThisConnection = false;
             this._emitStateChange();
@@ -357,15 +325,12 @@
         getState() { return this._state; }
         isConnected() { return this._state === CONNECTION_STATE.AUTHENTICATED; }
         isUserOnline(u) { return this._onlineUsers.has(String(u)); }
+        emit(type, payload = {}, options = {}) { return this.send(type, payload, options); }
 
         sendSignal(signalType, payload = {}, options = {}) {
             this._lastSignalPayload = { signalType, payload, options, timestamp: Date.now() };
             const eventType = payload.eventType || payload.type || signalType || 'call:signal';
             return this.send(eventType, { ...payload, signalType }, options);
-        }
-
-        emit(type, payload = {}, options = {}) {
-            return this.send(type, payload, options);
         }
 
         handleReconnect(meta = {}) {
@@ -392,12 +357,10 @@
 
         setDebug(enabled) { SOCKET_CONFIG.debug = enabled; }
 
-        // ── PRIVATE METHODS ─────────────────────────────────────────────────
+        // ── Private methods ────────────────────────────────────────────────────
 
         async _connectInternal() {
-            if (this._socket && (this._socket.connected || this._socket.connecting)) {
-                return;
-            }
+            if (this._socket && (this._socket.connected || this._socket.connecting)) return;
 
             if (this._socket) {
                 if (this._socket.disconnect) {
@@ -427,40 +390,33 @@
         }
 
         async _connectSocketIO() {
-            // Use the frontend URL for Socket.IO connection, not the backend
-            // Socket.IO will handle the WebSocket connection internally
-            const socketUrl = getBackendBaseUrl(); // Keep as HTTP/HTTPS, let Socket.IO handle WebSocket
-            
-            // Only log on first connect or every 5th attempt to reduce noise
+            const socketUrl = getBackendBaseUrl();
+
             if (!this._hasEverConnected || this._reconnectAttempts === 0 || this._reconnectAttempts % 5 === 0) {
                 console.log('[Realtime] Connecting Socket.IO to', socketUrl);
             }
-            
-            // Use query parameter for token to match backend expectations
+
             const socketOptions = {
                 transports: ['websocket', 'polling'],
                 timeout: SOCKET_CONFIG.connectionTimeout,
-                reconnection: false
-                // NOTE: forceNew removed — it caused "io server disconnect" on every
-                // reconnect because Socket.IO manager was creating a fresh socket that
-                // the server immediately closed in place of the previous one.
+                reconnection: false  // we manage reconnection ourselves
             };
-            
-            // Add token as query parameter if available (fallback for session-based auth)
+
+            // ── FIX #4: Pass token in BOTH auth and query for max compatibility ──
             if (this._sessionToken) {
-                socketOptions.query = { token: this._sessionToken };
                 socketOptions.auth = { token: this._sessionToken };
+                socketOptions.query = { token: this._sessionToken };
+            } else {
+                console.warn('[Realtime] Connecting WITHOUT token — expect auth/token-missing error');
             }
-            
+
             this._socket = socketIOClient(socketUrl, socketOptions);
 
-            // Socket.IO event handlers
-            // ── Noise guards: only log state changes, not every cycle ──────────
             this._lastConnectLogState = this._lastConnectLogState || 'disconnected';
 
             this._socket.on('connect', () => {
                 if (this._lastConnectLogState !== 'connected') {
-                    console.log('[Realtime] Socket.IO connected successfully');
+                    console.log('[Realtime] ✅ Socket.IO connected successfully, sid:', this._socket.id);
                     this._lastConnectLogState = 'connected';
                 }
                 this._onSocketIOConnect();
@@ -468,9 +424,33 @@
 
             this._socket.on('connect_error', (err) => {
                 const now = Date.now();
+                const msg = err.message || String(err);
+
+                // ── FIX #5: Don't loop on auth errors — they won't fix themselves ──
+                const isAuthError = msg.includes('auth/') || msg.includes('invalid-token') ||
+                                    msg.includes('token-missing') || msg.includes('Authentication');
+                if (isAuthError) {
+                    console.error('[Realtime] ❌ Auth error from server:', msg);
+                    console.error('[Realtime] ⚠️  Token in use:', this._sessionToken
+                        ? this._sessionToken.substring(0, 30) + '...'
+                        : 'NONE');
+                    console.error('[Realtime] Fix: ensure JWT_ACCESS_SECRET matches between token signing and verification');
+
+                    // Don't keep reconnecting for auth errors — it won't help
+                    this._state = CONNECTION_STATE.ERROR;
+                    this._emitStateChange();
+
+                    if (this._connectPromise) {
+                        const p = this._connectPromise;
+                        this._connectPromise = null;
+                        try { p.reject(err); } catch (_) {}
+                    }
+                    return; // no reconnect for auth errors
+                }
+
                 if (!this._lastConnectErrLogAt || now - this._lastConnectErrLogAt > 60000) {
                     this._lastConnectErrLogAt = now;
-                    console.error('[Realtime] Socket.IO connection error:', err.message || err);
+                    console.error('[Realtime] Socket.IO connection error:', msg);
                 }
                 this._onError(err);
             });
@@ -480,11 +460,23 @@
                     console.log('[Realtime] Socket.IO disconnected:', reason);
                     this._lastConnectLogState = 'disconnected';
                 }
+                // Don't reconnect on server-forced auth disconnects
+                if (reason === 'io server disconnect') {
+                    console.warn('[Realtime] Server forcefully disconnected — likely auth issue, not reconnecting');
+                    this._state = CONNECTION_STATE.ERROR;
+                    this._authenticated = false;
+                    this._emitStateChange();
+                    return;
+                }
                 this._onClose();
             });
 
             this._socket.on('message', (data) => {
                 this._onSocketIOMessage(data);
+            });
+
+            this._socket.on('authenticated', (data) => {
+                console.log('[Realtime] ✅ Server confirmed authentication:', data);
             });
         }
 
@@ -497,7 +489,6 @@
             this._state = CONNECTION_STATE.CONNECTED;
             this._emitStateChange();
 
-            // Socket.IO handles authentication during connection
             this._authenticated = true;
             this._state = CONNECTION_STATE.AUTHENTICATED;
             this._emitStateChange();
@@ -514,9 +505,7 @@
                 if (typeof data === 'object' && data.type) {
                     this._stats.messagesReceived++;
 
-                    if (data.type === 'authenticated' || data.type === 'welcome') {
-                        return;
-                    }
+                    if (data.type === 'authenticated' || data.type === 'welcome') return;
 
                     this._routeMessage(data);
 
@@ -536,7 +525,7 @@
         async _connectRawWebSocket() {
             const wsUrl = `${getBackendBaseUrl().replace(/^http/, 'ws')}/ws?token=${encodeURIComponent(this._sessionToken || '')}`;
             this._url = wsUrl;
-            
+
             if (!this._lastWebSocketOpenLogAt || Date.now() - this._lastWebSocketOpenLogAt > 8000) {
                 this._lastWebSocketOpenLogAt = Date.now();
                 console.log('[Realtime] Opening raw WebSocket fallback', wsUrl.replace(/token=[^&]+/, 'token=***'));
@@ -565,11 +554,7 @@
 
             if (!this._hasEverConnected) {
                 this._hasEverConnected = true;
-                console.log('[Realtime] ✅ WebSocket OPEN', this._socket && this._socket.url
-                    ? this._socket.url.replace(/token=[^&]+/, 'token=***')
-                    : this._url);
-            } else {
-                console.log('[Realtime] ✅ WebSocket OPEN (reconnected)');
+                console.log('[Realtime] ✅ WebSocket OPEN');
             }
 
             this._state = CONNECTION_STATE.CONNECTED;
@@ -582,9 +567,7 @@
         }
 
         _authenticate() {
-            if (!this._socket || this._authenticated) {
-                return;
-            }
+            if (!this._socket || this._authenticated) return;
 
             this._state = CONNECTION_STATE.AUTHENTICATING;
             this._emitStateChange();
@@ -616,7 +599,6 @@
                 if (typeof event.data !== 'string') return;
                 const rawMessage = event.data.trim();
                 if (!rawMessage) return;
-
                 if (rawMessage === 'pong' || rawMessage === 'PONG') {
                     this._clearHeartbeatTimeout();
                     return;
@@ -674,7 +656,6 @@
             }
             this._authenticated = false;
             this._registeredSocketListeners.clear();
-            // Reset per-connection flags so next socket gets full setup
             this._bridgeListenersLogged = false;
             this._hasSyncedThisConnection = false;
 
@@ -697,20 +678,14 @@
 
             const error = (rawError instanceof Error)
                 ? rawError
-                : new Error(
-                    (rawError && rawError.message)
-                        ? rawError.message
-                        : 'WebSocket connection error'
-                  );
+                : new Error((rawError && rawError.message) ? rawError.message : 'WebSocket connection error');
 
             const now = Date.now();
             if (!this._lastErrorLogAt || now - this._lastErrorLogAt > 60000) {
                 this._lastErrorLogAt = now;
                 if (!this._hasLoggedInitialError) {
-                    console.warn('[Realtime] WebSocket connection failed, messages module will work without real-time updates');
+                    console.warn('[Realtime] WebSocket connection failed, working without real-time updates');
                     this._hasLoggedInitialError = true;
-                } else {
-                    console.log('[Realtime] WebSocket reconnect attempt failed (working offline)');
                 }
             }
 
@@ -719,9 +694,7 @@
                 this._connectPromise = null;
                 try { p.reject(error); } catch (_) {}
             }
-            (this._connectWaiters || []).forEach(w => {
-                try { w.reject(error); } catch (_) {}
-            });
+            (this._connectWaiters || []).forEach(w => { try { w.reject(error); } catch (_) {} });
             this._connectWaiters = [];
             this._state = CONNECTION_STATE.ERROR;
             this._emitStateChange();
@@ -739,19 +712,16 @@
             if (this._consecutiveErrors < SOCKET_CONFIG.maxConsecutiveErrors) {
                 this._scheduleReconnect();
             } else {
-                console.warn('[Realtime] Max consecutive errors reached — entering DEGRADED mode (will auto-recover).');
+                console.warn('[Realtime] Max consecutive errors reached — entering DEGRADED mode');
                 this._consecutiveErrors = 0;
                 this._state = CONNECTION_STATE.DEGRADED;
                 this._emitStateChange();
-                
+
                 if (!this._degradedRecoveryTimer) {
                     this._degradedRecoveryTimer = setTimeout(() => {
                         this._degradedRecoveryTimer = null;
                         if (this._state === CONNECTION_STATE.DEGRADED) {
-                            if (!this._lastAutoRecoveryLogAt || Date.now() - this._lastAutoRecoveryLogAt > 12000) {
-                                this._lastAutoRecoveryLogAt = Date.now();
-                                console.log('[Realtime] 🔄 Auto-recovering from DEGRADED — reconnecting...');
-                            }
+                            console.log('[Realtime] Auto-recovering from DEGRADED...');
                             this._reconnectAttempts = 0;
                             this._consecutiveErrors = 0;
                             this._connectInternal();
@@ -769,7 +739,6 @@
                 return;
             }
 
-            // Presence
             if (['PRESENCE_UPDATE', 'presence:update', 'user:online', 'user:offline'].includes(message.type)) {
                 let uid, online;
                 if (message.type === 'user:online') { uid = message.payload?.userId || message.userId; online = true; }
@@ -781,14 +750,12 @@
                 }
             }
 
-            // Type-specific listeners
             if (this._listeners.has(message.type)) {
                 this._listeners.get(message.type).forEach(({ handler }) => {
                     try { handler(message.payload, message); } catch (e) { console.error('[Realtime] Listener error:', e); }
                 });
             }
 
-            // Wildcard listeners
             if (this._listeners.has('*')) {
                 this._listeners.get('*').forEach(({ handler }) => {
                     try { handler(message.payload, message); } catch (e) { console.error('[Realtime] Wildcard listener error:', e); }
@@ -807,24 +774,18 @@
 
         _setupNetworkMonitoring() {
             window.addEventListener('online', () => {
-                console.log('[Realtime] 🌐 Network online — triggering reconnect.');
+                console.log('[Realtime] Network online — triggering reconnect.');
                 this._reconnectAttempts = 0;
                 this.handleReconnect({ reason: 'network-online' });
-
-                if (window.KynectaEventBus) {
-                    window.KynectaEventBus.emit('NETWORK_ONLINE', { timestamp: Date.now() });
-                }
+                if (window.KynectaEventBus) window.KynectaEventBus.emit('NETWORK_ONLINE', { timestamp: Date.now() });
             });
 
             window.addEventListener('offline', () => {
-                console.warn('[Realtime] 🚫 Network offline.');
+                console.warn('[Realtime] Network offline.');
                 this._state = CONNECTION_STATE.DISCONNECTED;
                 this._authenticated = false;
                 this._emitStateChange();
-
-                if (window.KynectaEventBus) {
-                    window.KynectaEventBus.emit('NETWORK_OFFLINE', { timestamp: Date.now() });
-                }
+                if (window.KynectaEventBus) window.KynectaEventBus.emit('NETWORK_OFFLINE', { timestamp: Date.now() });
             });
 
             document.addEventListener('visibilitychange', () => {
@@ -852,11 +813,9 @@
 
                 try {
                     if (this._socket.emit) {
-                        // Socket.IO client
                         this._socket.emit(message.type, message.payload);
                         resolve({ sent: true, messageId: message.messageId });
                     } else {
-                        // Raw WebSocket
                         this._socket.send(JSON.stringify(message));
                     }
 
@@ -915,40 +874,28 @@
             this._heartbeatTimer = setInterval(() => {
                 if (this._state === CONNECTION_STATE.AUTHENTICATED && this._socket) {
                     this._stats.heartbeats++;
-                    
-                    if (this._socket.emit) {
-                        // Socket.IO - ping/pong handled automatically
-                    } else {
-                        // Raw WebSocket
+                    if (!this._socket.emit) {
                         this._sendMessage({ type: 'ping', timestamp: Date.now() }).catch(() => {});
                         this._heartbeatTimeoutTimer = setTimeout(() => {
                             this._onError(new Error('Heartbeat timeout'));
                         }, SOCKET_CONFIG.heartbeatTimeout);
                     }
+                    // Socket.IO handles ping/pong automatically
                 }
             }, SOCKET_CONFIG.heartbeatInterval);
         }
 
         _clearHeartbeatTimer() {
-            if (this._heartbeatTimer) {
-                clearInterval(this._heartbeatTimer);
-                this._heartbeatTimer = null;
-            }
+            if (this._heartbeatTimer) { clearInterval(this._heartbeatTimer); this._heartbeatTimer = null; }
             this._clearHeartbeatTimeout();
         }
 
         _clearHeartbeatTimeout() {
-            if (this._heartbeatTimeoutTimer) {
-                clearTimeout(this._heartbeatTimeoutTimer);
-                this._heartbeatTimeoutTimer = null;
-            }
+            if (this._heartbeatTimeoutTimer) { clearTimeout(this._heartbeatTimeoutTimer); this._heartbeatTimeoutTimer = null; }
         }
 
         _clearReconnectTimer() {
-            if (this._reconnectTimer) {
-                clearTimeout(this._reconnectTimer);
-                this._reconnectTimer = null;
-            }
+            if (this._reconnectTimer) { clearTimeout(this._reconnectTimer); this._reconnectTimer = null; }
         }
 
         _resolveConnectPromise() {
@@ -976,23 +923,25 @@
         }
 
         _scheduleReconnect() {
+            if (this._reconnectAttempts >= SOCKET_CONFIG.reconnectAttempts) {
+                console.warn('[Realtime] Max reconnect attempts reached — stopping');
+                this._state = CONNECTION_STATE.DEGRADED;
+                this._emitStateChange();
+                return;
+            }
+
             this._clearReconnectTimer();
 
             const delay = Math.min(
                 SOCKET_CONFIG.reconnectBaseDelay * Math.pow(2, this._reconnectAttempts),
                 SOCKET_CONFIG.reconnectMaxDelay
             );
-
             const jitter = delay * SOCKET_CONFIG.reconnectJitter;
             const finalDelay = delay + (Math.random() * jitter - jitter / 2);
 
-            // Only log once per reconnect attempt block (not every call)
             const attemptNum = this._reconnectAttempts + 1;
-            if (!this._lastReconnectLogAttempt || this._lastReconnectLogAttempt !== attemptNum) {
-                this._lastReconnectLogAttempt = attemptNum;
-                if (attemptNum === 1 || attemptNum % 5 === 0) {
-                    console.log(`[Realtime] Reconnecting in ${Math.round(finalDelay)}ms (attempt ${attemptNum})`);
-                }
+            if (attemptNum === 1 || attemptNum % 5 === 0) {
+                console.log(`[Realtime] Reconnecting in ${Math.round(finalDelay)}ms (attempt ${attemptNum}/${SOCKET_CONFIG.reconnectAttempts})`);
             }
 
             this._reconnectTimer = setTimeout(() => {
@@ -1002,31 +951,22 @@
         }
 
         _registerMessageBridgeListeners() {
-            // Use _registeredSocketListeners (cleared on _onClose) as the dedup guard,
-            // not _bridgeListenersLogged (which persists across reconnects and would
-            // prevent a fresh socket from ever binding its listeners again).
             this._bridgeListenersLogged = true;
 
-            // ── CRITICAL FIX: Register message events so incoming messages from the
-            // server reach _routeMessage() and then the messages-core.js listeners.
-            // Previously only call events were registered here, meaning 'message:new'
-            // emitted by messageService.js on the server was received by the Socket.IO
-            // socket but silently dropped before reaching any JS handler.
             const messageEvents = [
-                'message:new',    'new_message',    'chat:message',   'MESSAGE_RECEIVED',
+                'message:new', 'new_message', 'chat:message', 'MESSAGE_RECEIVED',
                 'message:delivered', 'message:read', 'message_delivered', 'message_read',
             ];
 
-            // ── Call and signalling events ─────────────────────────────────────
             const callEvents = [
-                'call:incoming',  'call_incoming',  'incoming_call', 'CALL_INCOMING',
-                'call:accepted',  'call_accepted',  'call:answered', 'call_answered',
-                'call:rejected',  'call_rejected',
-                'call:ended',     'call_ended',     'call_force_ended',
+                'call:incoming', 'call_incoming', 'incoming_call', 'CALL_INCOMING',
+                'call:accepted', 'call_accepted', 'call:answered', 'call_answered',
+                'call:rejected', 'call_rejected',
+                'call:ended', 'call_ended', 'call_force_ended',
                 'call:cancelled', 'call_cancelled',
                 'call:initiated', 'call_initiated',
-                'webrtc:signal',  'webrtc_signal',
-                'call:ringing',   'call_ringing',
+                'webrtc:signal', 'webrtc_signal',
+                'call:ringing', 'call_ringing',
             ];
 
             const allEvents = [...messageEvents, ...callEvents];
@@ -1037,34 +977,28 @@
                     this._registeredSocketListeners.add(eventType);
 
                     this._socket.on(eventType, (payload) => {
-                        // Normalise into the standard message envelope
                         const msg = (payload && typeof payload === 'object' && payload.type)
                             ? payload
                             : { type: eventType, payload: payload || {} };
 
                         this._routeMessage(msg);
 
-                        // Also dispatch on KynectaEventBus for any bus listeners
                         if (window.KynectaEventBus) {
                             window.KynectaEventBus.emit(`REALTIME_${eventType}`, msg.payload || payload, { async: true });
                         }
                     });
                 });
 
-                if (!this._bridgeListenersLogged) {
-                    this._bridgeListenersLogged = true;
-                    console.log('[Realtime] ✅ Message bridge listeners registered');
-                }
+                console.log('[Realtime] ✅ Message bridge listeners registered');
             }
         }
 
         _triggerSync() {
-            // Only log and emit once per connection (not every reconnect)
             if (this._hasSyncedThisConnection) return;
             this._hasSyncedThisConnection = true;
 
             if (window.KynectaEventBus) {
-                window.KynectaEventBus.emit('kyn:syncRequired', { 
+                window.KynectaEventBus.emit('kyn:syncRequired', {
                     source: 'realtime-socket',
                     timestamp: Date.now()
                 });
@@ -1072,14 +1006,11 @@
         }
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // Bootstrap
-    // ─────────────────────────────────────────────────────────────────────────
+    // ── Bootstrap ─────────────────────────────────────────────────────────────
     const realtimeManager = new KynectaRealtimeManager();
 
     window.KynectaRealtime = realtimeManager;
 
-    // Expose a stable wsService shim (backward compat)
     window.wsService = window.wsService || {};
     Object.assign(window.wsService, {
         connect: realtimeManager.connect.bind(realtimeManager),
@@ -1098,12 +1029,10 @@
         window.__KYNECTA_AUTHORITIES__.realtime = realtimeManager;
     }
 
-    // Notify dependents
     try {
         window.dispatchEvent(new CustomEvent('kyn:realtimeReady', { detail: { manager: realtimeManager } }));
     } catch (_) {}
 
-    // Listen for SESSION_DATA / AUTH_READY / PARENT_READY from parent frames
     window.addEventListener('message', function (evt) {
         if (!evt.data || typeof evt.data !== 'object') return;
         const { type, payload } = evt.data;
@@ -1124,18 +1053,12 @@
         }
     });
 
-    // Auto-connect immediately on load
     function safeConnect(tokenOverride) {
         return Promise.resolve(
             realtimeManager.connect(tokenOverride || null)
         ).catch(function () { return null; });
     }
 
-    // Wait up to 3s for the Socket.IO CDN script to finish loading before
-    // auto-connecting.  Without this guard, _autoConnect() runs while the CDN
-    // <script> is still in-flight, socketIOClient is still null, and the code
-    // falls through to _connectRawWebSocket() — opening a raw WS alongside
-    // Socket.IO once the CDN finishes, which causes "io server disconnect" spam.
     function waitForSocketIO() {
         return new Promise((resolve) => {
             if (socketIOClient) { resolve(); return; }
@@ -1149,22 +1072,103 @@
         });
     }
 
+    // ── IFRAME GUARD: Only the TOP frame opens a Socket.IO connection ────────
+    // When this script runs inside an iframe (message.html, calls.html, etc.),
+    // it must NOT open its own Socket.IO connection. Multiple connections for the
+    // same userId trigger _handleDuplicateSession on the server, which boots all
+    // prior sockets with "io server disconnect" — causing the connect → auth →
+    // immediate disconnect loop visible in the console.
+    //
+    // Instead, iframes receive real-time events forwarded by the parent frame via
+    // the existing kyn:* postMessage bridge installed in chat.html. The
+    // KynectaRealtime object is still created so modules can call .on()/.send()
+    // without errors — send() will route through the parent via postMessage.
+    const _isInIframe = (() => {
+        try { return window.self !== window.top; } catch (_) { return true; }
+    })();
+
     (async function _autoConnect() {
+        if (_isInIframe) {
+            // ── CHILD FRAME: skip direct connection, proxy through parent ──────
+            console.log('[Realtime] Running in iframe — skipping direct Socket.IO connection, using parent bridge');
+
+            // Mark the manager as using bridge mode so .send() routes via postMessage
+            realtimeManager._isBridgeMode = true;
+
+            // Override send() to forward to parent frame instead of a local socket
+            const _originalSend = realtimeManager.send.bind(realtimeManager);
+            realtimeManager.send = function (type, payload = {}, options = {}) {
+                try {
+                    window.parent.postMessage({
+                        type: 'REALTIME_SEND',
+                        eventType: type,
+                        payload,
+                        source: 'child-frame'
+                    }, '*');
+                } catch (_) {}
+                return Promise.resolve();
+            };
+            realtimeManager.emit = realtimeManager.send;
+
+            // Listen for real-time events forwarded by parent (kyn:* bridge)
+            window.addEventListener('message', function (evt) {
+                if (!evt.data || typeof evt.data !== 'object') return;
+                const { type, payload } = evt.data;
+                if (type && type.startsWith('REALTIME_EVENT:')) {
+                    const eventType = type.replace('REALTIME_EVENT:', '');
+                    const msg = { type: eventType, payload: payload || {} };
+                    realtimeManager._routeMessage(msg);
+                    if (window.KynectaEventBus) {
+                        window.KynectaEventBus.emit(`REALTIME_${eventType}`, payload, { async: true });
+                    }
+                }
+            });
+
+            // Reflect connection state as AUTHENTICATED so modules don't block on it
+            // (actual auth is held by the parent — iframes just trust the session token)
+            const tok = await waitForToken();
+            if (tok) {
+                realtimeManager._sessionToken = tok;
+                window.__kynToken = tok;
+            }
+            realtimeManager._state = CONNECTION_STATE.AUTHENTICATED;
+            realtimeManager._authenticated = true;
+            realtimeManager._emitStateChange();
+            return;
+        }
+
+        // ── TOP FRAME: normal connection ─────────────────────────────────────
         try {
-            await waitForSocketIO();          // wait for CDN before deciding transport
+            await waitForSocketIO();
             const tok = await waitForToken();
             if (tok) {
                 realtimeManager._sessionToken = tok;
                 window.__kynToken = tok;
             }
             await safeConnect(tok);
-        } catch (_) {
-            // Auto-connect failed silently
-        }
+        } catch (_) {}
     })();
 
-    // Expose safeConnect globally
+    // ── TOP FRAME: forward received socket events to all child iframes ────────
+    // This is the other half of the bridge — when a real-time event arrives at
+    // the parent socket, we forward it to each iframe so their KynectaRealtime
+    // instances can dispatch it to local listeners (.on() handlers).
+    if (!_isInIframe) {
+        realtimeManager.on('*', function (msg) {
+            try {
+                const iframes = document.querySelectorAll('iframe');
+                const eventMsg = {
+                    type: `REALTIME_EVENT:${msg.type}`,
+                    payload: msg.payload || msg
+                };
+                iframes.forEach(function (frame) {
+                    try { frame.contentWindow.postMessage(eventMsg, '*'); } catch (_) {}
+                });
+            } catch (_) {}
+        });
+    }
+
     realtimeManager.safeConnect = safeConnect;
 
-    console.log('[Realtime] ✅ Ready (Socket.IO compatible v3.0.0)');
+    console.log('[Realtime] ✅ Ready (Socket.IO compatible v3.1.0)');
 })();
