@@ -8,6 +8,23 @@
 (function () {
     'use strict';
 
+    // ── One-shot log dedup (suppress same message within 5s) ────────────────
+    const _sessLogs = new Map();
+    function _log(msg, data) {
+        const k = msg; const now = Date.now();
+        if (_sessLogs.has(k) && now - _sessLogs.get(k) < 5000) return;
+        _sessLogs.set(k, now);
+        if (data !== undefined) console.log('[CallSession] ' + msg, data);
+        else console.log('[CallSession] ' + msg);
+    }
+    function _warn(msg, data) {
+        const k = 'w:' + msg; const now = Date.now();
+        if (_sessLogs.has(k) && now - _sessLogs.get(k) < 5000) return;
+        _sessLogs.set(k, now);
+        if (data !== undefined) console.warn('[CallSession] ' + msg, data);
+        else console.warn('[CallSession] ' + msg);
+    }
+
     // ── Session States ───────────────────────────────────────────────────────
     const SESSION_STATE = {
         IDLE:     'idle',
@@ -276,7 +293,7 @@
                 }
                 
                 if (!store) {
-                    console.warn('[CallSession] No storage available, using localStorage fallback');
+                    _warn('No storage available, using localStorage fallback');
                     // Fallback to localStorage
                     try {
                         const callKey = `call_${data.id}_${Date.now()}`;
@@ -309,7 +326,7 @@
                     throw new Error('No compatible save method found');
                 }
             } catch (e) {
-                console.warn('[CallSession] Failed to create local history, trying localStorage fallback', e.message);
+                _warn('Failed to create local history', e.message);
                 // Final fallback to localStorage
                 try {
                     const callKey = `call_${data.id}_${Date.now()}`;
@@ -334,7 +351,7 @@
             if (!store) return;
 
             store.updateFields(id, fields).catch(e => {
-                console.warn('[CallSession] Failed to update local history', e.message);
+                _warn('Failed to update local history', e.message);
             });
         }
     }

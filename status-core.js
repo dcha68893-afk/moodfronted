@@ -369,8 +369,58 @@ setInterval(cleanupPendingRequests, TIMING.CLEANUP_INTERVAL);
 
 function makeApiRequest(endpoint, method, data = null, params = null) {
     return new Promise((resolve, reject) => {
+        // FIX Bug B: When module is not yet ACTIVE (e.g. user posts before SESSION_DATA
+        // handshake completes), fall back to a direct fetch instead of hard-rejecting.
+        // This lets status creation work immediately without waiting for the iframe lifecycle.
         if (!ensureActive(`API_REQUEST: ${endpoint}`)) {
-            reject(new Error(`Module not ACTIVE (current: ${currentState})`));
+            // Attempt direct fetch fallback using token from any available source
+            const fallbackToken =
+                _sessionToken ||
+                (function() { try { return localStorage.getItem('moodchat_token') || localStorage.getItem('authToken') || localStorage.getItem('token') || localStorage.getItem('accessToken') || null; } catch(_) { return null; } })();
+
+            if (!fallbackToken) {
+                reject(new Error(`Module not ACTIVE and no fallback token available (current: ${currentState})`));
+                return;
+            }
+
+            // Build URL — strip leading /api so we don't double-prefix
+            let directEndpoint = endpoint;
+            if (directEndpoint.startsWith('/api/')) directEndpoint = directEndpoint.substring(4);
+            if (!directEndpoint.startsWith('/')) directEndpoint = '/' + directEndpoint;
+
+            const getBase = () => {
+                if (typeof window.__getApiBase === 'function') return window.__getApiBase().replace(/\/api\/?$/, '');
+                const h = window.location.hostname;
+                if (h === 'localhost' || h === '127.0.0.1') return 'http://localhost:3000';
+                return window.location.origin;
+            };
+
+            const directUrl = getBase() + '/api' + directEndpoint;
+            const fetchOpts = {
+                method: method.toUpperCase(),
+                headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + fallbackToken },
+                credentials: 'include'
+            };
+            if (data && method.toUpperCase() !== 'GET') fetchOpts.body = JSON.stringify(data);
+
+            logStatus('WARN', `makeApiRequest: module not ACTIVE — using direct fetch fallback for ${method} ${directEndpoint}`);
+
+            fetch(directUrl, fetchOpts)
+                .then(res => res.json().catch(() => ({ success: false, message: 'Non-JSON response' })).then(json => ({ res, json })))
+                .then(({ res, json }) => {
+                    if (!res.ok) {
+                        const err = new Error(json.message || json.error || `HTTP ${res.status}`);
+                        err.statusCode = res.status;
+                        reject(err);
+                    } else {
+                        // Strip outer wrapper same as handleApiResponse does
+                        let result = json;
+                        if (result && result.data !== undefined && result.success === true) result = result.data;
+                        if (result && result.status === 'success' && result.data !== undefined) result = result.data;
+                        resolve(result);
+                    }
+                })
+                .catch(err => reject(err));
             return;
         }
         
@@ -1493,10 +1543,17 @@ async function loadStatuses() {
 }
 
 async function postStatus(statusData) {
-    if (!ensureActive('postStatus')) {
-        return { success: false, error: 'Module not active' };
+    // FIX Bug B: Do NOT hard-block on ensureActive here.
+    // makeApiRequest now handles the "not ACTIVE" case by falling back to a
+    // direct fetch using whatever token is available.  We only block if there
+    // is genuinely no session data anywhere.
+    const hasAnyToken = _sessionToken ||
+        (function() { try { return localStorage.getItem('moodchat_token') || localStorage.getItem('authToken') || localStorage.getItem('token') || localStorage.getItem('accessToken') || null; } catch(_) { return null; } })();
+
+    if (!ensureActive('postStatus') && !hasAnyToken) {
+        return { success: false, error: 'Module not active and no session token available' };
     }
-    if (!isSessionReady()) {
+    if (!isSessionReady() && !hasAnyToken) {
         return { success: false, error: 'Not authenticated' };
     }
     if (!statusData || (!(statusData.content || '').trim() && !(statusData.text || '').trim() && !statusData.media && !statusData.mediaUrl)) {
@@ -1571,7 +1628,13 @@ async function postStatus(statusData) {
         const response = await makeApiRequest('/api/status', 'POST', payload);
         // console.log(`[${MODULE_NAME}] 📥 Status posted successfully:`, response);
 
-        const newStatus = response?.status || response?.data?.status || null;
+        // FIX Bug E: handleApiResponse strips the outer { success, data } wrapper so
+        // `response` here is the `data` inner object: { status: {...} }.
+        // We also guard the legacy shape where the full object comes through.
+        const newStatus =
+            response?.status ||           // normal: data.status after one strip
+            response?.data?.status ||     // double-wrapped (some older code paths)
+            (response?.id ? response : null); // backend returned the status itself
         if (newStatus) {
             addStatus(newStatus);
             // Persist to IndexedDB immediately

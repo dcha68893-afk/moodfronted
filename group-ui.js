@@ -3219,26 +3219,29 @@ export function setupCreateGroupTabs() {
 
 /**
  * Setup create group form
+ * The modal content is now wrapped in <form id="createGroupForm"> so pressing
+ * Enter inside any input also triggers group creation (same path as the button).
  */
 export function setupCreateGroupForm() {
     const createGroupForm = safeGetElement('#createGroupForm');
     if (!createGroupForm) return;
-    
+
     registerUIEventListener(createGroupForm, 'submit', function(e) {
         e.preventDefault();
-        
-        const groupNameInput = safeGetElement('#groupNameInput');
-        if (!groupNameInput || !groupNameInput.value.trim()) {
+        e.stopPropagation();
+
+        const nameInput = safeGetElement('#groupNameInput');
+        if (!nameInput || !nameInput.value.trim()) {
             if (typeof showNotification === 'function') {
                 showNotification('Please enter a group name', 'error');
             }
+            nameInput?.focus();
             return;
         }
-        
-        const groupData = collectGroupFormData();
-        if (typeof createGroupOnline === 'function') {
-            createGroupOnline(groupData);
-        }
+
+        // Delegate to the Create button so we don't duplicate the async logic
+        const btn = safeGetElement('#createGroupBtnModal');
+        if (btn && !btn.disabled) btn.click();
     });
 }
 
@@ -3526,9 +3529,7 @@ function bindCreateGroupModalEvents() {
         newCreateBtn.addEventListener('click', async (e) => {
             e.preventDefault();
             e.stopPropagation();
-            
-            // (log suppressed)
-            
+
             const nameInput = safeGetElement('#groupNameInput');
             if (!nameInput || !nameInput.value.trim()) {
                 if (typeof showNotification === 'function') {
@@ -3537,72 +3538,10 @@ function bindCreateGroupModalEvents() {
                 nameInput?.focus();
                 return;
             }
-            
-            // Disable button and show loading state
-            newCreateBtn.disabled = true;
-            newCreateBtn.textContent = 'Creating...';
-            
-            try {
-                const groupData = collectGroupFormData();
-                
-                // Include selected friends from members tab with invitation method tracking
-                if (window._cgSelectedMembers && window._cgSelectedMembers.size > 0) {
-                    const selectedMemberIds = [...window._cgSelectedMembers];
-                    const invitationMethods = window._cgInvitationMethods || new Map();
-                    
-                    // Separate direct additions from invitations
-                    const directAdditions = [];
-                    const pendingInvitations = [];
-                    
-                    selectedMemberIds.forEach(friendId => {
-                        const method = invitationMethods.get(friendId);
-                        if (method?.canAddDirectly) {
-                            directAdditions.push(friendId);
-                        } else {
-                            pendingInvitations.push(friendId);
-                        }
-                    });
-                    
-                    // Add direct members to group data
-                    groupData.memberIds = directAdditions;
-                    
-                    // Store pending invitations for post-creation
-                    window.__pendingGroupInvites = pendingInvitations;
-                    window.__pendingInvitationMethods = new Map();
-                    pendingInvitations.forEach(friendId => {
-                        window.__pendingInvitationMethods.set(friendId, 'invite');
-                    });
-                    
-                    // (log suppressed)
-                }
-                
-                // Create the group
-                await createGroupOnline(groupData);
-                
-                // Reset selection
-                window._cgSelectedMembers = new Set();
-                
-                // Close modal
-                const modal = safeGetElement('#createGroupModal');
-                if (modal) { 
-                    modal.classList.remove('active'); 
-                    modal.style.display = 'none'; 
-                }
-                
-                if (typeof showNotification === 'function') {
-                    showNotification('Group created successfully!', 'success');
-                }
-                
-            } catch (e) {
-                console.error('[GroupUI] Create group error:', e);
-                if (typeof showNotification === 'function') {
-                    showNotification('Failed to create group: ' + (e.message || 'Unknown error'), 'error');
-                }
-            } finally {
-                // Reset button state
-                newCreateBtn.disabled = false;
-                newCreateBtn.textContent = 'Create Group';
-            }
+
+            // Delegate everything (member collection, session wait, API call,
+            // modal close, notifications, button reset) to createGroupAsync.
+            await createGroupAsync(newCreateBtn);
         });
         
         // (log suppressed)
@@ -4952,56 +4891,9 @@ if (typeof document !== 'undefined') {
     } catch(e) {}
 })();
 
-// Global fallback click handler for create group modal buttons
-document.addEventListener('click', function(e) {
-    if (e.target.id === 'cancelCreateGroupBtn') {
-        e.preventDefault();
-        e.stopPropagation();
-        
-        // (log suppressed)
-        
-        const modal = document.querySelector('#createGroupModal');
-        if (modal) { 
-            modal.classList.remove('active'); 
-            modal.style.display = 'none'; 
-        }
-        
-        // Reset form
-        if (typeof resetCreateGroupForm === 'function') {
-            resetCreateGroupForm();
-        }
-        
-        // Reset members selection
-        if (window._cgSelectedMembers) window._cgSelectedMembers.clear();
-        const chips = document.querySelector('#selectedMembersChips');
-        if (chips) chips.innerHTML = '';
-        
-        // (log suppressed)
-    }
-    
-    if (e.target.id === 'createGroupBtnModal') {
-        e.preventDefault();
-        e.stopPropagation();
-        
-        // (log suppressed)
-        
-        const nameInput = document.querySelector('#groupNameInput');
-        if (!nameInput || !nameInput.value.trim()) {
-            if (typeof showNotification === 'function') {
-                showNotification('Please enter a group name', 'error');
-            }
-            nameInput?.focus();
-            return;
-        }
-        
-        // Disable button and show loading state
-        e.target.disabled = true;
-        e.target.textContent = 'Creating...';
-        
-        // Create the group async
-        createGroupAsync(e.target);
-    }
-});
+// NOTE: Global click fallback for create group buttons REMOVED (Bug fix).
+// The cloned direct listeners in bindCreateGroupModalEvents() are the
+// single source of truth. Having both caused every click to fire twice.
 
 /**
  * Async group creation function
@@ -5010,10 +4902,9 @@ async function createGroupAsync(buttonElement) {
     // ── SENDER UI: Show creating state immediately ────────────────────────
     if (buttonElement) {
         buttonElement.disabled    = true;
-        buttonElement.textContent = 'Creating…';
+        buttonElement.textContent = 'Creating\u2026';
         buttonElement.classList && buttonElement.classList.add('btn-loading');
     }
-    // (log suppressed)
 
     try {
         const groupData = typeof collectGroupFormData === 'function' ? collectGroupFormData() : {};
@@ -5041,29 +4932,26 @@ async function createGroupAsync(buttonElement) {
             pendingInvitations.forEach(friendId => {
                 window.__pendingInvitationMethods.set(friendId, 'invite');
             });
-
-            // (log suppressed)
         }
 
         // ── SENT: call backend ────────────────────────────────────────────
-        let createdGroup = null;
+        // createGroupOnline now returns { success, group, data } on success
+        // and throws on failure, so we just await it.
+        let result = null;
         if (typeof createGroupOnline === 'function') {
-            const result = await createGroupOnline(groupData);
-            // Normalise result shape
-            createdGroup = result?.group || result?.data?.group || result?.data || null;
-            // (log suppressed)
+            result = await createGroupOnline(groupData);
         } else if (window.GroupCore && typeof window.GroupCore.createGroup === 'function') {
-            const result = await window.GroupCore.createGroup(groupData);
-            createdGroup = result?.data?.group || result?.data || null;
-            // (log suppressed)
+            const r = await window.GroupCore.createGroup(groupData);
+            result = { success: r?.success, group: r?.data?.group || r?.data };
         }
 
         // Reset selection
         window._cgSelectedMembers = new Set();
 
-        // Close modal
+        // Modal is already closed by createGroupOnline — don't double-close.
+        // Only close it here as a safety net if createGroupOnline didn't.
         const modal = document.querySelector('#createGroupModal');
-        if (modal) {
+        if (modal && (modal.classList.contains('active') || modal.style.display !== 'none')) {
             modal.classList.remove('active');
             modal.style.display = 'none';
         }
@@ -5077,12 +4965,12 @@ async function createGroupAsync(buttonElement) {
         if (typeof showNotification === 'function') {
             showNotification('Group created successfully!', 'success');
         }
-        // (log suppressed)
 
     } catch (e) {
         console.error('[GroupUI] Create group error:', e);
         // ── SENDER: show error state ──────────────────────────────────────
-        if (typeof showNotification === 'function') {
+        // Only show notification here if createGroupOnline didn't already show one
+        if (typeof showNotification === 'function' && e?.message !== 'Group creation already handled') {
             showNotification('Failed to create group: ' + (e.message || 'Unknown error'), 'error');
         }
     } finally {

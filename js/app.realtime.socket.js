@@ -440,8 +440,10 @@
             const socketOptions = {
                 transports: ['websocket', 'polling'],
                 timeout: SOCKET_CONFIG.connectionTimeout,
-                reconnection: false,
-                forceNew: true
+                reconnection: false
+                // NOTE: forceNew removed — it caused "io server disconnect" on every
+                // reconnect because Socket.IO manager was creating a fresh socket that
+                // the server immediately closed in place of the previous one.
             };
             
             // Add token as query parameter if available (fallback for session-based auth)
@@ -457,8 +459,10 @@
             this._lastConnectLogState = this._lastConnectLogState || 'disconnected';
 
             this._socket.on('connect', () => {
-                console.log('[Realtime] Socket.IO connected successfully');
-                this._lastConnectLogState = 'connected';
+                if (this._lastConnectLogState !== 'connected') {
+                    console.log('[Realtime] Socket.IO connected successfully');
+                    this._lastConnectLogState = 'connected';
+                }
                 this._onSocketIOConnect();
             });
 
@@ -998,13 +1002,22 @@
         }
 
         _registerMessageBridgeListeners() {
-            if (this._bridgeListenersLogged) return;
+            // Use _registeredSocketListeners (cleared on _onClose) as the dedup guard,
+            // not _bridgeListenersLogged (which persists across reconnects and would
+            // prevent a fresh socket from ever binding its listeners again).
             this._bridgeListenersLogged = true;
 
-            // ── CRITICAL: Forward call events from Socket.IO to the _routeMessage
-            // pipeline so chat.html's wsService.on('call:incoming', ...) listeners fire.
-            // Without this, incoming call notifications are delivered to the Socket.IO
-            // socket but never reach any JavaScript handler.
+            // ── CRITICAL FIX: Register message events so incoming messages from the
+            // server reach _routeMessage() and then the messages-core.js listeners.
+            // Previously only call events were registered here, meaning 'message:new'
+            // emitted by messageService.js on the server was received by the Socket.IO
+            // socket but silently dropped before reaching any JS handler.
+            const messageEvents = [
+                'message:new',    'new_message',    'chat:message',   'MESSAGE_RECEIVED',
+                'message:delivered', 'message:read', 'message_delivered', 'message_read',
+            ];
+
+            // ── Call and signalling events ─────────────────────────────────────
             const callEvents = [
                 'call:incoming',  'call_incoming',  'incoming_call', 'CALL_INCOMING',
                 'call:accepted',  'call_accepted',  'call:answered', 'call_answered',
@@ -1016,8 +1029,10 @@
                 'call:ringing',   'call_ringing',
             ];
 
+            const allEvents = [...messageEvents, ...callEvents];
+
             if (this._socket && typeof this._socket.on === 'function') {
-                callEvents.forEach(eventType => {
+                allEvents.forEach(eventType => {
                     if (this._registeredSocketListeners.has(eventType)) return;
                     this._registeredSocketListeners.add(eventType);
 
@@ -1036,7 +1051,10 @@
                     });
                 });
 
-                console.log('[Realtime] ✅ Message bridge listeners registered');
+                if (!this._bridgeListenersLogged) {
+                    this._bridgeListenersLogged = true;
+                    console.log('[Realtime] ✅ Message bridge listeners registered');
+                }
             }
         }
 
@@ -1113,8 +1131,27 @@
         ).catch(function () { return null; });
     }
 
+    // Wait up to 3s for the Socket.IO CDN script to finish loading before
+    // auto-connecting.  Without this guard, _autoConnect() runs while the CDN
+    // <script> is still in-flight, socketIOClient is still null, and the code
+    // falls through to _connectRawWebSocket() — opening a raw WS alongside
+    // Socket.IO once the CDN finishes, which causes "io server disconnect" spam.
+    function waitForSocketIO() {
+        return new Promise((resolve) => {
+            if (socketIOClient) { resolve(); return; }
+            const deadline = Date.now() + 3000;
+            const iv = setInterval(() => {
+                if (socketIOClient || Date.now() >= deadline) {
+                    clearInterval(iv);
+                    resolve();
+                }
+            }, 50);
+        });
+    }
+
     (async function _autoConnect() {
         try {
+            await waitForSocketIO();          // wait for CDN before deciding transport
             const tok = await waitForToken();
             if (tok) {
                 realtimeManager._sessionToken = tok;

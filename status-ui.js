@@ -4779,12 +4779,27 @@ async function handlePostStatus() {
             btn.disabled = true;
             btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Posting...';
         }
-        const api = window.StatusAPI;
         let response;
 
-        // Handle media upload if present
+        // ── FIX Bug A + Bug B: Single unified creation path ─────────────────────
+        // Previously status-ui called StatusAPI.createStatus() (direct fetch) AND
+        // status-core's postStatus() (postMessage path) in parallel — two requests
+        // racing each other, with the UI showing success from the local path even
+        // when the backend request failed silently.
+        //
+        // Now we use ONE path with this priority:
+        //   1. status-core postStatus()  — preferred (handles offline queue, session
+        //      lifecycle, and the postMessage→chat.html→backend chain)
+        //   2. StatusAPI.createStatus()  — direct fetch fallback when core is not
+        //      yet ACTIVE (e.g. user posts before SESSION_DATA handshake completes)
+        //
+        // This means status creation works even when the module is not yet ACTIVE.
+        // ─────────────────────────────────────────────────────────────────────────
+
+        // Handle media upload first (same for both paths)
         if (statusData.type === 'media' && statusData.file) {
             showNotification('Uploading media...', 'info');
+            const api = window.StatusAPI;
             const uploadResult = await api.uploadMedia(statusData.file);
             if (uploadResult.success) {
                 statusData.mediaUrl = uploadResult.url;
@@ -4794,13 +4809,32 @@ async function handlePostStatus() {
             }
         }
 
-        // Create the status
-        response = await api.createStatus(statusData);
-        
-        // Handle offline queue if not online
-        if (!navigator.onLine && window.StatusCache) {
-            await window.StatusCache.addToSyncQueue(statusData);
+        // Offline path — queue immediately, no backend call needed
+        if (!navigator.onLine) {
+            if (window.StatusCache) await window.StatusCache.addToSyncQueue(statusData);
             response = { success: true, queued: true, offline: true };
+        } else {
+            // Try core postStatus() first — it uses the postMessage bridge which
+            // correctly relays to chat.html → directApiRequest → backend
+            const core = getCore();
+            const coreReady = core && typeof core.postStatus === 'function' && core.isSessionReady && core.isSessionReady();
+
+            if (coreReady) {
+                // FIX Bug B: core is ACTIVE and session is ready — use postMessage path
+                response = await core.postStatus(statusData);
+                // Normalise: core returns { success, status } after handleApiResponse
+                // strips the outer data wrapper. Ensure response.status is populated.
+                if (response && response.success && !response.status && response.data) {
+                    response.status = response.data.status || response.data;
+                }
+            } else {
+                // FIX Bug B fallback: module not yet ACTIVE — use StatusAPI direct fetch
+                // so the user can post immediately without waiting for the iframe handshake
+                console.warn('[status-ui] Core not ready — falling back to direct API fetch for status creation');
+                const api = window.StatusAPI;
+                response = await api.createStatus(statusData);
+                // StatusAPI.createStatus returns { success, status } already normalised
+            }
         }
         
         if (response && (response.success || response.queued)) {

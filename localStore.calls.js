@@ -41,34 +41,42 @@
   }
 
   /* ── Wait for AppCache to be available ──────────────────────────────────── */
+  // Cache the resolved result so we never wait 5s more than once
+  let _resolvedCache = undefined;  // undefined = not yet resolved, null = confirmed unavailable
+  let _cachePromise  = null;       // in-flight promise
+
   function getCache() {
-    if (window.AppCache) return Promise.resolve(window.AppCache);
-    
-    // Listen for cache ready event instead of polling
-    return new Promise((resolve) => {
+    if (window.AppCache) { _resolvedCache = window.AppCache; return Promise.resolve(window.AppCache); }
+    if (_resolvedCache !== undefined) return Promise.resolve(_resolvedCache); // null or AppCache
+    if (_cachePromise) return _cachePromise;  // reuse in-flight wait
+
+    _cachePromise = new Promise((resolve) => {
       const handleCacheReady = () => {
         if (window.AppCache) {
           window.removeEventListener('kyn:cacheReady', handleCacheReady);
+          _resolvedCache = window.AppCache;
+          _cachePromise  = null;
           resolve(window.AppCache);
         }
       };
-      
       window.addEventListener('kyn:cacheReady', handleCacheReady, { once: true });
-      
-      // Fallback: check if AppCache becomes available within 5 seconds
+
       setTimeout(() => {
+        window.removeEventListener('kyn:cacheReady', handleCacheReady);
         if (window.AppCache) {
-          window.removeEventListener('kyn:cacheReady', handleCacheReady);
-          resolve(window.AppCache);
+          _resolvedCache = window.AppCache;
         } else {
           if (!window._callLocalStoreFallbackWarned) {
             window._callLocalStoreFallbackWarned = true;
-            console.log('[CallLocalStore] AppCache not available after 5s, using localStorage fallback (once only)');
+            console.warn('[CallLocalStore] AppCache not available after 5s — falling back to localStorage');
           }
-          resolve(null);
+          _resolvedCache = null;
         }
+        _cachePromise = null;
+        resolve(_resolvedCache);
       }, 5000);
     });
+    return _cachePromise;
   }
 
   /* ── Normalise a raw call record ────────────────────────────────────────── */

@@ -226,12 +226,12 @@ async function _dispatchAction(item) {
         case QUEUE_ACTIONS.REMOVE_MEMBER:
             return _apiCall(`/groups/${groupId}/members/${userId}`, 'DELETE', null);
 
-        case QUEUE_ACTIONS.UPDATE_ROLE: {
-            const ep = payload.role === 'admin'
-                ? `/groups/${groupId}/members/${userId}/promote`
-                : `/groups/${groupId}/members/${userId}/demote`;
-            return _apiCall(ep, 'POST', null);
-        }
+        case QUEUE_ACTIONS.UPDATE_ROLE:
+            // FIX: /promote and /demote routes don't exist in group.js.
+            // The correct endpoint is PUT /groups/:groupId/members/:userId/role
+            return _apiCall(`/groups/${groupId}/members/${userId}/role`, 'PUT', {
+                role: payload.role || 'member',
+            });
 
         case QUEUE_ACTIONS.LEAVE_GROUP:
             return _apiCall(`/groups/${groupId}/leave`, 'POST', null);

@@ -161,8 +161,13 @@ class StatusAPI {
 
             const result = await this._parseJSON(response);
 
-            // FIX: explicitly validate the returned status object
-            const status = result?.data?.status;
+            // FIX Bug E: backend returns { success, data: { status } }.
+            // Guard every possible shape so one missing wrapper never breaks creation.
+            const status =
+                result?.data?.status ||   // normal shape
+                result?.status       ||   // some older endpoints return top-level status
+                (result?.data?.id ? result.data : null) || // data IS the status obj
+                (result?.id ? result : null);              // result itself is the status
             if (!status || !status.id) {
                 const msg = 'Server returned empty or invalid status object';
                 console.error('[STATUS FLOW] API → FAILED:', msg, result);

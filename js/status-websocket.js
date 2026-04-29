@@ -1,12 +1,13 @@
-// status-websocket.js — Fixed v3 (2026-04-22)
-// SW cache busted: v3 — KynectaRealtime socket detection, kyn:realtimeReady listener
-// Key fixes:
-//  1. handleStatusCreated: reads status from data.status OR reconstructs from flat fields
-//     (backend now sends both — this file handles either shape for resilience)
-//  2. Listens for ALL alias event names: status:created, new_status, status_created
-//  3. Removed polling fallback that was masking real-time failures
-//  4. init() retries without setInterval spam — uses a single backoff attempt
-//  5. No more silent failures — every handler logs clearly on success and error
+// status-websocket.js — Fixed v4 (2026-04-28)
+// Bug fixes vs v3:
+//  Bug F fix 1: Persistent 500ms poll (up to 60s) so a missed KYN_REALTIME_READY
+//               postMessage (race between parent firing and iframe listener attaching)
+//               never leaves listeners unregistered.
+//  Bug F fix 2: Re-init listeners when KynectaRealtime reconnects so friends'
+//               statuses still arrive after a socket reconnect mid-session.
+//  Bug F fix 3: On init(), proactively emit join_user_room so the backend adds
+//               this socket to the user:<id> room even if server missed it on connect.
+//  All v3 fixes preserved.
 
 class StatusWebSocket {
     constructor() {
@@ -62,8 +63,45 @@ class StatusWebSocket {
         this.socket = manager;
         this._setupSocketListeners();
         this.isConnected = manager.isConnected ? manager.isConnected() : true;
+
+        // FIX Bug F: Proactively join user room so backend routes status events here.
+        // webSocketService joins user:<id> on TCP connect, but if this iframe initialised
+        // after the socket was already connected the join event was never sent for this
+        // socket. We emit join_user_room explicitly to ensure membership.
+        this._joinUserRoom();
+
+        // FIX Bug F: When socket reconnects (e.g. after a network blip), re-wire
+        // listeners and re-join the user room so delivery resumes automatically.
+        if (typeof manager.on === 'function') {
+            manager.on('connect', () => {
+                console.log('[StatusWebSocket] Reconnected — re-joining user room');
+                this._joinUserRoom();
+            });
+        }
+
         console.log('[StatusWebSocket] ✅ Initialized via KynectaRealtime/wsService');
         return true;
+    }
+
+    // FIX Bug F: emit join_user_room so server adds socket to user:<id> room
+    _joinUserRoom() {
+        const userId =
+            (window.currentUser && (window.currentUser.id || window.currentUser.userId)) ||
+            (window.StatusCore && window.StatusCore.getSessionUserId && window.StatusCore.getSessionUserId()) ||
+            null;
+
+        if (!userId) return;
+
+        const socket = this.socket;
+        if (!socket) return;
+
+        // KynectaRealtime proxies emit() to the real socket
+        if (typeof socket.emit === 'function') {
+            try {
+                socket.emit('join_user_room', { userId });
+                console.log(`[StatusWebSocket] 📡 Emitted join_user_room for userId=${userId}`);
+            } catch (_) {}
+        }
     }
 
     // ── SOCKET EVENT LISTENERS ────────────────────────────────────────────────
@@ -369,44 +407,64 @@ class StatusWebSocket {
 window.StatusWebSocket = new StatusWebSocket();
 
 // ── Auto-init: poll until socket is available, then wire once ─────────────────
-// Uses multiple strategies since StatusWebSocket runs inside an iframe:
-//  1. Direct polling — catches cases where KynectaRealtime was already ready
-//  2. kyn:realtimeReady event — fired on this window if same-origin
-//  3. KYN_REALTIME_READY postMessage — forwarded by chat.html into this iframe
+// FIX Bug F: The previous version capped at 30 attempts (~6s).  If chat.html
+// fires KYN_REALTIME_READY before this iframe's message listener was attached
+// (race condition), StatusWebSocket never wired up.
+//
+// Fixes:
+//  1. Poll extended to 120 attempts (~60s total) — covers slow auth handshakes.
+//  2. On every KYN_REALTIME_READY / kyn:realtimeReady, force socket=null so
+//     init() re-wires (handles reconnects where manager reference changes).
+//  3. On AUTHENTICATED socket event, call _joinUserRoom() to re-assert room membership.
 (function initStatusWebSocket() {
     let attempts = 0;
-    const MAX    = 30; // up to ~6 s of polling at 200ms each
+    const MAX    = 120; // up to ~60 s (exponential backoff caps at 2s per step)
+    let pollTimer = null;
 
     function tryInit() {
-        if (window.StatusWebSocket.isConnected) return; // already done
+        if (window.StatusWebSocket.isConnected) return; // already wired
         if (attempts >= MAX) {
-            console.warn('[StatusWebSocket] Gave up waiting for socket after', MAX, 'attempts - using fallback mode');
-            // Set fallback mode to prevent further retries
+            console.warn('[StatusWebSocket] Gave up waiting for socket after', MAX, 'attempts — using fallback mode');
             window.StatusWebSocket.fallbackMode = true;
             return;
         }
         attempts++;
         if (!window.StatusWebSocket.init()) {
-            // Exponential backoff to reduce noise
-            const delay = Math.min(200 * Math.pow(1.5, attempts - 1), 2000);
-            setTimeout(tryInit, delay);
+            // Exponential backoff: 200ms → 400ms → … → 2000ms
+            const delay = Math.min(200 * Math.pow(1.2, attempts - 1), 2000);
+            pollTimer = setTimeout(tryInit, delay);
         }
     }
 
     // Strategy 2: kyn:realtimeReady on this window (same-origin, forwarded by chat.html)
     window.addEventListener('kyn:realtimeReady', function() {
-        if (!window.StatusWebSocket.isConnected) {
-            window.StatusWebSocket.socket = null; // force re-init
-            window.StatusWebSocket.init();
-        }
+        if (pollTimer) { clearTimeout(pollTimer); pollTimer = null; }
+        // Force re-init so we re-wire against the (possibly new) manager instance
+        window.StatusWebSocket.socket = null;
+        window.StatusWebSocket.isConnected = false;
+        attempts = 0;
+        tryInit();
     });
 
     // Strategy 3: KYN_REALTIME_READY postMessage forwarded from chat.html parent
     window.addEventListener('message', function(evt) {
         if (!evt.data || evt.data.type !== 'KYN_REALTIME_READY') return;
-        if (!window.StatusWebSocket.isConnected) {
-            window.StatusWebSocket.socket = null;
-            window.StatusWebSocket.init();
+        if (pollTimer) { clearTimeout(pollTimer); pollTimer = null; }
+        window.StatusWebSocket.socket = null;
+        window.StatusWebSocket.isConnected = false;
+        attempts = 0;
+        tryInit();
+    });
+
+    // Strategy 4: re-join user room whenever authenticated event fires
+    // (covers the case where socket connected but user room join was missed)
+    window.addEventListener('message', function(evt) {
+        if (!evt.data) return;
+        const t = evt.data.type;
+        if (t === 'AUTH_READY' || t === 'SESSION_DATA' || t === 'SESSION_ACTIVE') {
+            if (window.StatusWebSocket.isConnected) {
+                window.StatusWebSocket._joinUserRoom();
+            }
         }
     });
 

@@ -1886,14 +1886,13 @@
             };
             
             window.showIncomingCallBanner = (callData) => {
+                // Dedup: ignore if same call already being shown
+                if (pendingIncomingCall && (pendingIncomingCall.callId || pendingIncomingCall.id) === (callData.callId || callData.id)) return;
                 pendingIncomingCall = callData;
                 const nameEl = document.getElementById('callerName');
                 if (nameEl) nameEl.innerText = callData.callerName || callData.fromUserName || 'Someone';
                 banner.style.display = 'flex';
 
-                // ── FIX 1: Navigate to calls page so the iframe becomes visible ──
-                // CRITICAL: Set __activeCallInProgress BEFORE navigating so navigateToPage
-                // does NOT strip call-screen-active when switching away from the current page.
                 document.body.classList.add('call-screen-active');
                 window.__activeCallInProgress = true;
 
@@ -1902,23 +1901,38 @@
                     navigateToPage('calls');
                 }
 
-                // ── FIX 2: (already applied above — call-screen-active set before navigate) ──
-
-                // ── FIX 3: Delay CALL_INCOMING postMessage by 350ms so the iframe
-                //    has time to become visible and its DOM is ready to activate
-                //    the incomingCallModal. Without this delay the postMessage
-                //    arrives while the iframe is still hidden (display:none) and
-                //    the modal activation is missed.
-                setTimeout(() => {
+                // ── RELIABLE DELIVERY: wait for iframe to signal it's ready ──
+                // call_patches.js (or calls-ui.js) posts CALLS_IFRAME_READY when loaded.
+                // If already ready, deliver after 100ms settle time.
+                // If not ready within 1500ms, deliver anyway as fallback.
+                let _delivered = false;
+                function _deliverToIframe() {
+                    if (_delivered) return;
+                    _delivered = true;
                     const callsIframe = document.getElementById('callsIframe');
                     if (callsIframe && callsIframe.contentWindow) {
                         callsIframe.contentWindow.postMessage(
                             { type: 'CALL_INCOMING', payload: callData, source: 'banner-bridge' }, '*'
                         );
                     }
-                }, 350);
+                }
 
-                // Auto-hide after 30 seconds if not answered
+                if (window.__callsIframeReady) {
+                    setTimeout(_deliverToIframe, 100);
+                } else {
+                    // Listen for the ready signal
+                    const _fallbackTimer = setTimeout(_deliverToIframe, 1500);
+                    function _onIframeReady(evt) {
+                        if (evt.data && evt.data.type === 'CALLS_IFRAME_READY') {
+                            clearTimeout(_fallbackTimer);
+                            window.removeEventListener('message', _onIframeReady);
+                            setTimeout(_deliverToIframe, 80);
+                        }
+                    }
+                    window.addEventListener('message', _onIframeReady);
+                }
+
+                // Auto-hide banner after 30 seconds if not answered
                 setTimeout(() => {
                     if (pendingIncomingCall === callData) hideBanner();
                 }, 30000);
@@ -2578,6 +2592,21 @@
                     hideGlobalBanner();
                     document.body.classList.remove('call-screen-active');
                     window.__activeCallInProgress = false;
+                }
+
+                // CALLS_IFRAME_READY handshake - calls iframe signals it is ready to receive CALL_INCOMING
+                if (data.type === 'CALLS_IFRAME_READY') {
+                    window.__callsIframeReady = true;
+                }
+
+                // CALL_ACCEPT / CALL_REJECT forwarded from iframe buttons
+                if (data.type === 'CALL_ACCEPT' && data.payload) {
+                    typeof window._handleCallAcceptFromIframe === 'function' && window._handleCallAcceptFromIframe(data.payload);
+                    typeof hideBanner === 'function' && hideBanner();
+                }
+                if (data.type === 'CALL_REJECT' && data.payload) {
+                    typeof window._handleCallRejectFromIframe === 'function' && window._handleCallRejectFromIframe(data.payload);
+                    typeof hideBanner === 'function' && hideBanner();
                 }
             });
         }
@@ -4302,19 +4331,34 @@
             var _wsCallListenersBound = false;
             function _bindWsCallListeners() {
                 if (_wsCallListenersBound) return;
-                if (!window.wsService || typeof window.wsService.on !== 'function') return;
+                if (!window.wsService || typeof window.wsService.on !== 'function') {
+                    // wsService not ready yet — retry every 150ms for up to 6s
+                    if (!window._wsBindRetryCount) window._wsBindRetryCount = 0;
+                    if (window._wsBindRetryCount < 40) {
+                        window._wsBindRetryCount++;
+                        setTimeout(_bindWsCallListeners, 150);
+                    } else {
+                        console.warn('[Parent] wsService never became available — incoming call notifications may not work');
+                    }
+                    return;
+                }
                 _wsCallListenersBound = true;
+                window._wsBindRetryCount = 0;
 
+                // Dedup log: only log incoming_call once per callId
+                const _fwdIncomingLogged = new Set();
                 function _fwdIncoming(callData) {
-                    // ── FIX: Normalise payload ──────────────────────────────────
                     const payload = {
                         ...callData,
                         callerName:   callData.callerName   || (callData.caller && callData.caller.username) || callData.fromUserName || 'Unknown',
                         callerAvatar: callData.callerAvatar || (callData.caller && callData.caller.avatar)   || null,
                         callType:     callData.callType     || callData.type || 'voice',
                     };
-                    console.log('[Parent] 📞 _fwdIncoming → callerName:', payload.callerName);
-                    // Banner handles navigation + fullscreen + delayed iframe postMessage
+                    const callKey = payload.callId || payload.id || payload.callerName;
+                    if (!_fwdIncomingLogged.has(callKey)) {
+                        _fwdIncomingLogged.add(callKey);
+                        console.log('[Parent] 📞 Incoming call from:', payload.callerName, '| callId:', callKey);
+                    }
                     if (window.showIncomingCallBanner) window.showIncomingCallBanner(payload);
                 }
                 function _fwdAccepted(callData) {

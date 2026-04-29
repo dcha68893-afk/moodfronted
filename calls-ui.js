@@ -80,134 +80,6 @@ const UIState = {
     pendingCallUser: null
 };
 
-// ==================== FORCE CALLING SCREEN FOR ALL CALLS ====================
-// This ensures the calling screen shows regardless of where the call originates from
-
-// Override the callCore's startCall method to show the calling screen
-(function patchCallCoreStartCall() {
-    console.log('[PATCH] Installing calling screen patch...');
-    
-    // Wait for callCore to be available
-    const checkInterval = setInterval(() => {
-        if (window.callCore && window.callCore.startCall) {
-            clearInterval(checkInterval);
-            console.log('[PATCH] callCore found, patching startCall method');
-            
-            // Store original startCall
-            const originalStartCall = window.callCore.startCall;
-            
-            // Override startCall to show calling screen immediately
-            window.callCore.startCall = async function(userId, callType) {
-                console.log('[PATCH] Intercepted startCall:', { userId, callType });
-                
-                // Get user info
-                let userName = 'User';
-                const contacts = window.__cachedCallContacts || [];
-                const contact = contacts.find(c => String(c.id) === String(userId) || String(c.userId) === String(userId));
-                if (contact) {
-                    userName = contact.displayName || contact.username || contact.name || 'User';
-                }
-                
-                // Get avatar
-                let userAvatar = null;
-                const photoUrl = contact && (contact.avatar || contact.photo || contact.profilePhoto);
-                if (photoUrl) {
-                    userAvatar = `<img src="${photoUrl}" alt="${userName}" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">`;
-                } else {
-                    userAvatar = `<i class="fas fa-user"></i>`;
-                }
-                
-                // CRITICAL FIX: Ensure parent window navigates to calls page BEFORE showing call screen
-                console.log('[PATCH] Ensuring parent navigation to calls page before showing call screen for:', userName);
-                
-                // Tell parent to navigate to calls page first
-                if (window.parent && window.parent !== window) {
-                    window.parent.postMessage({
-                        type: 'NAVIGATE_TO_CALLS_FOR_CALL',
-                        payload: { 
-                            userName: userName,
-                            userId: userId,
-                            callType: callType === 'video' ? 'video' : 'voice'
-                        }
-                    }, '*');
-                }
-                
-                // Show calling screen after a small delay to allow parent navigation
-                setTimeout(() => {
-                    showCallingScreenViaPatch({
-                        userName: userName,
-                        userId: userId,
-                        callType: callType === 'video' ? 'video' : 'voice',
-                        status: 'Calling...',
-                        userAvatar: userAvatar
-                    });
-                }, 100);
-                
-                // Call original method
-                return originalStartCall.call(window.callCore, userId, callType);
-            };
-            
-            console.log('[PATCH] startCall method patched successfully');
-        }
-    }, 100);
-    
-    // Also patch initiateCall
-    setTimeout(() => {
-        if (window.callCore && window.callCore.initiateCall) {
-            const originalInitiateCall = window.callCore.initiateCall;
-            window.callCore.initiateCall = async function(callType, participants) {
-                console.log('[PATCH] Intercepted initiateCall:', { callType, participants });
-                
-                // Get user info
-                const userId = participants?.[0];
-                let userName = 'User';
-                const contacts = window.__cachedCallContacts || [];
-                const contact = contacts.find(c => String(c.id) === String(userId) || String(c.userId) === String(userId));
-                if (contact) {
-                    userName = contact.displayName || contact.username || contact.name || 'User';
-                }
-                
-                // Get avatar
-                let userAvatar = null;
-                const photoUrl = contact && (contact.avatar || contact.photo || contact.profilePhoto);
-                if (photoUrl) {
-                    userAvatar = `<img src="${photoUrl}" alt="${userName}" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">`;
-                } else {
-                    userAvatar = `<i class="fas fa-user"></i>`;
-                }
-                
-                // CRITICAL FIX: Ensure parent window navigates to calls page BEFORE showing call screen
-                console.log('[PATCH] Ensuring parent navigation to calls page before showing call screen for:', userName);
-                
-                // Tell parent to navigate to calls page first
-                if (window.parent && window.parent !== window) {
-                    window.parent.postMessage({
-                        type: 'NAVIGATE_TO_CALLS_FOR_CALL',
-                        payload: { 
-                            userName: userName,
-                            userId: userId,
-                            callType: callType === 'video' ? 'video' : 'voice'
-                        }
-                    }, '*');
-                }
-                
-                // Show calling screen after a small delay to allow parent navigation
-                setTimeout(() => {
-                    showCallingScreenViaPatch({
-                        userName: userName,
-                        userId: userId,
-                        callType: callType === 'video' ? 'video' : 'voice',
-                        status: 'Calling...',
-                        userAvatar: userAvatar
-                    });
-                }, 100);
-                
-                return originalInitiateCall.call(window.callCore, callType, participants);
-            };
-            console.log('[PATCH] initiateCall method patched successfully');
-        }
-    }, 100);
-})();
 function showCallingScreenViaPatch(callInfo) {
     console.log('[UI] showCallingScreenViaPatch → caller outgoing screen', callInfo);
 
@@ -294,163 +166,6 @@ function showCallingScreenViaPatch(callInfo) {
 
 // ==================== CRITICAL FIX: FORCE CALLING SCREEN VISIBILITY ====================
 // This ensures the calling screen appears and STAYS visible for 2 minutes
-(function forceCallingScreenVisibility() {
-    console.log('[FORCE] Installing calling screen force visibility patch');
-    
-    // Override the core's call state change handler to keep calling screen visible
-    const originalHandleCoreEvent = window.CoreIntegration ? window.CoreIntegration.handleCoreEvent : null;
-    
-    // Create a mutation observer to ensure calling screen stays visible
-    let callingScreenObserver = null;
-    
-    function ensureCallingScreenVisible() {
-        const callingScreen = document.getElementById('callingScreen');
-        const idleScreen    = document.getElementById('idleScreen');
-        if (!callingScreen) return;
-        // FIX: Use callState === 'calling' alone. activeCallId may not be set yet
-        // when the patch shows the screen before callCore assigns an ID.
-        if (window.UIState && window.UIState.callState === 'calling') {
-            document.body.classList.add('call-active');
-            if (!callingScreen.classList.contains('active')) {
-                console.log('[FORCE] Re-showing callingScreen (callState=calling)');
-                if (idleScreen) { idleScreen.classList.remove('active'); idleScreen.style.setProperty('display','none','important'); }
-                callingScreen.classList.add('active');
-                callingScreen.style.setProperty('display','flex','important');
-            }
-            // Belt & suspenders: always hide idle while calling
-            if (idleScreen) { idleScreen.style.setProperty('display','none','important'); }
-        }
-    }
-    
-    // Check every 500ms to ensure calling screen stays visible during call
-    setInterval(() => {
-        ensureCallingScreenVisible();
-    }, 500);
-    
-    // Also patch the showIdleScreen function to prevent it from hiding calling screen during active call
-    const originalShowIdleScreen = window.showIdleScreen;
-    if (originalShowIdleScreen) {
-        window.showIdleScreen = function() {
-            // Don't hide calling screen if we have an active call
-            if (window.UIState && window.UIState.activeCallId) {
-                console.log('[FORCE] Blocked showIdleScreen during active call');
-                return;
-            }
-            return originalShowIdleScreen.apply(this, arguments);
-        };
-    }
-    
-    console.log('[FORCE] Calling screen force visibility patch installed');
-})();
-
-// ==================== FORCE CALLING SCREEN ON ANY CALL INITIATION ====================
-(function patchAllCallMethods() {
-    console.log('[PATCH] Installing comprehensive call method patches');
-    
-    // Helper to get contact info
-    function getContactInfo(userId) {
-        const contacts = window.__cachedCallContacts || [];
-        const contact = contacts.find(c => String(c.id) === String(userId) || String(c.userId) === String(userId));
-        if (contact) {
-            return {
-                name: contact.displayName || contact.username || contact.name || 'User',
-                avatar: contact.avatar || contact.photo || contact.profilePhoto
-            };
-        }
-        return { name: 'User', avatar: null };
-    }
-    
-    // Helper to show calling screen
-    function forceShowCallingScreen(userId, userName, callType) {
-        console.log('[PATCH] forceShowCallingScreen called for:', userId, userName);
-        
-        const idleScreen = document.getElementById('idleScreen');
-        const callingScreen = document.getElementById('callingScreen');
-        const inCallScreen = document.getElementById('inCallScreen');
-        const callContainer = document.getElementById('callContainer');
-        
-        // FIX: Show callContainer first (parent must be visible)
-        if (callContainer) {
-            callContainer.classList.add('active');
-            callContainer.style.display = 'flex';
-        }
-        
-        // Hide all other screens — CSS uses !important
-        if (idleScreen) {
-            idleScreen.classList.remove('active');
-            idleScreen.style.setProperty('display', 'none', 'important');
-        }
-        if (inCallScreen) {
-            inCallScreen.classList.remove('active');
-            inCallScreen.style.setProperty('display', 'none', 'important');
-        }
-        
-        // Get avatar
-        let userAvatar = null;
-        const contact = getContactInfo(userId);
-        if (contact.avatar) {
-            userAvatar = `<img src="${contact.avatar}" alt="${userName}" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">`;
-        } else {
-            userAvatar = '<i class="fas fa-user"></i>';
-        }
-        
-        // Show calling screen — CSS requires .active (has !important display:flex)
-        if (callingScreen) {
-            callingScreen.classList.add('active');
-            callingScreen.style.setProperty('display', 'flex', 'important');
-            
-            // Update content
-            const callingAvatar = document.getElementById('callingAvatar');
-            const callingNameEl = document.getElementById('callingName');
-            const callingStatusEl = document.getElementById('callingStatus');
-            const callingTypeEl = document.getElementById('callingType');
-            
-            if (callingAvatar) callingAvatar.innerHTML = userAvatar;
-            if (callingNameEl) callingNameEl.textContent = userName || 'User';
-            if (callingStatusEl) callingStatusEl.textContent = 'Calling...';
-            if (callingTypeEl) callingTypeEl.textContent = callType === 'video' ? 'Video Call' : 'Voice Call';
-            
-            console.log('[PATCH] Calling screen forcefully shown');
-        } else {
-            console.error('[PATCH] Calling screen element not found!');
-        }
-    }
-    
-    // Patch window.callCore.startCall
-    const checkCore = setInterval(() => {
-        if (window.callCore) {
-            clearInterval(checkCore);
-            console.log('[PATCH] Found callCore, patching methods');
-            
-            // Store originals
-            const originalStartCall = window.callCore.startCall;
-            const originalInitiateCall = window.callCore.initiateCall;
-            
-            // Patch startCall
-            window.callCore.startCall = async function(userId, callType) {
-                console.log('[PATCH] startCall intercepted:', userId, callType);
-                const contact = getContactInfo(userId);
-                forceShowCallingScreen(userId, contact.name, callType);
-                return originalStartCall.call(this, userId, callType);
-            };
-            
-            // Patch initiateCall
-            window.callCore.initiateCall = async function(callType, participants) {
-                console.log('[PATCH] initiateCall intercepted:', callType, participants);
-                const userId = participants?.[0];
-                if (userId) {
-                    const contact = getContactInfo(userId);
-                    forceShowCallingScreen(userId, contact.name, callType);
-                }
-                return originalInitiateCall.call(this, callType, participants);
-            };
-            
-            console.log('[PATCH] callCore methods patched successfully');
-        }
-    }, 100);
-    
-})();
-
 // ==================== GLOBAL CALL HISTORY UPDATES ====================
 const GlobalCallHistory = {
     emitUpdate: function(eventType, data = {}) {
@@ -519,8 +234,7 @@ const GlobalCallHistory = {
     let listenerEstablished = false;
 
     async function startCallWithUser(userId, userName, callType) {
-    console.log('[Calls UI] ========== STARTING CALL ==========');
-    console.log('[Calls UI] startCallWithUser called with:', { userId, userName, callType });
+    console.log('[Calls UI] startCallWithUser → userId:', userId, '| type:', callType);
     
     if (!userId) {
         console.error('[Calls UI] Cannot start call: No userId');
@@ -2549,6 +2263,20 @@ async function initiateCallWithPendingUser() {
             throw new Error('No valid session');
         }
         
+        // Force-clear any stale call state from previous call (prevents "already active" ghost state)
+        if (coreInstance.forceResetCallState) {
+            try { coreInstance.forceResetCallState(); } catch(_) {}
+        }
+
+        // Show calling screen IMMEDIATELY — before the async startCall so user sees feedback right away
+        showCallingScreen({
+            userId:    userId,
+            userName:  userName,
+            callType:  callType,
+            status:    'Calling...',
+            userAvatar: null
+        });
+
         // CRITICAL FIX: Use startCall method instead of sendAction
         if (coreInstance.startCall) {
             const result = await coreInstance.startCall(parseInt(userId), callType);
@@ -2709,7 +2437,7 @@ async function initiateCallWithPendingUser() {
                 
                 newCallModal: '#newCallModal',
                 closeNewCallModal: '#closeNewCallModal',
-                callingOverlay: '#callingOverlay',
+                callingOverlay: '#callingScreen',   // FIX: actual DOM id is callingScreen, not callingOverlay
                 callingName: '#callingName',
                 callingStatus: '#callingStatus',
                 callingType: '#callingType',
@@ -4882,6 +4610,14 @@ case 'CALL_INITIATED':
             // ── CALLING OVERLAY: show dialing screen ─────────────────────────
             (function _showCallingOverlay() {
                 if (!elements.callingOverlay) return;
+                // ── FIX: actually make the screen visible ──
+                const callContainer = document.getElementById('callContainer');
+                if (callContainer) { callContainer.classList.add('active'); callContainer.style.display = 'flex'; }
+                const idleScreen = document.getElementById('idleScreen');
+                if (idleScreen) { idleScreen.classList.remove('active'); idleScreen.style.setProperty('display','none','important'); }
+                elements.callingOverlay.classList.add('active');
+                elements.callingOverlay.style.setProperty('display', 'flex', 'important');
+
                 const participant = (UIState.callParticipants && UIState.callParticipants[0]) || {};
                 const name = participant.name || participantNames || 'Calling...';
                 const isVideo = UIState.callType === 'video';
@@ -9804,4 +9540,21 @@ if (detectExistingCore()) {
     }
 
     console.log('[calls-ui] callContainer dark-screen guard installed.');
+})();
+
+// ── CALLS_IFRAME_READY handshake ─────────────────────────────────────────────
+// Signal to the parent (chat.html) that this iframe has fully loaded and is
+// ready to receive CALL_INCOMING postMessages.  Must fire after all scripts run.
+(function signalIframeReady() {
+    function _signal() {
+        if (window.parent && window.parent !== window) {
+            window.parent.postMessage({ type: 'CALLS_IFRAME_READY', timestamp: Date.now() }, '*');
+            console.log('[calls-ui] ✅ CALLS_IFRAME_READY sent to parent');
+        }
+    }
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', _signal);
+    } else {
+        _signal();
+    }
 })();

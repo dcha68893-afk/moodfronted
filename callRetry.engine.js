@@ -13,7 +13,13 @@
     const MAX_DELAY_MS   = 8000;    // Cap at 8s (calls are time-sensitive)
     const ATTEMPT_TTL_MS = 25000;   // Total retry window — give up after 25s
 
+    const _retryLogCache = new Map();
     function log(msg, data) {
+        const key = msg;
+        const now = Date.now();
+        // Allow attempt logs (they change) but suppress identical repeated logs within 3s
+        if (_retryLogCache.has(key) && now - _retryLogCache.get(key) < 3000) return;
+        _retryLogCache.set(key, now);
         console.log('[CallRetry] ' + msg, data !== undefined ? data : '');
     }
 

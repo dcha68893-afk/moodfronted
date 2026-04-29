@@ -73,6 +73,14 @@
       this._memory = new Map(STORE_NAMES.map((name) => [name, new Map()]));
       this._bootstrapped = false;
       this._readyPromise = this.initDB();
+      // Throttle [CACHE] Loaded/Saved logs — max once per storeName per 3s
+      this._cacheLogTs = new Map();
+      this._logCacheOp = (op, sn) => {
+        const k = op + sn; const now = Date.now();
+        if (!this._cacheLogTs.has(k) || now - this._cacheLogTs.get(k) > 3000) {
+          this._cacheLogTs.set(k, now); console.log('[CACHE] ' + op + ':', sn);
+        }
+      };
     }
 
     async initDB() {
@@ -271,7 +279,7 @@
       if (!this._db) {
         const mem = this._memoryStore(storeName);
         normalized.forEach((record) => mem.set(record.id, clone(record)));
-        console.log("[CACHE] Saved:", storeName);
+        this._logCacheOp("Saved", storeName);
         return Array.isArray(data) ? normalized : normalized[0];
       }
 
@@ -288,7 +296,7 @@
         normalized.forEach((record) => mem.set(record.id, clone(record)));
       });
 
-      console.log("[CACHE] Saved:", storeName);
+      this._logCacheOp("Saved", storeName);
       return Array.isArray(data) ? normalized : normalized[0];
     }
 
@@ -307,7 +315,7 @@
         if (typeof query === "string" || typeof query === "number") {
           const tx = this._db.transaction([storeName], "readonly");
           const result = await this._requestToPromise(tx.objectStore(storeName).get(String(query)));
-          console.log("[CACHE] Loaded:", storeName);
+          this._logCacheOp("Loaded", storeName);
           return result || null;
         }
 
@@ -325,18 +333,18 @@
 
       if (!this._db) {
         const items = Array.from(this._memoryStore(storeName).values()).map((item) => clone(item));
-        console.log("[CACHE] Loaded:", storeName);
+        this._logCacheOp("Loaded", storeName);
         return items;
       }
 
       try {
         const tx = this._db.transaction([storeName], "readonly");
         const records = await this._requestToPromise(tx.objectStore(storeName).getAll());
-        console.log("[CACHE] Loaded:", storeName);
+        this._logCacheOp("Loaded", storeName);
         return Array.isArray(records) ? records : [];
       } catch (_error) {
         const items = Array.from(this._memoryStore(storeName).values()).map((item) => clone(item));
-        console.log("[CACHE] Loaded:", storeName);
+        this._logCacheOp("Loaded", storeName);
         return items;
       }
     }

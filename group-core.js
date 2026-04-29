@@ -5846,17 +5846,47 @@ function removeSelectedFriend(friendId) {
 }
 
 const createGroupOnline = async function(groupData) {
+    // FIX: Instead of silently returning when not ready, wait up to 8s for
+    // the parent handshake and session to arrive, then show a clear error.
     if (!isGroupOperationReady()) {
-        queueGroupAction({ type: 'createGroup', data: groupData });
-        return;
+        if (typeof showNotification === 'function') {
+            showNotification('Connecting to server\u2026', 'info');
+        }
+        // Poll every 200ms for up to 8 seconds
+        const ready = await new Promise(resolve => {
+            let elapsed = 0;
+            const iv = setInterval(() => {
+                elapsed += 200;
+                if (isGroupOperationReady()) { clearInterval(iv); resolve(true); }
+                else if (elapsed >= 8000) { clearInterval(iv); resolve(false); }
+            }, 200);
+        });
+        if (!ready) {
+            const msg = 'Not connected to server. Please refresh and try again.';
+            if (typeof showNotification === 'function') showNotification(msg, 'error');
+            throw new Error(msg);
+        }
     }
-    
+
     try {
         if (!groupData) return;
-        
+
+        // FIX: If session not yet received, request it and wait up to 5s
         if (!sessionReceived) {
             requestSession();
-            return;
+            const sessionArrived = await new Promise(resolve => {
+                let elapsed = 0;
+                const iv = setInterval(() => {
+                    elapsed += 200;
+                    if (sessionReceived) { clearInterval(iv); resolve(true); }
+                    else if (elapsed >= 5000) { clearInterval(iv); resolve(false); }
+                }, 200);
+            });
+            if (!sessionArrived) {
+                const msg = 'Session not ready \u2014 please try again.';
+                if (typeof showNotification === 'function') showNotification(msg, 'error');
+                throw new Error(msg);
+            }
         }
         
         const creatorId = session.user?.uid || session.user?.id;
@@ -5970,6 +6000,9 @@ const createGroupOnline = async function(groupData) {
             group: newGroup,
             timestamp: Date.now()
         });
+
+        // FIX: Return the created group so callers (createGroupAsync) can use it
+        return { success: true, group: newGroup, data: newGroup };
         
     } catch (error) {
         console.error('[GROUP CREATE] Failed:', error?.message || error);
