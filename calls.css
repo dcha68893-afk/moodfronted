@@ -3758,7 +3758,7 @@ body.call-active #idleScreen {
 .unified-btn-video:hover {
     box-shadow: 0 12px 32px rgba(0,132,255,0.6);
 }
-/* Accept (green check) — fourth icon on notification incoming call */
+/* Accept (green ✓) — 4th icon on incoming call notification */
 .unified-btn-accept-green {
     background: linear-gradient(135deg, #00c853, #009624);
     box-shadow: 0 8px 24px rgba(0,200,83,0.4);
@@ -4205,4 +4205,236 @@ body.call-active #idleScreen {
 
 [data-theme="dark"] .quick-call-info h3 {
     color: #e9edef;
+}
+
+/* ╔══════════════════════════════════════════════════════════════╗
+   ║  WHATSAPP-STYLE IN-CALL SCREEN                              ║
+   ╚══════════════════════════════════════════════════════════════╝ */
+
+/* Full-screen dark overlay — sits on top of everything */
+#inCallScreen {
+    position: fixed !important;
+    inset: 0 !important;
+    width: 100vw !important;
+    height: 100vh !important;
+    z-index: 9999 !important;
+    display: none;
+    flex-direction: column;
+    background: #0d1117;
+    overflow: hidden;
+    font-family: inherit;
+}
+#inCallScreen.active {
+    display: flex !important;
+}
+
+/* Subtle dark patterned/textured background */
+.incall-bg {
+    position: absolute;
+    inset: 0;
+    background:
+        radial-gradient(ellipse at 50% 30%, rgba(80,40,120,0.35) 0%, transparent 70%),
+        repeating-linear-gradient(
+            0deg,
+            transparent,
+            transparent 40px,
+            rgba(255,255,255,0.012) 40px,
+            rgba(255,255,255,0.012) 41px
+        ),
+        repeating-linear-gradient(
+            90deg,
+            transparent,
+            transparent 40px,
+            rgba(255,255,255,0.012) 40px,
+            rgba(255,255,255,0.012) 41px
+        );
+    background-color: #111827;
+    pointer-events: none;
+    z-index: 0;
+}
+
+/* ── TOP BAR ─────────────────────────────────────────────────── */
+.incall-top-bar {
+    position: relative;
+    z-index: 10;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 16px 8px;
+}
+.incall-top-center {
+    text-align: center;
+    flex: 1;
+}
+.incall-peer-name {
+    font-size: 20px;
+    font-weight: 700;
+    color: #ffffff;
+    letter-spacing: 0.2px;
+}
+.incall-timer {
+    font-size: 14px;
+    color: rgba(255,255,255,0.70);
+    margin-top: 3px;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0.5px;
+}
+.incall-icon-btn {
+    width: 42px;
+    height: 42px;
+    border-radius: 50%;
+    border: none;
+    background: rgba(255,255,255,0.12);
+    color: #fff;
+    font-size: 17px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.18s;
+    flex-shrink: 0;
+}
+.incall-icon-btn:hover { background: rgba(255,255,255,0.22); }
+
+/* ── CENTRE (avatar / video) ─────────────────────────────────── */
+.incall-centre {
+    position: relative;
+    z-index: 5;
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.incall-avatar-wrap {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.incall-avatar {
+    width: 148px;
+    height: 148px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #4f3b8b 0%, #6c4fc7 100%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 64px;
+    font-weight: 700;
+    color: rgba(255,255,255,0.85);
+    text-transform: uppercase;
+    user-select: none;
+    overflow: hidden;
+    box-shadow: 0 0 0 6px rgba(108,79,199,0.25), 0 0 0 14px rgba(108,79,199,0.10);
+}
+.incall-avatar img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    border-radius: 50%;
+}
+/* Pulsing ring around avatar (voice call) */
+@keyframes incallPulse {
+    0%   { box-shadow: 0 0 0 6px rgba(108,79,199,0.25), 0 0 0 14px rgba(108,79,199,0.10); }
+    50%  { box-shadow: 0 0 0 10px rgba(108,79,199,0.18), 0 0 0 22px rgba(108,79,199,0.06); }
+    100% { box-shadow: 0 0 0 6px rgba(108,79,199,0.25), 0 0 0 14px rgba(108,79,199,0.10); }
+}
+#inCallScreen.active .incall-avatar {
+    animation: incallPulse 2.4s ease-in-out infinite;
+}
+/* Remote video — full centre when active */
+.incall-remote-video {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    border-radius: 0;
+    background: #000;
+}
+
+/* ── PiP (local camera preview) ──────────────────────────────── */
+.incall-pip {
+    position: absolute;
+    top: 80px;
+    right: 14px;
+    width: 100px;
+    height: 148px;
+    border-radius: 14px;
+    overflow: hidden;
+    border: 2px solid rgba(255,255,255,0.25);
+    z-index: 20;
+    background: #000;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.5);
+}
+.incall-pip-video {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+.incall-pip-close {
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    background: rgba(0,0,0,0.55);
+    color: #fff;
+    border: none;
+    font-size: 10px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+/* ── BOTTOM CONTROL BAR ──────────────────────────────────────── */
+.incall-controls-bar {
+    position: relative;
+    z-index: 10;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 14px;
+    padding: 16px 20px 32px;
+    background: rgba(0,0,0,0.55);
+    backdrop-filter: blur(18px);
+    -webkit-backdrop-filter: blur(18px);
+}
+/* Individual control button */
+.incall-ctrl-btn {
+    width: 58px;
+    height: 58px;
+    border-radius: 50%;
+    border: none;
+    background: rgba(255,255,255,0.15);
+    color: #ffffff;
+    font-size: 22px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.18s, transform 0.15s;
+    position: relative;
+    flex-shrink: 0;
+}
+.incall-ctrl-btn:hover { background: rgba(255,255,255,0.25); transform: scale(1.07); }
+.incall-ctrl-btn.active { background: rgba(255,255,255,0.90); color: #111; }
+
+/* Red end-call pill */
+.incall-end-btn {
+    background: #ff3b30 !important;
+    width: 64px;
+    height: 64px;
+    font-size: 24px;
+    box-shadow: 0 6px 20px rgba(255,59,48,0.50);
+}
+.incall-end-btn:hover { background: #e0261c !important; }
+
+/* ── RESPONSIVE ──────────────────────────────────────────────── */
+@media (max-width: 480px) {
+    .incall-avatar { width: 130px; height: 130px; font-size: 56px; }
+    .incall-ctrl-btn { width: 52px; height: 52px; font-size: 19px; }
+    .incall-end-btn  { width: 58px; height: 58px; font-size: 21px; }
+    .incall-controls-bar { gap: 10px; padding: 14px 12px 28px; }
 }

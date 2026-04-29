@@ -5702,20 +5702,59 @@ try {
         // ✅ FIX: Also bind to KynectaRealtime singleton if available now or when it becomes ready.
         // messages-core previously ONLY checked window.wsService which is the legacy shim.
         // The hardened manager exposes window.KynectaRealtime.on() — we must bind to it too.
+        //
+        // FIX (race condition): The old version silently returned if KynectaRealtime wasn't
+        // ready yet, meaning the receiver NEVER got realtime messages when core loaded first.
+        // New version polls every 500ms for up to 30 seconds, then falls back gracefully.
         function _bindKynectaRealtime() {
             const rt = window.KynectaRealtime;
-            if (!rt || !rt.on || rt.__msgCoreBound) return;
+
+            // Not available yet — schedule a retry instead of silently giving up
+            if (!rt || !rt.on) {
+                _bindKynectaRealtime._tries = (_bindKynectaRealtime._tries || 0) + 1;
+                if (_bindKynectaRealtime._tries <= 60) { // 60 × 500ms = 30 seconds
+                    setTimeout(_bindKynectaRealtime, 500);
+                } else {
+                    console.warn(
+                        '[messages] ⚠️ KynectaRealtime never became available after 30s.' +
+                        ' Receiver will not get realtime messages until page reload.' +
+                        ' Ensure KynectaRealtime is initialised and window.kyn:realtimeReady is dispatched.'
+                    );
+                }
+                return;
+            }
+
+            // Already bound — skip
+            if (rt.__msgCoreBound) return;
             rt.__msgCoreBound = true;
-            ['message:new', 'new_message', 'chat:message', 'MESSAGE_RECEIVED',
-             'message:delivered', 'message:read'].forEach((eventName) => {
+            _bindKynectaRealtime._tries = 0; // reset so future re-connections can re-bind
+
+            const REALTIME_EVENTS = [
+                'message:new', 'new_message', 'chat:message',
+                'MESSAGE_RECEIVED', 'message:delivered', 'message:read'
+            ];
+            REALTIME_EVENTS.forEach((eventName) => {
                 rt.on(eventName, (payload) => {
                     handleRealtimePayload(eventName, payload);
                 });
             });
             console.log('[messages] ✅ Bound to KynectaRealtime singleton events');
+
+            // When the realtime connection drops and reconnects, re-bind on the new instance
+            // (some implementations create a fresh object on reconnect)
+            rt.on('disconnect', () => {
+                rt.__msgCoreBound = false;
+                _bindKynectaRealtime._tries = 0;
+            });
         }
         _bindKynectaRealtime();
-        window.addEventListener('kyn:realtimeReady', _bindKynectaRealtime, { once: false });
+        // Also re-run when the app explicitly signals realtime is ready (e.g. after auth)
+        window.addEventListener('kyn:realtimeReady', () => {
+            // Reset bound flag so we can re-attach to the (possibly new) instance
+            if (window.KynectaRealtime) window.KynectaRealtime.__msgCoreBound = false;
+            _bindKynectaRealtime._tries = 0;
+            _bindKynectaRealtime();
+        }, { once: false });
 
         // ✅ FIX: Bridge from DOM CustomEvents emitted by app.realtime.socket.js bridge listeners.
         // This path activates when KynectaRealtime is connected but wsService.on was missed.

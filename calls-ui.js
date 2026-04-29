@@ -604,62 +604,84 @@ function showIdleScreen() {
 }
 
 function transitionToInCall(callInfo) {
-    console.log('[UI] transitionToInCall → caller connected', callInfo);
+    console.log('[UI] transitionToInCall → connected', callInfo);
 
     if (window._callRingTimer) { clearInterval(window._callRingTimer); window._callRingTimer = null; }
 
-    // ── PRIMARY: Use CallOverlayManager in-call state ──
-    if (window.CallOverlayManager) {
-        window.CallOverlayManager.answerCall(callInfo);
-    }
+    if (window.CallOverlayManager) window.CallOverlayManager.answerCall(callInfo);
 
+    // ── Swap screens: hide calling, show in-call ──────────────────────────
     const callingScreen = document.getElementById('callingScreen');
     const inCallScreen  = document.getElementById('inCallScreen');
 
-    // ── Swap screens ──
     if (callingScreen) {
         callingScreen.classList.remove('active');
         callingScreen.style.setProperty('display', 'none', 'important');
     }
+    // Also hide incoming modal if open
+    const incomingModal = document.getElementById('incomingCallModal');
+    if (incomingModal) {
+        incomingModal.classList.remove('active');
+        incomingModal.style.setProperty('display', 'none', 'important');
+    }
+
     if (!inCallScreen) { console.error('[UI] #inCallScreen not found'); return; }
     inCallScreen.classList.add('active');
     inCallScreen.style.setProperty('display', 'flex', 'important');
 
-    // ── Populate in-call header ──
-    const callWithName    = document.getElementById('callWithName');
-    const callStatusText  = document.getElementById('callStatusText');
-    const callTypeIcon    = document.getElementById('callTypeIcon');
-    const callDuration    = document.getElementById('callDuration');
-    const endCallBtn      = document.getElementById('endCallBtn');
-    const callHeaderEndBtn = document.getElementById('callHeaderEndBtn');
+    // ── Populate name ────────────────────────────────────────────────────
+    const callWithName = document.getElementById('callWithName');
+    const callDuration = document.getElementById('callDuration');
+    const name = callInfo.userName || (UIState.callParticipants && UIState.callParticipants[0] && UIState.callParticipants[0].name) || 'User';
+    if (callWithName) callWithName.textContent = name;
+    if (callDuration) callDuration.textContent = '0:00';
 
-    if (callWithName)   callWithName.textContent  = callInfo.userName || 'User';
-    if (callStatusText) callStatusText.textContent = 'Connected';
-    if (callDuration)   callDuration.textContent   = '00:00';
-    if (callTypeIcon) {
-        const ic = callTypeIcon.querySelector('i');
-        if (ic) ic.className = callInfo.callType === 'video' ? 'fas fa-video' : 'fas fa-phone';
+    // ── Populate avatar ──────────────────────────────────────────────────
+    const incallAvatar = document.getElementById('incallAvatar');
+    if (incallAvatar) {
+        const participant = (UIState.callParticipants && UIState.callParticipants[0]) || {};
+        const photo = callInfo.userAvatar || participant.avatar || participant.photo;
+        if (photo) {
+            incallAvatar.innerHTML = `<img src="${photo}" alt="${name}" onerror="this.parentNode.textContent='${name.charAt(0).toUpperCase()}'">`;
+        } else {
+            incallAvatar.textContent = name.charAt(0).toUpperCase();
+        }
     }
-    if (callHeaderEndBtn) callHeaderEndBtn.style.display = 'flex';
 
-    // ── Call timer ──
-    let secs = 0;
+    // ── Timer ────────────────────────────────────────────────────────────
+    UIState.callStartTime = UIState.callStartTime || Date.now();
     if (window._currentCallTimer) clearInterval(window._currentCallTimer);
     window._currentCallTimer = setInterval(() => {
         if (!UIState.callActive) { clearInterval(window._currentCallTimer); return; }
-        secs++;
-        const m = Math.floor(secs / 60), s = secs % 60;
-        if (callDuration) callDuration.textContent = `${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+        const elapsed = Math.floor((Date.now() - UIState.callStartTime) / 1000);
+        const m = Math.floor(elapsed / 60), s = elapsed % 60;
+        if (callDuration) callDuration.textContent = `${m}:${String(s).padStart(2,'0')}`;
     }, 1000);
 
-    // ── End call handler (wired once) ──
+    // ── End call button — broadcasts to BOTH sides ───────────────────────
+    const endCallBtn = document.getElementById('endCallBtn');
     const endHandler = function () {
+        if (endCallBtn._ending) return;
+        endCallBtn._ending = true;
         if (window._currentCallTimer) { clearInterval(window._currentCallTimer); window._currentCallTimer = null; }
+        // Tell core to signal the remote peer
         if (window.callCore && window.callCore.endCall) window.callCore.endCall();
-        showIdleScreen();
+        else if (window.coreInstance && window.coreInstance.endCall) window.coreInstance.endCall();
+        // Post CALL_ENDED to parent so it broadcasts to all iframes (the remote side)
+        const cid = UIState.activeCallId;
+        if (window.parent && window.parent !== window) {
+            window.parent.postMessage({
+                type: 'CALL_ENDED',
+                payload: { callId: cid, reason: 'ended', status: 'ended' },
+                source: 'end-btn'
+            }, '*');
+        }
+        UIEventHandlers.handleCallEnded && UIEventHandlers.handleCallEnded({ callId: cid, reason: 'ended' });
     };
-    if (endCallBtn && !endCallBtn._wired)        { endCallBtn._wired = true;        endCallBtn.onclick = endHandler; }
-    if (callHeaderEndBtn && !callHeaderEndBtn._wired) { callHeaderEndBtn._wired = true; callHeaderEndBtn.onclick = endHandler; }
+    if (endCallBtn && !endCallBtn._wired) {
+        endCallBtn._wired = true;
+        endCallBtn.onclick = endHandler;
+    }
 
     UIState.callActive = true;
     UIState.callState  = 'connected';
@@ -669,81 +691,14 @@ function transitionToInCall(callInfo) {
     if (window.parent && window.parent !== window) {
         window.parent.postMessage({ type: 'CALL_SCREEN_ACTIVE', payload: { active: true } }, '*');
     }
-    console.log('[UI] In-call screen VISIBLE (caller) ✓');
+    console.log('[UI] ✅ In-call screen VISIBLE ✓ (both sides)');
 }
 
 function showInCallScreen(callInfo) {
-    console.log('[Calls UI] Showing in-call screen with:', callInfo);
-    
-    const idleScreen = document.getElementById('idleScreen');
-    const callingScreen = document.getElementById('callingScreen');
-    const inCallScreen = document.getElementById('inCallScreen');
-    const callContainer = document.getElementById('callContainer');
-    
-    // Ensure callContainer (parent) is visible
-    if (callContainer) {
-        callContainer.classList.add('active');
-        callContainer.style.display = 'flex';
-    }
-    
-    // Hide idle screen
-    if (idleScreen) {
-        idleScreen.classList.remove('active');
-        idleScreen.style.setProperty('display', 'none', 'important');
-    }
-    
-    // Hide calling screen — CSS uses !important
-    if (callingScreen) {
-        callingScreen.classList.remove('active');
-        callingScreen.style.setProperty('display', 'none', 'important');
-    }
-    
-    // Show in-call screen — CSS uses !important on .active
-    if (inCallScreen) {
-        inCallScreen.classList.add('active');
-        inCallScreen.style.setProperty('display', 'flex', 'important');
-        
-        // Update in-call screen content
-        const callWithName = document.getElementById('callWithName');
-        const callStatusText = document.getElementById('callStatusText');
-        const callTypeIcon = document.getElementById('callTypeIcon');
-        const callHeaderEndBtn = document.getElementById('callHeaderEndBtn');
-        
-        if (callWithName) {
-            callWithName.textContent = callInfo.userName || 'User';
-        }
-        
-        if (callStatusText) {
-            callStatusText.textContent = 'Connected';
-        }
-        
-        if (callTypeIcon) {
-            const icon = callTypeIcon.querySelector('i');
-            if (icon) {
-                icon.className = callInfo.callType === 'video' ? 'fas fa-video' : 'fas fa-phone';
-            }
-        }
-        
-        // Wire end call button
-        if (callHeaderEndBtn && !callHeaderEndBtn._wired) {
-            callHeaderEndBtn._wired = true;
-            callHeaderEndBtn.onclick = function() {
-                if (window.callCore && window.callCore.endCall) {
-                    window.callCore.endCall();
-                }
-                showIdleScreen();
-            };
-            callHeaderEndBtn.style.display = 'flex';
-        }
-        
-        console.log('[Calls UI] In-call screen is now ACTIVE');
-        document.body.classList.add('call-active');
-        UIState.callActive = true;
-        UIState.callState  = 'connected';
-        window.__callActive = true;
-    } else {
-        console.error('[Calls UI] inCallScreen element not found!');
-    }
+    // Delegate entirely to transitionToInCall so both caller AND receiver
+    // always get the same WhatsApp-style in-call screen.
+    console.log('[Calls UI] showInCallScreen → transitionToInCall', callInfo);
+    transitionToInCall(callInfo || {});
 }
 
     function showNotificationInCalls(message, type = 'info') {
@@ -4845,29 +4800,44 @@ case 'CALL_INITIATED':
             }
         },
 
-        // ── FIX: handleCallConnected was called but never defined in UIEventHandlers.
-        // This caused the in-call screen to never appear and the timer to never start.
+        // ── FIX A: handleCallAccepted was called but never defined.
+        // Fires on the CALLER side when receiver picks up → transition calling→in-call.
+        handleCallAccepted: function(callData) {
+            console.log('[UI] handleCallAccepted → receiver answered, transitioning caller to in-call', callData);
+            UIState.callStartTime = UIState.callStartTime || Date.now();
+            UIState.callActive    = true;
+            UIState.callState     = 'connected';
+
+            const callerName = (callData && (callData.callerName || callData.userName || callData.receiverName)) ||
+                               (UIState.callParticipants && UIState.callParticipants[0] && UIState.callParticipants[0].name) || 'User';
+            const callType   = (callData && callData.callType) || UIState.callType || 'voice';
+
+            // Swap calling screen → in-call screen for the CALLER
+            transitionToInCall({ userName: callerName, callType });
+        },
+
+        // ── FIX B: handleCallConnected fires for BOTH sides once WebRTC is up.
+        // Ensures in-call screen is shown & timer running for whoever missed the earlier transition.
         handleCallConnected: function(callData) {
-            console.log('[UI] handleCallConnected → transitioning to in-call screen', callData);
-            // Update UI state
+            console.log('[UI] handleCallConnected → WebRTC connected', callData);
             UIState.callState     = 'connected';
             UIState.callActive    = true;
             UIState.callStartTime = UIState.callStartTime || Date.now();
 
-            // Update status text
             if (elements.callStatusText) elements.callStatusText.textContent = 'Connected';
 
-            // Show the in-call screen (works for both caller and receiver)
-            const callerName = (callData && (callData.callerName || callData.userName || callData.calleeName)) ||
-                               (UIState.callParticipants && UIState.callParticipants[0] && UIState.callParticipants[0].name) || 'User';
-            const callType   = (callData && callData.callType) || UIState.callType || 'voice';
+            // If in-call screen is not already active, force the transition now
+            const inCallScreen = document.getElementById('inCallScreen');
+            if (!inCallScreen || !inCallScreen.classList.contains('active')) {
+                const callerName = (callData && (callData.callerName || callData.userName || callData.calleeName)) ||
+                                   (UIState.callParticipants && UIState.callParticipants[0] && UIState.callParticipants[0].name) || 'User';
+                const callType   = (callData && callData.callType) || UIState.callType || 'voice';
+                showInCallScreen({ userName: callerName, callType });
+            }
 
-            showInCallScreen({ userName: callerName, callType });
-
-            // Start the duration timer
+            // Ensure timer is running
             this.startCallTimer && this.startCallTimer();
 
-            // Notify parent frame
             if (window.parent && window.parent !== window) {
                 window.parent.postMessage({ type: 'CALL_SCREEN_ACTIVE', payload: { active: true } }, '*');
             }
@@ -6470,81 +6440,62 @@ case 'CALL_ACCEPTED':
         toggleVideo: async function() {
             if (!canPerformAction('toggleVideo')) return;
 
-            // Prefer core's toggleCamera if available (handles renegotiation internally)
+            // Prefer core's toggleCamera — it handles renegotiation internally
             if (coreInstance && coreInstance.toggleCamera) {
                 coreInstance.toggleCamera();
                 return;
             }
 
-            // ── FIX: If we have existing video tracks just toggle them ────────
             const existingVideoTracks = UIState.localStream ? UIState.localStream.getVideoTracks() : [];
-
             if (existingVideoTracks.length > 0) {
+                // Just toggle the existing track
                 UIState.isVideoOff = !UIState.isVideoOff;
                 existingVideoTracks.forEach(t => { t.enabled = !UIState.isVideoOff; });
                 const icon = elements.videoBtn && elements.videoBtn.querySelector('i');
                 if (icon) icon.className = UIState.isVideoOff ? 'fas fa-video-slash' : 'fas fa-video';
-                showNotification(UIState.isVideoOff ? 'Camera turned off' : 'Camera turned on', 'info');
+                showNotification(UIState.isVideoOff ? 'Camera off' : 'Camera on', 'info');
                 return;
             }
 
-            // ── FIX: No video track yet (voice call) — acquire camera and
-            // renegotiate the peer connection so the remote side gets video ────
+            // ── Voice call → turn on camera: acquire track + renegotiate ─────
             try {
                 showNotification('Starting camera…', 'info');
-                const cameraStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
-                const videoTrack = cameraStream.getVideoTracks()[0];
+                const camStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+                const videoTrack = camStream.getVideoTracks()[0];
+                if (!videoTrack) { showNotification('No camera found', 'error'); return; }
 
-                if (!videoTrack) {
-                    showNotification('No camera found', 'error');
-                    return;
-                }
-
-                // Add track to local stream for local preview
                 if (UIState.localStream) {
                     UIState.localStream.addTrack(videoTrack);
                 } else {
-                    UIState.localStream = cameraStream;
+                    UIState.localStream = camStream;
                 }
 
-                // Show local video preview in PiP
+                // Local PiP preview
                 const pipVideo = document.getElementById('pipVideo');
                 const pipContainer = document.getElementById('pipContainer');
-                if (pipVideo) { pipVideo.srcObject = UIState.localStream; }
-                if (pipContainer) { pipContainer.style.display = 'flex'; }
+                if (pipVideo) pipVideo.srcObject = UIState.localStream;
+                if (pipContainer) pipContainer.style.display = 'flex';
 
-                // ── Renegotiate WebRTC with the new video track ───────────────
-                const pc = window.callCore && window.callCore._getPeerConnection && window.callCore._getPeerConnection();
+                // Add to peer connection and renegotiate
+                const pc = (window.callCore && window.callCore._getPeerConnection && window.callCore._getPeerConnection()) ||
+                           (window.WebRTCManager && window.WebRTCManager._peerConnection);
                 if (pc) {
                     pc.addTrack(videoTrack, UIState.localStream);
-                    // Create and send a new offer with video
                     const offer = await pc.createOffer();
                     await pc.setLocalDescription(offer);
-                    if (coreInstance && coreInstance.sendSignal) {
-                        coreInstance.sendSignal('video_offer', {
-                            sdp: offer,
-                            callId: UIState.activeCallId,
-                            hasVideo: true
-                        });
-                    } else if (window.callCore && window.callCore.sendSignal) {
-                        window.callCore.sendSignal('video_offer', {
-                            sdp: offer,
-                            callId: UIState.activeCallId,
-                            hasVideo: true
-                        });
-                    }
-                    showNotification('Video started — waiting for other side to accept', 'success');
+                    const signalFn = (coreInstance && coreInstance.sendSignal) || (window.callCore && window.callCore.sendSignal);
+                    if (signalFn) signalFn.call(coreInstance || window.callCore, 'video_offer', { sdp: offer, callId: UIState.activeCallId, hasVideo: true });
+                    showNotification('Camera on — waiting for other side', 'success');
                 } else {
-                    showNotification('Camera ready (no active peer connection to send to)', 'info');
+                    showNotification('Camera ready', 'info');
                 }
 
                 UIState.isVideoOff = false;
                 const icon = elements.videoBtn && elements.videoBtn.querySelector('i');
                 if (icon) icon.className = 'fas fa-video';
-
             } catch (err) {
-                console.error('[UI] toggleVideo camera error:', err);
-                showNotification('Could not access camera: ' + (err.message || err), 'error');
+                console.error('[UI] toggleVideo error:', err);
+                showNotification('Camera error: ' + (err.message || err), 'error');
             }
         },
         
@@ -7277,8 +7228,8 @@ declineIncomingCall: async function() {
         coreInstance.resetCallState();
     }
 
-    // FIX: Tell parent to broadcast CALL_ENDED so the CALLER's UI also
-    // resets immediately when the receiver clicks Decline.
+    // ── FIX C: Tell parent to broadcast CALL_ENDED to all iframes so the
+    // CALLER's screen also resets when the receiver declines.
     if (window.parent && window.parent !== window) {
         window.parent.postMessage({
             type: 'CALL_REJECT',
@@ -8187,74 +8138,19 @@ declineIncomingCall: async function() {
     function _showReceiverCallScreen(callId, callerName, callType) {
     console.log('[UI] _showReceiverCallScreen → receiver connected', { callId, callerName, callType });
 
-    UIState.activeCallId  = callId  || UIState.activeCallId;
     UIState.callActive    = true;
-    UIState.callState     = 'in-call';
-    UIState.callType      = callType || UIState.callType || 'voice';
+    UIState.callState     = 'connected';
     UIState.callStartTime = UIState.callStartTime || Date.now();
-    UIState.currentView   = 'call';
+    UIState.activeCallId  = callId || UIState.activeCallId;
 
-    // ── Hide incoming screen ──
-    const incomingModal = document.getElementById('incomingCallModal');
-    if (incomingModal) {
-        incomingModal.classList.remove('active');
-        incomingModal.style.setProperty('display', 'none', 'important');
-        UIState.activeModals && UIState.activeModals.delete('incomingCallModal');
-    }
+    const name = callerName
+        || (UIState.callParticipants && UIState.callParticipants[0] && UIState.callParticipants[0].name)
+        || 'User';
+    const type = callType || UIState.callType || 'voice';
 
-    // ── Hide calling screen (shouldn't be visible for receiver, but just in case) ──
-    const callingScreen = document.getElementById('callingScreen');
-    if (callingScreen) {
-        callingScreen.classList.remove('active');
-        callingScreen.style.setProperty('display', 'none', 'important');
-    }
-
-    // ── Show in-call screen ──
-    const callContainer = document.getElementById('callContainer');
-    const inCallScreen  = document.getElementById('inCallScreen');
-    if (callContainer) { callContainer.classList.add('active'); callContainer.style.display = 'flex'; }
-    if (!inCallScreen) { console.error('[UI] #inCallScreen not found'); return; }
-    inCallScreen.classList.add('active');
-    inCallScreen.style.setProperty('display', 'flex', 'important');
-
-    // ── Populate ──
-    const nameToShow   = callerName || (UIState.callParticipants && UIState.callParticipants[0] && UIState.callParticipants[0].name) || 'Caller';
-    const resolvedType = callType || UIState.callType || 'voice';
-
-    const callWithName    = document.getElementById('callWithName');
-    const callStatusText  = document.getElementById('callStatusText');
-    const callDuration    = document.getElementById('callDuration');
-    const callTypeIcon    = document.getElementById('callTypeIcon');
-    const endCallBtn      = document.getElementById('endCallBtn');
-    const callHeaderEndBtn = document.getElementById('callHeaderEndBtn');
-
-    if (callWithName)   callWithName.textContent  = nameToShow;
-    if (callStatusText) callStatusText.textContent = 'Connecting...';
-    if (callDuration)   callDuration.textContent   = '--:--';
-    if (callTypeIcon) {
-        const ic = callTypeIcon.querySelector('i');
-        if (ic) ic.className = resolvedType === 'video' ? 'fas fa-video' : 'fas fa-phone';
-    }
-    if (callHeaderEndBtn) callHeaderEndBtn.style.display = 'flex';
-
-    // ── End call handler ──
-    const endHandler = function () {
-        if (window._currentCallTimer) { clearInterval(window._currentCallTimer); window._currentCallTimer = null; }
-        if (window.callCore && window.callCore.endCall) window.callCore.endCall();
-        showIdleScreen();
-    };
-    if (endCallBtn && !endCallBtn._wired)             { endCallBtn._wired = true;        endCallBtn.onclick = endHandler; }
-    if (callHeaderEndBtn && !callHeaderEndBtn._wired) { callHeaderEndBtn._wired = true;  callHeaderEndBtn.onclick = endHandler; }
-
-    // ── Timer starts once call_connected fires (UIEventHandlers.startCallTimer) ──
-    UIEventHandlers.startCallTimer && UIEventHandlers.startCallTimer();
-
-    window.__callActive = true;
-    if (window.parent && window.parent !== window) {
-        window.parent.postMessage({ type: 'CALL_SCREEN_ACTIVE', payload: { active: true } }, '*');
-    }
-    console.log('[UI] In-call screen VISIBLE (receiver) ✓');
-    }
+    // Use the same transition as the caller for consistent WhatsApp-style UI
+    transitionToInCall({ userName: name, callType: type });
+}
 
     function showNotification(message, type = 'success') {
         const notificationArea = elements.notificationArea || document.body;
