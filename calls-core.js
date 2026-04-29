@@ -29849,15 +29849,10 @@ window.CallHandlers = {
 
 
 
-    if (!callsState.callActive && callsState.callState !== 'initiating' &&
-
-
-
-        callsState.callState !== 'incoming' && callsState.callState !== 'connecting' &&
-
-
-
-        callsState.callState !== 'in-call') {
+    // FIX: expanded guard to include 'initiated', 'starting', 'ringing', 'connected' states
+    // so the receiver's WebRTC offer is never blocked when acceptCall sets state to 'initiating'
+    const _validOfferStates = ['initiating', 'initiated', 'incoming', 'connecting', 'in-call', 'starting', 'ringing', 'connected'];
+    if (!callsState.callActive && !_validOfferStates.includes(callsState.callState)) {
 
 
 

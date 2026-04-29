@@ -4844,7 +4844,35 @@ case 'CALL_INITIATED':
                 elements.callStatusText.textContent = 'In call';
             }
         },
-        
+
+        // ── FIX: handleCallConnected was called but never defined in UIEventHandlers.
+        // This caused the in-call screen to never appear and the timer to never start.
+        handleCallConnected: function(callData) {
+            console.log('[UI] handleCallConnected → transitioning to in-call screen', callData);
+            // Update UI state
+            UIState.callState     = 'connected';
+            UIState.callActive    = true;
+            UIState.callStartTime = UIState.callStartTime || Date.now();
+
+            // Update status text
+            if (elements.callStatusText) elements.callStatusText.textContent = 'Connected';
+
+            // Show the in-call screen (works for both caller and receiver)
+            const callerName = (callData && (callData.callerName || callData.userName || callData.calleeName)) ||
+                               (UIState.callParticipants && UIState.callParticipants[0] && UIState.callParticipants[0].name) || 'User';
+            const callType   = (callData && callData.callType) || UIState.callType || 'voice';
+
+            showInCallScreen({ userName: callerName, callType });
+
+            // Start the duration timer
+            this.startCallTimer && this.startCallTimer();
+
+            // Notify parent frame
+            if (window.parent && window.parent !== window) {
+                window.parent.postMessage({ type: 'CALL_SCREEN_ACTIVE', payload: { active: true } }, '*');
+            }
+        },
+
         handleCallEnded: function(callData) {
             // ── FIX: Immediately restore parent layout + reset to idle screen ──
             window.__callActive = false;
@@ -6439,26 +6467,84 @@ case 'CALL_ACCEPTED':
             }
         },
         
-        toggleVideo: function() {
+        toggleVideo: async function() {
             if (!canPerformAction('toggleVideo')) return;
-            
+
+            // Prefer core's toggleCamera if available (handles renegotiation internally)
             if (coreInstance && coreInstance.toggleCamera) {
                 coreInstance.toggleCamera();
-            } else if (UIState.localStream) {
-                const videoTracks = UIState.localStream.getVideoTracks();
-                if (videoTracks.length > 0) {
-                    UIState.isVideoOff = !UIState.isVideoOff;
-                    videoTracks.forEach(track => {
-                        track.enabled = !UIState.isVideoOff;
-                    });
-                    
-                    const icon = elements.videoBtn.querySelector('i');
-                    if (icon) {
-                        icon.className = UIState.isVideoOff ? 'fas fa-video-slash' : 'fas fa-video';
-                    }
-                    
-                    showNotification(UIState.isVideoOff ? 'Camera turned off' : 'Camera turned on', 'info');
+                return;
+            }
+
+            // ── FIX: If we have existing video tracks just toggle them ────────
+            const existingVideoTracks = UIState.localStream ? UIState.localStream.getVideoTracks() : [];
+
+            if (existingVideoTracks.length > 0) {
+                UIState.isVideoOff = !UIState.isVideoOff;
+                existingVideoTracks.forEach(t => { t.enabled = !UIState.isVideoOff; });
+                const icon = elements.videoBtn && elements.videoBtn.querySelector('i');
+                if (icon) icon.className = UIState.isVideoOff ? 'fas fa-video-slash' : 'fas fa-video';
+                showNotification(UIState.isVideoOff ? 'Camera turned off' : 'Camera turned on', 'info');
+                return;
+            }
+
+            // ── FIX: No video track yet (voice call) — acquire camera and
+            // renegotiate the peer connection so the remote side gets video ────
+            try {
+                showNotification('Starting camera…', 'info');
+                const cameraStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+                const videoTrack = cameraStream.getVideoTracks()[0];
+
+                if (!videoTrack) {
+                    showNotification('No camera found', 'error');
+                    return;
                 }
+
+                // Add track to local stream for local preview
+                if (UIState.localStream) {
+                    UIState.localStream.addTrack(videoTrack);
+                } else {
+                    UIState.localStream = cameraStream;
+                }
+
+                // Show local video preview in PiP
+                const pipVideo = document.getElementById('pipVideo');
+                const pipContainer = document.getElementById('pipContainer');
+                if (pipVideo) { pipVideo.srcObject = UIState.localStream; }
+                if (pipContainer) { pipContainer.style.display = 'flex'; }
+
+                // ── Renegotiate WebRTC with the new video track ───────────────
+                const pc = window.callCore && window.callCore._getPeerConnection && window.callCore._getPeerConnection();
+                if (pc) {
+                    pc.addTrack(videoTrack, UIState.localStream);
+                    // Create and send a new offer with video
+                    const offer = await pc.createOffer();
+                    await pc.setLocalDescription(offer);
+                    if (coreInstance && coreInstance.sendSignal) {
+                        coreInstance.sendSignal('video_offer', {
+                            sdp: offer,
+                            callId: UIState.activeCallId,
+                            hasVideo: true
+                        });
+                    } else if (window.callCore && window.callCore.sendSignal) {
+                        window.callCore.sendSignal('video_offer', {
+                            sdp: offer,
+                            callId: UIState.activeCallId,
+                            hasVideo: true
+                        });
+                    }
+                    showNotification('Video started — waiting for other side to accept', 'success');
+                } else {
+                    showNotification('Camera ready (no active peer connection to send to)', 'info');
+                }
+
+                UIState.isVideoOff = false;
+                const icon = elements.videoBtn && elements.videoBtn.querySelector('i');
+                if (icon) icon.className = 'fas fa-video';
+
+            } catch (err) {
+                console.error('[UI] toggleVideo camera error:', err);
+                showNotification('Could not access camera: ' + (err.message || err), 'error');
             }
         },
         
@@ -7189,6 +7275,15 @@ declineIncomingCall: async function() {
     // Reset core state
     if (coreInstance && coreInstance.resetCallState) {
         coreInstance.resetCallState();
+    }
+
+    // FIX: Tell parent to broadcast CALL_ENDED so the CALLER's UI also
+    // resets immediately when the receiver clicks Decline.
+    if (window.parent && window.parent !== window) {
+        window.parent.postMessage({
+            type: 'CALL_REJECT',
+            payload: { callId: callId, reason: 'declined', timestamp: Date.now() }
+        }, '*');
     }
     
     showIdleScreen();

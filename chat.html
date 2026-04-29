@@ -1891,6 +1891,14 @@
                 pendingIncomingCall = callData;
                 const nameEl = document.getElementById('callerName');
                 if (nameEl) nameEl.innerText = callData.callerName || callData.fromUserName || 'Someone';
+                // FIX: When already on the calls page the in-app modal handles
+                // accept/decline — hide the banner's duplicate buttons to avoid
+                // two decline options appearing simultaneously.
+                const _onCallsPage = (window.__currentPage === 'calls');
+                const _bannerAccept  = document.getElementById('bannerAcceptCall');
+                const _bannerDecline = document.getElementById('bannerDeclineCall');
+                if (_bannerAccept)  _bannerAccept.style.display  = _onCallsPage ? 'none' : '';
+                if (_bannerDecline) _bannerDecline.style.display = _onCallsPage ? 'none' : '';
                 banner.style.display = 'flex';
 
                 document.body.classList.add('call-screen-active');
@@ -3698,6 +3706,20 @@
                     }
                     hideGlobalBanner();
                     document.body.classList.remove('call-screen-active');
+                    // FIX: Broadcast CALL_ENDED to ALL iframes so the caller's UI
+                    // also resets when the receiver declines. Without this only
+                    // the decliner's side resets.
+                    const _rejectCallId = callId;
+                    const _allFrames = document.querySelectorAll('iframe');
+                    _allFrames.forEach(f => {
+                        if (f.contentWindow) {
+                            f.contentWindow.postMessage({
+                                type: 'CALL_ENDED',
+                                payload: { callId: _rejectCallId, reason: 'declined', status: 'declined' },
+                                source: 'parent-reject-broadcast'
+                            }, '*');
+                        }
+                    });
                     await refreshCallHistoryForUser(cachedUserId);
                     return;
                 }
