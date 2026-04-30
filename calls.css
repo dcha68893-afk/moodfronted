@@ -4344,3 +4344,227 @@ body.call-connected .unified-incoming-screen {
     visibility: hidden !important;
     pointer-events: none !important;
 }
+/* ═══════════════════════════════════════════════════════════════════════════
+   KYNECTA CALL SCREEN FIX — v2.0 (authoritative, appended last, wins all)
+   Fixes:
+     1. call-screen base visibility (all 3 screens hidden unless .active)
+     2. #inCallScreen stacking (children above incall-bg)
+     3. Remove incomingCallModal flicker — permanently hidden (receiver uses callingScreen)
+     4. Responsive safe-area for notch phones + tablets
+     5. callOverlay floating panel permanently gone
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ── 1. CALL-SCREEN BASE: all screens hidden by default ─────────────────── */
+.call-screen {
+    display: none !important;
+    position: absolute !important;
+    inset: 0 !important;
+    width: 100% !important;
+    height: 100% !important;
+    flex-direction: column !important;
+    overflow: hidden !important;
+}
+.call-screen.active {
+    display: flex !important;
+}
+
+/* ── 2. #inCallScreen — fixed fullscreen, highest priority ─────────────── */
+#inCallScreen {
+    position: fixed !important;
+    inset: 0 !important;
+    width: 100vw !important;
+    height: 100dvh !important;           /* dvh = dynamic viewport (notch-safe) */
+    z-index: 9999999 !important;
+    display: none !important;
+    flex-direction: column !important;
+    overflow: hidden !important;
+    background: #111827 !important;
+}
+#inCallScreen.active {
+    display: flex !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+}
+
+/* ── 2a. incall-bg: fills behind everything ─────────────────────────────── */
+#inCallScreen .incall-bg {
+    position: absolute !important;
+    inset: 0 !important;
+    z-index: 0 !important;
+    pointer-events: none !important;
+    background:
+        radial-gradient(ellipse at 50% 30%, rgba(80,40,120,0.45) 0%, transparent 70%),
+        repeating-linear-gradient(0deg,  transparent, transparent 40px, rgba(255,255,255,0.013) 40px, rgba(255,255,255,0.013) 41px),
+        repeating-linear-gradient(90deg, transparent, transparent 40px, rgba(255,255,255,0.013) 40px, rgba(255,255,255,0.013) 41px) !important;
+    background-color: #111827 !important;
+}
+
+/* ── 2b. Top bar: above bg ──────────────────────────────────────────────── */
+#inCallScreen .incall-top-bar {
+    position: relative !important;
+    z-index: 10 !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: space-between !important;
+    padding: 16px 16px 8px !important;
+    /* Notch-safe top padding */
+    padding-top: max(16px, env(safe-area-inset-top, 16px)) !important;
+    flex-shrink: 0 !important;
+}
+
+/* ── 2c. Centre: avatar/video area fills remaining space ────────────────── */
+#inCallScreen .incall-centre {
+    position: relative !important;
+    z-index: 5 !important;
+    flex: 1 1 auto !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    min-height: 0 !important;
+}
+
+/* ── 2d. Avatar: always visible ─────────────────────────────────────────── */
+#inCallScreen .incall-avatar {
+    width: clamp(120px, 38vmin, 180px) !important;
+    height: clamp(120px, 38vmin, 180px) !important;
+    border-radius: 50% !important;
+    background: linear-gradient(135deg, #4f3b8b 0%, #6c4fc7 100%) !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    font-size: clamp(48px, 12vmin, 72px) !important;
+    font-weight: 700 !important;
+    color: rgba(255,255,255,.85) !important;
+    text-transform: uppercase !important;
+    user-select: none !important;
+    overflow: hidden !important;
+    box-shadow: 0 0 0 8px rgba(108,79,199,.22), 0 0 0 18px rgba(108,79,199,.09) !important;
+    position: relative !important;
+    z-index: 2 !important;
+}
+
+/* ── 2e. Controls bar: above bg, notch-safe bottom ─────────────────────── */
+#inCallScreen .incall-controls-bar {
+    position: relative !important;
+    z-index: 10 !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    gap: 14px !important;
+    padding: 16px 20px !important;
+    padding-bottom: max(36px, calc(env(safe-area-inset-bottom, 0px) + 16px)) !important;
+    background: rgba(0,0,0,.58) !important;
+    backdrop-filter: blur(20px) !important;
+    -webkit-backdrop-filter: blur(20px) !important;
+    flex-shrink: 0 !important;
+}
+
+/* ── 3. INCOMING CALL MODAL — permanently killed ────────────────────────── */
+/* Receiver now uses #callingScreen (incoming mode) — modal never shows */
+#incomingCallModal,
+.unified-incoming-screen#incomingCallModal {
+    display: none !important;
+    visibility: hidden !important;
+    pointer-events: none !important;
+    opacity: 0 !important;
+    z-index: -999 !important;
+    position: fixed !important;
+    width: 0 !important;
+    height: 0 !important;
+    overflow: hidden !important;
+}
+#incomingCallModal.active,
+.unified-incoming-screen.active#incomingCallModal {
+    display: none !important;
+    visibility: hidden !important;
+}
+
+/* ── 4. CALLING SCREEN — highest z for both caller + receiver ───────────── */
+#callingScreen {
+    position: fixed !important;
+    inset: 0 !important;
+    width: 100vw !important;
+    height: 100dvh !important;
+    z-index: 999999 !important;
+    display: none !important;
+    flex-direction: column !important;
+    align-items: center !important;
+    justify-content: center !important;
+    overflow: hidden !important;
+}
+#callingScreen.active {
+    display: flex !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+}
+/* Incoming variant: green tint on background */
+#callingScreen.incoming-mode .unified-call-bg {
+    background: linear-gradient(160deg, #0a1f0d 0%, #143320 55%, #0a160d 100%) !important;
+}
+#callingScreen.incoming-mode .unified-call-bg::after {
+    background: radial-gradient(ellipse at 50% 30%, rgba(52,199,89,0.12) 0%, transparent 65%) !important;
+}
+#callingScreen.incoming-mode .unified-call-label { color: rgba(52,199,89,0.8) !important; }
+#callingScreen.incoming-mode .unified-pulse-rings span { border-color: rgba(52,199,89,0.6) !important; }
+
+/* ── 5. CALL OVERLAY FLOATING PANEL — completely disabled ───────────────── */
+#callOverlay,
+.call-overlay {
+    display: none !important;
+    visibility: hidden !important;
+    opacity: 0 !important;
+    pointer-events: none !important;
+    z-index: -1 !important;
+}
+/* Override all data-state variants */
+.call-overlay[data-state="calling"],
+.call-overlay[data-state="in-call"] {
+    display: none !important;
+    visibility: hidden !important;
+    opacity: 0 !important;
+    pointer-events: none !important;
+}
+
+/* ── 6. SAFE-AREA + RESPONSIVE ──────────────────────────────────────────── */
+/* Universal safe-area on callingScreen content */
+#callingScreen .unified-call-wrap {
+    padding-top: max(60px, calc(env(safe-area-inset-top, 0px) + 40px)) !important;
+    padding-bottom: max(50px, calc(env(safe-area-inset-bottom, 0px) + 20px)) !important;
+}
+
+/* Tablets ≥ 768px: larger avatar + wider wrap */
+@media (min-width: 768px) {
+    #inCallScreen .incall-avatar {
+        width: 180px !important;
+        height: 180px !important;
+        font-size: 72px !important;
+    }
+    #inCallScreen .incall-controls-bar { gap: 20px !important; padding: 20px 40px !important;
+        padding-bottom: max(40px, calc(env(safe-area-inset-bottom, 0px) + 20px)) !important; }
+    #inCallScreen .incall-ctrl-btn { width: 64px !important; height: 64px !important; font-size: 24px !important; }
+    #inCallScreen .incall-end-btn  { width: 72px !important; height: 72px !important; }
+    #callingScreen .unified-avatar { width: 160px !important; height: 160px !important; font-size: 68px !important; }
+}
+
+/* Small phones ≤ 375px */
+@media (max-width: 375px) {
+    #inCallScreen .incall-avatar { width: 110px !important; height: 110px !important; font-size: 44px !important; }
+    #inCallScreen .incall-ctrl-btn { width: 46px !important; height: 46px !important; font-size: 17px !important; }
+    #inCallScreen .incall-end-btn { width: 54px !important; height: 54px !important; }
+    #inCallScreen .incall-controls-bar { gap: 8px !important; }
+    #inCallScreen .incall-peer-name { font-size: 17px !important; }
+}
+
+/* Landscape phones */
+@media (max-height: 500px) and (orientation: landscape) {
+    #inCallScreen .incall-avatar { width: 90px !important; height: 90px !important; font-size: 36px !important; }
+    #inCallScreen .incall-top-bar { padding-top: max(8px, env(safe-area-inset-top, 8px)) !important; }
+    #inCallScreen .incall-controls-bar { padding: 8px 20px !important;
+        padding-bottom: max(8px, calc(env(safe-area-inset-bottom, 0px) + 4px)) !important; }
+}
+
+/* Foldables / very wide screens */
+@media (min-width: 1024px) {
+    #inCallScreen .incall-avatar { width: 200px !important; height: 200px !important; font-size: 80px !important; }
+    #inCallScreen .incall-controls-bar { max-width: 600px !important; margin: 0 auto !important; border-radius: 20px 20px 0 0 !important; }
+}

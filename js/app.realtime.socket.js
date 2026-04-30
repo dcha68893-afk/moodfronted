@@ -1240,6 +1240,37 @@
                     return;
                 }
 
+                // FIX: friend:removed from server → also send FRIEND_REMOVED which is the
+                // event type that friend-core.js's ParentCommunicationManager._handleMessage
+                // listens for. Without this the friend list never updates in the iframes
+                // when someone unfriends you (or when you unfriend someone on another tab).
+                if (eventType === 'friend:removed') {
+                    const msgs = [
+                        { type: 'REALTIME_EVENT:friend:removed',  payload: payload || {} },
+                        { type: 'FRIEND_REMOVED',                 payload: payload || {} },
+                    ];
+                    iframes.forEach(function (frame) {
+                        msgs.forEach(function (m) {
+                            try { frame.contentWindow.postMessage(m, '*'); } catch (_) {}
+                        });
+                    });
+                    return;
+                }
+
+                // FIX: friend:rejected → also send FRIEND_REQUEST_REJECTED for friend-core listeners
+                if (eventType === 'friend:rejected') {
+                    const msgs = [
+                        { type: 'REALTIME_EVENT:friend:rejected',       payload: payload || {} },
+                        { type: 'FRIEND_REQUEST_REJECTED',              payload: payload || {} },
+                    ];
+                    iframes.forEach(function (frame) {
+                        msgs.forEach(function (m) {
+                            try { frame.contentWindow.postMessage(m, '*'); } catch (_) {}
+                        });
+                    });
+                    return;
+                }
+
                 const eventMsg = {
                     type: `REALTIME_EVENT:${eventType}`,
                     payload: payload || {}

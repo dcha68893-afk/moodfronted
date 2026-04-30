@@ -9793,3 +9793,274 @@ if (detectExistingCore()) {
         _signal();
     }
 })();
+// ═══════════════════════════════════════════════════════════════════════════
+// KYNECTA CALL SCREEN FIX — v2.0 (appended last, runs after all other code)
+//
+// Patches:
+//   1. Intercept handleIncomingCall → receiver uses #callingScreen (incoming mode)
+//      instead of #incomingCallModal — eliminates the flickering call panel entirely
+//   2. acceptCallBtn / declineCallBtn wired to #callingScreen incoming-mode buttons
+//   3. #callOverlay permanently silenced
+//   4. incall-bg z-index guard (ensures children always render above bg)
+//   5. Device-detect: viewport height refresh for dvh support fallback
+// ═══════════════════════════════════════════════════════════════════════════
+(function KynCallScreenFix() {
+    'use strict';
+
+    // ── Helpers ──────────────────────────────────────────────────────────
+    function _el(id) { return document.getElementById(id); }
+
+    // ── 1. Silence #callOverlay permanently ──────────────────────────────
+    function _killCallOverlay() {
+        var ov = _el('callOverlay');
+        if (!ov) return;
+        ov.style.cssText = 'display:none!important;visibility:hidden!important;opacity:0!important;pointer-events:none!important;z-index:-1!important;';
+        // Prevent JS from re-enabling it via dataset.state
+        try {
+            Object.defineProperty(ov, '_stateGuarded', { value: true, writable: false });
+        } catch(e) {}
+        var _orig = ov.setAttribute.bind(ov);
+        ov.setAttribute = function(name, value) {
+            if (name === 'data-state') return; // swallow — we never want overlay to show
+            return _orig(name, value);
+        };
+    }
+
+    // ── 2. Show receiver incoming call on #callingScreen (incoming mode) ─
+    function showReceiverOnCallingScreen(callData) {
+        var cs = _el('callingScreen');
+        if (!cs) return false;
+
+        // Mark incoming mode for CSS colour variation
+        cs.classList.add('incoming-mode');
+
+        // Populate fields
+        var label  = _el('callingLabel');
+        var name   = _el('callingName');
+        var status = _el('callingStatus');
+        var type   = _el('callingType');
+        var avatar = _el('callingAvatar');
+
+        var callerName = callData.callerName || callData.userName || 'Unknown';
+        var callType   = callData.callType   || callData.type     || 'voice';
+
+        if (label)  label.textContent  = 'Incoming Call';
+        if (name)   name.textContent   = callerName;
+        if (status) status.textContent = 'is calling you…';
+        if (type)   type.textContent   = callType === 'video' ? 'Video Call' : 'Voice Call';
+        if (avatar) {
+            var initials = callerName.charAt(0).toUpperCase();
+            var photo    = callData.callerAvatar || callData.callerPhoto || null;
+            if (photo) {
+                avatar.innerHTML = '<img src="' + photo + '" alt="' + callerName + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%" onerror="this.parentNode.textContent=\'' + initials + '\'">';
+            } else {
+                avatar.textContent = initials;
+            }
+        }
+
+        // Replace the Cancel button with Decline + Accept buttons
+        var actionsWrap = cs.querySelector('.unified-call-actions');
+        if (actionsWrap && !actionsWrap._incomingWired) {
+            actionsWrap._incomingWired = true;
+            actionsWrap.innerHTML = [
+                '<div class="unified-action-item">',
+                '  <button class="unified-btn unified-btn-decline" id="callingDeclineBtn"><i class="fas fa-phone-slash"></i></button>',
+                '  <span>Decline</span>',
+                '</div>',
+                '<div class="unified-action-item">',
+                '  <button class="unified-btn unified-btn-accept" id="callingAcceptAudioBtn"><i class="fas fa-phone"></i></button>',
+                '  <span>Audio</span>',
+                '</div>',
+                '<div class="unified-action-item">',
+                '  <button class="unified-btn unified-btn-video" id="callingAcceptVideoBtn"><i class="fas fa-video"></i></button>',
+                '  <span>Video</span>',
+                '</div>'
+            ].join('');
+
+            // Wire Decline
+            var declineBtn = document.getElementById('callingDeclineBtn');
+            if (declineBtn) {
+                declineBtn.onclick = function(e) {
+                    e.preventDefault();
+                    // Delegate to existing decline handler
+                    var realDecline = _el('declineCallBtn');
+                    if (realDecline) realDecline.click();
+                    else if (window.UIEventHandlers && window.UIEventHandlers.declineIncomingCall) {
+                        window.UIEventHandlers.declineIncomingCall();
+                    }
+                    hideCallingScreenIncomingMode();
+                };
+            }
+
+            // Wire Accept (audio)
+            var acceptAudioBtn = document.getElementById('callingAcceptAudioBtn');
+            if (acceptAudioBtn) {
+                acceptAudioBtn.onclick = function(e) {
+                    e.preventDefault();
+                    var realAccept = _el('acceptCallBtn');
+                    if (realAccept) realAccept.click();
+                    else if (window.UIEventHandlers && window.UIEventHandlers.acceptIncomingCall) {
+                        window.UIEventHandlers.acceptIncomingCall(false);
+                    }
+                    hideCallingScreenIncomingMode();
+                };
+            }
+
+            // Wire Accept (video)
+            var acceptVideoBtn = document.getElementById('callingAcceptVideoBtn');
+            if (acceptVideoBtn) {
+                acceptVideoBtn.onclick = function(e) {
+                    e.preventDefault();
+                    var realVideo = _el('acceptVideoCallBtn');
+                    if (realVideo) realVideo.click();
+                    else if (window.UIEventHandlers && window.UIEventHandlers.acceptIncomingCall) {
+                        window.UIEventHandlers.acceptIncomingCall(true);
+                    }
+                    hideCallingScreenIncomingMode();
+                };
+            }
+        }
+
+        // Show the screen
+        cs.classList.add('active');
+        cs.style.setProperty('display', 'flex', 'important');
+
+        // State
+        if (window.UIState) {
+            window.UIState.callActive = true;
+            window.UIState.callState  = 'ringing';
+        }
+        window.__callActive = true;
+        document.body.classList.add('call-active');
+
+        return true;
+    }
+
+    function hideCallingScreenIncomingMode() {
+        var cs = _el('callingScreen');
+        if (!cs) return;
+        cs.classList.remove('incoming-mode');
+        cs.classList.remove('active');
+        cs.style.setProperty('display', 'none', 'important');
+        // Restore original cancel button
+        var actionsWrap = cs.querySelector('.unified-call-actions');
+        if (actionsWrap) {
+            actionsWrap._incomingWired = false;
+            actionsWrap.innerHTML = [
+                '<div class="unified-action-item">',
+                '  <button class="unified-btn unified-btn-decline" id="callingCancelBtn"><i class="fas fa-phone-slash"></i></button>',
+                '  <span>Cancel</span>',
+                '</div>'
+            ].join('');
+        }
+    }
+
+    // ── 3. Patch UIEventHandlers.handleIncomingCall ──────────────────────
+    function _patchHandleIncomingCall() {
+        var handlers = window.UIEventHandlers;
+        if (!handlers || !handlers.handleIncomingCall) {
+            // Not ready yet — retry
+            setTimeout(_patchHandleIncomingCall, 200);
+            return;
+        }
+
+        var _original = handlers.handleIncomingCall.bind(handlers);
+        handlers.handleIncomingCall = function(callData) {
+            console.log('[CallFix] handleIncomingCall intercepted — using callingScreen incoming mode');
+
+            // Ensure #incomingCallModal stays hidden
+            var modal = _el('incomingCallModal');
+            if (modal) {
+                modal.classList.remove('active');
+                modal.style.cssText = 'display:none!important;visibility:hidden!important;pointer-events:none!important;opacity:0!important;z-index:-999!important;';
+            }
+
+            // Store call data for accept/decline handlers
+            window._currentIncomingCallData = callData;
+            window._currentIncomingCallId   = callData.callId || callData.id || null;
+
+            // Play ringtone (the original does this — call it for ringtone only)
+            // We only invoke original to get the ringtone playing, then immediately re-hide modal
+            try { _original(callData); } catch(e) {}
+            // Re-hide modal in case original showed it
+            if (modal) {
+                modal.classList.remove('active');
+                modal.style.cssText = 'display:none!important;visibility:hidden!important;pointer-events:none!important;opacity:0!important;z-index:-999!important;';
+            }
+
+            // Show on callingScreen instead
+            showReceiverOnCallingScreen(callData);
+        };
+
+        console.log('[CallFix] ✅ handleIncomingCall patched');
+    }
+
+    // ── 4. Auto-hide #callingScreen incoming-mode when incomingCallModal is declined ─
+    // Patch declineIncomingCall too
+    function _patchDeclineIncomingCall() {
+        var handlers = window.UIEventHandlers;
+        if (!handlers || !handlers.declineIncomingCall) { setTimeout(_patchDeclineIncomingCall, 200); return; }
+        var _orig = handlers.declineIncomingCall.bind(handlers);
+        handlers.declineIncomingCall = function() {
+            hideCallingScreenIncomingMode();
+            return _orig.apply(this, arguments);
+        };
+        console.log('[CallFix] ✅ declineIncomingCall patched');
+    }
+
+    // ── 5. dvh fallback for older browsers (--real-vh custom property) ───
+    function _setRealVh() {
+        var vh = window.innerHeight * 0.01;
+        document.documentElement.style.setProperty('--real-vh', vh + 'px');
+    }
+    _setRealVh();
+    window.addEventListener('resize', _setRealVh);
+    window.addEventListener('orientationchange', function() { setTimeout(_setRealVh, 200); });
+
+    // Also patch #inCallScreen to use --real-vh if dvh not supported
+    (function applyRealVhFallback() {
+        var el = _el('inCallScreen');
+        if (el) {
+            // Will be overridden by CSS dvh but useful as fallback
+            el.style.setProperty('min-height', 'calc(var(--real-vh, 1vh) * 100)');
+        }
+    })();
+
+    // ── 6. Guard: ensure incall children are always above bg ─────────────
+    function _enforceInCallZIndex() {
+        var el = _el('inCallScreen');
+        if (!el || !el.classList.contains('active')) return;
+        var topBar = el.querySelector('.incall-top-bar');
+        var centre = el.querySelector('.incall-centre');
+        var ctrlBar = el.querySelector('.incall-controls-bar');
+        if (topBar  && !topBar._zFixed)  { topBar.style.setProperty('z-index','10','important');  topBar._zFixed  = true; }
+        if (centre  && !centre._zFixed)  { centre.style.setProperty('z-index','5','important');   centre._zFixed  = true; }
+        if (ctrlBar && !ctrlBar._zFixed) { ctrlBar.style.setProperty('z-index','10','important'); ctrlBar._zFixed = true; }
+    }
+
+    // ── Run all patches ───────────────────────────────────────────────────
+    function _init() {
+        _killCallOverlay();
+        _patchHandleIncomingCall();
+        _patchDeclineIncomingCall();
+        _enforceInCallZIndex();
+
+        // Re-enforce z-index when inCallScreen becomes active
+        var inCallEl = _el('inCallScreen');
+        if (inCallEl) {
+            var obs = new MutationObserver(function() {
+                if (inCallEl.classList.contains('active')) _enforceInCallZIndex();
+            });
+            obs.observe(inCallEl, { attributes: true, attributeFilter: ['class'] });
+        }
+
+        console.log('[CallFix] ✅ All patches applied — v2.0');
+    }
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', _init);
+    } else {
+        _init();
+    }
+
+})();
