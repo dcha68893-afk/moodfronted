@@ -1891,13 +1891,13 @@
                 pendingIncomingCall = callData;
                 const nameEl = document.getElementById('callerName');
                 if (nameEl) nameEl.innerText = callData.callerName || callData.fromUserName || 'Someone';
-                // FIX H: When user is already on the calls page the in-app modal
-                // handles accept/decline — hide the banner's duplicate buttons
+                // When already on calls page the in-app modal handles accept/decline
+                // — hide banner buttons to avoid two Decline buttons showing
                 const _onCallsPage = (window.__currentPage === 'calls');
-                const _bAccept  = document.getElementById('bannerAcceptCall');
-                const _bDecline = document.getElementById('bannerDeclineCall');
-                if (_bAccept)  _bAccept.style.display  = _onCallsPage ? 'none' : '';
-                if (_bDecline) _bDecline.style.display = _onCallsPage ? 'none' : '';
+                const _bA = document.getElementById('bannerAcceptCall');
+                const _bD = document.getElementById('bannerDeclineCall');
+                if (_bA) _bA.style.display = _onCallsPage ? 'none' : '';
+                if (_bD) _bD.style.display = _onCallsPage ? 'none' : '';
                 banner.style.display = 'flex';
 
                 document.body.classList.add('call-screen-active');
@@ -3512,7 +3512,19 @@
                             console.log('[Parent] Call ended via API (non-ws source)');
                         } catch(e) { console.warn('[Parent] Failed to POST /calls/end:', e); }
                     }
-                    // Dismiss banner on call termination
+                    // ── CRITICAL FIX: Broadcast CALL_ENDED to ALL iframes so
+                    // the remote side (caller or receiver) also resets when
+                    // the other party clicks End Call. Without this only the
+                    // person who pressed End sees the screen close.
+                    document.querySelectorAll('iframe').forEach(f => {
+                        if (f.contentWindow && f.contentWindow !== event.source) {
+                            f.contentWindow.postMessage({
+                                type: 'CALL_ENDED',
+                                payload: { callId, reason: 'ended', status: 'ended' },
+                                source: 'parent-end-broadcast'
+                            }, '*');
+                        }
+                    });
                     hideGlobalBanner();
                     document.body.classList.remove('call-screen-active');
                     window.__activeCallInProgress = false;
@@ -3522,10 +3534,20 @@
                 
                 // Handle ws-bridge sourced events - dismiss banner but DON'T POST to /calls/:id/end
                 if (data.type === 'CALL_ENDED' && data.source === 'ws-bridge') {
-                    console.log('[Parent] CALL_ENDED from ws-bridge - banner dismissed, no API call');
+                    console.log('[Parent] CALL_ENDED from ws-bridge - broadcasting to all iframes');
                     hideGlobalBanner();
                     document.body.classList.remove('call-screen-active');
                     window.__activeCallInProgress = false;
+                    // Broadcast to all iframes (ws-bridge re-entry from WS event)
+                    document.querySelectorAll('iframe').forEach(f => {
+                        if (f.contentWindow) {
+                            f.contentWindow.postMessage({
+                                type: 'CALL_ENDED',
+                                payload: data.payload || {},
+                                source: 'parent-ws-broadcast'
+                            }, '*');
+                        }
+                    });
                     await refreshCallHistoryForUser(cachedUserId);
                     return;
                 }
@@ -3534,8 +3556,20 @@
                 // CALL ANSWERED HANDLER
                 // ==================================================================
                 if (data.type === 'CALL_ANSWERED' || data.type === 'CALL_ACCEPTED') {
-                    console.log('[Parent] Call answered - dismissing banner');
+                    console.log('[Parent] Call answered - dismissing banner, broadcasting to all iframes');
                     hideGlobalBanner();
+                    // Broadcast CALL_ACCEPTED to all iframes so the CALLER's calling
+                    // screen transitions to in-call (not just the receiver's)
+                    const _acceptPayload = data.payload || {};
+                    document.querySelectorAll('iframe').forEach(f => {
+                        if (f.contentWindow && f.contentWindow !== event.source) {
+                            f.contentWindow.postMessage({
+                                type: 'CALL_ACCEPTED',
+                                payload: _acceptPayload,
+                                source: 'parent-accept-broadcast'
+                            }, '*');
+                        }
+                    });
                     return;
                 }
                 
@@ -3705,17 +3739,14 @@
                     }
                     hideGlobalBanner();
                     document.body.classList.remove('call-screen-active');
-                    // FIX G: When receiver's iframe sends CALL_REJECT to parent,
-                    // also broadcast CALL_ENDED to all iframes so caller resets
-                    const _rejectCallId = callId;
+                    // Broadcast CALL_ENDED to all iframes so the CALLER side resets when declined
+                    const _rCallId = callId;
                     document.querySelectorAll('iframe').forEach(f => {
-                        if (f.contentWindow) {
-                            f.contentWindow.postMessage({
-                                type: 'CALL_ENDED',
-                                payload: { callId: _rejectCallId, reason: 'declined', status: 'declined' },
-                                source: 'parent-reject-broadcast'
-                            }, '*');
-                        }
+                        if (f.contentWindow) f.contentWindow.postMessage({
+                            type: 'CALL_ENDED',
+                            payload: { callId: _rCallId, reason: 'declined', status: 'declined' },
+                            source: 'parent-reject-broadcast'
+                        }, '*');
                     });
                     await refreshCallHistoryForUser(cachedUserId);
                     return;
@@ -4382,8 +4413,7 @@
                 }
                 function _fwdAccepted(callData) {
                     hideGlobalBanner();
-                    // FIX D: Broadcast CALL_ACCEPTED to ALL iframes so the
-                    // caller's calling screen transitions to in-call immediately
+                    // Broadcast to ALL iframes so caller's calling screen → in-call
                     document.querySelectorAll('iframe').forEach(f => {
                         if (f.contentWindow) f.contentWindow.postMessage({ type: 'CALL_ACCEPTED', payload: callData, source: 'ws-bridge' }, '*');
                     });
@@ -4393,8 +4423,7 @@
                     hideGlobalBanner();
                     document.body.classList.remove('call-screen-active');
                     window.__activeCallInProgress = false;
-                    // FIX E: Broadcast CALL_ENDED to ALL iframes so BOTH caller
-                    // and receiver screens close when either side ends the call
+                    // Broadcast CALL_ENDED to ALL iframes — both caller and receiver reset
                     document.querySelectorAll('iframe').forEach(f => {
                         if (f.contentWindow) f.contentWindow.postMessage({ type: 'CALL_ENDED', payload: callData, source: 'ws-bridge' }, '*');
                     });
@@ -4412,8 +4441,6 @@
                     hideGlobalBanner();
                     document.body.classList.remove('call-screen-active');
                     window.__activeCallInProgress = false;
-                    // FIX F: Broadcast CALL_REJECTED to all iframes so caller
-                    // screen resets when receiver declines
                     document.querySelectorAll('iframe').forEach(f => {
                         if (f.contentWindow) f.contentWindow.postMessage({ type: 'CALL_REJECTED', payload: callData, source: 'ws-bridge' }, '*');
                     });

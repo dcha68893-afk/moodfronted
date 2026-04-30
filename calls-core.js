@@ -12835,7 +12835,13 @@ if (message.type === 'SETTING_CHANGED' || message.type === 'SETTINGS_UPDATED') {
 
                     this._notifyListeners('ice_connected', { state });
 
-
+                    // FIX: also fire 'call_connected' so UIEventHandlers.handleCallConnected
+                    // runs on BOTH sides and transitions them to the in-call screen
+                    this._notifyListeners('call_connected', {
+                        callId: callsState.activeCallId,
+                        callType: callsState.callType || 'voice',
+                        callerName: (callsState.callData && (callsState.callData.callerName || callsState.callData.fromUserName)) || ''
+                    });
 
                 } else if (state === 'failed') {
 
@@ -17699,11 +17705,22 @@ initiateCall: async function(callType, participants = []) {
 
                 this.transition(CALLS_STATE.IN_CALL, 'call_accepted');
 
+                // FIX: notify UI so handleCallAccepted fires on receiver side
+                this._notifyListeners('call_accepted', {
+                    callId,
+                    callType,
+                    callerName: (callsState.callData && (callsState.callData.callerName || callsState.callData.fromUserName)) || ''
+                });
 
-
-                
-
-
+                // Tell parent so caller's iframe sees CALL_ACCEPTED and switches to in-call
+                if (window.parent && window.parent !== window) {
+                    window.parent.postMessage({
+                        type: 'CALL_ACCEPTED',
+                        payload: { callId, callType,
+                            callerName: (callsState.callData && (callsState.callData.callerName || '')) || '' },
+                        source: 'core-accept'
+                    }, '*');
+                }
 
                 return { success: true };
 
@@ -29849,8 +29866,9 @@ window.CallHandlers = {
 
 
 
-    // FIX: expanded valid-offer-states to cover all transitional states
-    const _validOfferStates = ['initiating','initiated','incoming','connecting','in-call','starting','ringing','connected'];
+    // FIX: allow all transitional states so receiver WebRTC offer is never dropped
+    const _validOfferStates = ['initiating','initiated','incoming','connecting','in-call',
+                               'starting','ringing','connected','in_call'];
     if (!callsState.callActive && !_validOfferStates.includes(callsState.callState)) {
 
 
@@ -30047,11 +30065,10 @@ window.CallHandlers = {
 
 
 
-        if (!callsState.callActive && callsState.callState !== 'initiating' &&
-
-
-
-            callsState.callState !== 'connecting') {
+        // FIX: allow all valid mid-call states for signal answer too
+        const _validAnsStates = ['initiating','initiated','connecting','in-call',
+                                  'in_call','starting','ringing','connected'];
+        if (!callsState.callActive && !_validAnsStates.includes(callsState.callState)) {
 
 
 

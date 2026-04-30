@@ -3758,7 +3758,6 @@ body.call-active #idleScreen {
 .unified-btn-video:hover {
     box-shadow: 0 12px 32px rgba(0,132,255,0.6);
 }
-/* Accept (green ✓) — 4th icon on incoming call notification */
 .unified-btn-accept-green {
     background: linear-gradient(135deg, #00c853, #009624);
     box-shadow: 0 8px 24px rgba(0,200,83,0.4);
@@ -4207,234 +4206,103 @@ body.call-active #idleScreen {
     color: #e9edef;
 }
 
-/* ╔══════════════════════════════════════════════════════════════╗
-   ║  WHATSAPP-STYLE IN-CALL SCREEN                              ║
-   ╚══════════════════════════════════════════════════════════════╝ */
-
-/* Full-screen dark overlay — sits on top of everything */
+/* ╔══════════════════════════════════════════════════════════════════╗
+   ║  WHATSAPP-STYLE IN-CALL SCREEN  (authoritative — overrides all) ║
+   ╚══════════════════════════════════════════════════════════════════╝ */
 #inCallScreen {
     position: fixed !important;
     inset: 0 !important;
     width: 100vw !important;
     height: 100vh !important;
-    z-index: 9999 !important;
+    z-index: 99999 !important;
     display: none;
     flex-direction: column;
-    background: #0d1117;
+    background: #111827;
     overflow: hidden;
-    font-family: inherit;
 }
-#inCallScreen.active {
-    display: flex !important;
-}
+#inCallScreen.active { display: flex !important; }
 
-/* Subtle dark patterned/textured background */
 .incall-bg {
-    position: absolute;
-    inset: 0;
+    position: absolute; inset: 0; pointer-events: none; z-index: 0;
     background:
-        radial-gradient(ellipse at 50% 30%, rgba(80,40,120,0.35) 0%, transparent 70%),
-        repeating-linear-gradient(
-            0deg,
-            transparent,
-            transparent 40px,
-            rgba(255,255,255,0.012) 40px,
-            rgba(255,255,255,0.012) 41px
-        ),
-        repeating-linear-gradient(
-            90deg,
-            transparent,
-            transparent 40px,
-            rgba(255,255,255,0.012) 40px,
-            rgba(255,255,255,0.012) 41px
-        );
+        radial-gradient(ellipse at 50% 30%, rgba(80,40,120,0.4) 0%, transparent 70%),
+        repeating-linear-gradient(0deg,  transparent, transparent 40px, rgba(255,255,255,0.013) 40px, rgba(255,255,255,0.013) 41px),
+        repeating-linear-gradient(90deg, transparent, transparent 40px, rgba(255,255,255,0.013) 40px, rgba(255,255,255,0.013) 41px);
     background-color: #111827;
-    pointer-events: none;
-    z-index: 0;
 }
 
-/* ── TOP BAR ─────────────────────────────────────────────────── */
+/* ── TOP BAR ─── */
 .incall-top-bar {
-    position: relative;
-    z-index: 10;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 14px 16px 8px;
+    position: relative; z-index: 10;
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 16px 16px 8px;
 }
-.incall-top-center {
-    text-align: center;
-    flex: 1;
-}
-.incall-peer-name {
-    font-size: 20px;
-    font-weight: 700;
-    color: #ffffff;
-    letter-spacing: 0.2px;
-}
-.incall-timer {
-    font-size: 14px;
-    color: rgba(255,255,255,0.70);
-    margin-top: 3px;
-    font-variant-numeric: tabular-nums;
-    letter-spacing: 0.5px;
-}
-.incall-icon-btn {
-    width: 42px;
-    height: 42px;
-    border-radius: 50%;
-    border: none;
-    background: rgba(255,255,255,0.12);
-    color: #fff;
-    font-size: 17px;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    transition: background 0.18s;
-    flex-shrink: 0;
-}
-.incall-icon-btn:hover { background: rgba(255,255,255,0.22); }
+.incall-top-center { text-align: center; flex: 1; }
+.incall-peer-name  { font-size: 20px; font-weight: 700; color: #fff; letter-spacing: .2px; }
+.incall-timer      { font-size: 13px; color: rgba(255,255,255,.68); margin-top: 3px;
+                     font-variant-numeric: tabular-nums; letter-spacing: .5px; }
+.incall-icon-btn   { width: 42px; height: 42px; border-radius: 50%; border: none;
+                     background: rgba(255,255,255,.13); color: #fff; font-size: 17px;
+                     cursor: pointer; display: flex; align-items: center; justify-content: center;
+                     transition: background .18s; flex-shrink: 0; }
+.incall-icon-btn:hover { background: rgba(255,255,255,.23); }
 
-/* ── CENTRE (avatar / video) ─────────────────────────────────── */
+/* ── CENTRE ─── */
 .incall-centre {
-    position: relative;
-    z-index: 5;
-    flex: 1;
-    display: flex;
-    align-items: center;
-    justify-content: center;
+    position: relative; z-index: 5; flex: 1;
+    display: flex; align-items: center; justify-content: center;
 }
-.incall-avatar-wrap {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-}
+.incall-avatar-wrap { display: flex; align-items: center; justify-content: center; }
 .incall-avatar {
-    width: 148px;
-    height: 148px;
-    border-radius: 50%;
+    width: 150px; height: 150px; border-radius: 50%;
     background: linear-gradient(135deg, #4f3b8b 0%, #6c4fc7 100%);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 64px;
-    font-weight: 700;
-    color: rgba(255,255,255,0.85);
-    text-transform: uppercase;
-    user-select: none;
-    overflow: hidden;
-    box-shadow: 0 0 0 6px rgba(108,79,199,0.25), 0 0 0 14px rgba(108,79,199,0.10);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 66px; font-weight: 700; color: rgba(255,255,255,.85);
+    text-transform: uppercase; user-select: none; overflow: hidden;
+    box-shadow: 0 0 0 8px rgba(108,79,199,.22), 0 0 0 18px rgba(108,79,199,.09);
 }
-.incall-avatar img {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-    border-radius: 50%;
-}
-/* Pulsing ring around avatar (voice call) */
 @keyframes incallPulse {
-    0%   { box-shadow: 0 0 0 6px rgba(108,79,199,0.25), 0 0 0 14px rgba(108,79,199,0.10); }
-    50%  { box-shadow: 0 0 0 10px rgba(108,79,199,0.18), 0 0 0 22px rgba(108,79,199,0.06); }
-    100% { box-shadow: 0 0 0 6px rgba(108,79,199,0.25), 0 0 0 14px rgba(108,79,199,0.10); }
+    0%,100% { box-shadow: 0 0 0 8px rgba(108,79,199,.22), 0 0 0 18px rgba(108,79,199,.09); }
+    50%      { box-shadow: 0 0 0 14px rgba(108,79,199,.15), 0 0 0 26px rgba(108,79,199,.05); }
 }
-#inCallScreen.active .incall-avatar {
-    animation: incallPulse 2.4s ease-in-out infinite;
-}
-/* Remote video — full centre when active */
-.incall-remote-video {
-    position: absolute;
-    inset: 0;
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-    border-radius: 0;
-    background: #000;
-}
+#inCallScreen.active .incall-avatar { animation: incallPulse 2.4s ease-in-out infinite; }
+.incall-avatar img { width:100%; height:100%; object-fit:cover; border-radius:50%; }
+.incall-remote-video { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; background:#000; }
 
-/* ── PiP (local camera preview) ──────────────────────────────── */
+/* ── PiP ─── */
 .incall-pip {
-    position: absolute;
-    top: 80px;
-    right: 14px;
-    width: 100px;
-    height: 148px;
-    border-radius: 14px;
-    overflow: hidden;
-    border: 2px solid rgba(255,255,255,0.25);
-    z-index: 20;
-    background: #000;
-    box-shadow: 0 4px 16px rgba(0,0,0,0.5);
+    position: absolute; top: 76px; right: 14px;
+    width: 100px; height: 148px; border-radius: 14px; overflow: hidden;
+    border: 2px solid rgba(255,255,255,.25); z-index: 20; background: #000;
+    box-shadow: 0 4px 16px rgba(0,0,0,.5);
 }
-.incall-pip-video {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-}
-.incall-pip-close {
-    position: absolute;
-    top: 4px;
-    right: 4px;
-    width: 22px;
-    height: 22px;
-    border-radius: 50%;
-    background: rgba(0,0,0,0.55);
-    color: #fff;
-    border: none;
-    font-size: 10px;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-}
+.incall-pip-video  { width:100%; height:100%; object-fit:cover; }
+.incall-pip-close  { position:absolute; top:4px; right:4px; width:22px; height:22px;
+                     border-radius:50%; background:rgba(0,0,0,.55); color:#fff; border:none;
+                     font-size:10px; cursor:pointer; display:flex; align-items:center; justify-content:center; }
 
-/* ── BOTTOM CONTROL BAR ──────────────────────────────────────── */
+/* ── BOTTOM CONTROL BAR ─── */
 .incall-controls-bar {
-    position: relative;
-    z-index: 10;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 14px;
-    padding: 16px 20px 32px;
-    background: rgba(0,0,0,0.55);
-    backdrop-filter: blur(18px);
-    -webkit-backdrop-filter: blur(18px);
+    position: relative; z-index: 10;
+    display: flex; align-items: center; justify-content: center; gap: 14px;
+    padding: 16px 20px 36px;
+    background: rgba(0,0,0,.58); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
 }
-/* Individual control button */
 .incall-ctrl-btn {
-    width: 58px;
-    height: 58px;
-    border-radius: 50%;
-    border: none;
-    background: rgba(255,255,255,0.15);
-    color: #ffffff;
-    font-size: 22px;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    transition: background 0.18s, transform 0.15s;
-    position: relative;
-    flex-shrink: 0;
+    width: 58px; height: 58px; border-radius: 50%; border: none;
+    background: rgba(255,255,255,.16); color: #fff; font-size: 22px; cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    transition: background .18s, transform .15s; flex-shrink: 0;
 }
-.incall-ctrl-btn:hover { background: rgba(255,255,255,0.25); transform: scale(1.07); }
-.incall-ctrl-btn.active { background: rgba(255,255,255,0.90); color: #111; }
+.incall-ctrl-btn:hover  { background: rgba(255,255,255,.28); transform: scale(1.07); }
+.incall-ctrl-btn.active { background: rgba(255,255,255,.92); color: #111; }
+.incall-end-btn         { background: #ff3b30 !important; width: 64px; height: 64px;
+                           font-size: 24px; box-shadow: 0 6px 20px rgba(255,59,48,.5); }
+.incall-end-btn:hover   { background: #e0261c !important; }
 
-/* Red end-call pill */
-.incall-end-btn {
-    background: #ff3b30 !important;
-    width: 64px;
-    height: 64px;
-    font-size: 24px;
-    box-shadow: 0 6px 20px rgba(255,59,48,0.50);
-}
-.incall-end-btn:hover { background: #e0261c !important; }
-
-/* ── RESPONSIVE ──────────────────────────────────────────────── */
 @media (max-width: 480px) {
-    .incall-avatar { width: 130px; height: 130px; font-size: 56px; }
-    .incall-ctrl-btn { width: 52px; height: 52px; font-size: 19px; }
-    .incall-end-btn  { width: 58px; height: 58px; font-size: 21px; }
-    .incall-controls-bar { gap: 10px; padding: 14px 12px 28px; }
+    .incall-avatar       { width: 128px; height: 128px; font-size: 54px; }
+    .incall-ctrl-btn     { width: 50px;  height: 50px;  font-size: 19px; }
+    .incall-end-btn      { width: 58px;  height: 58px;  font-size: 21px; }
+    .incall-controls-bar { gap: 10px; padding: 14px 12px 30px; }
 }

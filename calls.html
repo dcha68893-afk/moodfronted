@@ -3086,10 +3086,10 @@ window.__CALLS_IFRAME__ = {
             <!-- ==================== IN-CALL SCREEN ==================== -->
             <div class="call-screen" id="inCallScreen" data-screen="in-call">
 
-                <!-- Dark patterned background (like WhatsApp) -->
+                <!-- Dark patterned background -->
                 <div class="incall-bg"></div>
 
-                <!-- ── TOP: collapse + name + timer + add-participant ─────── -->
+                <!-- ── TOP BAR: compress + name + timer + add-participant ─── -->
                 <div class="incall-top-bar">
                     <button class="incall-icon-btn" id="incallCollapseBtn" title="Minimise">
                         <i class="fas fa-compress-arrows-alt"></i>
@@ -3097,38 +3097,46 @@ window.__CALLS_IFRAME__ = {
                     <div class="incall-top-center">
                         <div class="incall-peer-name" id="callWithName">User</div>
                         <div class="incall-timer" id="callDuration">0:00</div>
-                        <!-- hidden helpers kept for JS compatibility -->
-                        <div id="callStatusText" style="display:none">Connected</div>
-                        <div id="callTypeIcon" style="display:none"><i class="fas fa-phone"></i></div>
-                        <div id="callSourceCtx" style="display:none"></div>
-                        <div id="callMoodIndicator" style="display:none"></div>
-                        <div id="callIntentionIndicator" style="display:none"></div>
-                        <div id="callHeaderEndBtn" style="display:none"></div>
-                        <div id="focusModeBtn" style="display:none"></div>
                     </div>
                     <button class="incall-icon-btn" id="incallAddBtn" title="Add participant">
                         <i class="fas fa-user-plus"></i>
                     </button>
                 </div>
 
-                <!-- ── CENTRE: avatar / video grid ──────────────────────── -->
-                <div class="incall-centre" id="videoGrid">
-                    <!-- Voice call avatar (shown when no video) -->
+                <!-- Hidden compatibility stubs (referenced by legacy JS) -->
+                <div id="callStatusText"   style="display:none">Connected</div>
+                <div id="callTypeIcon"     style="display:none"><i class="fas fa-phone"></i></div>
+                <div id="callSourceCtx"    style="display:none"></div>
+                <div id="callMoodIndicator"    style="display:none"></div>
+                <div id="callIntentionIndicator" style="display:none"></div>
+                <div id="callHeaderEndBtn" style="display:none"></div>
+                <div id="focusModeBtn"     style="display:none"></div>
+                <div id="callHeaderBar"    style="display:none"></div>
+                <div id="videoGrid"        style="display:none"></div>
+                <div id="screenShareBtn"   style="display:none"></div>
+                <div id="intentionBtn"     style="display:none"></div>
+                <div id="moodBtn"          style="display:none"></div>
+
+                <!-- ── CENTRE: avatar (voice) or remote video ─────────────── -->
+                <div class="incall-centre">
                     <div class="incall-avatar-wrap" id="incallAvatarWrap">
                         <div class="incall-avatar" id="incallAvatar">U</div>
                     </div>
-                    <!-- Remote video (shown when video is on) -->
+                    <!-- Remote video shown when camera is enabled -->
                     <video class="incall-remote-video" id="remoteVideo" autoplay playsinline style="display:none"></video>
                 </div>
 
-                <!-- ── PiP (local camera preview) ───────────────────────── -->
+                <!-- Hidden audio element for remote voice -->
+                <audio id="remoteAudio" autoplay playsinline style="display:none"></audio>
+
+                <!-- ── PiP: local camera preview ─────────────────────────── -->
                 <div class="incall-pip" id="pipContainer" style="display:none">
                     <video class="incall-pip-video" id="pipVideo" autoplay playsinline muted></video>
                     <button class="incall-pip-close" id="pipCloseBtn"><i class="fas fa-times"></i></button>
                 </div>
 
-                <!-- ── Reactions overlay ─────────────────────────────────── -->
-                <div class="in-call-reactions" id="reactionsContainer" style="display: none;">
+                <!-- ── Reactions overlay ──────────────────────────────────── -->
+                <div class="in-call-reactions" id="reactionsContainer" style="display:none;">
                     <div class="reaction-btn" data-reaction="👍">👍</div>
                     <div class="reaction-btn" data-reaction="👏">👏</div>
                     <div class="reaction-btn" data-reaction="😂">😂</div>
@@ -3136,32 +3144,23 @@ window.__CALLS_IFRAME__ = {
                     <div class="reaction-btn" data-reaction="🔥">🔥</div>
                 </div>
 
-                <!-- ── BOTTOM: WhatsApp-style control bar ───────────────── -->
+                <!-- ── BOTTOM: WhatsApp-style control bar ─────────────────── -->
                 <div class="incall-controls-bar" id="callControls">
-                    <!-- More options -->
-                    <button class="incall-ctrl-btn" id="moodBtn" title="More">
+                    <button class="incall-ctrl-btn" id="moreBtn" title="More options">
                         <i class="fas fa-ellipsis-h"></i>
                     </button>
-                    <!-- Camera toggle -->
                     <button class="incall-ctrl-btn" id="videoBtn" title="Camera">
                         <i class="fas fa-video"></i>
                     </button>
-                    <!-- Speaker toggle -->
                     <button class="incall-ctrl-btn" id="speakerBtn" title="Speaker">
                         <i class="fas fa-volume-up"></i>
                     </button>
-                    <!-- Mute toggle -->
                     <button class="incall-ctrl-btn" id="muteBtn" title="Mute">
                         <i class="fas fa-microphone-slash"></i>
                     </button>
-                    <!-- End call — big red pill -->
                     <button class="incall-ctrl-btn incall-end-btn" id="endCallBtn" title="End Call">
                         <i class="fas fa-phone-slash"></i>
                     </button>
-                    <!-- Hidden for JS compat -->
-                    <div id="screenShareBtn" style="display:none"></div>
-                    <div id="intentionBtn" style="display:none"></div>
-                    <div id="callHeaderBar" style="display:none"></div>
                 </div>
 
             </div>
