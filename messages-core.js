@@ -5615,8 +5615,21 @@ try {
                 // FIX BUG2: Dedup guard — the same message can arrive via multiple paths
                 // (wsService.on bridge + REALTIME_EVENT postMessage). Without this, the
                 // receiver renders the bubble twice.
+                //
+                // FIX BUG3 (RECEIVER INVISIBLE): The old dedup used a single shared pool.
+                // When the sender's own sent message echoed back from the server, its ID was
+                // registered in _dedupTimestamps. Then when the same message arrived on the
+                // RECEIVER side via a separate event path within 10s, isDuplicateMessage()
+                // returned true and silently blocked it — the receiver never saw it.
+                //
+                // Fix: only apply dedup guard to messages sent BY the current user (echoes).
+                // For messages from OTHER users we skip the dedup registration so the receiver
+                // path is never blocked by the sender's echo registration.
+                const _myUserId = SessionManager?.getUserId?.();
+                const _msgSenderId = message.senderId || message.sender?.id || message.sender?.userId;
+                const _isOwnMessage = _myUserId && _msgSenderId && String(_msgSenderId) === String(_myUserId);
                 const _dedupKey = _safeId || _safeLocalId;
-                if (_dedupKey && isDuplicateMessage(_dedupKey)) return;
+                if (_dedupKey && _isOwnMessage && isDuplicateMessage(_dedupKey)) return;
 
                 // FIX BUG3: Ensure senderId is always resolved so isSent/isReceived
                 // comparison in the UI template never falls back to undefined.

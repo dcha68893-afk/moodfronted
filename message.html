@@ -1917,6 +1917,30 @@
             // Never auto-open on page load or sessionStorage read.
             // ✅ FIX 7a: Forward ws-bridge message events into messages-core document events.
             // chat.html sends these via postMessage — without this block they were silently dropped.
+            //
+            // ✅ FIX 8 (RECEIVER BUG): app_realtime_socket.js wildcard bridge sends events as
+            // REALTIME_EVENT:{socketEventName} — e.g. REALTIME_EVENT:message:new. These were
+            // NOT in WS_BRIDGE_MESSAGE_TYPES so they were completely silently dropped here,
+            // which is why receivers never saw incoming messages even though delivery showed success.
+            // We now normalize REALTIME_EVENT:* types before the whitelist check.
+            let normalizedData = data;
+            if (typeof data.type === 'string' && data.type.startsWith('REALTIME_EVENT:')) {
+                const subType = data.type.slice('REALTIME_EVENT:'.length);
+                // Map to the canonical type that the rest of the pipeline understands
+                if (subType === 'message:new' || subType === 'new_message' ||
+                    subType === 'newMessage' || subType === 'chat:message' ||
+                    subType === 'MESSAGE_RECEIVED') {
+                    normalizedData = { ...data, type: 'message:new', payload: data.payload || data };
+                } else if (subType === 'message:delivered' || subType === 'message_delivered') {
+                    normalizedData = { ...data, type: 'message:delivered' };
+                } else if (subType === 'message:read' || subType === 'message_read') {
+                    normalizedData = { ...data, type: 'message:read' };
+                } else if (subType === 'message:sent' || subType === 'message_sent') {
+                    normalizedData = { ...data, type: 'message:sent' };
+                }
+                // For any other REALTIME_EVENT:* (presence, calls, etc.) fall through unchanged
+            }
+
             const WS_BRIDGE_MESSAGE_TYPES = [
                 'message:new', 'new_message', 'newMessage', 'chat:message',
                 'message:sent', 'message_sent',
@@ -1924,22 +1948,22 @@
                 'message:read', 'message_read',
                 'CONVERSATION_UPDATED'
             ];
-            if (WS_BRIDGE_MESSAGE_TYPES.includes(data.type)) {
-                const payload = data.payload || data;
+            if (WS_BRIDGE_MESSAGE_TYPES.includes(normalizedData.type)) {
+                const payload = normalizedData.payload || normalizedData;
                 // 1. Dispatch on document so messages-core.js listeners pick it up
                 try { document.dispatchEvent(new CustomEvent('message:new', { detail: payload })); } catch(_) {}
                 try { window.dispatchEvent(new CustomEvent('kyn:message:received', { detail: payload })); } catch(_) {}
                 // 2. Also dispatch specific status events
-                if (data.type === 'message:sent' || data.type === 'message_sent') {
+                if (normalizedData.type === 'message:sent' || normalizedData.type === 'message_sent') {
                     try { window.dispatchEvent(new CustomEvent('messageStatusUpdated', { detail: { messageId: payload.localId || payload.messageId, status: 'sent', serverId: payload.serverId || payload.messageId } })); } catch(_) {}
                 }
-                if (data.type === 'message:delivered' || data.type === 'message_delivered') {
+                if (normalizedData.type === 'message:delivered' || normalizedData.type === 'message_delivered') {
                     try { window.dispatchEvent(new CustomEvent('messageStatusUpdated', { detail: { messageId: payload.messageId || payload.localId, status: 'delivered' } })); } catch(_) {}
                 }
-                if (data.type === 'message:read' || data.type === 'message_read') {
+                if (normalizedData.type === 'message:read' || normalizedData.type === 'message_read') {
                     try { window.dispatchEvent(new CustomEvent('messageStatusUpdated', { detail: { messageId: payload.messageId || payload.localId, status: 'read' } })); } catch(_) {}
                 }
-                console.log('[Message HTML] ✅ FIX7 forwarded ws-bridge event:', data.type);
+                console.log('[Message HTML] ✅ FIX7/8 forwarded ws-bridge event:', data.type, '→', normalizedData.type);
                 // Don't return — fall through in case OPEN_CHAT_WITH_USER is also set
             }
 

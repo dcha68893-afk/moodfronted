@@ -407,8 +407,6 @@ const GlobalCallHistory = {
         UIState.callType = callType;
         UIState.callActive = true;
         UIState.callState = 'calling';
-        // ── Store participants so CALL_ACCEPTED can resolve the peer name ──
-        UIState.callParticipants = [{ name: userName, userId: userId }];
         
     } catch (error) {
         console.error('[Calls UI] Call initiation error:', error);
@@ -2264,6 +2262,13 @@ async function initiateCallWithPendingUser() {
         if (coreInstance.startCall) {
             const result = await coreInstance.startCall(parseInt(userId), callType);
             if (result && result.success) {
+                // Store call context so CALL_ACCEPTED can resolve peer name + type
+                UIState.callActive = true;
+                UIState.callState = 'calling';
+                UIState.callType = callType;
+                UIState.activeCallId = result.callId;
+                UIState.callParticipants = [{ name: userName, userId: userId }];
+                UIState.pendingCallUser = { userName, userId, callType, userAvatar: null };
                 showNotification(`${callType === 'video' ? 'Video call' : 'Voice call'} started with ${userName}`, 'success');
                 clearPendingCall();
                 
@@ -5192,23 +5197,21 @@ case 'CALL_INITIATED':
                         case 'call_accepted':
 case 'CALL_ACCEPTED': {
     // Receiver answered — transition caller to in-call screen
-    console.log('[Calls UI] CALL_ACCEPTED received — transitioning to in-call screen');
-    UIState.callStartTime = Date.now();
-    UIState.callActive = true;
-    UIState.callState = 'connected';
-    // Resolve peer name: callParticipants (set during startCall), or pendingCallUser, or payload
-    const _acceptPayload = data.payload || {};
+    console.log('[Calls UI] ✅ CALL_ACCEPTED received — transitioning caller to in-call screen');
+    const _ap = data.payload || {};
+    // Resolve peer name from every possible storage location
     const _peerName = (UIState.callParticipants && UIState.callParticipants[0] && UIState.callParticipants[0].name)
         || (UIState.pendingCallUser && UIState.pendingCallUser.userName)
-        || _acceptPayload.callerName
-        || _acceptPayload.userName
-        || 'User';
-    const _peerType = UIState.callType || _acceptPayload.callType || 'voice';
-    const _peerAvatar = (UIState.pendingCallUser && UIState.pendingCallUser.userAvatar) || null;
-    // Stop the ringing timer
+        || _ap.callerName || _ap.userName || _ap.name || 'User';
+    const _peerType  = UIState.callType || _ap.callType || 'voice';
+    const _peerAva   = (UIState.pendingCallUser && UIState.pendingCallUser.userAvatar) || null;
+    // Stop ring timer
     if (window._currentCallTimer) { clearInterval(window._currentCallTimer); window._currentCallTimer = null; }
-    if (window._callRingTimer) { clearInterval(window._callRingTimer); window._callRingTimer = null; }
-    transitionToInCall({ userName: _peerName, callType: _peerType, userAvatar: _peerAvatar });
+    if (window._callRingTimer)    { clearInterval(window._callRingTimer);    window._callRingTimer    = null; }
+    UIState.callStartTime = Date.now();
+    UIState.callActive    = true;
+    UIState.callState     = 'connected';
+    transitionToInCall({ userName: _peerName, callType: _peerType, userAvatar: _peerAva });
     break;
 }
                     case 'CALL_INCOMING': {
@@ -5365,8 +5368,17 @@ case 'CALL_ACCEPTED': {
                 return false;
             }
             
-            // Validate source is parent
+            // Validate source is parent — but allow trusted call broadcast sources.
+            // CALL_ACCEPTED / CALL_ENDED arrive with source 'ws-bridge', 'parent-end-broadcast',
+            // 'parent-accept-broadcast' etc. Blocking these drops all call state transitions.
+            const _callBroadcastSources = ['ws-bridge', 'parent-end-broadcast', 'parent-accept-broadcast',
+                'parent-ws-broadcast', 'parent-frame', 'parent-signal', 'auto-accept'];
+            const _callEventTypes = ['CALL_ACCEPTED', 'CALL_ENDED', 'CALL_FORCE_ENDED', 'CALL_REJECTED',
+                'CALL_CANCELLED', 'CALL_INCOMING', 'CALL_RINGING', 'call_accepted', 'call:accepted',
+                'call:ended', 'call_ended', 'SIGNAL_OFFER', 'SIGNAL_ANSWER', 'ICE_CANDIDATE'];
             if (data.source && data.source !== 'parent') {
+                if (_callBroadcastSources.includes(data.source)) return true;
+                if (_callEventTypes.includes(data.type)) return true;
                 return false;
             }
             
@@ -7158,27 +7170,28 @@ acceptIncomingCallGeneric: async function(asVideo) {
     }
 
     if (accepted) {
-        // Set call state so WebRTC guards allow the offer through
+        // ── FIX: Do NOT immediately show in-call screen here.
+        // The WebRTC offer from the caller will arrive shortly via the signalling server.
+        // Once WebRTC negotiation completes, calls-core fires 'call_connected' or
+        // 'call_accepted' which triggers handleCallConnected / handleCallAccepted →
+        // transitionToInCall. Showing the screen here early caused the callState guard
+        // in handleSignalOffer to drop the offer and self-end the call.
+        //
+        // Set state so the guard allows the offer through:
         UIState.callActive    = true;
         UIState.callState     = 'connected';
         UIState.activeCallId  = callId;
         UIState.callType      = callType;
-        UIState.callStartTime = Date.now();
-        // Store caller info for transitionToInCall
+        // Store caller info for transitionToInCall when it fires:
         if (!UIState.callParticipants || UIState.callParticipants.length === 0) {
             UIState.callParticipants = [{ name: callerName }];
         }
-        // Dismiss incoming modal immediately
+        // Dismiss modals right away
         const incomingModal = document.getElementById('incomingCallModal');
         if (incomingModal) {
             incomingModal.classList.remove('active');
             incomingModal.style.setProperty('display', 'none', 'important');
         }
-        // ── SHOW IN-CALL SCREEN IMMEDIATELY on receiver side ──
-        // The receiver should see the in-call fullscreen right away (like WhatsApp).
-        // WebRTC audio will connect in the background — it doesn't block the UI.
-        transitionToInCall({ userName: callerName, callType });
-
         // Notify parent the call is active (hides banner, marks call in progress)
         if (window.parent && window.parent !== window) {
             window.parent.postMessage({
@@ -7186,6 +7199,14 @@ acceptIncomingCallGeneric: async function(asVideo) {
                 payload: { callId, callerName, callType }
             }, '*');
         }
+        // Fallback: if core never fires call_connected within 4 s, show in-call anyway
+        window._receiverShowFallback = setTimeout(() => {
+            const inCall = document.getElementById('inCallScreen');
+            if (!inCall || !inCall.classList.contains('active')) {
+                console.warn('[UI] Fallback: showing in-call screen for receiver');
+                transitionToInCall({ userName: callerName, callType });
+            }
+        }, 4000);
     }
 },
 

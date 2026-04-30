@@ -1122,7 +1122,10 @@
                 if (!evt.data || typeof evt.data !== 'object') return;
                 const { type, payload } = evt.data;
                 if (type && type.startsWith('REALTIME_EVENT:')) {
-                    const eventType = type.replace('REALTIME_EVENT:', '');
+                    // Strip the REALTIME_EVENT: prefix to get the original socket event name.
+                    // e.g. 'REALTIME_EVENT:message:new' → 'message:new'
+                    const eventType = type.slice('REALTIME_EVENT:'.length);
+                    if (!eventType) return;
                     const msg = { type: eventType, payload: payload || {} };
                     realtimeManager._routeMessage(msg);
                     if (window.KynectaEventBus) {
@@ -1160,13 +1163,35 @@
     // This is the other half of the bridge — when a real-time event arrives at
     // the parent socket, we forward it to each iframe so their KynectaRealtime
     // instances can dispatch it to local listeners (.on() handlers).
+    //
+    // FIX: The on() handler signature is (payload, fullMessage). The old code used
+    // `msg.type` where msg was the *payload* — which for chat messages has type='text'
+    // (the content type), producing REALTIME_EVENT:text and REALTIME_EVENT:undefined.
+    // We now use the second argument (fullMessage) to get the correct socket event name.
+    // We also skip message types that chat.html's _fwdNewMessage already forwards
+    // via wsService.on() to avoid double-delivery at the iframe.
     if (!_isInIframe) {
-        realtimeManager.on('*', function (msg) {
+        // These are handled directly by chat.html's wsService.on() bridge — skip here
+        // to prevent duplicate postMessages to the messages iframe.
+        const _SKIP_WILDCARD = new Set([
+            'message:new', 'new_message', 'newMessage', 'chat:message',
+            'message:sent', 'message_sent',
+            'message:delivered', 'message_delivered',
+            'message:read', 'message_read'
+        ]);
+
+        realtimeManager.on('*', function (payload, fullMessage) {
             try {
+                // fullMessage is the full {type, payload} object from _routeMessage.
+                // payload is just fullMessage.payload — use fullMessage for the type.
+                const eventType = (fullMessage && fullMessage.type) ? fullMessage.type : null;
+                if (!eventType) return; // can't route without a type
+                if (_SKIP_WILDCARD.has(eventType)) return; // already forwarded by chat.html wsService bridge
+
                 const iframes = document.querySelectorAll('iframe');
                 const eventMsg = {
-                    type: `REALTIME_EVENT:${msg.type}`,
-                    payload: msg.payload || msg
+                    type: `REALTIME_EVENT:${eventType}`,
+                    payload: payload || {}
                 };
                 iframes.forEach(function (frame) {
                     try { frame.contentWindow.postMessage(eventMsg, '*'); } catch (_) {}
