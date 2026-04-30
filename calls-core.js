@@ -6185,7 +6185,7 @@ function applySession(sessionData) {
 
 
 
-        CALL_INVITATION_TIMEOUT: 120000,  // 2 minutes ring timeout
+        CALL_INVITATION_TIMEOUT: 180000,  // 3 minutes ring timeout
 
 
 
@@ -17367,38 +17367,22 @@ initiateCall: async function(callType, participants = []) {
 
 
 
-        // Set invitation timeout
-
-
-
+        // Set invitation timeout (3 minutes)
         callsState.callInvitationTimer = setTimeout(() => {
-
-
-
             if (callsState.callState === 'initiating') {
-
-
-
-                logWarn(MODULE, 'Call invitation timed out');
-
-
-
-                this.endCall(callId);
-
-
-
-                this._notifyListeners('call_timeout', { callId });
-
-
-
-                notifyListeners('call_timeout', { callId });
-
-
-
+                logWarn(MODULE, 'Call invitation timed out (3 min) — recording as no_answer on caller side');
+                // Caller side: no_answer = outgoing unanswered (NOT missed)
+                this.endCall(callId, { status: 'no_answer' });
+                this._notifyListeners('call_timeout', { callId, status: 'no_answer' });
+                notifyListeners('call_timeout', { callId, status: 'no_answer' });
+                // Signal parent to record receiver-side missed call
+                if (window.parent && window.parent !== window) {
+                    window.parent.postMessage({
+                        type: 'RECORD_MISSED_CALL',
+                        payload: { callId, timestamp: Date.now() }
+                    }, '*');
+                }
             }
-
-
-
         }, CONFIG.CALL_INVITATION_TIMEOUT);
 
 
@@ -28202,7 +28186,7 @@ _escapeHtml: function(text) {
 
 
 
-    // Show call UI anyway for 2 minutes with ringtone even if receiver is offline
+    // Show call UI anyway for 3 minutes with ringtone even if receiver is offline
 
 
 
@@ -28210,7 +28194,7 @@ _escapeHtml: function(text) {
 
 
 
-        logWarn(MODULE, 'Receiver is offline - showing call UI for 2 minutes', callData);
+        logWarn(MODULE, 'Receiver is offline - showing call UI for 3 minutes', callData);
 
 
 
@@ -28238,7 +28222,7 @@ _escapeHtml: function(text) {
 
 
 
-        const offlineMsg = callData.error || callData.message || 'User is currently offline. Call will display for 2 minutes.';
+        const offlineMsg = callData.error || callData.message || 'User is currently offline. Call will display for 3 minutes.';
 
 
 
@@ -28723,6 +28707,9 @@ _escapeHtml: function(text) {
 
 
     function handleCallStarted(callData) {
+            // SCREEN MANAGER: switch to calling screen
+            if (typeof window.showScreen === "function") { window.showScreen("calling"); }
+            var __ov = document.getElementById("callOverlay"); if (__ov) __ov.setAttribute("data-state", "idle");
 
 
 
@@ -28751,6 +28738,9 @@ _escapeHtml: function(text) {
 
 
     function handleCallConnected(callData) {
+            // SCREEN MANAGER: switch to in-call screen
+            if (typeof window.showScreen === "function") { window.showScreen("in-call"); }
+            var __ov = document.getElementById("callOverlay"); if (__ov) __ov.setAttribute("data-state", "idle");
 
 
 
@@ -28871,6 +28861,9 @@ _escapeHtml: function(text) {
 
 
     function handleCallEnded(callData) {
+            // SCREEN MANAGER: call ended — go idle then navigate back
+            if (typeof window.showScreen === "function") { window.showScreen("idle"); }
+            var __ov2 = document.getElementById("callOverlay"); if (__ov2) __ov2.setAttribute("data-state", "idle");
 
 
 
@@ -29423,6 +29416,9 @@ function _handleCallStatus(callData) {
 
 
             handleCallAccepted(callData);
+            // SCREEN MANAGER: directly switch to in-call screen, bypassing callOverlay
+            if (typeof window.showScreen === "function") { window.showScreen("in-call"); }
+            var __ov = document.getElementById("callOverlay"); if (__ov) __ov.setAttribute("data-state", "idle");
 
 
 
@@ -29751,26 +29747,28 @@ function updateOnlineStatusIndicators(userId, isOnline) {
 
 
 function updateCallUI() {
-
-
-
-    // Update call UI with current participant status
-
-
-
-    if (window.callsUI && window.callsUI.updateCallUI) {
-
-
-
+    // Drive screen transitions through the injected window.showScreen manager
+    // This replaces the callsUI delegation which was triggering the call panel overlay.
+    var state = (window.callsState && window.callsState.callState) || "idle";
+    if (typeof window.showScreen === "function") {
+        if (state === "initiating" || state === "ringing") {
+            window.showScreen("calling");
+        } else if (state === "connected" || state === "in-call" || state === "connecting") {
+            window.showScreen("in-call");
+        } else if (state === "idle") {
+            window.showScreen("idle");
+        }
+    } else if (window.callsUI && window.callsUI.updateCallUI) {
+        // Fallback only if showScreen not yet available
         window.callsUI.updateCallUI();
-
-
-
     }
-
-
-
+    // Always suppress callOverlay
+    var overlay = document.getElementById("callOverlay");
+    if (overlay) overlay.setAttribute("data-state", "idle");
 }
+
+
+
 
 
 

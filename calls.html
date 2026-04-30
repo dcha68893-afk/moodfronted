@@ -63,6 +63,287 @@ window.__CALLS_IFRAME__ = {
     name: window.name
 };
 </script>
+    <script>
+// ==================== SCREEN MANAGER — SINGLE SOURCE OF TRUTH ====================
+// All call screen transitions go through showScreen(). The callOverlay (#callOverlay)
+// is fully suppressed — only #callingScreen, #inCallScreen, and #idleScreen are used.
+(function() {
+    'use strict';
+
+    var RING_DURATION = 180; // seconds (3 minutes)
+    var _declineIntervalId = null;
+    var _autoDeclineTimeoutId = null;
+
+    // ── Core: switch between idle / calling / in-call screens ───────────────
+    window.showScreen = function(screenName) {
+        var idle     = document.getElementById('idleScreen');
+        var calling  = document.getElementById('callingScreen');
+        var inCall   = document.getElementById('inCallScreen');
+        var incoming = document.getElementById('incomingCallModal');
+        var overlay  = document.getElementById('callOverlay');
+
+        // Always keep the callOverlay hidden — it causes the "call panel" bug
+        if (overlay) {
+            overlay.setAttribute('data-state', 'idle');
+            overlay.style.pointerEvents = 'none';
+            overlay.style.opacity = '0';
+            overlay.style.visibility = 'hidden';
+        }
+
+        if (idle)    idle.classList.remove('active');
+        if (calling) calling.classList.remove('active');
+        if (inCall)  inCall.classList.remove('active');
+        document.body.classList.remove('call-active');
+
+        if (screenName === 'calling') {
+            if (calling) calling.classList.add('active');
+            document.body.classList.add('call-active');
+        } else if (screenName === 'in-call') {
+            // Hide incoming modal too
+            if (incoming) {
+                incoming.classList.remove('active');
+                incoming.style.display = 'none';
+            }
+            if (inCall) inCall.classList.add('active');
+            document.body.classList.add('call-active');
+            // Stop ring countdown
+            _stopDeclineTimer();
+        } else {
+            // idle: show idle screen
+            if (idle) idle.classList.add('active');
+            if (incoming) {
+                incoming.classList.remove('active');
+                incoming.style.display = 'none';
+            }
+            _stopDeclineTimer();
+        }
+    };
+
+    // ── Decline timer for incoming call screen ───────────────────────────────
+    function _stopDeclineTimer() {
+        if (_declineIntervalId)  { clearInterval(_declineIntervalId);  _declineIntervalId  = null; }
+        if (_autoDeclineTimeoutId) { clearTimeout(_autoDeclineTimeoutId); _autoDeclineTimeoutId = null; }
+    }
+
+    window.startDeclineTimer = function(onExpire) {
+        _stopDeclineTimer();
+        var el = document.getElementById('declineTimer');
+        var remaining = RING_DURATION;
+        if (el) el.textContent = remaining;
+
+        _declineIntervalId = setInterval(function() {
+            remaining--;
+            if (el) el.textContent = remaining;
+            if (remaining <= 0) {
+                _stopDeclineTimer();
+                if (typeof onExpire === 'function') onExpire();
+            }
+        }, 1000);
+
+        // Safety fallback
+        _autoDeclineTimeoutId = setTimeout(function() {
+            _stopDeclineTimer();
+            if (typeof onExpire === 'function') onExpire();
+        }, (RING_DURATION + 1) * 1000);
+    };
+
+    // ── Intercept callsUI events to drive showScreen ─────────────────────────
+    // Listen for the custom events that calls-core fires so we can switch screens
+    function _hookCoreListeners() {
+        if (!window.callCore) {
+            setTimeout(_hookCoreListeners, 300);
+            return;
+        }
+
+        // Register a listener on callCore that drives screen transitions
+        var coreListenFn = window.callCore._addListener || window.callCore.addListener;
+        if (typeof coreListenFn !== 'function') {
+            // Fallback: poll callsState
+            _pollCallState();
+            return;
+        }
+
+        try {
+            coreListenFn.call(window.callCore, function(event, data) {
+                _handleCoreEvent(event, data);
+            });
+        } catch(e) {
+            _pollCallState();
+        }
+    }
+
+    function _handleCoreEvent(event, data) {
+        switch(event) {
+            case 'call_initiating':
+            case 'call_started':
+                showScreen('calling');
+                break;
+
+            case 'incoming_call':
+                // Show incoming screen + start 3-min countdown
+                var modal = document.getElementById('incomingCallModal');
+                if (modal) {
+                    modal.style.display = '';
+                    modal.classList.add('active');
+                    // Populate caller info
+                    if (data) {
+                        var nameEl   = document.getElementById('incomingCallName');
+                        var typeEl   = document.getElementById('incomingCallType');
+                        var avatarEl = document.getElementById('incomingCallAvatar');
+                        if (nameEl)   nameEl.textContent   = data.callerName || 'Unknown';
+                        if (typeEl)   typeEl.textContent   = (data.callType === 'video') ? 'Video Call' : 'Voice Call';
+                        if (avatarEl) {
+                            var initial = (data.callerName || 'U')[0].toUpperCase();
+                            avatarEl.textContent = initial;
+                        }
+                    }
+                }
+                // Start 180-second countdown, auto-decline on expiry
+                window.startDeclineTimer(function() {
+                    // Auto-decline: fire decline button
+                    var declineBtn = document.getElementById('declineCallBtn');
+                    if (declineBtn) declineBtn.click();
+                    else if (window.callCore && window.callCore.declineCall) {
+                        var callId = (data && data.callId) || (window.callCore.getState && window.callCore.getState().activeCallId);
+                        window.callCore.declineCall(callId);
+                    }
+                });
+                // Keep overlay suppressed
+                var overlay = document.getElementById('callOverlay');
+                if (overlay) overlay.setAttribute('data-state', 'idle');
+                break;
+
+            case 'call_accepted':
+                showScreen('in-call');
+                break;
+
+            case 'call_connected':
+                showScreen('in-call');
+                break;
+
+            case 'call_ended':
+            case 'call_rejected':
+            case 'call_cancelled':
+            case 'call_failed':
+            case 'call_timeout':
+            case 'call_initiation_failed':
+                // Navigate back after call ends
+                _navigateAfterCall();
+                showScreen('idle');
+                break;
+        }
+    }
+
+    // Fallback: poll callsState when listener API not available
+    var _lastPollState = '';
+    function _pollCallState() {
+        setInterval(function() {
+            var core = window.callCore;
+            if (!core) return;
+            var state = (core.getState && core.getState()) || {};
+            var cs = state.callState || 'idle';
+            if (cs === _lastPollState) return;
+            _lastPollState = cs;
+
+            if (cs === 'initiating' || cs === 'ringing') {
+                showScreen('calling');
+            } else if (cs === 'in-call' || cs === 'connected' || cs === 'connecting') {
+                showScreen('in-call');
+            } else if (cs === 'idle') {
+                showScreen('idle');
+            }
+        }, 400);
+    }
+
+    // ── Navigate back to origin after call ends ───────────────────────────────
+    function _navigateAfterCall() {
+        try {
+            var origin = window._callOrigin || window.__pendingCallOrigin || 'calls';
+            if (window.parent && window.parent !== window) {
+                window.parent.postMessage({
+                    type: 'CALL_ENDED_RETURN',
+                    payload: { origin: origin, timestamp: Date.now() }
+                }, '*');
+            }
+            // Reset origin
+            window._callOrigin = null;
+        } catch(e) {}
+    }
+
+    // ── Suppress callOverlay on any mutation ─────────────────────────────────
+    function _suppressCallOverlay() {
+        var overlay = document.getElementById('callOverlay');
+        if (!overlay) return;
+
+        function forceIdle() {
+            if (overlay.getAttribute('data-state') !== 'idle') {
+                overlay.setAttribute('data-state', 'idle');
+            }
+            overlay.style.pointerEvents = 'none';
+            overlay.style.opacity       = '0';
+            overlay.style.visibility    = 'hidden';
+        }
+        forceIdle();
+
+        // Watch for any external code trying to set data-state on the overlay
+        var mo = new MutationObserver(function(mutations) {
+            mutations.forEach(function(m) {
+                if (m.type === 'attributes' && m.attributeName === 'data-state') {
+                    var v = overlay.getAttribute('data-state');
+                    if (v !== 'idle') {
+                        // Something tried to show the call panel — suppress it
+                        forceIdle();
+                        console.log('[ScreenMgr] Suppressed callOverlay state:', v);
+                    }
+                }
+            });
+        });
+        mo.observe(overlay, { attributes: true, attributeFilter: ['data-state'] });
+    }
+
+    // ── Message listener for parent-driven events ────────────────────────────
+    window.addEventListener('message', function(evt) {
+        if (!evt.data) return;
+        var t = evt.data.type;
+        if (!t) return;
+
+        // Accept call from parent (e.g. Android notification tap)
+        if (t === 'CALL_ACCEPT_FROM_PARENT' || t === 'call:accepted' || t === 'call_accepted' || t === 'CALL_ACCEPTED') {
+            showScreen('in-call');
+        }
+        // Incoming call notification from parent
+        if (t === 'CALL_INCOMING' || t === 'call:incoming' || t === 'incoming_call') {
+            _handleCoreEvent('incoming_call', evt.data.payload || evt.data.data || evt.data);
+        }
+        // Call ended from parent
+        if (t === 'CALL_ENDED' || t === 'call:ended' || t === 'call_ended') {
+            showScreen('idle');
+        }
+        // Store call origin so we can navigate back after call
+        if (t === 'CALL_ORIGIN') {
+            window._callOrigin = (evt.data.payload && evt.data.payload.origin) || evt.data.origin || 'calls';
+        }
+    });
+
+    // ── Boot sequence ────────────────────────────────────────────────────────
+    document.addEventListener('DOMContentLoaded', function() {
+        _suppressCallOverlay();
+        // Start the idle screen by default
+        showScreen('idle');
+        // Hook into callCore once it's ready
+        _hookCoreListeners();
+    });
+
+    // If DOM already loaded
+    if (document.readyState !== 'loading') {
+        _suppressCallOverlay();
+        showScreen('idle');
+        _hookCoreListeners();
+    }
+
+    console.log('[ScreenMgr] Screen manager v3.0 loaded — callOverlay suppressed, 3-min timer active');
+})();
+</script>
     <script src="/js/kynecta.safety.layer.js"></script>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=yes">
@@ -2481,28 +2762,28 @@ window.__CALLS_IFRAME__ = {
             <div id="incomingCallIntention" style="display:none;" class="unified-intention-badge">
                 <i class="fas fa-heart"></i><span>Check-in</span>
             </div>
-            <p class="unified-auto-decline">Auto declining in <span id="declineTimer">120</span>s</p>
+            <p class="unified-auto-decline">Auto declining in <span id="declineTimer">180</span>s</p>
             <div class="unified-call-actions">
                 <div class="unified-action-item">
-                    <button class="unified-btn unified-btn-decline" id="declineCallBtn">
+                    <button class="unified-btn unified-btn-decline" id="declineCallBtn" onclick="if(window.showScreen) window.showScreen('idle');">
                         <i class="fas fa-phone-slash"></i>
                     </button>
                     <span>Decline</span>
                 </div>
                 <div class="unified-action-item">
-                    <button class="unified-btn unified-btn-accept" id="acceptCallBtn">
+                    <button class="unified-btn unified-btn-accept" id="acceptCallBtn" onclick="if(window.showScreen) window.showScreen('in-call');">
                         <i class="fas fa-phone"></i>
                     </button>
                     <span>Audio</span>
                 </div>
                 <div class="unified-action-item">
-                    <button class="unified-btn unified-btn-video" id="acceptVideoCallBtn">
+                    <button class="unified-btn unified-btn-video" id="acceptVideoCallBtn" onclick="if(window.showScreen) window.showScreen('in-call');">
                         <i class="fas fa-video"></i>
                     </button>
                     <span>Video</span>
                 </div>
                 <div class="unified-action-item">
-                    <button class="unified-btn unified-btn-accept-green" id="acceptCallBtnAlt" onclick="document.getElementById('acceptCallBtn').click()">
+                    <button class="unified-btn unified-btn-accept-green" id="acceptCallBtnAlt" onclick="if(window.showScreen) window.showScreen('in-call'); document.getElementById('acceptCallBtn').click();">
                         <i class="fas fa-check"></i>
                     </button>
                     <span>Accept</span>
@@ -3074,7 +3355,7 @@ window.__CALLS_IFRAME__ = {
                     <p class="unified-call-type" id="callingType">Voice Call</p>
                     <div class="unified-call-actions">
                         <div class="unified-action-item">
-                            <button class="unified-btn unified-btn-decline" id="callingCancelBtn">
+                            <button class="unified-btn unified-btn-decline" id="callingCancelBtn" onclick="if(window.showScreen) window.showScreen('idle');">
                                 <i class="fas fa-phone-slash"></i>
                             </button>
                             <span>Cancel</span>

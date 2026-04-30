@@ -3795,6 +3795,12 @@
 
                     setTimeout(() => {
                         if (callsIframe.contentWindow) {
+                            // Tell calls.html its return origin BEFORE the call opens
+                            callsIframe.contentWindow.postMessage({
+                                type: 'CALL_ORIGIN',
+                                origin: returnTo,
+                                source: 'parent-frame'
+                            }, '*');
                             callsIframe.contentWindow.postMessage({
                                 type: 'OPEN_CALL_WITH_USER',
                                 payload,
@@ -3815,7 +3821,25 @@
                     __dispatchCallToIframe(p.userId, p.userName || 'User', p.callType || 'voice', 'messages', p.userId, 'messages-module');
                 }
 
-                if (data.type === 'CALL_ENDED_RETURN') {
+                // Receiver-side missed call recording — fired by calls-core when 3-min timeout expires
+                if (data.type === 'RECORD_MISSED_CALL') {
+                    console.log('[Parent] Recording receiver-side missed call:', data.payload);
+                    // Forward to calls iframe to add to recent-calls list as missed
+                    const callsIframe = document.getElementById('callsIframe');
+                    if (callsIframe && callsIframe.contentWindow) {
+                        callsIframe.contentWindow.postMessage({
+                            type: 'RECORD_MISSED_CALL',
+                            payload: data.payload || {},
+                            source: 'parent-frame'
+                        }, '*');
+                    }
+                    // Also notify via ws-bridge if available
+                    if (window.wssBridge && window.wssBridge.emit) {
+                        window.wssBridge.emit('missed_call', data.payload || {});
+                    }
+                }
+
+                if (data.type === 'CALL_ENDED_RETURN' || data.type === 'CALL_ENDED_NAVIGATE_BACK') {
                     let ctx = window.__callReturnContext;
                     if (!ctx) {
                         try { const s = sessionStorage.getItem('call_return_ctx'); if (s) ctx = JSON.parse(s); } catch(e) {}
