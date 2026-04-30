@@ -80,7 +80,13 @@ let GATED_REQUESTS_QUEUE = [];
 // Active requests tracking for deduplication
 const activeRequests = new Map();
 const requestTimeouts = new Map();
-const abortControllers = new Map(); 
+const abortControllers = new Map();
+
+// ============================================================================
+// TIMEOUT CONSTANTS - FIX: DEFAULT_TIMEOUT was referenced but never defined
+// ============================================================================
+const DEFAULT_TIMEOUT = 60000;  // 60 seconds — long enough for Render cold starts
+const MAX_RETRIES = 2;
 
 let TokenManager;
 let SecureStorage;
@@ -3747,6 +3753,8 @@ const PUBLIC_ENDPOINTS = [
     '/api/status', '/status', '/health', '/api/health',
     '/api/auth/login', '/auth/login',
     '/api/auth/register', '/auth/register',
+    '/api/auth/forgot-password', '/auth/forgot-password',
+    '/api/auth/reset-password', '/auth/reset-password',
     '/api/auth/forgot', '/auth/forgot-password',
     '/api/auth/reset', '/auth/reset-password',
     '/api/auth/refresh', '/auth/refresh',
@@ -3757,10 +3765,11 @@ const PUBLIC_ENDPOINTS = [
 const AUTH_ENDPOINTS = [
     '/api/auth/login', '/auth/login',
     '/api/auth/register', '/auth/register',
+    '/api/auth/forgot-password', '/auth/forgot-password',
+    '/api/auth/reset-password', '/auth/reset-password',
     '/api/auth/forgot', '/auth/forgot-password',
     '/api/auth/reset', '/auth/reset-password',
     '/api/auth/refresh', '/auth/refresh',
-    // '/api/auth/me' removed - this should NOT be public!
     '/api/auth/verify', '/auth/verify'
 ];
 
@@ -4641,15 +4650,17 @@ SAIC.initialize();
     };
     
     forgotPassword = async function(email) {
-        return secureApiFetch('/api/auth/forgot', {
+        // FIX: path unified to /auth/forgot-password to match backend router
+        return secureApiFetch('/auth/forgot-password', {
             method: 'POST',
             body: { email },
             auth: false
         });
     };
-    
+
     resetPassword = async function(token, newPassword) {
-        return secureApiFetch('/api/auth/reset', {
+        // FIX: path unified to /auth/reset-password to match backend router
+        return secureApiFetch('/auth/reset-password', {
             method: 'POST',
             body: { token, newPassword },
             auth: false

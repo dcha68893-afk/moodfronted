@@ -9793,274 +9793,334 @@ if (detectExistingCore()) {
         _signal();
     }
 })();
-// ═══════════════════════════════════════════════════════════════════════════
-// KYNECTA CALL SCREEN FIX — v2.0 (appended last, runs after all other code)
-//
-// Patches:
-//   1. Intercept handleIncomingCall → receiver uses #callingScreen (incoming mode)
-//      instead of #incomingCallModal — eliminates the flickering call panel entirely
-//   2. acceptCallBtn / declineCallBtn wired to #callingScreen incoming-mode buttons
-//   3. #callOverlay permanently silenced
-//   4. incall-bg z-index guard (ensures children always render above bg)
-//   5. Device-detect: viewport height refresh for dvh support fallback
-// ═══════════════════════════════════════════════════════════════════════════
-(function KynCallScreenFix() {
+/* ═══════════════════════════════════════════════════════════════════════════
+   KYNECTA CALL SCREEN FIX — v3.0  JS PATCH
+   Appended last. Runs after ALL other code.
+
+   ROOT CAUSE: The "call panel" (idleScreen / "Ready to Connect") bleeds through
+   during call transitions because #callContainer is already `.active` and
+   body.call-active is not set before the transition paint frame.
+
+   THIS PATCH:
+   1.  Immediately hides #callContainer + #idleScreen the instant body.call-active is set
+   2.  MutationObserver on body.classList — hides callContainer the moment call-active is added
+   3.  Intercepts handleIncomingCall → shows receiver on #callingScreen (incoming-mode)
+       so #incomingCallModal NEVER appears — no flicker at all
+   4.  Patches transitionToInCall to force body.call-connected + hide container
+   5.  --real-vh fallback for browsers without dvh support
+   6.  Kills #callOverlay completely — setAttribute intercepted
+   ═══════════════════════════════════════════════════════════════════════════ */
+(function KynCallFix_v3() {
     'use strict';
 
-    // ── Helpers ──────────────────────────────────────────────────────────
-    function _el(id) { return document.getElementById(id); }
+    var _el = function(id) { return document.getElementById(id); };
 
-    // ── 1. Silence #callOverlay permanently ──────────────────────────────
-    function _killCallOverlay() {
-        var ov = _el('callOverlay');
-        if (!ov) return;
-        ov.style.cssText = 'display:none!important;visibility:hidden!important;opacity:0!important;pointer-events:none!important;z-index:-1!important;';
-        // Prevent JS from re-enabling it via dataset.state
-        try {
-            Object.defineProperty(ov, '_stateGuarded', { value: true, writable: false });
-        } catch(e) {}
-        var _orig = ov.setAttribute.bind(ov);
-        ov.setAttribute = function(name, value) {
-            if (name === 'data-state') return; // swallow — we never want overlay to show
-            return _orig(name, value);
-        };
-    }
-
-    // ── 2. Show receiver incoming call on #callingScreen (incoming mode) ─
-    function showReceiverOnCallingScreen(callData) {
-        var cs = _el('callingScreen');
-        if (!cs) return false;
-
-        // Mark incoming mode for CSS colour variation
-        cs.classList.add('incoming-mode');
-
-        // Populate fields
-        var label  = _el('callingLabel');
-        var name   = _el('callingName');
-        var status = _el('callingStatus');
-        var type   = _el('callingType');
-        var avatar = _el('callingAvatar');
-
-        var callerName = callData.callerName || callData.userName || 'Unknown';
-        var callType   = callData.callType   || callData.type     || 'voice';
-
-        if (label)  label.textContent  = 'Incoming Call';
-        if (name)   name.textContent   = callerName;
-        if (status) status.textContent = 'is calling you…';
-        if (type)   type.textContent   = callType === 'video' ? 'Video Call' : 'Voice Call';
-        if (avatar) {
-            var initials = callerName.charAt(0).toUpperCase();
-            var photo    = callData.callerAvatar || callData.callerPhoto || null;
-            if (photo) {
-                avatar.innerHTML = '<img src="' + photo + '" alt="' + callerName + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%" onerror="this.parentNode.textContent=\'' + initials + '\'">';
-            } else {
-                avatar.textContent = initials;
-            }
-        }
-
-        // Replace the Cancel button with Decline + Accept buttons
-        var actionsWrap = cs.querySelector('.unified-call-actions');
-        if (actionsWrap && !actionsWrap._incomingWired) {
-            actionsWrap._incomingWired = true;
-            actionsWrap.innerHTML = [
-                '<div class="unified-action-item">',
-                '  <button class="unified-btn unified-btn-decline" id="callingDeclineBtn"><i class="fas fa-phone-slash"></i></button>',
-                '  <span>Decline</span>',
-                '</div>',
-                '<div class="unified-action-item">',
-                '  <button class="unified-btn unified-btn-accept" id="callingAcceptAudioBtn"><i class="fas fa-phone"></i></button>',
-                '  <span>Audio</span>',
-                '</div>',
-                '<div class="unified-action-item">',
-                '  <button class="unified-btn unified-btn-video" id="callingAcceptVideoBtn"><i class="fas fa-video"></i></button>',
-                '  <span>Video</span>',
-                '</div>'
-            ].join('');
-
-            // Wire Decline
-            var declineBtn = document.getElementById('callingDeclineBtn');
-            if (declineBtn) {
-                declineBtn.onclick = function(e) {
-                    e.preventDefault();
-                    // Delegate to existing decline handler
-                    var realDecline = _el('declineCallBtn');
-                    if (realDecline) realDecline.click();
-                    else if (window.UIEventHandlers && window.UIEventHandlers.declineIncomingCall) {
-                        window.UIEventHandlers.declineIncomingCall();
-                    }
-                    hideCallingScreenIncomingMode();
-                };
-            }
-
-            // Wire Accept (audio)
-            var acceptAudioBtn = document.getElementById('callingAcceptAudioBtn');
-            if (acceptAudioBtn) {
-                acceptAudioBtn.onclick = function(e) {
-                    e.preventDefault();
-                    var realAccept = _el('acceptCallBtn');
-                    if (realAccept) realAccept.click();
-                    else if (window.UIEventHandlers && window.UIEventHandlers.acceptIncomingCall) {
-                        window.UIEventHandlers.acceptIncomingCall(false);
-                    }
-                    hideCallingScreenIncomingMode();
-                };
-            }
-
-            // Wire Accept (video)
-            var acceptVideoBtn = document.getElementById('callingAcceptVideoBtn');
-            if (acceptVideoBtn) {
-                acceptVideoBtn.onclick = function(e) {
-                    e.preventDefault();
-                    var realVideo = _el('acceptVideoCallBtn');
-                    if (realVideo) realVideo.click();
-                    else if (window.UIEventHandlers && window.UIEventHandlers.acceptIncomingCall) {
-                        window.UIEventHandlers.acceptIncomingCall(true);
-                    }
-                    hideCallingScreenIncomingMode();
-                };
-            }
-        }
-
-        // Show the screen
-        cs.classList.add('active');
-        cs.style.setProperty('display', 'flex', 'important');
-
-        // State
-        if (window.UIState) {
-            window.UIState.callActive = true;
-            window.UIState.callState  = 'ringing';
-        }
-        window.__callActive = true;
-        document.body.classList.add('call-active');
-
-        return true;
-    }
-
-    function hideCallingScreenIncomingMode() {
-        var cs = _el('callingScreen');
-        if (!cs) return;
-        cs.classList.remove('incoming-mode');
-        cs.classList.remove('active');
-        cs.style.setProperty('display', 'none', 'important');
-        // Restore original cancel button
-        var actionsWrap = cs.querySelector('.unified-call-actions');
-        if (actionsWrap) {
-            actionsWrap._incomingWired = false;
-            actionsWrap.innerHTML = [
-                '<div class="unified-action-item">',
-                '  <button class="unified-btn unified-btn-decline" id="callingCancelBtn"><i class="fas fa-phone-slash"></i></button>',
-                '  <span>Cancel</span>',
-                '</div>'
-            ].join('');
-        }
-    }
-
-    // ── 3. Patch UIEventHandlers.handleIncomingCall ──────────────────────
-    function _patchHandleIncomingCall() {
-        var handlers = window.UIEventHandlers;
-        if (!handlers || !handlers.handleIncomingCall) {
-            // Not ready yet — retry
-            setTimeout(_patchHandleIncomingCall, 200);
-            return;
-        }
-
-        var _original = handlers.handleIncomingCall.bind(handlers);
-        handlers.handleIncomingCall = function(callData) {
-            console.log('[CallFix] handleIncomingCall intercepted — using callingScreen incoming mode');
-
-            // Ensure #incomingCallModal stays hidden
-            var modal = _el('incomingCallModal');
-            if (modal) {
-                modal.classList.remove('active');
-                modal.style.cssText = 'display:none!important;visibility:hidden!important;pointer-events:none!important;opacity:0!important;z-index:-999!important;';
-            }
-
-            // Store call data for accept/decline handlers
-            window._currentIncomingCallData = callData;
-            window._currentIncomingCallId   = callData.callId || callData.id || null;
-
-            // Play ringtone (the original does this — call it for ringtone only)
-            // We only invoke original to get the ringtone playing, then immediately re-hide modal
-            try { _original(callData); } catch(e) {}
-            // Re-hide modal in case original showed it
-            if (modal) {
-                modal.classList.remove('active');
-                modal.style.cssText = 'display:none!important;visibility:hidden!important;pointer-events:none!important;opacity:0!important;z-index:-999!important;';
-            }
-
-            // Show on callingScreen instead
-            showReceiverOnCallingScreen(callData);
-        };
-
-        console.log('[CallFix] ✅ handleIncomingCall patched');
-    }
-
-    // ── 4. Auto-hide #callingScreen incoming-mode when incomingCallModal is declined ─
-    // Patch declineIncomingCall too
-    function _patchDeclineIncomingCall() {
-        var handlers = window.UIEventHandlers;
-        if (!handlers || !handlers.declineIncomingCall) { setTimeout(_patchDeclineIncomingCall, 200); return; }
-        var _orig = handlers.declineIncomingCall.bind(handlers);
-        handlers.declineIncomingCall = function() {
-            hideCallingScreenIncomingMode();
-            return _orig.apply(this, arguments);
-        };
-        console.log('[CallFix] ✅ declineIncomingCall patched');
-    }
-
-    // ── 5. dvh fallback for older browsers (--real-vh custom property) ───
-    function _setRealVh() {
+    // ── A. dvh / real-vh fallback ─────────────────────────────────────────
+    function _setVh() {
         var vh = window.innerHeight * 0.01;
         document.documentElement.style.setProperty('--real-vh', vh + 'px');
+        // Apply to inCallScreen as inline min-height fallback
+        var s = _el('inCallScreen');
+        if (s) s.style.minHeight = (window.innerHeight) + 'px';
     }
-    _setRealVh();
-    window.addEventListener('resize', _setRealVh);
-    window.addEventListener('orientationchange', function() { setTimeout(_setRealVh, 200); });
+    _setVh();
+    window.addEventListener('resize', _setVh, { passive: true });
+    window.addEventListener('orientationchange', function() { setTimeout(_setVh, 200); }, { passive: true });
 
-    // Also patch #inCallScreen to use --real-vh if dvh not supported
-    (function applyRealVhFallback() {
-        var el = _el('inCallScreen');
-        if (el) {
-            // Will be overridden by CSS dvh but useful as fallback
-            el.style.setProperty('min-height', 'calc(var(--real-vh, 1vh) * 100)');
+    // ── B. Hide callContainer + idleScreen whenever call is active ─────────
+    function _hideCallContainer() {
+        var cc = _el('callContainer');
+        var idle = _el('idleScreen');
+        if (cc) {
+            cc.style.setProperty('display', 'none', 'important');
+            cc.style.setProperty('visibility', 'hidden', 'important');
+            cc.style.setProperty('pointer-events', 'none', 'important');
+        }
+        if (idle) {
+            idle.style.setProperty('display', 'none', 'important');
+            idle.classList.remove('active');
+        }
+    }
+
+    function _showCallContainer() {
+        var cc = _el('callContainer');
+        var idle = _el('idleScreen');
+        if (cc) {
+            cc.style.removeProperty('visibility');
+            cc.style.removeProperty('pointer-events');
+            cc.style.setProperty('display', 'flex', 'important');
+        }
+        if (idle) {
+            idle.style.setProperty('display', 'flex', 'important');
+            idle.classList.add('active');
+        }
+    }
+
+    // Watch body classList for call-active / call-connected
+    (function _watchBodyClass() {
+        var obs = new MutationObserver(function(mutations) {
+            mutations.forEach(function(m) {
+                if (m.type !== 'attributes' || m.attributeName !== 'class') return;
+                var body = m.target;
+                var isActive = body.classList.contains('call-active') || body.classList.contains('call-connected');
+                if (isActive) {
+                    _hideCallContainer();
+                } else {
+                    // Only restore when truly idle
+                    if (!window.__callActive && (!window.UIState || !window.UIState.callActive)) {
+                        _showCallContainer();
+                    }
+                }
+            });
+        });
+        obs.observe(document.body, { attributes: true, attributeFilter: ['class'] });
+    })();
+
+    // Also suppress callContainer if it tries to show via class/style while call active
+    (function _guardCallContainer() {
+        function _attachGuard() {
+            var cc = _el('callContainer');
+            if (!cc) { setTimeout(_attachGuard, 200); return; }
+            var obs = new MutationObserver(function(mutations) {
+                if (!document.body.classList.contains('call-active') && !window.__callActive) return;
+                // During a call — callContainer must stay hidden
+                cc.style.setProperty('display', 'none', 'important');
+                cc.style.setProperty('visibility', 'hidden', 'important');
+            });
+            obs.observe(cc, { attributes: true, attributeFilter: ['class', 'style'] });
+        }
+        _attachGuard();
+    })();
+
+    // ── C. Kill #callOverlay permanently ──────────────────────────────────
+    (function _killOverlay() {
+        function _hide(el) {
+            if (!el) return;
+            el.style.cssText = [
+                'display:none!important',
+                'visibility:hidden!important',
+                'opacity:0!important',
+                'pointer-events:none!important',
+                'z-index:-1!important'
+            ].join(';');
+        }
+        function _applyKill() {
+            _hide(_el('callOverlay'));
+            _hide(_el('callFloatingPanel'));
+            _hide(document.querySelector('.call-overlay'));
+            _hide(document.querySelector('.call-overlay-floating'));
+        }
+        _applyKill();
+        // Intercept setAttribute on callOverlay so data-state="calling" can't make it visible
+        var ov = _el('callOverlay');
+        if (ov && !ov._killPatched) {
+            ov._killPatched = true;
+            var _origSet = ov.setAttribute.bind(ov);
+            ov.setAttribute = function(name) {
+                _origSet.apply(ov, arguments);
+                // Always re-hide after any setAttribute
+                _hide(ov);
+            };
+        }
+        // Watch for changes to callOverlay
+        if (ov) {
+            new MutationObserver(function() { _hide(ov); })
+                .observe(ov, { attributes: true, attributeFilter: ['class', 'style', 'data-state'] });
         }
     })();
 
-    // ── 6. Guard: ensure incall children are always above bg ─────────────
-    function _enforceInCallZIndex() {
-        var el = _el('inCallScreen');
-        if (!el || !el.classList.contains('active')) return;
-        var topBar = el.querySelector('.incall-top-bar');
-        var centre = el.querySelector('.incall-centre');
-        var ctrlBar = el.querySelector('.incall-controls-bar');
-        if (topBar  && !topBar._zFixed)  { topBar.style.setProperty('z-index','10','important');  topBar._zFixed  = true; }
-        if (centre  && !centre._zFixed)  { centre.style.setProperty('z-index','5','important');   centre._zFixed  = true; }
-        if (ctrlBar && !ctrlBar._zFixed) { ctrlBar.style.setProperty('z-index','10','important'); ctrlBar._zFixed = true; }
-    }
+    // ── D. Receiver incoming call → #callingScreen (incoming-mode) ────────
+    function _showReceiverIncoming(callData) {
+        var cs = _el('callingScreen');
+        if (!cs) return;
 
-    // ── Run all patches ───────────────────────────────────────────────────
-    function _init() {
-        _killCallOverlay();
-        _patchHandleIncomingCall();
-        _patchDeclineIncomingCall();
-        _enforceInCallZIndex();
+        var callerName = callData.callerName || callData.userName || 'Unknown';
+        var callType   = (callData.callType || callData.type || 'voice');
+        var photo      = callData.callerAvatar || callData.callerPhoto || null;
+        var initial    = callerName.charAt(0).toUpperCase();
 
-        // Re-enforce z-index when inCallScreen becomes active
-        var inCallEl = _el('inCallScreen');
-        if (inCallEl) {
-            var obs = new MutationObserver(function() {
-                if (inCallEl.classList.contains('active')) _enforceInCallZIndex();
-            });
-            obs.observe(inCallEl, { attributes: true, attributeFilter: ['class'] });
+        // Populate
+        var label  = _el('callingLabel');
+        var nameEl = _el('callingName');
+        var status = _el('callingStatus');
+        var typeEl = _el('callingType');
+        var avatar = _el('callingAvatar');
+
+        if (label)  label.textContent  = 'Incoming Call';
+        if (nameEl) nameEl.textContent = callerName;
+        if (status) status.textContent = 'is calling you…';
+        if (typeEl) typeEl.textContent = callType === 'video' ? 'Video Call' : 'Voice Call';
+        if (avatar) {
+            if (photo) {
+                avatar.innerHTML = '<img src="' + photo + '" alt="' + callerName +
+                    '" style="width:100%;height:100%;object-fit:cover;border-radius:50%"' +
+                    ' onerror="this.parentNode.textContent=\'' + initial + '\'">';
+            } else {
+                avatar.textContent = initial;
+            }
         }
 
-        console.log('[CallFix] ✅ All patches applied — v2.0');
+        // Swap action buttons to Decline / Audio / Video
+        var wrap = cs.querySelector('.unified-call-actions');
+        if (wrap && !wrap._rxWired) {
+            wrap._rxWired = true;
+            wrap.innerHTML =
+                '<div class="unified-action-item">' +
+                  '<button class="unified-btn unified-btn-decline" id="rxDeclineBtn"><i class="fas fa-phone-slash"></i></button>' +
+                  '<span>Decline</span>' +
+                '</div>' +
+                '<div class="unified-action-item">' +
+                  '<button class="unified-btn unified-btn-accept" id="rxAcceptBtn"><i class="fas fa-phone"></i></button>' +
+                  '<span>Audio</span>' +
+                '</div>' +
+                '<div class="unified-action-item">' +
+                  '<button class="unified-btn unified-btn-video" id="rxVideoBtn"><i class="fas fa-video"></i></button>' +
+                  '<span>Video</span>' +
+                '</div>';
+
+            document.getElementById('rxDeclineBtn').onclick = function(e) {
+                e.preventDefault();
+                _hideRxScreen();
+                var h = window.UIEventHandlers;
+                if (h && h.declineIncomingCall) h.declineIncomingCall();
+                else { var b = _el('declineCallBtn'); if (b) b.click(); }
+            };
+            document.getElementById('rxAcceptBtn').onclick = function(e) {
+                e.preventDefault();
+                _hideRxScreen();
+                var h = window.UIEventHandlers;
+                if (h && h.acceptIncomingCall) h.acceptIncomingCall(false);
+                else { var b = _el('acceptCallBtn'); if (b) b.click(); }
+            };
+            document.getElementById('rxVideoBtn').onclick = function(e) {
+                e.preventDefault();
+                _hideRxScreen();
+                var h = window.UIEventHandlers;
+                if (h && h.acceptIncomingCall) h.acceptIncomingCall(true);
+                else { var b = _el('acceptVideoCallBtn'); if (b) b.click(); }
+            };
+        }
+
+        cs.classList.add('incoming-mode', 'active');
+        cs.style.setProperty('display', 'flex', 'important');
+
+        // State
+        if (window.UIState) { window.UIState.callActive = true; window.UIState.callState = 'ringing'; }
+        window.__callActive = true;
+        document.body.classList.add('call-active');
     }
 
-    if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', _init);
-    } else {
-        _init();
+    function _hideRxScreen() {
+        var cs = _el('callingScreen');
+        if (!cs) return;
+        cs.classList.remove('incoming-mode', 'active');
+        cs.style.setProperty('display', 'none', 'important');
+        // Restore single cancel button
+        var wrap = cs.querySelector('.unified-call-actions');
+        if (wrap) {
+            wrap._rxWired = false;
+            wrap.innerHTML =
+                '<div class="unified-action-item">' +
+                  '<button class="unified-btn unified-btn-decline" id="callingCancelBtn"><i class="fas fa-phone-slash"></i></button>' +
+                  '<span>Cancel</span>' +
+                '</div>';
+        }
     }
 
+    // ── E. Patch UIEventHandlers once available ───────────────────────────
+    function _patchHandlers() {
+        var h = window.UIEventHandlers;
+        if (!h) { setTimeout(_patchHandlers, 150); return; }
+
+        // Patch handleIncomingCall
+        if (!h._kynFixedIncoming) {
+            h._kynFixedIncoming = true;
+            var _origIncoming = h.handleIncomingCall.bind(h);
+            h.handleIncomingCall = function(callData) {
+                // 1. Always keep #incomingCallModal dead
+                var modal = _el('incomingCallModal');
+                if (modal) modal.style.cssText = 'display:none!important;visibility:hidden!important;opacity:0!important;pointer-events:none!important;z-index:-999!important;width:0!important;height:0!important;';
+
+                // 2. Store incoming id + data
+                window._currentIncomingCallId   = callData.callId || callData.id || null;
+                window._currentIncomingCallData  = callData;
+
+                // 3. Start the ringtone via original (it tries to show modal but modal is dead)
+                try { _origIncoming(callData); } catch(e) {}
+
+                // 4. Re-kill modal in case _origIncoming added .active
+                if (modal) modal.style.cssText = 'display:none!important;visibility:hidden!important;opacity:0!important;pointer-events:none!important;z-index:-999!important;width:0!important;height:0!important;';
+
+                // 5. Show on callingScreen (incoming-mode)
+                _showReceiverIncoming(callData);
+            };
+        }
+
+        // Patch declineIncomingCall — clean up callingScreen incoming-mode
+        if (!h._kynFixedDecline) {
+            h._kynFixedDecline = true;
+            var _origDecline = h.declineIncomingCall.bind(h);
+            h.declineIncomingCall = function() {
+                _hideRxScreen();
+                return _origDecline.apply(this, arguments);
+            };
+        }
+
+        console.log('[CallFix v3] ✅ UIEventHandlers patched');
+    }
+    _patchHandlers();
+
+    // ── F. Patch transitionToInCall to also hide callContainer ───────────
+    (function _patchTransition() {
+        var _origFn = window.transitionToInCall;
+        if (typeof _origFn !== 'function') {
+            // It may not be on window — it's a module-level function.
+            // We'll intercept via the inCallScreen MutationObserver instead (see G).
+            return;
+        }
+        if (!window._kynTransitionPatched) {
+            window._kynTransitionPatched = true;
+            window.transitionToInCall = function(callInfo) {
+                _hideCallContainer();
+                document.body.classList.add('call-active', 'call-connected');
+                return _origFn(callInfo);
+            };
+        }
+    })();
+
+    // ── G. Watch #inCallScreen — whenever it becomes active, hide callContainer ─
+    (function _watchInCallScreen() {
+        function _attach() {
+            var el = _el('inCallScreen');
+            if (!el) { setTimeout(_attach, 200); return; }
+            new MutationObserver(function() {
+                if (el.classList.contains('active') || el.style.display === 'flex') {
+                    _hideCallContainer();
+                    // Force all children above bg
+                    ['incall-top-bar','incall-centre','incall-controls-bar'].forEach(function(cls) {
+                        var c = el.querySelector('.' + cls);
+                        if (c) {
+                            c.style.setProperty('position', 'relative', 'important');
+                            c.style.setProperty('z-index', cls === 'incall-centre' ? '5' : '10', 'important');
+                        }
+                    });
+                    // Keep inCallScreen itself on top
+                    el.style.setProperty('z-index', '10000000', 'important');
+                    el.style.setProperty('display', 'flex', 'important');
+                }
+            }).observe(el, { attributes: true, attributeFilter: ['class', 'style'] });
+        }
+        _attach();
+    })();
+
+    // ── H. On page load: if callContainer is shown at idle, that's fine ───
+    //     But kill any stale call-active state
+    (function _cleanInitialState() {
+        if (!window.UIState || !window.UIState.callActive) {
+            document.body.classList.remove('call-active', 'call-connected');
+            window.__callActive = false;
+        }
+    })();
+
+    console.log('[CallFix v3] ✅ All patches applied');
 })();

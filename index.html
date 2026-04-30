@@ -2191,8 +2191,9 @@
                     try {
                         let response;
                         if (window.api?.auth?.register) {
+                            // FIX: Increased timeout from 30s to 65s for Render.com cold starts
                             const regPromise = window.api.auth.register({ email: email, username: username, password: password, displayName: displayName || username });
-                            const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), 30000));
+                            const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error('Request timed out. The server may be starting up — please try again in a moment.')), 65000));
                             response = await Promise.race([regPromise, timeout]);
                         } else {
                             const baseUrl = window.__getApiOrigin ? window.__getApiOrigin() : (location.hostname === 'localhost' ? 'http://localhost:3000' : 'https://moodchat-fy56.onrender.com');
