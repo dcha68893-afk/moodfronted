@@ -272,14 +272,22 @@
         } catch (e) {}
     }
 
+    // FIX: TTL-based dedup (10s window) instead of a persistent Set.
+    // The old Set persisted across the page lifetime, so a message that arrived
+    // via the WS bridge AND via a separate socket listener was silently dropped
+    // on the second path. With a short TTL window we still stop visual duplicates
+    // but the Set resets automatically, preventing permanent suppression.
+    const _dedupTimestamps = new Map(); // messageId -> timestamp first seen
+    const DEDUP_TTL_MS = 10000; // 10 seconds is plenty to stop double-renders
     function isDuplicateMessage(messageId) {
         if (!messageId) return false;
-        if (processedMessageIds.has(messageId)) return true;
-        processedMessageIds.add(messageId);
-        
-        if (processedMessageIds.size > 1000) {
-            processedMessageIds.clear();
+        const now = Date.now();
+        // Purge stale entries
+        for (const [id, ts] of _dedupTimestamps) {
+            if (now - ts > DEDUP_TTL_MS) _dedupTimestamps.delete(id);
         }
+        if (_dedupTimestamps.has(messageId)) return true;
+        _dedupTimestamps.set(messageId, now);
         return false;
     }
     
@@ -2899,8 +2907,29 @@ try {
                 }
             }
             
-            if (this._activeConversation && message.conversationId === this._activeConversation.id) {
-                this._saveMessagesToCache();
+            // FIX BUG4 (history disappears): always persist to the message's own chatId
+            // key so messages for non-active chats survive a page reload.
+            // Old code only saved when conversationId matched the active chat,
+            // so background messages were never written to localStorage.
+            const _msgChatId = message.chatId || message.conversationId;
+            if (_msgChatId) {
+                if (this._activeConversation && String(_msgChatId) === String(this._activeConversation.id)) {
+                    // Active chat — save current _messages array (includes this new message)
+                    this._saveMessagesToCache(_msgChatId);
+                } else {
+                    // Background chat — load its existing cache, append, re-save
+                    try {
+                        const _bgKey = `${LOCAL_STORAGE_KEYS.MESSAGES_PREFIX}${_msgChatId}`;
+                        const _bgExisting = SafeStorage.getJSON(_bgKey, []);
+                        const _bgMsgs = Array.isArray(_bgExisting) ? _bgExisting : [];
+                        const _alreadyIn = _bgMsgs.some(m => m.id === message.id || (message.localId && m.id === message.localId));
+                        if (!_alreadyIn) {
+                            _bgMsgs.push(message);
+                            _bgMsgs.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
+                            SafeStorage.setJSON(_bgKey, _bgMsgs);
+                        }
+                    } catch (_e) {}
+                }
             }
             
             this._notifySubscribers();
@@ -5569,9 +5598,7 @@ try {
             const data = payload || {};
 
             if (normalizedType === 'new_message' || normalizedType === 'message:new' || normalizedType === 'newmessage') {
-                // ✅ FIX: data may be the raw payload (from wsService.on) or a wrapper
-                // { payload:{...}, source:'ws-bridge' } (from postMessage bridge).
-                // Unwrap one level if needed, then fall back to data itself.
+                // Unwrap one level if needed (postMessage bridge wraps in { payload, source })
                 const message = (data && data.payload && (data.payload.id || data.payload.chatId))
                     ? data.payload
                     : (data && data.data && (data.data.id || data.data.chatId))
@@ -5580,55 +5607,40 @@ try {
                 const chatId = String(
                     (message && (message.chatId || message.conversationId)) || ''
                 );
-                // ✅ FIX: Don't gate on message.id — server might not echo id back immediately.
-                // Gate only on chatId so we never silently drop a valid incoming message.
                 if (!message || !chatId) return;
 
-                // ✅ FIX 4: Guard against String(undefined) = "undefined" poisoning the local store.
                 const _safeId = message.id != null ? String(message.id) : null;
                 const _safeLocalId = message.localId != null ? String(message.localId) : null;
-                // Reject messages with no usable id to prevent corrupt dedup state.
-                // FIX: media messages (image/file/audio/video) legitimately have no text
-                // content so we must NOT gate on message.content — only gate on having no id.
-                const _hasMediaContent = ['image','video','audio','file','sticker'].includes(message.type);
-                if (!_safeId && !_safeLocalId && !message.content && !_hasMediaContent) return;
+
+                // FIX BUG2: Dedup guard — the same message can arrive via multiple paths
+                // (wsService.on bridge + REALTIME_EVENT postMessage). Without this, the
+                // receiver renders the bubble twice.
+                const _dedupKey = _safeId || _safeLocalId;
+                if (_dedupKey && isDuplicateMessage(_dedupKey)) return;
+
+                // FIX BUG3: Ensure senderId is always resolved so isSent/isReceived
+                // comparison in the UI template never falls back to undefined.
+                // Server sometimes sends sender object but omits flat senderId field.
+                if (!message.senderId && message.sender) {
+                    message.senderId = message.sender.id || message.sender.userId;
+                }
+                // Reject messages with no usable id to prevent corrupt dedup state
+                if (!_safeId && !_safeLocalId && !message.content) return;
 
                 let normalizedMessage = {
-                    id:          _safeId || _safeLocalId || ('tmp_' + Date.now()),
-                    serverId:    _safeId || null,
-                    localId:     _safeLocalId || null,
-                    // Text / emoji content
-                    content:     message.content || message.text || '',
-                    // FIX: preserve message type so the correct UI template is selected
-                    // (image/video/audio/file/sticker/text). Without this, all media
-                    // from the receiver side would fall back to the text template.
-                    type:        message.type || 'text',
-                    senderId:    message.senderId || message.sender?.id,
-                    sender:      message.sender || null,
-                    timestamp:   message.createdAt || message.timestamp || Date.now(),
-                    createdAt:   message.createdAt || message.timestamp || Date.now(),
-                    updatedAt:   message.updatedAt || message.createdAt || message.timestamp || Date.now(),
-                    status:      message.status || 'delivered',
+                    id:       _safeId || _safeLocalId || ('tmp_' + Date.now()),
+                    serverId: _safeId || null,
+                    localId:  _safeLocalId || null,
+                    content: message.content || message.text || '',
+                    type: message.type || 'text',
+                    senderId: message.senderId || message.sender?.id,
+                    sender: message.sender || null,
+                    timestamp: message.createdAt || message.timestamp || Date.now(),
+                    createdAt: message.createdAt || message.timestamp || Date.now(),
+                    status: message.status || 'delivered',
                     conversationId: chatId,
-                    chatId:      chatId,
-                    isLocalOnly: false,
-                    // FIX: media/file fields — required by image/audio/file/video UI templates
-                    fileName:    message.fileName   || message.file_name   || message.name   || null,
-                    fileSize:    message.fileSize   || message.file_size   || message.size   || null,
-                    mimeType:    message.mimeType   || message.mime_type   || message.fileType || null,
-                    duration:    message.duration   || null,
-                    caption:     message.caption    || null,
-                    thumbnail:   message.thumbnail  || message.thumbnailUrl || null,
-                    // FIX: reaction/reply/forward fields
-                    reactions:   message.reactions  || {},
-                    replyToId:   message.replyToId  || message.reply_to_id || null,
-                    replyTo:     message.replyTo    || message.messageParent || null,
-                    forwarded:   message.forwarded  || false,
-                    // FIX: keep full metadata/attachment blob so nothing is lost
-                    metadata:    message.metadata   || {},
-                    attachment:  message.attachment || message.media || null,
-                    // Media attachments array from server join
-                    messageMediaAttachments: message.messageMediaAttachments || message.attachments || [],
+                    chatId: chatId,
+                    isLocalOnly: false
                 };
 
                 if (window.KynectaSyncEngine?.ingestIncomingMessage) {

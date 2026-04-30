@@ -3677,25 +3677,13 @@ window.__CALLS_IFRAME__ = {
             }
         });
 
-        // ── FIX: Only reload on SW update when NO call is active.
-        // Reloading mid-call destroys the WebRTC peer connection and clears
-        // all in-memory state — causing the "call disappears" / no-audio bug.
+        // ── FIX: NEVER reload calls.html on SW controller change.
+        // The SW cycles rapidly on first load (install → activate → controllerchange).
+        // Each reload was destroying the in-memory call state, WebRTC peer connection,
+        // and UIState — causing "calling screen disappears" and no in-call screen.
+        // calls.html gets fresh JS via network-first SW caching already.
         navigator.serviceWorker.addEventListener('controllerchange', function() {
-            const callActive = window.__callActive ||
-                (window.KynectaCallSession && window.KynectaCallSession.isActive) ||
-                (window.UIState && window.UIState.callActive) ||
-                (window.callCore && window.callCore.isCallActive && window.callCore.isCallActive());
-            if (callActive) {
-                console.log('[calls.html] SW controller changed — call active, reload deferred until call ends');
-                // Defer reload until call ends
-                window.addEventListener('callEnded', function onEnd() {
-                    window.removeEventListener('callEnded', onEnd);
-                    window.location.reload();
-                }, { once: true });
-                return;
-            }
-            console.log('[calls.html] SW controller changed — reloading (no active call)');
-            window.location.reload();
+            console.log('[calls.html] SW controller changed — reload suppressed to protect call state');
         });
     })();
     </script>

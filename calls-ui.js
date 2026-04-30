@@ -407,6 +407,8 @@ const GlobalCallHistory = {
         UIState.callType = callType;
         UIState.callActive = true;
         UIState.callState = 'calling';
+        // ── Store participants so CALL_ACCEPTED can resolve the peer name ──
+        UIState.callParticipants = [{ name: userName, userId: userId }];
         
     } catch (error) {
         console.error('[Calls UI] Call initiation error:', error);
@@ -5188,17 +5190,27 @@ case 'CALL_INITIATED':
                         this.handleAuthError();
                         break;
                         case 'call_accepted':
-case 'CALL_ACCEPTED':
-    // Receiver answered - transition to in-call screen
-    console.log('[Calls UI] Call accepted, transitioning to in-call');
+case 'CALL_ACCEPTED': {
+    // Receiver answered — transition caller to in-call screen
+    console.log('[Calls UI] CALL_ACCEPTED received — transitioning to in-call screen');
     UIState.callStartTime = Date.now();
     UIState.callActive = true;
     UIState.callState = 'connected';
-    transitionToInCall({
-        userName: UIState.callParticipants?.[0]?.name || 'User',
-        callType: UIState.callType || 'voice'
-    });
+    // Resolve peer name: callParticipants (set during startCall), or pendingCallUser, or payload
+    const _acceptPayload = data.payload || {};
+    const _peerName = (UIState.callParticipants && UIState.callParticipants[0] && UIState.callParticipants[0].name)
+        || (UIState.pendingCallUser && UIState.pendingCallUser.userName)
+        || _acceptPayload.callerName
+        || _acceptPayload.userName
+        || 'User';
+    const _peerType = UIState.callType || _acceptPayload.callType || 'voice';
+    const _peerAvatar = (UIState.pendingCallUser && UIState.pendingCallUser.userAvatar) || null;
+    // Stop the ringing timer
+    if (window._currentCallTimer) { clearInterval(window._currentCallTimer); window._currentCallTimer = null; }
+    if (window._callRingTimer) { clearInterval(window._callRingTimer); window._callRingTimer = null; }
+    transitionToInCall({ userName: _peerName, callType: _peerType, userAvatar: _peerAvatar });
     break;
+}
                     case 'CALL_INCOMING': {
                         const _incomingPayload = data.payload || {};
                         // Store so late-arriving callCore listeners can still pick it up
