@@ -272,23 +272,42 @@
         } catch (e) {}
     }
 
-    // FIX: TTL-based dedup (10s window) instead of a persistent Set.
-    // The old Set persisted across the page lifetime, so a message that arrived
-    // via the WS bridge AND via a separate socket listener was silently dropped
-    // on the second path. With a short TTL window we still stop visual duplicates
-    // but the Set resets automatically, preventing permanent suppression.
-    const _dedupTimestamps = new Map(); // messageId -> timestamp first seen
-    const DEDUP_TTL_MS = 10000; // 10 seconds is plenty to stop double-renders
-    function isDuplicateMessage(messageId) {
-        if (!messageId) return false;
+    // ── Dual-path deduplication ────────────────────────────────────────────────
+    // Two separate dedup maps so receiver-side dedup and sender-echo dedup never
+    // cross-contaminate each other.
+    //
+    // _echoDedup  — tracks messages we SENT ourselves (server echo path).
+    //               10-second TTL so optimistic->confirmed transitions work.
+    // _recvDedup  — tracks messages we RECEIVED from others.
+    //               2-second TTL — just enough to collapse the 4x duplicate
+    //               postMessages that arrive per event (message:new x2 from
+    //               wsService.on bridge + kyn:* bridge, each as both message:new
+    //               and new_message) without swallowing a real second message.
+    const _echoDedup = new Map(); // localId/serverId -> timestamp (own messages)
+    const _recvDedup = new Map(); // serverId -> timestamp (others' messages)
+    const ECHO_TTL_MS = 10000;   // 10s for own-message echo collapse
+    const RECV_TTL_MS = 2000;    // 2s for received-message duplicate collapse
+
+    function _purgeTTL(map, ttl) {
         const now = Date.now();
-        // Purge stale entries
-        for (const [id, ts] of _dedupTimestamps) {
-            if (now - ts > DEDUP_TTL_MS) _dedupTimestamps.delete(id);
+        for (const [id, ts] of map) {
+            if (now - ts > ttl) map.delete(id);
         }
-        if (_dedupTimestamps.has(messageId)) return true;
-        _dedupTimestamps.set(messageId, now);
-        return false;
+    }
+
+    function isDuplicateMessage(messageId, isOwnMessage) {
+        if (!messageId) return false;
+        if (isOwnMessage) {
+            _purgeTTL(_echoDedup, ECHO_TTL_MS);
+            if (_echoDedup.has(messageId)) return true;
+            _echoDedup.set(messageId, Date.now());
+            return false;
+        } else {
+            _purgeTTL(_recvDedup, RECV_TTL_MS);
+            if (_recvDedup.has(messageId)) return true;
+            _recvDedup.set(messageId, Date.now());
+            return false;
+        }
     }
     
     function isDuplicateSentMessage(messageId) {
@@ -4273,12 +4292,37 @@ try {
 
                     let realUserName = options.name;
                     let realUserAvatar = null;
-                    
+
+                    // ── Step 1: check FriendManager (friends list) ────────────
                     if (window.MessagesCore && window.MessagesCore.FriendManager) {
                         const friend = window.MessagesCore.FriendManager.getFriend(numericReceiverId);
                         if (friend) {
                             realUserName = friend.displayName || friend.username || friend.name || options.name;
                             realUserAvatar = friend.avatar || friend.photoURL || null;
+                        }
+                    }
+
+                    // ── Step 2: check existing conversations for participant info ─
+                    // This covers non-friend users who already have a conversation
+                    if (!realUserName || realUserName === `User_${numericReceiverId}`) {
+                        const convWithUser = ChatManager.getConversations().find(c => {
+                            if (c.friendId === numericReceiverId) return true;
+                            if (c.otherParticipant?.id === numericReceiverId) return true;
+                            if (Array.isArray(c.participants)) {
+                                return c.participants.some(p => (p.id || p) === numericReceiverId);
+                            }
+                            return false;
+                        });
+                        if (convWithUser) {
+                            const p = convWithUser.otherParticipant ||
+                                (convWithUser.participants && convWithUser.participants.find(p => p.id === numericReceiverId));
+                            if (p) {
+                                realUserName = p.displayName || p.username || p.firstName || convWithUser.friendName || options.name;
+                                realUserAvatar = p.avatar || convWithUser.friendAvatar || null;
+                            } else if (convWithUser.friendName) {
+                                realUserName = convWithUser.friendName;
+                                realUserAvatar = convWithUser.friendAvatar || null;
+                            }
                         }
                     }
                     
@@ -5629,7 +5673,7 @@ try {
                 const _msgSenderId = message.senderId || message.sender?.id || message.sender?.userId;
                 const _isOwnMessage = _myUserId && _msgSenderId && String(_msgSenderId) === String(_myUserId);
                 const _dedupKey = _safeId || _safeLocalId;
-                if (_dedupKey && _isOwnMessage && isDuplicateMessage(_dedupKey)) return;
+                if (_dedupKey && isDuplicateMessage(_dedupKey, !!_isOwnMessage)) return;
 
                 // FIX BUG3: Ensure senderId is always resolved so isSent/isReceived
                 // comparison in the UI template never falls back to undefined.

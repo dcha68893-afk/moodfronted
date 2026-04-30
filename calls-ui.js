@@ -90,6 +90,13 @@ function showCallingScreenViaPatch(callInfo) {
     window.__callActive     = true;
     document.body.classList.add('call-active');
 
+    // Fix 4: Persist peer info durably so CALL_ACCEPTED survives a force_ended wipe
+    window.__activePeerName   = callInfo.userName   || null;
+    window.__activePeerType   = callInfo.callType   || 'voice';
+    window.__activePeerAvatar = callInfo.userAvatar || null;
+    // Reset accept dedup so this new call can be handled
+    window.__callAcceptedHandled = 0;
+
     // ── PRIMARY: Use CallOverlayManager fullscreen overlay ──
     if (window.CallOverlayManager) {
         const fName   = document.getElementById('floatingName');
@@ -534,6 +541,11 @@ const GlobalCallHistory = {
     UIState.callActive = true;
     UIState.callState  = 'calling';
     window.__callActive = true;
+    // Fix 4: Persist peer info durably
+    window.__activePeerName   = callInfo.userName   || window.__activePeerName   || null;
+    window.__activePeerType   = callInfo.callType   || window.__activePeerType   || 'voice';
+    window.__activePeerAvatar = callInfo.userAvatar || window.__activePeerAvatar || null;
+    window.__callAcceptedHandled = 0; // reset dedup for this new call
 
     console.log('[Calls UI] Calling screen setup complete');
 }
@@ -609,12 +621,32 @@ function transitionToInCall(callInfo) {
     if (window._callRingTimer) { clearInterval(window._callRingTimer); window._callRingTimer = null; }
     if (window._receiverShowFallback) { clearTimeout(window._receiverShowFallback); window._receiverShowFallback = null; }
 
+    // ── Always stop ringtones ─────────────────────────────────────────────
+    if (window._incomingRingtone) {
+        try { window._incomingRingtone.pause(); window._incomingRingtone.currentTime = 0; } catch(e) {}
+        window._incomingRingtone = null;
+    }
+    if (window._callerRingtone) {
+        try { window._callerRingtone.pause(); window._callerRingtone.currentTime = 0; } catch(e) {}
+        window._callerRingtone = null;
+    }
+    if (window._outgoingRingTimer) { clearInterval(window._outgoingRingTimer); window._outgoingRingTimer = null; }
+
     if (window.CallOverlayManager) window.CallOverlayManager.answerCall(callInfo);
 
-    // ── Hide calling screen + incoming modal, show in-call screen ────────
+    // ── Hide calling screen + incoming modal — be aggressive about the modal ─
     ['callingScreen', 'incomingCallModal'].forEach(id => {
         const el = document.getElementById(id);
-        if (el) { el.classList.remove('active'); el.style.setProperty('display', 'none', 'important'); }
+        if (el) {
+            // Clear any countdown timer stored on the modal
+            if (el.dataset && el.dataset.timer) { clearInterval(parseInt(el.dataset.timer)); el.dataset.timer = ''; }
+            el.classList.remove('active');
+            el.style.setProperty('display', 'none', 'important');
+            // Belt-and-suspenders: override z-index so it can't sit on top
+            el.style.setProperty('z-index', '-1', 'important');
+            el.style.setProperty('pointer-events', 'none', 'important');
+            el.style.setProperty('visibility', 'hidden', 'important');
+        }
     });
 
     const inCallScreen = document.getElementById('inCallScreen');
@@ -2269,6 +2301,11 @@ async function initiateCallWithPendingUser() {
                 UIState.activeCallId = result.callId;
                 UIState.callParticipants = [{ name: userName, userId: userId }];
                 UIState.pendingCallUser = { userName, userId, callType, userAvatar: null };
+                // Fix 4: Persist peer info in durable window globals so CALL_ACCEPTED can
+                // recover them even if a race-condition call_force_ended wiped UIState first.
+                window.__activePeerName = userName;
+                window.__activePeerType = callType;
+                window.__activePeerAvatar = null;
                 showNotification(`${callType === 'video' ? 'Video call' : 'Voice call'} started with ${userName}`, 'success');
                 clearPendingCall();
                 
@@ -4822,13 +4859,25 @@ case 'CALL_INITIATED':
             // Clear the receiver-show fallback if it was set (receiver side)
             if (window._receiverShowFallback) { clearTimeout(window._receiverShowFallback); window._receiverShowFallback = null; }
 
+            // ── Stop ringtones immediately ────────────────────────────────────
+            if (window._incomingRingtone) {
+                try { window._incomingRingtone.pause(); window._incomingRingtone.currentTime = 0; } catch(e) {}
+                window._incomingRingtone = null;
+            }
+            if (window._callerRingtone) {
+                try { window._callerRingtone.pause(); window._callerRingtone.currentTime = 0; } catch(e) {}
+                window._callerRingtone = null;
+            }
+            if (window._outgoingRingTimer) { clearInterval(window._outgoingRingTimer); window._outgoingRingTimer = null; }
+
             UIState.callStartTime = UIState.callStartTime || Date.now();
             UIState.callActive    = true;
             UIState.callState     = 'connected';
 
             const name = (callData && (callData.callerName || callData.userName || callData.receiverName || callData.calleeName))
+                || window.__activePeerName
                 || (UIState.callParticipants && UIState.callParticipants[0] && UIState.callParticipants[0].name) || 'User';
-            const type = (callData && callData.callType) || UIState.callType || 'voice';
+            const type = (callData && callData.callType) || window.__activePeerType || UIState.callType || 'voice';
 
             transitionToInCall({ userName: name, callType: type });
         },
@@ -4862,6 +4911,11 @@ case 'CALL_INITIATED':
         handleCallEnded: function(callData) {
             // ── FIX: Immediately restore parent layout + reset to idle screen ──
             window.__callActive = false;
+            // Clear the CALL_ACCEPTED dedup lock and peer globals so next call works
+            window.__callAcceptedHandled = 0;
+            window.__activePeerName   = null;
+            window.__activePeerType   = null;
+            window.__activePeerAvatar = null;
             if (window.parent && window.parent !== window) {
                 window.parent.postMessage({ type: 'CALL_SCREEN_ACTIVE', payload: { active: false } }, '*');
             }
@@ -5197,20 +5251,53 @@ case 'CALL_INITIATED':
                         case 'call_accepted':
 case 'CALL_ACCEPTED': {
     // Receiver answered — transition caller to in-call screen
+    // ── Dedup: ignore if we already transitioned to in-call ──────────────
+    if (window.__callAcceptedHandled && (Date.now() - window.__callAcceptedHandled) < 5000) {
+        console.log('[Calls UI] ⏭ CALL_ACCEPTED dedup — already handled');
+        break;
+    }
+    window.__callAcceptedHandled = Date.now();
     console.log('[Calls UI] ✅ CALL_ACCEPTED received — transitioning caller to in-call screen');
+
     const _ap = data.payload || {};
-    // Resolve peer name from every possible storage location
-    const _peerName = (UIState.callParticipants && UIState.callParticipants[0] && UIState.callParticipants[0].name)
-        || (UIState.pendingCallUser && UIState.pendingCallUser.userName)
-        || _ap.callerName || _ap.userName || _ap.name || 'User';
-    const _peerType  = UIState.callType || _ap.callType || 'voice';
-    const _peerAva   = (UIState.pendingCallUser && UIState.pendingCallUser.userAvatar) || null;
-    // Stop ring timer
+
+    // ── ALWAYS stop ringtones immediately ────────────────────────────────
+    if (window._incomingRingtone) {
+        try { window._incomingRingtone.pause(); window._incomingRingtone.currentTime = 0; } catch(e) {}
+        window._incomingRingtone = null;
+    }
+    if (window._callerRingtone) {
+        try { window._callerRingtone.pause(); window._callerRingtone.currentTime = 0; } catch(e) {}
+        window._callerRingtone = null;
+    }
+    // Stop ring timers
     if (window._currentCallTimer) { clearInterval(window._currentCallTimer); window._currentCallTimer = null; }
     if (window._callRingTimer)    { clearInterval(window._callRingTimer);    window._callRingTimer    = null; }
-    UIState.callStartTime = Date.now();
+    if (window._outgoingRingTimer){ clearInterval(window._outgoingRingTimer);window._outgoingRingTimer= null; }
+    // Stop incomingCallModal timer if still running (receiver side)
+    const _im = document.getElementById('incomingCallModal');
+    if (_im && _im.dataset.timer) { clearInterval(parseInt(_im.dataset.timer)); _im.dataset.timer = ''; }
+
+    // ── Resolve peer name: use window globals first (survive force_ended wipe) ─
+    const _peerName = window.__activePeerName
+        || (UIState.callParticipants && UIState.callParticipants[0] && UIState.callParticipants[0].name)
+        || (UIState.pendingCallUser && UIState.pendingCallUser.userName)
+        || _ap.callerName || _ap.userName || _ap.name || 'User';
+    const _peerType = window.__activePeerType
+        || UIState.callType || _ap.callType || 'voice';
+    const _peerAva  = window.__activePeerAvatar
+        || (UIState.pendingCallUser && UIState.pendingCallUser.userAvatar) || null;
+
+    // ── Restore UIState in case a stale call_force_ended wiped it ────────
     UIState.callActive    = true;
     UIState.callState     = 'connected';
+    UIState.callStartTime = UIState.callStartTime || Date.now();
+    window.__callActive   = true;
+    document.body.classList.add('call-active');
+
+    // ── Dismiss incoming call modal on receiver side ──────────────────────
+    if (_im) { _im.classList.remove('active'); _im.style.setProperty('display','none','important'); }
+
     transitionToInCall({ userName: _peerName, callType: _peerType, userAvatar: _peerAva });
     break;
 }
@@ -5283,11 +5370,35 @@ case 'CALL_ACCEPTED': {
                     case 'CALL_FORCE_ENDED':
                     case 'parent-end-broadcast':
                     case 'CALL_REJECTED': {
+                        // ── ALWAYS stop ringtones immediately, regardless of state ──
+                        if (window._incomingRingtone) {
+                            try { window._incomingRingtone.pause(); window._incomingRingtone.currentTime = 0; } catch(e) {}
+                            window._incomingRingtone = null;
+                        }
+                        if (window._callerRingtone) {
+                            try { window._callerRingtone.pause(); window._callerRingtone.currentTime = 0; } catch(e) {}
+                            window._callerRingtone = null;
+                        }
+                        // ── If CALL_FORCE_ENDED arrives but we just transitioned to in-call,
+                        // it's a stale WS echo — ignore the UI reset, only stop ringtone ──
+                        const _isAlreadyInCall = UIState.callState === 'connected'
+                            || (document.getElementById('inCallScreen') && document.getElementById('inCallScreen').classList.contains('active'));
+                        if (data.type === 'CALL_FORCE_ENDED' && _isAlreadyInCall) {
+                            console.warn('[Calls UI] CALL_FORCE_ENDED ignored — already in-call screen active');
+                            if (window._currentCallTimer) { clearInterval(window._currentCallTimer); window._currentCallTimer = null; }
+                            if (window._receiverShowFallback) { clearTimeout(window._receiverShowFallback); window._receiverShowFallback = null; }
+                            break;
+                        }
                         // Parent broadcast CALL_ENDED to this iframe — reset UI immediately
-                        // This fires on BOTH caller and receiver sides when either ends the call.
                         console.log('[Calls UI] CALL_ENDED received from parent — resetting UI');
                         if (window._currentCallTimer) { clearInterval(window._currentCallTimer); window._currentCallTimer = null; }
                         if (window._receiverShowFallback) { clearTimeout(window._receiverShowFallback); window._receiverShowFallback = null; }
+                        // Clear the accept dedup lock so next call works
+                        window.__callAcceptedHandled = 0;
+                        // Clear window globals for peer info
+                        window.__activePeerName = null;
+                        window.__activePeerType = null;
+                        window.__activePeerAvatar = null;
                         UIEventHandlers.handleCallEnded && UIEventHandlers.handleCallEnded(data.payload || {});
                         break;
                     }
@@ -5329,12 +5440,25 @@ case 'CALL_ACCEPTED': {
                         break;
                     case 'CALL_FORCE_ENDED':
                         // Backend cleaned up a stale call — reset all frontend state
+                        // BUT skip if we already transitioned to in-call (stale WS echo)
+                        if (UIState.callState === 'connected' ||
+                            (document.getElementById('inCallScreen') && document.getElementById('inCallScreen').classList.contains('active'))) {
+                            console.warn('[Calls UI] CALL_FORCE_ENDED (2nd handler) ignored — already in-call');
+                            break;
+                        }
                         console.warn('[Calls UI] CALL_FORCE_ENDED received — resetting state');
+                        // Always stop ringtones
+                        if (window._incomingRingtone) { try { window._incomingRingtone.pause(); window._incomingRingtone.currentTime = 0; } catch(e) {} window._incomingRingtone = null; }
+                        if (window._callerRingtone)   { try { window._callerRingtone.pause();   window._callerRingtone.currentTime   = 0; } catch(e) {} window._callerRingtone   = null; }
                         if (coreInstance && coreInstance.forceResetCallState) coreInstance.forceResetCallState();
                         UIEventHandlers.resetCallUI && UIEventHandlers.resetCallUI();
                         // Also clear dedup locks so next call works immediately
                         if (window.__uiCallDispatchLock) window.__uiCallDispatchLock = { ts: 0, userId: null };
                         if (window.__earlyCallLock) window.__earlyCallLock = { ts: 0, userId: null };
+                        window.__callAcceptedHandled = 0;
+                        window.__activePeerName = null;
+                        window.__activePeerType = null;
+                        window.__activePeerAvatar = null;
                         break;
                 }
             };

@@ -11707,7 +11707,39 @@ Type: ${message.type || 'text'}`;
 
                     const friends = coreInstance.getFriends ? coreInstance.getFriends() : [];
 
-                    const friend = friends.find(f => f.id === id);
+                    let friend = friends.find(f => String(f.id) === String(id));
+
+                    // ── Non-friend fallback: resolve user info from conversation participants ──
+                    // Users who are not in the friends list still appear in conversation.participants
+                    // or conversation.otherParticipant from the backend response.
+                    if (!friend) {
+                        const conversations = coreInstance.getConversations ? coreInstance.getConversations() : [];
+                        const convForUser = conversations.find(c => {
+                            if (String(c.friendId) === String(id)) return true;
+                            if (c.otherParticipant && String(c.otherParticipant.id) === String(id)) return true;
+                            if (Array.isArray(c.participants)) return c.participants.some(p => String(p.id || p) === String(id));
+                            return false;
+                        });
+                        if (convForUser) {
+                            const p = convForUser.otherParticipant ||
+                                (Array.isArray(convForUser.participants) && convForUser.participants.find(p => String(p.id) === String(id)));
+                            if (p) {
+                                friend = {
+                                    id,
+                                    displayName: p.displayName || p.username || p.firstName || convForUser.friendName || displayName,
+                                    avatar: p.avatar || convForUser.friendAvatar || null,
+                                    online: p.status === 'online' || convForUser.online || false
+                                };
+                            } else if (convForUser.friendName) {
+                                friend = {
+                                    id,
+                                    displayName: convForUser.friendName,
+                                    avatar: convForUser.friendAvatar || null,
+                                    online: convForUser.online || false
+                                };
+                            }
+                        }
+                    }
 
                     if (friend) {
 

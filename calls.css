@@ -4309,3 +4309,20 @@ body.call-active #idleScreen {
     .incall-end-btn      { width: 58px;  height: 58px;  font-size: 21px; }
     .incall-controls-bar { gap: 10px; padding: 14px 12px 30px; }
 }
+/* ── CALL PANEL (incomingCallModal) HIDE FIX ─────────────────────────────────
+   When the in-call screen becomes active the incoming modal MUST be fully gone.
+   The JS sets inline visibility:hidden + z-index:-1 but this CSS ensures the
+   browser doesn't override those with the .active rule.                       */
+#incomingCallModal:not(.active) {
+    display: none !important;
+    visibility: hidden !important;
+    pointer-events: none !important;
+    z-index: -1 !important;
+}
+
+/* ── IN-CALL SCREEN always sits above incoming modal (z-index race guard) ── */
+#inCallScreen.active {
+    z-index: 1100 !important;
+    display: flex !important;
+    visibility: visible !important;
+}
