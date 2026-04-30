@@ -7146,28 +7146,27 @@ acceptIncomingCallGeneric: async function(asVideo) {
     }
 
     if (accepted) {
-        // ── FIX: Do NOT immediately show in-call screen here.
-        // The WebRTC offer from the caller will arrive shortly via the signalling server.
-        // Once WebRTC negotiation completes, calls-core fires 'call_connected' or
-        // 'call_accepted' which triggers handleCallConnected / handleCallAccepted →
-        // transitionToInCall. Showing the screen here early caused the callState guard
-        // in handleSignalOffer to drop the offer and self-end the call.
-        //
-        // Set state so the guard allows the offer through:
+        // Set call state so WebRTC guards allow the offer through
         UIState.callActive    = true;
         UIState.callState     = 'connected';
         UIState.activeCallId  = callId;
         UIState.callType      = callType;
-        // Store caller info for transitionToInCall when it fires:
+        UIState.callStartTime = Date.now();
+        // Store caller info for transitionToInCall
         if (!UIState.callParticipants || UIState.callParticipants.length === 0) {
             UIState.callParticipants = [{ name: callerName }];
         }
-        // Dismiss modals right away
+        // Dismiss incoming modal immediately
         const incomingModal = document.getElementById('incomingCallModal');
         if (incomingModal) {
             incomingModal.classList.remove('active');
             incomingModal.style.setProperty('display', 'none', 'important');
         }
+        // ── SHOW IN-CALL SCREEN IMMEDIATELY on receiver side ──
+        // The receiver should see the in-call fullscreen right away (like WhatsApp).
+        // WebRTC audio will connect in the background — it doesn't block the UI.
+        transitionToInCall({ userName: callerName, callType });
+
         // Notify parent the call is active (hides banner, marks call in progress)
         if (window.parent && window.parent !== window) {
             window.parent.postMessage({
@@ -7175,14 +7174,6 @@ acceptIncomingCallGeneric: async function(asVideo) {
                 payload: { callId, callerName, callType }
             }, '*');
         }
-        // Fallback: if core never fires call_connected within 4 s, show in-call anyway
-        window._receiverShowFallback = setTimeout(() => {
-            const inCall = document.getElementById('inCallScreen');
-            if (!inCall || !inCall.classList.contains('active')) {
-                console.warn('[UI] Fallback: showing in-call screen for receiver');
-                transitionToInCall({ userName: callerName, callType });
-            }
-        }, 4000);
     }
 },
 

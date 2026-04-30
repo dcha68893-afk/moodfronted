@@ -3520,18 +3520,21 @@ body.call-active #idleScreen {
     display: flex !important;
 }
 
-/* ── Outgoing calling screen (inside call-container) ── */
+/* ── Outgoing calling screen: FIXED fullscreen overlay (same as incoming) ── */
 #callingScreen {
-    position: absolute;
-    inset: 0;
-    z-index: 100;
-    display: none;
-    align-items: center;
-    justify-content: center;
-    overflow: hidden;
+    position: fixed !important;
+    inset: 0 !important;
+    z-index: 999999 !important;
+    display: none !important;
+    flex-direction: column !important;
+    align-items: center !important;
+    justify-content: center !important;
+    overflow: hidden !important;
 }
 #callingScreen.active {
     display: flex !important;
+    visibility: visible !important;
+    opacity: 1 !important;
 }
 
 /* ── Shared dark gradient background ── */

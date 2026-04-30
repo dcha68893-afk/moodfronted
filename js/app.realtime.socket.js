@@ -977,14 +977,21 @@
                     this._registeredSocketListeners.add(eventType);
 
                     this._socket.on(eventType, (payload) => {
-                        const msg = (payload && typeof payload === 'object' && payload.type)
-                            ? payload
-                            : { type: eventType, payload: payload || {} };
+                        // FIX: Always use eventType (e.g. 'message:new') as the routing key.
+                        // The old code used payload.type when present — but for chat messages
+                        // payload.type is the CONTENT type ('text', 'audio', 'image'), NOT
+                        // the socket event name. This caused _routeMessage to route under 'text'
+                        // instead of 'message:new', so the wildcard sent REALTIME_EVENT:text
+                        // to iframes — which messages-core.js has no listener for.
+                        const msg = {
+                            type: eventType,
+                            payload: (payload && typeof payload === 'object') ? payload : { data: payload }
+                        };
 
                         this._routeMessage(msg);
 
                         if (window.KynectaEventBus) {
-                            window.KynectaEventBus.emit(`REALTIME_${eventType}`, msg.payload || payload, { async: true });
+                            window.KynectaEventBus.emit(`REALTIME_${eventType}`, payload, { async: true });
                         }
                     });
                 });
@@ -1116,7 +1123,6 @@
                 const { type, payload } = evt.data;
                 if (type && type.startsWith('REALTIME_EVENT:')) {
                     const eventType = type.replace('REALTIME_EVENT:', '');
-                    if (!eventType) return; // skip stale REALTIME_EVENT:undefined messages
                     const msg = { type: eventType, payload: payload || {} };
                     realtimeManager._routeMessage(msg);
                     if (window.KynectaEventBus) {
@@ -1155,19 +1161,12 @@
     // the parent socket, we forward it to each iframe so their KynectaRealtime
     // instances can dispatch it to local listeners (.on() handlers).
     if (!_isInIframe) {
-        // FIX: _routeMessage calls wildcard handlers as handler(message.payload, message).
-        // The old code only accepted one argument and read .type from it — but that first
-        // argument IS the payload, not the full message, so .type was always undefined.
-        // Every iframe therefore received `REALTIME_EVENT:undefined` instead of e.g.
-        // `REALTIME_EVENT:message:new`, causing the receiver to silently drop all messages.
-        realtimeManager.on('*', function (payload, fullMsg) {
+        realtimeManager.on('*', function (msg) {
             try {
-                const eventType = (fullMsg && fullMsg.type) || (payload && payload.type) || '';
-                if (!eventType) return; // guard: nothing to forward if type is missing
                 const iframes = document.querySelectorAll('iframe');
                 const eventMsg = {
-                    type: `REALTIME_EVENT:${eventType}`,
-                    payload: (fullMsg && fullMsg.payload != null ? fullMsg.payload : payload) || {}
+                    type: `REALTIME_EVENT:${msg.type}`,
+                    payload: msg.payload || msg
                 };
                 iframes.forEach(function (frame) {
                     try { frame.contentWindow.postMessage(eventMsg, '*'); } catch (_) {}

@@ -5587,23 +5587,48 @@ try {
                 // ✅ FIX 4: Guard against String(undefined) = "undefined" poisoning the local store.
                 const _safeId = message.id != null ? String(message.id) : null;
                 const _safeLocalId = message.localId != null ? String(message.localId) : null;
-                // Reject messages with no usable id to prevent corrupt dedup state
-                if (!_safeId && !_safeLocalId && !message.content) return;
+                // Reject messages with no usable id to prevent corrupt dedup state.
+                // FIX: media messages (image/file/audio/video) legitimately have no text
+                // content so we must NOT gate on message.content — only gate on having no id.
+                const _hasMediaContent = ['image','video','audio','file','sticker'].includes(message.type);
+                if (!_safeId && !_safeLocalId && !message.content && !_hasMediaContent) return;
 
                 let normalizedMessage = {
-                    id:       _safeId || _safeLocalId || ('tmp_' + Date.now()),
-                    serverId: _safeId || null,
-                    localId:  _safeLocalId || null,
-                    content: message.content || message.text || '',
-                    type: message.type || 'text',
-                    senderId: message.senderId || message.sender?.id,
-                    sender: message.sender || null,
-                    timestamp: message.createdAt || message.timestamp || Date.now(),
-                    createdAt: message.createdAt || message.timestamp || Date.now(),
-                    status: message.status || 'delivered',
+                    id:          _safeId || _safeLocalId || ('tmp_' + Date.now()),
+                    serverId:    _safeId || null,
+                    localId:     _safeLocalId || null,
+                    // Text / emoji content
+                    content:     message.content || message.text || '',
+                    // FIX: preserve message type so the correct UI template is selected
+                    // (image/video/audio/file/sticker/text). Without this, all media
+                    // from the receiver side would fall back to the text template.
+                    type:        message.type || 'text',
+                    senderId:    message.senderId || message.sender?.id,
+                    sender:      message.sender || null,
+                    timestamp:   message.createdAt || message.timestamp || Date.now(),
+                    createdAt:   message.createdAt || message.timestamp || Date.now(),
+                    updatedAt:   message.updatedAt || message.createdAt || message.timestamp || Date.now(),
+                    status:      message.status || 'delivered',
                     conversationId: chatId,
-                    chatId: chatId,
-                    isLocalOnly: false
+                    chatId:      chatId,
+                    isLocalOnly: false,
+                    // FIX: media/file fields — required by image/audio/file/video UI templates
+                    fileName:    message.fileName   || message.file_name   || message.name   || null,
+                    fileSize:    message.fileSize   || message.file_size   || message.size   || null,
+                    mimeType:    message.mimeType   || message.mime_type   || message.fileType || null,
+                    duration:    message.duration   || null,
+                    caption:     message.caption    || null,
+                    thumbnail:   message.thumbnail  || message.thumbnailUrl || null,
+                    // FIX: reaction/reply/forward fields
+                    reactions:   message.reactions  || {},
+                    replyToId:   message.replyToId  || message.reply_to_id || null,
+                    replyTo:     message.replyTo    || message.messageParent || null,
+                    forwarded:   message.forwarded  || false,
+                    // FIX: keep full metadata/attachment blob so nothing is lost
+                    metadata:    message.metadata   || {},
+                    attachment:  message.attachment || message.media || null,
+                    // Media attachments array from server join
+                    messageMediaAttachments: message.messageMediaAttachments || message.attachments || [],
                 };
 
                 if (window.KynectaSyncEngine?.ingestIncomingMessage) {
@@ -5702,59 +5727,20 @@ try {
         // ✅ FIX: Also bind to KynectaRealtime singleton if available now or when it becomes ready.
         // messages-core previously ONLY checked window.wsService which is the legacy shim.
         // The hardened manager exposes window.KynectaRealtime.on() — we must bind to it too.
-        //
-        // FIX (race condition): The old version silently returned if KynectaRealtime wasn't
-        // ready yet, meaning the receiver NEVER got realtime messages when core loaded first.
-        // New version polls every 500ms for up to 30 seconds, then falls back gracefully.
         function _bindKynectaRealtime() {
             const rt = window.KynectaRealtime;
-
-            // Not available yet — schedule a retry instead of silently giving up
-            if (!rt || !rt.on) {
-                _bindKynectaRealtime._tries = (_bindKynectaRealtime._tries || 0) + 1;
-                if (_bindKynectaRealtime._tries <= 60) { // 60 × 500ms = 30 seconds
-                    setTimeout(_bindKynectaRealtime, 500);
-                } else {
-                    console.warn(
-                        '[messages] ⚠️ KynectaRealtime never became available after 30s.' +
-                        ' Receiver will not get realtime messages until page reload.' +
-                        ' Ensure KynectaRealtime is initialised and window.kyn:realtimeReady is dispatched.'
-                    );
-                }
-                return;
-            }
-
-            // Already bound — skip
-            if (rt.__msgCoreBound) return;
+            if (!rt || !rt.on || rt.__msgCoreBound) return;
             rt.__msgCoreBound = true;
-            _bindKynectaRealtime._tries = 0; // reset so future re-connections can re-bind
-
-            const REALTIME_EVENTS = [
-                'message:new', 'new_message', 'chat:message',
-                'MESSAGE_RECEIVED', 'message:delivered', 'message:read'
-            ];
-            REALTIME_EVENTS.forEach((eventName) => {
+            ['message:new', 'new_message', 'chat:message', 'MESSAGE_RECEIVED',
+             'message:delivered', 'message:read'].forEach((eventName) => {
                 rt.on(eventName, (payload) => {
                     handleRealtimePayload(eventName, payload);
                 });
             });
             console.log('[messages] ✅ Bound to KynectaRealtime singleton events');
-
-            // When the realtime connection drops and reconnects, re-bind on the new instance
-            // (some implementations create a fresh object on reconnect)
-            rt.on('disconnect', () => {
-                rt.__msgCoreBound = false;
-                _bindKynectaRealtime._tries = 0;
-            });
         }
         _bindKynectaRealtime();
-        // Also re-run when the app explicitly signals realtime is ready (e.g. after auth)
-        window.addEventListener('kyn:realtimeReady', () => {
-            // Reset bound flag so we can re-attach to the (possibly new) instance
-            if (window.KynectaRealtime) window.KynectaRealtime.__msgCoreBound = false;
-            _bindKynectaRealtime._tries = 0;
-            _bindKynectaRealtime();
-        }, { once: false });
+        window.addEventListener('kyn:realtimeReady', _bindKynectaRealtime, { once: false });
 
         // ✅ FIX: Bridge from DOM CustomEvents emitted by app.realtime.socket.js bridge listeners.
         // This path activates when KynectaRealtime is connected but wsService.on was missed.
