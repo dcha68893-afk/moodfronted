@@ -3479,7 +3479,7 @@ input:focus + .toggle-slider,
 #inCallScreen {
     position: fixed !important;
     inset: 0 !important;
-    z-index: 999999 !important;
+    z-index: 9999999 !important;  /* higher than incoming modal's 99999 */
     display: none !important;
     flex-direction: column !important;
     overflow: hidden !important;
@@ -4321,8 +4321,26 @@ body.call-active #idleScreen {
 }
 
 /* ── IN-CALL SCREEN always sits above incoming modal (z-index race guard) ── */
-#inCallScreen.active {
-    z-index: 1100 !important;
-    display: flex !important;
-    visibility: visible !important;
+/* z-index: 9999999 set above already dominates incoming modal's 99999 */
+
+/* ── Force incoming modal BELOW in-call screen when both somehow active ── */
+body.call-active .unified-incoming-screen {
+    z-index: -1 !important;
+    display: none !important;
+    visibility: hidden !important;
+    pointer-events: none !important;
+}
+
+/* ── Once call is CONNECTED, callingScreen must not show (caller side) ── */
+body.call-connected #callingScreen {
+    z-index: -1 !important;
+    display: none !important;
+    visibility: hidden !important;
+    pointer-events: none !important;
+}
+body.call-connected .unified-incoming-screen {
+    z-index: -1 !important;
+    display: none !important;
+    visibility: hidden !important;
+    pointer-events: none !important;
 }

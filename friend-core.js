@@ -1894,9 +1894,99 @@ const ParentCommunicationManager = {
             }
 
             if (message.type === 'FRIEND_REQUEST_ACCEPTED') {
-                // Someone accepted OUR request — reload friends list
+                // Someone accepted OUR sent request.
+                // BUG FIX: we must also update KynectaFriendsLocalStore (pending_sent -> accepted)
+                // and FriendCacheManager here, not just reload from backend.
+                // Without this the sender's local store keeps the friend as pending_sent forever.
+
+                const _acceptedFriendId = message.payload?.friendId
+                    || message.payload?.acceptedById
+                    || message.payload?.userId
+                    || null;
+                const _acceptedRequestId = message.payload?.requestId || null;
+                const _friendPayload     = message.payload?.friend || null;
+
+                // Step 1: update KynectaFriendsLocalStore
+                const _ls = window.KynectaFriendsLocalStore;
+                if (_ls && _acceptedFriendId) {
+                    _ls.ready().then(async () => {
+                        try {
+                            const _lr = await _ls.getByFriendId(String(_acceptedFriendId));
+                            if (_lr) {
+                                // Promote existing pending_sent record to accepted
+                                await _ls.confirm(
+                                    _lr.id,
+                                    _acceptedRequestId || _lr.serverId,
+                                    {
+                                        status:      'accepted',
+                                        isLocalOnly: false,
+                                        updatedAt:   new Date().toISOString()
+                                    }
+                                );
+                                Logger.info('FRIEND_REQUEST_ACCEPTED', 'LocalStore record confirmed accepted', { id: _lr.id });
+                            } else {
+                                // No existing record found - create an accepted entry
+                                const _newRecord = {
+                                    friendId:    String(_acceptedFriendId),
+                                    userId:      __session.user?.id ? String(__session.user.id) : 'unknown',
+                                    serverId:    _acceptedRequestId || null,
+                                    status:      'accepted',
+                                    isLocalOnly: false,
+                                    createdAt:   new Date().toISOString(),
+                                    updatedAt:   new Date().toISOString()
+                                };
+                                if (_friendPayload) {
+                                    _newRecord.displayName = _friendPayload.displayName || '';
+                                    _newRecord.avatar      = _friendPayload.avatar || _friendPayload.photoURL || '';
+                                    _newRecord.username    = _friendPayload.username || '';
+                                }
+                                await _ls.save(_newRecord);
+                                Logger.info('FRIEND_REQUEST_ACCEPTED', 'LocalStore record created as accepted', { friendId: _acceptedFriendId });
+                            }
+                        } catch (_e) {
+                            Logger.warn('FRIEND_REQUEST_ACCEPTED', 'LocalStore update failed', _e.message);
+                        }
+                    }).catch(() => {});
+                }
+
+                // Step 2: update FriendCacheManager in-memory cache
+                if (_friendPayload && _acceptedFriendId) {
+                    FriendCacheManager.setFriend({
+                        ..._friendPayload,
+                        id:     String(_acceptedFriendId),
+                        status: 'accepted'
+                    });
+                }
+
+                // Step 3: remove from sent-requests cache (no longer pending)
+                if (_acceptedRequestId) {
+                    FriendCacheManager.removeSentRequest?.(_acceptedRequestId);
+                }
+                if (_acceptedFriendId) {
+                    const _allSent = FriendCacheManager.getAllSentRequests?.() || [];
+                    const _matchSent = _allSent.find(r =>
+                        String(r.receiverId || r.friendId || r.userId) === String(_acceptedFriendId)
+                    );
+                    if (_matchSent?.id) FriendCacheManager.removeSentRequest?.(_matchSent.id);
+                }
+
+                FriendCacheManager.syncToGlobals();
+
+                // Step 4: reload from backend for authoritative data
                 Promise.allSettled([loadFriendsFromBackend(), loadSentRequestsFromBackend()])
-                    .then(() => window.dispatchEvent(new CustomEvent('friendsUpdated', { detail: { realtime: true } })));
+                    .then(() => {
+                        FriendCacheManager.persist();
+                        window.dispatchEvent(new CustomEvent('friendsUpdated', { detail: { realtime: true } }));
+                        window.dispatchEvent(new CustomEvent('friendRequestAccepted', {
+                            detail: {
+                                requestId: _acceptedRequestId,
+                                friendId:  _acceptedFriendId,
+                                friend:    _friendPayload,
+                                realtime:  true
+                            }
+                        }));
+                    });
+
                 showNotification?.('Your friend request was accepted!', 'success');
                 return;
             }
@@ -3732,9 +3822,28 @@ const FriendRequestManager = {
                 }));
                 window.dispatchEvent(new CustomEvent('friendAdded', { detail: { friend: newFriend } }));
 
+                // ── FIX: include targetUserId so the parent/server knows which
+                //    user (the original sender) to push FRIEND_REQUEST_ACCEPTED to.
+                //    Without this the sender's session is never notified.
+                const _originalSenderId =
+                    existingRequest?.senderId ||
+                    existingRequest?.sender?.id ||
+                    existingRequest?.requesterId ||
+                    friendId; // friendId IS the original sender on the receiver's side
+
                 safeSend({
                     type: 'FRIEND_ACCEPTED',
-                    payload: { requestId, friendId, friend: newFriend, timestamp: Date.now() }
+                    payload: {
+                        requestId,
+                        friendId,
+                        friend:          newFriend,
+                        // ↓ NEW: routing fields for the parent/server relay
+                        targetUserId:    String(_originalSenderId),   // who must receive FRIEND_REQUEST_ACCEPTED
+                        acceptedById:    String(__session.user?.id || ''), // the receiver (current user)
+                        acceptedByName:  __session.user?.displayName || __session.user?.username || '',
+                        acceptedByAvatar: __session.user?.avatar || __session.user?.photoURL || '',
+                        timestamp:       Date.now()
+                    }
                 });
 
                 setTimeout(() => {
@@ -10221,3 +10330,48 @@ function applySettingToFriendModule(section, key, value) {
         } catch(e) {}
     });
 })();
+
+// =============================================
+// [FIX 3 — PARENT/SERVER RELAY: FRIEND_ACCEPTED → FRIEND_REQUEST_ACCEPTED]
+// =============================================
+// When this module sends  FRIEND_ACCEPTED  to the parent (via safeSend/postMessage),
+// the parent (or server WebSocket handler) MUST relay a  FRIEND_REQUEST_ACCEPTED
+// message back to the ORIGINAL SENDER's active session.
+//
+// The payload now includes:
+//   targetUserId    — the user ID of the original request sender (must be notified)
+//   acceptedById    — the user ID of the receiver who just accepted
+//   acceptedByName  — display name of the receiver
+//   acceptedByAvatar— avatar of the receiver
+//   friend          — full friend profile object of the receiver
+//   requestId       — the original friend-request ID
+//   friendId        — same as acceptedById (the accepting user's ID)
+//
+// Add this handler in your parent window / server WebSocket router:
+//
+//   if (message.type === 'FRIEND_ACCEPTED') {
+//       const { targetUserId, friendId, requestId, friend,
+//               acceptedById, acceptedByName, acceptedByAvatar } = message.payload;
+//
+//       if (targetUserId) {
+//           sendToUser(targetUserId, {
+//               type: 'FRIEND_REQUEST_ACCEPTED',
+//               payload: {
+//                   requestId,
+//                   friendId:       acceptedById,        // the receiver's ID
+//                   friend: friend || {                  // receiver's profile
+//                       id:          acceptedById,
+//                       displayName: acceptedByName,
+//                       avatar:      acceptedByAvatar
+//                   },
+//                   acceptedById,
+//                   acceptedByName,
+//                   timestamp: Date.now()
+//               }
+//           });
+//       }
+//   }
+//
+// sendToUser() is your server's mechanism for pushing a message to a specific
+// online user (WebSocket broadcast, SSE push, Firebase RTDB, Pusher, etc.).
+// =============================================

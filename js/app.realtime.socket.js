@@ -969,7 +969,20 @@
                 'call:ringing', 'call_ringing',
             ];
 
-            const allEvents = [...messageEvents, ...callEvents];
+            // FIX: friend events were missing — without these the socket never
+            // forwards friend:accepted / friend:request to the iframe bridge,
+            // so the sender's client never knew their request was accepted.
+            const friendEvents = [
+                'friend:accepted',   // receiver accepted sender's request  (both users)
+                'friend:request',    // new incoming friend request received
+                'friend:rejected',   // request was rejected / cancelled
+                'friend:removed',    // a friend unfriended the current user
+                'friend:blocked',    // current user was blocked
+                'friend:online',     // a friend came online
+                'friend:offline',    // a friend went offline
+            ];
+
+            const allEvents = [...messageEvents, ...callEvents, ...friendEvents];
 
             if (this._socket && typeof this._socket.on === 'function') {
                 allEvents.forEach(eventType => {
@@ -1189,6 +1202,44 @@
                 if (_SKIP_WILDCARD.has(eventType)) return; // already forwarded by chat.html wsService bridge
 
                 const iframes = document.querySelectorAll('iframe');
+
+                // FIX: for friend:accepted we must send TWO postMessages to iframes:
+                //  1. REALTIME_EVENT:friend:accepted  — so any direct listener gets it
+                //  2. REALTIME_EVENT:FRIEND_REQUEST_ACCEPTED — the exact type that
+                //     friend-core.js's FRIEND_REQUEST_ACCEPTED handler listens for,
+                //     so the SENDER's client updates its local store and friend list.
+                //
+                //  The server (friendController.js) already emits friend:accepted to
+                //  user:${originalRequesterId} with { requestId, friendId, user }.
+                //  We just need to make sure the iframe sees both event name forms.
+                if (eventType === 'friend:accepted') {
+                    const msgs = [
+                        { type: 'REALTIME_EVENT:friend:accepted',           payload: payload || {} },
+                        { type: 'REALTIME_EVENT:FRIEND_REQUEST_ACCEPTED',   payload: payload || {} },
+                    ];
+                    iframes.forEach(function (frame) {
+                        msgs.forEach(function (m) {
+                            try { frame.contentWindow.postMessage(m, '*'); } catch (_) {}
+                        });
+                    });
+                    return;
+                }
+
+                // FIX: friend:request from server → translate to FRIEND_REQUEST_RECEIVED
+                // so friendSync_engine.js KynectaEventBus listener fires correctly.
+                if (eventType === 'friend:request') {
+                    const msgs = [
+                        { type: 'REALTIME_EVENT:friend:request',            payload: payload || {} },
+                        { type: 'REALTIME_EVENT:FRIEND_REQUEST_RECEIVED',   payload: { request: payload } },
+                    ];
+                    iframes.forEach(function (frame) {
+                        msgs.forEach(function (m) {
+                            try { frame.contentWindow.postMessage(m, '*'); } catch (_) {}
+                        });
+                    });
+                    return;
+                }
+
                 const eventMsg = {
                     type: `REALTIME_EVENT:${eventType}`,
                     payload: payload || {}

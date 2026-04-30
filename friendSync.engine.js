@@ -780,21 +780,63 @@
                     this.syncType('requests');
                 });
 
-                window.KynectaEventBus.on?.('FRIEND_ACCEPTED', async (data) => {
-                    // Immediately update both sides in IndexedDB
-                    if (data?.friendId) {
+                // FIX: handle both event name variants:
+                //   'FRIEND_ACCEPTED'          — emitted by friendSync_engine itself / EventBus
+                //   'FRIEND_REQUEST_ACCEPTED'  — emitted by parent bridge when server sends friend:accepted
+                // Both must update the local store and trigger a friends sync.
+                const _handleFriendAccepted = async (data) => {
+                    const _friendId = data?.friendId || data?.acceptedById || data?.userId;
+                    if (_friendId) {
                         try {
                             const ls = window.KynectaFriendsLocalStore;
                             if (ls) {
-                                const existing = await ls.getByFriendId(String(data.friendId));
+                                await ls.ready();
+                                const existing = await ls.getByFriendId(String(_friendId));
                                 if (existing) {
-                                    await ls.updateStatus(existing.id, 'accepted', { isLocalOnly: false });
+                                    // Promote pending_sent or pending_received → accepted
+                                    await ls.confirm(
+                                        existing.id,
+                                        data?.requestId || existing.serverId,
+                                        { status: 'accepted', isLocalOnly: false, updatedAt: new Date().toISOString() }
+                                    );
+                                } else {
+                                    // No record yet (sender side may not have one) — create it
+                                    const _friendProfile = data?.user || data?.friend || {};
+                                    await ls.save({
+                                        friendId:    String(_friendId),
+                                        userId:      window.__session?.user?.id
+                                                     ? String(window.__session.user.id)
+                                                     : 'unknown',
+                                        serverId:    data?.requestId || null,
+                                        status:      'accepted',
+                                        isLocalOnly: false,
+                                        displayName: _friendProfile.displayName || _friendProfile.username || '',
+                                        avatar:      _friendProfile.avatar || _friendProfile.photoURL || '',
+                                        username:    _friendProfile.username || '',
+                                        createdAt:   new Date().toISOString(),
+                                        updatedAt:   new Date().toISOString(),
+                                    });
+                                }
+                                // Also update FriendCacheManager in-memory immediately
+                                if (window.FriendCacheManager?.setFriend) {
+                                    const _friendData = data?.user || data?.friend || {};
+                                    window.FriendCacheManager.setFriend({
+                                        ..._friendData,
+                                        id:     String(_friendId),
+                                        status: 'accepted'
+                                    });
+                                    window.FriendCacheManager.syncToGlobals?.();
                                 }
                             }
-                        } catch (_) {}
+                        } catch (_e) {
+                            console.warn('[FriendSync] FRIEND_ACCEPTED local store update failed:', _e.message);
+                        }
                     }
                     this.syncType('friends');
-                });
+                };
+
+                window.KynectaEventBus.on?.('FRIEND_ACCEPTED',          _handleFriendAccepted);
+                window.KynectaEventBus.on?.('FRIEND_REQUEST_ACCEPTED',  _handleFriendAccepted);
 
                 window.KynectaEventBus.on?.('FRIEND_REMOVED', () => this.syncType('friends'));
             }

@@ -562,6 +562,8 @@ function showIdleScreen() {
     // ── Stop timers ──
     if (window._currentCallTimer)  { clearInterval(window._currentCallTimer);  window._currentCallTimer  = null; }
     if (window._callRingTimer)      { clearInterval(window._callRingTimer);      window._callRingTimer      = null; }
+    // Disconnect incoming modal guard observer so future calls can show it
+    if (window._modalGuardObserver) { try { window._modalGuardObserver.disconnect(); } catch(e) {} window._modalGuardObserver = null; }
 
     // ── PRIMARY: Reset CallOverlayManager to idle ──
     if (window.CallOverlayManager) {
@@ -608,6 +610,7 @@ function showIdleScreen() {
     UIState.pendingCallUser = null;
     window.__callActive     = false;
     document.body.classList.remove('call-active');
+    document.body.classList.remove('call-connected');
 
     if (window.parent && window.parent !== window) {
         window.parent.postMessage({ type: 'CALL_SCREEN_ACTIVE', payload: { active: false } }, '*');
@@ -653,6 +656,37 @@ function transitionToInCall(callInfo) {
     if (!inCallScreen) { console.error('[UI] #inCallScreen not found'); return; }
     inCallScreen.classList.add('active');
     inCallScreen.style.setProperty('display', 'flex', 'important');
+
+    // ── NUCLEAR OPTION: Watch the incoming modal and force-hide it while in-call ──
+    // If anything re-adds .active to incomingCallModal, yank it off immediately.
+    // Also guard callingScreen (caller side) so it can't re-appear over inCallScreen.
+    const _modalGuardEl = document.getElementById('incomingCallModal');
+    const _callingGuardEl = document.getElementById('callingScreen');
+    const _guardEls = [_modalGuardEl, _callingGuardEl].filter(Boolean);
+    _guardEls.forEach(el => {
+        if (el.dataset && el.dataset.timer) { clearInterval(parseInt(el.dataset.timer)); el.dataset.timer = ''; }
+        el.classList.remove('active');
+        el.style.cssText = 'display:none!important;visibility:hidden!important;pointer-events:none!important;z-index:-1!important;';
+    });
+    if (_modalGuardEl) {
+        // Install MutationObserver to prevent re-activation of EITHER screen
+        if (window._modalGuardObserver) { try { window._modalGuardObserver.disconnect(); } catch(e) {} }
+        window._modalGuardObserver = new MutationObserver(() => {
+            if (!UIState.callActive || UIState.callState !== 'connected') {
+                if (window._modalGuardObserver) { window._modalGuardObserver.disconnect(); window._modalGuardObserver = null; }
+                return;
+            }
+            _guardEls.forEach(el => {
+                if (el.classList.contains('active') || (el.style.display && el.style.display !== 'none')) {
+                    el.classList.remove('active');
+                    el.style.cssText = 'display:none!important;visibility:hidden!important;pointer-events:none!important;z-index:-1!important;';
+                }
+            });
+        });
+        _guardEls.forEach(el => {
+            window._modalGuardObserver.observe(el, { attributes: true, attributeFilter: ['class', 'style'] });
+        });
+    }
 
     // ── Resolve peer name ─────────────────────────────────────────────────
     const name = callInfo.userName
@@ -729,6 +763,7 @@ function transitionToInCall(callInfo) {
     UIState.callState  = 'connected';
     window.__callActive = true;
     document.body.classList.add('call-active');
+    document.body.classList.add('call-connected'); // suppresses callingScreen + incomingModal via CSS
 
     if (window.parent && window.parent !== window) {
         window.parent.postMessage({ type: 'CALL_SCREEN_ACTIVE', payload: { active: true } }, '*');
@@ -3935,9 +3970,21 @@ case 'CALL_INITIATED':
                 case 'call_rejected':
                 case 'call_failed':
                 case 'call_timeout':
-                case 'call_force_ended':
                     this.handleCallEnded(data);
                     // FIX for Bug 6: Refresh call history after call ends
+                    this.refreshCallHistory();
+                    break;
+                case 'call_force_ended':
+                    // Skip reset if we're already in-call (stale WS echo after accept)
+                    if (UIState.callState === 'connected' ||
+                        (document.getElementById('inCallScreen') && document.getElementById('inCallScreen').classList.contains('active'))) {
+                        console.warn('[Calls UI] call_force_ended core event ignored — already in-call');
+                        // Only stop ringtones
+                        if (window._incomingRingtone) { try { window._incomingRingtone.pause(); window._incomingRingtone.currentTime = 0; } catch(e) {} window._incomingRingtone = null; }
+                        if (window._callerRingtone)   { try { window._callerRingtone.pause();   window._callerRingtone.currentTime   = 0; } catch(e) {} window._callerRingtone   = null; }
+                        break;
+                    }
+                    this.handleCallEnded(data);
                     this.refreshCallHistory();
                     break;
                 case 'call_cancelled':
@@ -4916,6 +4963,8 @@ case 'CALL_INITIATED':
             window.__activePeerName   = null;
             window.__activePeerType   = null;
             window.__activePeerAvatar = null;
+            // Disconnect the incoming-modal guard observer
+            if (window._modalGuardObserver) { try { window._modalGuardObserver.disconnect(); } catch(e) {} window._modalGuardObserver = null; }
             if (window.parent && window.parent !== window) {
                 window.parent.postMessage({ type: 'CALL_SCREEN_ACTIVE', payload: { active: false } }, '*');
             }
@@ -4964,6 +5013,7 @@ case 'CALL_INITIATED':
             UIState.callStartTime = null;
             UIState.callType = null;
             window._currentIncomingCallId = null;
+            document.body.classList.remove('call-connected');
 
             // Stop any playing ringtone immediately
             if (window._incomingRingtone) {
@@ -7294,6 +7344,13 @@ acceptIncomingCallGeneric: async function(asVideo) {
     }
 
     if (accepted) {
+        // ── FIX: Set navigation origin so handleCallEnded returns here after call ──
+        // On receiver side, returnTo should go back to wherever they were (calls page).
+        if (!window.__callOriginReturnTo) {
+            window.__callOriginReturnTo = 'calls'; // receiver came from calls page
+            window.__callOriginChatUserId = null;
+        }
+
         // ── FIX: Do NOT immediately show in-call screen here.
         // The WebRTC offer from the caller will arrive shortly via the signalling server.
         // Once WebRTC negotiation completes, calls-core fires 'call_connected' or
