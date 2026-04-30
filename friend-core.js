@@ -1706,6 +1706,12 @@ const SecurityValidator = {
         if (!message || typeof message !== 'object') return false;
         if (!message.type || typeof message.type !== 'string') return false;
 
+        // Allow internally-unwrapped REALTIME_EVENT messages (no source/target check needed)
+        if (message._unwrapped === true) return true;
+
+        // Allow REALTIME_EVENT: prefix messages through so the unwrapper can handle them
+        if (message.type.startsWith('REALTIME_EVENT:')) return true;
+
         if (message.source && message.source !== 'parent' && message.source !== MODULE_NAME) {
             return false;
         }
@@ -1864,6 +1870,38 @@ const ParentCommunicationManager = {
                 return;
             }
             
+            // ── FIX: REALTIME_EVENT: prefix — app_realtime_socket.js forwards socket events
+            //    as { type: 'REALTIME_EVENT:friend:accepted', payload: {...} }.
+            //    Unwrap and re-dispatch as bare internal types so all existing handlers fire.
+            if (message.type && message.type.startsWith('REALTIME_EVENT:')) {
+                const innerType = message.type.slice('REALTIME_EVENT:'.length);
+                const innerPayload = message.payload || {};
+                // Map socket event names → internal message types
+                const socketToInternal = {
+                    'friend:request':           'FRIEND_REQUEST_RECEIVED',
+                    'friend:accepted':           'FRIEND_REQUEST_ACCEPTED',
+                    'friend:rejected':           'FRIEND_REQUEST_REJECTED',
+                    'friend:removed':            'FRIEND_REMOVED',
+                    'friend:blocked':            'FRIEND_BLOCKED',
+                    'friend:online':             'FRIEND_ONLINE',
+                    'friend:offline':            'FRIEND_OFFLINE',
+                    // Already-translated forms (double-forwarded)
+                    'FRIEND_REQUEST_RECEIVED':   'FRIEND_REQUEST_RECEIVED',
+                    'FRIEND_REQUEST_ACCEPTED':   'FRIEND_REQUEST_ACCEPTED',
+                    'FRIEND_REQUEST_REJECTED':   'FRIEND_REQUEST_REJECTED',
+                    'FRIEND_REMOVED':            'FRIEND_REMOVED',
+                };
+                const mapped = socketToInternal[innerType];
+                if (mapped) {
+                    // Re-invoke this same handler with the unwrapped message
+                    ParentCommunicationManager._handleMessage({
+                        origin: event.origin,
+                        data: { type: mapped, payload: innerPayload, _unwrapped: true }
+                    });
+                }
+                return;
+            }
+
             // ── Real-time friend events forwarded from the WS bridge in chat.html ──
             if (message.type === 'FRIEND_REQUEST_RECEIVED') {
                 const payload   = message.payload || {};
@@ -2795,7 +2833,15 @@ const FriendCacheManager = {
             }
             if (friendsData && Array.isArray(friendsData)) {
                 friendsData.forEach(f => {
-                    if (f && f.id) this._cache.friends.set(f.id, f);
+                    // FIX: Only load truly accepted friends. Records with status
+                    // 'pending', 'pending_sent', 'pending_received', 'blocked',
+                    // or 'removed' must NOT appear in the friends list.
+                    if (f && f.id) {
+                        const st = f.status || 'accepted'; // legacy records have no status → accepted
+                        if (st === 'accepted' || st === 'online' || st === 'offline' || st === 'away' || st === 'busy') {
+                            this._cache.friends.set(f.id, f);
+                        }
+                    }
                 });
             }
             
@@ -3521,7 +3567,17 @@ const FriendRequestManager = {
 
     async sendFriendRequest(userId, options = {}) {
         if (!assertActive('sendFriendRequest')) {
-            return { success: false, error: 'Module not active' };
+            // FIX: Module not yet ACTIVE — queue the request to fire once active.
+            // Previously this returned { success: false } silently, making the
+            // button appear completely broken to the user. Now we wait and retry.
+            return new Promise((resolve, reject) => {
+                queueRequest(async () => {
+                    try {
+                        const result = await this.sendFriendRequest(userId, options);
+                        resolve(result);
+                    } catch (error) { reject(error); }
+                });
+            });
         }
 
         if (!authReadyReceived || !__session.ready || !__session.token) {

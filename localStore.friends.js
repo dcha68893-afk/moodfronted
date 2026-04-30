@@ -225,18 +225,27 @@
 
     /**
      * Replace all non-local-only records with server data (preserves local-only).
+     * FIX: Save records one-by-one since AppCache.save() expects individual records,
+     * not arrays. Also normalize status so only accepted records are stored as 'accepted'.
      * @param {Array} serverRecords
      */
     async replaceFromServer(serverRecords) {
-      const current  = await this._allForCurrentUser();
+      const current   = await this._allForCurrentUser();
       const localOnly = current.filter(i => i.isLocalOnly === true);
-      const cache    = await getCache();
+      const cache     = await getCache();
+      // Delete all server-backed records
       await Promise.all(
         current.filter(i => i.isLocalOnly !== true).map(i => cache.remove('friends', i.id))
       );
-      const normalized = (serverRecords || []).map(i => this._normalizeRecord({ ...i, isLocalOnly: false }));
-      await cache.save('friends', normalized);
-      if (localOnly.length) await cache.save('friends', localOnly);
+      // Save new server records one-by-one — AppCache.save() takes a single record
+      const normalized = (serverRecords || []).map(i => this._normalizeRecord({ ...i, isLocalOnly: false, status: 'accepted' }));
+      for (const record of normalized) {
+        try { await cache.save('friends', record); } catch (_) {}
+      }
+      // Re-save local-only (pending/queued) records
+      for (const record of localOnly) {
+        try { await cache.save('friends', record); } catch (_) {}
+      }
       this._emit('replaced', { count: (serverRecords || []).length });
     }
 

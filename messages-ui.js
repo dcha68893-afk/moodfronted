@@ -4415,21 +4415,48 @@
 
                 if (!contacts || contacts.length === 0) {
 
-                    UIFailsafe.safeSetHTML(container, `
+                    // FIX: Instead of "No friends yet", show users from existing conversations
+                    // so non-friend users are always reachable from the new-chat panel.
+                    const _core2 = core || getMessagesCore();
+                    const _conversations = _core2?.getConversations?.() || [];
+                    const _myId = _core2?.getCurrentUser?.()?.id || _core2?.SessionManager?.getUserId?.();
+                    const _seenIds = new Set();
+                    const _convUsers = [];
+                    _conversations.forEach(conv => {
+                        if (conv.blocked || conv.archived) return;
+                        const op = conv.otherParticipant;
+                        const fid = conv.friendId;
+                        const userId = (op && op.id) || fid;
+                        if (!userId || String(userId) === String(_myId) || _seenIds.has(String(userId))) return;
+                        _seenIds.add(String(userId));
+                        _convUsers.push({
+                            id: userId,
+                            displayName: (op?.displayName || op?.username || op?.firstName || conv.friendName || conv.chatName || `User ${userId}`).replace(/\s+User$/i, '').trim(),
+                            avatar: op?.avatar || conv.friendAvatar || null,
+                            online: (op?.status === 'online') || conv.online || false,
+                            status: (op?.status === 'online' || conv.online) ? 'Online' : 'Offline'
+                        });
+                    });
 
-                        <div class="empty-state" style="padding:32px 16px;text-align:center;">
+                    if (_convUsers.length > 0) {
+                        contacts = _convUsers;
+                    } else {
+                        UIFailsafe.safeSetHTML(container, `
 
-                            <i class="fas fa-user-friends" style="font-size:40px;color:#d1d5db;margin-bottom:12px;display:block;"></i>
+                            <div class="empty-state" style="padding:32px 16px;text-align:center;">
 
-                            <div style="font-weight:600;color:#374151;margin-bottom:6px;">No friends yet</div>
+                                <i class="fas fa-user-friends" style="font-size:40px;color:#d1d5db;margin-bottom:12px;display:block;"></i>
 
-                            <div style="font-size:13px;color:#9ca3af;">Go to the Friends tab to add people</div>
+                                <div style="font-weight:600;color:#374151;margin-bottom:6px;">No contacts yet</div>
 
-                        </div>
+                                <div style="font-size:13px;color:#9ca3af;">Go to the Friends tab to add people or start a conversation</div>
 
-                    `);
+                            </div>
 
-                    return;
+                        `);
+
+                        return;
+                    }
 
                 }
 

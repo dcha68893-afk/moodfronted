@@ -2609,9 +2609,10 @@ try {
                 if (!pendingConv || !pendingConv.pendingReceiverId) {
                     throw new Error('Invalid pending conversation: missing receiverId');
                 }
-                console.log(`[ChatManager] 📤 Sending message to pending conversation - using receiverId: ${pendingConv.pendingReceiverId}`);
+                const receiverId = pendingConv.pendingReceiverId;
+                console.log(`[ChatManager] 📤 Sending message to pending conversation - using receiverId: ${receiverId}`);
                 requestBody = {
-                    receiverId: pendingConv.pendingReceiverId,
+                    receiverId: receiverId,
                     localId: options.localId || options.id || null,
                     content: content,
                     type: options.type || 'text',
@@ -2619,6 +2620,81 @@ try {
                     replyToId: options.replyToId || options.replyTo,
                     mentions: options.mentions
                 };
+
+                let result;
+                try {
+                    result = await makeApiRequest('/messages', 'POST', requestBody);
+                } catch (err) {
+                    // ── Non-friend fallback ────────────────────────────────────────────
+                    // If the backend rejects the message because the users aren't friends
+                    // (403 / "not friends" / "friendship required"), check whether a real
+                    // chatId already exists for this pair (e.g. from a previous conversation
+                    // or a conversation the other user initiated).  If found, retry with
+                    // chatId so the message goes through regardless of friendship status.
+                    const isFriendshipError = /friend|not.*allow|permission|forbidden|403/i.test(String(err.message || ''));
+                    if (isFriendshipError) {
+                        const existingConv = this._conversations.find(c =>
+                            !c.isPending &&
+                            c.id &&
+                            (String(c.friendId) === String(receiverId) ||
+                             String(c.otherParticipantId) === String(receiverId) ||
+                             (c.otherParticipant && String(c.otherParticipant.id) === String(receiverId)) ||
+                             (Array.isArray(c.participants) && c.participants.some(p => String(p.id || p) === String(receiverId))))
+                        );
+                        if (existingConv) {
+                            console.log(`[ChatManager] Friendship error — retrying with existing chatId: ${existingConv.id}`);
+                            result = await makeApiRequest('/messages', 'POST', {
+                                chatId: existingConv.id,
+                                localId: options.localId || options.id || null,
+                                content: content,
+                                type: options.type || 'text',
+                                attachment: options.attachment,
+                                replyToId: options.replyToId || options.replyTo,
+                                mentions: options.mentions
+                            });
+                            // Promote pending conversation to real
+                            const normalizedConv = {
+                                ...(pendingConv || {}),
+                                ...existingConv,
+                                isPending: false
+                            };
+                            this.replacePendingConversation(conversationId, normalizedConv);
+                            if (result) result.chatId = existingConv.id;
+                        } else {
+                            // No existing conversation — surface a friendly error
+                            throw new Error('Cannot send message: you are not friends with this user and no existing conversation was found. Add them as a friend first.');
+                        }
+                    } else {
+                        throw err;
+                    }
+                }
+
+                console.log(`[ChatManager] 📥 Message sent successfully:`, result);
+
+                if (result && (result.chatId || result.data?.chatId)) {
+                    const realChatId = result.chatId || result.data.chatId;
+                    if (realChatId) {
+                        const pConv = this._conversationsMap.get(conversationId) || {};
+                        const normalizedConv = {
+                            ...pConv,
+                            ...(result.conversation || result.data?.conversation || {}),
+                            id: realChatId,
+                            chatId: realChatId,
+                            friendId: pConv.pendingReceiverId || pConv.friendId || result.receiverId || result.data?.receiverId,
+                            friendName: pConv.friendName || pConv.userName || 'Chat',
+                            friendAvatar: pConv.friendAvatar || pConv.userAvatar || '',
+                            lastMessage: content,
+                            lastMessageAt: Date.now(),
+                            unreadCount: 0,
+                            type: 'direct',
+                            isPending: false
+                        };
+                        this.replacePendingConversation(conversationId, normalizedConv);
+                        result.chatId = realChatId;
+                    }
+                }
+
+                return result;
             } else {
                 console.log(`[ChatManager] 📤 Sending message to real conversation - using chatId: ${conversationId}`);
                 requestBody = {
@@ -2635,29 +2711,6 @@ try {
             const result = await makeApiRequest('/messages', 'POST', requestBody);
             
             console.log(`[ChatManager] 📥 Message sent successfully:`, result);
-            
-            if (isPending && result && (result.chatId || (result.data && result.data.chatId))) {
-                const realChatId = result.chatId || result.data.chatId;
-                if (realChatId) {
-                    const pendingConv = this._conversationsMap.get(conversationId) || {};
-                    const normalizedConv = {
-                        ...pendingConv,
-                        ...(result.conversation || result.data?.conversation || {}),
-                        id: realChatId,
-                        chatId: realChatId,
-                        friendId: pendingConv.pendingReceiverId || pendingConv.friendId || result.receiverId || result.data?.receiverId,
-                        friendName: pendingConv.friendName || pendingConv.userName || 'Chat',
-                        friendAvatar: pendingConv.friendAvatar || pendingConv.userAvatar || '',
-                        lastMessage: content,
-                        lastMessageAt: Date.now(),
-                        unreadCount: 0,
-                        type: 'direct',
-                        isPending: false
-                    };
-                    this.replacePendingConversation(conversationId, normalizedConv);
-                    result.chatId = realChatId;
-                }
-            }
             
             return result;
         },
@@ -3442,37 +3495,72 @@ try {
         },
         
         getFriendListForChat: function() {
-            const availableFriends = this._friends
-                .filter(friend => !this._blockedFriends.has(friend.id || friend.uid))
-                .map(friend => {
-                    const id = friend.id || friend.uid || friend.userId;
-                    const firstName = friend.firstName || friend.first_name || '';
-                    const lastName = friend.lastName || friend.last_name || '';
-                    const fullName = [firstName, lastName].filter(Boolean).join(' ').trim();
-                    const displayName = friend.displayName || friend.display_name || fullName || friend.username || friend.name || 'User';
-                    const avatar = friend.avatar || friend.photoURL || friend.avatarUrl || friend.profilePhoto || null;
-                    const online = friend.online ?? (friend.status === 'online') ?? false;
-                    const status = friend.status || (online ? 'Online' : 'Offline');
+            const _normalizeUser = (u, overrideId) => {
+                const id = overrideId || u.id || u.uid || u.userId;
+                const firstName = u.firstName || u.first_name || '';
+                const lastName = u.lastName || u.last_name || '';
+                const fullName = [firstName, lastName].filter(Boolean).join(' ').trim();
+                const rawName = u.displayName || u.display_name || fullName || u.username || u.name || 'User';
+                const displayName = rawName.replace(/\s+User$/i, '').trim() || rawName;
+                const avatar = u.avatar || u.photoURL || u.avatarUrl || u.profilePhoto || null;
+                const online = u.online ?? (u.status === 'online') ?? false;
+                const status = u.status || (online ? 'Online' : 'Offline');
+                return { ...u, id, displayName, username: u.username || displayName, avatar, photoURL: avatar, online, status, lastSeen: u.lastSeen || u.last_seen || u.lastActive || null };
+            };
 
-                    return {
-                        ...friend,
-                        id,
-                        displayName,
-                        username: friend.username || displayName,
-                        avatar,
-                        photoURL: avatar,
-                        online,
-                        status,
-                        lastSeen: friend.lastSeen || friend.last_seen || friend.lastActive || null
-                    };
+            // Start with confirmed friends
+            const seenIds = new Set();
+            const result = [];
+
+            this._friends
+                .filter(f => !this._blockedFriends.has(f.id || f.uid))
+                .forEach(f => {
+                    const n = _normalizeUser(f);
+                    if (n.id && !seenIds.has(String(n.id))) {
+                        seenIds.add(String(n.id));
+                        result.push(n);
+                    }
                 });
 
-            return availableFriends.sort((a, b) => {
+            // Also include non-friend users from existing conversations so users
+            // can message anyone they have (or had) a conversation with, or who
+            // appears as a participant even without a friendship relation.
+            try {
+                const currentUserId = SessionManager.getUserId();
+                const conversations = ChatManager ? ChatManager.getConversations() : [];
+                conversations.forEach(conv => {
+                    if (conv.blocked) return;
+                    // Try otherParticipant first (pre-normalized by setConversations)
+                    const op = conv.otherParticipant;
+                    if (op && op.id && String(op.id) !== String(currentUserId) && !seenIds.has(String(op.id))) {
+                        seenIds.add(String(op.id));
+                        result.push(_normalizeUser({
+                            ...op,
+                            displayName: op.displayName || op.username || op.firstName || conv.friendName,
+                            avatar: op.avatar || conv.friendAvatar || null,
+                            online: op.status === 'online' || conv.online || false
+                        }));
+                        return;
+                    }
+                    // Fallback: derive from friendId + friendName stored on conversation
+                    const fid = conv.friendId;
+                    if (fid && String(fid) !== String(currentUserId) && !seenIds.has(String(fid))) {
+                        seenIds.add(String(fid));
+                        result.push(_normalizeUser({
+                            id: fid,
+                            displayName: conv.friendName || conv.chatName || `User ${fid}`,
+                            avatar: conv.friendAvatar || null,
+                            online: conv.online || false,
+                            status: conv.online ? 'online' : 'offline'
+                        }));
+                    }
+                });
+            } catch (_e) {}
+
+            return result.sort((a, b) => {
                 if (a.online && !b.online) return -1;
                 if (!a.online && b.online) return 1;
-                const aName = (a.displayName || a.username || '').toLowerCase();
-                const bName = (b.displayName || b.username || '').toLowerCase();
-                return aName.localeCompare(bName);
+                return (a.displayName || '').toLowerCase().localeCompare((b.displayName || '').toLowerCase());
             });
         },
         

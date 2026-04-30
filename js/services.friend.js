@@ -39,9 +39,13 @@
             if (!response) return []; // offline or error
 
             // ── safeArray guard (patch v1) ─────────────────────────────────
-            const friends = (typeof safeArray === 'function')
+            const rawFriends = (typeof safeArray === 'function')
                 ? safeArray(response.data)
                 : (Array.isArray(response.data) ? response.data : []);
+
+            // FIX: Tag every record with status:'accepted' so FriendCacheManager
+            // correctly places them in the friends cache (not pending/sent) on reload.
+            const friends = rawFriends.map(f => f ? { ...f, status: f.status || 'accepted' } : f).filter(Boolean);
             
             // Cache result
             this._cache.set(cacheKey, {
@@ -64,16 +68,17 @@
             }
             // FIX: Write to IndexedDB 'friends' store so friends are available
             // offline even after localStorage is cleared or quota-exceeded.
+            // Save one-by-one — AppCache.save() expects individual records, not arrays.
             if (friends.length > 0 && window.AppCache) {
                 const idbFriends = friends.map(f => ({
                     ...f,
                     id:          String(f.id || f.friendId),
                     friendId:    String(f.id || f.friendId),
                     userId:      String(f.userId || f.id),
-                    status:      f.status || 'accepted',
+                    status:      'accepted',
                     isLocalOnly: false,
                 }));
-                window.AppCache.save('friends', idbFriends).catch(() => {});
+                idbFriends.forEach(r => window.AppCache.save('friends', r).catch(() => {}));
             }
 
             return friends;
