@@ -4232,52 +4232,30 @@ case 'CALL_INITIATED':
             switch (event) {
                 case 'local_stream_ready':
                     UIState.localStream = data.stream;
-                    // FIXED: attach local stream to local video element immediately
                     (function attachLocalVideo(stream) {
-                        // Try multiple possible local video element ids
-                        const localVid = document.getElementById('localVideo')
-                            || document.getElementById('selfVideo')
-                            || document.getElementById('pipVideo')
-                            || document.querySelector('.local-video video')
-                            || document.querySelector('.pip-video');
-                        if (localVid && stream) {
-                            localVid.srcObject = stream;
-                            localVid.muted = true; // prevent echo
-                            localVid.autoplay = true;
-                            localVid.playsInline = true;
+                        if (!stream) return;
+                        const hasVideoTracks = stream.getVideoTracks().some(t => t.readyState === 'live' && t.enabled);
+                        // Always wire the dedicated PiP video element
+                        const pipVideo = document.getElementById('pipVideo');
+                        if (pipVideo) {
+                            if (pipVideo.srcObject !== stream) pipVideo.srcObject = stream;
+                            pipVideo.muted       = true;
+                            pipVideo.autoplay    = true;
+                            pipVideo.playsInline = true;
+                            pipVideo.play().catch(() => {});
+                        }
+                        // Show PiP container whenever there are live video tracks
+                        const pipContainer = document.getElementById('pipContainer');
+                        if (pipContainer && hasVideoTracks) {
+                            pipContainer.style.display = 'block';
+                        }
+                        // Legacy fallbacks
+                        const localVid = document.getElementById('localVideo') || document.getElementById('selfVideo');
+                        if (localVid && localVid !== pipVideo) {
+                            if (localVid.srcObject !== stream) localVid.srcObject = stream;
+                            localVid.muted = true;
                             localVid.play().catch(() => {});
-                            // Also show pip container if video call or if stream has video tracks (upgrade scenario)
-                            const pipContainer = document.getElementById('pipContainer');
-                            const hasVideoTracks = stream && stream.getVideoTracks().length > 0;
-                            if (pipContainer && (UIState.callType === 'video' || hasVideoTracks)) {
-                                pipContainer.style.display = 'block';
-                            }
                         }
-                        // If no dedicated local video element, add one to videoGrid
-                        if (!localVid && stream && elements.videoGrid) {
-                            const hasLocalContainer = document.getElementById('localVideoContainer');
-                            if (!hasLocalContainer) {
-                                const container = document.createElement('div');
-                                container.id = 'localVideoContainer';
-                                container.className = 'video-container local-video-container';
-                                container.style.cssText = 'position:relative;';
-                                const video = document.createElement('video');
-                                video.id = 'localVideo';
-                                video.className = 'video-element';
-                                video.autoplay = true;
-                                video.playsInline = true;
-                                video.muted = true;
-                                video.srcObject = stream;
-                                const overlay = document.createElement('div');
-                                overlay.className = 'video-overlay';
-                                overlay.innerHTML = '<div class="video-name"><span>You</span></div>';
-                                container.appendChild(video);
-                                container.appendChild(overlay);
-                                elements.videoGrid.appendChild(container);
-                                video.play().catch(() => {});
-                            }
-                        }
-                        // Hide placeholder once we have a stream
                         const placeholder = document.getElementById('offlineCallPlaceholder');
                         if (placeholder) placeholder.style.display = 'none';
                     })(data.stream);
@@ -6448,13 +6426,139 @@ case 'CALL_ACCEPTED': {
             if (elements.callTimer) elements.callTimer.textContent = '0:00';
             // Clear dedup locks
             if (window.__uiCallDispatchLock) window.__uiCallDispatchLock = { ts: 0, userId: null };
+            if (window.__earlyCallLock) window.__earlyCallLock = { ts: 0, userId: null };
+            window.__pendingCallReturnTo = null;
+            window.__pendingCallChatUserId = null;
+        },
 
-        if (hasVideo) {
-            // Video recording: composite both video feeds on canvas
-            const canvas = document.createElement('canvas');
-            canvas.width = 1280;
-            canvas.height = 720;
-            const ctx = canvas.getContext('2d');
+        // ── toggleRecording: mixes local + remote audio into downloadable .webm ──
+        toggleRecording: function() {
+            if (!UIState._mediaRecorder) {
+                // ── Collect audio tracks (local mic + remote) ──────────────────
+                const audioTracks = [];
+                if (UIState.localStream) {
+                    UIState.localStream.getAudioTracks()
+                        .filter(t => t.readyState === 'live')
+                        .forEach(t => audioTracks.push(t));
+                }
+                const remoteAudioEl = document.getElementById('remoteAudio');
+                if (remoteAudioEl && remoteAudioEl.srcObject) {
+                    remoteAudioEl.srcObject.getAudioTracks()
+                        .filter(t => t.readyState === 'live')
+                        .forEach(t => { if (!audioTracks.includes(t)) audioTracks.push(t); });
+                }
+                if (audioTracks.length === 0) {
+                    showNotification('No audio stream to record', 'error');
+                    return;
+                }
+
+                // ── Check if we are currently in a video call ──────────────────
+                const remoteVideo = document.getElementById('remoteVideo');
+                const pipVideo    = document.getElementById('pipVideo');
+                const isVideoCall = remoteVideo &&
+                    remoteVideo.style.display !== 'none' &&
+                    remoteVideo.srcObject &&
+                    remoteVideo.srcObject.getVideoTracks().some(t => t.readyState === 'live');
+
+                let mixStream;
+                let drawTimer = null;
+
+                if (isVideoCall) {
+                    // ── VIDEO RECORDING: composite canvas ─────────────────────
+                    const canvas  = document.createElement('canvas');
+                    canvas.width  = 1280;
+                    canvas.height = 720;
+                    const ctx = canvas.getContext('2d');
+
+                    drawTimer = setInterval(() => {
+                        ctx.clearRect(0, 0, 1280, 720);
+                        if (remoteVideo.readyState >= 2) {
+                            ctx.drawImage(remoteVideo, 0, 0, 1280, 720);
+                        } else {
+                            ctx.fillStyle = '#111';
+                            ctx.fillRect(0, 0, 1280, 720);
+                        }
+                        if (pipVideo && pipVideo.readyState >= 2) {
+                            // PiP: local camera in top-right corner
+                            ctx.save();
+                            ctx.beginPath();
+                            ctx.roundRect(1280 - 236, 16, 220, 160, 10);
+                            ctx.clip();
+                            ctx.drawImage(pipVideo, 1280 - 236, 16, 220, 160);
+                            ctx.restore();
+                        }
+                    }, 50);
+
+                    const canvasStream = canvas.captureStream(20);
+                    mixStream = new MediaStream([...audioTracks, ...canvasStream.getVideoTracks()]);
+                    UIState._recordDrawTimer = drawTimer;
+                } else {
+                    // ── AUDIO-ONLY RECORDING ──────────────────────────────────
+                    mixStream = new MediaStream(audioTracks);
+                }
+
+                // ── Pick best supported MIME type ─────────────────────────────
+                let mr;
+                const mimeTypes = isVideoCall
+                    ? ['video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm', 'audio/webm;codecs=opus', 'audio/webm']
+                    : ['audio/webm;codecs=opus', 'audio/webm'];
+
+                for (const mime of mimeTypes) {
+                    if (MediaRecorder.isTypeSupported(mime)) {
+                        try { mr = new MediaRecorder(mixStream, { mimeType: mime }); break; } catch(e) {}
+                    }
+                }
+                if (!mr) {
+                    try { mr = new MediaRecorder(mixStream); }
+                    catch(e2) { showNotification('Recording not supported in this browser', 'error'); return; }
+                }
+
+                UIState._recordChunks = [];
+                UIState._recordIsVideo = isVideoCall;
+
+                mr.ondataavailable = e => {
+                    if (e.data && e.data.size > 0) UIState._recordChunks.push(e.data);
+                };
+                mr.onstop = () => {
+                    if (UIState._recordDrawTimer) {
+                        clearInterval(UIState._recordDrawTimer);
+                        UIState._recordDrawTimer = null;
+                    }
+                    const isVid = UIState._recordIsVideo;
+                    const blob  = new Blob(UIState._recordChunks, { type: isVid ? 'video/webm' : 'audio/webm' });
+                    const url   = URL.createObjectURL(blob);
+                    const a     = document.createElement('a');
+                    const ts    = new Date().toISOString().slice(0, 19).replace(/:/g, '-');
+                    a.href     = url;
+                    a.download = 'call-recording-' + ts + '.webm';
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    URL.revokeObjectURL(url);
+                    UIState._recordChunks    = [];
+                    UIState._mediaRecorder   = null;
+                    UIState._recordIsVideo   = false;
+                    if (elements.menuRecordLabel) elements.menuRecordLabel.textContent = 'Record';
+                    const recIcon = elements.menuRecord && elements.menuRecord.querySelector('i');
+                    if (recIcon) { recIcon.style.color = '#ff3b30'; recIcon.classList.remove('fa-circle'); recIcon.classList.add('fa-circle'); }
+                    showNotification('Recording saved ✓', 'success');
+                };
+
+                mr.start(500);
+                UIState._mediaRecorder = mr;
+                if (elements.menuRecordLabel) elements.menuRecordLabel.textContent = 'Stop Recording';
+                const recIcon = elements.menuRecord && elements.menuRecord.querySelector('i');
+                if (recIcon) { recIcon.style.color = '#ff3b30'; recIcon.classList.add('recording-pulse'); }
+                showNotification(isVideoCall ? 'Video recording started 🔴' : 'Audio recording started 🔴', 'info');
+            } else {
+                UIState._mediaRecorder.stop();
+                showNotification('Recording stopped — saving…', 'info');
+            }
+        },
+
+        toggleMenuDots: function(e) {
+            e?.stopPropagation();
+            if (elements.menuDotsDropdown) {
                 elements.menuDotsDropdown.classList.toggle('active');
                 UILogger.interaction('toggleMenuDots', 'menuDotsBtn');
             }
@@ -6789,43 +6893,42 @@ case 'CALL_ACCEPTED': {
                         if (icon) icon.className = 'fas fa-video';
                         if (elements.videoBtn) elements.videoBtn.classList.add('active');
 
-                        // Add video track to peer connection
+                        // Add video track to peer connection and renegotiate
                         const pc = (window.callCore && window.callCore.getPeerConnection && window.callCore.getPeerConnection())
                             || (window.KynectaCallSession && window.KynectaCallSession.peerConnection);
-                        if (pc && pc.addTrack) { 
-                            try { 
-                                pc.addTrack(vTrack, UIState.localStream); 
-                                
-                                // Trigger renegotiation by creating and sending a new offer
-                                if (pc.createOffer && pc.setLocalDescription) {
-                                    pc.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: true })
-                                        .then(offer => {
-                                            return pc.setLocalDescription(offer);
-                                        })
-                                        .then(() => {
-                                            // Send the new offer via existing signaling channel
-                                            if (window.callCore && window.callCore.sendToParent) {
-                                                window.callCore.sendToParent('SIGNAL_OFFER', {
-                                                    sdp: pc.localDescription,
-                                                    callId: callsState.serverCallId || callsState.activeCallId
-                                                });
+                        if (pc && pc.addTrack) {
+                            try { pc.addTrack(vTrack, UIState.localStream); } catch(e){}
+                            // Renegotiate so remote peer receives the video track
+                            if (pc.createOffer) {
+                                pc.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: true })
+                                    .then(offer => pc.setLocalDescription(offer))
+                                    .then(() => {
+                                        // Forward SDP through existing signalling channel
+                                        const callId = (window.callsState && window.callsState.serverCallId)
+                                            || (window.KynectaCallSession && window.KynectaCallSession.serverCallId);
+                                        window.dispatchEvent(new CustomEvent('webrtc:sendSignal', {
+                                            detail: {
+                                                type: 'SIGNAL_OFFER',
+                                                payload: { callId, offer: pc.localDescription, timestamp: Date.now() }
                                             }
-                                            console.log('[Calls UI] Video upgrade offer sent');
-                                        })
-                                        .catch(err => {
-                                            console.warn('[Calls UI] Failed to create video upgrade offer:', err);
-                                        });
-                                }
-                            } catch(e){ 
-                                console.warn('[Calls UI] Failed to add video track:', e);
-                            } 
+                                        }));
+                                    })
+                                    .catch(err => { console.warn('[CallsUI] Renegotiation failed', err.message); });
+                            }
                         }
 
-                        // Signal remote peer about video upgrade
+                        // Signal remote peer about video upgrade (WhatsApp-style prompt)
+                        const callerName = (window.callsState && window.callsState.remoteUserName)
+                            || (window.KynectaCallSession && window.KynectaCallSession.current && window.KynectaCallSession.current.callerName)
+                            || 'The caller';
                         if (window.parent && window.parent !== window) {
-                            window.parent.postMessage({ type: 'VIDEO_UPGRADE_REQUEST', payload: { enabled: true }, source: 'calls-iframe' }, '*');
+                            window.parent.postMessage({
+                                type: 'VIDEO_UPGRADE_REQUEST',
+                                payload: { enabled: true, callerName },
+                                source: 'calls-iframe'
+                            }, '*');
                         }
-                        showNotification('Camera on', 'info');
+                        showNotification('Camera on — waiting for other side to accept', 'info');
                     })
                     .catch(err => {
                         if (err.name === 'NotAllowedError') showNotification('Camera permission denied', 'error');
@@ -9849,6 +9952,37 @@ if (detectExistingCore()) {
                 });
                 break;
             }
+
+            case 'VIDEO_UPGRADE_ACCEPTED':
+                // Remote side accepted our video upgrade request — enable our camera
+                if (typeof UIEventHandlers !== 'undefined' && UIEventHandlers.toggleVideo) {
+                    // Only trigger if we're not already in video mode
+                    if (!UIState.localStream || !UIState.localStream.getVideoTracks().some(t => t.readyState === 'live')) {
+                        UIEventHandlers.toggleVideo();
+                    }
+                }
+                if (typeof showNotification === 'function') showNotification('Video call accepted ✓', 'success');
+                break;
+
+            case 'VIDEO_UPGRADE_DECLINED':
+                // Remote declined — roll back: stop any video tracks we started, revert UI
+                if (UIState.localStream) {
+                    UIState.localStream.getVideoTracks().forEach(t => { t.enabled = false; t.stop(); });
+                }
+                UIState.isVideoOff = true;
+                const _pipC = document.getElementById('pipContainer');
+                if (_pipC) _pipC.style.display = 'none';
+                const _aw   = document.getElementById('incallAvatarWrap');
+                if (_aw) _aw.style.display = 'flex';
+                const _rv   = document.getElementById('remoteVideo');
+                if (_rv) _rv.style.display = 'none';
+                if (elements && elements.videoBtn) {
+                    elements.videoBtn.classList.remove('active');
+                    const _vi = elements.videoBtn.querySelector('i');
+                    if (_vi) _vi.className = 'fas fa-video-slash';
+                }
+                if (typeof showNotification === 'function') showNotification('Video declined by other party', 'warning');
+                break;
         }
     });
 

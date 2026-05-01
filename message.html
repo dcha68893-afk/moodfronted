@@ -1942,40 +1942,38 @@
             }
 
             // ── Route WS bridge events correctly — each type gets its OWN dispatch ──
-            // BUG-FIX: Previously ALL ws-bridge types (including message:sent, message:delivered)
-            // were fired as 'message:new' on the document, causing duplicates and ghost messages.
-            // Now each type is routed to the correct handler only.
+            // ROOT-CAUSE FIX: Previously ALL ws-bridge types were dispatched as 'message:new',
+            // so message:sent / message:delivered / message:read were treated as new messages
+            // (duplicates on sender, missed delivery on receiver). Now each type routes correctly.
             const _nt = normalizedData.type;
-            const _payload = normalizedData.payload || normalizedData;
+            const _p  = normalizedData.payload || normalizedData;
 
-            // Incoming new message from another user → fire message:new
+            // ── Real new incoming message from another user ───────────────────
             if (_nt === 'message:new' || _nt === 'new_message' || _nt === 'newMessage' || _nt === 'chat:message') {
-                try { document.dispatchEvent(new CustomEvent('message:new', { detail: _payload })); } catch(_) {}
-                try { window.dispatchEvent(new CustomEvent('kyn:message:received', { detail: _payload })); } catch(_) {}
+                try { document.dispatchEvent(new CustomEvent('message:new',           { detail: _p })); } catch(_) {}
+                try { window.dispatchEvent(new CustomEvent('kyn:message:received',    { detail: _p })); } catch(_) {}
                 console.log('[Message HTML] ✅ FIX forwarded new message event:', _nt);
             }
-            // Sender's own message confirmed → fire message:sent (status update only, NOT message:new)
+            // ── Sender's own message confirmed (status-update only, NOT new message) ──
             else if (_nt === 'message:sent' || _nt === 'message_sent') {
-                try { window.dispatchEvent(new CustomEvent('messageStatusUpdated', { detail: { messageId: _payload.localId || _payload.messageId, status: 'sent', serverId: _payload.serverId || _payload.messageId } })); } catch(_) {}
-                // Also dispatch message:sent so messages-core.js handleRealtimePayload picks it up
-                try { document.dispatchEvent(new CustomEvent('message:sent', { detail: _payload })); } catch(_) {}
+                try { document.dispatchEvent(new CustomEvent('message:sent',          { detail: _p })); } catch(_) {}
+                try { window.dispatchEvent(new CustomEvent('messageStatusUpdated',    { detail: { messageId: _p.localId || _p.messageId, status: 'sent', serverId: _p.serverId || _p.id || _p.messageId } })); } catch(_) {}
                 console.log('[Message HTML] ✅ FIX forwarded message:sent status event');
             }
-            // Delivery receipt → status update only
+            // ── Delivery receipt ─────────────────────────────────────────────
             else if (_nt === 'message:delivered' || _nt === 'message_delivered') {
-                try { window.dispatchEvent(new CustomEvent('messageStatusUpdated', { detail: { messageId: _payload.messageId || _payload.localId, status: 'delivered' } })); } catch(_) {}
-                try { document.dispatchEvent(new CustomEvent('message:delivered', { detail: _payload })); } catch(_) {}
+                try { document.dispatchEvent(new CustomEvent('message:delivered',     { detail: _p })); } catch(_) {}
+                try { window.dispatchEvent(new CustomEvent('messageStatusUpdated',    { detail: { messageId: _p.messageId || _p.localId, status: 'delivered' } })); } catch(_) {}
                 console.log('[Message HTML] ✅ FIX forwarded message:delivered status event');
             }
-            // Read receipt → status update only
+            // ── Read receipt ─────────────────────────────────────────────────
             else if (_nt === 'message:read' || _nt === 'message_read') {
-                try { window.dispatchEvent(new CustomEvent('messageStatusUpdated', { detail: { messageId: _payload.messageId || _payload.localId, status: 'read' } })); } catch(_) {}
-                try { document.dispatchEvent(new CustomEvent('message:read', { detail: _payload })); } catch(_) {}
-                console.log('[Message HTML] ✅ FIX forwarded message:read status event');
+                try { document.dispatchEvent(new CustomEvent('message:read',          { detail: _p })); } catch(_) {}
+                try { window.dispatchEvent(new CustomEvent('messageStatusUpdated',    { detail: { messageId: _p.messageId || _p.localId, status: 'read' } })); } catch(_) {}
             }
-            // Conversation metadata update (sidebar badge refresh)
+            // ── Sidebar / conversation metadata update ───────────────────────
             else if (_nt === 'CONVERSATION_UPDATED') {
-                try { window.dispatchEvent(new CustomEvent('conversationUpdated', { detail: _payload })); } catch(_) {}
+                try { window.dispatchEvent(new CustomEvent('conversationUpdated',     { detail: _p })); } catch(_) {}
             }
 
             // ✅ FIX 7b: Forward INCOMING_CALL so messages-ui.js modal fires.

@@ -2131,26 +2131,23 @@
 
                         this._notifyListeners('newMessage', e.detail.message);
 
-
-
-                        // Force immediate re-render of the messages container
-
-                        // if the incoming message belongs to the active chat
-
                         const core = getMessagesCore();
-
                         const activeChat = core?.getCurrentConversation?.() || core?.ChatManager?.getActiveChat?.();
+                        const incomingChatId = String(e.detail.message.chatId || e.detail.message.conversationId || '');
 
-                        const incomingChatId = e.detail.message.chatId || e.detail.message.conversationId;
-
-                        if (activeChat && String(activeChat.id) === String(incomingChatId)) {
-
-                            const messages    = core?.getMessages?.() || [];
-
+                        if (activeChat && incomingChatId && String(activeChat.id) === incomingChatId) {
+                            const allMsgs = core?.getMessages?.() || [];
+                            // ✅ FIX: Filter to only this chat's messages before rendering
+                            const chatMsgs = allMsgs.filter(m =>
+                                String(m.chatId || m.conversationId || '') === incomingChatId
+                            );
                             const currentUser = core?.getCurrentUser?.();
-
-                            UIRenderer.renderMessages(messages, activeChat, currentUser);
-
+                            UIRenderer.renderMessages(chatMsgs.length > 0 ? chatMsgs : allMsgs, activeChat, currentUser);
+                            // Auto-scroll so new message is visible
+                            try {
+                                const c = document.getElementById('messagesContainer');
+                                if (c) requestAnimationFrame(() => { c.scrollTop = c.scrollHeight; });
+                            } catch(_) {}
                         }
 
                     }
@@ -2888,7 +2885,19 @@
 
                 UIFailsafe.queueAction(() => {
 
-                    this.renderMessages(e.detail.messages, e.detail.currentChat, e.detail.currentUser);
+                    const currentChat = e.detail.currentChat;
+                    let messages = e.detail.messages || [];
+                    // ✅ FIX: Always filter messages to the current chat before rendering.
+                    // ChatManager._messages is a flat global array — without filtering,
+                    // messages from other chats contaminate the panel.
+                    if (currentChat && currentChat.id && messages.length > 0) {
+                        const chatId = String(currentChat.id);
+                        const filtered = messages.filter(m =>
+                            String(m.chatId || m.conversationId || '') === chatId
+                        );
+                        if (filtered.length > 0) messages = filtered;
+                    }
+                    this.renderMessages(messages, currentChat, e.detail.currentUser);
 
                 });
 
@@ -3041,14 +3050,22 @@
                     if (e.detail && e.detail.message) {
 
                         const core = getMessagesCore();
-
                         const currentChat = core?.getCurrentConversation?.();
-
                         const currentUser = core?.getCurrentUser?.();
+                        const incomingChatId = String(e.detail.message.chatId || e.detail.message.conversationId || '');
 
-                        const messages = core?.getMessages?.() || [];
-
-                        this.renderMessages(messages, currentChat, currentUser);
+                        if (currentChat && incomingChatId && String(currentChat.id) === incomingChatId) {
+                            const allMsgs = core?.getMessages?.() || [];
+                            // ✅ FIX: filter to only active chat messages
+                            const chatMsgs = allMsgs.filter(m =>
+                                String(m.chatId || m.conversationId || '') === incomingChatId
+                            );
+                            this.renderMessages(chatMsgs.length > 0 ? chatMsgs : allMsgs, currentChat, currentUser);
+                            try {
+                                const c = document.getElementById('messagesContainer');
+                                if (c) requestAnimationFrame(() => { c.scrollTop = c.scrollHeight; });
+                            } catch(_) {}
+                        }
 
                     }
 
@@ -3138,8 +3155,6 @@
 
 
 
-            // FIX: Allow message rendering even when lifecycle state is not ACTIVE
-            // Real-time messages should always be displayed regardless of UI state
             if (!this._canRender()) {
 
                 if (currentChat && normalizedMessages.length > 0) {
@@ -3160,9 +3175,9 @@
 
                 }
 
-                // Don't show passive loading state - allow normal rendering to continue
-                // UIFailsafe.safeSetHTML(container, this._getPassiveLoadingState());
-                // return;
+                UIFailsafe.safeSetHTML(container, this._getPassiveLoadingState());
+
+                return;
 
             }
 
@@ -10762,6 +10777,39 @@ Type: ${message.type || 'text'}`;
 
         setupAutoOpenChat();
 
+        // ✅ ROOT-FIX: Receiver-side real-time message display.
+        // When a new message arrives for the receiver, messages-core fires kyn:incomingMessage.
+        // We listen here and immediately render it into the chat panel if the chat is open,
+        // OR update the sidebar badge if a different chat is active.
+        window.addEventListener('kyn:incomingMessage', function(evt) {
+            const detail = evt.detail || {};
+            const incomingMsg  = detail.message || detail;
+            const incomingChat = String(incomingMsg.chatId || incomingMsg.conversationId || detail.chatId || '');
+            if (!incomingChat) return;
+
+            const core = getMessagesCore();
+            const activeChat = core?.getCurrentConversation?.() || core?.ChatManager?.getActiveChat?.();
+
+            if (activeChat && String(activeChat.id) === incomingChat) {
+                // Receiver has this chat open — render the new message immediately
+                const allMsgs = core?.getMessages?.() || core?.ChatManager?._messages || [];
+                const chatMsgs = allMsgs.filter(m =>
+                    String(m.chatId || m.conversationId || '') === incomingChat
+                );
+                const currentUser = core?.getCurrentUser?.();
+                UIRenderer.renderMessages(chatMsgs.length > 0 ? chatMsgs : allMsgs, activeChat, currentUser);
+                try {
+                    const c = document.getElementById('messagesContainer');
+                    if (c) requestAnimationFrame(() => { c.scrollTop = c.scrollHeight; });
+                } catch(_) {}
+            } else {
+                // Receiver is in a different chat — bump unread badge on sidebar
+                const conversations = core?.getConversations?.() || [];
+                const currentChat2 = core?.getCurrentConversation?.();
+                const currentCategory = core?.getCurrentCategory?.() || 'all';
+                UIRenderer.renderChatsList(conversations, currentChat2, currentCategory, {});
+            }
+        });
 
 
         const primeCachedUi = () => {

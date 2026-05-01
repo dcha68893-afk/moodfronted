@@ -13055,228 +13055,92 @@ if (message.type === 'SETTING_CHANGED' || message.type === 'SETTINGS_UPDATED') {
 
 
 
-                    // ── CRITICAL FIX: Attach remote stream to EXISTING audio element ──
-
-                    // Without this step there is NO sound on either side.
-                    // IMPORTANT: Always use the existing #remoteAudio from the DOM, never create a duplicate
-
+                    // ── AUDIO: pipe all audio tracks from remote stream into #remoteAudio ──
                     try {
-
                         let remoteAudio = document.getElementById('remoteAudio');
-
                         if (!remoteAudio) {
-                            console.error('[CallsCore] CRITICAL: #remoteAudio element not found in DOM - audio will not work');
-                            return;
+                            remoteAudio = document.createElement('audio');
+                            remoteAudio.id      = 'remoteAudio';
+                            remoteAudio.autoplay = true;
+                            remoteAudio.setAttribute('playsinline', '');
+                            remoteAudio.style.cssText = 'position:absolute;width:0;height:0;overflow:hidden;left:-9999px;';
+                            document.body.appendChild(remoteAudio);
                         }
-
-                        console.log('[CallsCore] Attaching stream to existing #remoteAudio element');
-                        remoteAudio.srcObject = stream;
-
-                        remoteAudio.play().catch(function(playErr) {
-
-
-
-                            // Autoplay blocked — retry on next user gesture
-
-
-
-                            console.warn('[CallsCore] Remote audio autoplay blocked, retrying', playErr.message);
-
-
-
-                            const retryPlay = function() {
-
-
-
-                                remoteAudio.play().catch(function() {});
-
-
-
-                                document.removeEventListener('click',      retryPlay);
-
-
-
-                                document.removeEventListener('touchstart', retryPlay);
-
-
-
-                            };
-
-
-
-                            document.addEventListener('click',      retryPlay, { once: true });
-
-
-
-                            document.addEventListener('touchstart', retryPlay, { once: true });
-
-
-
-                        });
-
-
-
-                        console.log('[CallsCore] ✅ AUDIO STREAM ATTACHED — remoteAudio.srcObject set');
-
-
-
-                    } catch (audioErr) {
-
-
-
-                        logError(MODULE, 'Failed to attach remote audio', audioErr);
-
-
-
-                    }
-
-
-
-
-
-
-
-                    // ── VIDEO TRACK HANDLING ──
-
-
-
-                    // Check if the stream has video tracks and attach them to remoteVideo
-
-
-
-                    const videoTracks = stream.getVideoTracks();
-
-
-
-                    if (videoTracks.length > 0) {
-
-
-
-                        try {
-
-
-
-                            let remoteVideo = document.getElementById('remoteVideo');
-
-
-
-                            if (!remoteVideo) {
-
-
-
-                                remoteVideo = document.createElement('video');
-
-
-
-                                remoteVideo.id = 'remoteVideo';
-
-
-
-                                remoteVideo.autoplay = true;
-
-
-
-                                remoteVideo.setAttribute('playsinline', '');
-
-
-
-                                remoteVideo.style.display = 'none';
-
-
-
-                                document.body.appendChild(remoteVideo);
-
-
-
-                                console.log('[CallsCore] Created <video id="remoteVideo">');
-
-
-
-                            }
-
-
-
-                            remoteVideo.srcObject = stream;
-
-
-
-                            remoteVideo.play().catch(function(videoPlayErr) {
-
-
-
-                                console.warn('[CallsCore] Remote video autoplay blocked, retrying', videoPlayErr.message);
-
-
-
-                                const retryVideoPlay = function() {
-
-
-
-                                    remoteVideo.play().catch(function() {});
-
-
-
-                                    document.removeEventListener('click', retryVideoPlay);
-
-
-
-                                    document.removeEventListener('touchstart', retryVideoPlay);
-
-
-
+                        if (remoteAudio.srcObject !== stream) {
+                            remoteAudio.srcObject = stream;
+                        }
+                        remoteAudio.volume = 1.0;
+                        remoteAudio.muted  = false;
+                        const _audioPlay = remoteAudio.play();
+                        if (_audioPlay) {
+                            _audioPlay.catch(function(playErr) {
+                                console.warn('[CallsCore] Remote audio autoplay blocked, retrying on gesture', playErr.message);
+                                const retryPlay = function() {
+                                    remoteAudio.play().catch(function() {});
+                                    document.removeEventListener('click',      retryPlay);
+                                    document.removeEventListener('touchstart', retryPlay);
+                                    document.removeEventListener('keydown',    retryPlay);
                                 };
-
-
-
-                                document.addEventListener('click', retryVideoPlay, { once: true });
-
-
-
-                                document.addEventListener('touchstart', retryVideoPlay, { once: true });
-
-
-
+                                document.addEventListener('click',      retryPlay, { once: true });
+                                document.addEventListener('touchstart', retryPlay, { once: true });
+                                document.addEventListener('keydown',    retryPlay, { once: true });
                             });
-
-
-
-                            // Hide avatar and show video container when video is available
-
-
-
-                            const avatarWrap = document.getElementById('incallAvatarWrap');
-
-
-
-                            const remoteVideoContainer = document.getElementById('remoteVideo');
-
-
-
-                            if (avatarWrap) avatarWrap.style.display = 'none';
-
-
-
-                            if (remoteVideoContainer) remoteVideoContainer.style.display = 'block';
-
-
-
-                            console.log('[CallsCore] ✅ VIDEO STREAM ATTACHED — remoteVideo.srcObject set');
-
-
-
-                        } catch (videoErr) {
-
-
-
-                            logError(MODULE, 'Failed to attach remote video', videoErr);
-
-
-
                         }
-
-
-
+                        console.log('[CallsCore] ✅ AUDIO STREAM ATTACHED — remoteAudio.srcObject set');
+                    } catch (audioErr) {
+                        logError(MODULE, 'Failed to attach remote audio', audioErr);
                     }
+
+                    // ── VIDEO: if stream has live video tracks, attach to #remoteVideo ──
+                    try {
+                        const _liveVideoTracks = stream.getVideoTracks().filter(function(t) {
+                            return t.readyState === 'live' && t.enabled;
+                        });
+                        if (_liveVideoTracks.length > 0) {
+                            const _remoteVideo = document.getElementById('remoteVideo');
+                            if (_remoteVideo) {
+                                if (_remoteVideo.srcObject !== stream) {
+                                    _remoteVideo.srcObject = stream;
+                                }
+                                _remoteVideo.volume = 1.0;
+                                _remoteVideo.muted  = false;
+                                _remoteVideo.style.display = 'block';
+                                _remoteVideo.play().catch(function() {
+                                    _remoteVideo.muted = true;
+                                    _remoteVideo.play().then(function() {
+                                        _remoteVideo.muted  = false;
+                                        _remoteVideo.volume = 1.0;
+                                    }).catch(function() {});
+                                });
+                                const _avatarWrap = document.getElementById('incallAvatarWrap');
+                                if (_avatarWrap) _avatarWrap.style.display = 'none';
+                                console.log('[CallsCore] ✅ VIDEO STREAM ATTACHED — remoteVideo.srcObject set');
+                            }
+                        }
+                        // Watch for video tracks added later (audio → video call upgrade)
+                        if (!stream._callsVideoTrackListenerAdded) {
+                            stream._callsVideoTrackListenerAdded = true;
+                            stream.addEventListener('addtrack', function(addEv) {
+                                if (addEv.track && addEv.track.kind === 'video') {
+                                    const _rv = document.getElementById('remoteVideo');
+                                    if (_rv) {
+                                        if (_rv.srcObject !== stream) _rv.srcObject = stream;
+                                        _rv.style.display = 'block';
+                                        _rv.play().catch(function() {});
+                                        const _aw = document.getElementById('incallAvatarWrap');
+                                        if (_aw) _aw.style.display = 'none';
+                                        console.log('[CallsCore] ✅ Video track added dynamically — remoteVideo updated');
+                                    }
+                                }
+                            });
+                        }
+                    } catch (videoErr) {
+                        logError(MODULE, 'Failed to attach remote video', videoErr);
+                    }
+
+
+
+
 
 
 

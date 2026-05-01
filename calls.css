@@ -4344,3 +4344,18 @@ body.call-connected .unified-incoming-screen {
     visibility: hidden !important;
     pointer-events: none !important;
 }
+
+/* ── Recording pulse indicator ───────────────────────────────────── */
+.recording-pulse {
+    animation: recPulse 1s ease-in-out infinite;
+}
+@keyframes recPulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50%       { opacity: 0.5; transform: scale(1.15); }
+}
+
+/* ── Video upgrade banner animation ─────────────────────────────── */
+@keyframes _vuSlideUp {
+    from { opacity: 0; transform: translateX(-50%) translateY(18px); }
+    to   { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
