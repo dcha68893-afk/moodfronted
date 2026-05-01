@@ -272,14 +272,18 @@
         } catch (e) {}
     }
 
+    // FIX: TTL-based dedup (8s) instead of permanent Set.
+    // Permanent Set caused a message arriving via BOTH wsService.on AND REALTIME_EVENT
+    // postMessage to be treated as duplicate on the 2nd path and dropped silently.
+    // Short TTL still blocks visual double-renders but auto-clears so nothing is lost.
+    const _dedupTs = new Map();
+    const _DEDUP_TTL = 8000;
     function isDuplicateMessage(messageId) {
         if (!messageId) return false;
-        if (processedMessageIds.has(messageId)) return true;
-        processedMessageIds.add(messageId);
-        
-        if (processedMessageIds.size > 1000) {
-            processedMessageIds.clear();
-        }
+        const now = Date.now();
+        for (const [id, ts] of _dedupTs) { if (now - ts > _DEDUP_TTL) _dedupTs.delete(id); }
+        if (_dedupTs.has(String(messageId))) return true;
+        _dedupTs.set(String(messageId), now);
         return false;
     }
     
@@ -2638,24 +2642,27 @@ try {
         setConversations: function(conversations) {
             const currentUserId = SessionManager.getUserId();
             const uniqueMap = new Map();
-            // FIX: Deduplicate by chat id, NOT by friendId.
-            // Deduping by friendId silently drops legitimate chats between non-friends
-            // (or multiple chats with the same person). Every unique chat row has its
-            // own id — that is the only safe dedup key.
+            const seenFriendIds = new Set();
+            
             ensureSafeArray(conversations).forEach(chat => {
                 if (!chat || !chat.id) return;
-
+                
                 let friendId = chat.friendId || chat.otherParticipantId;
                 if (!friendId && chat.otherParticipant) {
                     friendId = chat.otherParticipant.id;
                 }
                 if (!friendId && chat.participants) {
-                    const other = chat.participants.find(p => p && p.id !== currentUserId);
+                    const other = chat.participants.find(p => p.id !== currentUserId);
                     friendId = other?.id;
                 }
-                // still set friendId on the object so lookups work, just don't gate on it
+                
+                if (friendId && seenFriendIds.has(friendId)) {
+                    console.log(`[ChatManager] Skipping duplicate conversation for friend ${friendId}`);
+                    return;
+                }
+                
                 if (friendId) {
-                    // no-op: we keep ALL chats regardless of friendId
+                    seenFriendIds.add(friendId);
                 }
                 
                 const otherUser = chat.otherParticipant || 
@@ -4266,67 +4273,21 @@ try {
                         realUserName = options.name || `User_${numericReceiverId}`;
                     }
 
-                    // FIX: Always call POST /chats/start first.
-                    // This creates or returns the real chatId for both parties immediately
-                    // so the receiver can reply without a pending->real replacement race.
-                    // The old code created a local "pending_X" conversation that only the
-                    // sender had — the receiver could never resolve it without a full reload.
-                    try {
-                        const startResult = await makeApiRequest('/chats/start', 'POST', { userId: numericReceiverId });
-                        const realChat = startResult?.data?.chat || startResult?.chat || startResult;
-                        const realChatId = realChat?.id || realChat?.chatId;
-                        if (realChatId) {
-                            // Merge the real chat into local conversations
-                            const normalizedChat = {
-                                ...realChat,
-                                id: realChatId,
-                                chatId: realChatId,
-                                friendId: numericReceiverId,
-                                friendName: realUserName,
-                                friendAvatar: realUserAvatar || null,
-                                chatName: realUserName,
-                                type: 'direct',
-                                isPending: false,
-                                unreadCount: 0,
-                                lastMessage: '',
-                                lastMessageAt: Date.now()
-                            };
-                            const existingIdx = ChatManager._conversations.findIndex(
-                                c => String(c.id) === String(realChatId)
-                            );
-                            if (existingIdx === -1) {
-                                ChatManager._conversations.unshift(normalizedChat);
-                                ChatManager._conversationsMap.set(realChatId, normalizedChat);
-                            }
-                            // Replace any stale pending conversation for this receiver
-                            const stale = ChatManager.getPendingConversationByReceiverId(numericReceiverId);
-                            if (stale) {
-                                ChatManager.replacePendingConversation(stale.id, normalizedChat);
-                            }
-                            ChatManager._saveToCache();
-                            await ConversationManager.openConversation(realChatId, options);
-                            try {
-                                window.dispatchEvent(new CustomEvent('conversationCreated', {
-                                    detail: { participants, options, chatId: realChatId }
-                                }));
-                            } catch (e) {}
-                            return realChatId;
-                        }
-                    } catch (startErr) {
-                        console.warn('[ConversationManager] /chats/start failed, falling back to pending:', startErr.message);
-                    }
-
                     if (options.initialMessage && options.initialMessage.trim()) {
                         const body = {
                             receiverId: numericReceiverId,
                             content: options.initialMessage.trim(),
                             type: 'text'
                         };
+
                         const result = await makeApiRequest('/messages', 'POST', body);
+                        
                         const chatId = result?.chatId || result?.data?.chatId || result?.id || result?.data?.id;
+
                         if (chatId) {
                             await ChatManager.fetchConversations();
                             await ConversationManager.openConversation(chatId, options);
+                            
                             try {
                                 window.dispatchEvent(new CustomEvent('conversationCreated', {
                                     detail: { participants, options, chatId }
@@ -4335,26 +4296,28 @@ try {
                             return chatId;
                         }
                     }
-
+                    
                     const existingPending = ChatManager.getPendingConversationByReceiverId(numericReceiverId);
                     if (existingPending) {
                         await ConversationManager.openConversation(existingPending.id, options);
                         return existingPending.id;
                     }
-
+                    
                     const pendingConversation = ChatManager.getOrCreatePendingConversation(
-                        numericReceiverId,
-                        realUserName,
+                        numericReceiverId, 
+                        realUserName, 
                         realUserAvatar
                     );
-
+                    
                     if (pendingConversation) {
                         ChatManager.setActiveConversation(pendingConversation);
                         ConversationManager._showChatPanel(pendingConversation);
+                        
                         try {
                             window.dispatchEvent(new CustomEvent('conversationCreated', {
-                                detail: {
-                                    participants, options,
+                                detail: { 
+                                    participants, 
+                                    options, 
                                     chatId: pendingConversation.id,
                                     isPending: true,
                                     receiverId: numericReceiverId,
@@ -4363,9 +4326,10 @@ try {
                                 }
                             }));
                         } catch (e) {}
+                        
                         return pendingConversation.id;
                     }
-
+                    
                     return false;
                     
                 } catch (error) {
@@ -5562,65 +5526,15 @@ try {
             }
 
             if (ChatManager && ChatManager._conversationsMap && chatId) {
-                let conversation = ChatManager._conversationsMap.get(chatId);
-
-                // FIX: If the receiver doesn't have this chat in their list yet
-                // (e.g. first ever message from a non-friend), create a minimal
-                // conversation entry immediately so the chat appears in the sidebar
-                // and the message bubble renders right away without a page reload.
-                if (!conversation && normalizedMessage) {
-                    const myId = SessionManager?.getUserId?.();
-                    const sender = normalizedMessage.sender || {};
-                    const otherUser = String(normalizedMessage.senderId) !== String(myId)
-                        ? sender
-                        : null;
-                    const displayName = otherUser
-                        ? (otherUser.displayName || otherUser.username || `User_${normalizedMessage.senderId}`)
-                        : 'Chat';
-                    conversation = {
-                        id: chatId,
-                        chatId: chatId,
-                        type: 'direct',
-                        friendId: otherUser ? otherUser.id : null,
-                        friendName: displayName,
-                        friendAvatar: otherUser?.avatar || null,
-                        otherParticipant: otherUser ? {
-                            id: otherUser.id,
-                            username: otherUser.username,
-                            displayName: displayName,
-                            avatar: otherUser.avatar || null,
-                            status: 'offline'
-                        } : null,
-                        chatName: displayName,
-                        lastMessage: normalizedMessage.content || '',
-                        lastMessageAt: normalizedMessage.createdAt || Date.now(),
-                        unreadCount: String(normalizedMessage.senderId) !== String(myId) ? 1 : 0,
-                        isPending: false
-                    };
-                    ChatManager._conversations.unshift(conversation);
-                    ChatManager._conversationsMap.set(chatId, conversation);
-                    // Load the full chat from server in background so we get real participant info
-                    makeApiRequest(`/chats/${chatId}`, 'GET').then(result => {
-                        const chatData = result?.data?.chat || result?.chat || result;
-                        if (chatData && chatData.id) {
-                            const idx = ChatManager._conversations.findIndex(c => String(c.id) === String(chatId));
-                            if (idx !== -1) {
-                                ChatManager._conversations[idx] = { ...conversation, ...chatData };
-                                ChatManager._conversationsMap.set(chatId, ChatManager._conversations[idx]);
-                                ChatManager._saveToCache();
-                            }
-                        }
-                    }).catch(() => {});
-                    ChatManager._saveToCache();
-                } else if (conversation && normalizedMessage) {
-                    conversation.lastMessage = normalizedMessage.content || '';
+                const conversation = ChatManager._conversationsMap.get(chatId);
+                if (conversation && normalizedMessage) {
+                    conversation.lastMessage = normalizedMessage.content;
                     conversation.lastMessageAt = normalizedMessage.createdAt || normalizedMessage.timestamp || Date.now();
                     const myId = SessionManager?.getUserId?.();
                     if (normalizedMessage.senderId && String(normalizedMessage.senderId) !== String(myId)) {
                         conversation.unreadCount = (conversation.unreadCount || 0) + 1;
                     }
                 }
-
                 if (ChatManager._conversations) {
                     ChatManager._conversations.sort((a, b) => (b.lastMessageAt || 0) - (a.lastMessageAt || 0));
                 }
@@ -5674,20 +5588,19 @@ try {
                 // Gate only on chatId so we never silently drop a valid incoming message.
                 if (!message || !chatId) return;
 
-                // ✅ FIX 4: Guard against String(undefined) = "undefined" poisoning the local store.
                 const _safeId = message.id != null ? String(message.id) : null;
                 const _safeLocalId = message.localId != null ? String(message.localId) : null;
-                // Reject messages with no usable id to prevent corrupt dedup state.
-                // Media messages (image/file/audio/video) legitimately have no text content.
                 const _hasMediaType = ['image','video','audio','file','sticker'].includes(message.type);
                 if (!_safeId && !_safeLocalId && !message.content && !_hasMediaType) return;
 
-                // FIX: Normalise senderId to integer immediately.
-                // Server sometimes sends senderId as string, sometimes omits it in favour
-                // of sender.id. Both sender sides need the same numeric type so the
-                // isSent/isReceived comparison (String(senderId) === String(currentUserId))
-                // is reliable and the bubble never renders on the wrong side.
-                if (message.senderId == null && message.sender) {
+                // FIX: Dedup — same message arrives via wsService.on AND REALTIME_EVENT
+                // postMessage simultaneously (4 copies per send). Block all but the first.
+                const _dedupKey = _safeId || _safeLocalId;
+                if (_dedupKey && isDuplicateMessage(_dedupKey)) return;
+
+                // FIX: Normalise senderId to integer now so isSent comparison is always reliable.
+                // Server sometimes sends senderId as string or omits it in favour of sender.id.
+                if (!message.senderId && message.sender) {
                     message.senderId = message.sender.id || message.sender.userId;
                 }
                 if (message.senderId != null) {
@@ -5695,19 +5608,28 @@ try {
                 }
 
                 let normalizedMessage = {
-                    id:       _safeId || _safeLocalId || ('tmp_' + Date.now()),
-                    serverId: _safeId || null,
-                    localId:  _safeLocalId || null,
-                    content: message.content || message.text || '',
-                    type: message.type || 'text',
-                    senderId: message.senderId || message.sender?.id,
-                    sender: message.sender || null,
-                    timestamp: message.createdAt || message.timestamp || Date.now(),
-                    createdAt: message.createdAt || message.timestamp || Date.now(),
-                    status: message.status || 'delivered',
+                    id:            _safeId || _safeLocalId || ('tmp_' + Date.now()),
+                    serverId:      _safeId || null,
+                    localId:       _safeLocalId || null,
+                    content:       message.content || message.text || '',
+                    type:          message.type || 'text',
+                    senderId:      message.senderId,
+                    sender:        message.sender || null,
+                    timestamp:     message.createdAt || message.timestamp || Date.now(),
+                    createdAt:     message.createdAt || message.timestamp || Date.now(),
+                    updatedAt:     message.updatedAt || message.createdAt || Date.now(),
+                    status:        message.status || 'delivered',
                     conversationId: chatId,
-                    chatId: chatId,
-                    isLocalOnly: false
+                    chatId:        chatId,
+                    isLocalOnly:   false,
+                    reactions:     message.reactions || {},
+                    replyToId:     message.replyToId || null,
+                    fileName:      message.fileName || message.file_name || null,
+                    fileSize:      message.fileSize || message.file_size || null,
+                    duration:      message.duration || null,
+                    metadata:      message.metadata || {},
+                    attachment:    message.attachment || message.media || null,
+                    messageMediaAttachments: message.messageMediaAttachments || message.attachments || [],
                 };
 
                 if (window.KynectaSyncEngine?.ingestIncomingMessage) {

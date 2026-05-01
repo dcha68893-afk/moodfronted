@@ -5030,6 +5030,30 @@ const handleSendFriendRequest = async function() {
     const activeTabName = activeTab.dataset.tab;
     logUI(`Send friend request from tab: ${activeTabName}`);
 
+    // ── All Users tab: find the selected/highlighted user card and send to them ──
+    if (activeTabName === 'all-users') {
+        // Try to find a selected user card first; otherwise show guidance
+        const selectedCard = document.querySelector('#allUsersList .user-item.selected, #allUsersList .friend-item.selected');
+        if (selectedCard) {
+            const rawId = selectedCard.dataset.userId || selectedCard.dataset.id;
+            const parsedInt = parseInt(rawId, 10);
+            const uid = (!isNaN(parsedInt) && String(parsedInt) === rawId) ? parsedInt : rawId;
+            const uname = selectedCard.dataset.displayName || selectedCard.dataset.username || 'User';
+            if (!uid) { showNotification('Please select a user first', 'warning'); return; }
+            const result = await sendFriendRequest(uid, 'friend', 'Added via All Users');
+            if (result && result.success) {
+                showNotification(`Friend request sent to ${uname}`, 'success');
+            } else {
+                showNotification(result?.error || 'Failed to send friend request', 'error');
+            }
+        } else {
+            // No card selected — tell user to click the Add button on a user card directly
+            showNotification('Tap the Add button (➕) on the user you want to add', 'info');
+        }
+        return;
+    }
+
+    // ── Username tab ───────────────────────────────────────────────────────────
     if (activeTabName === 'username') {
         const usernameInput = document.getElementById('usernameInput');
         const raw = usernameInput?.value.trim() || '';
@@ -5079,6 +5103,19 @@ const handleSendFriendRequest = async function() {
         } else {
             showNotification('Search function not available', 'error');
         }
+        return;
+    }
+
+    // ── QR tab — handled by scanner; Send button not used here ────────────────
+    if (activeTabName === 'qr') {
+        showNotification('Scan a QR code to add a friend', 'info');
+        return;
+    }
+
+    // ── Nearby tab — handled by individual Add buttons ─────────────────────
+    if (activeTabName === 'nearby') {
+        showNotification('Tap the Add button next to a nearby user', 'info');
+        return;
     }
 };
 

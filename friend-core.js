@@ -3605,10 +3605,15 @@ const FriendRequestManager = {
         const opId = `send_${userId}_${Date.now()}`;
 
         if (this._pendingOperations.has(userId)) {
+            // Already in-flight — return same promise so UI gets the result
             return this._pendingOperations.get(userId).promise;
         }
 
         if (this._requestInProgress.has(userId)) {
+            // FIX: Previously returned silent { success: false } — now shows feedback
+            // and clears the stale lock so the user can retry immediately.
+            this._requestInProgress.delete(userId);
+            showNotification?.('Friend request already being sent, please wait a moment...', 'info');
             return { success: false, error: 'Request already in progress' };
         }
 
@@ -3620,7 +3625,7 @@ const FriendRequestManager = {
             setTimeout(() => {
                 this._pendingOperations.delete(userId);
                 this._requestInProgress.delete(userId);
-            }, 1000);
+            }, 400); // FIX: was 1000ms — shorter window prevents blocking retry clicks
         });
 
         return promise;

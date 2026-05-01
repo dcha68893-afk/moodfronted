@@ -369,23 +369,36 @@
         const core = getMessagesCore();
 
         if (core && core.getCurrentUserId) {
-
-            return core.getCurrentUserId();
-
+            const id = core.getCurrentUserId();
+            if (id != null) return parseInt(id, 10) || id;
         }
 
         if (core && core.SessionManager && core.SessionManager.getCurrentUserId) {
-
-            return core.SessionManager.getCurrentUserId();
-
+            const id = core.SessionManager.getCurrentUserId();
+            if (id != null) return parseInt(id, 10) || id;
         }
 
-        // FIX Bug6: fallback to globally-cached userId set by SessionManager on login.
-        // This ensures message bubbles always resolve sent/received correctly even
-        // when the core reference is not yet available during async renders.
+        // Globally-cached userId set by SessionManager on login — fastest path
         if (window._kynCurrentUserId) {
-            return window._kynCurrentUserId;
+            return parseInt(window._kynCurrentUserId, 10) || window._kynCurrentUserId;
         }
+
+        // FIX: Deep fallback — read from localStorage user cache written by messages-core.
+        // This ensures bubble direction is ALWAYS correct even when the module hasn't
+        // finished initialising (e.g. first render from cache on page load / navigation).
+        // Without this, getCurrentUserId() returns null → String(null) === "null" →
+        // String(senderId) !== "null" for every message → everything renders as "received".
+        try {
+            const userCache = localStorage.getItem('kynecta_user_cache_v8');
+            if (userCache) {
+                const parsed = JSON.parse(userCache);
+                const uid = parsed.userId || parsed.id;
+                if (uid != null) {
+                    window._kynCurrentUserId = uid; // warm the fast-path for next render
+                    return parseInt(uid, 10) || uid;
+                }
+            }
+        } catch (_e) {}
 
         return null;
 
@@ -3314,9 +3327,11 @@
 
             const core = getMessagesCore();
 
-            const currentUserId = core?.getCurrentUserId?.() || getCurrentUserId();
+            // FIX: Full fallback so currentUserId is never null.
+            // null → String(null)='null' → all bubbles appear as 'received' for both users.
+            const currentUserId = getCurrentUserId();
 
-            const isSent = String(message.senderId) === String(currentUserId);
+            const isSent = currentUserId != null && String(message.senderId) === String(currentUserId);
 
             const status = message.status || 'sent';
 
@@ -3398,9 +3413,11 @@
 
             const core = getMessagesCore();
 
-            const currentUserId = core?.getCurrentUserId?.() || getCurrentUserId();
+            // FIX: Full fallback so currentUserId is never null.
+            // null → String(null)='null' → all bubbles appear as 'received' for both users.
+            const currentUserId = getCurrentUserId();
 
-            const isSent = String(message.senderId) === String(currentUserId);
+            const isSent = currentUserId != null && String(message.senderId) === String(currentUserId);
 
             const status = message.status || 'sent';
 
@@ -3464,9 +3481,11 @@
 
             const core = getMessagesCore();
 
-            const currentUserId = core?.getCurrentUserId?.() || getCurrentUserId();
+            // FIX: Full fallback so currentUserId is never null.
+            // null → String(null)='null' → all bubbles appear as 'received' for both users.
+            const currentUserId = getCurrentUserId();
 
-            const isSent = String(message.senderId) === String(currentUserId);
+            const isSent = currentUserId != null && String(message.senderId) === String(currentUserId);
 
             const status = message.status || 'sent';
 
@@ -3530,9 +3549,11 @@
 
             const core = getMessagesCore();
 
-            const currentUserId = core?.getCurrentUserId?.() || getCurrentUserId();
+            // FIX: Full fallback so currentUserId is never null.
+            // null → String(null)='null' → all bubbles appear as 'received' for both users.
+            const currentUserId = getCurrentUserId();
 
-            const isSent = String(message.senderId) === String(currentUserId);
+            const isSent = currentUserId != null && String(message.senderId) === String(currentUserId);
 
             const status = message.status || 'sent';
 
@@ -3604,9 +3625,11 @@
 
             const core = getMessagesCore();
 
-            const currentUserId = core?.getCurrentUserId?.() || getCurrentUserId();
+            // FIX: Full fallback so currentUserId is never null.
+            // null → String(null)='null' → all bubbles appear as 'received' for both users.
+            const currentUserId = getCurrentUserId();
 
-            const isSent = String(message.senderId) === String(currentUserId);
+            const isSent = currentUserId != null && String(message.senderId) === String(currentUserId);
 
             const status = message.status || 'sent';
 
@@ -3684,9 +3707,11 @@
 
             const core = getMessagesCore();
 
-            const currentUserId = core?.getCurrentUserId?.() || getCurrentUserId();
+            // FIX: Full fallback so currentUserId is never null.
+            // null → String(null)='null' → all bubbles appear as 'received' for both users.
+            const currentUserId = getCurrentUserId();
 
-            const isSent = String(message.senderId) === String(currentUserId);
+            const isSent = currentUserId != null && String(message.senderId) === String(currentUserId);
 
             const status = message.status || 'sent';
 
@@ -3750,9 +3775,11 @@
 
             const core = getMessagesCore();
 
-            const currentUserId = core?.getCurrentUserId?.() || getCurrentUserId();
+            // FIX: Full fallback so currentUserId is never null.
+            // null → String(null)='null' → all bubbles appear as 'received' for both users.
+            const currentUserId = getCurrentUserId();
 
-            const isSent = String(message.senderId) === String(currentUserId);
+            const isSent = currentUserId != null && String(message.senderId) === String(currentUserId);
 
             const status = message.status || 'sent';
 
@@ -3848,9 +3875,11 @@
 
             const core = getMessagesCore();
 
-            const currentUserId = core?.getCurrentUserId?.() || getCurrentUserId();
+            // FIX: Full fallback so currentUserId is never null.
+            // null → String(null)='null' → all bubbles appear as 'received' for both users.
+            const currentUserId = getCurrentUserId();
 
-            const isSent = String(message.senderId) === String(currentUserId);
+            const isSent = currentUserId != null && String(message.senderId) === String(currentUserId);
 
             const status = message.status || 'sent';
 
@@ -3914,9 +3943,11 @@
 
             const core = getMessagesCore();
 
-            const currentUserId = core?.getCurrentUserId?.() || getCurrentUserId();
+            // FIX: Full fallback so currentUserId is never null.
+            // null → String(null)='null' → all bubbles appear as 'received' for both users.
+            const currentUserId = getCurrentUserId();
 
-            const isSent = String(message.senderId) === String(currentUserId);
+            const isSent = currentUserId != null && String(message.senderId) === String(currentUserId);
 
             const time = core?.formatTime ?
 
@@ -4415,48 +4446,21 @@
 
                 if (!contacts || contacts.length === 0) {
 
-                    // FIX: Instead of "No friends yet", show users from existing conversations
-                    // so non-friend users are always reachable from the new-chat panel.
-                    const _core2 = core || getMessagesCore();
-                    const _conversations = _core2?.getConversations?.() || [];
-                    const _myId = _core2?.getCurrentUser?.()?.id || _core2?.SessionManager?.getUserId?.();
-                    const _seenIds = new Set();
-                    const _convUsers = [];
-                    _conversations.forEach(conv => {
-                        if (conv.blocked || conv.archived) return;
-                        const op = conv.otherParticipant;
-                        const fid = conv.friendId;
-                        const userId = (op && op.id) || fid;
-                        if (!userId || String(userId) === String(_myId) || _seenIds.has(String(userId))) return;
-                        _seenIds.add(String(userId));
-                        _convUsers.push({
-                            id: userId,
-                            displayName: (op?.displayName || op?.username || op?.firstName || conv.friendName || conv.chatName || `User ${userId}`).replace(/\s+User$/i, '').trim(),
-                            avatar: op?.avatar || conv.friendAvatar || null,
-                            online: (op?.status === 'online') || conv.online || false,
-                            status: (op?.status === 'online' || conv.online) ? 'Online' : 'Offline'
-                        });
-                    });
+                    UIFailsafe.safeSetHTML(container, `
 
-                    if (_convUsers.length > 0) {
-                        contacts = _convUsers;
-                    } else {
-                        UIFailsafe.safeSetHTML(container, `
+                        <div class="empty-state" style="padding:32px 16px;text-align:center;">
 
-                            <div class="empty-state" style="padding:32px 16px;text-align:center;">
+                            <i class="fas fa-user-friends" style="font-size:40px;color:#d1d5db;margin-bottom:12px;display:block;"></i>
 
-                                <i class="fas fa-user-friends" style="font-size:40px;color:#d1d5db;margin-bottom:12px;display:block;"></i>
+                            <div style="font-weight:600;color:#374151;margin-bottom:6px;">No friends yet</div>
 
-                                <div style="font-weight:600;color:#374151;margin-bottom:6px;">No contacts yet</div>
+                            <div style="font-size:13px;color:#9ca3af;">Go to the Friends tab to add people</div>
 
-                                <div style="font-size:13px;color:#9ca3af;">Go to the Friends tab to add people or start a conversation</div>
+                        </div>
 
-                            </div>
+                    `);
 
-                        `);
-
-                        return;
-                    }
+                    return;
 
                 }
 
@@ -11734,39 +11738,7 @@ Type: ${message.type || 'text'}`;
 
                     const friends = coreInstance.getFriends ? coreInstance.getFriends() : [];
 
-                    let friend = friends.find(f => String(f.id) === String(id));
-
-                    // ── Non-friend fallback: resolve user info from conversation participants ──
-                    // Users who are not in the friends list still appear in conversation.participants
-                    // or conversation.otherParticipant from the backend response.
-                    if (!friend) {
-                        const conversations = coreInstance.getConversations ? coreInstance.getConversations() : [];
-                        const convForUser = conversations.find(c => {
-                            if (String(c.friendId) === String(id)) return true;
-                            if (c.otherParticipant && String(c.otherParticipant.id) === String(id)) return true;
-                            if (Array.isArray(c.participants)) return c.participants.some(p => String(p.id || p) === String(id));
-                            return false;
-                        });
-                        if (convForUser) {
-                            const p = convForUser.otherParticipant ||
-                                (Array.isArray(convForUser.participants) && convForUser.participants.find(p => String(p.id) === String(id)));
-                            if (p) {
-                                friend = {
-                                    id,
-                                    displayName: p.displayName || p.username || p.firstName || convForUser.friendName || displayName,
-                                    avatar: p.avatar || convForUser.friendAvatar || null,
-                                    online: p.status === 'online' || convForUser.online || false
-                                };
-                            } else if (convForUser.friendName) {
-                                friend = {
-                                    id,
-                                    displayName: convForUser.friendName,
-                                    avatar: convForUser.friendAvatar || null,
-                                    online: convForUser.online || false
-                                };
-                            }
-                        }
-                    }
+                    const friend = friends.find(f => f.id === id);
 
                     if (friend) {
 
