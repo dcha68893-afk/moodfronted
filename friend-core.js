@@ -2815,6 +2815,32 @@ const FriendCacheManager = {
     
     _loadFromStorage() {
         try {
+            // FIX: On startup, purge any stale v8 cache entries that have int+string duplicate IDs.
+            // This happens when old code wrote both id=5 (integer) and id="5" (string) to the same array.
+            // We rewrite the key with deduplicated data so broadcasts from chat.html are clean.
+            try {
+                const v8Key = 'kynecta_friends_cache_v8';
+                const v8Raw = localStorage.getItem(v8Key);
+                if (v8Raw) {
+                    const v8Parsed = JSON.parse(v8Raw);
+                    const arr = v8Parsed?.friends || (Array.isArray(v8Parsed) ? v8Parsed : null);
+                    if (arr && arr.length > 0) {
+                        const seen = new Set();
+                        const deduped = arr.filter(f => {
+                            if (!f || !f.id) return false;
+                            const k = String(f.id);
+                            if (seen.has(k)) return false;
+                            seen.add(k);
+                            return true;
+                        });
+                        if (deduped.length !== arr.length) {
+                            // Rewrite with deduplicated data
+                            localStorage.setItem(v8Key, JSON.stringify({ friends: deduped, timestamp: Date.now() }));
+                        }
+                    }
+                }
+            } catch (_) {}
+
             // FIX: Read from ALL known cache key variants written by different modules.
             // services.friend.js writes 'kynecta_friends_cache_v8'; messages module writes
             // the same key.  Previously only 'knecta_friends_cache' was read, causing 0 friends on reload.

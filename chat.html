@@ -1574,11 +1574,30 @@
             for (const key of candidates) {
                 try {
                     const parsed = JSON.parse(localStorage.getItem(key) || 'null');
+                    let arr = null;
                     if (Array.isArray(parsed) && parsed.length > 0) {
-                        return parsed;
+                        arr = parsed;
+                    } else if (parsed && Array.isArray(parsed.friends) && parsed.friends.length > 0) {
+                        arr = parsed.friends;
                     }
-                    if (parsed && Array.isArray(parsed.friends) && parsed.friends.length > 0) {
-                        return parsed.friends;
+                    if (arr) {
+                        // FIX: Deduplicate by String(id) — integer key 5 and string key "5" are
+                        // the same friend but both get stored due to a Map key type mismatch,
+                        // causing 2 real friends to display as 4.
+                        // Also strip non-accepted records (pending/blocked/removed) so they never
+                        // appear in the friends list broadcast to all modules.
+                        const seen = new Set();
+                        const deduped = arr.filter(f => {
+                            if (!f || !f.id) return false;
+                            const st = f.status || 'accepted';
+                            if (st === 'pending' || st === 'pending_sent' || st === 'pending_received' ||
+                                st === 'blocked' || st === 'removed' || st === 'rejected') return false;
+                            const k = String(f.id);
+                            if (seen.has(k)) return false;
+                            seen.add(k);
+                            return true;
+                        });
+                        if (deduped.length > 0) return deduped;
                     }
                 } catch (_) {}
             }
@@ -4405,7 +4424,17 @@
                 if (data.type === 'FRIENDS_DATA') {
                     const incoming = data.friends || data.payload?.friends || [];
                     if (Array.isArray(incoming) && incoming.length > 0) {
-                        cachedFriendsList = incoming;
+                        // FIX: Deduplicate by String(id) before caching and broadcasting.
+                        // Without this, int id=5 and string id="5" both survive as separate
+                        // entries, making every friend appear twice in all modules.
+                        const seen = new Set();
+                        cachedFriendsList = incoming.filter(f => {
+                            if (!f || !f.id) return false;
+                            const k = String(f.id);
+                            if (seen.has(k)) return false;
+                            seen.add(k);
+                            return true;
+                        });
                         broadcastFriendsToAllModules(cachedFriendsList);
                     }
                 }
@@ -4902,6 +4931,22 @@
                 } catch(e) {}
             }
         });
+        
     </script>
+    <script>
+  // Keep backend alive — ping every 14 minutes (Render sleeps after 15)
+  function keepBackendAwake() {
+    fetch('https://moodchat-fy56.onrender.com/api/health', {
+      method: 'GET',
+      cache: 'no-cache'
+    })
+    .then(r => console.log('[KeepAlive] Ping sent, status:', r.status))
+    .catch(e => console.warn('[KeepAlive] Ping failed:', e.message));
+  }
+
+  // Ping immediately on load, then every 14 minutes
+  keepBackendAwake();
+  setInterval(keepBackendAwake, 14 * 60 * 1000);
+</script>
 </body>
 </html>
