@@ -4122,9 +4122,23 @@ try {
             // Load cached messages immediately so the panel isn't blank offline
             const isPending = typeof actualId === 'string' && actualId.startsWith('pending_');
             if (!isPending) {
-                const cached = ChatManager.loadPreviousMessages ? ChatManager.loadPreviousMessages(actualId) : [];
-                if (cached && cached.length > 0) {
-                    ChatManager.setMessages(cached);
+                // ✅ FIX: Always load from IndexedDB cache first for instant display
+                if (window.KynectaLocalStore) {
+                    const idbCached = await window.KynectaLocalStore.getMessagesByChat(actualId, { limit: 100 }).catch(() => []);
+                    if (idbCached && idbCached.length > 0) {
+                        ChatManager.setMessages(idbCached, actualId);
+                    } else {
+                        // Fall back to localStorage cache
+                        const cached = ChatManager.loadPreviousMessages ? ChatManager.loadPreviousMessages(actualId) : [];
+                        if (cached && cached.length > 0) {
+                            ChatManager.setMessages(cached, actualId);
+                        }
+                    }
+                } else {
+                    const cached = ChatManager.loadPreviousMessages ? ChatManager.loadPreviousMessages(actualId) : [];
+                    if (cached && cached.length > 0) {
+                        ChatManager.setMessages(cached, actualId);
+                    }
                 }
             }
             
@@ -4138,13 +4152,10 @@ try {
             // FIXED: Fetch live messages only when online AND authenticated, otherwise serve cache
             if (!isPending) {
                 if (navigator.onLine && SessionManager.isAuthenticated() && currentState === LIFECYCLE_STATES.ACTIVE) {
-                    await ChatManager.fetchMessages(actualId, options).catch(() => {});
+                    // ✅ FIX: force:true bypasses the 8s minFetchGap so messages always refresh on open
+                    await ChatManager.fetchMessages(actualId, { ...options, force: true }).catch(() => {});
                 } else {
-                    // Offline / pre-ACTIVE — load from IndexedDB cache
-                    if (window.KynectaLocalStore) {
-                        const idbMsgs = await window.KynectaLocalStore.getMessagesByChat(actualId, { limit: 100 }).catch(() => []);
-                        if (idbMsgs && idbMsgs.length > 0) ChatManager.setMessages(idbMsgs);
-                    }
+                    // Offline / pre-ACTIVE — already loaded from IndexedDB above
                 }
             } else {
                 console.log('[ConversationManager] Skipping message fetch for pending conversation:', actualId);
@@ -5702,7 +5713,22 @@ try {
 
         window.addEventListener('message', function(event) {
             const data = event.data;
-            handleRealtimePayload(data?.type, data);
+            if (!data || typeof data !== 'object') return;
+
+            // ✅ FIX: Only route actual new messages via handleRealtimePayload from postMessage.
+            // Previously this called handleRealtimePayload(data.type, data) for ALL postMessages,
+            // including message:sent, message:delivered, message:read — causing those status
+            // events to be treated as new incoming messages (duplicates / ghost messages).
+            // Now we only route types that mean "a new message arrived from another user".
+            const _rawType = String(data.type || '').toLowerCase();
+            const _isNewMsg = _rawType === 'message:new' || _rawType === 'new_message' ||
+                              _rawType === 'newmessage' || _rawType === 'chat:message' ||
+                              _rawType === 'message_received';
+            if (_isNewMsg) {
+                handleRealtimePayload(data.type, data);
+            }
+            // Status events (message:sent, message:delivered, message:read) are handled via
+            // document CustomEvents dispatched by message.html — do NOT double-process here.
 
             if (data && (data.type === 'FRIEND_ONLINE' || data.type === 'FRIEND_OFFLINE' || data.type === 'STATUS_UPDATE')) {
                 const p = data.payload || data;
@@ -5753,11 +5779,22 @@ try {
 
         // ✅ FIX: Bridge from DOM CustomEvents emitted by app.realtime.socket.js bridge listeners.
         // This path activates when KynectaRealtime is connected but wsService.on was missed.
+        // IMPORTANT: Only dispatch message:new for actual NEW messages, not status events.
         window.addEventListener('kyn:message:received', function(evt) {
             if (evt.detail) handleRealtimePayload('message:new', evt.detail);
         });
         document.addEventListener('message:new', function(evt) {
             if (evt.detail) handleRealtimePayload('message:new', evt.detail);
+        });
+        // ✅ FIX: Handle status events from message.html's corrected dispatcher
+        document.addEventListener('message:sent', function(evt) {
+            if (evt.detail) handleRealtimePayload('message:sent', evt.detail);
+        });
+        document.addEventListener('message:delivered', function(evt) {
+            if (evt.detail) handleRealtimePayload('message:delivered', evt.detail);
+        });
+        document.addEventListener('message:read', function(evt) {
+            if (evt.detail) handleRealtimePayload('message:read', evt.detail);
         });
     }   // end setupRealtimeMessageListener
 

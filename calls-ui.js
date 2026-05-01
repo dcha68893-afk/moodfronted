@@ -4001,10 +4001,11 @@ case 'CALL_INITIATED':
                     this.refreshCallHistory();
                     break;
                 case 'call_timeout':
-                    // Skip if already in-call — timeout fires stale after receiver accepts
+                    // CRITICAL: 3-min ring timer must NOT end an already-accepted call.
+                    // Once receiver accepts, in-call screen is active — skip the reset.
                     if (UIState.callState === 'connected' ||
                         (document.getElementById('inCallScreen') && document.getElementById('inCallScreen').classList.contains('active'))) {
-                        console.warn('[Calls UI] call_timeout ignored — already in-call screen active');
+                        console.warn('[Calls UI] call_timeout ignored — already in-call (receiver accepted)');
                         break;
                     }
                     this.handleCallEnded(data);
@@ -4514,9 +4515,8 @@ case 'CALL_INITIATED':
                     UIState.callParticipants = [{ name: _callerName }];
                 }
             }
-            // Store caller avatar globally so transitionToInCall can use it
-            const _callerAvatar = (callData && (callData.callerAvatar || callData.callerPhoto || callData.callerProfilePhoto)) || null;
-            window.__incomingCallerAvatar = _callerAvatar;
+            // Store caller avatar globally so transitionToInCall can use it on receiver side
+            window.__incomingCallerAvatar = (callData && (callData.callerAvatar || callData.callerPhoto || callData.callerProfilePhoto)) || null;
             // ✅ FIX: Re-cache elements if incomingCallModal not yet resolved
             if (!elements.incomingCallModal) {
                 if (typeof cacheElements === 'function') cacheElements();
@@ -7556,20 +7556,20 @@ acceptIncomingCallGeneric: async function(asVideo) {
                 payload: { callId, callerName, callType }
             }, '*');
         }
-        // Immediately transition to in-call screen on receiver side with correct caller name
+        // Immediately show in-call screen on receiver side with the real caller name
         transitionToInCall({
-            userName: callerName || window.__incomingCallerName || 'Caller',
-            callType: callType,
+            userName:  callerName || window.__incomingCallerName || 'Caller',
+            callType:  callType,
             userAvatar: window.__incomingCallerAvatar || null
         });
-        // Fallback: if transitionToInCall wasn't enough (race), retry once after 1s
+        // Safety fallback: if transitionToInCall had a race, retry after 1 s
         window._receiverShowFallback = setTimeout(() => {
             const inCall = document.getElementById('inCallScreen');
             if (!inCall || !inCall.classList.contains('active')) {
                 console.warn('[UI] Fallback: showing in-call screen for receiver');
                 transitionToInCall({
-                    userName: callerName || window.__incomingCallerName || 'Caller',
-                    callType: callType,
+                    userName:  callerName || window.__incomingCallerName || 'Caller',
+                    callType:  callType,
                     userAvatar: window.__incomingCallerAvatar || null
                 });
             }
@@ -9527,8 +9527,6 @@ if (detectExistingCore()) {
     function _wireNativeEndBtns() {
         const cancelBtn  = _el('cancelCallBtn');
         const declineBtn = _el('declineCallBtn');
-        const acceptBtn  = _el('acceptCallBtn');
-        const acceptVidBtn = _el('acceptVideoCallBtn');
 
         if (cancelBtn && !cancelBtn._comWired) {
             cancelBtn._comWired = true;
@@ -9542,25 +9540,11 @@ if (detectExistingCore()) {
                 CallOverlayManager.endCall();
             });
         }
-        if (acceptBtn && !acceptBtn._comWired) {
-            acceptBtn._comWired = true;
-            acceptBtn.addEventListener('click', function() {
-                // transition to in-call
-                if (_callInfo) {
-                    CallOverlayManager.setState('in-call', { ..._callInfo, status: 'Connected' });
-                }
-                _dismissOverlay(_el('incomingCallModal'));
-            });
-        }
-        if (acceptVidBtn && !acceptVidBtn._comWired) {
-            acceptVidBtn._comWired = true;
-            acceptVidBtn.addEventListener('click', function() {
-                if (_callInfo) {
-                    CallOverlayManager.setState('in-call', { ..._callInfo, callType: 'video', status: 'Connected' });
-                }
-                _dismissOverlay(_el('incomingCallModal'));
-            });
-        }
+        // NOTE: acceptCallBtn and acceptVideoCallBtn are intentionally NOT wired here.
+        // They are handled exclusively by UIEventHandlers.acceptIncomingCall /
+        // acceptIncomingCallAsVideo (wired in EventBinder.bindAll). Wiring them here
+        // too caused CallOverlayManager.setState('in-call') to fire first, showing the
+        // legacy call panel instead of the proper in-call screen.
     }
 
     // ── Wire in-call control buttons ─────────────────────────────────────

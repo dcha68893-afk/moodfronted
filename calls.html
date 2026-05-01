@@ -106,17 +106,17 @@ window.__CALLS_IFRAME__ = {
             }
             if (inCall) inCall.classList.add('active');
             document.body.classList.add('call-active');
-            // Stop ring countdown
+            // Stop ring countdown — 3-min timer is only for ringing, NOT for in-call
             _stopDeclineTimer();
-            // Populate the peer name from globals so it's never "User"
+            // Populate peer name from globals so it's never "User"
             var _nameEl = document.getElementById('callWithName');
             if (_nameEl) {
-                var _resolvedName = window.__activePeerName
+                var _resolved = window.__activePeerName
                     || window.__incomingCallerName
                     || (window.UIState && window.UIState.callParticipants && window.UIState.callParticipants[0] && window.UIState.callParticipants[0].name)
                     || (window.UIState && window.UIState.pendingCallUser && window.UIState.pendingCallUser.userName)
                     || null;
-                if (_resolvedName && _resolvedName !== 'User') _nameEl.textContent = _resolvedName;
+                if (_resolved && _resolved !== 'User') _nameEl.textContent = _resolved;
             }
         } else {
             // idle: show idle screen
@@ -200,12 +200,16 @@ window.__CALLS_IFRAME__ = {
                         var nameEl   = document.getElementById('incomingCallName');
                         var typeEl   = document.getElementById('incomingCallType');
                         var avatarEl = document.getElementById('incomingCallAvatar');
-                        if (nameEl)   nameEl.textContent   = data.callerName || 'Unknown';
-                        if (typeEl)   typeEl.textContent   = (data.callType === 'video') ? 'Video Call' : 'Voice Call';
+                        var callerName = data.callerName || data.userName || data.name || 'Unknown';
+                        if (nameEl)   nameEl.textContent   = callerName;
+                        if (typeEl)   typeEl.textContent   = (data.callType === 'video') ? 'Voice Call' : 'Voice Call';
                         if (avatarEl) {
-                            var initial = (data.callerName || 'U')[0].toUpperCase();
+                            var initial = callerName[0].toUpperCase();
                             avatarEl.textContent = initial;
                         }
+                        // Store globally so transitionToInCall can use it on receiver side
+                        window.__incomingCallerName  = callerName;
+                        window.__incomingCallerAvatar = data.callerAvatar || data.callerPhoto || null;
                     }
                 }
                 // Start 180-second countdown, auto-decline on expiry
@@ -224,46 +228,43 @@ window.__CALLS_IFRAME__ = {
                 break;
 
             case 'call_accepted':
-                // Transition with correct peer name
-                (function() {
-                    var _n = window.__activePeerName || window.__incomingCallerName
-                        || (window.UIState && window.UIState.callParticipants && window.UIState.callParticipants[0] && window.UIState.callParticipants[0].name)
-                        || (window.UIState && window.UIState.pendingCallUser && window.UIState.pendingCallUser.userName)
-                        || (data && (data.callerName || data.userName || data.name)) || null;
-                    var _t = (window.UIState && window.UIState.callType) || (data && data.callType) || 'voice';
-                    var _a = window.__activePeerAvatar || window.__incomingCallerAvatar || null;
-                    if (typeof window.transitionToInCall === 'function' && _n) {
-                        window.transitionToInCall({ userName: _n, callType: _t, userAvatar: _a });
-                    } else {
-                        showScreen('in-call');
-                    }
-                })();
+            case 'call_connected': {
+                // Transition with correct peer name — never show bare screen without name
+                var _n = window.__activePeerName || window.__incomingCallerName
+                    || (window.UIState && window.UIState.callParticipants && window.UIState.callParticipants[0] && window.UIState.callParticipants[0].name)
+                    || (window.UIState && window.UIState.pendingCallUser && window.UIState.pendingCallUser.userName)
+                    || (data && (data.callerName || data.userName || data.name)) || null;
+                var _t = (window.UIState && window.UIState.callType) || (data && data.callType) || 'voice';
+                var _a = window.__activePeerAvatar || window.__incomingCallerAvatar || null;
+                if (typeof window.transitionToInCall === 'function' && _n) {
+                    window.transitionToInCall({ userName: _n, callType: _t, userAvatar: _a });
+                } else {
+                    showScreen('in-call');
+                }
                 break;
-
-            case 'call_connected':
-                // Transition with correct peer name
-                (function() {
-                    var _n = window.__activePeerName || window.__incomingCallerName
-                        || (window.UIState && window.UIState.callParticipants && window.UIState.callParticipants[0] && window.UIState.callParticipants[0].name)
-                        || (window.UIState && window.UIState.pendingCallUser && window.UIState.pendingCallUser.userName)
-                        || (data && (data.callerName || data.userName || data.name)) || null;
-                    var _t = (window.UIState && window.UIState.callType) || (data && data.callType) || 'voice';
-                    var _a = window.__activePeerAvatar || window.__incomingCallerAvatar || null;
-                    if (typeof window.transitionToInCall === 'function' && _n) {
-                        window.transitionToInCall({ userName: _n, callType: _t, userAvatar: _a });
-                    } else {
-                        showScreen('in-call');
-                    }
-                })();
-                break;
+            }
 
             case 'call_ended':
             case 'call_rejected':
             case 'call_cancelled':
-            case 'call_failed':
-            case 'call_timeout':
             case 'call_initiation_failed':
                 // Navigate back after call ends
+                _navigateAfterCall();
+                showScreen('idle');
+                break;
+
+            case 'call_failed':
+                // Only end if not already in-call (avoid dropping established calls)
+                var _inCall = document.getElementById('inCallScreen');
+                if (_inCall && _inCall.classList.contains('active')) break;
+                _navigateAfterCall();
+                showScreen('idle');
+                break;
+
+            case 'call_timeout':
+                // Only end if NOT already in-call — 3-min ring timer must NOT kill an active call
+                var _ic = document.getElementById('inCallScreen');
+                if (_ic && _ic.classList.contains('active')) break;
                 _navigateAfterCall();
                 showScreen('idle');
                 break;
@@ -345,15 +346,29 @@ window.__CALLS_IFRAME__ = {
 
         // Accept call from parent (e.g. Android notification tap)
         if (t === 'CALL_ACCEPT_FROM_PARENT' || t === 'call:accepted' || t === 'call_accepted' || t === 'CALL_ACCEPTED') {
-            showScreen('in-call');
+            var _pn = window.__activePeerName || window.__incomingCallerName
+                || (window.UIState && window.UIState.pendingCallUser && window.UIState.pendingCallUser.userName)
+                || (evt.data.payload && (evt.data.payload.callerName || evt.data.payload.userName)) || null;
+            var _pt = (window.UIState && window.UIState.callType) || (evt.data.payload && evt.data.payload.callType) || 'voice';
+            var _pa = window.__activePeerAvatar || window.__incomingCallerAvatar || null;
+            if (typeof window.transitionToInCall === 'function' && _pn) {
+                window.transitionToInCall({ userName: _pn, callType: _pt, userAvatar: _pa });
+            } else {
+                showScreen('in-call');
+            }
         }
         // Incoming call notification from parent
         if (t === 'CALL_INCOMING' || t === 'call:incoming' || t === 'incoming_call') {
             _handleCoreEvent('incoming_call', evt.data.payload || evt.data.data || evt.data);
         }
-        // Call ended from parent
+        // Call ended from parent — only reset if we are NOT actively in-call
         if (t === 'CALL_ENDED' || t === 'call:ended' || t === 'call_ended') {
-            showScreen('idle');
+            var _activeInCall = document.getElementById('inCallScreen');
+            // Allow reset only if in-call screen is NOT active
+            // (prevents stale WS echoes from killing an established call)
+            if (!_activeInCall || !_activeInCall.classList.contains('active')) {
+                showScreen('idle');
+            }
         }
         // Store call origin so we can navigate back after call
         if (t === 'CALL_ORIGIN') {
@@ -392,6 +407,18 @@ window.__CALLS_IFRAME__ = {
 <link rel="stylesheet" href="/css/vendor/video-js.min.css">
     <!-- External libraries (non-module) -->
     <link rel="stylesheet" href="calls.css">
+    <style>
+    /* ── Permanently suppress the callOverlay floating notification pill ── */
+    #callOverlay, .call-overlay,
+    #callFloatingPanel, .call-overlay-floating,
+    #callExpandedPanel, .call-overlay-expanded {
+        display: none !important;
+        visibility: hidden !important;
+        pointer-events: none !important;
+        opacity: 0 !important;
+        z-index: -9999 !important;
+    }
+    </style>
     
     <!-- Preconnect to API endpoints for better performance -->
     <link rel="preconnect" href="https://moodchat-fy56.onrender.com">

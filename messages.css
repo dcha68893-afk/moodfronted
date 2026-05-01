@@ -3882,11 +3882,12 @@ input:focus + .toggle-slider,
 .message-date-separator,
 .date-separator,
 .chat-date-separator {
-    display: flex !important;
-    align-items: center;
-    justify-content: center;
+    display: block !important;
+    text-align: center;
     margin: 14px 0 10px;
     pointer-events: none;
+    background: none !important;
+    border: none !important;
 }
 
 .message-date-separator span,
@@ -3896,13 +3897,15 @@ input:focus + .toggle-slider,
     color: rgba(233, 237, 239, 0.75) !important;
     font-size: 12px !important;
     font-weight: 500 !important;
-    padding: 5px 12px !important;
+    padding: 4px 12px !important;
     border-radius: 8px !important;
     box-shadow: 0 1px 2px rgba(0,0,0,0.35) !important;
     letter-spacing: 0.3px;
     backdrop-filter: blur(4px);
     border: none !important;
     display: inline-block !important;
+    width: auto !important;
+    max-width: fit-content !important;
 }
 
 /* ── Floating scroll-date badge ─────────────────────────────────────────── */
