@@ -4246,9 +4246,10 @@ case 'CALL_INITIATED':
                             localVid.autoplay = true;
                             localVid.playsInline = true;
                             localVid.play().catch(() => {});
-                            // Also show pip container if video call
+                            // Also show pip container if video call or if stream has video tracks (upgrade scenario)
                             const pipContainer = document.getElementById('pipContainer');
-                            if (pipContainer && UIState.callType === 'video') {
+                            const hasVideoTracks = stream && stream.getVideoTracks().length > 0;
+                            if (pipContainer && (UIState.callType === 'video' || hasVideoTracks)) {
                                 pipContainer.style.display = 'block';
                             }
                         }
@@ -6447,58 +6448,13 @@ case 'CALL_ACCEPTED': {
             if (elements.callTimer) elements.callTimer.textContent = '0:00';
             // Clear dedup locks
             if (window.__uiCallDispatchLock) window.__uiCallDispatchLock = { ts: 0, userId: null };
-            if (window.__earlyCallLock) window.__earlyCallLock = { ts: 0, userId: null };
-            window.__pendingCallReturnTo = null;
-            window.__pendingCallChatUserId = null;
-        },
 
-        // ── toggleRecording: mixes local + remote audio into downloadable .webm ──
-        toggleRecording: function() {
-            if (!UIState._mediaRecorder) {
-                // Collect all available audio tracks (local mic + remote)
-                const tracks = [];
-                if (UIState.localStream) UIState.localStream.getAudioTracks().forEach(t => tracks.push(t));
-                const remoteAudioEl = document.getElementById('remoteAudio');
-                if (remoteAudioEl && remoteAudioEl.srcObject) {
-                    remoteAudioEl.srcObject.getAudioTracks().forEach(t => tracks.push(t));
-                }
-                if (tracks.length === 0) { showNotification('No audio stream to record', 'error'); return; }
-
-                const mixStream = new MediaStream(tracks);
-                let mr;
-                try { mr = new MediaRecorder(mixStream, { mimeType: 'audio/webm;codecs=opus' }); }
-                catch(e) { try { mr = new MediaRecorder(mixStream); } catch(e2) { showNotification('Recording not supported', 'error'); return; } }
-
-                UIState._recordChunks = [];
-                mr.ondataavailable = e => { if (e.data && e.data.size > 0) UIState._recordChunks.push(e.data); };
-                mr.onstop = () => {
-                    const blob = new Blob(UIState._recordChunks, { type: 'audio/webm' });
-                    const url  = URL.createObjectURL(blob);
-                    const a    = document.createElement('a');
-                    a.href = url; a.download = 'call-recording-' + new Date().toISOString().slice(0,19).replace(/:/g,'-') + '.webm';
-                    a.click(); URL.revokeObjectURL(url);
-                    UIState._recordChunks = [];
-                    UIState._mediaRecorder = null;
-                    if (elements.menuRecordLabel) elements.menuRecordLabel.textContent = 'Record';
-                    const recIcon = elements.menuRecord && elements.menuRecord.querySelector('i');
-                    if (recIcon) recIcon.style.color = '#ff3b30';
-                    showNotification('Recording saved', 'success');
-                };
-                mr.start(1000);
-                UIState._mediaRecorder = mr;
-                if (elements.menuRecordLabel) elements.menuRecordLabel.textContent = 'Stop Recording';
-                const recIcon = elements.menuRecord && elements.menuRecord.querySelector('i');
-                if (recIcon) recIcon.style.color = '#fff';
-                showNotification('Recording started', 'info');
-            } else {
-                UIState._mediaRecorder.stop();
-                showNotification('Recording stopped — saving…', 'info');
-            }
-        },
-
-        toggleMenuDots: function(e) {
-            e?.stopPropagation();
-            if (elements.menuDotsDropdown) {
+        if (hasVideo) {
+            // Video recording: composite both video feeds on canvas
+            const canvas = document.createElement('canvas');
+            canvas.width = 1280;
+            canvas.height = 720;
+            const ctx = canvas.getContext('2d');
                 elements.menuDotsDropdown.classList.toggle('active');
                 UILogger.interaction('toggleMenuDots', 'menuDotsBtn');
             }
@@ -6836,7 +6792,34 @@ case 'CALL_ACCEPTED': {
                         // Add video track to peer connection
                         const pc = (window.callCore && window.callCore.getPeerConnection && window.callCore.getPeerConnection())
                             || (window.KynectaCallSession && window.KynectaCallSession.peerConnection);
-                        if (pc && pc.addTrack) { try { pc.addTrack(vTrack, UIState.localStream); } catch(e){} }
+                        if (pc && pc.addTrack) { 
+                            try { 
+                                pc.addTrack(vTrack, UIState.localStream); 
+                                
+                                // Trigger renegotiation by creating and sending a new offer
+                                if (pc.createOffer && pc.setLocalDescription) {
+                                    pc.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: true })
+                                        .then(offer => {
+                                            return pc.setLocalDescription(offer);
+                                        })
+                                        .then(() => {
+                                            // Send the new offer via existing signaling channel
+                                            if (window.callCore && window.callCore.sendToParent) {
+                                                window.callCore.sendToParent('SIGNAL_OFFER', {
+                                                    sdp: pc.localDescription,
+                                                    callId: callsState.serverCallId || callsState.activeCallId
+                                                });
+                                            }
+                                            console.log('[Calls UI] Video upgrade offer sent');
+                                        })
+                                        .catch(err => {
+                                            console.warn('[Calls UI] Failed to create video upgrade offer:', err);
+                                        });
+                                }
+                            } catch(e){ 
+                                console.warn('[Calls UI] Failed to add video track:', e);
+                            } 
+                        }
 
                         // Signal remote peer about video upgrade
                         if (window.parent && window.parent !== window) {

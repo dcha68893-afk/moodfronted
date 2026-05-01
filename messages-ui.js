@@ -3138,6 +3138,8 @@
 
 
 
+            // FIX: Allow message rendering even when lifecycle state is not ACTIVE
+            // Real-time messages should always be displayed regardless of UI state
             if (!this._canRender()) {
 
                 if (currentChat && normalizedMessages.length > 0) {
@@ -3158,9 +3160,9 @@
 
                 }
 
-                UIFailsafe.safeSetHTML(container, this._getPassiveLoadingState());
-
-                return;
+                // Don't show passive loading state - allow normal rendering to continue
+                // UIFailsafe.safeSetHTML(container, this._getPassiveLoadingState());
+                // return;
 
             }
 

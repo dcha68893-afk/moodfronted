@@ -307,6 +307,199 @@ window.__CALLS_IFRAME__ = {
         } catch(e) {}
     }
 
+    // ── Handle video upgrade request from remote peer ─────────────────────────
+    function _handleVideoUpgradeRequest(payload) {
+        if (!payload || !payload.enabled) return;
+        
+        console.log('[ScreenMgr] Video upgrade request received');
+        
+        // Create WhatsApp-style video upgrade prompt
+        var prompt = document.createElement('div');
+        prompt.id = 'videoUpgradePrompt';
+        prompt.style.cssText = `
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: white;
+            border-radius: 12px;
+            padding: 24px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+            z-index: 9999;
+            max-width: 320px;
+            text-align: center;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        `;
+        
+        prompt.innerHTML = `
+            <div style="margin-bottom: 16px;">
+                <div style="width: 60px; height: 60px; background: #0084ff; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto 12px;">
+                    <i class="fas fa-video" style="color: white; font-size: 24px;"></i>
+                </div>
+                <h3 style="margin: 0 0 8px 0; color: #1c1c1e; font-size: 18px; font-weight: 600;">Switch to Video</h3>
+                <p style="margin: 0; color: #8e8e93; font-size: 14px; line-height: 1.4;">Your contact wants to turn on video. Do you want to switch to a video call?</p>
+            </div>
+            <div style="display: flex; gap: 12px; justify-content: center;">
+                <button id="videoUpgradeDecline" style="
+                    flex: 1;
+                    padding: 12px 20px;
+                    border: 1px solid #e5e5ea;
+                    background: white;
+                    color: #1c1c1e;
+                    border-radius: 8px;
+                    font-size: 16px;
+                    font-weight: 500;
+                    cursor: pointer;
+                    transition: all 0.2s;
+                ">Decline</button>
+                <button id="videoUpgradeAccept" style="
+                    flex: 1;
+                    padding: 12px 20px;
+                    border: none;
+                    background: #0084ff;
+                    color: white;
+                    border-radius: 8px;
+                    font-size: 16px;
+                    font-weight: 500;
+                    cursor: pointer;
+                    transition: all 0.2s;
+                ">Accept</button>
+            </div>
+        `;
+        
+        // Add hover effects
+        var acceptBtn = prompt.querySelector('#videoUpgradeAccept');
+        var declineBtn = prompt.querySelector('#videoUpgradeDecline');
+        
+        acceptBtn.onmouseover = function() { this.style.background = '#0066cc'; };
+        acceptBtn.onmouseout = function() { this.style.background = '#0084ff'; };
+        declineBtn.onmouseover = function() { this.style.background = '#f5f5f5'; };
+        declineBtn.onmouseout = function() { this.style.background = 'white'; };
+        
+        // Add event listeners
+        acceptBtn.onclick = function() {
+            _acceptVideoUpgrade();
+            document.body.removeChild(prompt);
+        };
+        
+        declineBtn.onclick = function() {
+            _declineVideoUpgrade();
+            document.body.removeChild(prompt);
+        };
+        
+        // Add to DOM
+        document.body.appendChild(prompt);
+        
+        // Auto-dismiss after 30 seconds
+        setTimeout(function() {
+            if (document.getElementById('videoUpgradePrompt')) {
+                document.body.removeChild(prompt);
+                _declineVideoUpgrade();
+            }
+        }, 30000);
+    }
+
+// ── Accept video upgrade ─────────────────────────────────────────────────
+function _acceptVideoUpgrade() {
+    console.log('[ScreenMgr] Video upgrade accepted');
+    
+    // Start camera and add video track
+    if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+        navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' }, audio: false })
+            .then(function(camStream) {
+                var vTrack = camStream.getVideoTracks()[0];
+                if (!vTrack) return;
+                
+                // Add to local stream
+                if (window.UIState && window.UIState.localStream) {
+                    camStream.getTracks().forEach(function(t) {
+                        try { window.UIState.localStream.addTrack(t); } catch(e) {}
+                    });
+                } else if (window.UIState) {
+                    window.UIState.localStream = camStream;
+                }
+                
+                // Show PiP
+                var pipContainer = document.getElementById('pipContainer');
+                var pipVideo = document.getElementById('pipVideo');
+                if (pipVideo) { 
+                    pipVideo.srcObject = camStream; 
+                    pipVideo.play().catch(function(){}); 
+                }
+                if (pipContainer) pipContainer.style.display = 'block';
+                
+                // Add to peer connection
+                var pc = (window.callCore && window.callCore.getPeerConnection && window.callCore.getPeerConnection())
+                    || (window.KynectaCallSession && window.KynectaCallSession.peerConnection);
+                if (pc && pc.addTrack) {
+                    try { 
+                        pc.addTrack(vTrack, window.UIState.localStream); 
+                        
+                        // Create and send answer
+                        if (pc.createAnswer && pc.setLocalDescription) {
+                            pc.createAnswer({ offerToReceiveAudio: true, offerToReceiveVideo: true })
+                                .then(function(answer) {
+                                    return pc.setLocalDescription(answer);
+                                })
+                                .then(function() {
+                                    // Send answer via signaling
+                                    if (window.callCore && window.callCore.sendToParent) {
+                                        window.callCore.sendToParent('SIGNAL_ANSWER', {
+                                            sdp: pc.localDescription,
+                                            callId: (window.callsState && window.callsState.serverCallId) || (window.callsState && window.callsState.activeCallId)
+                                        });
+                                    }
+                                    console.log('[ScreenMgr] Video upgrade answer sent');
+                                })
+                                .catch(function(err) {
+                                    console.warn('[ScreenMgr] Failed to create video upgrade answer:', err);
+                                });
+                        }
+                    } catch(e) { 
+                        console.warn('[ScreenMgr] Failed to add video track:', e);
+                    }
+                }
+                
+                // Update UI
+                var videoBtn = document.getElementById('videoBtn');
+                if (videoBtn) {
+                    var icon = videoBtn.querySelector('i');
+                    if (icon) icon.className = 'fas fa-video';
+                    videoBtn.classList.add('active');
+                }
+                
+                // Hide avatar, show video
+                var avatarWrap = document.getElementById('incallAvatarWrap');
+                var remoteVideo = document.getElementById('remoteVideo');
+                if (avatarWrap) avatarWrap.style.display = 'none';
+                if (remoteVideo) remoteVideo.style.display = 'block';
+                
+                showNotification('Video call started', 'success');
+            })
+            .catch(function(err) {
+                if (err.name === 'NotAllowedError') showNotification('Camera permission denied', 'error');
+                else if (err.name === 'NotFoundError') showNotification('No camera found', 'error');
+                else showNotification('Could not start camera', 'error');
+            });
+    }
+}
+
+// ── Decline video upgrade ─────────────────────────────────────────────────
+function _declineVideoUpgrade() {
+    console.log('[ScreenMgr] Video upgrade declined');
+        
+    // Send decline signal back
+    if (window.parent && window.parent !== window) {
+        window.parent.postMessage({ 
+            type: 'VIDEO_UPGRADE_RESPONSE', 
+            payload: { accepted: false }, 
+            source: 'calls-iframe' 
+        }, '*');
+    }
+        
+    showNotification('Video upgrade declined', 'info');
+}
+
     // ── Suppress callOverlay on any mutation ─────────────────────────────────
     function _suppressCallOverlay() {
         var overlay = document.getElementById('callOverlay');
@@ -373,6 +566,10 @@ window.__CALLS_IFRAME__ = {
         // Store call origin so we can navigate back after call
         if (t === 'CALL_ORIGIN') {
             window._callOrigin = (evt.data.payload && evt.data.payload.origin) || evt.data.origin || 'calls';
+        }
+        // Handle video upgrade request from remote peer
+        if (t === 'VIDEO_UPGRADE_REQUEST') {
+            _handleVideoUpgradeRequest(evt.data.payload);
         }
     });
 

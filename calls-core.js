@@ -13055,61 +13055,22 @@ if (message.type === 'SETTING_CHANGED' || message.type === 'SETTINGS_UPDATED') {
 
 
 
-                    // ── CRITICAL FIX: Attach remote stream to an audio element ──
-
-
+                    // ── CRITICAL FIX: Attach remote stream to EXISTING audio element ──
 
                     // Without this step there is NO sound on either side.
-
-
+                    // IMPORTANT: Always use the existing #remoteAudio from the DOM, never create a duplicate
 
                     try {
 
-
-
                         let remoteAudio = document.getElementById('remoteAudio');
 
-
-
                         if (!remoteAudio) {
-
-
-
-                            remoteAudio = document.createElement('audio');
-
-
-
-                            remoteAudio.id      = 'remoteAudio';
-
-
-
-                            remoteAudio.autoplay = true;
-
-
-
-                            remoteAudio.setAttribute('playsinline', '');
-
-
-
-                            remoteAudio.style.display = 'none';
-
-
-
-                            document.body.appendChild(remoteAudio);
-
-
-
-                            console.log('[CallsCore] Created <audio id="remoteAudio">');
-
-
-
+                            console.error('[CallsCore] CRITICAL: #remoteAudio element not found in DOM - audio will not work');
+                            return;
                         }
 
-
-
+                        console.log('[CallsCore] Attaching stream to existing #remoteAudio element');
                         remoteAudio.srcObject = stream;
-
-
 
                         remoteAudio.play().catch(function(playErr) {
 
@@ -13172,6 +13133,150 @@ if (message.type === 'SETTING_CHANGED' || message.type === 'SETTINGS_UPDATED') {
 
 
 
+
+
+
+                    // ── VIDEO TRACK HANDLING ──
+
+
+
+                    // Check if the stream has video tracks and attach them to remoteVideo
+
+
+
+                    const videoTracks = stream.getVideoTracks();
+
+
+
+                    if (videoTracks.length > 0) {
+
+
+
+                        try {
+
+
+
+                            let remoteVideo = document.getElementById('remoteVideo');
+
+
+
+                            if (!remoteVideo) {
+
+
+
+                                remoteVideo = document.createElement('video');
+
+
+
+                                remoteVideo.id = 'remoteVideo';
+
+
+
+                                remoteVideo.autoplay = true;
+
+
+
+                                remoteVideo.setAttribute('playsinline', '');
+
+
+
+                                remoteVideo.style.display = 'none';
+
+
+
+                                document.body.appendChild(remoteVideo);
+
+
+
+                                console.log('[CallsCore] Created <video id="remoteVideo">');
+
+
+
+                            }
+
+
+
+                            remoteVideo.srcObject = stream;
+
+
+
+                            remoteVideo.play().catch(function(videoPlayErr) {
+
+
+
+                                console.warn('[CallsCore] Remote video autoplay blocked, retrying', videoPlayErr.message);
+
+
+
+                                const retryVideoPlay = function() {
+
+
+
+                                    remoteVideo.play().catch(function() {});
+
+
+
+                                    document.removeEventListener('click', retryVideoPlay);
+
+
+
+                                    document.removeEventListener('touchstart', retryVideoPlay);
+
+
+
+                                };
+
+
+
+                                document.addEventListener('click', retryVideoPlay, { once: true });
+
+
+
+                                document.addEventListener('touchstart', retryVideoPlay, { once: true });
+
+
+
+                            });
+
+
+
+                            // Hide avatar and show video container when video is available
+
+
+
+                            const avatarWrap = document.getElementById('incallAvatarWrap');
+
+
+
+                            const remoteVideoContainer = document.getElementById('remoteVideo');
+
+
+
+                            if (avatarWrap) avatarWrap.style.display = 'none';
+
+
+
+                            if (remoteVideoContainer) remoteVideoContainer.style.display = 'block';
+
+
+
+                            console.log('[CallsCore] ✅ VIDEO STREAM ATTACHED — remoteVideo.srcObject set');
+
+
+
+                        } catch (videoErr) {
+
+
+
+                            logError(MODULE, 'Failed to attach remote video', videoErr);
+
+
+
+                        }
+
+
+
+                    }
 
 
 
@@ -28622,7 +28727,7 @@ _escapeHtml: function(text) {
 
 
 
-            WebRTCManager.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: false })
+            WebRTCManager.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: true })
 
 
 
