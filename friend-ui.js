@@ -192,8 +192,13 @@ function navigateToChatWithUser(userId, userName, additionalData = {}) {
     }
     
     const displayName = userName || 'User';
-    const numericUserId = parseInt(userId);
-    console.log('[ChatNav] Opening chat with user:', { userId: numericUserId, displayName });
+    // FIX: parseInt() returns NaN for UUID-based IDs — chat module receives NaN
+    // and shows "Unknown User". Preserve the ID as-is: coerce to integer only
+    // when the ID is purely numeric, otherwise keep as string (UUID).
+    const rawId = String(userId).trim();
+    const parsedInt = parseInt(rawId, 10);
+    const safeUserId = (!isNaN(parsedInt) && String(parsedInt) === rawId) ? parsedInt : rawId;
+    console.log('[ChatNav] Opening chat with user:', { userId: safeUserId, displayName });
     
     // Close any open modals
     if (domElements.startChatModal) domElements.startChatModal.classList.remove('active');
@@ -202,7 +207,7 @@ function navigateToChatWithUser(userId, userName, additionalData = {}) {
     
     // Build the chat payload
     const chatPayload = {
-        userId: numericUserId,
+        userId: safeUserId,
         userName: displayName,
         timestamp: Date.now(),
         source: 'friends-module'
@@ -216,7 +221,7 @@ function navigateToChatWithUser(userId, userName, additionalData = {}) {
     if (window.parent && window.parent !== window) {
         window.parent.postMessage({
             type: 'OPEN_CHAT_WITH_USER',
-            userId: numericUserId,
+            userId: safeUserId,
             userName: displayName,
             source: 'friends-ui',
             timestamp: Date.now()
@@ -234,7 +239,7 @@ function navigateToChatWithUser(userId, userName, additionalData = {}) {
         showNotification(`Opening chat with ${displayName}...`, 'info', 1500);
     } else {
         // Fallback: direct navigation
-        window.location.href = `message.html?openChat=${numericUserId}&userName=${encodeURIComponent(displayName)}`;
+        window.location.href = `message.html?openChat=${safeUserId}&userName=${encodeURIComponent(displayName)}`;
     }
 }
 
@@ -250,8 +255,11 @@ function navigateToCallModule(userId, userName, callType = 'voice') {
     }
     
     const displayName = userName || 'User';
-    const numericUserId = parseInt(userId);
-    console.log('[CallNav] Opening call with user:', { userId: numericUserId, displayName, callType });
+    // FIX: same UUID-safe ID coercion as navigateToChatWithUser
+    const rawId = String(userId).trim();
+    const parsedInt = parseInt(rawId, 10);
+    const safeUserId = (!isNaN(parsedInt) && String(parsedInt) === rawId) ? parsedInt : rawId;
+    console.log('[CallNav] Opening call with user:', { userId: safeUserId, displayName, callType });
     
     // Close any open modals
     if (domElements.startChatModal) domElements.startChatModal.classList.remove('active');
@@ -260,7 +268,7 @@ function navigateToCallModule(userId, userName, callType = 'voice') {
     
     // Build the call payload
     const callPayload = {
-        userId: numericUserId,
+        userId: safeUserId,
         userName: displayName,
         callType: callType,
         returnTo: 'friends',
@@ -269,9 +277,6 @@ function navigateToCallModule(userId, userName, callType = 'voice') {
     };
     
     if (window.parent && window.parent !== window) {
-        // Send ONE combined message: SWITCH_MODULE with the call payload embedded.
-        // chat.html handles navigation AND then forwards OPEN_CALL_WITH_USER to the
-        // calls iframe after the navigation settles — no race condition.
         window.parent.postMessage({
             type: 'SWITCH_MODULE',
             module: 'calls',
@@ -283,7 +288,7 @@ function navigateToCallModule(userId, userName, callType = 'voice') {
         showNotification(`Starting ${callType} call with ${displayName}...`, 'info', 1500);
     } else {
         // Fallback: direct navigation
-        window.location.href = `calls.html?userId=${numericUserId}&name=${encodeURIComponent(displayName)}&type=${callType}`;
+        window.location.href = `calls.html?userId=${safeUserId}&name=${encodeURIComponent(displayName)}&type=${callType}`;
     }
 }
 
@@ -351,7 +356,9 @@ async function loadGroupMembers(groupId, searchTerm) {
         }).join('');
         groupMembersList.querySelectorAll('.group-add-btn').forEach(btn => {
             btn.addEventListener('click', async function () {
-                const uid = parseInt(this.dataset.userId);
+                const rawId = this.dataset.userId;
+                const parsedInt = parseInt(rawId, 10);
+                const uid = (!isNaN(parsedInt) && String(parsedInt) === rawId) ? parsedInt : rawId;
                 const uname = this.dataset.username;
                 this.disabled = true;
                 this.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
@@ -1361,15 +1368,22 @@ export const RenderPipeline = {
                     try {
                         const lsKey = 'knecta_friends_cache';
                         const raw = JSON.parse(localStorage.getItem(lsKey) || localStorage.getItem('friends') || '[]');
-                        if (Array.isArray(raw) && raw.length > 0) {
+                        // FIX: Filter to only accepted friends — pending/blocked records must not
+                        // render as friends. status absent on legacy records → treat as accepted.
+                        const acceptedOnly = Array.isArray(raw) ? raw.filter(f => {
+                            if (!f || !f.id) return false;
+                            const st = f.status || 'accepted';
+                            return st === 'accepted' || st === 'online' || st === 'offline' || st === 'away' || st === 'busy';
+                        }) : [];
+                        if (acceptedOnly.length > 0) {
                             // Populate module globals and re-render
                             if (window.FriendCacheManager?.setFriends) {
-                                window.FriendCacheManager.setFriends(raw);
+                                window.FriendCacheManager.setFriends(acceptedOnly);
                                 window.FriendCacheManager.syncToGlobals?.();
                             }
                             // Render immediately from localStorage data
                             const fragment = document.createDocumentFragment();
-                            raw.slice(0, 25).forEach(item => {
+                            acceptedOnly.slice(0, 25).forEach(item => {
                                 if (!item?.id) return;
                                 const el = createFriendItemElement(item, 'friend', true);
                                 if (el) fragment.appendChild(el);
@@ -5837,7 +5851,10 @@ if (refreshRequestsBtn) {
         // Wire add buttons
         nearbyListEl.querySelectorAll('.nearby-add-btn').forEach(btn => {
             btn.addEventListener('click', async function() {
-                const uid = parseInt(this.dataset.userId);
+                // FIX: parseInt breaks UUID-based IDs — use safe coercion
+                const rawId = this.dataset.userId;
+                const parsedInt = parseInt(rawId, 10);
+                const uid = (!isNaN(parsedInt) && String(parsedInt) === rawId) ? parsedInt : rawId;
                 const uname = this.dataset.username;
                 this.disabled = true;
                 this.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
@@ -5931,9 +5948,11 @@ if (refreshRequestsBtn) {
                 showNotification('Please wait while module initializes…', 'info');
                 return;
             }
-            const userId = parseInt(addBtn.dataset.userId);
+            const rawId = addBtn.dataset.userId;
+            const parsedInt = parseInt(rawId, 10);
+            const userId = (!isNaN(parsedInt) && String(parsedInt) === rawId) ? parsedInt : rawId;
             const userName = addBtn.dataset.userName || '';
-            if (!userId || isNaN(userId)) return;
+            if (!userId) return;
             
             addBtn.disabled = true;
             const origHtml = addBtn.innerHTML;

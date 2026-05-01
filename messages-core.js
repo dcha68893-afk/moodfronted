@@ -272,42 +272,15 @@
         } catch (e) {}
     }
 
-    // ── Dual-path deduplication ────────────────────────────────────────────────
-    // Two separate dedup maps so receiver-side dedup and sender-echo dedup never
-    // cross-contaminate each other.
-    //
-    // _echoDedup  — tracks messages we SENT ourselves (server echo path).
-    //               10-second TTL so optimistic->confirmed transitions work.
-    // _recvDedup  — tracks messages we RECEIVED from others.
-    //               2-second TTL — just enough to collapse the 4x duplicate
-    //               postMessages that arrive per event (message:new x2 from
-    //               wsService.on bridge + kyn:* bridge, each as both message:new
-    //               and new_message) without swallowing a real second message.
-    const _echoDedup = new Map(); // localId/serverId -> timestamp (own messages)
-    const _recvDedup = new Map(); // serverId -> timestamp (others' messages)
-    const ECHO_TTL_MS = 10000;   // 10s for own-message echo collapse
-    const RECV_TTL_MS = 2000;    // 2s for received-message duplicate collapse
-
-    function _purgeTTL(map, ttl) {
-        const now = Date.now();
-        for (const [id, ts] of map) {
-            if (now - ts > ttl) map.delete(id);
-        }
-    }
-
-    function isDuplicateMessage(messageId, isOwnMessage) {
+    function isDuplicateMessage(messageId) {
         if (!messageId) return false;
-        if (isOwnMessage) {
-            _purgeTTL(_echoDedup, ECHO_TTL_MS);
-            if (_echoDedup.has(messageId)) return true;
-            _echoDedup.set(messageId, Date.now());
-            return false;
-        } else {
-            _purgeTTL(_recvDedup, RECV_TTL_MS);
-            if (_recvDedup.has(messageId)) return true;
-            _recvDedup.set(messageId, Date.now());
-            return false;
+        if (processedMessageIds.has(messageId)) return true;
+        processedMessageIds.add(messageId);
+        
+        if (processedMessageIds.size > 1000) {
+            processedMessageIds.clear();
         }
+        return false;
     }
     
     function isDuplicateSentMessage(messageId) {
@@ -2609,10 +2582,9 @@ try {
                 if (!pendingConv || !pendingConv.pendingReceiverId) {
                     throw new Error('Invalid pending conversation: missing receiverId');
                 }
-                const receiverId = pendingConv.pendingReceiverId;
-                console.log(`[ChatManager] 📤 Sending message to pending conversation - using receiverId: ${receiverId}`);
+                console.log(`[ChatManager] 📤 Sending message to pending conversation - using receiverId: ${pendingConv.pendingReceiverId}`);
                 requestBody = {
-                    receiverId: receiverId,
+                    receiverId: pendingConv.pendingReceiverId,
                     localId: options.localId || options.id || null,
                     content: content,
                     type: options.type || 'text',
@@ -2620,81 +2592,6 @@ try {
                     replyToId: options.replyToId || options.replyTo,
                     mentions: options.mentions
                 };
-
-                let result;
-                try {
-                    result = await makeApiRequest('/messages', 'POST', requestBody);
-                } catch (err) {
-                    // ── Non-friend fallback ────────────────────────────────────────────
-                    // If the backend rejects the message because the users aren't friends
-                    // (403 / "not friends" / "friendship required"), check whether a real
-                    // chatId already exists for this pair (e.g. from a previous conversation
-                    // or a conversation the other user initiated).  If found, retry with
-                    // chatId so the message goes through regardless of friendship status.
-                    const isFriendshipError = /friend|not.*allow|permission|forbidden|403/i.test(String(err.message || ''));
-                    if (isFriendshipError) {
-                        const existingConv = this._conversations.find(c =>
-                            !c.isPending &&
-                            c.id &&
-                            (String(c.friendId) === String(receiverId) ||
-                             String(c.otherParticipantId) === String(receiverId) ||
-                             (c.otherParticipant && String(c.otherParticipant.id) === String(receiverId)) ||
-                             (Array.isArray(c.participants) && c.participants.some(p => String(p.id || p) === String(receiverId))))
-                        );
-                        if (existingConv) {
-                            console.log(`[ChatManager] Friendship error — retrying with existing chatId: ${existingConv.id}`);
-                            result = await makeApiRequest('/messages', 'POST', {
-                                chatId: existingConv.id,
-                                localId: options.localId || options.id || null,
-                                content: content,
-                                type: options.type || 'text',
-                                attachment: options.attachment,
-                                replyToId: options.replyToId || options.replyTo,
-                                mentions: options.mentions
-                            });
-                            // Promote pending conversation to real
-                            const normalizedConv = {
-                                ...(pendingConv || {}),
-                                ...existingConv,
-                                isPending: false
-                            };
-                            this.replacePendingConversation(conversationId, normalizedConv);
-                            if (result) result.chatId = existingConv.id;
-                        } else {
-                            // No existing conversation — surface a friendly error
-                            throw new Error('Cannot send message: you are not friends with this user and no existing conversation was found. Add them as a friend first.');
-                        }
-                    } else {
-                        throw err;
-                    }
-                }
-
-                console.log(`[ChatManager] 📥 Message sent successfully:`, result);
-
-                if (result && (result.chatId || result.data?.chatId)) {
-                    const realChatId = result.chatId || result.data.chatId;
-                    if (realChatId) {
-                        const pConv = this._conversationsMap.get(conversationId) || {};
-                        const normalizedConv = {
-                            ...pConv,
-                            ...(result.conversation || result.data?.conversation || {}),
-                            id: realChatId,
-                            chatId: realChatId,
-                            friendId: pConv.pendingReceiverId || pConv.friendId || result.receiverId || result.data?.receiverId,
-                            friendName: pConv.friendName || pConv.userName || 'Chat',
-                            friendAvatar: pConv.friendAvatar || pConv.userAvatar || '',
-                            lastMessage: content,
-                            lastMessageAt: Date.now(),
-                            unreadCount: 0,
-                            type: 'direct',
-                            isPending: false
-                        };
-                        this.replacePendingConversation(conversationId, normalizedConv);
-                        result.chatId = realChatId;
-                    }
-                }
-
-                return result;
             } else {
                 console.log(`[ChatManager] 📤 Sending message to real conversation - using chatId: ${conversationId}`);
                 requestBody = {
@@ -2712,33 +2609,53 @@ try {
             
             console.log(`[ChatManager] 📥 Message sent successfully:`, result);
             
+            if (isPending && result && (result.chatId || (result.data && result.data.chatId))) {
+                const realChatId = result.chatId || result.data.chatId;
+                if (realChatId) {
+                    const pendingConv = this._conversationsMap.get(conversationId) || {};
+                    const normalizedConv = {
+                        ...pendingConv,
+                        ...(result.conversation || result.data?.conversation || {}),
+                        id: realChatId,
+                        chatId: realChatId,
+                        friendId: pendingConv.pendingReceiverId || pendingConv.friendId || result.receiverId || result.data?.receiverId,
+                        friendName: pendingConv.friendName || pendingConv.userName || 'Chat',
+                        friendAvatar: pendingConv.friendAvatar || pendingConv.userAvatar || '',
+                        lastMessage: content,
+                        lastMessageAt: Date.now(),
+                        unreadCount: 0,
+                        type: 'direct',
+                        isPending: false
+                    };
+                    this.replacePendingConversation(conversationId, normalizedConv);
+                    result.chatId = realChatId;
+                }
+            }
+            
             return result;
         },
         
         setConversations: function(conversations) {
             const currentUserId = SessionManager.getUserId();
             const uniqueMap = new Map();
-            const seenFriendIds = new Set();
-            
+            // FIX: Deduplicate by chat id, NOT by friendId.
+            // Deduping by friendId silently drops legitimate chats between non-friends
+            // (or multiple chats with the same person). Every unique chat row has its
+            // own id — that is the only safe dedup key.
             ensureSafeArray(conversations).forEach(chat => {
                 if (!chat || !chat.id) return;
-                
+
                 let friendId = chat.friendId || chat.otherParticipantId;
                 if (!friendId && chat.otherParticipant) {
                     friendId = chat.otherParticipant.id;
                 }
                 if (!friendId && chat.participants) {
-                    const other = chat.participants.find(p => p.id !== currentUserId);
+                    const other = chat.participants.find(p => p && p.id !== currentUserId);
                     friendId = other?.id;
                 }
-                
-                if (friendId && seenFriendIds.has(friendId)) {
-                    console.log(`[ChatManager] Skipping duplicate conversation for friend ${friendId}`);
-                    return;
-                }
-                
+                // still set friendId on the object so lookups work, just don't gate on it
                 if (friendId) {
-                    seenFriendIds.add(friendId);
+                    // no-op: we keep ALL chats regardless of friendId
                 }
                 
                 const otherUser = chat.otherParticipant || 
@@ -2979,29 +2896,8 @@ try {
                 }
             }
             
-            // FIX BUG4 (history disappears): always persist to the message's own chatId
-            // key so messages for non-active chats survive a page reload.
-            // Old code only saved when conversationId matched the active chat,
-            // so background messages were never written to localStorage.
-            const _msgChatId = message.chatId || message.conversationId;
-            if (_msgChatId) {
-                if (this._activeConversation && String(_msgChatId) === String(this._activeConversation.id)) {
-                    // Active chat — save current _messages array (includes this new message)
-                    this._saveMessagesToCache(_msgChatId);
-                } else {
-                    // Background chat — load its existing cache, append, re-save
-                    try {
-                        const _bgKey = `${LOCAL_STORAGE_KEYS.MESSAGES_PREFIX}${_msgChatId}`;
-                        const _bgExisting = SafeStorage.getJSON(_bgKey, []);
-                        const _bgMsgs = Array.isArray(_bgExisting) ? _bgExisting : [];
-                        const _alreadyIn = _bgMsgs.some(m => m.id === message.id || (message.localId && m.id === message.localId));
-                        if (!_alreadyIn) {
-                            _bgMsgs.push(message);
-                            _bgMsgs.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
-                            SafeStorage.setJSON(_bgKey, _bgMsgs);
-                        }
-                    } catch (_e) {}
-                }
+            if (this._activeConversation && message.conversationId === this._activeConversation.id) {
+                this._saveMessagesToCache();
             }
             
             this._notifySubscribers();
@@ -3495,72 +3391,37 @@ try {
         },
         
         getFriendListForChat: function() {
-            const _normalizeUser = (u, overrideId) => {
-                const id = overrideId || u.id || u.uid || u.userId;
-                const firstName = u.firstName || u.first_name || '';
-                const lastName = u.lastName || u.last_name || '';
-                const fullName = [firstName, lastName].filter(Boolean).join(' ').trim();
-                const rawName = u.displayName || u.display_name || fullName || u.username || u.name || 'User';
-                const displayName = rawName.replace(/\s+User$/i, '').trim() || rawName;
-                const avatar = u.avatar || u.photoURL || u.avatarUrl || u.profilePhoto || null;
-                const online = u.online ?? (u.status === 'online') ?? false;
-                const status = u.status || (online ? 'Online' : 'Offline');
-                return { ...u, id, displayName, username: u.username || displayName, avatar, photoURL: avatar, online, status, lastSeen: u.lastSeen || u.last_seen || u.lastActive || null };
-            };
+            const availableFriends = this._friends
+                .filter(friend => !this._blockedFriends.has(friend.id || friend.uid))
+                .map(friend => {
+                    const id = friend.id || friend.uid || friend.userId;
+                    const firstName = friend.firstName || friend.first_name || '';
+                    const lastName = friend.lastName || friend.last_name || '';
+                    const fullName = [firstName, lastName].filter(Boolean).join(' ').trim();
+                    const displayName = friend.displayName || friend.display_name || fullName || friend.username || friend.name || 'User';
+                    const avatar = friend.avatar || friend.photoURL || friend.avatarUrl || friend.profilePhoto || null;
+                    const online = friend.online ?? (friend.status === 'online') ?? false;
+                    const status = friend.status || (online ? 'Online' : 'Offline');
 
-            // Start with confirmed friends
-            const seenIds = new Set();
-            const result = [];
-
-            this._friends
-                .filter(f => !this._blockedFriends.has(f.id || f.uid))
-                .forEach(f => {
-                    const n = _normalizeUser(f);
-                    if (n.id && !seenIds.has(String(n.id))) {
-                        seenIds.add(String(n.id));
-                        result.push(n);
-                    }
+                    return {
+                        ...friend,
+                        id,
+                        displayName,
+                        username: friend.username || displayName,
+                        avatar,
+                        photoURL: avatar,
+                        online,
+                        status,
+                        lastSeen: friend.lastSeen || friend.last_seen || friend.lastActive || null
+                    };
                 });
 
-            // Also include non-friend users from existing conversations so users
-            // can message anyone they have (or had) a conversation with, or who
-            // appears as a participant even without a friendship relation.
-            try {
-                const currentUserId = SessionManager.getUserId();
-                const conversations = ChatManager ? ChatManager.getConversations() : [];
-                conversations.forEach(conv => {
-                    if (conv.blocked) return;
-                    // Try otherParticipant first (pre-normalized by setConversations)
-                    const op = conv.otherParticipant;
-                    if (op && op.id && String(op.id) !== String(currentUserId) && !seenIds.has(String(op.id))) {
-                        seenIds.add(String(op.id));
-                        result.push(_normalizeUser({
-                            ...op,
-                            displayName: op.displayName || op.username || op.firstName || conv.friendName,
-                            avatar: op.avatar || conv.friendAvatar || null,
-                            online: op.status === 'online' || conv.online || false
-                        }));
-                        return;
-                    }
-                    // Fallback: derive from friendId + friendName stored on conversation
-                    const fid = conv.friendId;
-                    if (fid && String(fid) !== String(currentUserId) && !seenIds.has(String(fid))) {
-                        seenIds.add(String(fid));
-                        result.push(_normalizeUser({
-                            id: fid,
-                            displayName: conv.friendName || conv.chatName || `User ${fid}`,
-                            avatar: conv.friendAvatar || null,
-                            online: conv.online || false,
-                            status: conv.online ? 'online' : 'offline'
-                        }));
-                    }
-                });
-            } catch (_e) {}
-
-            return result.sort((a, b) => {
+            return availableFriends.sort((a, b) => {
                 if (a.online && !b.online) return -1;
                 if (!a.online && b.online) return 1;
-                return (a.displayName || '').toLowerCase().localeCompare((b.displayName || '').toLowerCase());
+                const aName = (a.displayName || a.username || '').toLowerCase();
+                const bName = (b.displayName || b.username || '').toLowerCase();
+                return aName.localeCompare(bName);
             });
         },
         
@@ -4380,37 +4241,12 @@ try {
 
                     let realUserName = options.name;
                     let realUserAvatar = null;
-
-                    // ── Step 1: check FriendManager (friends list) ────────────
+                    
                     if (window.MessagesCore && window.MessagesCore.FriendManager) {
                         const friend = window.MessagesCore.FriendManager.getFriend(numericReceiverId);
                         if (friend) {
                             realUserName = friend.displayName || friend.username || friend.name || options.name;
                             realUserAvatar = friend.avatar || friend.photoURL || null;
-                        }
-                    }
-
-                    // ── Step 2: check existing conversations for participant info ─
-                    // This covers non-friend users who already have a conversation
-                    if (!realUserName || realUserName === `User_${numericReceiverId}`) {
-                        const convWithUser = ChatManager.getConversations().find(c => {
-                            if (c.friendId === numericReceiverId) return true;
-                            if (c.otherParticipant?.id === numericReceiverId) return true;
-                            if (Array.isArray(c.participants)) {
-                                return c.participants.some(p => (p.id || p) === numericReceiverId);
-                            }
-                            return false;
-                        });
-                        if (convWithUser) {
-                            const p = convWithUser.otherParticipant ||
-                                (convWithUser.participants && convWithUser.participants.find(p => p.id === numericReceiverId));
-                            if (p) {
-                                realUserName = p.displayName || p.username || p.firstName || convWithUser.friendName || options.name;
-                                realUserAvatar = p.avatar || convWithUser.friendAvatar || null;
-                            } else if (convWithUser.friendName) {
-                                realUserName = convWithUser.friendName;
-                                realUserAvatar = convWithUser.friendAvatar || null;
-                            }
                         }
                     }
                     
@@ -4430,21 +4266,67 @@ try {
                         realUserName = options.name || `User_${numericReceiverId}`;
                     }
 
+                    // FIX: Always call POST /chats/start first.
+                    // This creates or returns the real chatId for both parties immediately
+                    // so the receiver can reply without a pending->real replacement race.
+                    // The old code created a local "pending_X" conversation that only the
+                    // sender had — the receiver could never resolve it without a full reload.
+                    try {
+                        const startResult = await makeApiRequest('/chats/start', 'POST', { userId: numericReceiverId });
+                        const realChat = startResult?.data?.chat || startResult?.chat || startResult;
+                        const realChatId = realChat?.id || realChat?.chatId;
+                        if (realChatId) {
+                            // Merge the real chat into local conversations
+                            const normalizedChat = {
+                                ...realChat,
+                                id: realChatId,
+                                chatId: realChatId,
+                                friendId: numericReceiverId,
+                                friendName: realUserName,
+                                friendAvatar: realUserAvatar || null,
+                                chatName: realUserName,
+                                type: 'direct',
+                                isPending: false,
+                                unreadCount: 0,
+                                lastMessage: '',
+                                lastMessageAt: Date.now()
+                            };
+                            const existingIdx = ChatManager._conversations.findIndex(
+                                c => String(c.id) === String(realChatId)
+                            );
+                            if (existingIdx === -1) {
+                                ChatManager._conversations.unshift(normalizedChat);
+                                ChatManager._conversationsMap.set(realChatId, normalizedChat);
+                            }
+                            // Replace any stale pending conversation for this receiver
+                            const stale = ChatManager.getPendingConversationByReceiverId(numericReceiverId);
+                            if (stale) {
+                                ChatManager.replacePendingConversation(stale.id, normalizedChat);
+                            }
+                            ChatManager._saveToCache();
+                            await ConversationManager.openConversation(realChatId, options);
+                            try {
+                                window.dispatchEvent(new CustomEvent('conversationCreated', {
+                                    detail: { participants, options, chatId: realChatId }
+                                }));
+                            } catch (e) {}
+                            return realChatId;
+                        }
+                    } catch (startErr) {
+                        console.warn('[ConversationManager] /chats/start failed, falling back to pending:', startErr.message);
+                    }
+
                     if (options.initialMessage && options.initialMessage.trim()) {
                         const body = {
                             receiverId: numericReceiverId,
                             content: options.initialMessage.trim(),
                             type: 'text'
                         };
-
                         const result = await makeApiRequest('/messages', 'POST', body);
-                        
                         const chatId = result?.chatId || result?.data?.chatId || result?.id || result?.data?.id;
-
                         if (chatId) {
                             await ChatManager.fetchConversations();
                             await ConversationManager.openConversation(chatId, options);
-                            
                             try {
                                 window.dispatchEvent(new CustomEvent('conversationCreated', {
                                     detail: { participants, options, chatId }
@@ -4453,28 +4335,26 @@ try {
                             return chatId;
                         }
                     }
-                    
+
                     const existingPending = ChatManager.getPendingConversationByReceiverId(numericReceiverId);
                     if (existingPending) {
                         await ConversationManager.openConversation(existingPending.id, options);
                         return existingPending.id;
                     }
-                    
+
                     const pendingConversation = ChatManager.getOrCreatePendingConversation(
-                        numericReceiverId, 
-                        realUserName, 
+                        numericReceiverId,
+                        realUserName,
                         realUserAvatar
                     );
-                    
+
                     if (pendingConversation) {
                         ChatManager.setActiveConversation(pendingConversation);
                         ConversationManager._showChatPanel(pendingConversation);
-                        
                         try {
                             window.dispatchEvent(new CustomEvent('conversationCreated', {
-                                detail: { 
-                                    participants, 
-                                    options, 
+                                detail: {
+                                    participants, options,
                                     chatId: pendingConversation.id,
                                     isPending: true,
                                     receiverId: numericReceiverId,
@@ -4483,10 +4363,9 @@ try {
                                 }
                             }));
                         } catch (e) {}
-                        
                         return pendingConversation.id;
                     }
-                    
+
                     return false;
                     
                 } catch (error) {
@@ -5683,15 +5562,65 @@ try {
             }
 
             if (ChatManager && ChatManager._conversationsMap && chatId) {
-                const conversation = ChatManager._conversationsMap.get(chatId);
-                if (conversation && normalizedMessage) {
-                    conversation.lastMessage = normalizedMessage.content;
+                let conversation = ChatManager._conversationsMap.get(chatId);
+
+                // FIX: If the receiver doesn't have this chat in their list yet
+                // (e.g. first ever message from a non-friend), create a minimal
+                // conversation entry immediately so the chat appears in the sidebar
+                // and the message bubble renders right away without a page reload.
+                if (!conversation && normalizedMessage) {
+                    const myId = SessionManager?.getUserId?.();
+                    const sender = normalizedMessage.sender || {};
+                    const otherUser = String(normalizedMessage.senderId) !== String(myId)
+                        ? sender
+                        : null;
+                    const displayName = otherUser
+                        ? (otherUser.displayName || otherUser.username || `User_${normalizedMessage.senderId}`)
+                        : 'Chat';
+                    conversation = {
+                        id: chatId,
+                        chatId: chatId,
+                        type: 'direct',
+                        friendId: otherUser ? otherUser.id : null,
+                        friendName: displayName,
+                        friendAvatar: otherUser?.avatar || null,
+                        otherParticipant: otherUser ? {
+                            id: otherUser.id,
+                            username: otherUser.username,
+                            displayName: displayName,
+                            avatar: otherUser.avatar || null,
+                            status: 'offline'
+                        } : null,
+                        chatName: displayName,
+                        lastMessage: normalizedMessage.content || '',
+                        lastMessageAt: normalizedMessage.createdAt || Date.now(),
+                        unreadCount: String(normalizedMessage.senderId) !== String(myId) ? 1 : 0,
+                        isPending: false
+                    };
+                    ChatManager._conversations.unshift(conversation);
+                    ChatManager._conversationsMap.set(chatId, conversation);
+                    // Load the full chat from server in background so we get real participant info
+                    makeApiRequest(`/chats/${chatId}`, 'GET').then(result => {
+                        const chatData = result?.data?.chat || result?.chat || result;
+                        if (chatData && chatData.id) {
+                            const idx = ChatManager._conversations.findIndex(c => String(c.id) === String(chatId));
+                            if (idx !== -1) {
+                                ChatManager._conversations[idx] = { ...conversation, ...chatData };
+                                ChatManager._conversationsMap.set(chatId, ChatManager._conversations[idx]);
+                                ChatManager._saveToCache();
+                            }
+                        }
+                    }).catch(() => {});
+                    ChatManager._saveToCache();
+                } else if (conversation && normalizedMessage) {
+                    conversation.lastMessage = normalizedMessage.content || '';
                     conversation.lastMessageAt = normalizedMessage.createdAt || normalizedMessage.timestamp || Date.now();
                     const myId = SessionManager?.getUserId?.();
                     if (normalizedMessage.senderId && String(normalizedMessage.senderId) !== String(myId)) {
                         conversation.unreadCount = (conversation.unreadCount || 0) + 1;
                     }
                 }
+
                 if (ChatManager._conversations) {
                     ChatManager._conversations.sort((a, b) => (b.lastMessageAt || 0) - (a.lastMessageAt || 0));
                 }
@@ -5730,7 +5659,9 @@ try {
             const data = payload || {};
 
             if (normalizedType === 'new_message' || normalizedType === 'message:new' || normalizedType === 'newmessage') {
-                // Unwrap one level if needed (postMessage bridge wraps in { payload, source })
+                // ✅ FIX: data may be the raw payload (from wsService.on) or a wrapper
+                // { payload:{...}, source:'ws-bridge' } (from postMessage bridge).
+                // Unwrap one level if needed, then fall back to data itself.
                 const message = (data && data.payload && (data.payload.id || data.payload.chatId))
                     ? data.payload
                     : (data && data.data && (data.data.id || data.data.chatId))
@@ -5739,38 +5670,29 @@ try {
                 const chatId = String(
                     (message && (message.chatId || message.conversationId)) || ''
                 );
+                // ✅ FIX: Don't gate on message.id — server might not echo id back immediately.
+                // Gate only on chatId so we never silently drop a valid incoming message.
                 if (!message || !chatId) return;
 
+                // ✅ FIX 4: Guard against String(undefined) = "undefined" poisoning the local store.
                 const _safeId = message.id != null ? String(message.id) : null;
                 const _safeLocalId = message.localId != null ? String(message.localId) : null;
+                // Reject messages with no usable id to prevent corrupt dedup state.
+                // Media messages (image/file/audio/video) legitimately have no text content.
+                const _hasMediaType = ['image','video','audio','file','sticker'].includes(message.type);
+                if (!_safeId && !_safeLocalId && !message.content && !_hasMediaType) return;
 
-                // FIX BUG2: Dedup guard — the same message can arrive via multiple paths
-                // (wsService.on bridge + REALTIME_EVENT postMessage). Without this, the
-                // receiver renders the bubble twice.
-                //
-                // FIX BUG3 (RECEIVER INVISIBLE): The old dedup used a single shared pool.
-                // When the sender's own sent message echoed back from the server, its ID was
-                // registered in _dedupTimestamps. Then when the same message arrived on the
-                // RECEIVER side via a separate event path within 10s, isDuplicateMessage()
-                // returned true and silently blocked it — the receiver never saw it.
-                //
-                // Fix: only apply dedup guard to messages sent BY the current user (echoes).
-                // For messages from OTHER users we skip the dedup registration so the receiver
-                // path is never blocked by the sender's echo registration.
-                const _myUserId = SessionManager?.getUserId?.();
-                const _msgSenderId = message.senderId || message.sender?.id || message.sender?.userId;
-                const _isOwnMessage = _myUserId && _msgSenderId && String(_msgSenderId) === String(_myUserId);
-                const _dedupKey = _safeId || _safeLocalId;
-                if (_dedupKey && isDuplicateMessage(_dedupKey, !!_isOwnMessage)) return;
-
-                // FIX BUG3: Ensure senderId is always resolved so isSent/isReceived
-                // comparison in the UI template never falls back to undefined.
-                // Server sometimes sends sender object but omits flat senderId field.
-                if (!message.senderId && message.sender) {
+                // FIX: Normalise senderId to integer immediately.
+                // Server sometimes sends senderId as string, sometimes omits it in favour
+                // of sender.id. Both sender sides need the same numeric type so the
+                // isSent/isReceived comparison (String(senderId) === String(currentUserId))
+                // is reliable and the bubble never renders on the wrong side.
+                if (message.senderId == null && message.sender) {
                     message.senderId = message.sender.id || message.sender.userId;
                 }
-                // Reject messages with no usable id to prevent corrupt dedup state
-                if (!_safeId && !_safeLocalId && !message.content) return;
+                if (message.senderId != null) {
+                    message.senderId = parseInt(message.senderId, 10) || message.senderId;
+                }
 
                 let normalizedMessage = {
                     id:       _safeId || _safeLocalId || ('tmp_' + Date.now()),

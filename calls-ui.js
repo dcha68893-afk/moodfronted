@@ -713,7 +713,7 @@ function transitionToInCall(callInfo) {
     }
 
     // ── Timer (elapsed from callStartTime) ───────────────────────────────
-    UIState.callStartTime = UIState.callStartTime || Date.now();
+    UIState.callStartTime = Date.now(); // always reset so receiver timer starts from 0:00
     if (window._currentCallTimer) clearInterval(window._currentCallTimer);
     window._currentCallTimer = setInterval(() => {
         if (!UIState.callActive) { clearInterval(window._currentCallTimer); return; }
@@ -850,11 +850,11 @@ function showInCallScreen(callInfo) {
         }
         const userName = data.userName || data.name || data.user_name || 'User';
         const callType = data.callType || data.type || data.call_type || 'voice';
-        const source = data.source || data.origin || data.from || 'calls';
+        const source = data.source || data.origin || data.from || 'messages';
         let returnTo = data.returnTo || source;
         if (returnTo === 'friends-page' || returnTo === 'friends' || returnTo === 'friend') returnTo = 'friends';
         else if (returnTo === 'messages' || returnTo === 'chat' || returnTo === 'message') returnTo = 'messages';
-        else returnTo = 'calls';
+        else returnTo = 'messages'; // never default to calls panel
 
         const chatUserId = data.chatUserId || data.conversationUserId || null;
         
@@ -1279,7 +1279,7 @@ function displayCallHistory(calls) {
     document.querySelectorAll('.call-action-btn').forEach(function(btn) {
         btn.removeEventListener('click', handleCallActionClick);
         btn.addEventListener('click', function(e) {
-            window.__pendingCallReturnTo = 'calls';
+            window.__pendingCallReturnTo = 'messages';
             window.__pendingCallChatUserId = null;
             handleCallActionClick.call(btn, e);
         });
@@ -2475,6 +2475,8 @@ async function initiateCallWithPendingUser() {
                 menuNotes: '#menuNotes',
                 menuPolls: '#menuPolls',
                 menuRelationship: '#menuRelationship',
+                menuRecord: '#menuRecord',
+                menuRecordLabel: '#menuRecordLabel',
                 
                 muteBtn: '#muteBtn',
                 videoBtn: '#videoBtn',
@@ -2484,6 +2486,13 @@ async function initiateCallWithPendingUser() {
                 intentionBtn: '#intentionBtn',
                 focusModeBtn: '#focusModeBtn',
                 endCallBtn: '#endCallBtn',
+                moreBtn: '#moreBtn',
+                incallCollapseBtn: '#incallCollapseBtn',
+                pipContainer: '#pipContainer',
+                pipVideo: '#pipVideo',
+                pipCloseBtn: '#pipCloseBtn',
+                incallAvatarWrap: '#incallAvatarWrap',
+                remoteVideo: '#remoteVideo',
                 
                 callWithName: '#callWithName',
                 callStatusText: '#callStatusText',
@@ -3427,10 +3436,10 @@ renderContactsList: function(contacts) {
                     const uid = audioBtn.dataset.userId;
                     const uname = audioBtn.dataset.userName || 'User';
                     if (!uid) return;
-                    window.__pendingCallReturnTo = 'calls';
-                    window.__callOriginReturnTo = 'calls';
+                    window.__pendingCallReturnTo = 'messages';
+                    window.__callOriginReturnTo = 'messages';
                     if (typeof startCallWithUser === 'function') startCallWithUser(uid, uname, 'voice');
-                    else window.dispatchEvent(new CustomEvent('OPEN_CALL_WITH_USER', { detail: { userId: uid, userName: uname, callType: 'voice', returnTo: 'calls' } }));
+                    else window.dispatchEvent(new CustomEvent('OPEN_CALL_WITH_USER', { detail: { userId: uid, userName: uname, callType: 'voice', returnTo: 'messages' } }));
                     return;
                 }
                 const videoBtn = e.target.closest('.contact-video-call-btn');
@@ -3439,10 +3448,10 @@ renderContactsList: function(contacts) {
                     const uid = videoBtn.dataset.userId;
                     const uname = videoBtn.dataset.userName || 'User';
                     if (!uid) return;
-                    window.__pendingCallReturnTo = 'calls';
-                    window.__callOriginReturnTo = 'calls';
+                    window.__pendingCallReturnTo = 'messages';
+                    window.__callOriginReturnTo = 'messages';
                     if (typeof startCallWithUser === 'function') startCallWithUser(uid, uname, 'video');
-                    else window.dispatchEvent(new CustomEvent('OPEN_CALL_WITH_USER', { detail: { userId: uid, userName: uname, callType: 'video', returnTo: 'calls' } }));
+                    else window.dispatchEvent(new CustomEvent('OPEN_CALL_WITH_USER', { detail: { userId: uid, userName: uname, callType: 'video', returnTo: 'messages' } }));
                     return;
                 }
             });
@@ -3618,15 +3627,15 @@ handleContactItemClick: function(e) {
                         const userName = audioBtn.dataset.userName || 'User';
                         if (!userId) return;
                         console.log('[Calls UI] Audio call btn clicked:', userId, userName);
-                        window.__pendingCallReturnTo = 'calls';
-                        window.__callOriginReturnTo = 'calls';
+                        window.__pendingCallReturnTo = 'messages';
+                        window.__callOriginReturnTo = 'messages';
                         window.__pendingCallChatUserId = null;
                         window.__callOriginChatUserId = null;
                         if (typeof startCallWithUser === 'function') {
                             startCallWithUser(userId, userName, 'voice');
                         } else {
                             window.dispatchEvent(new CustomEvent('OPEN_CALL_WITH_USER', {
-                                detail: { userId, userName, callType: 'voice', source: 'calls', returnTo: 'calls' }
+                                detail: { userId, userName, callType: 'voice', source: 'calls', returnTo: 'messages' }
                             }));
                         }
                         return;
@@ -3639,15 +3648,15 @@ handleContactItemClick: function(e) {
                         const userName = videoBtn.dataset.userName || 'User';
                         if (!userId) return;
                         console.log('[Calls UI] Video call btn clicked:', userId, userName);
-                        window.__pendingCallReturnTo = 'calls';
-                        window.__callOriginReturnTo = 'calls';
+                        window.__pendingCallReturnTo = 'messages';
+                        window.__callOriginReturnTo = 'messages';
                         window.__pendingCallChatUserId = null;
                         window.__callOriginChatUserId = null;
                         if (typeof startCallWithUser === 'function') {
                             startCallWithUser(userId, userName, 'video');
                         } else {
                             window.dispatchEvent(new CustomEvent('OPEN_CALL_WITH_USER', {
-                                detail: { userId, userName, callType: 'video', source: 'calls', returnTo: 'calls' }
+                                detail: { userId, userName, callType: 'video', source: 'calls', returnTo: 'messages' }
                             }));
                         }
                         return;
@@ -4346,6 +4355,30 @@ case 'CALL_INITIATED':
         },
         
         addRemoteVideo: function(streamId, stream, participantName) {
+            // ── Always attach audio to the dedicated #remoteAudio element ─────
+            const remoteAudioEl = document.getElementById('remoteAudio');
+            if (remoteAudioEl && stream.getAudioTracks().length > 0) {
+                remoteAudioEl.srcObject = stream;
+                remoteAudioEl.play().catch(() => {
+                    const resume = () => { remoteAudioEl.play().catch(() => {}); document.removeEventListener('click', resume); document.removeEventListener('touchstart', resume); };
+                    document.addEventListener('click', resume, { once: true });
+                    document.addEventListener('touchstart', resume, { once: true });
+                });
+            }
+
+            // ── Attach video to the in-call #remoteVideo element ─────────────
+            const hasVideoTracks = stream.getVideoTracks().filter(t => t.enabled && t.readyState === 'live').length > 0;
+            if (hasVideoTracks) {
+                const remoteVideoEl = document.getElementById('remoteVideo');
+                if (remoteVideoEl) {
+                    remoteVideoEl.srcObject = stream;
+                    remoteVideoEl.style.display = 'block';
+                    remoteVideoEl.play().catch(() => {});
+                }
+                const avatarWrap = document.getElementById('incallAvatarWrap');
+                if (avatarWrap) avatarWrap.style.display = 'none';
+            }
+
             if (!elements.videoGrid) return;
             
             // Remove existing container for this stream if any
@@ -4364,9 +4397,9 @@ case 'CALL_INITIATED':
             container.className = 'video-container remote-video-container';
             container.dataset.streamId = streamId;
             
-            const hasVideoTracks = stream.getVideoTracks().filter(t => t.enabled && t.readyState === 'live').length > 0;
+            const hasVideoTracksGrid = stream.getVideoTracks().filter(t => t.enabled && t.readyState === 'live').length > 0;
 
-            if (hasVideoTracks) {
+            if (hasVideoTracksGrid) {
                 // ── VIDEO CALL ────────────────────────────────────────────────
                 const video = document.createElement('video');
                 video.className = 'video-element';
@@ -4917,7 +4950,7 @@ case 'CALL_INITIATED':
             }
             if (window._outgoingRingTimer) { clearInterval(window._outgoingRingTimer); window._outgoingRingTimer = null; }
 
-            UIState.callStartTime = UIState.callStartTime || Date.now();
+            UIState.callStartTime = Date.now(); // always reset so both sides start timer from 0:00
             UIState.callActive    = true;
             UIState.callState     = 'connected';
 
@@ -5000,7 +5033,7 @@ case 'CALL_INITIATED':
             // ── Capture navigation target BEFORE clearing state ───────────────
             const returnTo = window.__callOriginReturnTo
                 || window.__pendingCallReturnTo
-                || 'calls';
+                || 'messages';
             const chatUserId = window.__callOriginChatUserId
                 || window.__pendingCallChatUserId
                 || null;
@@ -5111,8 +5144,15 @@ case 'CALL_INITIATED':
                             payload: { returnFromCall: true },
                             timestamp: Date.now()
                         }, '*');
+                    } else {
+                        // returnTo === 'calls' or unset — go to messages instead of staying on call panel
+                        window.parent.postMessage({
+                            type: 'SWITCH_MODULE',
+                            module: 'messages',
+                            payload: { returnFromCall: true },
+                            timestamp: Date.now()
+                        }, '*');
                     }
-                    // If returnTo === 'calls', stay on this screen — no SWITCH_MODULE needed
                 }
 
                 // NEVER hide sidebar or main content - always use overlay
@@ -5988,6 +6028,14 @@ case 'CALL_ACCEPTED': {
             if (elements.menuDotsBtn) {
                 this.addListener(elements.menuDotsBtn, 'click', UIEventHandlers.toggleMenuDots);
             }
+
+            // ── Record menu item ─────────────────────────────────────────────
+            if (elements.menuRecord) {
+                this.addListener(elements.menuRecord, 'click', () => {
+                    UIEventHandlers.closeMenuDots();
+                    UIEventHandlers.toggleRecording();
+                });
+            }
             
             if (elements.menuParticipants) {
                 this.addListener(elements.menuParticipants, 'click', () => {
@@ -6122,6 +6170,45 @@ case 'CALL_ACCEPTED': {
             
             if (elements.speakerBtn) {
                 this.addListener(elements.speakerBtn, 'click', UIEventHandlers.toggleSpeaker);
+            }
+
+            // moreBtn (⋯) — opens the menuDotsDropdown panel (participants, chat, whiteboard, notes, polls)
+            if (elements.moreBtn) {
+                this.addListener(elements.moreBtn, 'click', UIEventHandlers.toggleMenuDots);
+            }
+
+            // Collapse / minimise in-call screen (call stays active in background)
+            if (elements.incallCollapseBtn) {
+                this.addListener(elements.incallCollapseBtn, 'click', function(e) {
+                    e && e.stopPropagation();
+                    const inCallScreen = document.getElementById('inCallScreen');
+                    if (inCallScreen) {
+                        inCallScreen.classList.remove('active');
+                        inCallScreen.style.setProperty('display', 'none', 'important');
+                    }
+                    if (window.parent && window.parent !== window) {
+                        const peerName = (elements.callWithName && elements.callWithName.textContent) || window.__activePeerName || 'User';
+                        window.parent.postMessage({ type: 'CALL_MINIMISED', payload: { peer: peerName } }, '*');
+                    }
+                });
+            }
+
+            // PiP close — stop camera, hide pip, restore avatar
+            if (elements.pipCloseBtn) {
+                this.addListener(elements.pipCloseBtn, 'click', function(e) {
+                    e && e.stopPropagation();
+                    if (UIState.localStream) {
+                        UIState.localStream.getVideoTracks().forEach(t => t.stop());
+                    }
+                    UIState.isVideoOff = true;
+                    if (elements.pipContainer) elements.pipContainer.style.display = 'none';
+                    if (elements.pipVideo) elements.pipVideo.srcObject = null;
+                    if (elements.incallAvatarWrap) elements.incallAvatarWrap.style.display = '';
+                    if (elements.remoteVideo) elements.remoteVideo.style.display = 'none';
+                    const icon = elements.videoBtn && elements.videoBtn.querySelector('i');
+                    if (icon) icon.className = 'fas fa-video-slash';
+                    if (elements.videoBtn) elements.videoBtn.classList.remove('active');
+                });
             }
             
             if (elements.moodBtn) {
@@ -6378,6 +6465,53 @@ case 'CALL_ACCEPTED': {
             window.__pendingCallChatUserId = null;
         },
 
+        // ── toggleRecording — mixes local + remote audio into a downloadable .webm ──
+        toggleRecording: function() {
+            if (!UIState._mediaRecorder) {
+                // START recording
+                const tracks = [];
+                if (UIState.localStream) UIState.localStream.getAudioTracks().forEach(t => tracks.push(t));
+                const remoteAudioEl = document.getElementById('remoteAudio');
+                if (remoteAudioEl && remoteAudioEl.srcObject) {
+                    remoteAudioEl.srcObject.getAudioTracks().forEach(t => tracks.push(t));
+                }
+                if (tracks.length === 0) { showNotification('No audio stream available to record', 'error'); return; }
+
+                const mixStream = new MediaStream(tracks);
+                let mr;
+                try { mr = new MediaRecorder(mixStream, { mimeType: 'audio/webm;codecs=opus' }); }
+                catch(e) { try { mr = new MediaRecorder(mixStream); } catch(e2) { showNotification('Recording not supported in this browser', 'error'); return; } }
+
+                UIState._recordChunks = [];
+                mr.ondataavailable = e => { if (e.data && e.data.size > 0) UIState._recordChunks.push(e.data); };
+                mr.onstop = () => {
+                    const blob = new Blob(UIState._recordChunks, { type: 'audio/webm' });
+                    const url  = URL.createObjectURL(blob);
+                    const a    = document.createElement('a');
+                    a.href     = url;
+                    a.download = 'call-recording-' + new Date().toISOString().slice(0,19).replace(/:/g,'-') + '.webm';
+                    a.click();
+                    URL.revokeObjectURL(url);
+                    UIState._recordChunks = [];
+                    UIState._mediaRecorder = null;
+                    if (elements.menuRecordLabel) elements.menuRecordLabel.textContent = 'Record';
+                    const icon = elements.menuRecord && elements.menuRecord.querySelector('i');
+                    if (icon) icon.style.color = '#ff3b30';
+                    showNotification('Recording saved', 'success');
+                };
+                mr.start(1000);
+                UIState._mediaRecorder = mr;
+                if (elements.menuRecordLabel) elements.menuRecordLabel.textContent = 'Stop Recording';
+                const icon = elements.menuRecord && elements.menuRecord.querySelector('i');
+                if (icon) icon.style.color = '#fff';
+                showNotification('Recording started', 'info');
+            } else {
+                // STOP recording
+                UIState._mediaRecorder.stop();
+                showNotification('Recording stopped — saving…', 'info');
+            }
+        },
+
         toggleMenuDots: function(e) {
             e?.stopPropagation();
             if (elements.menuDotsDropdown) {
@@ -6537,8 +6671,8 @@ case 'CALL_ACCEPTED': {
             
             // Use startCallWithUser for reliable call initiation
             if (typeof startCallWithUser === 'function') {
-                window.__pendingCallReturnTo = 'calls';
-                window.__callOriginReturnTo = 'calls';
+                window.__pendingCallReturnTo = 'messages';
+                window.__callOriginReturnTo = 'messages';
                 startCallWithUser(userId, userName, callType);
             } else if (coreInstance && (coreInstance.startCall || coreInstance.initiateCall)) {
                 showNotification(`Starting ${callType} call...`, 'info');
@@ -6650,22 +6784,25 @@ case 'CALL_ACCEPTED': {
             
             if (coreInstance && coreInstance.toggleMic) {
                 coreInstance.toggleMic();
+                // Sync UI state after core toggles
+                UIState.isMuted = !UIState.isMuted;
             } else if (UIState.localStream) {
                 const audioTracks = UIState.localStream.getAudioTracks();
                 if (audioTracks.length > 0) {
                     UIState.isMuted = !UIState.isMuted;
-                    audioTracks.forEach(track => {
-                        track.enabled = !UIState.isMuted;
-                    });
-                    
-                    const icon = elements.muteBtn.querySelector('i');
-                    if (icon) {
-                        icon.className = UIState.isMuted ? 'fas fa-microphone-slash' : 'fas fa-microphone';
-                    }
-                    
-                    showNotification(UIState.isMuted ? 'Microphone muted' : 'Microphone unmuted', 'info');
+                    audioTracks.forEach(track => { track.enabled = !UIState.isMuted; });
+                } else {
+                    UIState.isMuted = !UIState.isMuted;
                 }
+            } else {
+                UIState.isMuted = !UIState.isMuted;
             }
+
+            const icon = elements.muteBtn && elements.muteBtn.querySelector('i');
+            if (icon) icon.className = UIState.isMuted ? 'fas fa-microphone-slash' : 'fas fa-microphone';
+            if (elements.muteBtn) elements.muteBtn.classList.toggle('active', UIState.isMuted);
+
+            showNotification(UIState.isMuted ? 'Microphone muted' : 'Microphone unmuted', 'info');
         },
         
         toggleVideo: function() {
@@ -6673,21 +6810,82 @@ case 'CALL_ACCEPTED': {
             
             if (coreInstance && coreInstance.toggleCamera) {
                 coreInstance.toggleCamera();
-            } else if (UIState.localStream) {
+            } else if (UIState.localStream && UIState.localStream.getVideoTracks().length > 0) {
+                // Already have a video track — toggle it
                 const videoTracks = UIState.localStream.getVideoTracks();
-                if (videoTracks.length > 0) {
-                    UIState.isVideoOff = !UIState.isVideoOff;
-                    videoTracks.forEach(track => {
-                        track.enabled = !UIState.isVideoOff;
-                    });
-                    
-                    const icon = elements.videoBtn.querySelector('i');
-                    if (icon) {
-                        icon.className = UIState.isVideoOff ? 'fas fa-video-slash' : 'fas fa-video';
-                    }
-                    
-                    showNotification(UIState.isVideoOff ? 'Camera turned off' : 'Camera turned on', 'info');
+                UIState.isVideoOff = !UIState.isVideoOff;
+                videoTracks.forEach(track => { track.enabled = !UIState.isVideoOff; });
+                const icon = elements.videoBtn && elements.videoBtn.querySelector('i');
+                if (icon) icon.className = UIState.isVideoOff ? 'fas fa-video-slash' : 'fas fa-video';
+                if (elements.videoBtn) elements.videoBtn.classList.toggle('active', !UIState.isVideoOff);
+                // Show/hide PiP
+                const pip = document.getElementById('pipContainer');
+                if (pip) pip.style.display = UIState.isVideoOff ? 'none' : 'block';
+                showNotification(UIState.isVideoOff ? 'Camera turned off' : 'Camera turned on', 'info');
+            } else {
+                // No video track yet — request camera, show PiP preview + send upgrade signal
+                if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                    showNotification('Camera not supported on this device', 'error');
+                    return;
                 }
+                navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' }, audio: false })
+                    .then(camStream => {
+                        const videoTrack = camStream.getVideoTracks()[0];
+                        if (!videoTrack) return;
+
+                        // Store on UIState so it's cleaned up on call end
+                        if (!UIState.localStream) UIState.localStream = camStream;
+                        else { camStream.getTracks().forEach(t => UIState.localStream.addTrack(t)); }
+
+                        UIState.isVideoOff = false;
+
+                        // PiP — local camera preview
+                        const pipContainer = document.getElementById('pipContainer');
+                        const pipVideo     = document.getElementById('pipVideo');
+                        if (pipVideo) {
+                            pipVideo.srcObject = camStream;
+                            pipVideo.play().catch(() => {});
+                        }
+                        if (pipContainer) pipContainer.style.display = 'block';
+
+                        // Remote video area — avatar hidden, video shown when remote stream arrives
+                        const avatarWrap = document.getElementById('incallAvatarWrap');
+                        const remoteVideo = document.getElementById('remoteVideo');
+                        if (avatarWrap) avatarWrap.style.display = 'none';
+                        if (remoteVideo) remoteVideo.style.display = 'block';
+
+                        // Update icon
+                        const icon = elements.videoBtn && elements.videoBtn.querySelector('i');
+                        if (icon) icon.className = 'fas fa-video';
+                        if (elements.videoBtn) elements.videoBtn.classList.add('active');
+
+                        // Add track to RTCPeerConnection if available
+                        const pc = (window.callCore && window.callCore.getPeerConnection && window.callCore.getPeerConnection())
+                            || (window.KynectaCallSession && window.KynectaCallSession.peerConnection);
+                        if (pc && pc.addTrack) {
+                            try { pc.addTrack(videoTrack, UIState.localStream); } catch(e) {}
+                        }
+
+                        // Signal to remote that video is being upgraded
+                        if (window.parent && window.parent !== window) {
+                            window.parent.postMessage({
+                                type: 'VIDEO_UPGRADE_REQUEST',
+                                payload: { enabled: true, userId: window.__CHILD_SESSION__ && window.__CHILD_SESSION__.userId },
+                                source: 'calls-iframe'
+                            }, '*');
+                        }
+
+                        showNotification('Camera on', 'info');
+                    })
+                    .catch(err => {
+                        if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+                            showNotification('Camera permission denied', 'error');
+                        } else if (err.name === 'NotFoundError') {
+                            showNotification('No camera found', 'error');
+                        } else {
+                            showNotification('Could not start camera', 'error');
+                        }
+                    });
             }
         },
         
@@ -6765,12 +6963,34 @@ case 'CALL_ACCEPTED': {
         toggleSpeaker: function() {
             UIState.isSpeakerOn = !UIState.isSpeakerOn;
             
-            const icon = elements.speakerBtn.querySelector('i');
+            const icon = elements.speakerBtn && elements.speakerBtn.querySelector('i');
             if (icon) {
                 icon.className = UIState.isSpeakerOn ? 'fas fa-volume-up' : 'fas fa-headphones';
             }
-            
-            showNotification(`Switched to ${UIState.isSpeakerOn ? 'speaker' : 'headphones'}`, 'info');
+            if (elements.speakerBtn) elements.speakerBtn.classList.toggle('active', UIState.isSpeakerOn);
+
+            // Route audio output — setSinkId where supported, otherwise volume approximation
+            const remoteAudio = document.getElementById('remoteAudio');
+            if (remoteAudio) {
+                if (typeof remoteAudio.setSinkId === 'function') {
+                    // Try to enumerate devices and pick earpiece vs speaker
+                    navigator.mediaDevices.enumerateDevices().then(devices => {
+                        const earpiece = devices.find(d => d.kind === 'audiooutput' && /earpiece|handset/i.test(d.label));
+                        const speakerDev = devices.find(d => d.kind === 'audiooutput' && /speaker/i.test(d.label));
+                        const target = UIState.isSpeakerOn ? (speakerDev || '') : (earpiece || '');
+                        remoteAudio.setSinkId(typeof target === 'string' ? target : target.deviceId || '').catch(() => {});
+                    }).catch(() => {});
+                }
+                // Volume approximation as fallback
+                remoteAudio.volume = UIState.isSpeakerOn ? 1.0 : 0.35;
+            }
+
+            // Also call core if it exposes speaker control
+            if (window.callCore && window.callCore.setSpeakerEnabled) {
+                window.callCore.setSpeakerEnabled(UIState.isSpeakerOn);
+            }
+
+            showNotification(`Switched to ${UIState.isSpeakerOn ? 'speaker' : 'headphones / earpiece'}`, 'info');
         },
 
          endCall: async function() {
@@ -6917,8 +7137,15 @@ case 'CALL_ACCEPTED': {
                             payload: { returnFromCall: true },
                             timestamp: Date.now()
                         }, '*');
+                    } else {
+                        // returnTo === 'calls' — go to messages instead of call panel
+                        window.parent.postMessage({
+                            type: 'SWITCH_MODULE',
+                            module: 'messages',
+                            payload: { returnFromCall: true },
+                            timestamp: Date.now()
+                        }, '*');
                     }
-                    // returnTo === 'calls' → stay here, no SWITCH_MODULE needed
                 }
                 
                 // Also force UI update locally
@@ -7347,7 +7574,7 @@ acceptIncomingCallGeneric: async function(asVideo) {
         // ── FIX: Set navigation origin so handleCallEnded returns here after call ──
         // On receiver side, returnTo should go back to wherever they were (calls page).
         if (!window.__callOriginReturnTo) {
-            window.__callOriginReturnTo = 'calls'; // receiver came from calls page
+            window.__callOriginReturnTo = 'messages'; // receiver came from calls page
             window.__callOriginChatUserId = null;
         }
 
@@ -8854,7 +9081,7 @@ window.addEventListener('message', function(event) {
         document.querySelectorAll('.call-action-btn').forEach(function(btn) {
             btn.removeEventListener('click', handleCallActionClick);
             btn.addEventListener('click', function(e) {
-                window.__pendingCallReturnTo = 'calls';
+                window.__pendingCallReturnTo = 'messages';
                 window.__pendingCallChatUserId = null;
                 handleCallActionClick.call(btn, e);
             });
@@ -9792,4 +10019,32 @@ if (detectExistingCore()) {
     } else {
         _signal();
     }
+})();
+// ── kyn:remoteTrack → attach video to #remoteVideo, audio to #remoteAudio ──
+// Fires from calls-core.js ontrack event so both audio & video are routed correctly.
+(function() {
+    window.addEventListener('kyn:remoteTrack', function(e) {
+        var track  = e.detail && e.detail.track;
+        var stream = e.detail && e.detail.stream;
+        if (!track) return;
+
+        if (track.kind === 'audio') {
+            var remoteAudioEl = document.getElementById('remoteAudio');
+            if (remoteAudioEl) {
+                if (!remoteAudioEl.srcObject) remoteAudioEl.srcObject = stream || new MediaStream([track]);
+                remoteAudioEl.play().catch(function() {});
+            }
+        }
+
+        if (track.kind === 'video') {
+            var remoteVideoEl = document.getElementById('remoteVideo');
+            var avatarWrap    = document.getElementById('incallAvatarWrap');
+            if (remoteVideoEl) {
+                remoteVideoEl.srcObject = stream || new MediaStream([track]);
+                remoteVideoEl.style.display = 'block';
+                remoteVideoEl.play().catch(function() {});
+            }
+            if (avatarWrap) avatarWrap.style.display = 'none';
+        }
+    });
 })();

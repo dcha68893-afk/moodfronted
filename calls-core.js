@@ -13185,6 +13185,11 @@ if (message.type === 'SETTING_CHANGED' || message.type === 'SETTINGS_UPDATED') {
 
                     notifyListeners('remote_stream_added', { stream });
 
+                    // Dispatch DOM event so calls-ui addRemoteVideo attaches video to #remoteVideo
+                    window.dispatchEvent(new CustomEvent('kyn:remoteTrack', {
+                        detail: { track: event.track, stream: stream }
+                    }));
+
 
 
                 }

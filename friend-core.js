@@ -2839,7 +2839,9 @@ const FriendCacheManager = {
                     if (f && f.id) {
                         const st = f.status || 'accepted'; // legacy records have no status → accepted
                         if (st === 'accepted' || st === 'online' || st === 'offline' || st === 'away' || st === 'busy') {
-                            this._cache.friends.set(f.id, f);
+                            // FIX: Always use String key to prevent integer/string duplication
+                            const key = String(f.id);
+                            this._cache.friends.set(key, { ...f, id: key });
                         }
                     }
                 });
@@ -2954,8 +2956,11 @@ const FriendCacheManager = {
     
     setFriend(friend) {
         if (!friend || !friend.id) return false;
-        this._cache.friends.set(friend.id, friend);
-        this._timestamps.set(`friend_${friend.id}`, Date.now());
+        // FIX: Always use String key — integer 5 and string "5" are different Map keys,
+        // causing the same friend to appear twice in getAllFriends().
+        const key = String(friend.id);
+        this._cache.friends.set(key, { ...friend, id: key });
+        this._timestamps.set(`friend_${key}`, Date.now());
         this._emit('friend:updated', friend);
         return true;
     },
@@ -2964,8 +2969,9 @@ const FriendCacheManager = {
         if (!Array.isArray(friendsArray)) return false;
         friendsArray.forEach(f => {
             if (f && f.id) {
-                this._cache.friends.set(f.id, f);
-                this._timestamps.set(`friend_${f.id}`, Date.now());
+                const key = String(f.id);
+                this._cache.friends.set(key, { ...f, id: key });
+                this._timestamps.set(`friend_${key}`, Date.now());
             }
         });
         this._emit('friends:updated', this.getAllFriends());
@@ -2973,8 +2979,11 @@ const FriendCacheManager = {
     },
     
     removeFriend(id) {
-        const existed = this._cache.friends.delete(id);
+        const key = String(id);
+        // Try both String and original forms (legacy data may have used integer key)
+        const existed = this._cache.friends.delete(key) || this._cache.friends.delete(id);
         if (existed) {
+            this._timestamps.delete(`friend_${key}`);
             this._timestamps.delete(`friend_${id}`);
             this._emit('friend:removed', id);
         }
